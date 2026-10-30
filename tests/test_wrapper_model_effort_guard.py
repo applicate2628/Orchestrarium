@@ -26,8 +26,8 @@ from tests.fixtures.runtime_capabilities import requires_windows_process_runner
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "scripts/provider_prompt.py"
 ENTRYPOINTS = {
-    "codex": ROOT / "src.claude/agents/scripts/invoke-codex-prompt.py",
-    "claude": ROOT / "src.claude/agents/scripts/invoke-claude-prompt.py",
+    "codex": ROOT / 'adapters/claude/agents/scripts/invoke-codex-prompt.py',
+    "claude": ROOT / 'adapters/claude/agents/scripts/invoke-claude-prompt.py',
 }
 BIN_ENV = {"codex": "CODEX_BIN", "claude": "CLAUDE_BIN"}
 OUTPUT_ENV = {"codex": "CODEX_PROMPTS_DIR", "claude": "CLAUDE_PROMPTS_DIR"}

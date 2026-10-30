@@ -36,8 +36,8 @@ CHECKER = _load_checker()
 def _source_dirs(platform: str) -> tuple[Path, ...]:
     if platform == "claude":
         return (
-            ROOT / "src.claude" / "agents" / "scripts",
-            ROOT / "src.claude" / "agents" / "hooks",
+            ROOT / 'adapters/claude' / "agents" / "scripts",
+            ROOT / 'adapters/claude' / "agents" / "hooks",
         )
     return (
         ROOT / "src.codex" / "skills" / "lead" / "scripts",
@@ -105,7 +105,7 @@ def _mcp_only_config() -> dict:
                             "args": [
                                 str(
                                     ROOT
-                                    / "src.claude"
+                                    / 'adapters/claude'
                                     / "agents"
                                     / "scripts"
                                     / "check-mcp-momentum.py"
@@ -149,7 +149,7 @@ def test_hook_health_uses_force_mode_and_accepts_claude_advisory(
         platform="claude",
         host_os="posix",
         repo_root=ROOT,
-        installed_root=ROOT / "src.claude/agents",
+        installed_root=ROOT / 'adapters/claude/agents',
         verify_fires=True,
     )
     assert messages == ["PASS claude PreToolUse check-mcp-momentum"]
@@ -237,7 +237,7 @@ def test_hook_health_rejects_invalid_mcp_positive_probe(
             platform="claude",
             host_os="posix",
             repo_root=ROOT,
-            installed_root=ROOT / "src.claude/agents",
+            installed_root=ROOT / 'adapters/claude/agents',
             verify_fires=True,
         )
 
@@ -255,7 +255,7 @@ def test_missing_executable_and_missing_target_are_distinct(tmp_path: Path) -> N
             platform="claude",
             host_os="posix",
             repo_root=ROOT,
-            installed_root=ROOT / "src.claude/agents",
+            installed_root=ROOT / 'adapters/claude/agents',
             verify_fires=False,
         )
 
@@ -385,7 +385,7 @@ def test_foreign_entry_without_args_is_tolerated(tmp_path: Path) -> None:
         platform="claude",
         host_os="posix",
         repo_root=ROOT,
-        installed_root=ROOT / "src.claude/agents",
+        installed_root=ROOT / 'adapters/claude/agents',
         verify_fires=False,
     )
     expected = CHECKER._manifest_stems(ROOT, "claude")
@@ -414,7 +414,7 @@ def test_unparseable_entry_naming_owned_stem_fails_loudly(tmp_path: Path) -> Non
             platform="claude",
             host_os="posix",
             repo_root=ROOT,
-            installed_root=ROOT / "src.claude/agents",
+            installed_root=ROOT / 'adapters/claude/agents',
             verify_fires=False,
         )
 
@@ -438,7 +438,7 @@ def test_corrupted_args_on_owned_entry_names_the_stem(tmp_path: Path) -> None:
             platform="claude",
             host_os="posix",
             repo_root=ROOT,
-            installed_root=ROOT / "src.claude/agents",
+            installed_root=ROOT / 'adapters/claude/agents',
             verify_fires=False,
         )
     assert "missing registered hooks" not in str(excinfo.value)

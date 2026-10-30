@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
+from tests.fixtures.runtime_capabilities import NATIVE_ROLE_DISABLED_FEATURES
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -353,7 +354,8 @@ def test_prior_factory_tuned_controls_preserve_noncontrol_bytes(tmp_path: Path) 
             assert item.payload == (target / item.relative_path).read_bytes()
             assert item.accepted_prior is None
     exact = target / "worker.toml"
-    old_worker = (role_root / "worker.toml").read_bytes().replace(b'gpt-6.1-terra', b'gpt-6.1-sol', 1).replace(b'model_reasoning_effort = "medium"', b'model_reasoning_effort = "high"', 1)
+    # Frozen bytes are pinned by the historical manifest, not derived from current features.
+    old_worker = (ROOT / "tests/fixtures/native-luna-policy-priors/terra-ranking-previous/worker.toml").read_bytes()
     assert hashlib.sha256(old_worker).hexdigest() in installer._TERRA_RANKING_PRIOR_ROLE_SHA256
     exact.write_bytes(old_worker)
     current_generation = installer._preflight_codex_native_roles(ROOT, AGENTS_SOURCE, target, tmp_path / "config.toml")
@@ -417,7 +419,7 @@ def test_nrc_configured_all_roles_keep_owned_profession_and_factory_identity(tmp
     for role in policy["roles"]:
         path = root / "src.codex/agents" / (role + ".toml")
         path.write_bytes(_nrc_configured_role_bytes(path.read_bytes()))
-        assert tomllib.loads(path.read_text())["features"] == {"apps": False, "plugins": False}
+        assert tomllib.loads(path.read_text())["features"] == NATIVE_ROLE_DISABLED_FEATURES
         before = path.read_bytes()
         task = next(name for name, roles in policy["taskRoleEligibility"].items()
                     if role in roles and (name in resolver._MECHANICAL_TASK_CLASSES) == (role in resolver._MECHANICAL_ROLES))
@@ -538,7 +540,7 @@ def test_nrc_public_installer_upgrades_v1_and_preserves_all_configured_roles(tmp
     agents = project / ".codex/agents"
     for path in agents.glob("*.toml"):
         path.write_bytes(_nrc_configured_role_bytes(path.read_bytes()))
-        assert tomllib.loads(path.read_text())["features"] == {"apps": False, "plugins": False}
+        assert tomllib.loads(path.read_text())["features"] == NATIVE_ROLE_DISABLED_FEATURES
     config = project / ".codex/config.toml"
     config.write_bytes(config.read_bytes().replace(b'description = "', b'description = "User guidance: ', 1))
     preserved = {path: (path.read_bytes(), installer._CreateOnlyMutablePath._identity(path)) for path in [config, *agents.glob("*.toml")]}
@@ -2111,7 +2113,7 @@ def test_luna_native_tomls_are_standalone_trusted_and_manifest_bound() -> None:
             "model_reasoning_effort": "high",
             "sandbox_mode": sandbox,
             "developer_instructions": role["developer_instructions"],
-            "features": {"apps": False, "plugins": False},
+            "features": NATIVE_ROLE_DISABLED_FEATURES,
         }
         assert "standalone" in role["developer_instructions"].casefold()
         assert "mechanical" in role["developer_instructions"].casefold()
@@ -2162,7 +2164,7 @@ def test_luna_native_tomls_are_standalone_trusted_and_manifest_bound() -> None:
             assert {key: value for key, value in role.items() if key not in {"features", "model", "model_reasoning_effort"}} == {
                 key: value for key, value in prior.items() if key not in {"model", "model_reasoning_effort"}
             }
-            assert role["features"] == {"apps": False, "plugins": False}
+            assert role["features"] == NATIVE_ROLE_DISABLED_FEATURES
             prior_bytes = historical.replace(
                 b'model = "gpt-6.1-sol"', b'model = "gpt-6-sol"', 1
             )
@@ -2181,7 +2183,7 @@ def test_sol_migrated_roles_keep_independent_nonmodel_contract() -> None:
         assert role["name"] == name
         assert role["description"] == description
         assert role["sandbox_mode"] == sandbox
-        assert role["features"] == {"apps": False, "plugins": False}
+        assert role["features"] == NATIVE_ROLE_DISABLED_FEATURES
         assert role["developer_instructions"] == "\n".join(
             (*role_lines, TRUST_BOUNDARY, "")
         )
@@ -2461,7 +2463,15 @@ def test_stock_pair_retention_different_device_refuses_before_prior_rename(
             volume_hits += 1
             fields = list(metadata)
             fields[2] += 1
-            return os.stat_result(fields)
+            # Preserve named native timestamp/attribute fields: a plain tuple
+            # reconstruction drops nanoseconds and injects unrelated corruption.
+            tuple_fields = {"st_mode", "st_ino", "st_dev", "st_nlink", "st_uid", "st_gid", "st_size"}
+            named = {name: getattr(metadata, name) for name in dir(metadata)
+                     if name.startswith("st_") and name not in tuple_fields}
+            changed = os.stat_result(fields, named)
+            assert changed.st_mtime_ns == metadata.st_mtime_ns
+            assert changed.st_ctime_ns == metadata.st_ctime_ns
+            return changed
         return metadata
 
     def record_publication(transaction, source, target, **kwargs):
@@ -2477,12 +2487,15 @@ def test_stock_pair_retention_different_device_refuses_before_prior_rename(
 
     def record_reservation(transaction, *args, **kwargs):
         try:
-            return reserve(transaction, *args, **kwargs)
+            # Inject the volume mismatch at its owning boundary. A global stat
+            # replacement trips earlier native identity checks before reservation.
+            with monkeypatch.context() as volume_patch:
+                volume_patch.setattr(Path, "stat", different_device)
+                return reserve(transaction, *args, **kwargs)
         except ValueError as error:
             owner_failures.append(error)
             raise
 
-    monkeypatch.setattr(Path, "stat", different_device)
     monkeypatch.setattr(installer._InstallTransaction, "_publish_retained", record_publication)
     monkeypatch.setattr(installer._InstallTransaction, "reserve_migration_retention", record_reservation)
     result = installer.install("codex", arguments)
@@ -2866,3 +2879,48 @@ def test_role_dispatch_cli_rejects_result_replay_flags(tmp_path: Path) -> None:
         )
         assert rejected.returncode == 2
         assert "unrecognized arguments" in rejected.stderr
+
+
+@pytest.mark.parametrize("location,valid", [("ancestor", True), ("root", True), ("descendant", False)])
+def test_luna_selected_volume_boundary_does_not_admit_nested_mounts(tmp_path, monkeypatch, location, valid):
+    resolver = _resolver_module()
+    root = tmp_path / "selected-root"
+    target = root / "shared" / "example.txt"
+    target.parent.mkdir(parents=True)
+    target.write_text("before\n", encoding="utf-8")
+    mounted = {"ancestor": root.parent, "root": root, "descendant": target.parent}[location]
+    original = resolver.os.path.ismount
+    monkeypatch.setattr(resolver.os.path, "ismount", lambda path: Path(path) == mounted or original(path))
+    result = resolver.validate_luna_execution_plan(_worker_plan(exact_root=root), observed_git_root=root)
+    assert result["valid"] is valid
+    assert result["authorizing"] is False
+    assert target.read_text(encoding="utf-8") == "before\n"
+
+
+def test_luna_selected_mount_identity_drift_still_refuses(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    resolver = _resolver_module()
+    root = tmp_path / "selected-root"
+    root.mkdir()
+    (root / "README.md").write_text("before\n", encoding="utf-8")
+    original_mount = resolver.os.path.ismount
+    monkeypatch.setattr(resolver.os.path, "ismount", lambda path: Path(path) == root or original_mount(path))
+    original = resolver._luna_component_metadata
+    calls = 0
+
+    def observed(path, *, allow_anchor_mount):
+        nonlocal calls
+        metadata = original(path, allow_anchor_mount=allow_anchor_mount)
+        if Path(path) == root and metadata is not None:
+            calls += 1
+            if calls > 1:
+                return SimpleNamespace(st_mode=metadata.st_mode, st_dev=metadata.st_dev,
+                    st_ino=metadata.st_ino + 1, st_file_attributes=getattr(metadata, "st_file_attributes", 0))
+        return metadata
+
+    monkeypatch.setattr(resolver, "_luna_component_metadata", observed)
+    result = resolver.validate_luna_execution_plan(_luna_plan(exact_root=str(root)), observed_git_root=root)
+    assert result["valid"] is False
+    assert result["stableId"] == "E_LUNA_PRECONDITION_FAILED"
+    assert calls >= 2

@@ -3608,7 +3608,10 @@ def _prepare_review_proof_inputs(rows, item, inputs):
     """
     index = {}
     for row in rows:
-        index.setdefault(row.event.get("runId"), []).append(row.event)
+        run_id = row.event.get("runId")
+        # Opaque historical IDs remain diagnostic data, never proof references.
+        if type(run_id) is str and run_id:
+            index.setdefault(run_id, []).append(row.event)
     for row in rows:
         event = row.event
         if "reviewClosureProofs" not in event:

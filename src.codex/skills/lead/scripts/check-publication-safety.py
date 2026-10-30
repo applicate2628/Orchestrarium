@@ -94,10 +94,11 @@ def _load_posix_process_group_module():
     elif (
         script.parents[0].name == "scripts"
         and script.parents[1].name == "agents"
-        and script.parents[2].name == "src.claude"
+        and script.parents[2].name == "claude"
+        and script.parents[3].name == "adapters"
     ):
         candidates.append(
-            script.parents[3]
+            script.parents[4]
             / "scripts"
             / "process_supervision"
             / "posix_process_group.py"
@@ -161,9 +162,10 @@ def _load_windows_job_module():
         elif (
             script.parents[0].name == "scripts"
             and script.parents[1].name == "agents"
-            and script.parents[2].name == "src.claude"
+            and script.parents[2].name == "claude"
+        and script.parents[3].name == "adapters"
         ):
-            candidates.append(script.parents[3] / "scripts" / "process_supervision" / "windows_job.py")
+            candidates.append(script.parents[4] / "scripts" / "process_supervision" / "windows_job.py")
         available = tuple(path for path in candidates if path.is_file())
         if len(available) != 1:
             raise RuntimeError("Windows Job helper unavailable or ambiguous")
@@ -212,7 +214,7 @@ else:
 _SCANNER_EXEMPT_PATHS = frozenset({
     "scripts/universal-hooks/scripts/check-publication-safety.py",
     "src.codex/skills/lead/scripts/check-publication-safety.py",
-    "src.claude/agents/scripts/check-publication-safety.py",
+    "adapters/claude/agents/scripts/check-publication-safety.py",
 })
 _SIMPLE_RULES = (
     (True, re.compile(r"AKIA[0-9A-Z]{16}")),

@@ -37,9 +37,9 @@ def write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def run_validator(work_item: Path) -> subprocess.CompletedProcess[str]:
+def run_validator(work_item: Path, *resource_args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, str(VALIDATOR), "--work-item", str(work_item)],
+        [sys.executable, str(VALIDATOR), "--work-item", str(work_item), *resource_args],
         cwd=ROOT,
         text=True,
         stdout=subprocess.PIPE,
@@ -578,9 +578,14 @@ def test_v3_decoder_enforces_utf8_depth_and_event_count_bounds(tmp_path: Path) -
         item / "agent-runs.jsonl",
         repeated * (validator.MAX_LEDGER_EVENTS + 1),
     )
-    result = run_validator(item)
+    # Public omission derives admission from the selected input. An explicit
+    # positive pair, not the old diagnostic default, is the hard ceiling.
+    result = run_validator(
+        item, "--ledger-max-events", str(validator.MAX_LEDGER_EVENTS),
+        "--ledger-max-bytes", str(len(repeated.encode("utf-8")) * (validator.MAX_LEDGER_EVENTS + 1) + 1024),
+    )
     assert result.returncode == 1
-    assert "ledger exceeds bounded event count" in result.stdout
+    assert "WI-LEDGER-RESOURCE-INCOMPLETE" in result.stdout
 
 
 def test_raw_v1_v2_are_readable_but_do_not_create_v3_authorization() -> None:

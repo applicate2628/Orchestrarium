@@ -13,7 +13,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 ROOT_OWNER = ROOT / "scripts" / "provider_prompt.py"
-CLAUDE_SCRIPTS = ROOT / "src.claude" / "agents" / "scripts"
+CLAUDE_SCRIPTS = ROOT / 'adapters/claude' / "agents" / "scripts"
 
 
 def test_root_is_the_only_authored_transport_owner() -> None:
@@ -68,16 +68,18 @@ def _remove_test_directory_link(path: Path) -> None:
     # POSIX directory symlinks unlink; Windows junctions use rmdir.
     if path.is_symlink():
         path.unlink()
-    else:
-        assert sys.platform == "win32" and path.is_junction()
+    elif sys.platform == "win32" and path.is_junction():
         path.rmdir()
+    else:
+        # Preserve the ordinary selected tree while simulating replacement.
+        path.rename(path.with_name(path.name + '-retained'))
 
 
 def _ledger_project_scope(tmp_path, *, provider_target=None):
     from test_legacy_obligation_migration import make_directory_link
     base = tmp_path / 'scope'
-    canonical = base / '.agents/skills/lead'
     provider_root = base / '.claude' if provider_target is None else provider_target
+    canonical = provider_root / 'skills/lead'
     assert provider_root.parent == base
     marker = tmp_path / 'selected-ledger-executed'
     for relative in ('scripts/agent-run-ledger.py', 'scripts/validate-work-item-state.py',
@@ -94,8 +96,7 @@ def _ledger_project_scope(tmp_path, *, provider_target=None):
     peer.parent.mkdir(parents=True)
     peer.write_bytes(ROOT_OWNER.read_bytes())
     projection = provider_root / 'skills/lead'
-    projection.parent.mkdir(parents=True)
-    make_directory_link(projection, canonical)
+    assert projection == canonical and projection.is_dir()
     module = _load_owner(peer, 'projection_bound_ledger_' + str(id(tmp_path)))
     return module, base, canonical, projection, marker
 
@@ -117,7 +118,7 @@ def test_ledger_binding_retains_actual_installer_target_spelling(tmp_path, monke
     assert binding is not None
     # Compare actual path objects' spelling: WindowsPath equality casefolds.
     assert [os.fspath(row[0]) for row in binding.roots] == [
-        os.fspath(base / '.agents'), os.fspath(target / 'agents'), os.fspath(target / 'skills'),
+        os.fspath(target / 'skills'), os.fspath(target / 'agents'),
     ]
     assert binding.helper.samefile(canonical / 'scripts/agent-run-ledger.py')
     binding.assert_current()
@@ -211,14 +212,15 @@ def test_global_ledger_owner_binds_distinct_logical_backings(tmp_path, monkeypat
     from test_provider_prompt_projections import _load_installer, _linked_global_claude, _linked_global_canonical_agents
     installer = _load_installer()
     logical, peer_backing = _linked_global_claude(tmp_path, monkeypatch, installer)
-    agents, canonical_backing = _linked_global_canonical_agents(tmp_path, logical.parent)
+    skills = logical / 'skills'
+    canonical_backing = peer_backing / 'skills'
     marker = tmp_path / 'peer-bootstrap-executed'
     (peer_backing / 'agents/scripts/linked_runtime_subroots.py').write_text(
         f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\n", encoding='utf-8')
-    expected = canonical_backing / 'skills/lead/scripts/agent-run-ledger.py'
+    expected = canonical_backing / 'lead/scripts/agent-run-ledger.py'
     for index, module_path in enumerate((logical / 'agents/scripts/provider_prompt.py',
             peer_backing / 'agents/scripts/provider_prompt.py',
-            agents / 'skills/lead/scripts/provider_prompt.py')):
+            skills / 'lead/scripts/provider_prompt.py')):
         module = _load_owner(module_path, 'linked_ledger_owner_' + str(index))
         assert module.ledger_helper().samefile(expected)
         assert Path(module._ledger_owner().__file__).samefile(expected)
@@ -239,7 +241,7 @@ def test_current_claude_missing_canonical_member_never_uses_peer_or_cwd(tmp_path
     target = tmp_path / 'target'
     target.mkdir()
     assert installer.install('claude', ['--target', str(target), '--force', '--allow-unsafe-target', '--no-hypothesis-hook']) == 0
-    (target / '.agents/skills/lead/scripts' / missing).unlink()
+    (target / '.claude/skills/lead/scripts' / missing).unlink()
     decoy = tmp_path / 'cwd/scripts'
     decoy.mkdir(parents=True)
     marker = tmp_path / 'cwd-ledger-executed'
@@ -261,8 +263,8 @@ def test_ledger_global_link_drift_is_checked_at_actual_use(tmp_path, monkeypatch
     import os
     from test_provider_prompt_projections import _load_installer, _linked_global_claude, _linked_global_canonical_agents
     installer = _load_installer()
-    logical, _peer_backing = _linked_global_claude(tmp_path, monkeypatch, installer)
-    agents, backing = _linked_global_canonical_agents(tmp_path, logical.parent)
+    logical, peer_backing = _linked_global_claude(tmp_path, monkeypatch, installer)
+    agents, backing = logical / 'skills', peer_backing / 'skills'
     replacement = tmp_path / 'replacement-agents'
     shutil.copytree(backing, replacement)
     module = _load_owner(logical / 'agents/scripts/provider_prompt.py', 'ledger_binding_drift_' + use)
@@ -621,7 +623,12 @@ def test_policy_route_is_current_before_captured_payload_executes(tmp_path, monk
         "def launch_requirements(*args, **kwargs): return None, False\n"
         "def qualify_launch(*args, **kwargs): return None\n", encoding="utf8")
     try:
-        script.symlink_to(ROOT / "scripts" / script.name)
+        if kind == "R":
+            # Resolver companions belong to its selected physical package.
+            # Keep the raced companion beside a fixture-owned physical module.
+            script.write_bytes((ROOT / "scripts" / script.name).read_bytes())
+        else:
+            script.symlink_to(ROOT / "scripts" / script.name)
         selected.symlink_to(good)
     except OSError as error:
         pytest.skip("Owned supported-link fixture unavailable: " + type(error).__name__)

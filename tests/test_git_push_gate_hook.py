@@ -157,7 +157,7 @@ class TestTechnicalPublication:
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CANONICAL_HOOK = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-git-push-gate.py"
 HOOKS = (
-    REPO_ROOT / "src.claude" / "agents" / "scripts" / "check-git-push-gate.py",
+    REPO_ROOT / 'adapters/claude' / "agents" / "scripts" / "check-git-push-gate.py",
     REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-git-push-gate.py",
 )
 TARGETS = tuple(
@@ -847,6 +847,14 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
                         module._a3_preflight.classify_generic_push(terminal).status,
                         "PGG-ADMISSIBLE",
                     )
+
+                for suffix in ("\n; echo changed", "\n git push origin other", "\n> output", "\n&& echo changed"):
+                    with self.subTest(script=script, suffix=suffix):
+                        compound = module._a3_preflight.parse_shell_command(command + suffix, dialect)
+                        self.assertNotEqual(
+                            module._a3_preflight.classify_generic_push(compound).status,
+                            "PGG-ADMISSIBLE",
+                        )
 
                 for invalid_argv in (
                     ("git", "-C", root, "push", "origin", "HEAD:refs/heads/feature"),
@@ -3308,16 +3316,16 @@ class TestPublicationReviewedExceptionGateR2(unittest.TestCase):
             ),
             (
                 "claude-source",
-                Path("R/src.claude/agents/scripts/check-git-push-gate.py"),
+                Path("R/adapters/claude/agents/scripts/check-git-push-gate.py"),
                 Path("R"),
                 (
-                    ("gate", "src.claude/agents/scripts/check-git-push-gate.py"),
-                    ("hook_common", "src.claude/agents/scripts/hook_common.py"),
-                    ("classifier", "src.claude/agents/hooks/check-machine-local-path.py"),
+                    ("gate", "adapters/claude/agents/scripts/check-git-push-gate.py"),
+                    ("hook_common", "adapters/claude/agents/scripts/hook_common.py"),
+                    ("classifier", "adapters/claude/agents/hooks/check-machine-local-path.py"),
                     ("posix_helper", "scripts/process_supervision/posix_process_group.py"),
                     ("windows_job", "scripts/process_supervision/windows_job.py"),
-                    ("scanner", "src.claude/agents/scripts/check-publication-safety.py"),
-                    ("publication_review_policy", "src.claude/agents/scripts/publication_review_policy.py"),
+                    ("scanner", "adapters/claude/agents/scripts/check-publication-safety.py"),
+                    ("publication_review_policy", "adapters/claude/agents/scripts/publication_review_policy.py"),
                     ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
                 ),
             ),

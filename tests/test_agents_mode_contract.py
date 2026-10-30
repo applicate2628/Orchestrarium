@@ -107,7 +107,7 @@ class AgentsModeContractTest(unittest.TestCase):
                 "externalCodexProfile: gpt-6.1-sol-xhigh",
             ],
             "src.claude/commands/agents-init-project.md": [
-                "global legacy `~/.claude/.agents-mode`, then the shared cross-pack global",
+                "pack-local global legacy `~/.claude/.agents-mode`, shared cross-pack global",
                 "externalCodexProfile: gpt-6.1-sol-xhigh",
             ],
             "docs/agents-mode-reference.md": [
@@ -121,6 +121,20 @@ class AgentsModeContractTest(unittest.TestCase):
             for snippet in snippets:
                 with self.subTest(relative=relative, snippet=snippet):
                     self.assertIn(snippet, text)
+
+    def test_claude_initializer_documents_order_without_authorizing_read_writes(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        text = (root / 'adapters/claude/commands/agents-init-project.md').read_text(encoding="utf-8")
+        rule = next(line for line in text.splitlines() if line.startswith("- For decision-driving reads,"))
+        layers = (
+            "`.claude/.agents-mode.yaml`", "`.claude/.agents-mode`",
+            "`~/.claude/.agents-mode.yaml`", "`~/.claude/.agents-mode`",
+            "`~/.agents-mode.yaml`", "built-in defaults",
+        )
+        positions = [rule.index(layer) for layer in layers]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("inspection grants no write to the source overlay", rule)
+        self.assertIn("explicitly selected authorized project configuration", rule)
 
     def test_validator_rejects_init_canonical_shape_drift(self) -> None:
         root = Path(__file__).resolve().parents[1]

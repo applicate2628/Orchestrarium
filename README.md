@@ -1,13 +1,22 @@
-# Orchestrarium
+# Orche
 
-A cross-provider agent orchestration monorepo that keeps the production Codex and Claude Code lines aligned on one shared governance and reference core.
+![Orche mascot](assets/branding/orche.png)
+
+Orche is the workflow pack formerly named Orchestrarium. The repository URL and
+existing technical ownership/receipt identifiers remain compatible; branding
+does not rename installed state or authorize a migration.
+
+A Codex-first workflow pack with one shared governance, SDK and installation core.
+Other clients are integrations of that core, not parallel products. Kimi and Grok
+have higher secondary integration priority than Claude; priority alone does not
+enable a model, qualify a host installer or authorize a paid run.
 
 Codex native roles use the task and role selector, with Terra for suitable ordinary work and Sol for science. Named Luna mechanical roles have a separate supervised corridor; ordinary eligible producer roles can use `luna-high` or `luna-xhigh`. Explicit user controls, host restrictions, independent reviews and per-attempt Astra or Max consent remain binding. See [Codex platform rules](src.codex/AGENTS.codex.md) and [installation details](INSTALL.md) for role, migration and runtime contracts.
 
 - `src.codex/` — the production Codex provider-pack source
-- `src.claude/` — the production Claude Code provider-pack source
+- `adapters/claude/` — the existing secondary client adapter source
 
-The provider lines share one governance model and role vocabulary, while each keeps the runtime structure expected by its own provider. The root router installs Codex, Claude, or both. The removed Gemini and Qwen provider values are retained only as fail-closed migration identifiers; they are not install or execution routes.
+One shared governance model and role vocabulary serve the host integrations; adapter files retain the runtime structure required by each client. The root router installs Codex, Claude, or both. The removed Gemini and Qwen provider values are retained only as fail-closed migration identifiers; they are not install or execution routes.
 
 Warning: Orchestrarium is optimized for maximum execution effectiveness and low orchestration drag rather than for minimum token spend. On large tasks, multi-opinion review lanes, or aggressive external fan-out, usage can rise quickly and consume a substantial token budget in a short time.
 
@@ -17,9 +26,7 @@ For a repository transfer, `$manual-repo-transfer` defaults to a verified Git cl
 
 Optional software development kit (SDK) helpers are part of the installer-managed host-pack payload, without dependency provisioning or automatic activation. The explicit `--sdk-review-binding` Codex review path keeps the existing Host (invoking orchestration session) and default routes; the historical installed Windows success/receiving-collision checks and bounded live Codex review passed, while subsequent shared-owner changes retain separate regression evidence and broader scenarios remain unqualified. See [the opt-in contract and qualification boundaries](docs/sdk-execution.md).
 
-## WARNING: Claude external authentication
-
-The Python-owned `invoke-claude-prompt.py` transport (also exposed through the thin POSIX launcher `invoke-claude-prompt.sh`) runs automated, headless `claude -p`. Orchestrarium currently admits only `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` for automated Claude runs; subscription sign-in (OAuth), the subscription override, Amazon Bedrock, and Google Vertex AI fail closed. Claude authentication is irrelevant when the Codex route is selected, so absent Claude credentials do not block Codex. Orchestrarium 1.x refuses `apiKeyHelper` before prompt capture or provider lookup because a helper-generated credential cannot be bound to the transport's exact output scan. For the secret-backed path, use `invoke-claude-api.py` or its thin `invoke-claude-api.sh` launcher with the credentials documented in `SECRET.md`. See [Anthropic's Claude Code legal and compliance guidance](https://code.claude.com/docs/en/legal-and-compliance).
+Client-specific authentication restrictions are documented in [client integration notes](docs/client-integrations.md). They do not block the primary Codex route.
 
 ## Repository layout
 
@@ -27,9 +34,9 @@ The Python-owned `invoke-claude-prompt.py` transport (also exposed through the t
 shared/             Shared cross-provider governance and canonical reference cores
 docs/               Common branch-level docs index and operator/runtime references
 src.codex/          Codex provider-pack source
-src.claude/         Claude Code provider-pack source
+adapters/claude/         Claude Code provider-pack source
 references-codex/   Codex-specific addenda and compatibility pointers
-references-claude/  Claude Code-specific addenda and compatibility pointers
+adapters/claude/references/  Claude Code-specific addenda and compatibility pointers
 RELEASE_NOTES.md    Canonical tracked release log
 install.py          Python-owned entry-point installer (asks which pack to install)
 install.sh          Thin POSIX launcher for `install.py`
@@ -38,14 +45,14 @@ AGENTS.md           Dev overlay for Codex pack maintenance
 CLAUDE.md           Dev overlay for Claude Code pack maintenance
 ```
 
-## Provider Packs
+## Host integrations
 
 | Pack | Status in this monorepo | Source | Runtime entrypoint in source | Packaging in this branch | Validation |
 | --- | --- | --- | --- | --- | --- |
-| Codex | Production | `src.codex/` | assembled installed `AGENTS.md` from `shared/AGENTS.shared.md` + `src.codex/AGENTS.codex.md` | root Python router plus `scripts/install-codex.py` and its POSIX launcher | `validate-skill-pack.py` and its POSIX launcher |
-| Claude Code | Production | `src.claude/` | `src.claude/CLAUDE.md` | root Python router plus `scripts/install-claude.py` and its POSIX launcher | `validate-skill-pack.py` and its POSIX launcher |
+| Codex | Primary | `src.codex/` | assembled installed `AGENTS.md` from `shared/AGENTS.shared.md` + `src.codex/AGENTS.codex.md` | root Python router plus `scripts/install-codex.py` and its POSIX launcher | `validate-skill-pack.py` and its POSIX launcher |
+| Claude Code | Secondary adapter | `adapters/claude/` | `adapters/claude/CLAUDE.md` | root Python router plus `scripts/install-claude.py` and its POSIX launcher | `validate-skill-pack.py` and its POSIX launcher |
 
-Shared design references now live in `shared/references/`. Provider-local `references-codex/` and `references-claude/` keep provider-specific addenda plus compatibility pointers where older paths still need to resolve. The clearest example is `subagent-operating-model`: the canonical blueprint core now lives in `shared/references/subagent-operating-model.md`, while each production provider tree keeps only its runtime and repository concretization addendum. Shared governance is maintained across provider lines; the repository-level overlays in `AGENTS.md` and `CLAUDE.md` exist only for maintaining this monorepo.
+Shared design references now live in `shared/references/`. Provider-local `references-codex/` and `adapters/claude/references/` keep provider-specific addenda plus compatibility pointers where older paths still need to resolve. The clearest example is `subagent-operating-model`: the canonical blueprint core now lives in `shared/references/subagent-operating-model.md`, while each production provider tree keeps only its runtime and repository concretization addendum. Shared governance is maintained across provider lines; the repository-level overlays in `AGENTS.md` and `CLAUDE.md` exist only for maintaining this monorepo.
 
 Dynamic user-interface roles in both live packs consume one neutral installed leaf, `contracts/ui-transition-continuity.md`, sourced from the sole normative English source at `shared/references/ui-transition-continuity.md`. The mandatory Russian file at `shared/references/ru/ui-transition-continuity.md` is a non-authoritative maintainer/operator mirror and is not installed. The full `shared/references/` tree is not installed, and there is no provider-specific semantic copy. This is a pack-structure projection; the root README does not own the continuity semantics.
 
@@ -55,7 +62,11 @@ Installed Codex now follows the same compact-entrypoint pattern that Claude alre
 
 Maintainer note: this repository is the installer/source monorepo, not automatically a repo-local Codex install target. When working inside `Orchestrarium/`, it is valid to rely on the global Codex skill/contract install under `$HOME/.agents/` together with Codex configuration and runtime metadata under `$HOME/.codex/`. A missing local `.agents/` tree in this monorepo does not by itself mean the Codex runtime is misconfigured; create `.agents/` here only by running the installers intentionally.
 
-Global Codex and Claude upgrades share installer-owned receipts beside canonical skills under `$HOME/.agents/skills/`: a Lead receipt and one name-to-digest map for non-Lead skills. Clean receipted versions upgrade normally; an unlisted pre-receipt tree needs the corresponding global-only, exact-digest `--replace-unreceipted-lead-sha256` or `--replace-unreceipted-skill-sha256 NAME=SHA256` choice after a read-only `--dry-run`. See [INSTALL.md](INSTALL.md) for paired-backup and downgrade limits.
+Each selected client receives an independent ordinary copy of the canonical
+skills: Codex uses `.agents/skills`, and the secondary Claude adapter uses
+`.claude/skills`. Install, update and uninstall do not mutate an unselected
+client. Source reuse stays in the repository; installed shared links are legacy
+migration inputs. See [installation and migration](INSTALL.md).
 
 Installed governance now requires a cited repository-orientation record before the first run, build, or mutation in an unfamiliar repository or subtree. The record names scope, live/archive status, canonical workflow, protected surfaces, and `file:line` evidence; names, file counts, recency, and layout never prove liveness. The production Claude Code and Codex installers also register a warn-only, fail-open process audit that detects a skipped or conflicting record without scanning repository prose or inferring canon from deprecation words.
 
@@ -191,7 +202,7 @@ Two archetypes:
 - **Knowledge-style** — loaded into the caller's current context to inform how the caller performs the work.
 - **Delegate-style** — additionally spawnable as a fresh-context subagent that executes the workflow and returns one self-contained artifact.
 
-The governance index and runtime layout are defined in [`shared/AGENTS.shared.md`](shared/AGENTS.shared.md) under `## Common skills`. Each provider source tree carries its native form under `src.<provider>/skills/<name>/`, and Claude delegate-style skills additionally register a thin Agent-tool wrapper at `src.claude/agents/<name>.md`.
+The governance index and runtime layout are defined in [`shared/AGENTS.shared.md`](shared/AGENTS.shared.md) under `## Common skills`. Each provider source tree carries its native form under `src.<provider>/skills/<name>/`, and Claude delegate-style skills additionally register a thin Agent-tool wrapper at `adapters/claude/agents/<name>.md`.
 
 Currently shipped:
 - `$windows-gui-manual-testing` — delegate-style; Windows desktop GUI manual visual verification with screen capture, hard crop validation, and theme/state evidence across toolkit/runtime variants.
@@ -216,7 +227,7 @@ Currently shipped:
 - `docs/README.md` is the common branch-level docs entrypoint for operator semantics and runtime-layout references.
 - [`docs/provider-runtime-layouts.md`](docs/provider-runtime-layouts.md) records the installed production runtime layout for Codex and Claude Code, with `global` and `local` scopes split explicitly so install/runtime paths are not confused with repo source trees.
 - `references-codex/` contains Codex-specific addenda plus compatibility pointers for older reference paths.
-- `references-claude/` contains Claude-specific addenda plus compatibility pointers for older reference paths.
+- `adapters/claude/references/` contains Claude-specific addenda plus compatibility pointers for older reference paths.
 - `subagent-operating-model` is no longer duplicated per provider pack: use the shared core for the canonical blueprint and the provider-local file only for runtime and repository concretization.
 - `AGENTS.md` is the root development overlay for Codex provider-pack maintenance.
 - `CLAUDE.md` is the root development overlay for Claude Code provider-pack maintenance.
@@ -225,14 +236,14 @@ Before publishing maintenance changes, validate the active provider surfaces:
 
 ```bash
 bash src.codex/skills/lead/scripts/validate-skill-pack.sh
-bash src.claude/agents/scripts/validate-skill-pack.sh
+bash adapters/claude/agents/scripts/validate-skill-pack.sh
 python scripts/sync-agents-mode-docs.py --root . --check
 python scripts/validate-agents-mode-installers.py --root .
 ```
 
 ```powershell
 python .\src.codex\skills\lead\scripts\validate-skill-pack.py
-python .\src.claude\agents\scripts\validate-skill-pack.py
+python .\adapters/claude\agents\scripts\validate-skill-pack.py
 python .\scripts\sync-agents-mode-docs.py --root . --check
 python .\scripts\validate-agents-mode-installers.py --root .
 ```

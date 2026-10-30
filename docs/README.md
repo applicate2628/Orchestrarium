@@ -9,10 +9,10 @@ Use it together with:
 - [../README.md](../README.md) for the repository overview
 - [../INSTALL.md](../INSTALL.md) for install and runtime rules
 - [../src.codex/README.md](../src.codex/README.md) for the Codex source subtree
-- [../src.claude/README.md](../src.claude/README.md) for the Claude source subtree
+- [../adapters/claude/README.md](../adapters/claude/README.md) for the Claude source subtree
 - [../shared/references/README.md](../shared/references/README.md) for the shared design core
 - [../references-codex/README.md](../references-codex/README.md)
-- [../references-claude/README.md](../references-claude/README.md)
+- [../adapters/claude/references/README.md](../adapters/claude/references/README.md)
 
 Current docs in this branch:
 

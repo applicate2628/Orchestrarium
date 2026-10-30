@@ -113,7 +113,7 @@ POLICY_ENUMERATION = re.compile(
 
 
 def _live_docs_and_yaml() -> tuple[Path, ...]:
-    roots = (ROOT / "docs", ROOT / "shared", ROOT / "src.codex", ROOT / "src.claude")
+    roots = (ROOT / "docs", ROOT / "shared", ROOT / "src.codex", ROOT / 'adapters/claude')
     candidates = [ROOT / "README.md", ROOT / "INSTALL.md"]
     for directory in roots:
         candidates.extend(

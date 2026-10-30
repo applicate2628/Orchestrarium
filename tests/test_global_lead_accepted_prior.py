@@ -696,6 +696,17 @@ def _extract_stock_consultant(destination: Path, revision: str) -> Path:
     return destination / "src.codex" / "skills" / "consultant"
 
 
+def _expected_prior_v2(installer, name: str, legacy: str) -> str:
+    """A legacy pin selects a shipped witness; acceptance uses its strong ID."""
+    witnesses = (installer.GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256 if name == "lead"
+                 else installer.ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256[name])
+    assert isinstance(witnesses, dict)
+    assert legacy in witnesses
+    strong = witnesses[legacy]
+    assert isinstance(strong, str) and len(strong) == 64
+    return strong
+
+
 def _tree_bytes(root: Path) -> dict[Path, bytes]:
     return {
         path.relative_to(root): path.read_bytes()
@@ -728,7 +739,7 @@ def test_exact_stock_consultant_is_accepted_and_replaced_byte_for_byte(
 ) -> None:
     installer = _load_installer()
     historical = _extract_stock_consultant(tmp_path / "historical", revision)
-    assert installer._tree_sha256(historical) == expected_prior
+    assert installer._legacy_tree_sha256(historical) == expected_prior
 
     target = tmp_path / "target"
     skills_root = target / ".agents" / "skills"
@@ -740,7 +751,7 @@ def test_exact_stock_consultant_is_accepted_and_replaced_byte_for_byte(
     )
     try:
         selected = next(skill for skill in plan.skills if skill.name == "consultant")
-        assert selected.accepted_prior == expected_prior
+        assert selected.accepted_prior == _expected_prior_v2(installer, selected.name, expected_prior)
         owner = installer._CreateOnlyMutablePath(
             target, installer._InstallTransaction([], enabled=False), dry_run=False
         )
@@ -758,7 +769,7 @@ def test_stock_consultant_one_byte_drift_is_rejected(
 ) -> None:
     installer = _load_installer()
     historical = _extract_stock_consultant(tmp_path / "historical", revision)
-    assert installer._tree_sha256(historical) == expected_prior
+    assert installer._legacy_tree_sha256(historical) == expected_prior
     skills_root = tmp_path / "target" / ".agents" / "skills"
     skills_root.mkdir(parents=True)
     installed = skills_root / "consultant"
@@ -778,7 +789,7 @@ def test_stock_consultant_prior_is_rejected_for_another_skill(
 ) -> None:
     installer = _load_installer()
     historical = _extract_stock_consultant(tmp_path / "historical", revision)
-    assert installer._tree_sha256(historical) == expected_prior
+    assert installer._legacy_tree_sha256(historical) == expected_prior
     skills_root = tmp_path / "target" / ".agents" / "skills"
     skills_root.mkdir(parents=True)
     shutil.copytree(historical, skills_root / "design-panel")
@@ -795,7 +806,7 @@ def test_stock_consultant_transaction_abort_restores_prior(
 ) -> None:
     installer = _load_installer()
     historical = _extract_stock_consultant(tmp_path / "historical", revision)
-    assert installer._tree_sha256(historical) == expected_prior
+    assert installer._legacy_tree_sha256(historical) == expected_prior
     target = tmp_path / "target"
     skills_root = target / ".agents" / "skills"
     skills_root.mkdir(parents=True)
@@ -829,7 +840,7 @@ def test_stock_consultant_second_preflight_is_noop(
 ) -> None:
     installer = _load_installer()
     historical = _extract_stock_consultant(tmp_path / "historical", revision)
-    assert installer._tree_sha256(historical) == expected_prior
+    assert installer._legacy_tree_sha256(historical) == expected_prior
     target = tmp_path / "target"
     skills_root = target / ".agents" / "skills"
     skills_root.mkdir(parents=True)
@@ -873,7 +884,7 @@ def _assert_exact_stock_skill_is_accepted_and_drift_refused(
     expected_prior: str,
     historical: Path,
 ) -> None:
-    assert installer._tree_sha256(historical) == expected_prior
+    assert installer._legacy_tree_sha256(historical) == expected_prior
 
     skills_root = tmp_path / "target" / ".agents" / "skills"
     skills_root.mkdir(parents=True)
@@ -883,7 +894,7 @@ def _assert_exact_stock_skill_is_accepted_and_drift_refused(
     )
     try:
         selected = next(skill for skill in plan.skills if skill.name == name)
-        assert selected.accepted_prior == expected_prior
+        assert selected.accepted_prior == _expected_prior_v2(installer, selected.name, expected_prior)
         owner = installer._CreateOnlyMutablePath(
             tmp_path / "target",
             installer._InstallTransaction([], enabled=False),
@@ -949,13 +960,15 @@ def test_gpt6_exact_stock_skill_upgrades_and_one_byte_drift_is_rejected(
     )
 
 
-def _copy_current_staged_lead(installer, destination: Path) -> Path:
+def _copy_current_staged_lead(
+    installer, destination: Path, *, retained_from: Path | None = None,
+) -> Path:
     if destination.exists():
         shutil.rmtree(destination)
     stage = installer._stage_canonical_lead_tree(
         ROOT,
         ROOT / "src.codex" / "skills" / "lead",
-        destination / "scripts",
+        (retained_from or destination) / "scripts",
     )
     try:
         shutil.copytree(stage.path, destination)
@@ -990,15 +1003,18 @@ def test_exact_current_hybrid_global_lead_migrates_noops_and_rejects_drift(
     tmp_path: Path,
 ) -> None:
     installer = _load_installer()
-    current = _copy_current_staged_lead(installer, tmp_path / "current" / "lead")
     historical = _seed_current_hybrid_global_lead(
         installer, tmp_path / "historical" / "lead"
+    )
+    # Retired members are carried until their separate cleanup owner runs.
+    current = _copy_current_staged_lead(
+        installer, tmp_path / "current" / "lead", retained_from=historical
     )
     historical_files = _tree_bytes(historical)
     for relative, source in CURRENT_HYBRID_GLOBAL_LEAD_OVERLAYS.items():
         assert historical_files[Path(relative)] == _historical_blob(*source)
     assert (
-        installer._tree_sha256(historical, ignore_runtime_cache=True)
+        installer._legacy_tree_sha256(historical, ignore_runtime_cache=True)
         == CURRENT_HYBRID_GLOBAL_LEAD_TREE_SHA256
     )
 
@@ -1010,7 +1026,7 @@ def test_exact_current_hybrid_global_lead_migrates_noops_and_rejects_drift(
     )
     try:
         lead = next(skill for skill in plan.skills if skill.name == "lead")
-        assert lead.accepted_prior == CURRENT_HYBRID_GLOBAL_LEAD_TREE_SHA256
+        assert lead.accepted_prior == _expected_prior_v2(installer, lead.name, CURRENT_HYBRID_GLOBAL_LEAD_TREE_SHA256)
         owner = installer._CreateOnlyMutablePath(
             target, installer._InstallTransaction([], enabled=False), dry_run=False
         )
@@ -1079,7 +1095,7 @@ def test_exact_immediate_stock_lead_migrates_and_rejects_drift(
         revision, skills_root / "lead"
     )
     assert (
-        installer._tree_sha256(historical, ignore_runtime_cache=True)
+        installer._legacy_tree_sha256(historical, ignore_runtime_cache=True)
         == expected_digest
     )
 
@@ -1088,7 +1104,7 @@ def test_exact_immediate_stock_lead_migrates_and_rejects_drift(
     )
     try:
         lead = next(skill for skill in plan.skills if skill.name == "lead")
-        assert lead.accepted_prior == expected_digest
+        assert lead.accepted_prior == _expected_prior_v2(installer, lead.name, expected_digest)
     finally:
         installer._discard_canonical_skills_plan(plan)
 
@@ -1131,7 +1147,7 @@ def test_exact_partial_push_gate_lead_migrates_rolls_back_and_rejects_drift(
         "scripts/universal-hooks/scripts/check-git-push-gate.py",
     )
     assert (
-        installer._tree_sha256(historical, ignore_runtime_cache=True)
+        installer._legacy_tree_sha256(historical, ignore_runtime_cache=True)
         == PARTIAL_PUSH_GATE_GLOBAL_LEAD_TREE_SHA256
     )
 
@@ -1143,7 +1159,7 @@ def test_exact_partial_push_gate_lead_migrates_rolls_back_and_rejects_drift(
     )
     try:
         lead = next(skill for skill in plan.skills if skill.name == "lead")
-        assert lead.accepted_prior == PARTIAL_PUSH_GATE_GLOBAL_LEAD_TREE_SHA256
+        assert lead.accepted_prior == _expected_prior_v2(installer, lead.name, PARTIAL_PUSH_GATE_GLOBAL_LEAD_TREE_SHA256)
         owner = installer._CreateOnlyMutablePath(
             target, installer._InstallTransaction([], enabled=False), dry_run=False
         )
@@ -1151,7 +1167,9 @@ def test_exact_partial_push_gate_lead_migrates_rolls_back_and_rejects_drift(
     finally:
         installer._discard_canonical_skills_plan(plan)
 
-    current = _copy_current_staged_lead(installer, tmp_path / "current" / "lead")
+    current = _copy_current_staged_lead(
+        installer, tmp_path / "current" / "lead", retained_from=historical
+    )
     assert _runtime_cache_insensitive_tree_bytes(
         skills_root / "lead"
     ) == _runtime_cache_insensitive_tree_bytes(current)
@@ -1276,7 +1294,7 @@ def test_exact_provider_auth_baseline_lead_is_accepted_and_drift_refused(
     installer = _load_installer()
     skills_root = tmp_path / ".agents" / "skills"
     historical = _seed_provider_auth_baseline_staged_lead(skills_root / "lead")
-    assert installer._tree_sha256(
+    assert installer._legacy_tree_sha256(
         historical, ignore_runtime_cache=True
     ) == PROVIDER_AUTH_BASELINE_GLOBAL_LEAD_TREE_SHA256
 
@@ -1285,7 +1303,7 @@ def test_exact_provider_auth_baseline_lead_is_accepted_and_drift_refused(
     )
     try:
         lead = next(skill for skill in plan.skills if skill.name == "lead")
-        assert lead.accepted_prior == PROVIDER_AUTH_BASELINE_GLOBAL_LEAD_TREE_SHA256
+        assert lead.accepted_prior == _expected_prior_v2(installer, lead.name, PROVIDER_AUTH_BASELINE_GLOBAL_LEAD_TREE_SHA256)
     finally:
         installer._discard_canonical_skills_plan(plan)
 
@@ -1363,7 +1381,7 @@ def test_exact_shipped_global_lead_is_accepted_and_one_byte_drift_refused(
     historical = _seed_revision_staged_lead(
         revision, tmp_path / "historical" / "lead"
     )
-    assert installer._tree_sha256(
+    assert installer._legacy_tree_sha256(
         historical, ignore_runtime_cache=True
     ) == expected_digest
 
@@ -1374,7 +1392,7 @@ def test_exact_shipped_global_lead_is_accepted_and_one_byte_drift_refused(
     )
     try:
         lead = next(skill for skill in plan.skills if skill.name == "lead")
-        assert lead.accepted_prior == expected_digest
+        assert lead.accepted_prior == _expected_prior_v2(installer, lead.name, expected_digest)
         owner = installer._CreateOnlyMutablePath(
             tmp_path,
             installer._InstallTransaction([], enabled=False),
@@ -1403,7 +1421,7 @@ def test_exact_pre_range_v3_lead_is_accepted_and_customized_tree_refused(
     installer = _load_installer()
     skills_root = tmp_path / ".agents" / "skills"
     historical = _seed_pre_range_v3_staged_lead(skills_root / "lead")
-    assert installer._tree_sha256(
+    assert installer._legacy_tree_sha256(
         historical, ignore_runtime_cache=True
     ) == PRE_RANGE_V3_GLOBAL_LEAD_TREE_SHA256
 
@@ -1412,7 +1430,7 @@ def test_exact_pre_range_v3_lead_is_accepted_and_customized_tree_refused(
     )
     try:
         lead = next(skill for skill in plan.skills if skill.name == "lead")
-        assert lead.accepted_prior == PRE_RANGE_V3_GLOBAL_LEAD_TREE_SHA256
+        assert lead.accepted_prior == _expected_prior_v2(installer, lead.name, PRE_RANGE_V3_GLOBAL_LEAD_TREE_SHA256)
     finally:
         installer._discard_canonical_skills_plan(plan)
 
@@ -1447,7 +1465,7 @@ def test_exact_pre_rebase_staged_lead_is_accepted_and_current_is_noop(
     installer = _load_installer()
     historical = _seed_pre_rebase_staged_lead(tmp_path / "historical")
     assert (
-        installer._tree_sha256(historical, ignore_runtime_cache=True)
+        installer._legacy_tree_sha256(historical, ignore_runtime_cache=True)
         == PRE_REBASE_GLOBAL_LEAD_TREE_SHA256
     )
 
@@ -1459,7 +1477,7 @@ def test_exact_pre_rebase_staged_lead_is_accepted_and_current_is_noop(
     )
     try:
         lead = next(skill for skill in plan.skills if skill.name == "lead")
-        assert lead.accepted_prior == PRE_REBASE_GLOBAL_LEAD_TREE_SHA256
+        assert lead.accepted_prior == _expected_prior_v2(installer, lead.name, PRE_REBASE_GLOBAL_LEAD_TREE_SHA256)
         owner = installer._CreateOnlyMutablePath(
             tmp_path / "target", installer._InstallTransaction([], enabled=False), dry_run=False
         )
@@ -1608,7 +1626,7 @@ def test_additional_stock_skill_fixture_survives_missing_git_history(
         name, revision, tmp_path / "historical"
     )
     installer = _load_installer()
-    assert installer._tree_sha256(historical) == expected_prior
+    assert installer._legacy_tree_sha256(historical) == expected_prior
 
 
 def test_github_pr_review_bot_prior_is_skill_scoped(tmp_path: Path) -> None:
@@ -1617,7 +1635,7 @@ def test_github_pr_review_bot_prior_is_skill_scoped(tmp_path: Path) -> None:
     historical = _extract_additional_stock_skill(
         "github-pr-review-bot", revision, tmp_path / "historical"
     )
-    assert installer._tree_sha256(historical) == expected_prior
+    assert installer._legacy_tree_sha256(historical) == expected_prior
     skills_root = tmp_path / "target" / ".agents" / "skills"
     skills_root.mkdir(parents=True)
     shutil.copytree(historical, skills_root / "consultant")
@@ -1636,7 +1654,7 @@ def test_github_pr_review_bot_prior_transaction_abort_restores_prior(
     historical = _extract_additional_stock_skill(
         "github-pr-review-bot", revision, tmp_path / "historical"
     )
-    assert installer._tree_sha256(historical) == expected_prior
+    assert installer._legacy_tree_sha256(historical) == expected_prior
     target = tmp_path / "target"
     skills_root = target / ".agents" / "skills"
     skills_root.mkdir(parents=True)
@@ -1772,8 +1790,8 @@ def test_stock_canonical_skill_runtime_cache_migrates(tmp_path: Path) -> None:
     )
     try:
         selected = next(skill for skill in plan.skills if skill.name == name)
-        assert selected.installed_digest == expected_prior
-        assert selected.accepted_prior == expected_prior
+        assert selected.installed_digest == _expected_prior_v2(installer, selected.name, expected_prior)
+        assert selected.accepted_prior == _expected_prior_v2(installer, selected.name, expected_prior)
         owner = installer._CreateOnlyMutablePath(
             tmp_path / "target",
             installer._InstallTransaction([], enabled=False),
@@ -1846,7 +1864,7 @@ def _seed_exact_observed_global_lead(
         (lead / relative).write_bytes(payload)
     _remove_historical_members(lead, OBSERVED_GLOBAL_LEAD_ABSENT_TRANSPORT_FILES)
     assert (
-        installer._tree_sha256(lead, ignore_runtime_cache=True)
+        installer._legacy_tree_sha256(lead, ignore_runtime_cache=True)
         == expected_digest
     )
     return lead
@@ -1876,7 +1894,7 @@ def test_only_exact_observed_global_lead_tree_is_an_accepted_prior(
     )
     try:
         planned_lead = next(skill for skill in plan.skills if skill.name == "lead")
-        assert planned_lead.accepted_prior == expected_digest
+        assert planned_lead.accepted_prior == _expected_prior_v2(installer, planned_lead.name, expected_digest)
 
         owner = installer._CreateOnlyMutablePath(
             tmp_path, installer._InstallTransaction([], enabled=False), dry_run=False
@@ -1940,7 +1958,7 @@ def test_receipted_lead_two_source_versions_upgrade(tmp_path: Path) -> None:
             digest = installer._tree_sha256(skills / "lead", ignore_runtime_cache=True)
             assert digest == lead.source_digest
             assert json.loads(receipt.read_bytes()) == {
-                "schema": "orchestrarium.canonical-lead-install.v1",
+                "schema": "orchestrarium.canonical-lead-install.v2",
                 "treeSha256": digest,
             }
             observed.append(digest)
@@ -2028,8 +2046,12 @@ def test_lead_receipt_exact_current_reentry(tmp_path: Path) -> None:
     receipt.write_bytes(original.replace(
         json.loads(original)["treeSha256"].encode("ascii"), b"0" * 64
     ))
-    _apply_receipted(installer, source, anchor, skills)
-    assert receipt.read_bytes() == original
+    # A present structural receipt is authoritative even for a current tree:
+    # mismatches fail closed rather than silently replacing ownership evidence.
+    before = _tree_bytes(skills)
+    with pytest.raises(ValueError, match="E_CANONICAL_LEAD_RECEIPT_DRIFT"):
+        _apply_receipted(installer, source, anchor, skills)
+    assert _tree_bytes(skills) == before
     assert (skills / "lead").stat().st_ino == lead_identity
 
 

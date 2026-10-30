@@ -54,7 +54,7 @@ def _load_installer():
 def test_kimi_wrapper_stays_thin() -> None:
     text = WRAPPER_PATH.read_text(encoding="utf-8")
     assert "from provider_prompt import kimi_main" in text
-    assert "kimi_main(sys.argv[1:])" in text
+    assert "kimi_main(sys.argv[1:], runtime_namespace=_RUNTIME_NAMESPACE)" in text
     assert "subprocess" not in text
 
 

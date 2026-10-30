@@ -22,7 +22,7 @@ from tests.fixtures.runtime_capabilities import requires_windows_process_runner
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "scripts/provider_prompt.py"
-CODEX = ROOT / "src.claude/agents/scripts/invoke-codex-prompt.py"
+CODEX = ROOT / 'adapters/claude/agents/scripts/invoke-codex-prompt.py'
 spec = importlib.util.spec_from_file_location("provider_prompt_marker_test", SOURCE)
 assert spec and spec.loader
 module = importlib.util.module_from_spec(spec)

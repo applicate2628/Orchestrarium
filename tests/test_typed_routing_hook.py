@@ -48,7 +48,7 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-HOOK = REPO_ROOT / "src.claude" / "agents" / "hooks" / "check-typed-routing.py"
+HOOK = REPO_ROOT / 'adapters/claude' / "agents" / "hooks" / "check-typed-routing.py"
 WARNING = "[typed-routing AUDIT]"
 
 # A complete PreToolUse envelope for an Agent dispatch: the captured tool_name

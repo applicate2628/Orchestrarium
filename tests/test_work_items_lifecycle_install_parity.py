@@ -52,10 +52,10 @@ CURRENT_LIFECYCLE_SURFACES = (
     ROOT / "scripts" / "check-work-items-state.py",
     ROOT / "src.codex" / "AGENTS.codex.md",
     ROOT / "src.codex" / "skills" / "lead" / "SKILL.md",
-    ROOT / "src.claude" / "CLAUDE.md",
-    ROOT / "src.claude" / "skills" / "lead" / "SKILL.md",
-    ROOT / "src.claude" / "commands" / "agents-status.md",
-    ROOT / "src.claude" / "commands" / "agents-implement.md",
+    ROOT / 'adapters/claude' / "CLAUDE.md",
+    ROOT / 'adapters/claude' / "skills" / "lead" / "SKILL.md",
+    ROOT / 'adapters/claude' / "commands" / "agents-status.md",
+    ROOT / 'adapters/claude' / "commands" / "agents-implement.md",
     ROOT / "docs" / "epics.md",
     ROOT / "docs" / "dependencies.md",
     ROOT / "docs" / "decisions.md",
@@ -68,8 +68,8 @@ CURRENT_LIFECYCLE_SURFACES = (
     ROOT / "scripts" / "universal-hooks" / "scripts" / "hook_common.py",
     ROOT / "src.codex" / "skills" / "lead" / "scripts" / "workitem_sentinels.py",
     ROOT / "src.codex" / "skills" / "lead" / "scripts" / "hook_common.py",
-    ROOT / "src.claude" / "agents" / "scripts" / "workitem_sentinels.py",
-    ROOT / "src.claude" / "agents" / "scripts" / "hook_common.py",
+    ROOT / 'adapters/claude' / "agents" / "scripts" / "workitem_sentinels.py",
+    ROOT / 'adapters/claude' / "agents" / "scripts" / "hook_common.py",
 )
 RETIRED_ADAPTER_PATHS = tuple(
     ROOT / base / f"{OBSOLETE_MARKER}{suffix}"
@@ -175,15 +175,15 @@ class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
     def test_bug_disposition_close_contract_is_present_across_installed_surfaces(self) -> None:
         explicit_surfaces = (
             ROOT / "shared" / "AGENTS.shared.md",
-            ROOT / "src.claude" / "CLAUDE.md",
+            ROOT / 'adapters/claude' / "CLAUDE.md",
             ROOT / "src.codex" / "skills" / "lead" / "SKILL.md",
-            ROOT / "src.claude" / "skills" / "lead" / "SKILL.md",
+            ROOT / 'adapters/claude' / "skills" / "lead" / "SKILL.md",
             ROOT / "src.codex" / "skills" / "knowledge-archivist" / "SKILL.md",
-            ROOT / "src.claude" / "agents" / "knowledge-archivist.md",
+            ROOT / 'adapters/claude' / "agents" / "knowledge-archivist.md",
         )
         for path in explicit_surfaces:
             text = path.read_text(encoding="utf-8")
-            if path == ROOT / "src.claude" / "CLAUDE.md":
+            if path == ROOT / 'adapters/claude' / "CLAUDE.md":
                 text = (ROOT / "shared" / "AGENTS.shared.md").read_text(
                     encoding="utf-8"
                 ) + "\n" + text
@@ -230,7 +230,7 @@ class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
             source_root = (
                 ROOT / "src.codex" / "skills" / "lead"
                 if provider == "codex"
-                else ROOT / "src.claude" / "agents"
+                else ROOT / 'adapters/claude' / "agents"
             )
             markers = {
                 marker
@@ -268,7 +268,7 @@ class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
         self.assertIn("auto-installs all twelve Codex hook entries", codex)
         self.assertIn("Physical location owns membership", codex)
 
-        claude = (ROOT / "src.claude" / "CLAUDE.md").read_text(encoding="utf-8")
+        claude = (ROOT / 'adapters/claude' / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertIn("auto-installs thirteen `settings.json` entries", claude)
         self.assertIn("nine structural hooks", claude)
         self.assertIn("Physical location owns lifecycle membership", claude)
@@ -287,7 +287,7 @@ class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
                 source_root = (
                     ROOT / "src.codex" / "skills" / "lead"
                     if provider == "codex"
-                    else ROOT / "src.claude" / "agents"
+                    else ROOT / 'adapters/claude' / "agents"
                 )
                 actual = temp / f"{provider}-actual.json"
                 expected = temp / f"{provider}-expected.json"
@@ -333,7 +333,7 @@ class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
             temp = Path(directory)
             for provider, source in (
                 ("codex", ROOT / "src.codex" / "skills" / "lead"),
-                ("claude", ROOT / "src.claude" / "agents"),
+                ("claude", ROOT / 'adapters/claude' / "agents"),
             ):
                 installed = temp / provider
                 shutil.copytree(source, installed)

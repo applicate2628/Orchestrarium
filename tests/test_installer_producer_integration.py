@@ -1107,7 +1107,7 @@ class ProducerIntegrationTests(unittest.TestCase):
 
     def test_claude_current_stock_imports_and_policies_survive_migration(self):
         target, agents = self.target / "CLAUDE.md", self.target / "AGENTS.md"
-        source = (ROOT / "src.claude/CLAUDE.md").read_text()
+        source = (ROOT / 'adapters/claude/CLAUDE.md').read_text()
         anchor, body = source.split("\n", 1)
         shared = (ROOT / "shared/AGENTS.shared.md").read_text()
         prefix = "@before.md\n" + anchor + "\nKeep my rule between imports and the pack.\n@my-notes.md\n@AGENTS.md\n@second-notes.md  \n\n"
@@ -1117,7 +1117,7 @@ class ProducerIntegrationTests(unittest.TestCase):
         expected = prefix + "<!-- BEGIN ORCHESTRARIUM CLAUDE MANAGED -->\n" + body + "<!-- END ORCHESTRARIUM CLAUDE MANAGED -->\n" + suffix
         for _ in range(2):
             with self.transaction([target, agents]) as transaction:
-                PI._merge_claude_docs(ROOT, ROOT / "src.claude", target, False, mutable_owner=self.owner(transaction))
+                PI._merge_claude_docs(ROOT, ROOT / 'adapters/claude', target, False, mutable_owner=self.owner(transaction))
                 transaction.commit()
             self.assertEqual(expected, target.read_text())
             self.assertEqual("local prefix\n<!-- BEGIN ORCHESTRARIUM SHARED MANAGED -->\n" + shared + "<!-- END ORCHESTRARIUM SHARED MANAGED -->\nlocal suffix\n", agents.read_text())

@@ -26,8 +26,8 @@ ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "scripts/provider_prompt.py"
 FIXTURE_PYTHON_EXECUTABLE = str(Path(sys.executable).resolve(strict=True))
 ENTRYPOINTS = {
-    "codex": ROOT / "src.claude/agents/scripts/invoke-codex-prompt.py",
-    "claude": ROOT / "src.claude/agents/scripts/invoke-claude-prompt.py",
+    "codex": ROOT / 'adapters/claude/agents/scripts/invoke-codex-prompt.py',
+    "claude": ROOT / 'adapters/claude/agents/scripts/invoke-claude-prompt.py',
 }
 BIN_ENV = {"codex": "CODEX_BIN", "claude": "CLAUDE_BIN"}
 OUTPUT_ENV = {

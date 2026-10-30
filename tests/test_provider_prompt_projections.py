@@ -358,10 +358,22 @@ def _load_installer():
     return module
 
 
-def test_codex_only_update_peer_ledger_uses_complete_canonical_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Normal update retains old peer ledger files while current P uses its owner."""
+def test_selected_legacy_peer_migration_uses_its_own_complete_ledger_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Explicit peer migration isolates its owner before another client updates."""
     from test_provider_prompt_relocation import _load_owner
     from test_ledger_resource_budget import fixture as ledger_fixture
+    # An elevated Windows token may create Administrators-owned directories.
+    # The runner intentionally requires user-owned cwd. An elevated harness can
+    # supply a fresh empty directory created by the same user without elevation.
+    prepared_cwd = os.environ.get('ORCHE_TEST_LEDGER_CWD') if os.name == 'nt' else None
+    decoy = Path(prepared_cwd) if prepared_cwd else tmp_path / 'decoy'
+    if prepared_cwd:
+        assert decoy.is_absolute() and decoy.is_dir() and not any(decoy.iterdir())
+    else:
+        decoy.mkdir()
+    if os.name == 'nt':
+        from scripts.process_supervision.process_runner import bind_cwd_identity
+        bind_cwd_identity(str(decoy))  # Fail at setup, never relax production admission.
     old_source = tmp_path / 'predecessor-source'
     old_source.mkdir()
     public_repository = subprocess.run(['git', '--no-optional-locks', 'rev-parse', '--show-toplevel'],
@@ -378,8 +390,22 @@ def test_codex_only_update_peer_ledger_uses_complete_canonical_owner(tmp_path: P
     target = tmp_path / 'target'
     target.mkdir()
     arguments = ['--target', str(target), '--force', '--allow-unsafe-target', '--no-hypothesis-hook']
-    seeded = subprocess.run([sys.executable, '-X', 'utf8', '-B', str(old_source / 'scripts/install-claude.py'),
-        *arguments], cwd=old_source, capture_output=True, text=True, timeout=180)
+    seed_command = [sys.executable, '-X', 'utf8', '-B', str(old_source / 'scripts/install-claude.py'), *arguments]
+    if os.name == 'nt':
+        # The frozen installer predates private-thread symlink privilege
+        # activation. Supply that OS prerequisite without modifying its bytes,
+        # granting a missing privilege, or changing the process/system token.
+        bootstrap = (
+            "import importlib.util,sys;sys.path.insert(0," + repr(str(old_source / 'scripts')) + ");"
+            "import production_installer as frozen;sys.path.insert(0," + repr(str(ROOT / 'scripts')) + ");"
+            "spec=importlib.util.spec_from_file_location('fixture_windows_capability'," + repr(str(INSTALLER_PATH)) + ");"
+            "cap=importlib.util.module_from_spec(spec);sys.modules[spec.name]=cap;spec.loader.exec_module(cap);\n"
+            "with cap._WindowsBoundNode.symlink_privilege():\n"
+            "    result=frozen.install('claude'," + repr(arguments) + ")\n"
+            "raise SystemExit(result)\n"
+        )
+        seed_command = [sys.executable, '-X', 'utf8', '-B', '-c', bootstrap]
+    seeded = subprocess.run(seed_command, cwd=old_source, capture_output=True, text=True, timeout=180)
     assert seeded.returncode == 0, seeded.stdout + seeded.stderr
     peer = target / '.claude/agents'
     retained_names = ('scripts/agent-run-ledger.py', 'scripts/mutate-work-item.py',
@@ -388,10 +414,21 @@ def test_codex_only_update_peer_ledger_uses_complete_canonical_owner(tmp_path: P
     retained = {name: ((peer / name).read_bytes(), (peer / name).stat().st_ino) for name in retained_names}
     assert _sha(retained['scripts/mutate-work-item.py'][0]) == '27960edec46770328bf34bca9290576cda4aad861234dd596ac3f05b1a0e7228'
     installer = _load_installer()
-    assert installer.install('codex', arguments) == 0
+    assert installer.install('codex', arguments) != 0
+    assert installer.install('claude', [*arguments, '--materialize-legacy-skills', '--apply']) == 0
+    # Link conversion preserves bytes but does not yet upgrade a legacy binding.
     assert {name: ((peer / name).read_bytes(), (peer / name).stat().st_ino)
             for name in retained_names} == retained
-    canonical = target / '.agents/skills/lead'
+    assert installer.install('codex', arguments) != 0
+    assert installer.install('claude', arguments) == 0
+    peer_after_migration = _tree_bytes(target / '.claude')
+    retained = {name: ((peer / name).read_bytes(), (peer / name).stat().st_ino)
+                for name in retained_names}
+    assert installer.install('codex', arguments) == 0
+    assert _tree_bytes(target / '.claude') == peer_after_migration
+    assert {name: ((peer / name).read_bytes(), (peer / name).stat().st_ino)
+            for name in retained_names} == retained
+    canonical = target / '.claude/skills/lead'
     # The authority dependency is actually supplied by the same normal package.
     assert (canonical / 'scripts/linked_runtime_subroots.py').read_bytes() == (ROOT / 'scripts/linked_runtime_subroots.py').read_bytes()
     assert (peer / 'scripts/provider_prompt.py').read_bytes() == (ROOT / 'scripts/provider_prompt.py').read_bytes()
@@ -440,8 +477,7 @@ def test_codex_only_update_peer_ledger_uses_complete_canonical_owner(tmp_path: P
     assert Path(validator.__file__).samefile(canonical / 'scripts/validate-work-item-state.py')
     assert Path(lifecycle.__file__).samefile(canonical / 'scripts/mutate-work-item.py')
     assert validator.AGENT_RUN_SCHEMA_PATH.samefile(canonical / 'shared/schemas/agent-runs.schema.json')
-    decoy = tmp_path / 'decoy'
-    (decoy / 'scripts').mkdir(parents=True)
+    (decoy / 'scripts').mkdir()
     marker = decoy / 'executed-decoy'
     (decoy / 'scripts/agent-run-ledger.py').write_text(
         f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\n", encoding='utf-8')

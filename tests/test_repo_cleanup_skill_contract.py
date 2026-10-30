@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SPINE = ROOT / "shared" / "AGENTS.shared.md"
 REFERENCE = ROOT / "shared" / "references" / "repository-cleanup.md"
 CODEX_SKILL = ROOT / "src.codex" / "skills" / "repo-cleanup" / "SKILL.md"
-CLAUDE_SKILL = ROOT / "src.claude" / "skills" / "repo-cleanup" / "SKILL.md"
+CLAUDE_SKILL = ROOT / 'adapters/claude' / "skills" / "repo-cleanup" / "SKILL.md"
 CODEX_INTERFACE = (
     ROOT / "src.codex" / "skills" / "repo-cleanup" / "agents" / "openai.yaml"
 )

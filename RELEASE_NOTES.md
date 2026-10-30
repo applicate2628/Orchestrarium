@@ -2,7 +2,39 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-30
+
+- The common installer now distinguishes completed previews from completed operations and names clients not attempted after a stop. It preserves partial-uninstall exit status and its detailed report, recognizes the legacy dry-run spelling without asking to apply, and shows scope/help guidance. Shared-layout refusals and receipt validation use the existing typed diagnostic owner so their safe error identifiers are not lost.
+
+- Legacy per-skill conversion now carries authenticated old installation receipts without interpreting whole-tree hashes as file manifests. The published design-panel factory identity from the 815e9df baseline is admitted only through its exact strong tree witness; modified installations still refuse automatic replacement.
+- Publication command classification now accepts a parser-proven terminal line break after a single canonical absolute-root push command, while additional commands and redirections remain rejected. This fixes a false refusal without granting publication or bypassing native checks.
+
+- Selected clients now receive independent ordinary skill copies through one installation owner. Updates leave unselected clients unchanged; uninstall uses exact payload/configuration ownership and preserves user additions or conflicts. Explicit legacy-link conversion provides preview, apply and rollback without changing the source referent or silently authorizing adoption. Retained Python cleanup and full legacy/cross-platform qualification remain open.
+- Codex is the primary product host; other clients are secondary adapters. Kimi and Grok take priority over Claude for further integration work, without enabling unqualified installers, changing credentials or authorizing provider execution.
+
+- The shared reuse rule now explicitly requires proactive discovery of suitable ready solutions, libraries, tools, skills and MCP integrations, including brief task-benefit proposals for useful missing options. The existing owner and bounded search sequence remain; recommendations grant no installation, paid-execution or model-quota permission. This applies to the common workflow and SDK-delivered instructions without adding a separate agent stage.
+
+## 2026-10-29
+
+- Windows native skill projections now activate an already-granted symbolic-link privilege on a private thread token before acquiring the creator handle. The original thread identity is restored without changing process privileges or system policy; missing privileges still fail closed. If identity restoration fails, the installer terminates rather than continue or roll back under the wrong identity.
+
+- Bundled Windows launches now pass an argument sequence without a shell and wait for the selected Python's actual exit code. Arguments containing spaces or Unicode reach the child intact; a failed child can no longer be mistaken for successful installation. POSIX keeps process replacement.
+
+- POSIX hook-health completion now distinguishes already-exited descendants reaped without signals from descendants requiring termination. Complete resource settlement remains mandatory; live leftover children still fail closed.
+
+- Bundled apply now requires explicit permanent-runtime intent or create-only retention before effects. Retention preserves the selected destination name for collision checks; assembly refuses linked/reparse root and parent paths, preserves observed leaf links for validation, and states its verified-quiescent-input/private-parent contract without claiming a hostile-writer sandbox.
+
+- Mechanical-plan preflight accepts an explicitly selected project on an ordinary mounted filesystem instead of rejecting the enclosing volume as a child-path escape. Native identity rechecks, link/reparse refusal and detected descendant-mount refusal remain in place; plan validation still grants no execution authority or host sandbox guarantee.
+- Review-proof input preparation no longer crashes on opaque non-string run identifiers retained in historical ledger custody. Such values stay diagnostic history and cannot become proof-reference keys; normal closure-proof qualification and existing obligations remain authoritative.
+- Historical canonical-skill upgrades now bind additional immutable factory and pinned reconstruction witnesses to the versioned structural tree identity. This restores supported upgrades without treating ambiguous legacy digests as authority; modified trees and missing witnesses remain fail-closed.
+- Claude maintenance validation now follows the already-shipped publication contract: Root-owned review and consent, fresh target-qualified scanning, and revocation. Reviewed English/Russian payload pins and destructive mirror checks no longer demand a retired approval marker.
+- Installer catalogue validation reads the shared explicit client inventory without executing the installer or requiring the retired implicit install-all menu. Common-skill tests bind the current Claude projection to its canonical Codex source and reject source drift, rather than demanding equality with the protected historical Claude migration tree.
+
 ## 2026-10-28
+
+- Reconcile baseline test contracts with the documented six-layer Claude read order and installed provider-owned registry validation; re-review the 19 architecture role slices against the current source and refresh their existing fidelity stamp without changing installer behavior.
+
+- Introduce the Orche public name and existing toothy mascot without renaming historical ownership or receipt identifiers. The common installer front door now accepts explicit client selections, previews interactive changes through the existing installer, and refuses implicit noninteractive selection. A local bundle builder and relative shared launcher use the supplied private Python without changing managed-file update or rollback logic; explicit create-only retention keeps the runtime available beyond temporary download/cache lifetime. The Linux qualification wheel closure is hash-pinned; remote bootstrap and platform qualification remain separate.
 
 - SDK coordinator artifact preflight now rejects the work-item ledger and its lock as result destinations before any model or worker execution. This prevents wasted calls and an unresolved launch caused by a predictable output collision while preserving the CLI diagnostic.
 

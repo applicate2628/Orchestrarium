@@ -6,20 +6,20 @@ Use this guide at the start of a new Orchestrarium maintenance session. Its purp
 
 | Rule | Operational meaning |
 |---|---|
-| This repository is the source of truth | Fix Orchestrarium source first: `shared/`, `src.codex/`, `src.claude/`, `scripts/`, `docs/`, and root docs. |
-| Installed copies are runtime outputs | `$HOME/.agents/skills/` is the shared canonical installed skill tree for the current monorepo producer; `.claude/skills/` is its logical projection where the producer and actual binding establish that relationship. `$HOME/.agents/contracts/` remains the live canonical global Codex contract surface; skill-body mapping does not establish other contract-file origins. `$HOME/.codex/` holds Codex configuration and runtime metadata. `~/.claude/`, project `.agents/`, and project `.claude/` are also installed/runtime surfaces. Patch them only after the source owner is updated, and only when current sessions need the behavior before reinstall. |
+| This repository is the source of truth | Fix Orchestrarium source first: `shared/`, `src.codex/`, `adapters/claude/`, `scripts/`, `docs/`, and root docs. |
+| Installed copies are runtime outputs | `$HOME/.agents/skills/` is Codex's installed skill tree; `.claude/skills/` is an independent ordinary copy for that selected adapter. Shared installed links are legacy migration inputs, not the current output layout. `$HOME/.agents/contracts/` remains the live canonical global Codex contract surface; skill-body mapping does not establish other contract-file origins. `$HOME/.codex/` holds Codex configuration and runtime metadata. `~/.claude/`, project `.agents/`, and project `.claude/` are also installed/runtime surfaces. Patch them only after the source owner is updated, and only when current sessions need the behavior before reinstall. |
 | Do not treat stale installs as canon | A broken or stale global/local install can explain a symptom, but the durable fix belongs in the owning source file unless the problem is purely local state. |
 | Do not create source from runtime guesses | Before adding a new path or mechanism, identify the owning source surface and installer propagation path. |
-| Keep provider boundaries explicit | Codex-specific runtime metadata belongs in `src.codex/`; Claude Agent-tool wrappers belong in `src.claude/`; shared semantics belong in `shared/` plus affected provider addenda. |
+| Keep provider boundaries explicit | Codex-specific runtime metadata belongs in `src.codex/`; Claude Agent-tool wrappers belong in `adapters/claude/`; shared semantics belong in `shared/` plus affected provider addenda. |
 
 ## Start-of-Session Checklist
 
-1. Confirm the current directory is the Orchestrarium checkout root: it contains `shared/AGENTS.shared.md`, `src.codex/`, and `src.claude/`. Do not work from a parent container directory or a standalone provider checkout by accident.
+1. Confirm the current directory is the Orchestrarium checkout root: it contains `shared/AGENTS.shared.md`, `src.codex/`, and `adapters/claude/`. Do not work from a parent container directory or a standalone provider checkout by accident.
 2. Run `git status --short -uall` before editing. Preserve unrelated local changes.
 3. Classify the surface before changing it:
    - shared governance or cross-provider behavior -> `shared/AGENTS.shared.md` and `shared/references/`
    - Codex runtime pack -> `src.codex/`
-   - Claude Code runtime pack -> `src.claude/`
+   - Claude Code runtime pack -> `adapters/claude/`
    - operator docs -> `docs/`, `README.md`, `INSTALL.md`
    - release-relevant tracked change -> `RELEASE_NOTES.md`
 4. For a user-reported defect, capture the concrete symptom, the source `file:line`, and the hypothesis chain before the first edit.
@@ -37,10 +37,10 @@ Use this guide at the start of a new Orchestrarium maintenance session. Its purp
 | Canonical runtime skill bodies | Canonical runtime skill bodies for the current Codex/Claude monorepo install: `src.codex/skills/<name>/SKILL.md`; verify the installer materialization edge for the selected layout. |
 | Codex skill UI metadata | `src.codex/skills/<name>/agents/openai.yaml` |
 | Codex platform addendum and hooks | `src.codex/AGENTS.codex.md`, `src.codex/skills/lead/scripts/`, `src.codex/skills/lead/hooks/` |
-| Claude role entrypoints | Claude Agent entrypoints/bootstrap: `src.claude/agents/<role>.md`. Wrappers activate installed skill entrypoints; their canonical skill body comes from the Source row above. In this production route, `src.claude/skills/` is historical migration-comparison input, not a separate live skill-body owner. `agents/lead.md` activates `/lead` with main-agent `initialPrompt` and rejects stale dispatch; the other wrappers retain provider routing authority. |
-| Claude slash commands | `src.claude/commands/agents-*.md` |
-| Claude common-skill projections | Claude installed skill projections consume the canonical skill tree through the production installer; historical Source comparison trees stay protected unless compatibility migration is explicitly admitted. |
-| Provider-specific addenda | `references-codex/`, `references-claude/` |
+| Claude role entrypoints | Claude Agent entrypoints/bootstrap: `adapters/claude/agents/<role>.md`. Wrappers activate installed skill entrypoints; their canonical skill body comes from the Source row above. In this production route, `adapters/claude/skills/` is historical migration-comparison input, not a separate live skill-body owner. `agents/lead.md` activates `/lead` with main-agent `initialPrompt` and rejects stale dispatch; the other wrappers retain provider routing authority. |
+| Claude slash commands | `adapters/claude/commands/agents-*.md` |
+| Claude common-skill projections | The secondary adapter receives independent skill copies from the common source through the production installer; historical Source comparison trees stay protected unless compatibility migration is explicitly admitted. |
+| Provider-specific addenda | `references-codex/`, `adapters/claude/references/` |
 | Agents-mode schema and defaults | `shared/agents-mode.schema.json`, `shared/agents-mode.presets.json`, `shared/agents-mode.defaults.yaml` |
 | Installers | root `install.*`, `scripts/install-*.{sh,ps1}` |
 | Release log | `RELEASE_NOTES.md` |
@@ -49,7 +49,7 @@ Use this guide at the start of a new Orchestrarium maintenance session. Its purp
 
 | Runtime surface | Meaning |
 |---|---|
-| `$HOME/.agents/skills/` | Shared canonical installed skill tree for the current monorepo producer; `.claude/skills/` is its logical projection where the producer and actual binding establish it. Other layouts require their actual materialization owner. |
+| `$HOME/.agents/skills/` | Codex-owned installed skill tree. A selected secondary adapter has independent ordinary skill copies under its own client root; legacy shared projections require explicit migration. |
 | `$HOME/.agents/contracts/` | Live canonical global Codex contract surface. |
 | `$HOME/.codex/` | Codex configuration, hooks, native-role metadata, and retained provider-root compatibility outputs; not the canonical skills/contracts tree. |
 | `~/.claude/` | Global installed Claude Code pack and live Claude runtime state. |
@@ -64,10 +64,10 @@ Inside this monorepo, a missing project-local `.agents/` tree is not a misconfig
 |---|---|
 | Codex skill label, trigger, or default prompt is wrong | Edit `src.codex/skills/<skill>/SKILL.md` and/or `agents/openai.yaml`; then sync `$HOME/.agents/skills/<skill>/` only if immediate behavior is needed. |
 | Common skill behavior is wrong across providers | Update the common skill source in each affected provider tree; update shared docs/indexes when the public contract changes. Do not mechanically copy without validating provider semantics. |
-| Claude behavior relies on `Agent` or slash-command mechanics | Keep that change in `src.claude/`; do not rewrite it for Codex unless there is a Codex-native owner. |
+| Claude behavior relies on `Agent` or slash-command mechanics | Keep that change in `adapters/claude/`; do not rewrite it for Codex unless there is a Codex-native owner. |
 | Codex behavior lacks a direct Agent tool | Check available Codex subagent or MCP tooling in the current runtime; if unavailable, record the gap honestly instead of pretending the Claude mechanism exists. |
 | Installed runtime has stale behavior | Verify the live installed file, patch source first, then reinstall or explicitly sync the installed file as a temporary live-runtime update. |
-| Editing a script/hook shared by `scripts/universal-hooks/`, `src.claude/agents/`, and `src.codex/skills/lead/` | Edit ONLY the copy under `scripts/universal-hooks/{scripts,hooks}/` — it is the stated canon (`tests/test_universal_hook_surfaces.py:10-11`), never a mirror. Then run `python scripts/sync-universal-hooks.py --sync` to propagate, and `--check` before reporting a result — do not rely on remembering "the other two trees"; that manual-memory step is exactly what produced a false-green test run in a prior session (`work-items/bugs/2026-07-26-mirror-parity-is-detected-but-never-propagated.md`). |
+| Editing a script/hook shared by `scripts/universal-hooks/`, `adapters/claude/agents/`, and `src.codex/skills/lead/` | Edit ONLY the copy under `scripts/universal-hooks/{scripts,hooks}/` — it is the stated canon (`tests/test_universal_hook_surfaces.py:10-11`), never a mirror. Then run `python scripts/sync-universal-hooks.py --sync` to propagate, and `--check` before reporting a result — do not rely on remembering "the other two trees"; that manual-memory step is exactly what produced a false-green test run in a prior session (`work-items/bugs/2026-07-26-mirror-parity-is-detected-but-never-propagated.md`). |
 | Shared governance changes | Update `shared/AGENTS.shared.md`, affected `shared/references/`, provider addenda, validator fingerprints if required, and `RELEASE_NOTES.md`. |
 | Context compaction loses active work | Restore active task, next unchecked step and open evidence gates from accepted recovery; continue subject to user/persisted holds and, for an enrolled native Goal, the shared same-task/native-binding authority rule. Ordinary or unenrolled/no-Goal tasks retain their existing workflow. |
 | User says to stop closeout and work | Treat it as a continue-working correction, not a request for acknowledgement. Take the next concrete action in the active task immediately unless a real blocker prevents action. |
@@ -80,7 +80,7 @@ Run the smallest useful check first, then the affected pack checks.
 |---|---|
 | Shared spine and affected derived consumers | `python scripts\validate-agents-spine.py --spine shared\AGENTS.shared.md`; follow existing producer/manifest dependencies and run each affected consumer's check (provider-prompt source parity: `python scripts/validate-provider-prompt-projections.py --require --scope source --source-root .`). |
 | Codex pack | `bash src.codex/skills/lead/scripts/validate-skill-pack.sh` |
-| Claude pack | `bash src.claude/agents/scripts/validate-skill-pack.sh` |
+| Claude pack | `bash adapters/claude/agents/scripts/validate-skill-pack.sh` |
 | Agents-mode docs/schema | `python scripts\sync-agents-mode-docs.py --root . --check` |
 | universal-hooks canon vs. mirrors (run before reporting any change to a mirrored script/hook) | `python scripts\sync-universal-hooks.py --check` |
 | Installer behavior | `python scripts\validate-agents-mode-installers.py --root .` |

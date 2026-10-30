@@ -31,7 +31,7 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-STATUS_CMD = REPO_ROOT / "src.claude" / "commands" / "agents-status.md"
+STATUS_CMD = REPO_ROOT / 'adapters/claude' / "commands" / "agents-status.md"
 
 # --- reference predicate (SPEC-GUARD; NOT the model executor) ----------------
 

@@ -74,6 +74,7 @@ _PACKED_RUNTIME_DESTINATIONS = {
 _CROSS_HOST_MARKERS = (
     "from scripts.provider_prompt",
     "src.claude/agents/scripts/provider_prompt",
+    "adapters/claude/agents/scripts/provider_prompt",
     "src.codex/skills/lead/scripts/provider_prompt",
 )
 _LINKED_RUNTIME_SUBROOTS_SHA256 = (

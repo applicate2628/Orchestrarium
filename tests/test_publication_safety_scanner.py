@@ -61,7 +61,7 @@ from unittest import mock
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CANONICAL_SCANNER = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-publication-safety.py"
 CODEX_SCANNER = REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-publication-safety.py"
-CLAUDE_SCANNER = REPO_ROOT / "src.claude" / "agents" / "scripts" / "check-publication-safety.py"
+CLAUDE_SCANNER = REPO_ROOT / 'adapters/claude' / "agents" / "scripts" / "check-publication-safety.py"
 CODEX_REF = REPO_ROOT / "src.codex" / "skills" / "lead" / "hooks" / "check-machine-local-path.py"
 PUSH_GATE = REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-git-push-gate.py"
 SCANNERS = (CODEX_SCANNER, CLAUDE_SCANNER)
@@ -2209,7 +2209,7 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
         approved = (
             "scripts/universal-hooks/scripts/check-publication-safety.py",
             "src.codex/skills/lead/scripts/check-publication-safety.py",
-            "src.claude/agents/scripts/check-publication-safety.py",
+            "adapters/claude/agents/scripts/check-publication-safety.py",
         )
         for path in approved:
             with self.subTest(path=path), tempfile.TemporaryDirectory() as td:

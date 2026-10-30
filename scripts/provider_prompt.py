@@ -5472,7 +5472,10 @@ def _ledger_helper_binding() -> _LedgerHelperBinding | None:
             owner = source
         else:
             parts = tuple(part.casefold() for part in script.parts)
-            canonical = parts[-5:] == ('.agents', 'skills', 'lead', 'scripts', 'provider_prompt.py')
+            canonical = parts[-5:] in (
+                ('.agents', 'skills', 'lead', 'scripts', 'provider_prompt.py'),
+                ('.claude', 'skills', 'lead', 'scripts', 'provider_prompt.py'),
+            )
             claude = parts[-4:] == ('.claude', 'agents', 'scripts', 'provider_prompt.py')
             home = Path(os.path.abspath(Path.home()))
             # A declared global root can resolve to backing storage whose name
@@ -5480,6 +5483,7 @@ def _ledger_helper_binding() -> _LedgerHelperBinding | None:
             # no unsuccessful project lookup can select global scope later.
             matches = []
             for is_claude, candidate in ((False, home / '.agents/skills/lead/scripts/provider_prompt.py'),
+                    (False, home / '.claude/skills/lead/scripts/provider_prompt.py'),
                     (True, home / '.claude/agents/scripts/provider_prompt.py')):
                 try:
                     if script.samefile(candidate) and script.resolve(strict=True) == candidate.resolve(strict=True):
@@ -5499,9 +5503,14 @@ def _ledger_helper_binding() -> _LedgerHelperBinding | None:
                 return None
             # Keep the actual installer/native association's path spelling.
             # Casefolded suffixes classify a scope; they do not mint paths.
-            canonical_root = base / '.agents' if claude else scope_script.parents[3]
+            # The transport and canonical helper belong to the same client.
+            # Another client's package is never a missing-helper fallback.
             claude_root = scope_script.parents[2] if claude else None
-            logical_roots = (canonical_root, scope_script.parents[1], claude_root / 'skills') if claude else (canonical_root,)
+            secondary_canonical = not claude and scope_script.parts[-5].casefold() == '.claude'
+            canonical_root = (claude_root / 'skills' if claude
+                              else scope_script.parents[2] if secondary_canonical
+                              else scope_script.parents[3])
+            logical_roots = (canonical_root, scope_script.parents[1]) if claude else (canonical_root,)
             for logical in logical_roots:
                 validate_no_reparse_components(logical.parent)
                 metadata = logical.lstat()
@@ -5512,7 +5521,7 @@ def _ledger_helper_binding() -> _LedgerHelperBinding | None:
                     return None
                 roots.append((logical, (metadata.st_dev, metadata.st_ino, metadata.st_mode,
                     getattr(metadata, 'st_file_attributes', 0)), resolved))
-            relative_owner = Path('skills/lead') if claude else scope_script.parents[1].relative_to(canonical_root)
+            relative_owner = Path('lead') if claude else scope_script.parents[1].relative_to(canonical_root)
             owner = roots[0][2] / relative_owner
             selection.append(_ledger_selection_witness(owner))
             if claude:
@@ -5554,7 +5563,7 @@ def _ledger_helper_binding() -> _LedgerHelperBinding | None:
                     authority.assert_current()
                 # L owns ordinary descendants of its declared canonical root.
                 if authorities and authorities[0].logical_root == canonical_root:
-                    authorities[0].ordinary_file(Path('skills/lead/scripts/agent-run-ledger.py'))
+                    authorities[0].ordinary_file(relative_owner / 'scripts/agent-run-ledger.py')
         relatives = ('scripts/agent-run-ledger.py', 'scripts/validate-work-item-state.py',
             'scripts/mutate-work-item.py', 'scripts/solution_attempt/reducer.py',
             'shared/schemas/agent-runs.schema.json')

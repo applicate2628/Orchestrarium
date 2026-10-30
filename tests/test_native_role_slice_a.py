@@ -11,6 +11,7 @@ import hashlib
 import os
 import stat
 import shutil
+import shlex
 import subprocess
 import sys
 import tomllib
@@ -18,6 +19,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from tests.fixtures.runtime_capabilities import NATIVE_ROLE_DISABLED_FEATURES
 from tests.fixtures.runtime_capabilities import codex_hook_host_env
 
 
@@ -1408,7 +1410,7 @@ def test_source_native_roles_match_policy_profiles_and_supported_toml_fields() -
         profile = policy["profiles"][corridor["defaultProfile"]]
         assert set(parsed) <= SUPPORTED_NATIVE_FIELDS, role_name
         assert parsed["name"] == role_name
-        assert parsed["features"] == {"apps": False, "plugins": False}
+        assert parsed["features"] == NATIVE_ROLE_DISABLED_FEATURES
         if role_name == "default":
             assert "model" not in parsed
             assert "model_reasoning_effort" not in parsed
@@ -1781,7 +1783,10 @@ def test_config_storage_alias_stale_plan_preserves_changed_input(tmp_path: Path,
         logical.symlink_to(Path("../backing/nested/settings.toml"))
     elif drift == "ancestor":
         ancestor.unlink()
-        ancestor.symlink_to(Path("./backing"), target_is_directory=True)
+        # Preserve the raw spelling: Path("./backing") normalizes to "backing",
+        # making this drift depend on whether the filesystem recycles the inode.
+        ancestor.symlink_to("./backing", target_is_directory=True)
+        assert os.readlink(ancestor) != "backing"
     elif drift == "referent":
         storage.rename(storage.with_suffix(".displaced"))
         storage.write_bytes(payload)
@@ -2600,7 +2605,10 @@ def test_receipted_upgrade_retirement_preserves_targets_receipt_and_rollback(
     receipt.write_bytes(installer._lead_receipt_bytes(installer._tree_sha256(lead, ignore_runtime_cache=True)))
     registration = home / ".codex" / "hooks.json"
     config = json.loads(registration.read_bytes())
-    command = f"{Path(sys.executable).as_posix()} {retired.as_posix()}"
+    # Model a valid registered command even when the retained interpreter path
+    # contains spaces. Malformed shell text must not authorize target retirement.
+    arguments = [Path(sys.executable).as_posix(), retired.as_posix()]
+    command = " ".join(arguments) if os.name == "nt" else shlex.join(arguments)
     retained = {"type": "command", "command": command + " --retained-custom"}
     mixed = {
         "matcher": "Grep|Bash|PowerShell|shell_command|exec_command", "description": "retained-mixed",
@@ -2608,8 +2616,11 @@ def test_receipted_upgrade_retirement_preserves_targets_receipt_and_rollback(
     }
     unrelated_target = home / "unrelated.py"
     unrelated_target.write_bytes(b"print('unrelated')\n")
+    unrelated_arguments = [Path(sys.executable).as_posix(), unrelated_target.as_posix()]
+    unrelated_command = (" ".join(unrelated_arguments) if os.name == "nt"
+                         else shlex.join(unrelated_arguments))
     unrelated = {"matcher": "CustomTool", "hooks": [{
-        "type": "command", "command": f"{Path(sys.executable).as_posix()} {unrelated_target.as_posix()}",
+        "type": "command", "command": unrelated_command,
     }]}
     config["description"] = "user metadata"
     config["hooks"]["PreToolUse"].extend([mixed, unrelated])
@@ -3499,7 +3510,7 @@ def test_post_materialization_writer_inventory_is_complete_and_fail_closed(
     claude_records = installer._post_materialization_writer_destinations(
         provider="claude",
         root=ROOT,
-        source=ROOT / "src.claude",
+        source=ROOT / 'adapters/claude',
         target=claude_target,
         agents_root=claude_target,
         canonical_skills_target=canonical_skills,

@@ -69,3 +69,7 @@ The push hook does not acquire transcript data or read/write old consent sidecar
 
 - **HEAD** — the current local Git commit; it may differ from the separately approved publication source.
 - **PR** — pull request.
+
+### Terminal line breaks in literal push commands
+
+A parser-proven terminal CR/LF suffix on one otherwise canonical absolute-root push command is formatting, not another command. Literal-token serialization must still match the command without that suffix. Additional commands, redirections, lexical transformations, executable and repository qualification, native callback scanning, and human publication authorization retain their existing checks.

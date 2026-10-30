@@ -2271,7 +2271,7 @@ def test_done_predicate_twin_not_drifted():
     # thin adapter that imports it) — the twin-check follows the regex to its
     # new home rather than the file that used to hold it.
     line = r'r"\s*\*{0,3}\s*:\s*\*{0,3}\s*(?:closed|done|complete|completed|archived)(?![\w-])"'
-    sentinels = (ROOT / "src.claude" / "agents" / "scripts" / "workitem_sentinels.py").read_text(encoding="utf-8")
+    sentinels = (ROOT / 'adapters/claude' / "agents" / "scripts" / "workitem_sentinels.py").read_text(encoding="utf-8")
     checker = CHECKER.read_text(encoding="utf-8")
     assert line in sentinels, "workitem_sentinels.py DONE_STATE pattern changed — update the twin in check-work-items-state.py"
     assert line in checker, "check-work-items-state.py DONE_STATE pattern drifted from workitem_sentinels.py"

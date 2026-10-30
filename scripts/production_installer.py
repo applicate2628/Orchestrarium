@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared Python owner for the production Codex and Claude pack installers."""
+"""Shared Python lifecycle owner for qualified Orche client integrations."""
 from __future__ import annotations
 
 import argparse
@@ -40,6 +40,13 @@ try:
 except ModuleNotFoundError:
     from scripts.provider_prompt import enroll_kimi_executable, replace_kimi_enrollment
 
+
+try:
+    from installation.clients import get_client, CLIENTS as INSTALL_CLIENTS
+except ModuleNotFoundError as error:
+    if error.name not in {"installation", "installation.clients"}:
+        raise
+    from scripts.installation.clients import get_client, CLIENTS as INSTALL_CLIENTS
 
 _POSIX_PROCESS_GROUP_CONTRACT_V1 = "orchestrarium.posix-process-group.module.v1"
 
@@ -403,6 +410,9 @@ ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {'accessibility-reviewer': {
  'bug-hunting': {'c61c14574c6252375c2565d97905f36350c6c7e42d34506f5d27463dfa73e8d8': 'fd84595e5bb2d1005599676a96b9f7572c1bf029b3419aacb4630bc0504de468'},
  'computational-scientist': {'c8d1d1623e48993ad8168d68aaa071e164ad5f2b14d39ae43fded6dfa5b794cf': '380bb708a939b9bd3fd71bed64a68c1ef1141b6395a8a1b79d335e25e6d92ee5'},
  'consultant': {
+    # Exact historical factory trees, reconstructed from immutable Git objects.
+    '33998c6a60b442c09957d3edef914daa02d718eafa5f881473ce017fb29a4bd9': '11b71ae99327d746d32aa7f0b17f7b3bf2eaddf9bea4b52f16c2959dcb702ff5',  # 06b1838500fa9c656e13565698f517e5f9ce4eca
+    'f3d56fa8d361acf65d6624242c7cc61007bb8332fe6531dabc7766db940a9c5b': 'ce98ed89a1cbc5301c688e127143f978a731fa7710f49840436c05eaea3ce243',  # e55b2466281ecc50ad2a940a4de14a5ea90fb98c
     # Authenticated src.codex/skills tree at 815e9dfbc5932cc13ed1a8b01f44204e4b4d2349.
     '862a08ad882340eb79f5b08f0698c7ea7e07358a8ca2d61c4d80b4bf31fd9c5f': '167c2898c39d0fd5e2f6152900fc3f0780931229c6654c4239e67f8b749b7e01',
     '1beebf6b349048182e254d01f1b2c755199f98f45f60fb21f7990d5f014814e3': 'f1ba467f431a38c82b57355d256694bcfede73e4848791a5c19a7d0ef07a0154',
@@ -411,7 +421,10 @@ ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {'accessibility-reviewer': {
                 '63c358fcb0bc435177359927760d80f04c8133a5e14505115180bd60b600184a': '27be58b964681c09d3260252d49c468540f576aead370ecd784163fca4240e62',
                 'f1a23b5ceaa93c29cf0c5f9c9eec8c5997a7b4339fcd90abd13798df77e60793': 'ee6efc0264ab7b68aa1d80819353606623f458ec02632ad5a2904408060095e4'},
  'data-engineer': {'57b9821d3a53d0759baee45a7a3fa5edea7d2963fdda35b552e8a63b70792531': 'b5653ca61e2b394dbaad03bbd6f839d422b200a3b9ca06fea195cb47eb870628'},
- 'design-panel': {'685b75f5726dd16dbcf2b5fb3238652b8564242e5b66f0daf2b582267905f67b': '2e026b6dc68007ea972dc6f571ef08a855e4d106b40fa5ca595e9e94e31486ed',
+ 'design-panel': {
+    # Authenticated src.codex/skills tree at 815e9dfbc5932cc13ed1a8b01f44204e4b4d2349.
+    'cf46cfce8b95d05c08c6075f9fe45aec158dd1305c63f6bf59858fbd68b5d63f': 'bddfb03b7e1b3415e281ac42e0c6b849e371ced28020d9461c44b4aaefe9281e',
+    '685b75f5726dd16dbcf2b5fb3238652b8564242e5b66f0daf2b582267905f67b': '2e026b6dc68007ea972dc6f571ef08a855e4d106b40fa5ca595e9e94e31486ed',
                   'ac107c9d6c4a3833d0af90756c8b560f7ca4c4dfcc3d14d6a14faae1530f859f': '784d66c963af2a858ac053ec5089bfc58a37c819dce6522804a89e17958c07b4',
                   'fb9d97b09517ec38e4560e1b597794024e2e2d27184c25cfa79af0de8616973f': '98a78a2ede0d2e89e1056a42c0593417e4e63544a08e87ba10c7bbcf390fc0f9'},
  'explain-simply': {'fac8324b1107c8cc292d39bdeec91a1e50f3e27b75b08dcd1d4a13c5654c5384': 'd649fe3f6d0c1647ac53509467010ecf7c8c2599f2c600315ca6b2b47af66d4a'},
@@ -438,15 +451,15 @@ ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {'accessibility-reviewer': {
                   '378850fefc2c8b9b352988a34290e515f958b8ea2622c183a5ca5d9b636562fe': '7119c0781eb326dfc236198ba2b59aebf4648ee7e1cbc3bfaaf4272b4812f14d',
                   '4f0a5fdb8af605dc10cb2044f33db3339b410feaf23764cc395f9c3feaaf6353': '7ed43bf3286a8c9f4ff6a69d5b8835f6e1d5d81fa7981352082b88106c2c469d',
                   '905f0866931702acbc064dee39e487b51828e06df9dce99ac9db55d252499f07': '10fa991feccb30d815cd238eb6a02b9409ffe54222f04b0df57a127a89db3b7b',
-                  'c079a182db6139257be2b7b138c6a4b28aa730747c1988d54132f8b07504dd1c': None,
+                  'c079a182db6139257be2b7b138c6a4b28aa730747c1988d54132f8b07504dd1c': '41190dc7d303f7f5dd4b3928db45ce17b5e4b3749db1bc9fd832c48bfda31d3f',
                   'cd5bc7386f286393ee8dab782ed603fff7ad61e8c828f34cca102a3a5e2aba9f': '19b4794614f08a2233097f14c7e5b2343ca831e477c8802341fdd601770b6613'},
  'knowledge-archivist': {'112f1c024e39ca4a7833647aded8a93dbe8c16e94cd384b437c40c636af15eb4': '496f5577880769022a8207f77e3b1f89b656cd68614f342ad85245093214f862'},
  'manual-repo-transfer': {
     # Authenticated src.codex/skills tree at 815e9dfbc5932cc13ed1a8b01f44204e4b4d2349.
     '08adbe09ea67b47c77d5dc9c29965c1b487e9e7ea373dbea27da04266b6af632': '0da6838dff54201df4bf0c8e646d026d482ed8927ca095c083faaa6c9f9b1584',
     '03c0c2fd12a8273f8325fb145dc2b8e9e97502e497649fc2d474988a9f95070b': '5131cc4d18265cba6d7abf10225d717e3d8ac2a8b0f683efc803ca610dc95674',
-                          '45fc1efc9f0558664afb1f386c5fc7ac2692a607fb8c7be6265b2cfc4d10029b': None,
-                          'b73cde79962de55bd2cd52bc35f0b450d26cff78abb21b9a496bf38be686a9f3': None,
+                          '45fc1efc9f0558664afb1f386c5fc7ac2692a607fb8c7be6265b2cfc4d10029b': 'b77943d890facaec63168048fcc9f16d9e8f2ac4b66aac8783a9eaf751ceaa86',
+                          'b73cde79962de55bd2cd52bc35f0b450d26cff78abb21b9a496bf38be686a9f3': '403eed8bca5a3dcab934ae9a66305944e4cdb09a9d7433ff8681338cb8471b3f',
                           'cdc90d427cc593ee7b7212dd0ddeacbb13dc7474525b493bd8950318bbc3d92f': None,
                           'e0d160e3f216d79fe2aa221b6ed8d4d4b63dd06882d4ea69feb46cdccab1afcc': '44b24222acc7152cde916b4afbe63a6577a900ecef61760cf8355fb5874211f6'},
  'mathtype-book-page': {'2673b2e3132971af915a0302a2939df9f0f89e0b4d9e987616127452584ce862': '478581ba51149d7b69d167f8ec6327582069e5abc3f427f9bda8b2cf31a932e5'},
@@ -462,14 +475,14 @@ ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {'accessibility-reviewer': {
  'reliability-engineer': {'4f0b905495492c57226d9109f02016a4bcec80f723d54da1f62f12d5dc2235ea': '3925423d3941f7159abf014a44df2ddf13b05ce344d92ec333da6cce0456fda1'},
  'review-changes': {'16047092a3e29a47c5f261f3920fe653b03678e76ffc2a14835a2ce69010de71': 'a7e084b0f126cd8e5f014748cf231c437bfd49f3034693f9d8ee66ffbf383d28'},
  'review-loop': {'2d78f499bf7b4bb2e6dafdf0ef875f2d9d39448c28df6f3835bc8153fba02ce0': 'b4074ade6274381b9a89f87a6d01ee251981a7d5dd164f9444ac0e3d56f88167',
-                 '3e7be1c11624a0fb7beae1c286dd09a3abb4c6b1fb70d138c9bfdc77c1d8df8a': None,
+                 '3e7be1c11624a0fb7beae1c286dd09a3abb4c6b1fb70d138c9bfdc77c1d8df8a': 'a781f6ae1e33ec3eb8b7ec46973ddb38fbadaa6830fcde6eaad9d4ebc93f94ed',
                  '90148e258a4584787194bddf14eac8730de4ed08c80ce69fd2562a0d15f67bf2': '8dbe55f5a208ab9f340e25e664d346cb73ab81baeda56e3bdd5e62dcc1d37730',
                  'd5a5190926d170a6498399e221028e11087974aef7fb7e49abb1d2052acac089': 'ac7a0a8942be1b295958a93cfa9cb4ac2bca943f3a4eb8459eb6b06f42c2cb69',
                  'd956cf70db42a7c936d21984fe6aeb83748de02c544eec56ca54971629f85f7e': '70392ab319a1ec665a177775ea8bc09def2aebefff868ebd84f70de0edd9f34f'},
  'second-opinion': {'b82628910567799a6f03962f3ec0289cb47b4607093c074466b1a2656b53f432': 'b8b8d488ce57f60d19afcf2ccf152be16e9f47c096638b06317cb21882238825',
                     'd3f1e93ddb6641b21e05c13e28e1f291137e608922c00c00a59fa28ccad54741': '2f65f8de5fca6dee975bd01859e60527d15208325339e2dbf50d916d5e1d10b5',
                     'f9a2114c8baead9ec8a259288ff74e157af60864c9f3d70ba0bcc52154b2b4b6': '7be172e27fac00bd7bfde542d7bd87b9a1dd874caee15b90c06d0b292201fc60',
-                    'fe989a918e11ff8066a0c8af54f73ba7bbf763719ea3b604ed147b79bec684d6': None},
+                    'fe989a918e11ff8066a0c8af54f73ba7bbf763719ea3b604ed147b79bec684d6': 'a2354bd41dde94b1b6e22004813a187834ce7df3216d0dd0273ba13b0c0be83d'},
  'security-engineer': {'2ffbb3f112e3d3cd05c8ae547eb6a9c3bfe642129cad60f086479c11a7b8fc07': '553f936b913adedf369643531ec1d2085ac3bd502a04dbcb352d03a4d385f5c1'},
  'security-reviewer': {'5ab908e960e9f25d8acb56f995160ac114dfcaa9bb01d1726f7ba446e8b394f5': 'c36e6eec324971b231f563915652c3be3ae6104618f35745a44c83d02382ec04'},
  'toolchain-engineer': {'51cf24ae0699a6bb379ee6bbf7b51e2a982cba12aaeab2dc76e57d4b4ccf2a74': 'f83bdad4a5a53723d0d4f8d77f6b32577da60d902972910f0543747148b94ad3'},
@@ -480,42 +493,43 @@ ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {'accessibility-reviewer': {
  'visualization-engineer': {'56218f313e0ee24fc973eae8792bac0cddfd17ccab390fffb028d787cd0286f0': 'c09eecc45add2ded8571b999883bc7a03d90b82fd95c72a64bf6cf2537fc0230'},
  'windows-gui-manual-testing': {'80f895204f0a0f390fab8261806f63bc85d0f09a9f6f7b4fe09f8ad2151d3bd9': 'dac6af50ceadaa1d33a2340bff1e05afcf233397520b52eab6862ceeb0e85b47'}}
 GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256 = {
-    # Exact factory outputs: e7a691de and 815e9dfb, independently reconstructed.
+    # Exact factory outputs and pinned historical reconstructions.
+    # Tests preserve immutable revisions / overlay manifests and legacy pins.
     '9bebb43f56bcb0ecb8b8ff8219d227a66b50af026a8c1b900374498c9c494117': '798b074f6b588f379d380ce3977bbf5d2902c121e048338e9fb613a2d5b44e6d',
     '26ec9e51012340737f43dd99daa7f7a596fad2e2114eddef93f32503909bbeb7': '4966218b503fa5e52875b43dfdda244f6639983404467c748caa8e2906d30abd',
     '006161c105d8fcaaa3e9ae891e8b14e42ca170c026445062f983884a9296a3c6': None,
     '03a7d0587eef6c8997e1f78136510d8ca01c61e9d1d06290fe453e34dafbb435': None,
     '0627712baff8adf6423d8cb766e5effcfa8001196e077eaf5d1b4f17e5d97a85': 'e00e18b805aad33393cf2849b2f2a6612ac641135b225879b8d4f84240a003bc',
     '0c8cf87923774de9e345a72e071600d05a19b01e588f5f7acd053a6398e2f81e': None,
-    '0da7db4510b37eac407ad9577ff171fbaa86985e30a53f341b00f05aeb433975': None,
-    '1e4bdc38283d81f2901a3b089c13fc9a0d10946605b1900ae15006cd42534dc6': None,
-    '1f870106837564449117d07d4e51734a0a5afc3a79eb9c2e953916c64eb34afd': None,
-    '1ffea3eb0fcf6589ac874ab49e508807eb0726dff88473d82b8b22b5baa42bf0': None,
-    '2600ed4cdcdcf64767ad8486225a8bd4687c8ca3618344f7e4bbb709587f30ef': None,
-    '3067dcada53a7b090fa9a66594e3b4d3266d98f9ffe322c36c001c077bcfa0c0': None,
-    '3ca341a8c4ec35a7cbcd7920d6f5be7c1888b1d143393b544643fb005c97dab4': None,
-    '52f2c3d21a5d83bc36fccafe7599ca089006fc4d1b93237ab606dd1e7390422a': None,
-    '565f305b4498f045e7fb40821e5ba30902ca56b0a532d299a96d6c8a1e595d50': None,
-    '68619d80e3dc7283aec38399961d7cb2267292f01d9975a61f4b9ac59418d12d': None,
+    '0da7db4510b37eac407ad9577ff171fbaa86985e30a53f341b00f05aeb433975': '1149da2e2b01bfc0582794b8832270e6036c9d0f68334a004fd89d93d5b92610',
+    '1e4bdc38283d81f2901a3b089c13fc9a0d10946605b1900ae15006cd42534dc6': '4f801b9c896d8fd1abf6c2ec65a02ce1d369d0a51bd1c9e2de0338e09c801d99',
+    '1f870106837564449117d07d4e51734a0a5afc3a79eb9c2e953916c64eb34afd': '916886470e8ec0722e3e62caaecf213e19a0e2b147904ae304df06e447ad8773',
+    '1ffea3eb0fcf6589ac874ab49e508807eb0726dff88473d82b8b22b5baa42bf0': '6caec7550e5d01e737d894569f5988025a538abfa4c5522f6ea942a35b29531f',
+    '2600ed4cdcdcf64767ad8486225a8bd4687c8ca3618344f7e4bbb709587f30ef': 'b429f1a169ae401d30e0f14ea46cafd35b20f19e27430328e68e4c0512aa5262',
+    '3067dcada53a7b090fa9a66594e3b4d3266d98f9ffe322c36c001c077bcfa0c0': 'e124a371214049e12f8f2c981a092e0770a3389b65f4ef028c4e2d57de37d8cb',
+    '3ca341a8c4ec35a7cbcd7920d6f5be7c1888b1d143393b544643fb005c97dab4': 'dee0f8cb04a714cb1b76874e7b529a39b29ee6c5f8f91b8d81de616b1c48d568',
+    '52f2c3d21a5d83bc36fccafe7599ca089006fc4d1b93237ab606dd1e7390422a': '823cbef8e5c3b547fded9f7bf37a4a79b0a4484877631bf80a985d6e4aeb1a8c',
+    '565f305b4498f045e7fb40821e5ba30902ca56b0a532d299a96d6c8a1e595d50': 'f91fd3a8cd154571805f808279e93e63c0a380e3ac7a88edf6d555fdbbe73ffb',
+    '68619d80e3dc7283aec38399961d7cb2267292f01d9975a61f4b9ac59418d12d': 'd8b48c0dd48d5198666d204823d6243e9bb7f1d486ccccb0d00546d27ec15d8b',
     '793045007f143b502991ef71a3273f64aa62757115b2eed033a267c4d44bf79f': None,
-    '8088b25e70702f2c77d811bcd0c74e339474a7429a2e997f2df7662c6d75db0f': None,
-    '836f24dafcc409be2d120248a19ec34772af03238b7600389961a708315a15b7': None,
+    '8088b25e70702f2c77d811bcd0c74e339474a7429a2e997f2df7662c6d75db0f': '0a8b121503cd49e4a98fb62acc825b953fea1c125a576cb2d118dc5bc719c617',
+    '836f24dafcc409be2d120248a19ec34772af03238b7600389961a708315a15b7': '975410120afd21238b018a88d0dcc04c4e9f6b020e868dc45eaab2aad6131454',
     '87df0dfbef0bf1ae336ef5b26fa60e3a155e7519d2d7494818ce592a37b52a32': None,
-    '95eadefb2069546027bbaa59497212a42e9177cce80ad729a869f64f93784635': None,
-    '9b11e845e746adeb81e56243169ade9e48aaf2adc349b40073beb21b5b596c30': None,
-    'a4afc1fe35ddb5b0417f3ba8c170dceeeef61e95a7eb0b4e617bd28db271a2ff': None,
-    'a90c1989a0c136c55af71b68c62fad6a2cc239162a953d45643dfee903795560': None,
-    'b7d78ee5082cce97e0cb2fcb59ee2e5712617b43212a1c6c3199370797f9aa21': None,
-    'bc0e280d4319f71078daae8476015d6d80a9ce15ffe7a05ffc2c2438875bae88': None,
-    'c3508f94d6830da703a5519fbe28bf7011f2a8850e67b5ed5a49c47465283295': None,
-    'd0bec9fd61bf3fde6e48ba38cdbc7c021053a4167bbb694c8aa5c03e06283083': None,
-    'd6cf6e5cd2a1cdb08346d396b60fcd905d36bf2533b96508f942f684b52b0255': None,
-    'd73912c5e01c693fa8f6c0c3aa071e51f595f3d88e6a81aa7aa8abfa8995bfda': None,
-    'dd652b00b68a51273470ad4d3924454255d9ab5260da743fa2aa6bf2a7396627': None,
+    '95eadefb2069546027bbaa59497212a42e9177cce80ad729a869f64f93784635': '765ae7ccc71824568eb3338f1870ebe370a7fe3d8fd7d83a36c1128b04fc7a9f',
+    '9b11e845e746adeb81e56243169ade9e48aaf2adc349b40073beb21b5b596c30': 'b3e7c727b04731528822f7cb8bcbb5aafcfb4c8d833ed6a670a99539f5f50de5',
+    'a4afc1fe35ddb5b0417f3ba8c170dceeeef61e95a7eb0b4e617bd28db271a2ff': '6dc1e4a6ed9485472f2fb899e8c2efc48ef63862b292cac2ab5549eb043c2bdd',
+    'a90c1989a0c136c55af71b68c62fad6a2cc239162a953d45643dfee903795560': '878c15c2a927d074a0162c7cbb50e6ef6a628712dc7d0569dd2713d9c9d55d44',
+    'b7d78ee5082cce97e0cb2fcb59ee2e5712617b43212a1c6c3199370797f9aa21': 'c4909b5540adf0e6ac12a172ee15019bac3c4564a1349d19e3be80bfba265ee9',
+    'bc0e280d4319f71078daae8476015d6d80a9ce15ffe7a05ffc2c2438875bae88': '1d188944dfc8db53fc6975d36010c7dabf79c1760416db9277ae3b415b7a6e07',
+    'c3508f94d6830da703a5519fbe28bf7011f2a8850e67b5ed5a49c47465283295': '16712da5f6721af13dc138ad162f003254934a538f4f06d96828ae5b8b9483dd',
+    'd0bec9fd61bf3fde6e48ba38cdbc7c021053a4167bbb694c8aa5c03e06283083': '289172a3f22b076a5d760f29cbed737155c9045f0aa59f8766a902cdd3637aea',
+    'd6cf6e5cd2a1cdb08346d396b60fcd905d36bf2533b96508f942f684b52b0255': '8aaa55949db84c45f9fc7383d8ee17a18a80d9fcc0079751f2d0af1ca48606c0',
+    'd73912c5e01c693fa8f6c0c3aa071e51f595f3d88e6a81aa7aa8abfa8995bfda': '5d1afa7e1c326da43ffdf048a8574f1189bf2508c291fe131efcbd39ea18508a',
+    'dd652b00b68a51273470ad4d3924454255d9ab5260da743fa2aa6bf2a7396627': 'a4c1c798dc26d00d0e43cafc58a9d2979f0d8f05ef8b474ed049faa95b304fda',
     'e09377e4cf15c446e2ff19ab160a09835ac6683d51e54a89585625dc1de935ca': None,
-    'f03d3b74d68c032ec5c1539ce7936065d5083624b702ec4403fa7e2cc509adc7': None,
+    'f03d3b74d68c032ec5c1539ce7936065d5083624b702ec4403fa7e2cc509adc7': '6099f73bd272077f9cbcd090eddd51632b3b90088d9e07817b46cd031de54f32',
     'fd28049deb001bf088b0033e2dcc82ffc372e8257dd8aaf1bc6384d49be328b3': None,
-    'fefe8d5ff71dfa8475fea381cdb756848740b7ea0f4a7573d69bff5b5db113cc': None,
+    'fefe8d5ff71dfa8475fea381cdb756848740b7ea0f4a7573d69bff5b5db113cc': '5a96223ee3a561a39e65ba603c450793d48691dcce88b1c0684253928959045d',
     'fdd2c0638232462cf2257dd5ec3ba2523bea820363cfbece0b1edfa5c0a45247': '665ae82dcabafd0857153a7288e8cccaa27340e56c0874b5e884e154417f0e81',
 }
 RUNTIME_RESOURCES = (
@@ -678,6 +692,10 @@ def _parser(provider: str) -> argparse.ArgumentParser:
     modes.add_argument("--target", "-Target")
     parser.add_argument("--force", "-Force", action="store_true")
     parser.add_argument(
+        "--materialize-legacy-skills", action="store_true",
+        help="Preview selected legacy skill links as independent copies; --apply converts without installing",
+    )
+    parser.add_argument(
         "--replace-unreceipted-lead-sha256",
         metavar="tree-v2:SHA256",
         help="Global Codex/Claude only: adopt one unreceipted Lead tree using the exact versioned adoption token from controlled diagnostics",
@@ -700,6 +718,8 @@ def _parser(provider: str) -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--dry-run", "-DryRun", action="store_true")
+    parser.add_argument("--uninstall", action="store_true", help="Preview removal of selected owned content")
+    parser.add_argument("--apply", action="store_true", help="Apply an explicitly selected uninstall or legacy-link conversion")
     parser.add_argument("--allow-unsafe-target", "-AllowUnsafeTarget", action="store_true")
     parser.add_argument("--no-hypothesis-hook", "-NoHypothesisHook", action="store_true")
     kimi_maintenance = parser.add_mutually_exclusive_group()
@@ -850,6 +870,101 @@ class _WindowsBoundNode:
     _creation_bindings = None
     _security_bindings = None
     _target_bindings = None
+    _privilege_bindings = None
+
+    @classmethod
+    @contextmanager
+    def symlink_privilege(cls, *, required: bool = True):
+        """Use an existing privilege on a private thread token before acquisition.
+
+        FSCTL symlink access is captured when the creator handle is opened.
+        Never adjust the process token or grant a privilege absent from the
+        current effective token. Restore any prior impersonation exactly.
+        """
+        if not required:
+            yield
+            return
+        ctypes, W, kernel, *_rest = cls._api()
+        if cls._privilege_bindings is None:
+            class Luid(ctypes.Structure):
+                _fields_ = [("low", W.DWORD), ("high", W.LONG)]
+
+            class Item(ctypes.Structure):
+                _fields_ = [("luid", Luid), ("attributes", W.DWORD)]
+
+            class Privileges(ctypes.Structure):
+                _fields_ = [("count", W.DWORD), ("items", Item * 1)]
+
+            api = ctypes.WinDLL("advapi32", use_last_error=True)
+            kernel.GetCurrentThread.argtypes = ()
+            kernel.GetCurrentThread.restype = W.HANDLE
+            kernel.GetCurrentProcess.argtypes = ()
+            kernel.GetCurrentProcess.restype = W.HANDLE
+            api.OpenThreadToken.argtypes = (W.HANDLE, W.DWORD, W.BOOL, ctypes.POINTER(W.HANDLE))
+            api.OpenThreadToken.restype = W.BOOL
+            api.OpenProcessToken.argtypes = (W.HANDLE, W.DWORD, ctypes.POINTER(W.HANDLE))
+            api.OpenProcessToken.restype = W.BOOL
+            api.DuplicateTokenEx.argtypes = (W.HANDLE, W.DWORD, ctypes.c_void_p,
+                                             ctypes.c_int, ctypes.c_int, ctypes.POINTER(W.HANDLE))
+            api.DuplicateTokenEx.restype = W.BOOL
+            api.LookupPrivilegeValueW.argtypes = (W.LPCWSTR, W.LPCWSTR, ctypes.POINTER(Luid))
+            api.LookupPrivilegeValueW.restype = W.BOOL
+            api.AdjustTokenPrivileges.argtypes = (W.HANDLE, W.BOOL, ctypes.POINTER(Privileges),
+                                                  W.DWORD, ctypes.c_void_p, ctypes.c_void_p)
+            api.AdjustTokenPrivileges.restype = W.BOOL
+            api.SetThreadToken.argtypes = (ctypes.POINTER(W.HANDLE), W.HANDLE)
+            api.SetThreadToken.restype = W.BOOL
+            cls._privilege_bindings = api, Privileges
+        api, Privileges = cls._privilege_bindings
+        source, private = W.HANDLE(), W.HANDLE()
+        had_thread_token = False
+        attached = False
+        try:
+            # QUERY | DUPLICATE | IMPERSONATE; the latter permits exact restore.
+            if api.OpenThreadToken(kernel.GetCurrentThread(), 0x0E, True, ctypes.byref(source)):
+                had_thread_token = True
+            else:
+                error = ctypes.get_last_error()
+                if error != 1008:  # ERROR_NO_TOKEN is the only process-token route.
+                    raise ctypes.WinError(error)
+                if not api.OpenProcessToken(kernel.GetCurrentProcess(), 0x0A, ctypes.byref(source)):
+                    raise ctypes.WinError(ctypes.get_last_error())
+            # QUERY | ADJUST_PRIVILEGES | IMPERSONATE, SecurityImpersonation,
+            # TokenImpersonation. The source token remains unchanged.
+            if not api.DuplicateTokenEx(source, 0x2C, None, 2, 2, ctypes.byref(private)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            state = Privileges()
+            state.count = 1
+            state.items[0].attributes = 2  # SE_PRIVILEGE_ENABLED, never REMOVED.
+            if not api.LookupPrivilegeValueW(None, "SeCreateSymbolicLinkPrivilege",
+                                              ctypes.byref(state.items[0].luid)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            ctypes.set_last_error(0)
+            success = api.AdjustTokenPrivileges(private, False, ctypes.byref(state), 0, None, None)
+            error = ctypes.get_last_error()
+            if not success or error:  # Includes successful API / NOT_ALL_ASSIGNED.
+                raise ctypes.WinError(error)
+            if not api.SetThreadToken(None, private):
+                raise ctypes.WinError(ctypes.get_last_error())
+            attached = True
+            yield
+        finally:
+            try:
+                if attached and not api.SetThreadToken(None, source if had_thread_token else None):
+                    # Do not run rollback/caller code under an unrestored identity.
+                    # Process death releases the private token and native handles.
+                    try:
+                        os.write(2, b"E_WINDOWS_TOKEN_RESTORE_FAILED: installer stopped; inspect retained transaction state.\n")
+                    finally:
+                        os._exit(70)
+            finally:
+                try:
+                    if private and not kernel.CloseHandle(private):
+                        raise ctypes.WinError(ctypes.get_last_error())
+                finally:
+                    if source and not kernel.CloseHandle(source):
+                        raise ctypes.WinError(ctypes.get_last_error())
+
 
     @classmethod
     def _api(cls):
@@ -1851,6 +1966,14 @@ class _InstallFailure(RuntimeError):
 
 SLICE_A_FAILURE_IDS = frozenset(
     {
+        "E_PROVIDER_RECEIPT_DRIFT",
+        "E_PROVIDER_RECEIPT_INVALID",
+        "E_PROVIDER_PAYLOAD_MODIFIED",
+        "E_PROVIDER_CONFIG_MODIFIED",
+        "E_PROVIDER_SKILLS_MIGRATION_REQUIRED",
+        "E_PROVIDER_PROJECTION_MIGRATION_COLLISION",
+        "E_PROVIDER_PROJECTION_MIGRATION_DRIFT",
+        "E_SHARED_LAYOUT_MIGRATION_REQUIRED",
         "E_CREATE_ONLY_COLLISION",
         "E_CREATE_ONLY_TYPE_COLLISION",
         "E_CREATE_ONLY_PROJECTION_COLLISION",
@@ -3663,7 +3786,8 @@ class _InstallTransaction:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: source link native identity")
                 data = original.reparse_data()
                 directory = bool(original.basic().attributes & stat.FILE_ATTRIBUTE_DIRECTORY)
-            with _WindowsBoundNode.create(target, directory=directory) as created:
+            with _WindowsBoundNode.symlink_privilege(required=int.from_bytes(data[:4], "little") == 0xA000000C), \
+                    _WindowsBoundNode.create(target, directory=directory) as created:
                 node = self._capture_node(target, bound_node=created,
                                           kind="directory" if directory else "file",
                                           data=None if directory else hashlib.sha256(b"").hexdigest())
@@ -3692,7 +3816,8 @@ class _InstallTransaction:
             node = self._capture_node(target)
             record(target, node)
             return node
-        with _WindowsBoundNode.create(target, directory=True) as created:
+        with _WindowsBoundNode.symlink_privilege(required=not junction), \
+                _WindowsBoundNode.create(target, directory=True) as created:
             node = self._capture_node(target, bound_node=created, kind="directory")
             record(target, node)
             with _WindowsBoundNode(source, purpose="observe", follow=True) as original:
@@ -6321,6 +6446,58 @@ class _CreateOnlyMutablePath:
         )
         return target
 
+    @_InstallTransaction.direct_writer
+    def materialize_exact_projection(self, relative: Path, source: Path, expected_digest: str) -> Path:
+        """Replace a bound old directory link with an identical ordinary tree.
+
+        The original link is retained/moved, never recreated. The existing
+        transaction owns both publication and rollback; the referent is read-only.
+        """
+        target = self.destination(relative, allow_leaf_reparse=True)
+        dependency = self.transaction.bind_readonly_path(self, source)
+        original_image = _admitted_mutation_image(self.transaction, target)
+        if (len(original_image) != 1 or target not in original_image
+            or original_image[target].kind not in {"link", "reparse"}
+            or not _projection_resolves_to(target, source)
+            or self.transaction.readonly_tree_digest(dependency, ignore_runtime_cache=True) != expected_digest):
+            raise ValueError("E_PROVIDER_PROJECTION_MIGRATION_COLLISION")
+        if self.dry_run:
+            return target
+        prepared = {}
+        def record_stage(path, node):
+            prepared[path] = node
+            self.transaction._advance(path, {path: node})
+        staged = self.transaction._allocate_owned_directory(target.parent, f".{target.name}.materialize.", record_stage)
+        effect = None
+        original = None
+        try:
+            # A prepared directory selects same-parent retention, including when
+            # the old object is a link and TEMP is on another volume.
+            effect = self.transaction.arm_replacement(target, staged, self)
+            effect.prepared_path = staged
+            effect.prepared_state = prepared
+            effect.ignore_runtime_cache = True
+            effect.readonly_dependencies = (dependency,)
+            _copy_tree(source, staged, ignore_runtime_cache=True, owner=self, effect=effect)
+            staged = effect.prepared_path
+            self.transaction.assert_readonly_path(dependency, check_content=True)
+            if (_tree_sha256(staged, ignore_runtime_cache=True) != expected_digest
+                or not self.transaction._image_matches(target, original_image)):
+                raise ValueError("E_PROVIDER_PROJECTION_MIGRATION_DRIFT")
+            self._replace_prepared(target, staged, effect=effect)
+            if (_contains_reparse(target) or _tree_sha256(target, ignore_runtime_cache=True) != expected_digest):
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: materialized projection")
+            self.transaction.assert_readonly_path(dependency, check_content=True)
+        except BaseException as exc:
+            original = exc
+            raise
+        finally:
+            pending_path = effect.prepared_path if effect is not None else staged
+            pending_state = effect.prepared_state if effect is not None else prepared
+            if pending_path.exists() or pending_path.is_symlink():
+                self._settle_prepared(pending_path, pending_state, original)
+        return target
+
     def create_projection(self, relative: Path, source: Path) -> Path:
         target = self.destination(relative, allow_leaf_reparse=True)
         if target.exists() or target.is_symlink():
@@ -7092,7 +7269,6 @@ class _PostMaterializationWriterDestination:
 
 
 _POST_MATERIALIZATION_WRITER_CALLS = {
-    "_apply_claude_skill_projection_plan": ("claude-skill-projection",),
     "_install_runtime_files": ("runtime-outside",),
     "_install_ui_continuity_contract": ("ui-continuity",),
     "_install_hooks": ("hook-registration", "hook-inventory"),
@@ -7104,6 +7280,7 @@ _POST_MATERIALIZATION_WRITER_CALLS = {
     "_merge_claude_main_agent_settings": ("claude-main-settings",),
     "_reclaim_retired": ("retired-reclaim",),
     "_finalize_canonical_lead_receipt": ("lead-receipt",),
+    "_record_provider_install": ("provider-receipt",),
 }
 _POST_MATERIALIZATION_NONWRITER_CALLS = frozenset(
     {
@@ -7113,7 +7290,6 @@ _POST_MATERIALIZATION_NONWRITER_CALLS = frozenset(
     }
 )
 _POST_MATERIALIZATION_ARTIFACT_CLASS = {
-    "claude-skill-projection": "claude-skill-projection",
     "runtime-outside": "runtime-outside",
     "ui-continuity": "ui-continuity",
     "hook-registration": "hooks",
@@ -7125,6 +7301,7 @@ _POST_MATERIALIZATION_ARTIFACT_CLASS = {
     "claude-main-settings": "claude-main-settings",
     "retired-reclaim": "retired-reclaim",
     "lead-receipt": "lead-receipt",
+    "provider-receipt": "provider-receipt",
 }
 
 
@@ -7235,10 +7412,6 @@ def _post_materialization_writer_destinations(
         )
 
     if provider == "claude":
-        projection_root = claude_skills_target or target / "skills"
-        for skill in sorted((root / "src.codex" / "skills").iterdir()):
-            if skill.is_dir() and not skill.is_symlink():
-                add("claude-skill-projection", projection_root / skill.name)
         for runtime_source, destination in _runtime_file_destinations(
             root, target / "agents" / "scripts"
         ):
@@ -7252,6 +7425,7 @@ def _post_materialization_writer_destinations(
             add("runtime-outside", destination)
 
     add("lead-receipt", canonical_skills_target / _LEAD_RECEIPT_NAME)
+    add("provider-receipt", target / ".orche-install.v1.json")
     add("ui-continuity", agents_root / UI_CONTINUITY_CONTRACT_TARGET)
     if hooks_enabled:
         add("hook-registration", registration)
@@ -7421,7 +7595,7 @@ def _installer_mutation_paths(
     if provider not in {"codex", "claude"}:
         raise ValueError(f"unsupported provider: {provider}")
 
-    paths: list[Path] = []
+    paths: list[Path] = [target / ".orche-install.v1.json"]
     retained_transport_witnesses = {
         Path(os.path.abspath(path)) for path in claude_transport_migration_paths
     }
@@ -9003,7 +9177,7 @@ def _preflight_canonical_skills(
         if replace_unreceipted_skill_sha256 and not global_install:
             raise ValueError("E_CANONICAL_SKILL_ADOPTION_MISMATCH")
         grants = _parse_nonlead_grants(replace_unreceipted_skill_sha256, nonlead_names)
-        nonlead_receipt = _read_nonlead_receipt(target / _NONLEAD_RECEIPT_NAME) if global_install else None
+        nonlead_receipt = _read_nonlead_receipt(target / _NONLEAD_RECEIPT_NAME)
         if nonlead_receipt is not None and grants:
             raise ValueError("E_CANONICAL_SKILL_ADOPTION_MISMATCH")
         nonlead_prior_map = dict(nonlead_receipt.entries) if nonlead_receipt is not None else {}
@@ -9038,7 +9212,7 @@ def _preflight_canonical_skills(
                     raise ValueError("E_CANONICAL_LEAD_RECEIPT_DRIFT")
             nonlead_receipted = False
             nonlead_adopted = False
-            if skill.name != "lead" and global_install:
+            if skill.name != "lead":
                 if not _safe_nonlead_name(skill.name):
                     raise ValueError("E_CANONICAL_SKILLS_RECEIPT_INVALID: source name")
                 recorded = nonlead_prior_map.get(skill.name)
@@ -9188,17 +9362,16 @@ def _preflight_canonical_skills(
         nonlead_expected = dict(nonlead_prior_map) if member_selection is not None else {}
         nonlead_expected.update((skill.name, skill.managed_after if skill.managed_after is not None else _stage_tree_manifest(skill.source, ignore_runtime_cache=True))
                                for skill in planned if skill.name != "lead")
-        if global_install:
-            _nonlead_receipt_bytes({name: {"members": dict(value)} if isinstance(value, tuple) else value
-                                    for name, value in nonlead_expected.items()},
-                                   schema=nonlead_receipt.schema if nonlead_receipt is not None
-                                   and nonlead_receipt.schema == _NONLEAD_MEMBER_RECEIPT_SCHEMA else None)
+        _nonlead_receipt_bytes({name: {"members": dict(value)} if isinstance(value, tuple) else value
+                                for name, value in nonlead_expected.items()},
+                               schema=nonlead_receipt.schema if nonlead_receipt is not None
+                               and nonlead_receipt.schema == _NONLEAD_MEMBER_RECEIPT_SCHEMA else None)
         plan = _CanonicalSkillsPlan(
             stage, tuple(planned), transport_stage,
             _LeadReceiptPlan(receipt, stage.digest, lead_source) if member_selection is None else None,
             nonlead_receipt,
-            tuple(sorted(nonlead_expected.items())) if global_install else None,
-            source if global_install else None,
+            tuple(sorted(nonlead_expected.items())),
+            source,
             member_selection=member_selection,
         )
         return replace(plan, directory_move_parents=_preflight_directory_move_capabilities(plan, target))
@@ -9640,7 +9813,7 @@ def _validate_legacy_codex_skill_requests(
 ) -> frozenset[str]:
     if requested and (provider != "codex" or mode != "global"):
         raise ValueError(
-            "E_LEGACY_CODEX_SKILL_ARGUMENT: --migrate-legacy-skill requires global Codex install"
+            "E_LEGACY_CODEX_SKILL_ARGUMENT: legacy link migration is unavailable in the ordinary-copy layout"
         )
     if len(requested) != len(set(requested)):
         raise ValueError("E_LEGACY_CODEX_SKILL_ARGUMENT: duplicate skill name")
@@ -10648,7 +10821,10 @@ def _run_posix_hook_health_child(
                 raise _hook_health_failure(
                     "POSIX hook-health process group did not settle"
                 )
-            if closure.group_was_present:
+            # Already-exited adopted children can still occupy the group until
+            # waitpid reaps them. Complete, signal-free settlement is normal;
+            # descendants that needed termination must still fail the check.
+            if closure.term_sent or closure.kill_sent:
                 raise _hook_health_failure("PSV1-TREE-NOT-EMPTY")
             while not stderr_eof:
                 remaining = deadline - time.monotonic()
@@ -10884,6 +11060,28 @@ def _hook_specs(provider: str, installed_root: Path):
     return _HOOK_MANIFEST.registered_hook_specs(provider, installed_root)
 
 
+def _legacy_hook_stat_identity(value):
+    return (value.st_dev, value.st_ino, value.st_mode, value.st_size,
+            value.st_mtime_ns, value.st_ctime_ns,
+            getattr(value, "st_birthtime_ns", None),
+            getattr(value, "st_file_attributes", 0))
+
+
+def _legacy_hook_metadata_matches(before, opened, finished, after, *, windows: bool) -> bool:
+    """Keep both clock witnesses; compare only compatible fields across APIs."""
+    path_before, path_after = map(_legacy_hook_stat_identity, (before, after))
+    fd_before, fd_after = map(_legacy_hook_stat_identity, (opened, finished))
+    if path_before != path_after or fd_before != fd_after:
+        return False
+    if windows:
+        # Some CPython Windows versions expose birth time through lstat.ctime
+        # and change time through fstat.ctime. Neither clock may drift during
+        # the read, but their values are not interchangeable. Keep file ID,
+        # mode, size, mtime, birth time and attributes cross-bound as well.
+        return path_before[:5] + path_before[6:] == fd_before[:5] + fd_before[6:]
+    return path_before == fd_before
+
+
 def _verified_legacy_hook_targets(provider: str, installed_root: Path, markers: set[str], *,
                                   legacy_provider_root: Path | None = None, witnesses=None):
     """Admit only exact hash-pinned retired leaves under the selected package."""
@@ -10914,12 +11112,16 @@ def _verified_legacy_hook_targets(provider: str, installed_root: Path, markers: 
                 with os.fdopen(descriptor, "rb") as stream:
                     opened = os.fstat(stream.fileno())
                     payload = stream.read()
+                    finished = os.fstat(stream.fileno())
                 after = candidate.lstat()
-                identity = lambda value: (value.st_dev, value.st_ino, value.st_mode, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
-                if identity(before) == identity(opened) == identity(after) and hashlib.sha256(payload).hexdigest() == digest:
+                if (_legacy_hook_metadata_matches(before, opened, finished, after, windows=os.name == "nt")
+                        and hashlib.sha256(payload).hexdigest() == digest):
                     result[marker].add(str(candidate))
                     if witnesses is not None:
-                        witnesses[str(candidate)] = (identity(after), digest)
+                        witnesses[str(candidate)] = (
+                            _legacy_hook_stat_identity(after),
+                            _legacy_hook_stat_identity(finished), digest,
+                        )
             except OSError:
                 continue
     return result
@@ -11622,17 +11824,286 @@ def _verify_files(
     return missing
 
 
+def _require_provider_copy_isolation(root, provider, mode, target, project, *, removing=False):
+    """Preserve declared legacy consumers of the selected client's storage."""
+    base = target.parent if mode == "global" else project
+    selected = get_client(provider)["payload_roots"]
+    for client in INSTALL_CLIENTS.values():
+        if client["id"] == provider and not removing:
+            continue
+        dependencies = client["legacy_shared_roots"]
+        shares_selected = any(dependency == path or dependency.startswith(path + "/")
+                              or path.startswith(dependency + "/")
+                              for _logical, dependency in dependencies for path in selected)
+        if client["id"] != provider and shares_selected:
+            # Removing links is only the first migration phase. An old transport
+            # may still select shared ledger helpers until its own update finishes.
+            transport = base / client["transport_runtime"]
+            manifest = transport / "shared" / TRANSPORT_PROJECTION_MANIFEST
+            if manifest.exists() or manifest.is_symlink():
+                codec = _provider_ownership_module(root)
+                receipt = base / client["provider_root"] / codec.RECEIPT_NAME
+                try:
+                    if _contains_reparse(receipt) or receipt.stat().st_size > codec.MAX_BYTES:
+                        raise ValueError("unqualified peer receipt")
+                    record = codec.decode_record(receipt.read_bytes(), client["id"],
+                                                 "global" if mode == "global" else "project")
+                    if record.get("layout") != codec.LAYOUT:
+                        raise ValueError("legacy peer layout")
+                    members = (manifest, transport / "scripts/provider_prompt.py",
+                               base / client["canonical_runtime"] / "scripts/provider_prompt.py")
+                    # This is layout admission, not an integrity audit of an
+                    # unselected application. Its later code customization must
+                    # not make another independent client's updates dependent on it.
+                    if any(member.relative_to(base).as_posix() not in record["files"] for member in members):
+                        raise ValueError("incomplete peer layout record")
+                except (OSError, ValueError, RuntimeError) as exc:
+                    raise _InstallFailure("E_SHARED_LAYOUT_MIGRATION_REQUIRED", "migration", exc) from exc
+        for logical, dependency in dependencies:
+            if not any(dependency == path or dependency.startswith(path + "/") or path.startswith(dependency + "/") for path in selected):
+                continue
+            shared = (base / dependency).resolve(strict=False)
+            peer = base / logical
+            candidates = [peer]
+            if peer.is_dir():
+                candidates.extend(peer.iterdir())
+            for candidate in candidates:
+                resolved = candidate.resolve(strict=False)
+                if resolved == shared or shared in resolved.parents:
+                    raise _InstallFailure("E_SHARED_LAYOUT_MIGRATION_REQUIRED", "migration",
+                                          ValueError("selected client still has shared skill links"))
+
+
+
+def _provider_ownership_module(root: Path):
+    return _load_module_from_path("orche_provider_ownership", root / "scripts/installation/ownership.py")
+
+
+def _provider_configuration_module(root: Path):
+    return _load_module_from_path("orche_provider_configuration", root / "scripts/installation/configuration.py")
+
+
+def _capture_provider_configs(root, provider, scope, target, anchor, owner, before,
+                              prior, docs_target, mode_target, registration,
+                              installed_hook_root, hooks_enabled):
+    configuration = _provider_configuration_module(root)
+    configs = {}
+    client = get_client(provider)
+    documents = tuple((anchor / relative, kind) for relative, kind in client["documents"][scope].items())
+    for path, kind in documents:
+        current = _read_owned_text(path, owner)
+        if current is not None:
+            digest = configuration.block_digest(current, kind, _claude_document_context)
+            if digest is not None:
+                configs[path.relative_to(anchor).as_posix()] = dict(kind="block", blockKind=kind, sha256=digest)
+    mode_key = mode_target.relative_to(anchor).as_posix()
+    current_mode = _read_owned_text(mode_target, owner)
+    previous_mode = before[mode_target]
+    prior_mode = prior.get(mode_key, {})
+    if current_mode is not None and (previous_mode is None or
+        prior_mode.get("kind") == "file" and hashlib.sha256(previous_mode.encode("utf-8")).hexdigest() == prior_mode["sha256"]):
+        configs[mode_key] = dict(kind="file", sha256=hashlib.sha256(current_mode.encode("utf-8")).hexdigest())
+    if client["native_config"] is not None:
+        source_agents = root / "src.codex/agents"
+        manifest = _source_codex_role_manifest(root, source_agents)
+        registrations = _native_role_registrations(source_agents, manifest)
+        native_path = target / "config.toml"
+        native_key = native_path.relative_to(anchor).as_posix()
+        _selection, native_current = _read_native_config_selection(native_path, owner.transaction)
+        old_features = tomllib.loads(before[native_path] or "").get("features", {})
+        current_features = tomllib.loads(native_current.decode("utf-8")).get("features", {})
+        prior_features = prior.get(native_key, {}).get("features", {})
+        owned_features = {key: value for key, value in client["feature_defaults"].items()
+                          if current_features.get(key) is value and
+                          (key not in old_features or prior_features.get(key) is value and old_features.get(key) is value)}
+        configs[native_key] = {
+            "kind": "native-roles", "roles": {item.name: dict(description=item.description, config_file=item.config_file)
+                                               for item in registrations}, "features": owned_features}
+    current_registration = _read_owned_text(registration, owner)
+    registration_key = registration.relative_to(anchor).as_posix()
+    prior_registration = prior.get(registration_key, {})
+    if current_registration is not None:
+        data = json.loads(current_registration)
+        handlers = prior_registration.get("handlers", [])
+        if hooks_enabled:
+            health = _hook_health_module(root)
+            specs = _hook_specs(provider, installed_hook_root)
+            targets = {marker: {str(script)} for marker, script, *_rest in specs}
+            handlers = [dict(event=event, marker=invocation.marker,
+                             context={key: value for key, value in group.items() if key != "hooks"}, handler=handler)
+                        for event, _gi, _hi, group, handler, invocation in health._owned_records(
+                            data, set(targets), provider, "windows" if os.name == "nt" else "posix", targets)]
+        previous = json.loads(before[registration]) if before[registration] is not None else {}
+        agent_key = client["default_agent_key"]
+        agent_added = agent_key is not None and data.get(agent_key) == "lead" and (
+            agent_key not in previous or prior_registration.get("agentAdded", False))
+        if handlers or agent_added:
+            configs[registration_key] = dict(kind="hooks", handlers=handlers, agentAdded=agent_added)
+    return configs
+
+
+def _record_provider_install(root, provider, mode, target, anchor, transaction, owner, before,
+                             config_before, docs_target, mode_target, registration,
+                             installed_hook_root, hooks_enabled, *,
+                             canonical_plan=None, canonical_target=None):
+    """Record actual owned payload outcomes; configuration has separate semantics."""
+    if owner.dry_run:
+        return
+    codec = _provider_ownership_module(root)
+    scope = "global" if mode == "global" else "project"
+    prior = codec.decode_record(before.encode("utf-8"), provider, scope)["files"] if before else {}
+    payload_roots = get_client(provider)["payload_roots"]
+    original = {path: node for image in transaction._original.values() for path, node in image.items()}
+    current = {path: node for image in transaction._expected.values() for path, node in image.items()}
+    transient = {path for path in (transaction._temporary, *transaction._migration_retention) if path is not None}
+    for effect in transaction._effects:
+        transient.update(path for path in (effect.retained, effect.prepared_path, effect.quarantine) if path is not None)
+    def temporary(path):
+        return any(path == base or base in path.parents for base in transient)
+    files = {}
+    for path, node in current.items():
+        if temporary(path) or node.kind != "file" or not any(path == base or base in path.parents for base in transaction.paths):
+            continue
+        relative = path.relative_to(anchor).as_posix()
+        parts = relative.split("/")
+        if not any(relative.startswith(prefix + "/") for prefix in payload_roots) or "__pycache__" in parts:
+            continue
+        codec.validate_path(relative, provider, scope)
+        previous = original.get(path)
+        if previous is None or (relative in prior and previous.kind == "file" and previous.data == prior[relative]):
+            files[relative] = node.data
+    # A successful canonical materialization already admitted exact managed
+    # members. Carry that existing authority into the uninstall record, including
+    # unchanged old files. Copied user extras are NOT ownership evidence.
+    managed_directories = set()
+    if canonical_plan is not None:
+        if canonical_target is None:
+            raise _InstallFailure("E_PROVIDER_RECEIPT_INVALID", "verify")
+        selected_names = {skill.name for skill in canonical_plan.skills}
+        manifests = dict(canonical_plan.nonlead_expected or ())
+        if canonical_plan.lead_receipt is not None and "lead" in selected_names:
+            manifests["lead"] = canonical_plan.stage.manifest
+        for name, manifest in manifests.items():
+            if name not in selected_names:
+                continue
+            if not isinstance(manifest, tuple):
+                raise _InstallFailure("E_PROVIDER_RECEIPT_INVALID", "verify")
+            skill_root = canonical_target / name
+            for member, digest in manifest:
+                path = skill_root / member
+                relative = path.relative_to(anchor).as_posix()
+                codec.validate_path(relative, provider, scope)
+                node = current.get(path)
+                if digest == "directory":
+                    if node is None or node.kind != "directory":
+                        raise _InstallFailure("E_PROVIDER_RECEIPT_DRIFT", "verify")
+                    managed_directories.add(relative)
+                elif node is None or node.kind != "file" or node.data != digest:
+                    raise _InstallFailure("E_PROVIDER_RECEIPT_DRIFT", "verify")
+                else:
+                    files[relative] = digest
+            relative = skill_root.relative_to(anchor).as_posix()
+            if current.get(skill_root) is not None and current[skill_root].kind == "directory":
+                managed_directories.add(relative)
+        transport_stage = getattr(canonical_plan, "transport_stage", None)
+        if transport_stage is not None:
+            transport = anchor / get_client(provider)["transport_runtime"]
+            declarations = [(transport / "scripts" / name, payload)
+                            for name, payload in transport_stage.files]
+            declarations.append((transport / "shared" / TRANSPORT_PROJECTION_MANIFEST,
+                                 transport_stage.manifest_payload))
+            for path, payload in declarations:
+                relative = path.relative_to(anchor).as_posix()
+                codec.validate_path(relative, provider, scope)
+                digest = hashlib.sha256(payload).hexdigest()
+                node = current.get(path)
+                if node is None:
+                    # Accepted-prior leaves use the native migration ledger,
+                    # not snapshot restoration. Reuse that owner's bound state.
+                    migrated = [record for record in transaction._slice_a_migrated
+                                if record.leaf_path == path]
+                    created = [record for record in transaction._slice_a_created
+                               if record.leaf_path == path]
+                    if len(migrated) == 1 and not created:
+                        node = transaction._current_role(migrated[0], old=False)
+                    elif len(created) == 1 and not migrated:
+                        node = created[0].current_node
+                    if node is not None and not transaction._point_matches(path, node, check_file_content=True):
+                        raise _InstallFailure("E_PROVIDER_RECEIPT_DRIFT", "verify")
+                if node is None or node.kind != "file" or node.data != digest:
+                    raise _InstallFailure("E_PROVIDER_RECEIPT_DRIFT", "verify")
+                files[relative] = digest
+        for name in (_LEAD_RECEIPT_NAME, _NONLEAD_RECEIPT_NAME):
+            path = canonical_target / name
+            node = current.get(path)
+            if node is not None and node.kind == "file":
+                files[path.relative_to(anchor).as_posix()] = node.data
+    # Retain prior ownership of unchanged payloads outside this run's write set.
+    for relative, digest in prior.items():
+        if relative not in files and anchor / relative not in original and not temporary(anchor / relative):
+            candidate = anchor / relative
+            owner.destination(Path(relative))
+            if _file_sha256(candidate) == digest:
+                files[relative] = digest
+    receipt = target / codec.RECEIPT_NAME
+    if _read_owned_text(receipt, owner) != before:
+        raise _InstallFailure("E_PROVIDER_RECEIPT_DRIFT", "verify")
+    prior_configs = codec.decode_record(before.encode("utf-8"), provider, scope).get("configs", {}) if before else {}
+    configs = _capture_provider_configs(root, provider, scope, target, anchor, owner,
+        config_before, prior_configs, docs_target, mode_target, registration,
+        installed_hook_root, hooks_enabled)
+    created_roots = [record.leaf_path for record in transaction._slice_a_created
+                     if record.current_node.kind == "directory"]
+    prior_record = codec.decode_record(before.encode("utf-8"), provider, scope) if before else {}
+    directories = set(prior_record.get("directories", [])) | managed_directories
+    for path, node in current.items():
+        if temporary(path) or node.kind != "directory" or not any(path == base or base in path.parents for base in created_roots):
+            continue
+        relative = path.relative_to(anchor).as_posix()
+        parts = relative.split("/")
+        if any(relative == prefix or relative.startswith(prefix + "/") for prefix in payload_roots) and "__pycache__" not in parts:
+            codec.validate_path(relative, provider, scope)
+            directories.add(relative)
+    payload = codec.encode_record(files, provider, scope, configs=configs, directories=sorted(directories))
+    relative = receipt.relative_to(owner.anchor)
+    if before is None:
+        owner.create_file(relative, payload)
+    else:
+        owner.replace_file_atomic(relative, payload, fsync="required")
+
+
 def install(provider: str, argv: list[str] | None = None) -> int:
+    get_client(provider)  # Never route an unknown client through another adapter.
     args = _parser(provider).parse_args(argv)
+    if args.materialize_legacy_skills and args.uninstall:
+        print("FAIL: migration and uninstall are separate operations", file=sys.stderr)
+        return 2
+    if args.apply and not (args.uninstall or args.materialize_legacy_skills):
+        print("FAIL: --apply requires uninstall or legacy materialization", file=sys.stderr)
+        return 2
+    if args.materialize_legacy_skills:
+        try:
+            root = _repo_root(Path(__file__))
+            module = _load_module_from_path("orche_install_migration", root / "scripts/installation/migration.py")
+            return module.run(sys.modules[__name__], root, provider, args)
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"FAIL: legacy materialization: {_installer_failure_text(exc)}", file=sys.stderr)
+            return 1
+    if args.uninstall:
+        try:
+            root = _repo_root(Path(__file__))
+            operation = _load_module_from_path("orche_provider_uninstall", root / "scripts/installation/uninstall.py")
+            return operation.run(sys.modules[__name__], root, provider, args)
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"FAIL: uninstall preserved unverified state: {_installer_failure_text(exc)}", file=sys.stderr)
+            return 1
     if args.replace_unreceipted_skill_sha256 and not args.global_install:
         print("FAIL: E_CANONICAL_SKILL_ADOPTION_MISMATCH", file=sys.stderr)
         return 1
     if args.replace_unreceipted_lead_sha256 is not None and not args.global_install:
         print("FAIL: E_CANONICAL_LEAD_ADOPTION_MISMATCH", file=sys.stderr)
         return 1
-    if args.migrate_legacy_skill and (
-        provider != "codex" or not args.global_install
-    ):
+    if args.migrate_legacy_skill:
         print(
             "FAIL: E_LEGACY_CODEX_SKILL_ARGUMENT: "
             "--migrate-legacy-skill requires global Codex install",
@@ -11647,18 +12118,20 @@ def install(provider: str, argv: list[str] | None = None) -> int:
     script = Path(__file__)
     root = _repo_root(script)
     canonical_plan: _CanonicalSkillsPlan | None = None
-    source = root / f"src.{provider}"
+    source = root / get_client(provider)["source_root"]
     try:
         mode, target, project = _target(provider, args)
+        _require_provider_copy_isolation(root, provider, mode, target, project)
         if (
             args.enroll_kimi or args.replace_kimi_enrollment
         ) and (provider != "codex" or mode != "global"):
             raise ValueError(
                 "E_KIMI_ENROLLMENT_SCOPE: Kimi enrollment maintenance requires global Codex install"
             )
-        canonical_agents_root = (
-            target.parent / ".agents" if mode == "global" else project / ".agents"
-        )
+        # Each selected provider owns its installed skill payload. Source stays
+        # canonical in src.codex/skills; no installed peer is a materialization owner.
+        canonical_agents_root = (target if provider == "claude" else
+            target.parent / ".agents" if mode == "global" else project / ".agents")
         canonical_agents_authority: Any | None = None
         if mode == "global":
             canonical_agents_authority = _linked_runtime_subroots_module(
@@ -11724,7 +12197,8 @@ def install(provider: str, argv: list[str] | None = None) -> int:
         if mode == "global":
             if home is None:
                 raise ValueError("cannot resolve the user home directory")
-            shared_mode_target = home / ".agents-mode.yaml"
+            # Legacy shared operator settings remain read-only compatibility input.
+            # Selected-provider installation only writes its own mode_target.
 
         print(f"=== {provider.capitalize()} Python Installer ===")
         print(f"Source: {source}")
@@ -11802,13 +12276,8 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 replace_unreceipted_lead_sha256=args.replace_unreceipted_lead_sha256,
                 replace_unreceipted_skill_sha256=tuple(args.replace_unreceipted_skill_sha256),
             )
-            claude_skill_projection_plan = _preflight_claude_skill_projections(
-                root / "src.codex" / "skills",
-                source / "skills",
-                canonical_skills_target,
-                claude_skills_projection_target,
-                canonical_plan=canonical_plan,
-            )
+            if claude_skills_projection_target != canonical_skills_target:
+                raise ValueError("E_PROVIDER_SKILLS_MIGRATION_REQUIRED: linked Claude skills root")
             if (
                 args.dry_run
                 and canonical_plan.transport_stage is not None
@@ -11823,18 +12292,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     f"{replacement_count} replacements"
                 )
         elif provider == "codex":
-            peer_target = (target.parent if mode == "global" else project) / ".claude"
-            if peer_target.is_dir() and not _contains_reparse(peer_target):
-                try:
-                    peer_agents, peer_authority = _resolve_global_claude_linked_subroot(
-                        root, peer_target, mode, "agents"
-                    )
-                    if peer_agents.is_dir():
-                        owned_peer_transport_root = peer_agents / "scripts"
-                        owned_peer_transport_authority = peer_authority
-                except ValueError:
-                    # An unselected unsupported peer is preserved and unclaimed.
-                    owned_peer_transport_root = None
+            # Installing Codex must not update an unselected Claude transport.
             canonical_plan = _preflight_canonical_skills(
                 source_tree,
                 canonical_skills_target,
@@ -11959,11 +12417,26 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 source / "agents", target_tree, excluded_files=claude_sync_excluded))
             copy_paths.update(_sync_file_destinations(source / "commands", claude_commands_target))
             copy_paths.update(destination for _source, destination in claude_runtime_destinations)
+        # Unchanged authenticated transport leaves are not migration writes, but
+        # the new ownership receipt must bind them to the original transaction
+        # image rather than adopt a later pathname observation.
+        readonly_transport_paths = ()
+        if provider == "claude" and canonical_plan.transport_stage is not None:
+            transport_stage = canonical_plan.transport_stage
+            pending = {target_tree / "scripts" / name for name, _payload in transport_stage.pending_files}
+            if transport_stage.manifest_pending:
+                pending.add(target_tree / "shared" / TRANSPORT_PROJECTION_MANIFEST)
+            readonly_transport_paths = tuple(
+                witness.path for witness in transport_stage.witnesses
+                if witness.state == "regular" and witness.path not in pending
+            )
+            transaction_paths.extend(readonly_transport_paths)
         transaction = _InstallTransaction(
             transaction_paths,
             enabled=not args.dry_run,
             copy_paths=tuple(sorted(copy_paths)),
             link_object_paths=byte_pointer_objects,
+            readonly_paths=readonly_transport_paths,
         )
         for authority in claude_link_authorities:
             _assert_global_claude_linked_subroot_authority(root, authority)
@@ -11990,6 +12463,50 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     create_only = _CreateOnlyMutablePath.bind_or_create_anchor(
                         mutable_anchor, transaction, admitted_parent=admitted_parent,
                         parent_state=parent_state, dry_run=False)
+            receipt_path = target / ".orche-install.v1.json"
+            create_only.destination(receipt_path.relative_to(create_only.anchor))
+            if receipt_path.exists() and receipt_path.stat().st_size > 4 * 1024 * 1024:
+                raise ValueError("E_PROVIDER_RECEIPT_INVALID: size")
+            ownership_before = _read_owned_text(receipt_path, create_only)
+            if ownership_before is not None:
+                _provider_ownership_module(root).decode_record(
+                    ownership_before.encode("utf-8"), provider,
+                    "global" if mode == "global" else "project")
+            config_paths = {docs_target, mode_target, registration}
+            if provider == "claude":
+                config_paths.add(target / "AGENTS.md")
+            config_before = {path: _read_owned_text(path, create_only) for path in config_paths}
+            if provider == "codex":
+                # Native configuration has its own bound-storage owner, not a
+                # generic snapshot entry. Reuse its exact preflight selection.
+                _selection, native_before = _read_native_config_selection(
+                    target / "config.toml", transaction,
+                    expected=codex_native_role_plan.config_selection)
+                config_before[target / "config.toml"] = (
+                    native_before.decode("utf-8") if native_before is not None else None)
+            if ownership_before is not None:
+                previous_record = _provider_ownership_module(root).decode_record(
+                    ownership_before.encode("utf-8"), provider,
+                    "global" if mode == "global" else "project")
+                observed = {path: node for image in transaction._expected.values() for path, node in image.items()}
+                for relative, expected in previous_record["files"].items():
+                    selected_path = mutable_anchor / relative
+                    node = observed.get(selected_path)
+                    if not transaction.enabled and any(selected_path == base or base in selected_path.parents for base in transaction.paths):
+                        create_only.destination(Path(relative), allow_leaf_reparse=True)
+                        try:
+                            node = transaction._capture_node(selected_path)
+                        except FileNotFoundError:
+                            node = None
+                    if node is not None and (node.kind != "file" or node.data != expected):
+                        raise ValueError("E_PROVIDER_PAYLOAD_MODIFIED: " + relative)
+                configuration = _provider_configuration_module(root)
+                for relative, spec in previous_record.get("configs", {}).items():
+                    text = config_before.get(mutable_anchor / relative)
+                    if spec["kind"] == "block" and text is not None:
+                        current = configuration.block_digest(text, spec["blockKind"], _claude_document_context)
+                        if current is not None and current != spec["sha256"]:
+                            raise ValueError("E_PROVIDER_CONFIG_MODIFIED: " + relative)
             claude_agents_owner: _CreateOnlyMutablePath | None = None
             claude_skills_owner: _CreateOnlyMutablePath | None = None
             claude_commands_owner: _CreateOnlyMutablePath | None = None
@@ -12139,12 +12656,8 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 )
                 for authority in claude_link_authorities:
                     _assert_global_claude_linked_subroot_authority(root, authority)
-                _apply_claude_skill_projection_plan(
-                    claude_skill_projection_plan,
-                    root / "src.codex" / "skills",
-                    claude_skills_projection_target,
-                    claude_skills_owner,
-                )
+                # The canonical-skills producer above already materialized the
+                # ordinary provider-owned tree; no second projection writer runs.
                 _assert_global_claude_linked_subroot_authority(
                     root, claude_agents_authority
                 )
@@ -12349,15 +12862,15 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             finalized_lead_digest = _finalize_canonical_lead_receipt(
                 canonical_plan, canonical_skills_target, canonical_skills_owner, reclaimed
             )
+            _record_provider_install(root, provider, mode, target, mutable_anchor,
+                                     transaction, create_only, ownership_before,
+                                     config_before, docs_target, mode_target, registration,
+                                     installed_hook_root, hooks_enabled,
+                                     canonical_plan=canonical_plan,
+                                     canonical_target=canonical_skills_target)
             transaction.commit()
-        if provider == "codex" and mode == "global":
-            assert home is not None
-            assert canonical_plan is not None
-            _install_codex_legacy_skill_compatibility(
-                root, home, target, canonical_plan, canonical_skills_target,
-                legacy_codex_skill_migrations, dry_run=args.dry_run,
-                finalized_lead_digest=finalized_lead_digest,
-                canonical_authority=canonical_agents_authority)
+        # Do not synthesize legacy .codex/skills projection links. Native Codex
+        # discovery uses the selected ordinary .agents/skills payload.
         if args.dry_run:
             print("RESULT: DRY-RUN complete (no files modified).")
             return 0

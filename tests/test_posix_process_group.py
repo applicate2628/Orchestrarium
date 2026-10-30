@@ -20,11 +20,11 @@ SCANNER = ROOT / "scripts/universal-hooks/scripts/check-publication-safety.py"
 SOURCE_SCANNERS = (
     SCANNER,
     ROOT / "src.codex/skills/lead/scripts/check-publication-safety.py",
-    ROOT / "src.claude/agents/scripts/check-publication-safety.py",
+    ROOT / 'adapters/claude/agents/scripts/check-publication-safety.py',
 )
 TRACKED_HELPER_PROJECTIONS = (
     ROOT / "src.codex/skills/lead/scripts/process_supervision/posix_process_group.py",
-    ROOT / "src.claude/agents/scripts/process_supervision/posix_process_group.py",
+    ROOT / 'adapters/claude/agents/scripts/process_supervision/posix_process_group.py',
 )
 
 

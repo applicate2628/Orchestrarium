@@ -24,14 +24,14 @@ TRANSPORT_CONSUMERS = {
     "codex-review-loop": ROOT / "src.codex" / "skills" / "review-loop" / "SKILL.md",
     "codex-design-panel": ROOT / "src.codex" / "skills" / "design-panel" / "SKILL.md",
     "codex-consultant": ROOT / "src.codex" / "skills" / "consultant" / "SKILL.md",
-    "claude-dispatch-owner": ROOT / "src.claude" / "agents" / "contracts" / "external-dispatch.md",
-    "claude-worker": ROOT / "src.claude" / "agents" / "external-worker.md",
-    "claude-reviewer": ROOT / "src.claude" / "agents" / "external-reviewer.md",
-    "claude-review-loop": ROOT / "src.claude" / "agents" / "contracts" / "review-loop.md",
-    "claude-design-panel": ROOT / "src.claude" / "agents" / "contracts" / "design-panel.md",
-    "claude-consultant": ROOT / "src.claude" / "agents" / "consultant.md",
-    "claude-review-loop-command": ROOT / "src.claude" / "commands" / "agents-review-loop.md",
-    "claude-design-panel-command": ROOT / "src.claude" / "commands" / "agents-design-panel.md",
+    "claude-dispatch-owner": ROOT / 'adapters/claude' / "agents" / "contracts" / "external-dispatch.md",
+    "claude-worker": ROOT / 'adapters/claude' / "agents" / "external-worker.md",
+    "claude-reviewer": ROOT / 'adapters/claude' / "agents" / "external-reviewer.md",
+    "claude-review-loop": ROOT / 'adapters/claude' / "agents" / "contracts" / "review-loop.md",
+    "claude-design-panel": ROOT / 'adapters/claude' / "agents" / "contracts" / "design-panel.md",
+    "claude-consultant": ROOT / 'adapters/claude' / "agents" / "consultant.md",
+    "claude-review-loop-command": ROOT / 'adapters/claude' / "commands" / "agents-review-loop.md",
+    "claude-design-panel-command": ROOT / 'adapters/claude' / "commands" / "agents-design-panel.md",
     "external-worker-design": ROOT / "docs" / "external-worker-design.md",
     "agents-mode-reference": ROOT / "docs" / "agents-mode-reference.md",
     "verification-discipline": ROOT / "shared" / "references" / "spine" / "verification-and-decision-discipline.md",
@@ -40,15 +40,15 @@ TRANSPORT_CONSUMERS = {
 
 THIN_TRANSPORT_POINTERS = {
     "claude-main": (
-        ROOT / "src.claude" / "CLAUDE.md",
+        ROOT / 'adapters/claude' / "CLAUDE.md",
         "agents/contracts/external-dispatch.md",
-        ROOT / "src.claude" / "agents" / "contracts" / "external-dispatch.md",
+        ROOT / 'adapters/claude' / "agents" / "contracts" / "external-dispatch.md",
     ),
 }
 
 KIMI_TRANSPORT_OWNER_CONTRACTS = (
     ROOT / "src.codex" / "skills" / "lead" / "external-dispatch.md",
-    ROOT / "src.claude" / "agents" / "contracts" / "external-dispatch.md",
+    ROOT / 'adapters/claude' / "agents" / "contracts" / "external-dispatch.md",
 )
 
 SHARED_KIMI_TRANSPORT_REQUIREMENTS = (
@@ -277,7 +277,7 @@ def test_transport_owners_keep_the_full_nonauthorizing_boundary_and_no_retired_f
 
     owners = (
         ROOT / "src.codex" / "skills" / "lead" / "external-dispatch.md",
-        ROOT / "src.claude" / "agents" / "contracts" / "external-dispatch.md",
+        ROOT / 'adapters/claude' / "agents" / "contracts" / "external-dispatch.md",
     )
     for path in owners:
         text = path.read_text(encoding="utf-8")
@@ -294,9 +294,9 @@ def test_transport_owners_keep_the_full_nonauthorizing_boundary_and_no_retired_f
 
     for path in (
         ROOT / "src.codex" / "skills" / "lead" / "external-dispatch.md",
-        ROOT / "src.claude" / "CLAUDE.md",
-        ROOT / "src.claude" / "agents" / "contracts" / "review-loop.md",
-        ROOT / "src.claude" / "agents" / "contracts" / "external-dispatch.md",
+        ROOT / 'adapters/claude' / "CLAUDE.md",
+        ROOT / 'adapters/claude' / "agents" / "contracts" / "review-loop.md",
+        ROOT / 'adapters/claude' / "agents" / "contracts" / "external-dispatch.md",
         ROOT / "shared" / "references" / "spine" / "verification-and-decision-discipline.md",
     ):
         text = path.read_text(encoding="utf-8")
@@ -485,9 +485,9 @@ def test_external_contracts_preserve_owner_guarantees_and_forbid_unvalidated_pro
 
     contracts = (
         ROOT / "src.codex" / "skills" / "lead" / "external-dispatch.md",
-        ROOT / "src.claude" / "agents" / "contracts" / "external-dispatch.md",
+        ROOT / 'adapters/claude' / "agents" / "contracts" / "external-dispatch.md",
         ROOT / "src.codex" / "skills" / "consultant" / "SKILL.md",
-        ROOT / "src.claude" / "agents" / "consultant.md",
+        ROOT / 'adapters/claude' / "agents" / "consultant.md",
     )
     for contract in contracts:
         text = contract.read_text(encoding="utf-8")

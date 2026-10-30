@@ -334,7 +334,7 @@ def test_live_validator_pins_match_the_canonical_skill_body() -> None:
     expected = _canonical_skill_body_sha256(SKILL_PATHS[0])
     validator_paths = (
         ROOT / "src.codex/skills/lead/scripts/validate-skill-pack.py",
-        ROOT / "src.claude/agents/scripts/validate-skill-pack.py",
+        ROOT / 'adapters/claude/agents/scripts/validate-skill-pack.py',
     )
     for path in validator_paths:
         text = path.read_text(encoding="utf-8")

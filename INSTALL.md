@@ -1,4 +1,137 @@
-# Installation
+# Install Orche
+
+## Selected-client copies and uninstall
+
+Codex is the primary host. The common installer lifecycle serves the qualified
+client catalog; other integrations do not own separate install/update/remove logic.
+Each client gets ordinary independent skill files from the same repository source:
+Codex under `.agents/skills`, the existing Claude adapter under `.claude/skills`.
+The installer no longer creates shared installed skill links or updates an
+unselected client's transport.
+
+Preview selected removal, then apply it explicitly:
+
+```sh
+python install.py --clients codex --global --uninstall
+python install.py --clients codex --global --uninstall --apply
+```
+
+The versioned installation record owns exact payload files and structural
+configuration entries, not whole user directories. Modified files, user additions
+and unrelated settings are preserved. A partially preserved payload returns status
+2 with its residual record; conflicting owned configuration fails before removal.
+No record means no inferred deletion authority. The bundled interpreter is retained;
+automatic last-consumer runtime reclamation is not implemented.
+
+### Legacy shared skill links
+
+Explicit migration is separate from installation. Preview selected known legacy
+skill links before conversion:
+
+```sh
+python install.py --clients claude --global --materialize-legacy-skills
+python install.py --clients claude --global --materialize-legacy-skills --apply
+```
+
+Conversion uses the existing transaction owner, preserves the referent and user
+extras, and restores original link objects on an ordinary failed transaction.
+For Codex, the ordinary source already belongs to that client: obsolete
+`.codex/skills` aliases are retired rather than duplicated. A secondary client
+receives its own independent ordinary copy.
+It does not log in, launch models, install a new version, or grant uninstall
+ownership over arbitrary legacy files. Unknown/external referents and nested links
+are refused. An unselected client that still depends on shared storage blocks
+mutation of that storage; select and migrate that consumer first.
+
+For an old shared installation, conversion alone is not an SDK upgrade. After
+conversion, run the normal installer for that same selected secondary client
+(for example, `python install.py --clients claude --global`). This installs its
+own transport and records the independent layout. Only then update Codex. Old
+receipts are carried only for authenticated converted skill trees; unknown or
+modified files do not acquire removal authority through conversion.
+
+Fresh-install/uninstall and the migrated secondary-client roundtrip pass on
+Windows (Python 3.15.2) and Linux (Python 3.12.14). Exact Codex alias retirement
+and rollback pass on Linux; the corresponding final Windows run is pending.
+These scoped results do not qualify every global layout, SDK containment, macOS
+or release-publication requirement.
+
+## Bundled Python entry and local assembly
+
+The public product is Orche (formerly Orchestrarium). Existing technical receipt,
+configuration and ownership identifiers remain unchanged. The source installer
+still supports the established Python entry points; the new distribution layer
+does not rewrite their file/update/rollback rules.
+
+The common root selector supports `--list-clients` and explicit `--clients codex
+claude`, followed by the existing installer flags. Without an explicit selection
+an interactive console offers multiple selection, the real installer dry-run and
+confirmation. Noninteractive input without `--clients` refuses without applying;
+blank/invalid menu input does not silently select every client. Only currently
+supported Codex and Claude pack integrations are listed.
+
+Local bundle assembly is implemented by `scripts/distribution/build.py`. Supply a
+previously verified, dependency-complete Python tree, an absent output directory
+outside the source/runtime trees, a target tuple and an explicit release label:
+
+```sh
+python scripts/distribution/build.py --runtime /path/to/verified/python \
+  --output /path/to/orche-bundle --target linux-x64 --release development
+```
+
+`development` denotes an unpublished local build, not a chosen product version
+or Git tag. This command does not download, sign, publish or activate a release.
+It preserves interpreter-relative layout and copies the installer/resources plus
+the Orche mascot. Build interruption leaves an incomplete output for diagnosis;
+a completed `bundle.json` is written last. Existing output is never overwritten.
+
+The bundle's `orche` shell entry or `orche.ps1` Windows entry invokes only its
+bundled Python and shared `launch.py`. All manifest paths are relative to the
+bundle, independent of caller CWD. The shared entry rejects a missing/mismatched
+interpreter/target and normalizes Python-specific environment for child processes;
+there is no system-Python fallback. It delegates to the unchanged pack installer:
+
+```sh
+./orche --clients codex --target /path/to/project --allow-unsafe-target --dry-run
+```
+
+Before actual apply, retain the complete bundle in its permanent location: current
+hooks record the installer's absolute interpreter path. The shared launcher offers
+an explicit create-only retention operation, using the same bundle builder:
+
+```sh
+./orche --retain-to /absolute/permanent/orche/development --clients codex \
+  --target /path/to/project --allow-unsafe-target
+```
+
+`--retain-to` must precede installer arguments. It copies the complete payload,
+then restarts through the retained Python before invoking the pack installer.
+The destination must be absent and absolute; existing releases are never replaced
+or automatically removed. The copy is an explicit effect even if the forwarded
+installer is in dry-run mode. For repeat installs, invoke the retained `orche`
+with `--permanent-runtime` instead of `--retain-to`. This explicit acknowledgement
+means the selected runtime will be kept while its installed hooks depend on it.
+Mutating apply without either lifetime choice is refused; listing/help and dry-run
+need no placement acknowledgement. An interrupted copy stays for diagnosis and has no
+completed manifest. Moving/deleting a retained location after apply requires
+explicit re-registration; relative archive paths alone do not make that safe.
+Automatic retained-release placement, remote authenticity verification and npm/irm
+acquisition are not implemented. Do not use this as an authenticated internet
+bootstrap.
+
+Local assembly and retention require verified, quiescent source/runtime trees and
+an exclusively controlled destination-parent hierarchy throughout copying and
+launch. Static root/parent links and Windows reparse points are refused; ordinary
+POSIX payload symlinks must stay inside the payload. Copying preserves links it
+observes for final validation, but its link check and open are not atomic. Any
+concurrent leaf or ancestor replacement is outside this local contract; stronger
+confinement would require native-handle-bound acquisition/publication.
+
+Linux local no-hook installation is exercised separately from SDK native process
+containment, which remains Windows-only. Windows bundle execution awaits native
+tests; macOS is documentation/static-only because no test machine is available.
+The builder's target list does not imply those platform checks have passed.
+
 
 This monorepo ships a Python-owned root installer (`install.py`) plus the thin POSIX launcher `install.sh`. They require Python 3.11 or newer, offer the supported Codex and Claude Code packs, then forward arguments to the matching pack-specific installers in the `scripts/` directory.
 
@@ -99,10 +232,10 @@ Use `python scripts/install-codex.py` or its thin POSIX launcher `scripts/instal
 Notes:
 
 - Project-level Codex installs use `.agents/skills/` plus the project root `AGENTS.md`.
-- Global Codex installs keep `$HOME/.agents/skills/` as the one canonical skill tree and preserve `~/.codex/skills/` as a compatibility entrypoint through per-Orchestrarium-skill directory projections. The installer never replaces the legacy `skills/` root or unrelated names. An absent owned name is projected automatically; an existing ordinary same-name tree remains untouched and makes compatibility non-PASS unless the operator supplies the exact repeatable `--migrate-legacy-skill <name>` flag. That flag is global-Codex-only: it moves only the named tree to `.codex/orchestrarium-legacy-skills/<name>/<tree-sha256>` before creating the projection. Unknown, duplicate, unsafe, local, or Claude uses fail before writes.
-- Global Codex and Claude installs share one installer-owned canonical Lead receipt at `$HOME/.agents/skills/.orchestrarium-lead-receipt.v1.json`. It records the verified authored Lead projection, excluding ordinary derived runtime bytecode; it does not attest to cache authenticity or ownership. Later clean versions upgrade without adding another source hash constant; a customized authored tree or invalid receipt still refuses. `--dry-run --global` checks admission without writing. An unlisted pre-receipt Lead tree needs a one-time explicit `--replace-unreceipted-lead-sha256 tree-v2:<observed-digest>` on a global install; obtain that digest from controlled selected-tree evidence. This option selects the exact observed authored projection for replacement, does not certify it as stock, cannot override a present receipt, and does not change `--force`. Preserve a paired backup of Lead and its receipt before a real migration: an older installer cannot be assumed to downgrade an already committed receipt-bearing install. Project-target installs do not use this receipt or option.
+- Codex owns its ordinary `.agents/skills/` payload. New installs do not synthesize `.codex/skills/` compatibility links. The historical `--migrate-legacy-skill` projection-creation option is retired; use the explicit legacy-copy migration preview above.
+- Each client's own skill root holds its Lead and non-Lead receipts. Clean receipted trees update through the same canonical materializer; user extras remain outside managed-member ownership. Global-only exact unreceipted adoption flags remain separate admission controls. Preserve the tree and receipts together for downgrade/recovery.
 - Global Codex and Claude installs also share one non-Lead receipt map at `$HOME/.agents/skills/.orchestrarium-nonlead-skills-receipt.v1.json`. New entries bind each canonical skill to its complete managed-member manifest. Changes to managed members, malformed maps, missing entries and removed source skills fail closed; unrelated user files remain protected. Legacy string digests require independent factory structure and are not upgraded to ownership proof merely by being read. A legacy unlisted tree with no map needs one reviewed `--replace-unreceipted-skill-sha256 NAME=tree-v2:SHA256` grant per affected skill; the global-only flag is repeatable and `--dry-run` reports exact names, digests, and replacement count without writing. Wrong, unused, duplicate, Lead, or project-target grants refuse; `--force` does not bypass this rule. Preserve a paired tree/map backup before a real migration or downgrade. The canonical tree and map share the main installer transaction, but optional legacy `.codex/skills` compatibility still runs in its existing separate post-commit pass.
-- The common `$vcpkg-ports-updater` and `$vcpkg-builder` skills cover admitted vcpkg overlay synchronization, named-root inventory sweeps, and separately admitted runtime build gates. Codex installs materialize their canonical trees through the existing skill iterator; exact reinstall is a no-op, and a differing same-name tree is admitted only by a matching global receipt, a historical stock predecessor, or a one-time exact unreceipted grant. Claude carries provider-neutral body/reference sources and uses the existing shared canonical projection at install time; it does not copy Codex-only `agents/openai.yaml` metadata into the Claude source tree.
+- The common `$vcpkg-ports-updater` and `$vcpkg-builder` skills cover admitted vcpkg overlay synchronization, named-root inventory sweeps, and separately admitted runtime build gates. Codex installs materialize their canonical trees through the existing skill iterator; exact reinstall is a no-op, and a differing same-name tree is admitted only by a matching global receipt, a historical stock predecessor, or a one-time exact unreceipted grant. Claude carries provider-neutral body/reference sources and receives an independent copy of the same canonical source at install time; it does not copy Codex-only `agents/openai.yaml` metadata into the Claude source tree.
 - The common knowledge-style [`$post-spawn-cleanup`](src.codex/skills/post-spawn-cleanup/SKILL.md) uses the same canonical skill iterator, non-Lead receipt and existing provider compatibility/discovery paths; it adds no standalone install target or cleanup process. Its [conditional Windows reference](src.codex/skills/post-spawn-cleanup/references/windows-native-mcp.md) is conditional guidance for the selected endpoint and capabilities. Creator-bound resource ownership and actual teardown readback remain required: a ProcessRunner Job covers only the processes it launched, not unknown native Model Context Protocol (MCP) servers. Source availability is not installed discovery; receive the selected canonical tree, receipt and compatibility through the normal installer owner.
 - The common `$generalize-from-instance` skill turns fixture-, geometry-, dataset-, user-case-, or one-off behavior into an owner-level general contract while retaining the original case only as regression evidence.
 - The `$implementation-to-theory` utility reconstructs the theory, numerical algorithms, and derivation behind existing scientific code while tracing equations to implementation; importing it does not authorize solver changes, expensive computations, or publication.
@@ -164,8 +297,8 @@ Notes:
 - Full mode tables live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).
 - After first-time Claude project install, run `/agents-init-project` in Claude Code to write `## Project policies` in `.claude/CLAUDE.md` and review or update the installed default `.claude/.agents-mode.yaml`.
 - If a repo-local lane policy explicitly asks for consultant input at closeout, it follows the configured `consultantMode`. `consultantMode: disabled` waives consultant closeout instead of blocking the batch, and any requested consultant sweep stays advisory-only rather than replacing review or human gates.
-- The design-panel technique installs as `~/.claude/agents/contracts/design-panel.md` + `~/.claude/commands/agents-design-panel.md` (global) or the `<project>/.claude/` equivalents (project), source `src.claude/agents/contracts/design-panel.md` + `src.claude/commands/agents-design-panel.md`. No dedicated panel-state validator is installed; the pack validator checks only file presence and invariant markers (`DP1`-`DP8`).
-- Validation commands: `python src.claude/agents/scripts/validate-skill-pack.py` or its POSIX launcher `bash src.claude/agents/scripts/validate-skill-pack.sh`.
+- The design-panel technique installs as `~/.claude/agents/contracts/design-panel.md` + `~/.claude/commands/agents-design-panel.md` (global) or the `<project>/.claude/` equivalents (project), source `adapters/claude/agents/contracts/design-panel.md` + `adapters/claude/commands/agents-design-panel.md`. No dedicated panel-state validator is installed; the pack validator checks only file presence and invariant markers (`DP1`-`DP8`).
+- Validation commands: `python adapters/claude/agents/scripts/validate-skill-pack.py` or its POSIX launcher `bash adapters/claude/agents/scripts/validate-skill-pack.sh`.
 
 ## Multi-pack setup
 
@@ -197,7 +330,7 @@ Reference directories are development-only and are not installed:
 - `shared/references/`
 - `docs/`
 - `references-codex/`
-- `references-claude/`
+- `adapters/claude/references/`
 
 
 ## Post-install customization

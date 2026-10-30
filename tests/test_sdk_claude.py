@@ -285,7 +285,7 @@ def test_read_tool_uses_exact_arguments_and_current_authority():
 def test_full_governance_uses_owned_file_not_windows_argv_and_preserves_native_base():
     root = Path(__file__).resolve().parents[1]
     instructions = (root / "shared/AGENTS.shared.md").read_text(encoding="utf-8")
-    instructions += "\n" + (root / "src.claude/CLAUDE.md").read_text(encoding="utf-8")
+    instructions += "\n" + (root / 'adapters/claude/CLAUDE.md').read_text(encoding="utf-8")
     assert len(instructions.encode("utf-16-le")) // 2 > 32_767
     result, client = execute(instructions=lambda req: instructions)
     assert result.status == "completed" and client.instructions == instructions

@@ -23,7 +23,7 @@ CANONICAL = ROOT / "shared/references/architecture-pattern-applicability.md"
 RUSSIAN = ROOT / "shared/references/ru/architecture-pattern-applicability.md"
 VALIDATOR_DECLARATIONS = (
     ROOT / "src.codex/skills/lead/scripts/validate-skill-pack.py",
-    ROOT / "src.claude/agents/scripts/validate-skill-pack.py",
+    ROOT / 'adapters/claude/agents/scripts/validate-skill-pack.py',
 )
 FAKE_CODEX_HOOKS_HOST = ROOT / "tests/fixtures/fake_codex_hooks_host.py"
 
@@ -79,11 +79,14 @@ def test_installed_validator_scope_excludes_source_only_maintainer_checks() -> N
             assert not any(
                 str(value).startswith(source_only_prefixes) for value in action
             ), declaration
-            assert action[:2] != ("direct", "curated_registry"), declaration
             assert not any(
                 str(value).startswith("src.claude/skills/lead/")
                 for value in action
             ), declaration
+        # Registry validation reads @PACK/CLAUDE.md, not a source-only registry.
+        # Its runtime mutation oracle covers missing/extra/empty provider clauses.
+        registry_actions = [a for a in all_actions if a[:2] == ("direct", "curated_registry")]
+        assert len(registry_actions) == int(module.PROVIDER == "claude"), declaration
     codex = _load_validator_declaration(VALIDATOR_DECLARATIONS[0])
     codex_all_actions = next(actions for scope, actions in codex.ACTIONS if scope == "all")
     assert not any(
@@ -136,14 +139,14 @@ CORRESPONDENCE_INVENTORY = (
 BLOCKS = {
     "LEAD-ROUTING": (
         ROOT / "src.codex/skills/lead/SKILL.md",
-        ROOT / "src.claude/skills/lead/SKILL.md",
+        ROOT / 'adapters/claude/skills/lead/SKILL.md',
     ),
     "ARCHITECT-DISPOSITION": (
         ROOT / "src.codex/skills/architect/SKILL.md",
     ),
     "ARCHITECTURE-REVIEW": (
         ROOT / "src.codex/skills/architecture-reviewer/SKILL.md",
-        ROOT / "src.claude/agents/architecture-reviewer.md",
+        ROOT / 'adapters/claude/agents/architecture-reviewer.md',
     ),
 }
 
@@ -151,9 +154,9 @@ NON_OWNING_ROLES = (
     ROOT / "src.codex/skills/backend-engineer/SKILL.md",
     ROOT / "src.codex/skills/data-engineer/SKILL.md",
     ROOT / "src.codex/skills/reliability-engineer/SKILL.md",
-    ROOT / "src.claude/agents/backend-engineer.md",
-    ROOT / "src.claude/agents/data-engineer.md",
-    ROOT / "src.claude/agents/reliability-engineer.md",
+    ROOT / 'adapters/claude/agents/backend-engineer.md',
+    ROOT / 'adapters/claude/agents/data-engineer.md',
+    ROOT / 'adapters/claude/agents/reliability-engineer.md',
 )
 
 SEMANTIC_RECORD = re.compile(
@@ -341,7 +344,7 @@ def test_candidate_evidence_and_wire_order_stay_applicability_bound() -> None:
     architect = _read(BLOCKS["ARCHITECT-DISPOSITION"][0], FAILURE_IDS[1])
     assert "actual wire shape and codec" in architect
     assert "field order only when protocol semantics require it" in architect
-    assert not (ROOT / "src.claude/skills/architect/SKILL.md").exists()
+    assert not (ROOT / 'adapters/claude/skills/architect/SKILL.md').exists()
 
 
 def test_source_projection_parity() -> None:
@@ -494,10 +497,10 @@ def test_canonical_runtime_claim_does_not_overstate_static_delivery() -> None:
 
 def test_claude_architect_source_composition_has_one_universal_body() -> None:
     universal = ROOT / "src.codex/skills/architect/SKILL.md"
-    duplicate = ROOT / "src.claude/skills/architect/SKILL.md"
-    wrapper = ROOT / "src.claude/agents/architect.md"
-    inline_policy = ROOT / "src.claude/CLAUDE.md"
-    validator = ROOT / "src.claude/agents/scripts/validate-skill-pack.py"
+    duplicate = ROOT / 'adapters/claude/skills/architect/SKILL.md'
+    wrapper = ROOT / 'adapters/claude/agents/architect.md'
+    inline_policy = ROOT / 'adapters/claude/CLAUDE.md'
+    validator = ROOT / 'adapters/claude/agents/scripts/validate-skill-pack.py'
 
     assert universal.is_file()
     assert not duplicate.exists()
@@ -507,7 +510,7 @@ def test_claude_architect_source_composition_has_one_universal_body() -> None:
 
 
 def test_claude_validator_maps_architect_apat_to_each_layout_owner() -> None:
-    validator = ROOT / "src.claude/agents/scripts/validate-skill-pack.py"
+    validator = ROOT / 'adapters/claude/agents/scripts/validate-skill-pack.py'
     validation = subprocess.run(
         [sys.executable, "-B", str(validator), "--root", str(ROOT)],
         cwd=ROOT,
@@ -537,16 +540,22 @@ def test_claude_validator_maps_architect_apat_to_each_layout_owner() -> None:
             if architect_label in action[-1]
         )
 
-    source_actions = architect_actions("dev_repo")
-    installed_actions = architect_actions("installed")
-    assert len(source_actions) == len(installed_actions) == 8
-    assert {action[1] for action in source_actions} == {
-        "@ROOT/src.codex/skills/architect/SKILL.md"
-    }
-    assert {action[1] for action in installed_actions} == {
-        "@PACK/skills/architect/SKILL.md"
-    }
-    assert not architect_actions("all")
+    # The owner now resolves the same @SKILLS contract for source and installed
+    # layouts. Do not require two copied action lists with hardcoded paths.
+    common_actions = architect_actions("all")
+    assert len(common_actions) == 8
+    assert {action[1] for action in common_actions} == {"@SKILLS/architect/SKILL.md"}
+    assert not architect_actions("dev_repo")
+    assert not architect_actions("installed")
+    layout = declaration._ENGINE.detect_layout(validator, "claude", ROOT)
+    resolved = declaration._ENGINE.Validator(layout)
+    try:
+        assert resolved.path("@SKILLS/architect/SKILL.md") == (
+            ROOT / "src.codex/skills/architect/SKILL.md"
+        )
+    finally:
+        resolved.close()
+
 
 
 @pytest.mark.parametrize(
@@ -591,7 +600,7 @@ def test_installed_parity_and_validator(
 ) -> None:
     declaration = source_roles[0].parent / "scripts/validate-skill-pack.py"
     if provider == "claude":
-        declaration = ROOT / "src.claude/agents/scripts/validate-skill-pack.py"
+        declaration = ROOT / 'adapters/claude/agents/scripts/validate-skill-pack.py'
     declaration_text = _read(declaration, FAILURE_IDS[5])
     for marker in ("APAT-G04-PROVIDER-PARITY", "APAT-G05-INSTALLED-PARITY"):
         assert marker in declaration_text, (
