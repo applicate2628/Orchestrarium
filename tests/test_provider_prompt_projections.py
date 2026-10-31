@@ -809,18 +809,21 @@ def _tree_bytes(root: Path) -> dict[str, bytes]:
 def _linked_global_claude(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, installer
 ) -> tuple[Path, Path]:
-    """Create the only admitted linked-subroot shape over a seeded pack."""
+    """Seed both selected clients before exercising their paired global projections."""
 
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("HOME", str(home))
+    from tests.fixtures.runtime_capabilities import codex_hook_host_env
+    monkeypatch.setenv("CODEX_BIN", codex_hook_host_env(os.environ, ROOT)["CODEX_BIN"])
+    assert installer.install("codex", ["--global", "--no-hypothesis-hook"]) == 0
     assert installer.install("claude", ["--global", "--no-hypothesis-hook"]) == 0
     logical = home / ".claude"
     backing = tmp_path / "linked-claude"
     backing.mkdir()
     try:
-        for name in ("agents", "skills", "commands"):
+        for name in ("agents", "commands"):
             destination = backing / name
             shutil.move(str(logical / name), str(destination))
             os.symlink(destination, logical / name, target_is_directory=True)
@@ -2851,11 +2854,13 @@ def test_global_claude_declared_linked_subroots_are_bound_and_dry_run_is_read_on
 ) -> None:
     installer = _load_installer()
     logical, backing = _linked_global_claude(tmp_path, monkeypatch, installer)
-    before = {name: _tree_bytes(backing / name) for name in ("agents", "skills", "commands")}
+    before = {name: _tree_bytes(backing / name) for name in ("agents", "commands")}
     links = {name: os.readlink(logical / name) for name in before}
+    ordinary_skills = _tree_bytes(logical / "skills")
+    assert not (logical / "skills").is_symlink()
 
     observed = {}
-    for name in ("agents", "skills", "commands"):
+    for name in ("agents", "commands"):
         resolved, authority = installer._resolve_global_claude_linked_subroot(
             ROOT, logical, "global", name
         )
@@ -2874,6 +2879,22 @@ def test_global_claude_declared_linked_subroots_are_bound_and_dry_run_is_read_on
     assert {name: _tree_bytes(backing / name) for name in before} == before
     for authority in observed.values():
         installer._assert_global_claude_linked_subroot_authority(ROOT, authority)
+
+    assert _tree_bytes(logical / "skills") == ordinary_skills
+    # A linked skills root is a separate, explicitly refused migration input.
+    shutil.move(str(logical / "skills"), str(backing / "skills"))
+    os.symlink(backing / "skills", logical / "skills", target_is_directory=True)
+    failures = []
+    render = installer._installer_failure_text
+    def capture_failure(error):
+        failures.append(str(error))
+        return render(error)
+    monkeypatch.setattr(installer, "_installer_failure_text", capture_failure)
+    assert installer.install("claude", ["--global", "--dry-run", "--no-hypothesis-hook"]) == 1
+    assert any(message.startswith("E_PROVIDER_SKILLS_MIGRATION_REQUIRED:") for message in failures)
+    assert os.readlink(logical / "skills") == str(backing / "skills")
+    assert _tree_bytes(backing / "skills") == ordinary_skills
+    assert {name: _tree_bytes(backing / name) for name in before} == before
 
 
 def test_linked_claude_subroot_is_rejected_outside_global_scope(
@@ -2912,16 +2933,19 @@ def test_linked_claude_subroot_rollback_restores_resolved_agent_bytes(
     marker = backing / "agents" / "consultant.md"
     original = marker.read_bytes()
     marker.write_bytes(b"custom linked agent before transaction\n")
-    links = {name: os.readlink(logical / name) for name in ("agents", "skills", "commands")}
+    links = {name: os.readlink(logical / name) for name in ("agents", "commands")}
     sync_tree = installer._sync_tree
+    injected = []
 
     def fail_after_commands(source: Path, target: Path, dry_run: bool, **kwargs) -> None:
         sync_tree(source, target, dry_run, **kwargs)
         if source.name == "commands":
+            injected.append(source.name)
             raise RuntimeError("injected linked-subroot failure")
 
     monkeypatch.setattr(installer, "_sync_tree", fail_after_commands)
     assert installer.install("claude", ["--global", "--no-hypothesis-hook"]) == 1
+    assert injected == ["commands"]
     assert marker.read_bytes() == b"custom linked agent before transaction\n"
     assert original != marker.read_bytes()
     assert {name: os.readlink(logical / name) for name in links} == links

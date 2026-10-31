@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-31
 
+- Installer regression fixtures now explicitly seed both clients when checking paired projections, preserve ordinary per-client skills, and separately verify refusal of legacy linked skills. Rollback tests require the injected failure to execute instead of accepting an earlier refusal as success. Metadata fixtures create their disposable parent in a fresh checkout, so clearing scratch does not break test setup.
+
 - Windows owned-entry disposal now allows up to 250 ms for a previously issued native deletion to finish when another shared handle is briefly open. The wait only observes absence: it never repeats deletion, adopts a replacement or suppresses a persistent hold or OS error. This bounds transient cleanup failures without weakening the deletion proof; it does not establish the earlier intermittent installer failure as resolved.
 
 - Installation guidance now distinguishes the advisory scratch scan from the disposal proof and records the unresolved intermittent Windows backup-settlement qualification result. Focused passing checks do not silently certify the entire installer or unavailable historical-link scenarios.

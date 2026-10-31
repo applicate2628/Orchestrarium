@@ -267,6 +267,7 @@ class CopyMetadataTests(unittest.TestCase):
         self.assertFalse(participant.unknown)
 
     def setUp(self):
+        (ROOT / ".scratch").mkdir(exist_ok=True)
         self.temporary = tempfile.TemporaryDirectory(prefix="metadata-test-", dir=ROOT / ".scratch")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -2474,6 +2475,7 @@ class CopyMetadataTests(unittest.TestCase):
 
 class RetentionAndAnchorTests(unittest.TestCase):
     def setUp(self):
+        (ROOT / ".scratch").mkdir(exist_ok=True)
         self.temporary = tempfile.TemporaryDirectory(prefix="retention-test-", dir=ROOT / ".scratch")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -2610,6 +2612,7 @@ class RetentionAndAnchorTests(unittest.TestCase):
 
 class BytePublicationTests(unittest.TestCase):
     def setUp(self):
+        (ROOT / ".scratch").mkdir(exist_ok=True)
         self.temporary = tempfile.TemporaryDirectory(prefix="byte-test-", dir=ROOT / ".scratch")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -2762,6 +2765,7 @@ class BytePublicationTests(unittest.TestCase):
 
 class CrossOwnerRetentionTests(unittest.TestCase):
     def setUp(self):
+        (ROOT / ".scratch").mkdir(exist_ok=True)
         self.temporary = tempfile.TemporaryDirectory(prefix="dual-owner-test-", dir=ROOT / ".scratch")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -2851,6 +2855,7 @@ class CrossOwnerRetentionTests(unittest.TestCase):
 
 class CreatedDirectorySnapshotHandoffTests(unittest.TestCase):
     def setUp(self):
+        (ROOT / ".scratch").mkdir(exist_ok=True)
         self.temporary = tempfile.TemporaryDirectory(prefix="creator-handoff-", dir=ROOT / ".scratch")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
