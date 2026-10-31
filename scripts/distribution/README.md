@@ -11,6 +11,20 @@ absolute Python with an argument sequence and no shell, waits for it, and return
 its actual exit status. This preserves spaces/Unicode and avoids the Windows CRT
 `execve` quoting/overlay behavior. It is not a new hostile-process containment claim.
 
+## Current installation model
+
+Selected clients receive independent ordinary copies. New installations do not
+use a shared skill directory or client-to-client projection links. Explicit legacy
+migration converts only the selected client's historical links; uninstall uses
+that client's ownership records and must not remove another client's files.
+
+The symbolic-link qualification below is historical evidence and remains relevant
+to legacy restoration paths. It is not a requirement to create links in a fresh
+copy-based installation, nor evidence that the final internet distribution is
+qualified. The retained interpreter lifetime is a separate concern: registered
+hooks may still reference it, so removing client copies does not authorize runtime
+garbage collection.
+
 ## Current reproducibility record
 
 `locks/linux-x64-cp315.txt` freezes the 41 binary wheels actually tested on Linux

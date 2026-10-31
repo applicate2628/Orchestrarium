@@ -59,7 +59,7 @@ def test_old_shared_claude_projection_blocks_codex_mutation(tmp_path):
     peer = tmp_path / ".claude/skills"
     peer.parent.mkdir()
     INSTALL._create_directory_projection(shared, peer, prefer_junction=os.name == "nt")
-    with pytest.raises(ValueError, match="E_SHARED_LAYOUT_MIGRATION_REQUIRED"):
+    with pytest.raises(INSTALL._InstallFailure, match="E_SHARED_LAYOUT_MIGRATION_REQUIRED"):
         INSTALL._require_provider_copy_isolation(ROOT, "codex", "target", tmp_path / ".codex", tmp_path)
     assert shared.is_dir()
     assert os.path.samefile(shared, peer)
@@ -71,7 +71,7 @@ def test_alias_with_noncanonical_name_still_blocks_shared_storage_removal(tmp_pa
     alias = tmp_path / ".claude/skills/my-personal-alias"
     alias.parent.mkdir(parents=True)
     INSTALL._create_directory_projection(shared, alias, prefer_junction=os.name == "nt")
-    with pytest.raises(ValueError, match="E_SHARED_LAYOUT_MIGRATION_REQUIRED"):
+    with pytest.raises(INSTALL._InstallFailure, match="E_SHARED_LAYOUT_MIGRATION_REQUIRED"):
         INSTALL._require_provider_copy_isolation(ROOT, "codex", "target", tmp_path / ".codex", tmp_path)
 
 
@@ -82,5 +82,60 @@ def test_own_legacy_alias_requires_migration_before_uninstall(tmp_path):
     alias.parent.mkdir()
     INSTALL._create_directory_projection(shared, alias, prefer_junction=os.name == "nt")
     INSTALL._require_provider_copy_isolation(ROOT, "codex", "target", tmp_path / ".codex", tmp_path)
-    with pytest.raises(ValueError, match="E_SHARED_LAYOUT_MIGRATION_REQUIRED"):
+    with pytest.raises(INSTALL._InstallFailure, match="E_SHARED_LAYOUT_MIGRATION_REQUIRED"):
         INSTALL._require_provider_copy_isolation(ROOT, "codex", "target", tmp_path / ".codex", tmp_path, removing=True)
+
+
+def test_uninstall_removes_empty_owned_directories_in_one_apply(tmp_path):
+    project, first, second, receipt = prepare(tmp_path)
+    files = {p.relative_to(project).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+             for p in (first, second)}
+    directories = [".claude/skills", ".claude/skills/alpha", ".claude/skills/beta"]
+    receipt.write_bytes(CODEC.encode_record(files, "claude", "project", configs={},
+                                          directories=directories))
+    result = INSTALL.install("claude", ["--target", str(project),
+        "--allow-unsafe-target", "--uninstall", "--apply"])
+    assert result == 0
+    assert not (project / ".claude/skills").exists()
+    assert CODEC.decode_record(receipt.read_bytes(), "claude", "project")["directories"] == []
+
+
+@pytest.mark.parametrize("foreign_kind", ["file", "directory", "modified-owned"])
+def test_directory_cleanup_preserves_foreign_members(tmp_path, foreign_kind):
+    project, first, second, receipt = prepare(tmp_path)
+    files = {p.relative_to(project).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+             for p in (first, second)}
+    receipt.write_bytes(CODEC.encode_record(files, "claude", "project", configs={},
+        directories=[".claude/skills", ".claude/skills/alpha", ".claude/skills/beta"]))
+    foreign = first if foreign_kind == "modified-owned" else first.parent / "user-content"
+    if foreign_kind == "directory":
+        foreign.mkdir()
+    else:
+        foreign.write_bytes(b"user bytes")
+    result = INSTALL.install("claude", ["--target", str(project),
+        "--allow-unsafe-target", "--uninstall", "--apply"])
+    assert result == (2 if foreign_kind == "modified-owned" else 0)
+    assert foreign.is_dir() if foreign_kind == "directory" else foreign.read_bytes() == b"user bytes"
+    assert not second.parent.exists()
+    assert first.parent.is_dir()
+
+
+def test_owned_directory_retention_rolls_back_on_receipt_failure(tmp_path, monkeypatch):
+    project, first, second, receipt = prepare(tmp_path)
+    files = {p.relative_to(project).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+             for p in (first, second)}
+    receipt.write_bytes(CODEC.encode_record(files, "claude", "project", configs={},
+        directories=[".claude/skills", ".claude/skills/alpha", ".claude/skills/beta"]))
+    before = {p: p.read_bytes() for p in (first, second, receipt)}
+    identities = {p: (p.stat().st_dev, p.stat().st_ino) for p in (first, second)}
+    original = INSTALL._CreateOnlyMutablePath.replace_file_atomic
+    def fail_receipt(self, relative, *args, **kwargs):
+        if relative.name == receipt.name:
+            raise RuntimeError("injected receipt failure")
+        return original(self, relative, *args, **kwargs)
+    monkeypatch.setattr(INSTALL._CreateOnlyMutablePath, "replace_file_atomic", fail_receipt)
+    result = INSTALL.install("claude", ["--target", str(project),
+        "--allow-unsafe-target", "--uninstall", "--apply"])
+    assert result == 1
+    assert {p: p.read_bytes() for p in before} == before
+    assert {p: (p.stat().st_dev, p.stat().st_ino) for p in identities} == identities

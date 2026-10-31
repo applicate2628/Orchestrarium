@@ -134,8 +134,37 @@ def run(backend, root: Path, provider: str, args) -> int:
                 owner.remove_exact_file(Path(relative), backend.hashlib.sha256(payload).hexdigest())
             else:
                 owner.replace_file_atomic(Path(relative), after, fsync="required")
+        # Retain maximal wholly-owned trees before individual file tombstones
+        # are created. Otherwise those rollback artifacts make every containing
+        # directory appear nonempty until commit, leaving empty install trees.
+        owned_directories = set(record.get("directories", []))
+        removable_files = set(remove)
+        removed_roots = []
+        for relative in sorted(owned_directories, key=lambda value: (len(Path(value).parts), value)):
+            path = anchor / relative
+            if any(base == path or base in path.parents for base in removed_roots):
+                continue
+            owner.destination(Path(relative), allow_leaf_reparse=True)
+            image = transaction._observe(path)
+            if not image or image[path].kind != "directory":
+                continue
+            eligible = True
+            for member, node in image.items():
+                name = member.relative_to(anchor).as_posix()
+                if node.kind == "directory":
+                    eligible = name in owned_directories
+                else:
+                    eligible = (node.kind == "file" and name in removable_files
+                                and node.data == record["files"].get(name))
+                if not eligible:
+                    break
+            if eligible:
+                owner.retain_path(Path(relative), image)
+                removed_roots.append(path)
         for relative in remove:
-            owner.remove_exact_file(Path(relative), record["files"][relative])
+            path = anchor / relative
+            if not any(base in path.parents for base in removed_roots):
+                owner.remove_exact_file(Path(relative), record["files"][relative])
         remaining_directories = []
         for relative in sorted(record.get("directories", []), key=lambda value: (-len(Path(value).parts), value)):
             path = owner.destination(Path(relative), allow_leaf_reparse=True)
