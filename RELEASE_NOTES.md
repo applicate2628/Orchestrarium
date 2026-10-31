@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-31
 
+- Full-history publication scans now have a finite 900-second work budget and a 960-second captured-invocation ceiling. Repeated baseline measurements required 485–530 seconds, so the former 240/300-second bounds rejected otherwise evaluable history before review could finish. Object/byte limits, detector coverage, identity checks, cancellation and cleanup-attempt bounds remain unchanged; unresolved findings still block publication. Incremental pushes do not wait for the ceiling.
+
 - Frozen model-routing migration fixtures now preserve their exact historical bytes across Git checkouts, including core.autocrlf=true. The existing digest manifest is unchanged; a real checkout regression prevents newline conversion from producing false migration failures. The overview documentation test now checks its link to the detailed installation contract instead of requiring a duplicate policy paragraph. No model profile or runtime setting is changed.
 
 ## 2026-10-30

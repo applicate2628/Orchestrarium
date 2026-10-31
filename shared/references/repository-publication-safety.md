@@ -91,10 +91,20 @@ The scanner retains blob sizes and content digests, then reacquires one body at 
 time through its existing bounded reader. Reacquired object identity, type, size
 and digest must agree before scanning. Every selected commit/path/blob subject
 remains covered. The 64 MiB individual-blob limit, 64 MiB raw-tree-cache limit,
-object/subject bounds, 240-second scan deadline and 300-second captured invocation
+object/subject bounds, 900-second scan deadline and 960-second captured invocation
 bound remain separate limits. Metadata, decoded text and process overhead still
 consume RAM. Deadline checks also surround each blob's detector pass; a refusal
 or unfinished scan never becomes publication credit.
+
+The finite time budgets follow full-history Windows measurements of approximately
+485, 519 and 530 seconds for the reference graph above, with about 301 MB peak
+working set in the latest run. The 900-second scanner budget leaves approximately
+70% headroom over the slowest observed scan; the captured invocation adds 60
+seconds of supervision margin. This is a measured operating allowance, not an
+optimality claim or a guarantee that every 2 GiB history finishes. Per-request
+reader timeouts and cleanup-attempt limits are unchanged. Ordinary incremental
+pushes finish as soon as their selected graph is evaluated; they do not wait for
+the ceiling. Historical findings still block regardless of available time.
 
 ASCII-only keyword prefiltering skips a value regex only when its mandatory
 keyword is absent. Non-ASCII text takes the original regex path, preserving

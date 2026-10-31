@@ -2031,7 +2031,7 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
         module = _load_canonical_scanner("_scanner_selected_history_budget")
         self.assertEqual(module._MAX_AGGREGATE_BLOB_BYTES, 2 * 1024 * 1024 * 1024)
         self.assertEqual(module._MAX_BLOB_BYTES, 64 * 1024 * 1024)
-        self.assertEqual(module._SCAN_DEADLINE_SECONDS, 240.0)
+        self.assertEqual(module._SCAN_DEADLINE_SECONDS, 900.0)
 
     def test_aggregate_blob_budget_is_inclusive_and_counts_unique_objects(self) -> None:
         module = _load_canonical_scanner("_scanner_aggregate_budget_boundary")
