@@ -3148,7 +3148,8 @@ class ExpectedImageAndTypedSettlementTests(unittest.TestCase):
         dispose = transaction._dispose_node
         def after_retirement(blocked=None, *, records=None):
             result = settle(blocked, records=records)
-            if records and all(row.kind == "directory" for row in records) and result == ([], [], ()):
+            if (records and any(row.kind == "directory" and row.leaf_path == self.absent for row in records)
+                    and result == ([], [], ())):
                 self.assertEqual(transaction._expected[self.absent], {})
                 self.absent.write_bytes(b"foreign bytes must not be read")
                 identities.append(self.absent.stat().st_ino)
@@ -4027,6 +4028,57 @@ class ScalarLinkedTraversalTests(unittest.TestCase):
                 transaction._bind_scalar_storage(link)
         self.assertIs(caught.exception, primary)
         self.assertEqual(file.read_bytes(), b"untouched")
+
+@unittest.skipUnless(os.name == "nt", "Windows pending deletion")
+class PendingNativeDisposalTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.directory = self.root / "owned"
+        self.directory.mkdir()
+        self.tx = PI._InstallTransaction([], enabled=False)
+        self.expected = self.tx._capture_node(self.directory)
+        self.held = PI._WindowsBoundNode(self.directory, purpose="observe")
+        self.held.__enter__()
+        self.addCleanup(self.release)
+
+    def release(self):
+        self.held.__exit__(None, None, None)
+
+    def test_short_observer_hold_finishes_without_redeleting(self):
+        calls = []
+        original = PI._WindowsBoundNode.mark_disposal
+        def mark(bound):
+            calls.append(bound.path)
+            return original(bound)
+        with patch.object(PI._WindowsBoundNode, "mark_disposal", mark), patch.object(PI.time, "sleep", side_effect=lambda _: self.release()) as sleep:
+            self.tx._dispose_node(self.directory, self.expected)
+        self.assertEqual(calls, [self.directory])
+        self.assertEqual(sleep.call_count, 1)
+        self.assertFalse(self.directory.exists())
+
+    def test_persistent_hold_stays_failure_with_bounded_wait(self):
+        with patch.object(PI.time, "monotonic", side_effect=[0.0, 0.3]), patch.object(PI.time, "sleep") as sleep:
+            with self.assertRaisesRegex(ValueError, "native disposal pending or replaced"):
+                self.tx._dispose_node(self.directory, self.expected)
+        self.assertEqual(sleep.call_count, 0)
+        self.release()
+        self.assertFalse(self.directory.exists())
+
+    def test_replacement_during_wait_is_preserved(self):
+        foreign = self.root / "foreign"
+        foreign.mkdir()
+        (foreign / "sentinel").write_bytes(b"foreign")
+        identity = foreign.stat().st_ino
+        def replace_after_release(_):
+            self.release()
+            foreign.rename(self.directory)
+        with patch.object(PI.time, "sleep", side_effect=replace_after_release):
+            with self.assertRaisesRegex(ValueError, "native disposal pending or replaced"):
+                self.tx._dispose_node(self.directory, self.expected)
+        self.assertEqual(self.directory.stat().st_ino, identity)
+        self.assertEqual((self.directory / "sentinel").read_bytes(), b"foreign")
 
 
 if __name__ == "__main__":

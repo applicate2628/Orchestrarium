@@ -4189,11 +4189,21 @@ class _InstallTransaction:
                     if expected.reparse_data is None or bound.reparse_data() != expected.reparse_data:
                         raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal reparse metadata")
                 bound.mark_disposal()
-            # Marking is not disappearance; a new occupant is never adopted.
-            try:
-                path.lstat()
-            except FileNotFoundError:
-                return
+            # Windows delays removal until other shared handles close. Observe only:
+            # never repeat deletion or adopt a replacement. A pending entry can
+            # report st_ino == 0, which is not an identity proof or success.
+            deadline = time.monotonic() + 0.25  # Bound transient-handle grace, not deletion authority.
+            while True:
+                try:
+                    remaining = path.lstat()
+                except FileNotFoundError:
+                    return
+                if remaining.st_ino and (remaining.st_dev, remaining.st_ino) != expected.python_identity[:2]:
+                    break
+                wait = deadline - time.monotonic()
+                if wait <= 0:
+                    break
+                time.sleep(min(0.01, wait))
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal pending or replaced")
         if _CreateOnlyMutablePath._identity(path) != expected.python_identity:
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal identity")

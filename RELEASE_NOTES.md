@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-31
 
+- Windows owned-entry disposal now allows up to 250 ms for a previously issued native deletion to finish when another shared handle is briefly open. The wait only observes absence: it never repeats deletion, adopts a replacement or suppresses a persistent hold or OS error. This bounds transient cleanup failures without weakening the deletion proof; it does not establish the earlier intermittent installer failure as resolved.
+
 - Installation guidance now distinguishes the advisory scratch scan from the disposal proof and records the unresolved intermittent Windows backup-settlement qualification result. Focused passing checks do not silently certify the entire installer or unavailable historical-link scenarios.
 
 - Scratch byte checks support long Windows paths, including the temporary name used during verified disposal. Git long-path handling is enabled only for the read-only check command; user/global configuration is unchanged. This avoids a false recovery refusal after a safe rename.
