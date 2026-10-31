@@ -55,3 +55,7 @@ do not qualify this candidate.
 - MCP: Model Context Protocol.
 - Host: the existing invoking orchestration session, not a new coordinator.
 - API: Application Programming Interface.
+
+## Scratch-independent recovery
+
+Apply the [shared artifact owner](../../../shared/references/repository-source-hygiene.md#scratch-independent-recovery). Important edits, unpublished commits and required evidence need verified custody outside disposable storage before pause or handoff; a worktree is insufficient if its Git common directory or object alternates still depend on scratch. This adds no provider-specific storage owner or publication permission.

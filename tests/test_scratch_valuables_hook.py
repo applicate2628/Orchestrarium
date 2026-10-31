@@ -162,7 +162,10 @@ def test_directory_summary_is_capped_to_top_n_with_a_more_tail():
 
 
 def _run_main_with_envelope(monkeypatch, capsys, envelope: dict) -> tuple[int, str]:
-    monkeypatch.setattr(hook, "read_stdin_utf8", lambda: json.dumps(envelope))
+    # main imports the canonical helper lazily; patch its actual owner.
+    monkeypatch.syspath_prepend(str(ROOT / "scripts" / "universal-hooks" / "scripts"))
+    import hook_common
+    monkeypatch.setattr(hook_common, "read_stdin_utf8", lambda: json.dumps(envelope))
     monkeypatch.setattr(
         hook, "HOOK_TIME_BUDGET_SECONDS", FUNCTIONAL_TEST_BUDGET_SECONDS
     )

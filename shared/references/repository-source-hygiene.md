@@ -9,6 +9,44 @@ Two rules govern source-tree hygiene:
 1. **Directory-level entity separation** — every source directory has one primary entity type and ownership/lifecycle contract; the directory's purpose must be expressible in one sentence; new files placed by classifying owner/lifecycle + I/O contract.
 2. **Artifact disposition and project hygiene** — settle artifacts and resources during ordinary work under their existing owner; resolve correctable causes and genuinely missing permission through supported, authorized work. Before handoff or retaining an owned disposable remainder as blocked, assess the preserving route and carry out the selected permitted action with current readback, or retain its exact hold and next step. Refusal alone neither selects trash nor creates authority; keep proved manual custody separate from physical deletion, lifecycle completion and live-resource settlement; the full preservation contract remains in `shared/AGENTS.shared.md`.
 
+## Scratch-independent recovery
+
+The shared **Artifact disposition and project hygiene** rule remains the owner.
+Important edits, unpublished commits and required acceptance/recovery evidence
+cannot exist only in `.scratch/` or another disposable area. Existing canonical
+source and artifact storage outside that area is sufficient; do not create a
+second backup registry, lifecycle engine or mandatory archive for trivial work.
+
+- At meaningful checkpoints and before pause, handoff, acceptance or cleanup,
+  preserve staged, unstaged, and required untracked changes under that owner.
+  A named Git ref is useful only when its Git common directory and required
+  objects are outside disposable storage. Check missing objects and Git
+  alternates; a worktree outside scratch can still depend on a Git store inside it.
+  Conversely, a temporary worktree may use an independent common store with a
+  retained named ref; its uncommitted changes still need separate preservation.
+- For required evidence or patches, copy into the existing canonical artifact
+  location and re-read the destination to verify the content or inventory. A
+  pointer, filename, commit label, `.gitignore` entry or remembered tool output
+  does not make scratch archival. Durable complete supported tool returns remain
+  acceptable evidence under the existing resource-lifecycle contract.
+- Keep raw/private evidence local and ignored. Preservation does not authorize publication
+  or force committing sensitive logs, generated payloads or unrelated user files.
+  Preserve user changes and never overwrite another artifact to create a checkpoint.
+- Reproducible caches, test fixtures and rebuildable tools may remain temporary.
+  If the only required copy is still there, cleanup is blocked until preservation
+  succeeds or the exact recovery hold is recorded. Do not delete scratch as a test.
+- This guarantees independence from disposal of the temporary workspace, not off-site backup
+  or survival of a disk failure. Do not claim stronger durability than was checked.
+
+The SessionStart watchdog remains a cheap advisory: existing blobs and ignored
+log/cache patterns do not prove that cleanup is safe. The existing owned-tree
+cleanup proof separately checks current raw bytes without Git filters or a
+stat-only hash cache, retained branch/tag reachability, and an independent Git
+common store without alternates. It runs for the selected disposition, not for
+every command. Unknown proof retains that entry while independently ready work
+continues. Blob matching preserves bytes, not an otherwise unrecorded directory
+layout or metadata; canonical artifact promotion still owns those requirements.
+
 ## What counts as an "entity type"
 
 An entity type is the **kind of work the file does**, classified by:

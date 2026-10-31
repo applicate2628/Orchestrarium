@@ -1,13 +1,13 @@
 # Repository Source Hygiene — Reference
 
-Этот reference document для правил организации source-tree `Directory-level entity separation` и `Trash hygiene and archival`, определённых в `shared/AGENTS.shared.md` `### Scope and ownership discipline`. **НЕ** устанавливается в target projects — это methodology reference + repo-local concretization для этого monorepo.
+Этот reference document для правил организации source-tree `Directory-level entity separation` и `Artifact disposition and project hygiene`, определённых в `shared/AGENTS.shared.md` `### Scope and ownership discipline`. **НЕ** устанавливается в target projects — это methodology reference + repo-local concretization для этого monorepo.
 
 ## Краткое описание правил
 
 Два правила управляют source-tree hygiene:
 
 1. **Directory-level entity separation** — каждая source directory имеет один primary entity type и ownership/lifecycle contract; назначение directory выражается одним предложением; новые файлы размещаются после классификации по owner/lifecycle + I/O contract.
-2. **Trash hygiene and archival** — удалять или архивировать obsolete files внутри admitted change surface, subject to `Worktree safety`; archival path с breadcrumb если deletion потеряет recoverable history.
+2. **Artifact disposition and project hygiene** — сохранять ценные материалы у существующего владельца, проверять независимость важных копий от временного хранилища и выполнять только разрешённое удаление или архивирование. Полный контракт находится в `shared/AGENTS.shared.md`; отказ сам по себе не разрешает перенос или удаление.
 
 ## Что считается "entity type"
 
@@ -87,3 +87,18 @@ Subject to `Worktree safety`: не удалять или двигать v1 files
 - **Worktree safety**: существующее правило против модификации файлов вне admitted change surface (`shared/AGENTS.shared.md` `### Operational and environment safety`).
 - **Classification test**: two-signal placement check (actor/lifecycle + I/O contract) применённый перед added or moving any source file.
 - **Repo-local concretization**: per-repo extension of shared rule, declared в `AGENTS.md` / `CLAUDE.md` или в repo-specific shared reference как этот документ.
+
+## Восстановление независимо от scratch
+
+Владелец правила — **Artifact disposition and project hygiene** в shared/AGENTS.shared.md.
+Важные правки, неопубликованные коммиты и обязательные свидетельства нельзя хранить
+единственным экземпляром в .scratch или другом временном хранилище. На значимых
+этапах и до паузы, передачи, приёмки или очистки нужна проверенная копия у
+существующего канонического владельца вне временной области. Для Git проверяются
+общий каталог объектов, доступность нужных объектов и отсутствие зависимости через
+alternates; внешний worktree со служебным Git-каталогом в scratch недостаточен.
+Данные назначения перечитываются; ссылки и .gitignore не заменяют сохранение.
+Сырые материалы остаются локальными, без автоматической публикации. Новое хранилище
+или механизм жизненного цикла не вводится. Воспроизводимые кэши могут оставаться
+временными; единственная важная копия запрещает зависимую очистку. Это независимость
+от удаления scratch, а не гарантия внешнего резервного копирования или сохранности диска.

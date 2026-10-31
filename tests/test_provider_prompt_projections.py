@@ -378,7 +378,7 @@ def test_selected_legacy_peer_migration_uses_its_own_complete_ledger_owner(tmp_p
     old_source.mkdir()
     public_repository = subprocess.run(['git', '--no-optional-locks', 'rev-parse', '--show-toplevel'],
         cwd=ROOT, capture_output=True, text=True, check=True, timeout=30).stdout.strip()
-    package_bytes = subprocess.run(['git', '--no-optional-locks', 'archive', '--format=tar',
+    package_bytes = subprocess.run(['git', '-c', 'core.autocrlf=false', '--no-optional-locks', 'archive', '--format=tar',
         '815e9dfbc5932cc13ed1a8b01f44204e4b4d2349'], cwd=public_repository,
         capture_output=True, check=True, timeout=30).stdout
     with tarfile.open(fileobj=io.BytesIO(package_bytes), mode='r:') as package:
@@ -2543,7 +2543,7 @@ def test_e7_six_tree_upgrade_rolls_back_after_middle_replacement(
     snapshot = tmp_path / "e7-source"
     snapshot.mkdir()
     archive = subprocess.run(
-        ["git", "archive", "--format=tar", "e7a691dea4f1d3cb154d338c63b274ebcd74ee4c"],
+        ["git", "-c", "core.autocrlf=false", "archive", "--format=tar", "e7a691dea4f1d3cb154d338c63b274ebcd74ee4c"],
         cwd=ROOT,
         check=True,
         capture_output=True,
@@ -2629,7 +2629,7 @@ def test_e7_claude_transport_replacement_rolls_back_trees_trio_and_manifest(
     snapshot = tmp_path / "e7-source"
     snapshot.mkdir()
     archive = subprocess.run(
-        ["git", "archive", "--format=tar", "e7a691dea4f1d3cb154d338c63b274ebcd74ee4c"],
+        ["git", "-c", "core.autocrlf=false", "archive", "--format=tar", "e7a691dea4f1d3cb154d338c63b274ebcd74ee4c"],
         cwd=ROOT, check=True, capture_output=True,
     ).stdout
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
@@ -2805,10 +2805,10 @@ def test_canonical_stage_publishes_and_validates_transport_before_skill_projecti
     ).read_bytes() == (ROOT / "shared" / "provider-prompt-projections.v1.json").read_bytes()
 
 
-def test_global_claude_canonical_collision_preflights_before_transaction(
+def test_global_claude_skill_copy_collision_preflights_before_transaction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A rejected stock upgrade must not recreate the shared skills root."""
+    """A rejected stock upgrade preserves the selected independent skill copy."""
 
     installer = _load_installer()
     home = tmp_path / "home"
@@ -2817,7 +2817,8 @@ def test_global_claude_canonical_collision_preflights_before_transaction(
     monkeypatch.setenv("HOME", str(home))
     assert installer.install("claude", ["--global", "--no-hypothesis-hook"]) == 0
 
-    skills = home / ".agents" / "skills"
+    skills = home / ".claude" / "skills"
+    assert not (home / ".agents" / "skills").exists()
     consultant = skills / "consultant" / "SKILL.md"
     consultant.write_bytes(consultant.read_bytes() + b"custom collision\n")
     before_bytes = _tree_bytes(skills)

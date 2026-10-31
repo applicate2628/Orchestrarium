@@ -18,6 +18,7 @@ The rules below apply to every tracked file in the repository, including docs, r
 
 - Use `/.scratch/` for raw logs, transcripts, temp outputs, one-off experiments, and pre-redaction material.
 - Keep disposable material out of tracked paths until it is redacted and intentionally promoted.
+- Required recovery/acceptance evidence and important edits must also have verified custody outside disposable storage under the shared artifact-disposition owner. Keep raw/private copies local and ignored; preservation alone never authorizes publication.
 - The root `.gitignore` owns this boundary.
 
 ## Review and publication

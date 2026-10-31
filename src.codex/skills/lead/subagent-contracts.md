@@ -33,7 +33,7 @@ Cleanup disposition:
 - ResourceRowV1 for every selected resource: <category; creator/adopter role + run; exact identity; preexisting flag; settlement probe and current result; disposition>
 - When no resource is selected, Cleanup disposition is `none` and no `ResourceRowV1` is required; do not invent a row.
 Evidence discipline:
-- <cite each decision-driving claim with an in-repo file:line, installed-dependency surface check, versioned official docs/upstream source URL, or target-environment smoke test preserved under .scratch/; otherwise label it ASSUMPTION (UNVERIFIED) with the resolving step; never use "should work", "should be fine", "probably", "likely", "I think", "based on training data", "in general", or "this pattern usually works" as a correctness-driver>
+- <cite each decision-driving claim with an in-repo file:line, installed-dependency surface check, versioned official docs/upstream source URL, or target-environment smoke test retained by its canonical artifact owner outside disposable storage; otherwise label it ASSUMPTION (UNVERIFIED) with the resolving step; never use "should work", "should be fine", "probably", "likely", "I think", "based on training data", "in general", or "this pattern usually works" as a correctness-driver>
 Defect-class inventory:
 - <when one instance was cited: every participant to audit—parallel arms, cell/data shapes, return paths, and read-sites; otherwise "not-triggered">
 Constraints:

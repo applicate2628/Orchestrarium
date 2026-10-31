@@ -4,6 +4,16 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-31
 
+- Installation guidance now distinguishes the advisory scratch scan from the disposal proof and records the unresolved intermittent Windows backup-settlement qualification result. Focused passing checks do not silently certify the entire installer or unavailable historical-link scenarios.
+
+- Scratch byte checks support long Windows paths, including the temporary name used during verified disposal. Git long-path handling is enabled only for the read-only check command; user/global configuration is unchanged. This avoids a false recovery refusal after a safe rename.
+
+- Historical provider-prompt fixtures now preserve the exact published bytes through Git checkout newline settings. The pinned predecessor digest is unchanged; Windows autocrlf no longer turns an accepted historical input into a false collision. Checkout regressions also use the current secondary-adapter source path.
+
+- Selected scratch disposal now requires current raw bytes anchored by retained Git branches or tags in an independent common store. Loose blobs, scratch-owned Git stores, alternates, stale stat-only hashes and clean-filter transformations cannot establish recovery. The ordinary startup watchdog remains advisory; uncertain proof preserves only the affected entry. Regression coverage exercises successful disposal and rollback without touching real user scratch data.
+
+- Important edits, unpublished commits and required recovery evidence must have verified custody outside disposable scratch storage before pause, handoff, acceptance or cleanup. The existing shared artifact owner now states that Git refs/worktrees with temporary object stores and pointers back to scratch are insufficient. Dispatch evidence prompts and repository guidance agree; this is a governance obligation, not a new backup engine or automatic cleanup/publication permission. Scratch-contract tests also use the current secondary-adapter paths.
+
 - Local delivery bundles now include version-pinned upstream Codex LICENSE and NOTICE files alongside the locked SDK and CLI binary distributions. Regression checks bind their digests and package versions and verify byte-preserving bundle and Git checkout transport. This closes a specific missing-notice-file inventory gap without adding a runtime or changing installation logic; complete native/transitive licensing inventory remains a release hold.
 
 - Full-history publication scans now have a finite 900-second work budget and a 960-second captured-invocation ceiling. Repeated baseline measurements required 485–530 seconds, so the former 240/300-second bounds rejected otherwise evaluable history before review could finish. Object/byte limits, detector coverage, identity checks, cancellation and cleanup-attempt bounds remain unchanged; unresolved findings still block publication. Incremental pushes do not wait for the ceiling.

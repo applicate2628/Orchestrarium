@@ -49,8 +49,9 @@ The module exposes three read-only owners:
     `git cat-file --batch-check`) -- neither writes to the object database.
   * `classify_owned_tree()` -- pure, bounded, link-safe classification of one
     producer-owned evidence root. It opens regular files read-only, verifies
-    stable identities while hashing, and reuses the same two read-only Git
-    probes. It returns proof data but never applies a disposition.
+    stable identities while hashing, and additionally checks independent Git
+    storage and named-ref reachability. It returns proof data but never applies
+    a disposition. The cheap watchdog is advisory and cannot authorize cleanup.
   * `main()` -- a thin CLI that prints the scan as a human report (or JSON),
     for a developer to run by hand from this repository, purely for
     debugging. It performs no mutation either.
@@ -79,6 +80,7 @@ import shutil
 import stat as stat_module
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
@@ -114,7 +116,7 @@ class OwnedTreeClassificationError(Exception):
 
 @dataclass(frozen=True)
 class OwnedTreeSnapshot:
-    """Complete, read-only identity and Git-recoverability result for one root."""
+    """Read-only identity and raw-byte Git custody result, not a layout backup."""
 
     identity_digest: str
     file_count: int
@@ -623,7 +625,7 @@ def classify_owned_tree(tree_root: Path, repository_root: Path) -> OwnedTreeSnap
         stack.extend(reversed(child_directories))
 
     git_root = _find_git_root(repository_root) if shutil.which("git") else None
-    unique_paths = _git_unique_paths(git_root, files) if git_root is not None else None
+    unique_paths = _durable_git_unique_paths(git_root, files) if git_root is not None else None
     return OwnedTreeSnapshot(
         identity_digest=digest.hexdigest(),
         file_count=file_count,
@@ -822,67 +824,26 @@ def _find_git_root(start: Path) -> Path | None:
         current = current.parent
 
 
-# In-process memoization only (see `scan_valuables`'s zero-mutation
-# guarantee): keyed by (absolute path string, mtime, size) -> git blob SHA.
-# Never persisted to disk -- a disk-backed cache would itself be a write,
-# which this module must never perform. Its only benefit is avoiding
-# redundant `git hash-object` calls across repeated `scan_valuables()` calls
-# within the SAME process (e.g. a caller re-scanning); a fresh hook process
-# starts with an empty cache every time, which is fine -- a single batched
-# `git hash-object --stdin-paths` call is already fast (see module docstring
-# evidence: seconds for ~14k files on this repository).
-_BLOB_SHA_CACHE: dict[tuple[str, float, int], str] = {}
-
-
 def _hash_object_batch(git_root: Path, paths: list[Path]) -> dict[Path, str] | None:
-    """Read-only: `git hash-object --stdin-paths` (NEVER `-w`) computes each
-    path's git blob SHA without writing anything to the object database.
-    Returns `{path: sha}` for every input path, or `None` on ANY failure
-    (missing git, non-zero exit, timeout, malformed/short output) so the
-    caller can fail open rather than guess."""
-
+    """Hash current raw bytes, without clean filters, writes or stale stat caching."""
     if not paths:
         return {}
-    to_hash: list[Path] = []
-    result: dict[Path, str] = {}
-    stats: dict[Path, tuple[float, int]] = {}
-    for path in paths:
-        try:
-            info = path.stat()
-        except OSError:
-            continue
-        key = (str(path), info.st_mtime, info.st_size)
-        cached = _BLOB_SHA_CACHE.get(key)
-        if cached is not None:
-            result[path] = cached
-        else:
-            to_hash.append(path)
-            stats[path] = (info.st_mtime, info.st_size)
-    if to_hash:
-        stdin_payload = "\n".join(str(p) for p in to_hash) + "\n"
-        try:
-            proc = subprocess.run(
-                ["git", "-C", str(git_root), "hash-object", "--stdin-paths"],
-                input=stdin_payload,
-                capture_output=True,
-                text=True,
-                timeout=_GIT_TIMEOUT_SECONDS,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return None
-        if proc.returncode != 0:
-            return None
-        shas = proc.stdout.splitlines()
-        if len(shas) != len(to_hash):
-            return None
-        for path, sha in zip(to_hash, shas):
-            sha = sha.strip()
-            if not sha:
-                return None
-            result[path] = sha
-            mtime, size = stats[path]
-            _BLOB_SHA_CACHE[(str(path), mtime, size)] = sha
-    return result
+    payload = "\n".join(json.dumps(str(path), ensure_ascii=False) for path in paths) + "\n"
+    try:
+        proc = subprocess.run(
+            ["git", "-c", "core.longpaths=true", "--no-replace-objects", "--no-lazy-fetch", "-C", str(git_root),
+             "hash-object", "--no-filters", "--stdin-paths"],
+            input=payload, capture_output=True, text=True, encoding="utf-8",
+            timeout=_GIT_TIMEOUT_SECONDS,
+        )
+    except (OSError, UnicodeError, subprocess.SubprocessError):
+        return None
+    shas = proc.stdout.splitlines()
+    if proc.returncode or len(shas) != len(paths) or any(
+        re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", sha) is None for sha in shas
+    ):
+        return None
+    return dict(zip(paths, shas))
 
 
 def inspect_git_object_set(git_root: Path, shas: set[str]) -> set[str] | None:
@@ -897,7 +858,7 @@ def inspect_git_object_set(git_root: Path, shas: set[str]) -> set[str] | None:
     stdin_payload = "\n".join(sorted(shas)) + "\n"
     try:
         proc = subprocess.run(
-            ["git", "-C", str(git_root), "cat-file", "--batch-check"],
+            ["git", "-c", "core.longpaths=true", "--no-replace-objects", "--no-lazy-fetch", "-C", str(git_root), "cat-file", "--batch-check"],
             input=stdin_payload,
             capture_output=True,
             text=True,
@@ -938,7 +899,7 @@ def inspect_git_object_set(git_root: Path, shas: set[str]) -> set[str] | None:
 
 
 def _git_unique_paths(git_root: Path, paths: list[Path]) -> set[Path] | None:
-    """The subset of `paths` whose exact content is NOT recoverable from
+    """Advisory subset of `paths` whose exact content is NOT present in
     `git_root`'s object database -- the PRIMARY valuable predicate (see the
     module docstring). Returns `None` (the fail-open signal) if any git call
     fails, so the caller falls back to the age gate rather than guessing."""
@@ -950,6 +911,88 @@ def _git_unique_paths(git_root: Path, paths: list[Path]) -> set[Path] | None:
     if missing is None:
         return None
     return {path for path, sha in shas.items() if sha in missing}
+
+
+def _durable_git_unique_paths(git_root: Path, paths: list[Path]) -> set[Path] | None:
+    """Stricter cleanup proof; the cheap watchdog remains advisory only.
+
+    Require current raw blobs reachable from retained branches/tags in an
+    independent common object store. No HEAD-only, alternate or scratch-store
+    credit. Unknown proof preserves the affected scratch entry, not a global gate.
+    """
+    if not paths:
+        return set()
+    if any(os.environ.get(name) for name in (
+        "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE",
+    )):
+        return None
+    shas = _hash_object_batch(git_root, paths)
+    if shas is None:
+        return None
+    missing = inspect_git_object_set(git_root, set(shas.values()))
+    if missing is None:
+        return None
+    if missing:
+        return {path for path, oid in shas.items() if oid in missing}
+    deadline = time.monotonic() + _GIT_TIMEOUT_SECONDS
+    def query(*args):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        try:
+            result = subprocess.run(
+                ["git", "-c", "core.longpaths=true", "--no-replace-objects", "--no-lazy-fetch", "-C", str(git_root), *args],
+                stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                encoding="utf-8", timeout=remaining,
+            )
+        except (OSError, UnicodeError, subprocess.SubprocessError):
+            return None
+        if result.returncode or len(result.stdout.encode("utf-8")) > MAX_OWNED_TREE_BYTES:
+            return None
+        return result.stdout
+    common_text = query("rev-parse", "--path-format=absolute", "--git-common-dir")
+    if common_text is None or len(common_text.splitlines()) != 1:
+        return None
+    common = Path(common_text.strip())
+    try:
+        for part in (*reversed(common.parents), common):
+            info = _path_lstat(part)
+            if not stat_module.S_ISDIR(info.st_mode):
+                return None
+        common = common.resolve(strict=True)
+        objects = common / "objects"
+        if not stat_module.S_ISDIR(_path_lstat(objects).st_mode):
+            return None
+        if any(part.casefold() == SCRATCH_DIRNAME for part in common.parts):
+            return set(paths)
+        alternates = objects / "info" / "alternates"
+        if alternates.exists() or alternates.is_symlink():
+            info = _path_lstat(alternates)
+            if not stat_module.S_ISREG(info.st_mode) or info.st_size:
+                return set(paths)
+    except (OSError, OwnedTreeClassificationError):
+        return None
+    refs_args = ("for-each-ref", "--format=%(refname) %(objectname)", "refs/heads", "refs/tags")
+    before = query(*refs_args)
+    if before is None:
+        return None
+    if not before.strip():
+        return set(paths)
+    for line in before.splitlines():
+        fields = line.rsplit(" ", 1)
+        if (len(fields) != 2 or not fields[0].startswith(("refs/heads/", "refs/tags/"))
+            or re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", fields[1]) is None):
+            return None
+    reachable = query("rev-list", "--objects", "--no-object-names", "--branches", "--tags")
+    if reachable is None or query(*refs_args) != before:
+        return None
+    remaining = set(shas.values())
+    for oid in reachable.splitlines():
+        if re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", oid) is None:
+            return None
+        remaining.discard(oid)
+    return {path for path, oid in shas.items() if oid in remaining}
 
 
 def scan_valuables(
@@ -1087,7 +1130,7 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             f"Read-only watchdog for {SCRATCH_DIRNAME}/: lists non-empty, non-junk files "
             "whose content is not already recoverable from this repository's git object "
-            "database (age-gated fallback when git is unavailable). NEVER deletes, moves, "
+            "database (advisory only; age-gated fallback when git is unavailable). NEVER deletes, moves, "
             "or quarantines anything -- for debugging/manual inspection only. The automatic "
             "mechanism the operator asked for is the SessionStart hook, not this CLI."
         )

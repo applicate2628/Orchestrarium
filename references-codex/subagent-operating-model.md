@@ -56,3 +56,7 @@ V3 SDK evidence keeps existing receiving/ledger owners and cannot close another 
 - V1: the existing named mechanical execution and facts contract.
 - TOML: the configuration format used by native role definitions.
 - Other governance terms follow the [shared glossary](../shared/references/spine/governance-glossary.md).
+
+## Scratch-independent recovery
+
+Apply the [shared artifact owner](../shared/references/repository-source-hygiene.md#scratch-independent-recovery). Important edits, unpublished commits and required evidence need verified custody outside disposable storage before pause or handoff; a worktree is insufficient if its Git common directory or object alternates still depend on scratch. This adds no provider-specific storage owner or publication permission.

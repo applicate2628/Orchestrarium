@@ -16,6 +16,8 @@ Use this guide at the start of a new Orchestrarium maintenance session. Its purp
 
 1. Confirm the current directory is the Orchestrarium checkout root: it contains `shared/AGENTS.shared.md`, `src.codex/`, and `adapters/claude/`. Do not work from a parent container directory or a standalone provider checkout by accident.
 2. Run `git status --short -uall` before editing. Preserve unrelated local changes.
+Before pausing or handing off, keep important source changes, unpublished commits and required evidence outside disposable storage under the existing canonical owner. Verify the Git common directory/object availability or destination bytes, not only a path or ref name; follow the shared artifact-disposition rule. Do not delete temporary data to test recovery.
+
 3. Classify the surface before changing it:
    - shared governance or cross-provider behavior -> `shared/AGENTS.shared.md` and `shared/references/`
    - Codex runtime pack -> `src.codex/`
