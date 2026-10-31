@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-31
+
+- Frozen model-routing migration fixtures now preserve their exact historical bytes across Git checkouts, including core.autocrlf=true. The existing digest manifest is unchanged; a real checkout regression prevents newline conversion from producing false migration failures. The overview documentation test now checks its link to the detailed installation contract instead of requiring a duplicate policy paragraph. No model profile or runtime setting is changed.
+
 ## 2026-10-30
 
 - Uninstall now removes wholly owned, unmodified skill directory trees in the same operation instead of leaving empty directories after rollback artifacts settle. It uses the existing transactional owner, preserves user files and unowned directories, and restores original files and identities if receipt publication fails.

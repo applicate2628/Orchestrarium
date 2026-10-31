@@ -4,6 +4,7 @@ import importlib.util
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -79,12 +80,17 @@ def test_role_migration_and_luna_docs_have_no_stale_create_only_contract() -> No
         encoding="utf-8"
     )
 
-    for source in (codex_readme, root_readme, install):
+    # The root overview links to the operation owner instead of duplicating its policy.
+    targets = re.findall(r"\[[^]]+\]\(([^)#]+)(?:#[^)]*)?\)", root_readme)
+    assert "INSTALL.md" in targets
+    assert (ROOT / "INSTALL.md").is_file()
+    for source in (codex_readme, install):
         assert "Factory payload hashes and approved stock-only migrations remain exact" in source
         assert "compatible user runtime tuning" in source
         assert "native-required" in source
         assert "E_NATIVE_V2_DISABLED" in source
         assert "E_LUNA_UNAVAILABLE" in source
+    for source in (codex_readme, root_readme, install):
         assert "E_LUNA_EXECUTION_CONTAINMENT_UNAVAILABLE" not in source
         assert "E_LUNA_WRITE_CONTAINMENT_UNAVAILABLE" not in source
     assert "bounded-write `mechanical-worker`" not in codex_readme
