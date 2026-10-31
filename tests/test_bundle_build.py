@@ -162,8 +162,9 @@ def test_vendor_notices_keep_exact_bytes_in_autocrlf_checkout(tmp_path):
     git = shutil.which('git')
     assert git is not None
     origin = tmp_path / 'origin'; origin.mkdir()
-    names = ['.gitattributes'] + [f'scripts/distribution/notices/openai-codex/{name}'
-                                  for name in ('LICENSE', 'NOTICE', 'source.json')]
+    names = ['.gitattributes'] + sorted(
+        p.relative_to(SOURCE).as_posix()
+        for p in (SOURCE / 'scripts/distribution/notices').rglob('*') if p.is_file())
     for name in names:
         path = origin / name; path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes((SOURCE / name).read_bytes())
@@ -177,3 +178,37 @@ def test_vendor_notices_keep_exact_bytes_in_autocrlf_checkout(tmp_path):
     run('-c', 'core.autocrlf=true', 'clone', '-q', str(origin), str(checkout))
     for name in names[1:]:
         assert (checkout / name).read_bytes() == (SOURCE / name).read_bytes()
+
+
+@pytest.mark.parametrize("target,triple,names,archive_sha", [
+    ("windows-x64", "x86_64-pc-windows-msvc",
+     "bzip2 cpython libffi liblzma libuuid openssl-3 sqlite tcl zstd",
+     "5fc81405bbe4d0372302970372cde44fa0d755a0148a7d291168fba3e605a2f5"),
+    ("linux-x64", "x86_64-unknown-linux-gnu",
+     "bdb bzip2 cpython expat libX11 libXau libedit libffi liblzma libuuid libxcb mpdecimal ncurses openssl-3 sqlite tcl zlib-ng zlib zstd",
+     "3488eafeae3c25a44895df9fd52a9be1f2fa11a45cb0580279e03c2bce5339b4"),
+])
+def test_python_notices_bind_locked_runtime_and_ship(builder, tmp_path, target, triple, names, archive_sha):
+    import hashlib
+    notice_root = SOURCE / 'scripts/distribution/notices/python-build-standalone' / (target + '-cp315')
+    manifest = json.loads((notice_root / 'source.json').read_text())
+    lock = json.loads((SOURCE / 'scripts/distribution/locks' / (target + '-cp315.sources.json')).read_text())
+    assert manifest['runtime'] == lock['runtime']
+    assert manifest['target'] == triple
+    assert manifest['pythonVersion'] == '3.15.2'
+    assert manifest['metadataArchive']['sha256'] == archive_sha
+    expected = {'LICENSE.' + name + '.txt' for name in
+                names.split()}
+    assert set(manifest['files']) == expected
+    assert {Path(p).name for item in manifest['attributions'] for p in item['paths']} == expected
+    for name, evidence in manifest['files'].items():
+        assert evidence['archivePath'] == 'python/licenses/' + name
+        assert hashlib.sha256((notice_root / name).read_bytes()).hexdigest() == evidence['sha256']
+    runtime = tmp_path / 'runtime'; runtime.mkdir()
+    interpreter = runtime / builder.TARGETS[target]
+    interpreter.parent.mkdir(parents=True, exist_ok=True)
+    interpreter.write_bytes(b'synthetic; never executed')
+    output = tmp_path / 'bundle'
+    builder.build(SOURCE, runtime, output, target=target, release='development')
+    for name in (*expected, 'source.json'):
+        assert (output / 'app/scripts/distribution/notices/python-build-standalone' / (target + '-cp315') / name).read_bytes() == (notice_root / name).read_bytes()

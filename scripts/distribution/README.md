@@ -128,3 +128,26 @@ This closes that specific notice-file gap, not the complete release inventory.
 Other wheel notices and the interpreter license remain in the copied runtime;
 native/transitive components still require inventory. Do not infer a binary's
 complete provenance or blanket license compliance from these two upstream files.
+
+
+## Python dependency notices
+
+`notices/python-build-standalone/` preserves the notice texts declared by the
+matching 20261026 upstream full-build metadata: nine for Windows x64 and nineteen
+for Linux x64. The selected
+install-only archive omits that metadata and the outer licenses directory.
+The source record pins both archive identities, the metadata digest and each
+notice; tests bind it to the platform runtime locks and preserve bytes through
+assembly and a CRLF-enabled checkout. No new runtime or installer is introduced.
+
+This is the upstream-declared notice subset, not exhaustive native dependency
+attribution. Full and stripped binaries differ; exact stripped-archive checks
+matched 59 base native files in the Windows qualification runtime. Upstream metadata
+also has stale OpenSSL link filenames, so its dependency list is not treated as
+a complete binary inventory. Wheel-native attribution, Microsoft runtime terms,
+complete native attribution and final publisher authentication remain separate release gates.
+
+Linux metadata declares Berkeley DB under the Sleepycat license for `_dbm`.
+Retaining its notice does not by itself settle source-availability obligations.
+The metadata records library attribution, not a complete binary bill of materials;
+keep that release review open rather than treating a notice inventory as clearance.

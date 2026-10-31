@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-31
 
+- Windows and Linux Python bundles now retain the dependency notices declared by their pinned upstream full-build metadata, which the stripped install-only runtime does not carry. Source digests and byte-preservation tests prevent silent notice loss during packaging; full native/transitive release clearance remains separate.
+
 - Installer regression fixtures now explicitly seed both clients when checking paired projections, preserve ordinary per-client skills, and separately verify refusal of legacy linked skills. Rollback tests require the injected failure to execute instead of accepting an earlier refusal as success. Metadata fixtures create their disposable parent in a fresh checkout, so clearing scratch does not break test setup.
 
 - Windows owned-entry disposal now allows up to 250 ms for a previously issued native deletion to finish when another shared handle is briefly open. The wait only observes absence: it never repeats deletion, adopts a replacement or suppresses a persistent hold or OS error. This bounds transient cleanup failures without weakening the deletion proof; it does not establish the earlier intermittent installer failure as resolved.
