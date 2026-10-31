@@ -36,8 +36,8 @@ CHECKER = _load_checker()
 def _source_dirs(platform: str) -> tuple[Path, ...]:
     if platform == "claude":
         return (
-            ROOT / "src.claude" / "agents" / "scripts",
-            ROOT / "src.claude" / "agents" / "hooks",
+            ROOT / 'adapters/claude' / "agents" / "scripts",
+            ROOT / 'adapters/claude' / "agents" / "hooks",
         )
     return (
         ROOT / "src.codex" / "skills" / "lead" / "scripts",
@@ -105,7 +105,7 @@ def _mcp_only_config() -> dict:
                             "args": [
                                 str(
                                     ROOT
-                                    / "src.claude"
+                                    / 'adapters/claude'
                                     / "agents"
                                     / "scripts"
                                     / "check-mcp-momentum.py"
@@ -149,7 +149,7 @@ def test_hook_health_uses_force_mode_and_accepts_claude_advisory(
         platform="claude",
         host_os="posix",
         repo_root=ROOT,
-        installed_root=ROOT / "src.claude/agents",
+        installed_root=ROOT / 'adapters/claude/agents',
         verify_fires=True,
     )
     assert messages == ["PASS claude PreToolUse check-mcp-momentum"]
@@ -237,7 +237,7 @@ def test_hook_health_rejects_invalid_mcp_positive_probe(
             platform="claude",
             host_os="posix",
             repo_root=ROOT,
-            installed_root=ROOT / "src.claude/agents",
+            installed_root=ROOT / 'adapters/claude/agents',
             verify_fires=True,
         )
 
@@ -255,7 +255,7 @@ def test_missing_executable_and_missing_target_are_distinct(tmp_path: Path) -> N
             platform="claude",
             host_os="posix",
             repo_root=ROOT,
-            installed_root=ROOT / "src.claude/agents",
+            installed_root=ROOT / 'adapters/claude/agents',
             verify_fires=False,
         )
 
@@ -385,7 +385,7 @@ def test_foreign_entry_without_args_is_tolerated(tmp_path: Path) -> None:
         platform="claude",
         host_os="posix",
         repo_root=ROOT,
-        installed_root=ROOT / "src.claude/agents",
+        installed_root=ROOT / 'adapters/claude/agents',
         verify_fires=False,
     )
     expected = CHECKER._manifest_stems(ROOT, "claude")
@@ -414,7 +414,7 @@ def test_unparseable_entry_naming_owned_stem_fails_loudly(tmp_path: Path) -> Non
             platform="claude",
             host_os="posix",
             repo_root=ROOT,
-            installed_root=ROOT / "src.claude/agents",
+            installed_root=ROOT / 'adapters/claude/agents',
             verify_fires=False,
         )
 
@@ -438,7 +438,7 @@ def test_corrupted_args_on_owned_entry_names_the_stem(tmp_path: Path) -> None:
             platform="claude",
             host_os="posix",
             repo_root=ROOT,
-            installed_root=ROOT / "src.claude/agents",
+            installed_root=ROOT / 'adapters/claude/agents',
             verify_fires=False,
         )
     assert "missing registered hooks" not in str(excinfo.value)
@@ -538,6 +538,9 @@ def test_inventory_command_never_supplies_managed_authority(tmp_path: Path, monk
 
 
 def test_selected_hook_scope_cannot_be_reduced_by_inventory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import shlex
+    host_os = "windows" if os.name == "nt" else "posix"
+    serialize = subprocess.list2cmdline if os.name == "nt" else shlex.join
     package = tmp_path / "managed"
     scripts = package / "scripts"
     scripts.mkdir(parents=True)
@@ -554,13 +557,13 @@ def test_selected_hook_scope_cannot_be_reduced_by_inventory(tmp_path: Path, monk
     })())
 
     def seed(rows):
-        handlers = [{"command": subprocess.list2cmdline([sys.executable, str(script)])}
+        handlers = [{"command": serialize([sys.executable, str(script)])}
                     for _marker, script, _event, _matcher in rows]
         handlers.append({"command": "python /unknown/check-synthetic-user.py"})
         target.write_text(json.dumps({"hooks": {"Stop": [{"hooks": handlers}]}}), encoding="utf-8")
-        CHECKER.write_codex_inventory(target=target, specs=rows, inventory_path=inventory, host_os="windows")
+        CHECKER.write_codex_inventory(target=target, specs=rows, inventory_path=inventory, host_os=host_os)
         records = [{"eventName": "Stop", "matcher": None, "handlerType": "command",
-                    "command": subprocess.list2cmdline([sys.executable, str(script)]),
+                    "command": serialize([sys.executable, str(script)]),
                     "sourcePath": str(target), "enabled": True, "trustStatus": "trusted", "currentHash": "sha256:synthetic"}
                    for _marker, script, _event, _matcher in rows]
         monkeypatch.setattr(CHECKER, "_codex_hooks_list", lambda **_kwargs: records)
@@ -568,12 +571,12 @@ def test_selected_hook_scope_cannot_be_reduced_by_inventory(tmp_path: Path, monk
     all_stems = {row[0] for row in specs}
     seed(specs[:1])
     with pytest.raises(ValueError, match="inventory does not match the selected hook scope"):
-        CHECKER.verify_config(target=target, platform="codex", host_os="windows", repo_root=ROOT,
+        CHECKER.verify_config(target=target, platform="codex", host_os=host_os, repo_root=ROOT,
                               verify_fires=False, inventory_path=inventory, installed_root=package,
                               selected_stems=all_stems)
     chosen = specs[:11]
     seed(chosen)
-    kwargs = dict(target=target, platform="codex", host_os="windows", repo_root=ROOT,
+    kwargs = dict(target=target, platform="codex", host_os=host_os, repo_root=ROOT,
                   verify_fires=False, inventory_path=inventory, installed_root=package,
                   codex_trust_mode="require", codex_command=[sys.executable], codex_home=tmp_path, query_cwd=tmp_path)
     full = CHECKER.verify_config(**kwargs, selected_stems={row[0] for row in chosen})

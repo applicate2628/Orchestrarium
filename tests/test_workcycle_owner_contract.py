@@ -15,11 +15,11 @@ ROOT = Path(__file__).resolve().parent.parent
 
 LEAD_CONTRACTS = (
     ROOT / "src.codex" / "skills" / "lead" / "SKILL.md",
-    ROOT / "src.claude" / "skills" / "lead" / "SKILL.md",
+    ROOT / 'adapters/claude' / "skills" / "lead" / "SKILL.md",
 )
 ARCHIVIST_CONTRACTS = (
     ROOT / "src.codex" / "skills" / "knowledge-archivist" / "SKILL.md",
-    ROOT / "src.claude" / "agents" / "knowledge-archivist.md",
+    ROOT / 'adapters/claude' / "agents" / "knowledge-archivist.md",
 )
 SHARED_MODEL = ROOT / "shared" / "references" / "subagent-operating-model.md"
 

@@ -441,7 +441,7 @@ Invoke `$consultant` when the lead wants a second opinion on ambiguity, tradeoff
 
 ## Using Consultant
 
-`$consultant` is the independent advisory consultant for this repository. All usage rules, toggle check, and execution paths are in `$HOME/.agents/skills/consultant/SKILL.md`.
+`$consultant` is the independent advisory consultant for this repository. All usage rules, toggle check, and execution paths are in the installed sibling [consultant skill](../consultant/SKILL.md).
 
 Lead rules for `$consultant`:
 

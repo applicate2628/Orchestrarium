@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 HOOKS = (
     ROOT / "scripts" / "universal-hooks" / "scripts" / "check-scratch-valuables.py",
     ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-scratch-valuables.py",
-    ROOT / "src.claude" / "agents" / "scripts" / "check-scratch-valuables.py",
+    ROOT / 'adapters/claude' / "agents" / "scripts" / "check-scratch-valuables.py",
 )
 
 

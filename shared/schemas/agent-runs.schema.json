@@ -249,7 +249,226 @@
     "actualExecutionPath": {
       "enum": [
         "direct-external-cli",
+        "direct-external-sdk",
         "internal"
+      ]
+    },
+    "sdkExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "adapter",
+        "model",
+        "effort",
+        "sandboxMode",
+        "approvalPolicy",
+        "accountBinding"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "schemaVersion": {
+              "const": 1
+            },
+            "operationKind": false,
+            "innerRequestSha256": false,
+            "outerBudgetBinding": false,
+            "innerBudgetBinding": false
+          },
+          "required": [
+            "sdkVersion",
+            "runtimeVersion"
+          ]
+        },
+        {
+          "properties": {
+            "schemaVersion": {
+              "const": 2
+            },
+            "sdkVersion": false,
+            "runtimeVersion": false,
+            "operationKind": false,
+            "innerRequestSha256": false,
+            "outerBudgetBinding": false,
+            "innerBudgetBinding": false
+          },
+          "required": [
+            "requestSha256"
+          ]
+        },
+        {
+          "properties": {
+            "schemaVersion": {
+              "const": 3
+            },
+            "sdkVersion": false,
+            "runtimeVersion": false
+          },
+          "required": [
+            "requestSha256",
+            "operationKind",
+            "innerRequestSha256",
+            "outerBudgetBinding",
+            "innerBudgetBinding"
+          ]
+        }
+      ],
+      "properties": {
+        "requestSha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "$comment": "Optional for historical version-1 SDK rows; mandatory for selected version-2 metadata. SHA-256 of the canonical request and effect-relevant runtime selection, excluding expected launch SHA to avoid self-reference. Selected commitment, not an observed provider profile field."
+        },
+        "schemaVersion": {
+          "type": "integer",
+          "enum": [
+            1,
+            2,
+            3
+          ]
+        },
+        "adapter": {
+          "enum": [
+            "openai-codex",
+            "claude-agent-sdk"
+          ]
+        },
+        "sdkVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/!+-]{0,127}$"
+        },
+        "runtimeVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/!+-]{0,127}$"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$"
+        },
+        "effort": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "sandboxMode": {
+          "enum": [
+            "read-only",
+            "tool-restricted-read-only"
+          ]
+        },
+        "approvalPolicy": {
+          "enum": [
+            "deny_all",
+            "deny_unadmitted"
+          ]
+        },
+        "accountBinding": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$"
+        },
+        "operationKind": {
+          "const": "coordination-inference"
+        },
+        "innerRequestSha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "$comment": "Immutable inner execution snapshot, required only for coordination inference."
+        },
+        "outerBudgetBinding": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$"
+        },
+        "innerBudgetBinding": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$"
+        }
+      },
+      "$comment": "Exact SDK configuration, not permission or qualification evidence. Version 1 retains historical version-bearing metadata. Version 2 records only admitted controls and the request commitment, never fabricating SDK/runtime versions before startup; actual observed versions are retained in the scanned, artifact-bound review evidence. All tokens are bounded 128-character ASCII; version metadata additionally permits standard build/epoch markers. Codex read-only names its OS sandbox; Claude tool-restricted-read-only does not claim OS isolation. Approval-policy labels are not blanket tool denials.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "adapter": {
+                "const": "openai-codex"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sandboxMode": {
+                "const": "read-only"
+              },
+              "approvalPolicy": {
+                "const": "deny_all"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "adapter": {
+                "const": "claude-agent-sdk"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sandboxMode": {
+                "const": "tool-restricted-read-only"
+              },
+              "approvalPolicy": {
+                "const": "deny_unadmitted"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "schemaVersion": {
+                "const": 3
+              }
+            },
+            "required": [
+              "schemaVersion"
+            ]
+          },
+          "then": {
+            "properties": {
+              "adapter": {
+                "const": "openai-codex"
+              },
+              "sandboxMode": {
+                "const": "read-only"
+              },
+              "approvalPolicy": {
+                "const": "deny_all"
+              }
+            }
+          }
+        }
       ]
     },
     "artifactIdentity": {
@@ -413,7 +632,12 @@
     "artifactRevision": {
       "type": "string",
       "minLength": 4,
-      "$comment": "Revision of the reviewed artifact at review time (plain string in the minimal slice: a git sha or content digest; mechanical git-object/blob verification is deferred)."
+      "$comment": "Legacy review revision remains a git sha or content digest. On an SDK terminal with an artifact, this is the lowercase SHA-256 of exact received output bytes, qualified with artifactSizeBytes by the existing snapshot and locator owners."
+    },
+    "artifactSizeBytes": {
+      "type": "integer",
+      "minimum": 0,
+      "$comment": "Exact received SDK terminal artifact length. Together with artifactRevision SHA-256, binds output bytes and bounds the existing snapshot reader."
     },
     "lane": {
       "type": "string",
@@ -755,6 +979,246 @@
     }
   ],
   "allOf": [
+    {
+      "if": {
+        "required": [
+          "artifactSizeBytes"
+        ]
+      },
+      "then": {
+        "required": [
+          "artifact",
+          "actualExecutionPath",
+          "eventKind"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "const": 2
+          },
+          "actualExecutionPath": {
+            "const": "direct-external-sdk"
+          },
+          "eventKind": {
+            "const": "terminal"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "artifact",
+          "actualExecutionPath",
+          "eventKind"
+        ],
+        "properties": {
+          "actualExecutionPath": {
+            "const": "direct-external-sdk"
+          },
+          "eventKind": {
+            "const": "terminal"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "artifactRevision",
+          "artifactSizeBytes"
+        ],
+        "properties": {
+          "artifactRevision": {
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "anyOf": [
+          {
+            "required": [
+              "sdkExecution"
+            ]
+          },
+          {
+            "required": [
+              "actualExecutionPath"
+            ],
+            "properties": {
+              "actualExecutionPath": {
+                "const": "direct-external-sdk"
+              }
+            }
+          }
+        ]
+      },
+      "then": {
+        "required": [
+          "sdkExecution",
+          "actualExecutionPath",
+          "eventKind",
+          "provider",
+          "model",
+          "effort",
+          "assignedRole",
+          "artifactIdentity",
+          "externalDispatchId",
+          "externalEvidenceRunId",
+          "effortMappingLoss"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "const": 2
+          },
+          "actualExecutionPath": {
+            "const": "direct-external-sdk"
+          },
+          "provider": {
+            "enum": [
+              "codex",
+              "claude"
+            ]
+          },
+          "eventKind": {
+            "enum": [
+              "launch",
+              "terminal"
+            ]
+          }
+        },
+        "not": {
+          "required": [
+            "launchFlags"
+          ]
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "eventKind": {
+                  "const": "launch"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "status": {
+                  "const": "running"
+                },
+                "gate": {
+                  "const": "none"
+                }
+              },
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "terminalClass"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "authorizing"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "closesRunIds"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "closerRunId"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "targetTuple"
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "eventKind": {
+                  "const": "terminal"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "terminalClass",
+                "authorizing",
+                "closesRunIds",
+                "launchRunId"
+              ],
+              "properties": {
+                "status": {
+                  "enum": [
+                    "completed",
+                    "revise",
+                    "blocked",
+                    "cancelled"
+                  ]
+                },
+                "terminalClass": {
+                  "const": "external-nonauthorizing"
+                },
+                "authorizing": {
+                  "const": false
+                },
+                "closesRunIds": {
+                  "const": []
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "provider": {
+                  "const": "codex"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "sdkExecution": {
+                  "properties": {
+                    "adapter": {
+                      "const": "openai-codex"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "provider": {
+                  "const": "claude"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "sdkExecution": {
+                  "properties": {
+                    "adapter": {
+                      "const": "claude-agent-sdk"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
     {
       "if": {
         "properties": {
@@ -1270,6 +1734,44 @@
               ]
             }
           ]
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "sdkExecution"
+        ],
+        "properties": {
+          "sdkExecution": {
+            "required": [
+              "schemaVersion"
+            ],
+            "properties": {
+              "schemaVersion": {
+                "const": 3
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "role": {
+            "const": "lead"
+          },
+          "executionRole": {
+            "const": "main"
+          },
+          "assignedRole": {
+            "const": "lead"
+          },
+          "provider": {
+            "const": "codex"
+          },
+          "gate": {
+            "const": "none"
+          }
         }
       }
     }

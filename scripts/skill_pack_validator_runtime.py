@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import importlib.util
 import json
@@ -429,7 +430,7 @@ def detect_layout(script: Path, provider: str, requested_root: Path | None = Non
                     root=root,
                     provider=provider,
                     dev_repo=True,
-                    standalone=not (root / "src.claude").is_dir(),
+                    standalone=not (root / "adapters/claude").is_dir(),
                     pack=root / "src.codex",
                     skills=root / "src.codex/skills",
                     scripts=dev_scripts,
@@ -469,19 +470,19 @@ def detect_layout(script: Path, provider: str, requested_root: Path | None = Non
                     agents_text=_read(root / "AGENTS.md"),
                 )
         else:
-            if (root / "src.claude/agents").is_dir() and (root / "shared/AGENTS.shared.md").is_file():
+            if (root / "adapters/claude/agents").is_dir() and (root / "shared/AGENTS.shared.md").is_file():
                 return Layout(
                     root=root,
                     provider=provider,
                     dev_repo=True,
                     standalone=not (root / "src.codex").is_dir(),
-                    pack=root / "src.claude",
+                    pack=root / "adapters/claude",
                     skills=(
                         root / "src.codex/skills"
                         if (root / "src.codex").is_dir()
-                        else root / "src.claude/skills"
+                        else root / "adapters/claude/skills"
                     ),
-                    scripts=root / "src.claude/agents/scripts",
+                    scripts=root / "adapters/claude/agents/scripts",
                     agents_text=_read(root / "shared/AGENTS.shared.md"),
                 )
             if (root / ".claude/agents").is_dir():
@@ -499,7 +500,7 @@ def detect_layout(script: Path, provider: str, requested_root: Path | None = Non
                         scripts=root / ".claude/agents/scripts",
                         agents_text=_read(agents),
                     )
-    expected = "src.codex/.codex/.agents" if provider == "codex" else "src.claude/.claude"
+    expected = "src.codex/.codex/.agents" if provider == "codex" else "adapters/claude/.claude"
     raise RuntimeError(f"Could not detect Orchestrarium {provider} layout ({expected}).")
 
 
@@ -570,8 +571,8 @@ class Validator:
         provider_prefixes = (
             ("@ROOT/src.codex/", "codex"),
             ("src.codex/", "codex"),
-            ("@ROOT/src.claude/", "claude"),
-            ("src.claude/", "claude"),
+            ("@ROOT/adapters/claude/", "claude"),
+            ("adapters/claude/", "claude"),
         )
         for prefix, provider in provider_prefixes:
             if self.layout.provider == provider and value.startswith(prefix):
@@ -748,6 +749,15 @@ class Validator:
                 f"common-skill {name} body drifted from its provider-local body pin "
                 f"(expected {expected}, actual {actual})"
             )
+
+    def check_common_skill_live_body(
+        self, name: str, expected: str, codex_file: str, claude_file: str
+    ) -> None:
+        """Bind combined-source canon without changing standalone validity checks."""
+        if self.layout.standalone:
+            self.check_common_skill_body_parity(name, codex_file, claude_file)
+        else:
+            self.check_common_skill_body_pin(name, expected, f"@SKILLS/{name}/SKILL.md")
 
     def check_common_skill_body_parity(
         self, name: str, codex_file: str, claude_file: str
@@ -1201,25 +1211,38 @@ def skill_frontmatter_valid(path: Path, expected_name: str) -> bool:
 
 
 def installer_choices_are_supported_production_packs(root: Path) -> bool:
-    path = root / "install.py"
-    if not path.is_file():
+    """Read the declared client inventory without executing either source file."""
+    def assigned(module, name):
+        rows = [node.value for node in module.body if isinstance(node, ast.Assign)
+                and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)]
+        if len(rows) != 1:
+            raise ValueError("missing or ambiguous inventory")
+        return rows[0]
+    expected = (("codex", "Codex"), ("claude", "Claude Code"))
+    try:
+        module = ast.parse((root / "install.py").read_text(encoding="utf-8"))
+        expression = assigned(module, "CLIENTS")
+        if isinstance(expression, (ast.Tuple, ast.List)):
+            return ast.literal_eval(expression) == expected  # Historical static router.
+        projection = ast.parse('tuple((name, spec["label"]) for name, spec in CLIENT_CATALOG.items())', mode="eval").body
+        if ast.dump(expression) != ast.dump(projection):
+            return False
+        imports = [alias for node in module.body
+                   if isinstance(node, ast.ImportFrom) and node.module == "installation.clients"
+                   for alias in node.names if alias.name == "CLIENTS" and alias.asname == "CLIENT_CATALOG"]
+        if len(imports) != 1 or any(isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign))
+            and any(isinstance(part, ast.Name) and isinstance(part.ctx, ast.Store)
+                    and part.id == "CLIENT_CATALOG" for part in ast.walk(node)) for node in module.body):
+            return False
+        catalog_module = ast.parse((root / "scripts/installation/clients.py").read_text(encoding="utf-8"))
+        catalog = ast.literal_eval(assigned(catalog_module, "CLIENTS"))
+        if not isinstance(catalog, dict) or tuple(catalog) != tuple(name for name, _ in expected):
+            return False
+        return all(isinstance(catalog[name], dict) and catalog[name].get("id") == name
+                   and catalog[name].get("label") == label
+                   and catalog[name].get("primary") is (name == "codex") for name, label in expected)
+    except (OSError, UnicodeError, SyntaxError, ValueError, TypeError):
         return False
-    text = _read(path)
-    match = re.search(r"^    actions = \{\n(?P<body>.*?)^    \}", text, re.MULTILINE | re.DOTALL)
-    if not match:
-        return False
-    action_lines = tuple(
-        line.strip() for line in match.group("body").splitlines() if line.strip()
-    )
-    return (
-        action_lines
-        == (
-            '"1": ("codex",),',
-            '"2": ("claude",),',
-            '"3": ("codex", "claude"),',
-        )
-        and 'input("Select 1, 2, or 3 [default: 3]: ").strip() or "3"' in text
-    )
 
 
 def run_agents_mode_contract(validator: Validator) -> bool:
@@ -1317,7 +1340,7 @@ def _direct(
             dirs.extend(
                 layout.root / name
                 for name in (
-                    "references-claude",
+                    "adapters/claude/references",
                 )
             )
         for passed, message in validate_ru_mirror_policy(
@@ -1549,8 +1572,8 @@ def _direct(
         _verdict(
             validator,
             installer_choices_are_supported_production_packs(layout.root),
-            "root Python installer offers only Codex, Claude, and the default production pair",
-            "root Python installer choices must be Codex, Claude, and the default production pair",
+            "root Python installer declares the qualified client inventory",
+            "root Python installer inventory must match the qualified client catalog",
         )
         return
     if kind == "agents_contract":
@@ -1704,6 +1727,7 @@ def validate_pack(
             and action[0] in {
                 "check_common_skill_body_pin",
                 "check_common_skill_body_parity",
+                "check_common_skill_live_body",
             }
         )
         for action in applicable_actions:

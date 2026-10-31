@@ -37,7 +37,7 @@ def test_vcpkg_ports_updater_has_the_common_general_overlay_contract() -> None:
         "agents/openai.yaml",
         "references/upstream-sync.md",
     }
-    claude_root = ROOT / "src.claude" / "skills" / "vcpkg-ports-updater"
+    claude_root = ROOT / 'adapters/claude' / "skills" / "vcpkg-ports-updater"
     claude_files = {
         path.relative_to(claude_root).as_posix()
         for path in claude_root.rglob("*")
@@ -159,7 +159,7 @@ def test_claude_installer_projection_is_create_only_idempotent_and_collision_saf
     )
     plan = installer._preflight_claude_skill_projections(
         ROOT / "src.codex" / "skills",
-        ROOT / "src.claude" / "skills",
+        ROOT / 'adapters/claude' / "skills",
         canonical_target,
         projection_root,
     )
@@ -173,7 +173,7 @@ def test_claude_installer_projection_is_create_only_idempotent_and_collision_saf
 
     current = installer._preflight_claude_skill_projections(
         ROOT / "src.codex" / "skills",
-        ROOT / "src.claude" / "skills",
+        ROOT / 'adapters/claude' / "skills",
         canonical_target,
         projection_root,
     )
@@ -194,7 +194,7 @@ def test_claude_installer_projection_is_create_only_idempotent_and_collision_saf
     ):
         installer._preflight_claude_skill_projections(
             ROOT / "src.codex" / "skills",
-            ROOT / "src.claude" / "skills",
+            ROOT / 'adapters/claude' / "skills",
             canonical_target,
             projection_root,
         )

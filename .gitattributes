@@ -4,7 +4,7 @@
 /scripts/** -text
 /shared/** -text
 /src.codex/** -text
-/src.claude/** -text
+/adapters/** -text
 /baseline/** -text
 
 # Keep the always-loaded governance spine LF-only. CRLF line endings inflate its
@@ -20,3 +20,7 @@ shared/references/spine/*.md text eol=lf
 # Revision manifests remain text; only files inside each skill payload are byte-exact.
 tests/fixtures/canonical-skill-priors/*/*/** -text
 tests/fixtures/native-luna-policy-priors/** -text
+tests/fixtures/sol-6-1-priors/** -text
+
+# Release prose has a cross-platform LF contract; archived payload bytes above remain exact.
+RELEASE_NOTES.md text eol=lf

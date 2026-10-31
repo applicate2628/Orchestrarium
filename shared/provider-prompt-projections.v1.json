@@ -9,32 +9,32 @@
     },
     "provider_prompt.py": {
       "source": "scripts/provider_prompt.py",
-      "sha256": "e2c0beceaeedb8c0546f3c984f2cd2d4abdf475a0708be46a4931c9520f0a596",
+      "sha256": "20d63131765b3e2366825fe0203333796d90c14c814fa902c786d8ea10d3783d",
       "destination": "scripts/provider_prompt.py"
     },
     "process_supervision/process_runner.py": {
       "source": "scripts/process_supervision/process_runner.py",
-      "sha256": "69de09b3bfb695ae27311b547966fd06ef06379d2753f13b6f5b8264d68895a9",
+      "sha256": "a30e4b9811d9e805fadb193b72562f4d19964ff8fbf0c01acb5aff13adb7d13e",
       "destination": "scripts/process_supervision/process_runner.py"
     },
     "invoke-codex-prompt.py": {
       "source": "scripts/invoke-codex-prompt.py",
-      "sha256": "52ce79e75504427dbb52cb3a3d9ab6c46d9dfed8ddd3108307723d8705a7ecea",
+      "sha256": "e2112d404eddcbfefd4c3a013680242b33affb3203b57c60f01553b90551d664",
       "destination": "scripts/invoke-codex-prompt.py"
     },
     "invoke-claude-prompt.py": {
       "source": "scripts/invoke-claude-prompt.py",
-      "sha256": "87f51ac63568056939a2bc0b4fb60d2738ec74d992b9cf15d0c6ad119c5db324",
+      "sha256": "dc42adf9dcbe486c3e84509ef1d9810ba9a6d2fef3c3b55ea36fce3c7d5b67f3",
       "destination": "scripts/invoke-claude-prompt.py"
     },
     "invoke-kimi-prompt.py": {
       "source": "scripts/invoke-kimi-prompt.py",
-      "sha256": "2f6fd8937e3fff9315f8b112d77eb043746802974c1c9ab4af51532800f3d785",
+      "sha256": "87eaaa96b648d3b5475db6b42f595d4a636a1a71b36c584c1ca8a387768d6444",
       "destination": "scripts/invoke-kimi-prompt.py"
     },
     "invoke-grok-prompt.py": {
       "source": "scripts/invoke-grok-prompt.py",
-      "sha256": "1013c9d166d6a5773a958bb69c4a44cffe61085bc8c142f0af72edd665f67011",
+      "sha256": "1f112927d0fd38e735ef0c98c60d8095d65d5d9ded3f45aa2a9ae3071af9a0c3",
       "destination": "scripts/invoke-grok-prompt.py"
     },
     "external-prompt-governance.md": {
@@ -46,6 +46,111 @@
       "source": "shared/external-role-taxonomy.v1.json",
       "sha256": "469ad1b8bf93b56f0323456413961ca7e01dd9a1890a66d766e564bc03d489b8",
       "destination": "scripts/external-role-taxonomy.v1.json"
+    },
+    "process_supervision/sdk_worker.py": {
+      "source": "scripts/process_supervision/sdk_worker.py",
+      "sha256": "5b4fee8e94f6bfe4a93c362ca99ea18e8c330f59392a39cf558e316993743381",
+      "destination": "scripts/process_supervision/sdk_worker.py"
+    },
+    "sdk_execution/__init__.py": {
+      "source": "scripts/sdk_execution/__init__.py",
+      "sha256": "43b155df3f0610a35b79cdf5fc634a3fe8c3d7fa9825fc2c0bf9ed5688909bdd",
+      "destination": "scripts/sdk_execution/__init__.py"
+    },
+    "sdk_execution/_async.py": {
+      "source": "scripts/sdk_execution/_async.py",
+      "sha256": "32a9b033c7267ae99359892cf2c955a5f27d6eca383c45ee9d177ac3dcfa754a",
+      "destination": "scripts/sdk_execution/_async.py"
+    },
+    "sdk_execution/acp_streams.py": {
+      "source": "scripts/sdk_execution/acp_streams.py",
+      "sha256": "79c1f35cf5ec0bffb9cf5ae9936870fd60b10d23a91691cabaf81183173e22d8",
+      "destination": "scripts/sdk_execution/acp_streams.py"
+    },
+    "sdk_execution/claude.py": {
+      "source": "scripts/sdk_execution/claude.py",
+      "sha256": "10fdd94d967e87bcd5bcabd462f9af07b96ff8d282e499b222f3342eb9fa8843",
+      "destination": "scripts/sdk_execution/claude.py"
+    },
+    "sdk_execution/codex.py": {
+      "source": "scripts/sdk_execution/codex.py",
+      "sha256": "18af833cb7188860725424deb493eabba8ac98696ec383200e9fcb4aed4fb2a8",
+      "destination": "scripts/sdk_execution/codex.py"
+    },
+    "sdk_execution/codex_tools.py": {
+      "source": "scripts/sdk_execution/codex_tools.py",
+      "sha256": "81c48f039c0e4928ca719303a5eeb63ea6ce6354dada1a384a9ef2b238fb87fc",
+      "destination": "scripts/sdk_execution/codex_tools.py"
+    },
+    "sdk_execution/dispatch.py": {
+      "source": "scripts/sdk_execution/dispatch.py",
+      "destination": "scripts/sdk_execution/dispatch.py",
+      "sha256": "b41c6b49774fe6dad54b51e0cce8e8035cb9b69b688a7e1613ae1671dc676c7b"
+    },
+    "sdk_execution/contracts.py": {
+      "source": "scripts/sdk_execution/contracts.py",
+      "sha256": "b9ef483cf6c42f10959e106cf36d408e7936a73b07fc97843864ff4d903e5b8e",
+      "destination": "scripts/sdk_execution/contracts.py"
+    },
+    "sdk_execution/coordinator.py": {
+      "source": "scripts/sdk_execution/coordinator.py",
+      "sha256": "0042dba7c9190a85d58c719f104722902ad489236e1e6cd9cb09eac36b35167c",
+      "destination": "scripts/sdk_execution/coordinator.py"
+    },
+    "sdk_execution/coordination.py": {
+      "source": "scripts/sdk_execution/coordination.py",
+      "destination": "scripts/sdk_execution/coordination.py",
+      "sha256": "e51b475c7860e04e13de6d7b625a1857189055defac9336ffa4d53d7be2beaab"
+    },
+    "sdk_execution/coordination_codex.py": {
+      "source": "scripts/sdk_execution/coordination_codex.py",
+      "destination": "scripts/sdk_execution/coordination_codex.py",
+      "sha256": "cc25a37b0329beb96a02bf7d067c2fba8a8d84bc0dd1b04271820ea4f89c79d8"
+    },
+    "sdk_execution/coordination_model.py": {
+      "source": "scripts/sdk_execution/coordination_model.py",
+      "destination": "scripts/sdk_execution/coordination_model.py",
+      "sha256": "1de34cea7a623c700f2e13e3adc836a1af627e68623eebdbd4bdaf8f1f521841"
+    },
+    "sdk_execution/coordination_receiving.py": {
+      "source": "scripts/sdk_execution/coordination_receiving.py",
+      "destination": "scripts/sdk_execution/coordination_receiving.py",
+      "sha256": "a240d479a6ff7332255d87533ef7bd1537d4d9e41e4a1a57f83e6de83ae9d3a1"
+    },
+    "sdk_execution/grok.py": {
+      "source": "scripts/sdk_execution/grok.py",
+      "sha256": "410cb9c452d102ab17e8aa8c58edaa322afe85131c9523052f9ec68039a4f323",
+      "destination": "scripts/sdk_execution/grok.py"
+    },
+    "sdk_execution/kimi.py": {
+      "source": "scripts/sdk_execution/kimi.py",
+      "sha256": "dbb87eff6527c62ea0ac6b3dc694ab121d42b2ad9a68a2f14569554cc07ffd9c",
+      "destination": "scripts/sdk_execution/kimi.py"
+    },
+    "sdk_execution/mimo.py": {
+      "source": "scripts/sdk_execution/mimo.py",
+      "sha256": "10fd4047e3c4768506a5e4a33125391b4b00f9274df73b4f98c85f464559e20a",
+      "destination": "scripts/sdk_execution/mimo.py"
+    },
+    "sdk_execution/minimax.py": {
+      "source": "scripts/sdk_execution/minimax.py",
+      "sha256": "d1c3262bdc41f80a24e1632a96793ede12b52a329296dd75c315d932e10fb511",
+      "destination": "scripts/sdk_execution/minimax.py"
+    },
+    "sdk_execution/receiving.py": {
+      "source": "scripts/sdk_execution/receiving.py",
+      "sha256": "5db3d5ea12dfa42dc08c02051730f876422cbbb80903ffcd25e56de18e06add7",
+      "destination": "scripts/sdk_execution/receiving.py"
+    },
+    "sdk_execution/runtime.py": {
+      "source": "scripts/sdk_execution/runtime.py",
+      "sha256": "c22c2825e16645aae70a873ab076c4e927b5486f6f4e7a7befb9bae4eca4f326",
+      "destination": "scripts/sdk_execution/runtime.py"
+    },
+    "sdk_execution/worker.py": {
+      "source": "scripts/sdk_execution/worker.py",
+      "sha256": "9d0f828937620eeb30eb506b98ebcccde245bd1f9ee60bca97ff024dd5441958",
+      "destination": "scripts/sdk_execution/worker.py"
     }
   }
 }

@@ -15,6 +15,7 @@ import shutil
 import stat
 import sys
 import tempfile
+import threading
 import time
 import tomllib
 import types
@@ -22,6 +23,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
+from typing import Callable
 
 try:
     from process_supervision.process_runner import (
@@ -105,6 +107,7 @@ RESULT_MAX_BYTES_HARD = 16 * 1024 * 1024
 CAPTURE_MAX_BYTES_DEFAULT = 16 * 1024 * 1024
 CAPTURE_MAX_BYTES_HARD = 256 * 1024 * 1024
 RESULT_PREFIX = "ORCHESTRARIUM_PROVIDER_RESULT_V2="
+SDK_RESULT_PREFIX = "ORCHESTRARIUM_PROVIDER_RESULT_V3="
 EXTERNAL_PROVIDER_NAMES = frozenset({"codex", "claude", "kimi"})
 POLICY_BOUND_EXTERNAL_PROVIDERS = frozenset({"kimi", "grok"})
 _EXTERNAL_DISPATCH_DECISION_FIELDS = frozenset(
@@ -234,6 +237,7 @@ class Control:
     topic: str | None = None
     prompt_file: Path | None = None
     terminal_receipt: Path | None = None
+    sdk_review_binding: Path | None = None
     ledger: str | None = None
     ledger_role: str | None = None
     ledger_role_explicit: bool = False
@@ -949,8 +953,15 @@ class KimiAcpOneShotV1:
     result_max_bytes: int = RESULT_MAX_BYTES_DEFAULT
     observed_budget_chars: int | None = None
     effort: str = "high"
+    before_prompt: Callable[[], None] | None = None
     result_bytes: bytes = field(default=b"", init=False)
     session_id: str | None = field(default=None, init=False)
+    observed_model: str | None = field(default=None, init=False)
+    observed_effort: str | None = field(default=None, init=False)
+    stop_reason: str | None = field(default=None, init=False)
+    protocol_closed: bool = field(default=False, init=False)
+    cleanup_error: str | None = field(default=None, init=False)
+    cancel_sent: bool = field(default=False, init=False)
     _next_id: int = field(default=1, init=False)
     _tool_calls: dict[str, dict[str, str]] = field(default_factory=dict, init=False)
     _permission_decisions: list[dict[str, str]] = field(
@@ -1317,6 +1328,7 @@ class KimiAcpOneShotV1:
                     {"sessionId": self.session_id},
                     notification=True,
                 )
+                self.cancel_sent = True
             except BaseException as exc:
                 cleanup_error = exc
         for method in ("session/close", "session/delete"):
@@ -1338,7 +1350,9 @@ class KimiAcpOneShotV1:
                 if cleanup_error is None:
                     cleanup_error = exc
         if cleanup_error is not None:
+            self.cleanup_error = "E_KIMI_ACP_CLEANUP"
             raise cleanup_error
+        self.protocol_closed = True
 
     def __call__(self, channel) -> None:
         initialize_id = self._send(
@@ -1396,6 +1410,7 @@ class KimiAcpOneShotV1:
                 != KIMI_WINDOWS_PROFILE_V1.model
             ):
                 raise ValueError("E_KIMI_ACP_PROTOCOL")
+            self.observed_model = model_options[0]["currentValue"]
             thinking_id = self._send(
                 channel,
                 "session/set_config_option",
@@ -1420,6 +1435,9 @@ class KimiAcpOneShotV1:
                 or thinking_rows[0].get("currentValue") != self.effort
             ):
                 raise ValueError("E_KIMI_ACP_PROTOCOL")
+            self.observed_effort = thinking_rows[0]["currentValue"]
+            if self.before_prompt is not None and self.before_prompt() is not None:
+                raise ValueError("E_KIMI_CURRENT_AUTHORITY_INVALID")
             prompt_id = self._send(
                 channel,
                 "session/prompt",
@@ -1434,6 +1452,7 @@ class KimiAcpOneShotV1:
             prompt_result = self._response(channel, prompt_id, collect=True)
             if not isinstance(prompt_result.get("stopReason"), str):
                 raise ValueError("E_KIMI_ACP_PROTOCOL")
+            self.stop_reason = prompt_result["stopReason"]
         except BaseException as exc:
             cancel = (
                 isinstance(exc, ProcessSupervisionError)
@@ -1645,6 +1664,36 @@ class PolicyBoundLaunch:
     provenance: ExecutionProvenance | None
 
 
+@dataclass
+class KimiOperationBindingV1:
+    """One in-process consumer of the existing Kimi launch owner.
+
+    This adds no process, ledger, permission or ACP owner. The operation retains
+    the owner's already-scanned terminal bytes instead of publishing to stdout.
+    Current authority remains an explicit caller-owned dependency.
+    """
+
+    prevalidated: PolicyBoundLaunch
+    prompt: bytes
+    assert_current: Callable[[str], None]
+    cancellation_probe: Callable[[], bool]
+    exchange: KimiAcpOneShotV1 | None = field(default=None, init=False)
+    process_result: ProcessResultV1 | None = field(default=None, init=False)
+    terminal_bytes: bytes | None = field(default=None, init=False)
+    native_session_id: str | None = field(default=None, init=False)
+    consumed: bool = field(default=False, init=False)
+
+    def require_current(self, effect: str) -> None:
+        if self.cancellation_probe():
+            raise ProcessSupervisionError("PSV1-CANCELLED", "stdin-delivery")
+        try:
+            accepted = self.assert_current(effect)
+        except Exception:
+            raise ValueError("E_KIMI_CURRENT_AUTHORITY_UNAVAILABLE") from None
+        if accepted is not None:
+            raise ValueError("E_KIMI_CURRENT_AUTHORITY_INVALID")
+
+
 @dataclass(frozen=True)
 class TerminalResult:
     evidence_path: Path
@@ -1790,6 +1839,9 @@ class TerminalReceiptV1:
     ancestor_identities: tuple[tuple[int, int], ...] = ()
     leaf_identity: tuple[int, int] | None = None
     committed: bool = False
+    _close_handles: tuple[int, ...] | None = field(default=None, init=False, repr=False)
+    _close_attempted: set[int] = field(default_factory=set, init=False, repr=False)
+    _close_errors: tuple[BaseException, ...] = field(default=(), init=False, repr=False)
 
     @staticmethod
     def _validated_path(path: Path) -> Path:
@@ -2286,24 +2338,42 @@ class TerminalReceiptV1:
             raise OSError("terminal receipt exact readback")
 
     def close(self) -> None:
-        if self.file_handle < 0:
-            return
-        if self.windows:
+        if self._close_handles is None:
+            if self.file_handle < 0:
+                return
+            ancestors = self.ancestor_handles or (self.parent_handle,)
+            self._close_handles = tuple(dict.fromkeys(
+                handle for handle in (self.file_handle, *reversed(ancestors)) if handle >= 0
+            ))
+        pending = tuple(handle for handle in self._close_handles if handle not in self._close_attempted)
+        if pending and self.windows:
             import ctypes
             from ctypes import wintypes
 
             kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            kernel32.CloseHandle(wintypes.HANDLE(self.file_handle))
-            handles = self.ancestor_handles or (self.parent_handle,)
-            for handle in reversed(handles):
-                kernel32.CloseHandle(wintypes.HANDLE(handle))
-        else:
-            os.close(self.file_handle)
-            handles = self.ancestor_handles or (self.parent_handle,)
-            for handle in reversed(handles):
-                os.close(handle)
-        self.file_handle = -1
-        self.parent_handle = -1
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel32.CloseHandle.restype = wintypes.BOOL
+        for handle in pending:
+            # Failed close can have taken effect (including interrupted POSIX
+            # close). Never retry that numeric value after possible recycling.
+            self._close_attempted.add(handle)
+            try:
+                if self.windows:
+                    if not kernel32.CloseHandle(wintypes.HANDLE(handle)):
+                        raise OSError(ctypes.get_last_error(), "CloseHandle(receipt)")
+                else:
+                    os.close(handle)
+            except BaseException as failure:
+                self._close_errors += (failure,)
+            else:
+                if handle == self.file_handle:
+                    self.file_handle = -1
+                if handle == self.parent_handle:
+                    self.parent_handle = -1
+        if self._close_errors:
+            interruption = next((error for error in self._close_errors
+                                 if not isinstance(error, Exception)), None)
+            raise interruption if interruption is not None else self._close_errors[0]
 
     def __enter__(self) -> "TerminalReceiptV1":
         return self
@@ -2821,6 +2891,7 @@ def parse_control(
         "-promptfile": "prompt_file",
         "--prompt-file": "prompt_file",
         "--terminal-receipt": "terminal_receipt",
+        "--sdk-review-binding": "sdk_review_binding",
         "-ledger": "ledger",
         "--ledger": "ledger",
         "-ledgerrole": "ledger_role",
@@ -2874,6 +2945,7 @@ def parse_control(
             if attr in {
                 "prompt_file",
                 "terminal_receipt",
+                "sdk_review_binding",
                 "kimi_capabilities_file",
             }:
                 parsed_value: object = Path(value)
@@ -2912,6 +2984,8 @@ def parse_control(
         else:
             result.provider_flags.append(token)
         index += 1
+    if result.sdk_review_binding is not None and provider != "codex":
+        raise ValueError("E_SDK_REVIEW_PROVIDER_REQUIRED")
     if result.result_max_bytes > RESULT_MAX_BYTES_HARD:
         raise ValueError(
             f"--result-max-bytes must not exceed {RESULT_MAX_BYTES_HARD}"
@@ -3108,6 +3182,8 @@ def resolved_profile(
             f"and/or effort. Pass the FULL per-profile flag set, e.g.: {example}"
         )
     return list(frozen), model, effort
+
+
 
 
 def _lexically_within(path: Path, root: Path) -> bool:
@@ -3417,6 +3493,8 @@ def _prevalidate_policy_bound_external_launch(
             dispatch_decision=decision,
         ),
     )
+
+
 
 
 def require_transport_projection_parity() -> None:
@@ -4527,6 +4605,103 @@ class RunCaptureLifecycle:
     _prompt_identity: tuple[int, int] | None = field(default=None, init=False)
     _settled: CleanupResult | None = field(default=None, init=False)
     _close_issues: tuple[str, ...] = field(default=(), init=False)
+    _evidence_retention: bool = field(default=False, init=False)
+    _evidence_attempted: bool = field(default=False, init=False)
+    _evidence_verified: bool = field(default=False, init=False)
+    _evidence_receipt: TerminalReceiptV1 | None = field(default=None, init=False)
+    _evidence_close_attempted: bool = field(default=False, init=False)
+    _evidence_identity: tuple[int, int] | None = field(default=None, init=False)
+
+    def arm_evidence_retention(self) -> None:
+        """Protect acquired evidence before receiving; this grants no authority."""
+        if self._settled is not None:
+            raise ValueError("capture evidence lifecycle already settled")
+        self._validate_identity()
+        self._evidence_retention = True
+
+    def release_evidence_retention(self) -> None:
+        """Caller must first establish successful receiving and durable readback."""
+        if (self._settled is not None or not self._evidence_retention
+            or (self._evidence_attempted and not self._evidence_verified)
+            or self._evidence_receipt is not None):
+            raise ValueError("capture evidence retention cannot be released")
+        self._validate_identity()
+        if self._evidence_verified:
+            self._validate_evidence_leaf()
+        self._evidence_retention = False
+
+    def _validate_evidence_leaf(self) -> None:
+        metadata = (self.run_dir / "sdk-recovery.json").lstat()
+        if (not stat.S_ISREG(metadata.st_mode) or _metadata_is_reparse(metadata)
+            or (metadata.st_dev, metadata.st_ino) != self._evidence_identity):
+            raise OSError("capture evidence leaf identity changed")
+
+    def _close_evidence_receipt(self) -> None:
+        if self._evidence_receipt is None:
+            return
+        if self._evidence_close_attempted:
+            raise OSError("capture evidence receipt close effect unknown")
+        # The receipt owner does not expose per-handle close progress. Never
+        # retry a potentially effective close against a recycled descriptor.
+        self._evidence_close_attempted = True
+        self._evidence_receipt.close()
+        self._evidence_receipt = None
+
+    def persist_recovery_evidence(self, payload: bytes, *, max_bytes: int) -> tuple[Path, str]:
+        """Persist bounded private diagnostic bytes, never a creator seal/permit."""
+        if (self._settled is not None or not self._evidence_retention
+            or self._evidence_attempted):
+            raise ValueError("capture evidence persistence state invalid")
+        if (type(max_bytes) is not int or max_bytes <= 0 or type(payload) is not bytes
+            or not payload or not payload.endswith(b"\n") or len(payload) > max_bytes):
+            raise ValueError("capture evidence payload budget invalid")
+        self._validate_identity()
+        path = self.run_dir / "sdk-recovery.json"
+        self._evidence_attempted = True
+        primary: BaseException | None = None
+        try:
+            self._evidence_receipt = TerminalReceiptV1.reserve(path)
+            if self._evidence_receipt.windows:
+                # The Windows receipt owns a no-sharing handle. Capture the
+                # named stat identity while replacement remains denied, as for
+                # this lifecycle's existing prompt birth identity.
+                born = path.lstat()
+                self._evidence_identity = (born.st_dev, born.st_ino)
+            else:
+                self._evidence_identity = self._evidence_receipt.leaf_identity
+            self._validate_evidence_leaf()
+            self._validate_identity()
+            self._evidence_receipt.commit(payload)
+            self._validate_identity()
+        except BaseException as failure:
+            primary = failure
+            raise
+        finally:
+            try:
+                self._close_evidence_receipt()
+            except BaseException:
+                if primary is None:
+                    raise
+                primary.add_note("capture evidence receipt close incomplete")
+        self._validate_identity()
+        self._validate_evidence_leaf()
+        self._evidence_verified = True
+        return path, hashlib.sha256(payload).hexdigest()
+
+    def _retain_initialized_evidence(self) -> CleanupResult:
+        """Keep the proved private directory; never scrub after persistence uncertainty."""
+        try:
+            self._validate_identity()
+        except (OSError, ValueError):
+            return CleanupResult(("capture-evidence-retention-unknown",), recovery_retained=False)
+        if self._evidence_verified:
+            try:
+                self._validate_evidence_leaf()
+            except (OSError, ValueError):
+                return CleanupResult(("capture-evidence-leaf-identity-changed",), recovery_retained=True)
+        issues = (("capture-evidence-persistence-incomplete",)
+                  if self._evidence_attempted and not self._evidence_verified else ())
+        return CleanupResult(issues, recovery_retained=True)
 
     @staticmethod
     def release_provisional(run_dir: Path) -> CleanupResult:
@@ -4657,7 +4832,7 @@ class RunCaptureLifecycle:
     def _close_bindings(self) -> tuple[str, ...]:
         issues: list[str] = []
         interruption: BaseException | None = None
-        for close in (self._close_prompt, self._close_child):
+        for close in (self._close_evidence_receipt, self._close_prompt, self._close_child):
             try:
                 close()
             except BaseException as failure:
@@ -4685,7 +4860,8 @@ class RunCaptureLifecycle:
 
     def _has_unresolved_resources(self) -> bool:
         return bool(
-            self._prompt_resource is not None or self._prompt_native_resource is not None
+            self._evidence_receipt is not None
+            or self._prompt_resource is not None or self._prompt_native_resource is not None
             or self._child_resource is not None
             or self._namespace is not None and (
                 self._namespace.resources or self._namespace._uncertain_closes
@@ -5045,12 +5221,13 @@ class RunCaptureLifecycle:
         result = None
         primary: BaseException | None = None
         try:
-            result = self._cleanup_initialized()
+            result = (self._retain_initialized_evidence() if self._evidence_retention
+                      else self._cleanup_initialized())
         except BaseException as failure:
             primary = failure
             result = _bounded_cleanup_result(
                 ("cleanup-owner-failed", "cleanup-retention-unknown"),
-                recovery_retained=self._child_created,
+                recovery_retained=self._child_created and not self._evidence_retention,
             )
         finally:
             try:
@@ -5083,6 +5260,7 @@ class ReservedExternalRunV1:
     _output_context: ProviderOutputContext | None = field(default=None, init=False)
     _attempted: bool | None = field(default=None, init=False)
     _pending_capture: RunCaptureLifecycle | None = field(default=None, init=False)
+    operation: KimiOperationBindingV1 | None = None
 
     def acquire_capture(self, provider: str, slug: str) -> RunCaptureLifecycle:
         if self.state != "absent" or self.lifecycle is not None or self._pending_capture is not None:
@@ -5294,7 +5472,10 @@ def _ledger_helper_binding() -> _LedgerHelperBinding | None:
             owner = source
         else:
             parts = tuple(part.casefold() for part in script.parts)
-            canonical = parts[-5:] == ('.agents', 'skills', 'lead', 'scripts', 'provider_prompt.py')
+            canonical = parts[-5:] in (
+                ('.agents', 'skills', 'lead', 'scripts', 'provider_prompt.py'),
+                ('.claude', 'skills', 'lead', 'scripts', 'provider_prompt.py'),
+            )
             claude = parts[-4:] == ('.claude', 'agents', 'scripts', 'provider_prompt.py')
             home = Path(os.path.abspath(Path.home()))
             # A declared global root can resolve to backing storage whose name
@@ -5302,6 +5483,7 @@ def _ledger_helper_binding() -> _LedgerHelperBinding | None:
             # no unsuccessful project lookup can select global scope later.
             matches = []
             for is_claude, candidate in ((False, home / '.agents/skills/lead/scripts/provider_prompt.py'),
+                    (False, home / '.claude/skills/lead/scripts/provider_prompt.py'),
                     (True, home / '.claude/agents/scripts/provider_prompt.py')):
                 try:
                     if script.samefile(candidate) and script.resolve(strict=True) == candidate.resolve(strict=True):
@@ -5321,9 +5503,14 @@ def _ledger_helper_binding() -> _LedgerHelperBinding | None:
                 return None
             # Keep the actual installer/native association's path spelling.
             # Casefolded suffixes classify a scope; they do not mint paths.
-            canonical_root = base / '.agents' if claude else scope_script.parents[3]
+            # The transport and canonical helper belong to the same client.
+            # Another client's package is never a missing-helper fallback.
             claude_root = scope_script.parents[2] if claude else None
-            logical_roots = (canonical_root, scope_script.parents[1], claude_root / 'skills') if claude else (canonical_root,)
+            secondary_canonical = not claude and scope_script.parts[-5].casefold() == '.claude'
+            canonical_root = (claude_root / 'skills' if claude
+                              else scope_script.parents[2] if secondary_canonical
+                              else scope_script.parents[3])
+            logical_roots = (canonical_root, scope_script.parents[1]) if claude else (canonical_root,)
             for logical in logical_roots:
                 validate_no_reparse_components(logical.parent)
                 metadata = logical.lstat()
@@ -5334,7 +5521,7 @@ def _ledger_helper_binding() -> _LedgerHelperBinding | None:
                     return None
                 roots.append((logical, (metadata.st_dev, metadata.st_ino, metadata.st_mode,
                     getattr(metadata, 'st_file_attributes', 0)), resolved))
-            relative_owner = Path('skills/lead') if claude else scope_script.parents[1].relative_to(canonical_root)
+            relative_owner = Path('lead') if claude else scope_script.parents[1].relative_to(canonical_root)
             owner = roots[0][2] / relative_owner
             selection.append(_ledger_selection_witness(owner))
             if claude:
@@ -5376,7 +5563,7 @@ def _ledger_helper_binding() -> _LedgerHelperBinding | None:
                     authority.assert_current()
                 # L owns ordinary descendants of its declared canonical root.
                 if authorities and authorities[0].logical_root == canonical_root:
-                    authorities[0].ordinary_file(Path('skills/lead/scripts/agent-run-ledger.py'))
+                    authorities[0].ordinary_file(relative_owner / 'scripts/agent-run-ledger.py')
         relatives = ('scripts/agent-run-ledger.py', 'scripts/validate-work-item-state.py',
             'scripts/mutate-work-item.py', 'scripts/solution_attempt/reducer.py',
             'shared/schemas/agent-runs.schema.json')
@@ -5409,11 +5596,16 @@ def run_support_command(
     cwd: Path,
     environment: dict[str, str],
     timeout_secs: float,
+    deadline_monotonic: float | None = None,
+    cancellation_probe: Callable[[], bool] | None = None,
     before_start=None,
 ) -> tuple[ProcessResultV1, bytes, bytes]:
     executable = Path(command[0]).resolve(strict=True)
     argv = (str(executable), *command[1:])
     sink = runner.mint_memory_capture_sink()
+    support_deadline = time.monotonic() + timeout_secs
+    if deadline_monotonic is not None:
+        support_deadline = min(deadline_monotonic, support_deadline)
     request = ProcessRequestV1(
         schema_version=1,
         argv=argv,
@@ -5423,7 +5615,8 @@ def run_support_command(
             EnvironmentRowV1(name, value) for name, value in environment.items()
         ),
         stdin_bytes=None,
-        deadline_monotonic=time.monotonic() + timeout_secs,
+        deadline_monotonic=support_deadline,
+        cancellation_probe=cancellation_probe,
         capture_policy=CapturePolicyV1("provider-support-v1", 1024 * 1024, 0, 0, 64 * 1024),
         capture_sink_binding=sink,
         settle_policy=SettlePolicyV1(5.0),
@@ -5562,12 +5755,22 @@ def require_codex_hook_trust(
     command: list[str],
     codex_home: Path,
     query_cwd: Path,
+    *,
+    installed_root: Path | None = None,
+    deadline_monotonic: float | None = None,
+    cancellation_probe: Callable[[], bool] | None = None,
 ) -> int:
+    if installed_root is not None and (
+        not isinstance(installed_root, Path) or not installed_root.is_absolute()
+        or any(ord(char) < 32 or ord(char) == 127 for char in str(installed_root))
+    ):
+        return fail("Codex installed hook root must be an explicit absolute path")
     helper = codex_hook_health_helper(codex_home)
     if helper is None:
         return fail("Codex hook trust helper was not found")
     host_os = "windows" if os.name == "nt" else "posix"
-    target = (codex_home / "hooks.json").resolve(strict=False)
+    # Keep the selected spelling: the health owner witnesses and resolves links.
+    target = Path(os.path.abspath(codex_home / "hooks.json"))
     try:
         result, stdout, stderr = run_support_command(
             runner,
@@ -5588,10 +5791,13 @@ def require_codex_hook_trust(
                 str(codex_home),
                 "--query-cwd",
                 str(query_cwd),
+                *(["--installed-root", str(installed_root)] if installed_root is not None else []),
             ],
             cwd=query_cwd,
             environment=_trust_probe_env(codex_home),
             timeout_secs=30,
+            deadline_monotonic=deadline_monotonic,
+            cancellation_probe=cancellation_probe,
         )
     except (OSError, ValueError):
         return fail("Codex hook trust inventory query failed")
@@ -5890,6 +6096,7 @@ def run_provider_process(
     expected_executable_binding: ExecutableBindingV1 | None = None,
     dialogue: ProcessDialogueV1 | None = None,
     prepared_native_launch: PreparedNativeWindowsLaunchV1 | None = None,
+    cancellation_probe: Callable[[], bool] | None = None,
 ) -> tuple[ProcessResultV1, bytes, bytes]:
     """Run one provider through the sole process/tree/I-O lifecycle owner."""
 
@@ -5912,6 +6119,7 @@ def run_provider_process(
         capture_policy=provider_capture_policy(control.capture_max_bytes),
         capture_sink_binding=sink,
         settle_policy=SettlePolicyV1(5.0),
+        cancellation_probe=cancellation_probe,
         windows_argv_profile_id=(
             "native-parser-contract-v1" if prepared_native_launch is not None
             else provider_windows_argv_profile_id(provider or "python-support", executable)
@@ -6131,7 +6339,8 @@ def _terminal_protocol_token_positions(text: str) -> dict[int, str]:
                 index += 1
         return decoder.raw_decode(text, index)[1]
 
-    visit(len(RESULT_PREFIX) if text.startswith(RESULT_PREFIX) else 0, ())
+    prefix = next((value for value in (RESULT_PREFIX, SDK_RESULT_PREFIX) if text.startswith(value)), "")
+    visit(len(prefix), ())
     return positions
 
 
@@ -6690,6 +6899,7 @@ _PROVIDER_RESULT_FIELD_PROVENANCE = {
     "workItem": _SCAN_RECURSIVE,
     "assignedInternalRole": _SCAN_RECURSIVE,
     "launchFlags": _SCAN_RECURSIVE,
+    "sdkExecution": _SCAN_RECURSIVE,
     "artifactIdentity": _SCAN_RECURSIVE,
     "externalDispatchId": _SCAN_RECURSIVE,
     "externalEvidenceRunId": _SCAN_RECURSIVE,
@@ -6735,10 +6945,15 @@ def _provider_result_scan_projection(payload: dict[str, object]) -> dict[str, ob
 def _validate_provider_result_controls(payload: dict[str, object]) -> None:
     """Bind contextual treatment to the existing producer's closed protocol."""
     fixed = {
-        "schema": "orchestrarium.provider-result.v2", "authorizing": False,
+        "authorizing": False,
         "closesRunIds": [], "independentVerificationRequired": True,
         "terminalClass": "external-nonauthorizing",
     }
+    schema = payload.get("schema")
+    if schema == "orchestrarium.provider-result.v3":
+        _validate_sdk_result_binding(payload)
+    elif schema != "orchestrarium.provider-result.v2" or "sdkExecution" in payload:
+        raise ValueError("provider result schema mismatch")
     if any(type(payload.get(key)) is not type(value) or payload.get(key) != value
            for key, value in fixed.items()):
         raise ValueError("provider result fixed control source mismatch")
@@ -6992,20 +7207,74 @@ def build_minimal_provider_failure_line(
     ) + "\n"
 
 
+def _validate_sdk_result_binding(payload: dict[str, object]) -> None:
+    """Validate SDK provenance through the existing paired ledger schema owner.
+
+    This checks a received record, not admission, process settlement or authority.
+    CLI records retain their original profile representation and reader behavior.
+    """
+    if payload.get("actualExecutionPath") != "direct-external-sdk" or "launchFlags" in payload:
+        raise ValueError("provider result SDK execution path mismatch")
+    validator = _ledger_owner().load_validator()
+    validator.validate_sdk_execution(
+        payload.get("sdkExecution"), provider=payload.get("provider"),
+        model=payload.get("model"), effort=payload.get("effort"),
+    )
+    for name in (
+        "workItem", "assignedRole", "artifactIdentity", "externalDispatchId",
+        "externalEvidenceRunId", "effortMappingLoss",
+    ):
+        value = payload.get(name)
+        if not isinstance(value, str) or not value.strip() or len(value) > 2048:
+            raise ValueError("provider result SDK identity missing")
+    if payload["externalDispatchId"] == payload["externalEvidenceRunId"]:
+        raise ValueError("provider result SDK identities must be distinct")
+    if payload.get("executionRole") != "external-reviewer":
+        raise ValueError("provider result SDK review role mismatch")
+
+
 def parse_provider_result(output: str) -> dict[str, object]:
     if "\r" in output:
         raise ValueError("provider result must use one newline-terminated record")
     if not output.endswith("\n") or output.count("\n") != 1:
         raise ValueError("provider result must contain exactly one line")
     line = output[:-1]
-    if not line.startswith(RESULT_PREFIX):
+    prefix = next((value for value in (RESULT_PREFIX, SDK_RESULT_PREFIX) if line.startswith(value)), None)
+    if prefix is None:
         raise ValueError("provider result prefix mismatch")
-    encoded = line[len(RESULT_PREFIX) :]
-    decoder = json.JSONDecoder()
-    payload, end = decoder.raw_decode(encoded)
+    encoded = line[len(prefix) :]
+    if prefix == SDK_RESULT_PREFIX:
+        def strict_pairs(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("provider result duplicate field")
+                result[key] = value
+            return result
+        def reject_constant(value):
+            raise ValueError("provider result nonfinite number")
+        def finite_float(value):
+            parsed = float(value)
+            if not math.isfinite(parsed):
+                raise ValueError("provider result nonfinite number")
+            return parsed
+        decoder = json.JSONDecoder(object_pairs_hook=strict_pairs,
+                                   parse_constant=reject_constant, parse_float=finite_float)
+    else:
+        decoder = json.JSONDecoder()
+    try:
+        payload, end = decoder.raw_decode(encoded)
+    except RecursionError as exc:
+        raise ValueError("provider result nesting too deep") from exc
     if end != len(encoded) or not isinstance(payload, dict):
         raise ValueError("provider result must contain exactly one JSON object")
-    if payload.get("schema") != "orchestrarium.provider-result.v2":
+    sdk_result = payload.get("schema") == "orchestrarium.provider-result.v3"
+    if (prefix == SDK_RESULT_PREFIX) != sdk_result:
+        raise ValueError("provider result version prefix mismatch")
+    if sdk_result:
+        _validate_sdk_result_binding(payload)
+        _provider_result_scan_projection(payload)
+    elif payload.get("schema") != "orchestrarium.provider-result.v2" or "sdkExecution" in payload:
         raise ValueError("provider result schema mismatch")
     if not isinstance(payload.get("resultText"), str):
         raise ValueError("provider result resultText must be a string")
@@ -7019,7 +7288,9 @@ def parse_provider_result(output: str) -> dict[str, object]:
         or payload.get("closesRunIds") != []
         or payload.get("independentVerificationRequired") is not True
         or payload.get("terminalClass") != "external-nonauthorizing"
-        or payload.get("actualExecutionPath") != "direct-external-cli"
+        or payload.get("actualExecutionPath") != (
+            "direct-external-sdk" if sdk_result else "direct-external-cli"
+        )
     ):
         raise ValueError("provider result nonauthorizing tuple mismatch")
     if "launchFlags" in payload:
@@ -7242,6 +7513,33 @@ def record_terminal(
     return recorded
 
 
+def commit_reserved_terminal(
+    reserved_run: ReservedExternalRunV1, terminal_bytes: bytes, deliver_terminal,
+) -> bool:
+    """Publish already-scanned bytes through the one existing receipt owner.
+
+    Ledger settlement and output scanning belong to the caller. A delivery
+    failure never rolls back or overwrites the committed receipt.
+    """
+    if reserved_run.receipt.committed or reserved_run.finalized:
+        print("FAIL: terminal receipt was already committed", file=sys.stderr)
+        return False
+    if reserved_run.state != "cleaned":
+        raise ValueError("E_EXTERNAL_RESERVED_RUN_CLEANUP_REQUIRED")
+    try:
+        reserved_run.receipt.commit(terminal_bytes)
+    except (OSError, ValueError) as exc:
+        print(f"FAIL: terminal receipt commit failed: {type(exc).__name__}", file=sys.stderr)
+        return False
+    reserved_run.mark_finalized()
+    try:
+        deliver_terminal(terminal_bytes)
+    except Exception:
+        print("FAIL: E_EXTERNAL_PROVIDER_RESULT_STDOUT_FAILED", file=sys.stderr)
+        return False
+    return True
+
+
 def finalize_reserved_run_once(
     control: Control,
     provider: str,
@@ -7275,6 +7573,26 @@ def finalize_reserved_run_once(
     lifecycle = reserved_run.lifecycle
 
     def deliver_terminal(payload: bytes) -> None:
+        if reserved_run.operation is not None:
+            operation = reserved_run.operation
+            if operation.terminal_bytes is not None:
+                raise ValueError("E_KIMI_TERMINAL_ALREADY_DELIVERED")
+            operation.terminal_bytes = payload
+            # Session identity is optional public metadata, not another result.
+            # Apply the same captured-credential and path scan before exporting
+            # it; unsafe identity never erases the already-scanned native result.
+            session_id = operation.exchange.session_id if operation.exchange is not None else None
+            if isinstance(session_id, str):
+                try:
+                    if session_id.strip() and len(session_id.encode("utf-8")) <= 4096:
+                        probe = parse_provider_result(payload.decode("utf-8", errors="strict"))
+                        probe["resultText"] = session_id
+                        line = RESULT_PREFIX + json.dumps(probe, ensure_ascii=True, separators=(",", ":")) + "\n"
+                        if _provider_terminal_line_safety(provider, credential_needles, line) is None:
+                            operation.native_session_id = session_id
+                except (ValueError, TypeError, UnicodeError):
+                    pass
+            return
         binary_stdout = sys.stdout.buffer
         write_all_bytes(payload, binary_stdout.write)
         binary_stdout.flush()
@@ -7305,20 +7623,8 @@ def finalize_reserved_run_once(
         if minimal_scan is not None:
             print(f"FAIL: {minimal_scan}", file=sys.stderr)
             return 130 if cancelled else 124 if timed_out else exit_code if exit_code != 0 else 1
-        try:
-            terminal_bytes = line.encode("utf-8", errors="strict")
-            terminal_receipt.commit(terminal_bytes)
-        except (OSError, ValueError) as exc:
-            print(
-                f"FAIL: terminal receipt commit failed: {type(exc).__name__}",
-                file=sys.stderr,
-            )
-            return 1
-        reserved_run.mark_finalized()
-        try:
-            deliver_terminal(terminal_bytes)
-        except Exception:
-            print("FAIL: E_EXTERNAL_PROVIDER_RESULT_STDOUT_FAILED", file=sys.stderr)
+        terminal_bytes = line.encode("utf-8", errors="strict")
+        if not commit_reserved_terminal(reserved_run, terminal_bytes, deliver_terminal):
             return 1
         return 130 if cancelled else 124 if timed_out else exit_code if exit_code != 0 else 1
 
@@ -7531,7 +7837,7 @@ def finalize_reserved_run_once(
     terminal_outcome = outcome
     kimi_selected_evidence = (
         kimi_selected_receipt(control.kimi_capabilities)
-        if provider == "kimi" and control.kimi_capabilities_file is not None
+        if provider == "kimi" and (control.kimi_capabilities_file is not None or reserved_run.operation is not None)
         else None
     )
     if kimi_selected_evidence is None:
@@ -7601,21 +7907,8 @@ def finalize_reserved_run_once(
             print(f"FAIL: {replacement_scan}", file=sys.stderr)
             return terminal_outcome.exit_code if terminal_outcome.exit_code != 0 else 1
 
-    try:
-        terminal_bytes = line.encode("utf-8", errors="strict")
-        terminal_receipt.commit(terminal_bytes)
-    except (OSError, ValueError) as exc:
-        print(
-            f"FAIL: terminal receipt commit failed: {type(exc).__name__}",
-            file=sys.stderr,
-        )
-        return terminal_outcome.exit_code if terminal_outcome.exit_code != 0 else 1
-    reserved_run.mark_finalized()
-
-    try:
-        deliver_terminal(terminal_bytes)
-    except Exception:
-        print("FAIL: E_EXTERNAL_PROVIDER_RESULT_STDOUT_FAILED", file=sys.stderr)
+    terminal_bytes = line.encode("utf-8", errors="strict")
+    if not commit_reserved_terminal(reserved_run, terminal_bytes, deliver_terminal):
         return terminal_outcome.exit_code if terminal_outcome.exit_code != 0 else 1
 
     if control.ledger:
@@ -7647,6 +7940,72 @@ def finalize_reserved_run_once(
     return terminal_outcome.exit_code
 
 
+def _launch_sdk_review(operation, reserved_run: ReservedExternalRunV1, *, cancellation=None) -> int:
+    """Keep SDK receiving separate from the CLI terminal/ledger finalizer."""
+    recovery = None
+    try:
+        lifecycle = reserved_run.acquire_capture("codex", "sdk-review")
+        reserved_run.mark_initialized(lifecycle)
+        runner = ProcessRunnerV1()
+        close_error = None
+        try:
+            try:
+                operation.execute(runner)
+                lifecycle.arm_evidence_retention()
+            except KeyboardInterrupt:
+                if cancellation is not None:
+                    cancellation.set()
+                raise
+        finally:
+            try:
+                closed = runner.close()
+            except BaseException as error:
+                close_error = error
+                closed = None
+        try:
+            recovery = lifecycle.persist_recovery_evidence(
+                operation.recovery_bytes(), max_bytes=operation.recovery_max_bytes,
+            )
+        except BaseException as persistence_error:
+            if close_error is not None and not isinstance(close_error, Exception):
+                close_error.add_note("SDK diagnostic persistence incomplete")
+                raise close_error from persistence_error
+            raise
+        if close_error is not None and not isinstance(close_error, Exception):
+            raise close_error
+        if (closed is None or closed.outcome != "closed" or closed.failure_id is not None
+                or closed.unsettled_run_token_sha256):
+            return fail("E_SDK_REVIEW_RUNNER_CLOSE_INCOMPLETE")
+        result = operation.receive()
+        lifecycle.release_evidence_retention()
+        recovery = None
+        cleanup = reserved_run.cleanup_once()
+        if not cleanup.clean:
+            return fail("E_SDK_REVIEW_CAPTURE_CLEANUP_INCOMPLETE")
+
+        def deliver(payload: bytes) -> None:
+            binary_stdout = sys.stdout.buffer
+            write_all_bytes(payload, binary_stdout.write)
+            binary_stdout.flush()
+
+        if not commit_reserved_terminal(reserved_run, result.terminal_bytes, deliver):
+            return 1
+        return result.exit_code
+    except KeyboardInterrupt:
+        return fail("E_SDK_REVIEW_INTERRUPTED_RECEIVING_UNCONFIRMED", 130)
+    except Exception:
+        # Never fabricate a CLI/preworker observation after uncertain SDK effects.
+        # Only scanned diagnostic custody survives CLI exit, never a creator seal.
+        return fail("E_SDK_REVIEW_RECEIVING_UNCONFIRMED")
+    finally:
+        cleanup = reserved_run.cleanup_once()
+        if recovery is not None and cleanup.recovery_retained:
+            print(f"SDK diagnostic retained: {recovery[0]} sha256={recovery[1]}", file=sys.stderr)
+        elif (cleanup.recovery_retained and reserved_run.lifecycle is not None
+              and reserved_run.lifecycle._evidence_retention):
+            print(f"SDK diagnostic custody incomplete: {reserved_run.lifecycle.run_dir} "
+                  "(content not verified)", file=sys.stderr)
+
 def _qualify_managed_model_launch(provider: str, selected: PolicyBoundLaunch, *,
                                   runtime_namespace: Path | None = None) -> None:
     """Use actual assigned-role provenance, not filename, flags or a guessed role."""
@@ -7664,12 +8023,43 @@ def launch(
     argv: list[str],
     *,
     native_parser_contract: WindowsParserContractV1 | None = None,
+    operation: KimiOperationBindingV1 | None = None,
     runtime_namespace: Path | None = None,
 ) -> int:
     """Provider-launch composition root and sole owner of the injected runner."""
 
     try:
-        if provider in POLICY_BOUND_EXTERNAL_PROVIDERS:
+        if operation is not None:
+            if (
+                provider != "kimi" or argv or type(operation) is not KimiOperationBindingV1
+                or operation.consumed or type(operation.prevalidated) is not PolicyBoundLaunch
+                or not callable(operation.assert_current) or not callable(operation.cancellation_probe)
+            ):
+                raise ValueError("E_KIMI_OPERATION_BINDING_INVALID")
+            operation.consumed = True
+            prevalidated = operation.prevalidated
+            control, _decision = _policy_bound_external_control("kimi", prevalidated.control)
+            flags, model, effort = resolved_profile("kimi", control.provider_flags, kimi_effort=control.kimi_effort)
+            role_provenance = external_role_provenance(control, "kimi")
+            provenance = prevalidated.provenance
+            if (
+                control.ledger_closes or provenance is None
+                or (tuple(flags), model, effort, role_provenance)
+                != (prevalidated.flags, prevalidated.model, prevalidated.effort, prevalidated.role_provenance)
+                or provenance.provider != "kimi" or provenance.actual_execution_path != "direct-external-cli"
+                or (provenance.model, provenance.effort, provenance.assigned_internal_role, provenance.launch_flags)
+                != (model, effort, role_provenance.assigned_role, tuple(flags))
+            ):
+                raise ValueError("E_KIMI_OPERATION_BINDING_INVALID")
+            selected = (
+                read_kimi_capability_selection(control.kimi_capabilities_file)
+                if control.kimi_capabilities_file is not None else KimiCapabilitySelectionV1()
+            )
+            if selected != control.kimi_capabilities:
+                raise ValueError("E_KIMI_CAPABILITY_BINDING_CHANGED")
+            _bounded_strict_utf8_snapshot(operation.prompt, "operation")
+            operation.require_current("kimi_launch_admission")
+        elif provider in POLICY_BOUND_EXTERNAL_PROVIDERS:
             prevalidated = _prevalidate_policy_bound_external_launch(provider, argv)
         else:
             unavailable = EXTERNAL_UNAVAILABLE_IDS.get(provider)
@@ -7704,14 +8094,25 @@ def launch(
                 kimi_selected_receipt(prevalidated.control.kimi_capabilities)
             )
             if provider == "kimi"
-            and prevalidated.control.kimi_capabilities_file is not None
+            and (prevalidated.control.kimi_capabilities_file is not None or operation is not None)
             else None
         )
+        sdk_operation = None
+        if prevalidated.control.sdk_review_binding is not None:
+            from sdk_execution.dispatch import prepare_dispatch
+            cancellation = threading.Event()
+            sdk_operation = prepare_dispatch(
+                prevalidated, prevalidated.control.sdk_review_binding,
+                source_environment=dict(os.environ), cancellation_probe=cancellation.is_set,
+                runtime_namespace=runtime_namespace,
+            )
         receipt = TerminalReceiptV1.reserve(prevalidated.control.terminal_receipt)
-    except ValueError as exc:
+    except (ValueError, ProcessSupervisionError) as exc:
         return fail(str(exc))
 
-    with ReservedExternalRunV1(receipt) as reserved_run:
+    with ReservedExternalRunV1(receipt, operation=operation) as reserved_run:
+        if sdk_operation is not None:
+            return _launch_sdk_review(sdk_operation, reserved_run, cancellation=cancellation)
         try:
             with ProcessRunnerV1() as runner:
                 return _launch_with_runner(
@@ -7858,6 +8259,7 @@ def _launch_with_runner(
     native_parser_contract: WindowsParserContractV1 | None = None,
 ) -> int:
     control = prevalidated.control
+    operation = reserved_run.operation
     topic = prevalidated.topic
     flags = list(prevalidated.flags)
     model = prevalidated.model
@@ -7968,7 +8370,9 @@ def _launch_with_runner(
         return reserved_failure("PSV1-ARGV-ATTESTATION")
 
     try:
-        body = assemble_external_prompt(prompt_bytes(control, external=True))
+        body = assemble_external_prompt(
+            operation.prompt if operation is not None else prompt_bytes(control, external=True)
+        )
     except Exception as exc:
         return reserved_failure(
             stable_failure_id_from_exception(exc, "E_EXTERNAL_PROMPT_INVALID")
@@ -8048,7 +8452,10 @@ def _launch_with_runner(
                 control.result_max_bytes,
                 kimi_observed_budget,
                 effort,
+                before_prompt=(lambda: operation.require_current("kimi_prompt")) if operation is not None else None,
             )
+            if operation is not None:
+                operation.exchange = kimi_exchange
         except Exception as exc:
             return finalize_reserved_run_once(
                 control,
@@ -8158,6 +8565,8 @@ def _launch_with_runner(
     raw_stderr: bytes | None = None
     process_result: ProcessResultV1 | None = None
     try:
+        if operation is not None:
+            operation.require_current("kimi_process_start")
         reserved_run._attempted = True
         process_result, raw_stdout, raw_stderr = run_provider_process(
             runner,
@@ -8179,7 +8588,10 @@ def _launch_with_runner(
                 if kimi_exchange is not None
                 else None
             ),
+            **({"cancellation_probe": operation.cancellation_probe} if operation is not None else {}),
         )
+        if operation is not None:
+            operation.process_result = process_result
         if kimi_exchange is not None:
             raw_stdout = kimi_exchange.result_bytes
         stream_result = provider_stream_result(process_result)
@@ -8233,7 +8645,7 @@ def _launch_with_runner(
         kimi_observed=(
             kimi_exchange.observed_receipt()
             if kimi_exchange is not None
-            and control.kimi_capabilities_file is not None
+            and (control.kimi_capabilities_file is not None or operation is not None)
             else None
         ),
     )

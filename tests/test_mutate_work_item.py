@@ -14844,7 +14844,7 @@ def test_decision_v0_manifest_is_repo_local_and_preflight_read_only(
     for contract_path, no_fence_marker in (
         (repository / "docs" / "decisions.md", "NO `---` YAML fences"),
         (repository / "src.codex" / "skills" / "lead" / "SKILL.md", "no `---` fences"),
-        (repository / "src.claude" / "skills" / "lead" / "SKILL.md", "no `---` fences"),
+        (repository / 'adapters/claude' / "skills" / "lead" / "SKILL.md", "no `---` fences"),
     ):
         contract = contract_path.read_text(encoding="utf-8")
         assert "list-item" in contract

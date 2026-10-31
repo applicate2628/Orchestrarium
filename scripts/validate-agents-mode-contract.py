@@ -16,7 +16,7 @@ from typing import Any, Callable
 PRESET_DOCS = Path("docs/agents-mode-reference.md")
 INIT_SURFACES = {
     "codex": Path("src.codex/skills/init-project/SKILL.md"),
-    "claude": Path("src.claude/commands/agents-init-project.md"),
+    "claude": Path("adapters/claude/commands/agents-init-project.md"),
 }
 
 
@@ -614,7 +614,7 @@ def validate_manual_reference_surfaces(root: Path) -> None:
         root / "src.codex" / "skills" / "consultant" / "SKILL.md",
         root / "src.codex" / "skills" / "lead" / "external-dispatch.md",
         root / "src.codex" / "skills" / "lead" / "subagent-contracts.md",
-        root / "src.claude" / "agents" / "consultant.md",
+        root / "adapters/claude" / "agents" / "consultant.md",
     ]
 
     if "externalPriorityProfile: balanced | quality-first | <custom>" not in external_worker:
@@ -655,7 +655,7 @@ def validate_manual_reference_surfaces(root: Path) -> None:
 # The first cut hardcoded the `gpt-5.\d+-` namespace, so the guard would have
 # silently no-oped at exactly the moment a family rename swept the copies; the
 # shape is now generalized from whatever values the schema carries.
-_ENUM_SCAN_ROOTS = ("docs", "shared", "src.claude", "src.codex")
+_ENUM_SCAN_ROOTS = ("docs", "shared", "adapters/claude", "src.codex")
 _ENUM_SCAN_TOP = ("README.md", "INSTALL.md")
 _ENUM_SCAN_EXTS = (".md", ".json", ".yaml", ".yml", ".toml", ".sh", ".ps1")
 # Changelog / release-note / history stems are EXEMPT: recording a superseded
@@ -714,6 +714,9 @@ def _iter_enum_scan_files(root: Path) -> list[Path]:
                 p for p in d.rglob("*")
                 if p.is_file() and p.suffix in _ENUM_SCAN_EXTS
                 and "/.scratch/" not in p.as_posix()
+                # Adapter reference addenda were outside this runtime enum scan
+                # before relocation; moving them must not change its scope.
+                and not p.is_relative_to(root / "adapters/claude/references")
             )
     return files
 
@@ -800,7 +803,7 @@ def validate_external_provider_enum(root: Path, schema_data: dict[str, Any]) -> 
     their particular lane; they are validated by ``validate_schema``.  Only a
     line that names the scalar can be an allowed-value enum copy.
     """
-    active_roots = {"docs", "shared", "src.codex", "src.claude"}
+    active_roots = {"docs", "shared", "src.codex", "adapters"}
     active_root_files = {"AGENTS.md", "CLAUDE.md", "README.md", "INSTALL.md"}
 
     def active_surface(path: Path) -> bool:

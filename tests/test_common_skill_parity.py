@@ -1,4 +1,4 @@
-"""Independent live parity and frozen common-skill snapshot contracts."""
+"""Canonical live skill ownership and frozen historical snapshot contracts."""
 from __future__ import annotations
 
 import importlib
@@ -10,7 +10,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-LIVE_PACKS = ("src.claude", "src.codex")
+LIVE_PACKS = ("adapters/claude", "src.codex")
 GENERALIZE_SKILL = "generalize-from-instance"
 GENERALIZE_BODY_SHA256 = "c55e0d9389abce424e778c41816127c76948d67d92233e9afb26ab4d92cfaf97"
 IMPLEMENTATION_TO_THEORY_SKILL = "implementation-to-theory"
@@ -62,9 +62,8 @@ def _live_common_skill_hashes(root: Path = ROOT) -> dict[str, dict[str, str]]:
             assert path.is_file(), f"live common-skill {name} missing from {pack}"
             _assert_frontmatter(path, f"{pack}/{name}")
             hashes[pack] = digest(path.read_bytes())
-        assert len(set(hashes.values())) == 1, (
-            f"live common-skill {name} BODY drifted between production packs: {hashes}"
-        )
+        # Claude's source tree is a protected historical migration input, not
+        # a second live owner. The installer projection is checked separately.
         result[name] = hashes
     return result
 
@@ -72,7 +71,8 @@ def _live_common_skill_hashes(root: Path = ROOT) -> dict[str, dict[str, str]]:
 def _assert_authoritative_status(root: Path = ROOT) -> None:
     readme = (root / "README.md").read_text(encoding="utf-8")
     assert "`src.codex/` — the production Codex provider-pack source" in readme
-    assert "`src.claude/` — the production Claude Code provider-pack source" in readme
+    assert "Codex-first" in readme
+    assert "| Claude Code | Secondary adapter |" in readme
     assert _runtime().installer_choices_are_supported_production_packs(root)
 
 
@@ -82,6 +82,7 @@ def _copy_contract_tree(tmp_path: Path) -> Path:
         "shared/AGENTS.shared.md",
         "README.md",
         "install.py",
+        "scripts/installation/clients.py",
     ):
         source = ROOT / relative_path
         target = root / relative_path
@@ -110,7 +111,7 @@ def _add_live_name(root: Path, name: str) -> None:
     spine.write_text(text, encoding="utf-8")
 
 
-def test_live_common_skill_bodies_are_byte_identical() -> None:
+def test_common_skill_sources_are_present_and_well_formed() -> None:
     hashes = _live_common_skill_hashes()
     assert tuple(hashes) == _common_skills()
 
@@ -189,19 +190,46 @@ def test_live_add_changes_only_live_membership(tmp_path: Path) -> None:
     assert "fixture-live" in _live_common_skill_hashes(root)
 
 
+def _projection_plan(root: Path, target: Path):
+    from test_hook_runtime_transactions import production_installer as installer
+    canonical = root / "src.codex/skills"
+    projection = target / ".claude/skills"
+    plan = installer._preflight_claude_skill_projections(
+        canonical, root / 'adapters/claude/skills', target / ".agents/skills", projection,
+    )
+    return installer, canonical, projection, plan
+
+
+def test_current_claude_projection_consumes_canonical_skill_source(tmp_path: Path) -> None:
+    root = _copy_contract_tree(tmp_path)
+    installer, canonical, projection, plan = _projection_plan(root, tmp_path / "target")
+    assert {item.name for item in plan} == set(_common_skills(root))
+    for item in plan:
+        assert item.canonical_digest == installer._tree_sha256(canonical / item.name)
+        assert item.canonical_target == tmp_path / "target/.agents/skills" / item.name
+        assert item.action == "create"
+    installer._assert_skill_projection_plan_current(
+        plan, canonical, projection, failure_id="TEST-PROJECTION-DRIFT",
+    )
+
+
 @pytest.mark.parametrize("pack", LIVE_PACKS)
-def test_live_common_skill_mutation_reports_both_hashes(
-    tmp_path: Path,
-    pack: str,
+def test_canonical_mutation_invalidates_plan_but_historical_body_is_not_live(
+    tmp_path: Path, pack: str,
 ) -> None:
     root = _copy_contract_tree(tmp_path)
+    installer, canonical, projection, plan = _projection_plan(root, tmp_path / "target")
     path = _skill(root, pack, "mathtype-book-page")
-    path.write_bytes(path.read_bytes() + b"\nmutated production body\n")
-    with pytest.raises(AssertionError) as caught:
-        _live_common_skill_hashes(root)
-    message = str(caught.value)
-    assert "src.claude" in message and "src.codex" in message
-    assert "615499de68dc03fccb23954e8ed94662076a9a744a493b71232ebdcce55357be" in message
+    path.write_bytes(path.read_bytes() + b"\nmutated source body\n")
+    if pack == "src.codex":
+        with pytest.raises(ValueError, match="TEST-PROJECTION-DRIFT: preflight drift mathtype-book-page"):
+            installer._assert_skill_projection_plan_current(
+                plan, canonical, projection, failure_id="TEST-PROJECTION-DRIFT",
+            )
+    else:
+        installer._assert_skill_projection_plan_current(
+            plan, canonical, projection, failure_id="TEST-PROJECTION-DRIFT",
+        )
 
 
 @pytest.mark.parametrize(
@@ -235,9 +263,9 @@ def test_authoritative_status_preserves_production_class() -> None:
     (
         ("README.md", "`src.codex/` — the production Codex provider-pack source", "`src.codex/` — example"),
         (
-            "install.py",
-            '"3": ("codex", "claude"),',
-            '"3": ("codex",),',
+            "scripts/installation/clients.py",
+            '"id": "claude", "label": "Claude Code", "primary": False,',
+            '"id": "claude", "label": "Claude Code", "primary": True,',
         ),
     ),
 )
@@ -264,8 +292,29 @@ def test_doc_common_skill_lists_match_the_spine_owner() -> None:
     readme_names = set(re.findall(r"^- `\$([a-z][a-z0-9-]+)`", match.group(1), re.M))
     assert readme_names == owner
 
-    claude_md = (ROOT / "src.claude/CLAUDE.md").read_text(encoding="utf-8")
+    claude_md = (ROOT / 'adapters/claude/CLAUDE.md').read_text(encoding="utf-8")
     assert "## Common skills" not in claude_md
     assert not re.search(
         r"common-skills \((`\$[a-z0-9-]+`(?:,\s*`\$[a-z0-9-]+`)*)\)", claude_md
     ), "the Claude delta must import the shared common-skill inventory"
+
+
+@pytest.mark.parametrize("catalog", [
+    "CLIENTS = ((\"codex\", \"Codex\"),)",
+    "CLIENTS = ((\"grok\", \"Grok\"),)",
+    "CLIENTS = load_clients()",
+    "CLIENTS = ((\"codex\", \"Codex\"), (\"claude\", \"Claude Code\"))\nCLIENTS = ()",
+    "CLIENTS = (",
+])
+def test_installer_catalog_rejects_missing_dynamic_or_duplicate_inventory(tmp_path, catalog):
+    (tmp_path / "install.py").write_text(catalog, encoding="utf-8")
+    assert not _runtime().installer_choices_are_supported_production_packs(tmp_path)
+
+
+def test_installer_catalog_inspection_does_not_execute_entrypoint(tmp_path):
+    (tmp_path / "install.py").write_text(
+        'CLIENTS = (("codex", "Codex"), ("claude", "Claude Code"))\n'
+        'raise AssertionError("entrypoint must not run during inspection")\n',
+        encoding="utf-8",
+    )
+    assert _runtime().installer_choices_are_supported_production_packs(tmp_path)

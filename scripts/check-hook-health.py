@@ -419,7 +419,10 @@ def _host_identity(record: dict[str, Any], host_os: str) -> str:
 
 def resolve_codex_command(value: str | None = None) -> list[str]:
     """Resolve one absolute command prefix that both inventory and launch can reuse."""
-    resolved = shutil.which(value or "codex")
+    # Windows PATH may contain an unrelated npm "codex.cmd" before the native
+    # Codex executable. An explicit operator selection still takes precedence.
+    resolved = shutil.which("codex.exe") if value is None and os.name == "nt" else None
+    resolved = resolved or shutil.which(value or "codex")
     if not resolved:
         candidate = Path(value).expanduser() if value else None
         if candidate is None or not candidate.is_file():

@@ -57,7 +57,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-CLAUDE_HOOK = REPO_ROOT / "src.claude" / "agents" / "scripts" / "check-scratch-valuables.py"
+CLAUDE_HOOK = REPO_ROOT / 'adapters/claude' / "agents" / "scripts" / "check-scratch-valuables.py"
 UNIVERSAL_HOOK = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-scratch-valuables.py"
 CODEX_HOOK = REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-scratch-valuables.py"
 UNIVERSAL_HOOK_COMMON = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "hook_common.py"

@@ -5,9 +5,9 @@ to hand-copy to "the other two" and hope it remembered which two.
 
 CANONICAL DIRECTION (stated here, not inferred per-run from file contents):
 
-    scripts/universal-hooks/scripts/  --canon-of-->  src.claude/agents/scripts/
+    scripts/universal-hooks/scripts/  --canon-of-->  adapters/claude/agents/scripts/
                                                        src.codex/skills/lead/scripts/
-    scripts/universal-hooks/hooks/    --canon-of-->  src.claude/agents/hooks/
+    scripts/universal-hooks/hooks/    --canon-of-->  adapters/claude/agents/hooks/
                                                        src.codex/skills/lead/hooks/
 
 Evidence for this direction (load-bearing citations, not a guess):
@@ -34,7 +34,7 @@ Evidence for this direction (load-bearing citations, not a guess):
     an independent validator's own docstring also calls scripts/universal-hooks/
     "the pack-neutral canon", derived by glob.
   - scripts/install-claude.sh and scripts/install-codex.sh each copy their OWN pack
-    tree (src.claude/agents/*, src.codex/skills/lead/*) to the runtime install target;
+    tree (adapters/claude/agents/*, src.codex/skills/lead/*) to the runtime install target;
     neither reads scripts/universal-hooks/ at install time. That tree exists
     specifically as the pack-neutral reference all installed pack copies derive
     from, and every citation above names it as canon.
