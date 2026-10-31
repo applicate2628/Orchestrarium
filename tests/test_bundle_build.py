@@ -212,3 +212,23 @@ def test_python_notices_bind_locked_runtime_and_ship(builder, tmp_path, target, 
     builder.build(SOURCE, runtime, output, target=target, release='development')
     for name in (*expected, 'source.json'):
         assert (output / 'app/scripts/distribution/notices/python-build-standalone' / (target + '-cp315') / name).read_bytes() == (notice_root / name).read_bytes()
+
+
+@pytest.mark.parametrize("target, omitted", [("linux-x64", True), ("windows-x64", False)])
+def test_sdk_runtime_omits_only_qualified_linux_optional_dbm(builder, tmp_path, target, omitted):
+    runtime = tmp_path / "runtime"
+    interpreter = runtime / builder.TARGETS[target]
+    interpreter.parent.mkdir(parents=True)
+    interpreter.write_bytes(b"synthetic interpreter; never executed")
+    relative = Path("lib/python3.15/lib-dynload/_dbm.cpython-315-x86_64-linux-gnu.so")
+    optional = runtime / relative
+    optional.parent.mkdir(parents=True)
+    optional.write_bytes(b"synthetic optional extension")
+    unrelated = runtime / "user-data" / optional.name
+    unrelated.parent.mkdir()
+    unrelated.write_bytes(b"must remain")
+    output = tmp_path / "bundle"
+    builder.build(SOURCE, runtime, output, target=target, release="development")
+    assert (output / "python" / relative).exists() == (not omitted)
+    assert optional.read_bytes() == b"synthetic optional extension"
+    assert (output / "python/user-data" / optional.name).read_bytes() == b"must remain"

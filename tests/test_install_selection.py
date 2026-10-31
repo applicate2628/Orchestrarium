@@ -135,3 +135,37 @@ def test_legacy_dryrun_alias_never_prompts_for_apply(installer,monkeypatch,capsy
     assert module.main(['--global','-DryRun'])==0
     assert calls==[('codex',['--global','-DryRun'])]
     assert 'PREVIEW COMPLETE' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("provider", ["codex", "claude"])
+def test_project_preview_uses_callers_repository_not_installer_source(tmp_path, provider):
+    """Changing the child cwd to the distribution root must not redirect installs."""
+    import os
+    import shutil
+    import subprocess
+    import sys
+
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("Git required to qualify repository-root discovery")
+    project = tmp_path / "user project"
+    project.mkdir()
+    nested = project / "nested"
+    nested.mkdir()
+    home = tmp_path / "isolated home"
+    home.mkdir()
+    env = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
+    for key in ("CODEX_HOME", "CLAUDE_CONFIG_DIR", "GIT_DIR", "GIT_WORK_TREE"):
+        env.pop(key, None)
+    subprocess.run([git, "init", "-q", str(project)], check=True, env=env)
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "install.py"), "--clients", provider,
+         "--dry-run", "--no-hypothesis-hook"],
+        cwd=nested, env=env, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    target_lines = [line for line in result.stdout.splitlines() if line.startswith("Target: ")]
+    assert target_lines == ["Target: " + str(project.resolve() / ("." + provider))]
+    assert not (project / ("." + provider)).exists()
+    assert not (project / ".agents").exists()

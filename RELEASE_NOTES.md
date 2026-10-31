@@ -4,6 +4,11 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-31
 
+- Omit the unused optional Berkeley DB extension from the qualified Linux x64 Python 3.15.2 SDK bundle, keeping the verified acquisition archive and notices unchanged. This narrows the internal runtime without altering Windows or pretending to provide a general-purpose Python installation.
+
+- Preserve the caller working directory when the root client selector launches the installer. Project-scoped installation and preview now resolve the user repository instead of the checkout or relocated bundle that contains Orche; global and explicit-target policy remains unchanged.
+
+
 - Publication checks now use the union of old object bases supplied by the same native Git callback for both commit-range and transferred-object coverage. A genuine branch update and new tag can share already-held ancestry without trusting separate remote probes. New annotations and unknown history remain checked; standalone new tags retain conservative full-history checking. Scanner tests restore their synthetic module state so combined native-gate runs retain provenance isolation. Excluded tag-target types are checked through the existing owned Git reader using metadata-only commands, avoiding a nested POSIX process-owner deadlock without reading excluded object bodies.
 
 - Scratch cleanup now checks the complete bounded Git object-store layout before and after reachability verification. Linked or changing nested pack/loose-object storage cannot be credited as an independent recovery copy; uncertain entries remain preserved.

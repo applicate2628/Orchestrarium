@@ -147,7 +147,35 @@ also has stale OpenSSL link filenames, so its dependency list is not treated as
 a complete binary inventory. Wheel-native attribution, Microsoft runtime terms,
 complete native attribution and final publisher authentication remain separate release gates.
 
-Linux metadata declares Berkeley DB under the Sleepycat license for `_dbm`.
-Retaining its notice does not by itself settle source-availability obligations.
-The metadata records library attribution, not a complete binary bill of materials;
-keep that release review open rather than treating a notice inventory as clearance.
+Upstream Linux metadata declares Berkeley DB under the Sleepycat license for
+its optional _dbm backend. The qualified Linux SDK assembly now omits that backend
+as described below; upstream notices remain unmodified for provenance. The metadata
+records library attribution, not a complete binary bill of materials or blanket
+license clearance.
+
+The Windows runtime LICENSE.txt already contains CPython's additional Microsoft
+Distributable Code conditions; the real bundle preserves those bytes. This closes
+the notice-presence question, not every downstream redistribution obligation.
+
+## Project scope from a relocated bundle
+
+The root selector invokes the absolute bundled installer while preserving the
+caller working directory. Without --global or an explicit --target, the
+existing installer discovers the caller Git repository, not the bundle application
+directory. Preview uses the same resolution as apply. Global and explicit-target
+selection remain owned by the existing installer.
+
+## Qualified optional runtime omission
+
+For the locked Linux x64 CPython 3.15.2 SDK payload, assembly omits only
+lib/python3.15/lib-dynload/_dbm.cpython-315-x86_64-linux-gnu.so. The verified input
+archive is unchanged. Other paths, targets and upstream notice files are retained.
+This internal SDK runtime does not promise the optional dbm.ndbm backend or
+compatibility with existing Berkeley DB databases. It is not a general Python
+installation.
+
+Upstream intentionally ships this Berkeley DB backend as a removable shared
+extension: [python-build-standalone technical notes](https://gregoryszorc.com/docs/python-build-standalone/main/technotes.html#dbm).
+The exact pinned module was excluded in an isolated real-SDK qualification before
+this rule was added. New Python versions or other targets need their own inventory
+and qualification; this path-specific rule is not a blanket license clearance.

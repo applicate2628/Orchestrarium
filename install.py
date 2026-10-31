@@ -22,7 +22,7 @@ ensure_supported_python(str(Path(__file__).resolve()))
 def _run_production(name: str, forwarded: list[str]) -> int:
     return subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "install-client.py"), "--client", name, *forwarded],
-        cwd=ROOT,
+        # Keep caller cwd: the existing installer owns project-root discovery.
     ).returncode
 
 

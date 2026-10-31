@@ -24,6 +24,11 @@ APP_INPUTS = ('install.py', 'scripts', 'src.codex', 'adapters', 'shared',
               'INSTALL.md', 'RELEASE_NOTES.md', 'LICENSE', 'AGENTS.md', 'CLAUDE.md',
               'pyproject.toml', 'assets/branding')
 IGNORE = shutil.ignore_patterns('__pycache__', '*.pyc', '.DS_Store')
+# The pinned Linux SDK runtime does not use the optional Berkeley DB backend.
+RUNTIME_OMISSIONS = {
+    'linux-x64': frozenset({'lib/python3.15/lib-dynload/_dbm.cpython-315-x86_64-linux-gnu.so'}),
+}
+
 SH = '''#!/bin/sh
 set -eu
 case "$0" in
@@ -100,7 +105,15 @@ def build(source: Path, runtime: Path, output: Path, *, target: str, release: st
     # Exclusive creation: never replace another output. An interrupted build is
     # retained for diagnosis and is not launchable until the manifest is written.
     output.mkdir(parents=True, exist_ok=False)
-    shutil.copytree(runtime, output / 'python', symlinks=True, ignore=IGNORE, copy_function=_copy_leaf)
+    def ignore_runtime(directory, names):
+        ignored = set(IGNORE(directory, names))
+        relative = Path(directory).relative_to(runtime)
+        omissions = RUNTIME_OMISSIONS.get(target, ())
+        ignored.update(name for name in names if (relative / name).as_posix() in omissions)
+        return ignored
+
+    shutil.copytree(runtime, output / 'python', symlinks=True,
+                    ignore=ignore_runtime, copy_function=_copy_leaf)
     app = output / 'app'; app.mkdir()
     for name in APP_INPUTS:
         item = source / name
