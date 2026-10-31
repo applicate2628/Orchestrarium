@@ -1,21 +1,22 @@
-# Distribution and native operations: task index
+# Orche delivery and later native operations
 
-This former combined project now indexes two independent documentation tasks:
+The delivery sequence is SDK integration and bundled Python first, followed by
+separately qualified native-operation migration:
 
-- [PowerShell and npm delivery](npm-distribution-project.md): thin Windows bootstrap
-  and compatible npm dispatcher delivering the same versioned Rust CLI/resources.
-- [Native operations in Rust](https://github.com/applicate2628/Orchestrarium/pull/21): one common
-  operation CLI, candidate mcp-usage-reminder slice and separately qualified cutovers.
+- [Bundled Python and thin delivery channels](npm-distribution-project.md) owns
+  one release payload for PowerShell, POSIX and optional npm distribution.
+- [Native operations in Rust](https://github.com/applicate2628/Orchestrarium/pull/21)
+  remains a later operation-by-operation replacement, not a delivery prerequisite.
 
-Each linked document owns its requirements and acceptance; they are not two
-mandatory consecutive phases. No normative requirements are duplicated here.
-SDK design/status belongs to [PR18](https://github.com/applicate2628/Orchestrarium/pull/18)
-and implementation to [PR19](https://github.com/applicate2628/Orchestrarium/pull/19).
-The remaining 2.0 roadmap stays in [PR13](https://github.com/applicate2628/Orchestrarium/pull/13).
-The prior manual-trust documentation/test correction remains in its original
-owner scope in this PR; the split adds no hook, trust or runtime mutation.
+The linked delivery document owns the requirements; do not duplicate installation
+policy in channel wrappers. SDK design/status belongs to
+[PR18](https://github.com/applicate2628/Orchestrarium/pull/18), implementation to
+[PR19](https://github.com/applicate2628/Orchestrarium/pull/19), and the remaining
+roadmap to [PR13](https://github.com/applicate2628/Orchestrarium/pull/13).
+This index neither activates a runtime nor claims that those PRs are merged.
+The earlier manual-trust documentation/test correction remains unchanged.
 
 ## Terms and Abbreviations
 
-- npm: JavaScript package distribution tooling.
+- npm: optional package distribution tooling.
 - SDK / CLI / PR: software development kit / command-line interface / pull request.

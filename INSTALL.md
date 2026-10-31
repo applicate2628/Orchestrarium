@@ -348,9 +348,10 @@ Entries are identified independently by script marker: `check-bugfix-discipline`
 
 When both packs are installed, keep shared project policies aligned across both files. The repository's dev overlays, `AGENTS.md` and `CLAUDE.md`, are for maintaining this monorepo and are not copied into target projects by the install scripts.
 
-Planning only: [npm distribution](docs/npm-distribution-project.md) and
-[native Rust operations](https://github.com/applicate2628/Orchestrarium/pull/21) are independent
-tasks; these links do not change the installed runtime.
+Planning: [Orche bundled-Python delivery](docs/npm-distribution-project.md) integrates
+SDK/runtime delivery first; [native Rust operations](https://github.com/applicate2628/Orchestrarium/pull/21)
+follow later. Thin npm, PowerShell and POSIX channels share one installer owner.
+These plans do not activate a runtime or claim a published package.
 
 ## Terms and Abbreviations
 

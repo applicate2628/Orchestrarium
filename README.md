@@ -257,9 +257,10 @@ python .\scripts\check-publication-gate.py
 
 This repository is licensed under the Mozilla Public License 2.0. See [LICENSE](LICENSE).
 
-Planning only: [PowerShell and npm delivery](docs/npm-distribution-project.md) and
-[native Rust operations](https://github.com/applicate2628/Orchestrarium/pull/21) are independent
-tasks; these links do not change the installed runtime.
+Planning: [Orche bundled-Python delivery](docs/npm-distribution-project.md) integrates
+SDK/runtime delivery first; [native Rust operations](https://github.com/applicate2628/Orchestrarium/pull/21)
+follow later. Thin npm, PowerShell and POSIX channels share one installer owner.
+These plans do not activate a runtime or claim a published package.
 
 ## Terms and Abbreviations
 

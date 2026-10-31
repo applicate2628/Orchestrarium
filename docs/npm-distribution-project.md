@@ -1,174 +1,151 @@
-# Distribution: PowerShell bootstrap and compatible npm channel
+# Orche distribution: bundled Python and thin delivery channels
 
-Status: independent documentation task; no npm package or native target is
-published or activated here. Source baseline: main
-`317e1448a020aeaa58f65aaceb180e835741d6de`.
+Status: delivery design aligned with the SDK implementation in
+[PR19](https://github.com/applicate2628/Orchestrarium/pull/19).
+This PR does not publish an npm package, an internet bootstrap, a signed release,
+or a supported-platform declaration.
 
-## Goal and boundary
+## One operation owner, staged implementation
 
-Deliver one versioned Rust CLI and its matching resources through a thin Windows
-PowerShell bootstrap, with npm retained as a compatible alternative channel.
-Neither channel owns installation policy or managed-file mutation: both invoke
-the same qualified Rust operations. The current Python installer remains the
-explicit existing route until its Rust replacement has passed parity qualification.
-Do not disguise that transition as a completed native installer or silently fall
-back from a missing Rust operation. Distribution design and testing can proceed
-independently of PR21; enabling native apply depends on that specific operation
-being qualified, not on the full Rust roadmap or optional SDK coordination.
+First integrate the SDK and the existing Python installer with a qualified,
+minimal bundled CPython runtime and its required dependencies. Rust migration in
+[PR21](https://github.com/applicate2628/Orchestrarium/pull/21) comes afterward.
+Rust is not a prerequisite for this delivery release.
 
-## Common delivery and PowerShell boundary
+The canonical Python installer owns selection, installation, updates, receipts,
+hook registration, preservation, rollback and uninstall. npm, PowerShell and POSIX
+shell are thin acquisition/dispatch channels. They must not reproduce these
+decisions or invent another policy, inventory, ledger or recovery owner.
+A later Rust cutover replaces a qualified operation atomically; it does not create
+simultaneous Python/Rust writers or an automatic fallback between implementations.
 
-PR17 owns delivery through PowerShell and npm. PR21 owns native operation
-semantics. Both channels select the same release identifier, target tuple,
-executable and resource digests; parity means the same admitted operation inputs
-and effects, not merely the same command name. Neither channel creates a second
-installer, ledger, trust inventory, recovery engine or policy store.
+The product name is **Orche**. The planned public command is `orche`; registry
+package names, publisher ownership and any compatibility alias require release-time
+verification. Do not invent a semantic version. Preserve the actual pre-SDK main
+boundary with a verified tag before integration, then select the next release from
+the repository's established version history.
 
-The PowerShell script is a bootstrap only:
-- Detect the supported OS/architecture and resolve an explicitly selected release
-  from the official release origin. Reject unknown targets before changing state.
-- Download the versioned executable/resources and verify their integrity and
-  authenticity before execution. A digest downloaded beside an attacker-controlled
-  payload is not an independent authenticity check. Release signing/verification
-  trust, key rotation and publisher ownership must be specified and tested before
-  enabling this channel; this plan invents no signing keys or trust grants.
-- Stage only bootstrap-owned temporary downloads, verify the complete pair, then
-  invoke the selected Rust CLI with exact argument boundaries and propagate its
-  exit status. Interrupted or failed verification must not launch a partial payload
-  or replace a working installation. Temporary download cleanup is not pack removal.
-- Do not edit agent configuration, hooks, trust, managed-file inventories or user
-  projects in PowerShell. Do not elevate automatically or relax execution policy,
-  host trust, certificate verification or security settings. Preserve explicit
-  existing-user consent and the native operation's own target admission.
-- Separate downloading from execution in documented operator instructions. A
-  convenient one-line web invocation is not an integrity, authenticity or approval
-  mechanism; do not require piping unchecked downloaded code into execution.
+## Common payload and launch contract
 
-The Rust installer remains the sole owner of installed payload placement,
-managed-file changes, update/removal decisions, preservation and recovery. Existing
-Python ownership persists for each unmigrated operation until one qualified
-cutover, not simultaneous Python/Rust writers. PowerShell supplies no hook or
-business logic. npm is optional for users choosing direct native distribution.
+Every channel delivers the same versioned, platform-specific release:
+- The minimal qualified CPython runtime. Current SDK/delivery qualification uses
+  normal-GIL CPython 3.15.2; freeze interpreter source, version and digest per target.
+- The common installer, selected-client resources, schemas, validators and other
+  dynamically loaded files required by that release.
+- The exact dependency closure for the admitted SDK routes, with hashes, licenses
+  and provenance. A provider's native CLI remains present when its SDK requires it.
+  Optional future adapters must not silently make every installation larger.
+- A bundle-relative manifest and thin entrypoint. Resolve executable and resource
+  paths relative to the installed bundle, never to a developer machine, current
+  working directory, ambient PATH or a system Python installation.
 
-## npm compatibility and runtime-dependency contract
+The prototype owner in PR19 is `scripts/distribution/build.py` for assembly and
+`scripts/distribution/launch.py` for bundle-relative launch and retention.
+The client-selection entry delegates to the existing installer. These references
+describe the integration target, not files already landed on this PR's older base.
 
-**Owner:** Toolchain Engineer with Product Manager and the existing installer owner.
-These are selected design contracts, not installed commands or published packages.
-The public CLI name is `orchestrarium`; the registry package identifier remains a
-release-time publisher-ownership/name-availability check, not an architecture gap.
+Internal payload paths are relative. Where a host hook schema requires absolute
+paths, derive them from the admitted retained installation at registration time;
+never ship workstation paths. Qualify quoting, Unicode, spaces and exact argument
+boundaries independently on each supported host.
 
-Historical npm scope is recorded in [24d0647](https://github.com/applicate2628/Orchestrarium/commit/24d064741b21e8e84dab78dfa2bfcb7091d972ce)
-and [e55b246](https://github.com/applicate2628/Orchestrarium/commit/e55b2466281ecc50ad2a940a4de14a5ea90fb98c).
-The detailed local-only epic was not recovered; the following is a new explicit
-contract, not a claim to reproduce missing decisions. Current main has no root
-`package.json`.
+Selected clients receive independent ordinary copies of their owned payload.
+Do not recreate shared skill links, junctions or peer-owned copies. Legacy link
+conversion is explicit, selected-client-only and preserves the referent.
+Updating or removing one client must not mutate the unselected peer.
 
-- Ship a thin JavaScript dispatcher, versioned rules/resources and exact-version
-  native platform packages selected through npm `optionalDependencies`. No
-  `postinstall` downloads, compilation, Python setup, providers or project mutation.
-  Resolve prerequisites for the selected operation/route only. A selected native
-  operation with a missing binary fails clearly; no implicit compilation or Python
-  fallback. npm is a thin dispatcher to the same qualified native command used
-  by the PowerShell channel, not an independent implementation of apply.
-- `orchestrarium apply --provider codex|claude --global` selects global application;
-  `orchestrarium apply --provider codex|claude --target PATH --allow-unsafe-target`
-  selects an explicit project. Preserve current target admission, exact-digest
-  adoption, force/refusal and preservation semantics from
-  `scripts/production_installer.py:585–625` and `INSTALL.md:9–53`.
-  `--dry-run` retains existing preview semantics, not an unproved zero-host-query claim.
-  Repeating `apply` is the existing idempotent reinstall/update operation.
-- npm update changes only the distributable; installed packs change on explicit
-  `apply`. npm uninstall removes only the npm distribution. No complete applied-pack
-  removal command is promised in the first release: the current narrow owned-hook
-  removal is not whole-pack uninstall (`INSTALL.md:287–335`).
-- During staged migration, an explicitly selected legacy installer route may
-  forward to the canonical Python installer with its declared prerequisite; it
-  is a clearly labelled transitional compatibility route, not the target native
-  installer or an automatic missing-native fallback. Do not claim native channel
-  parity for it. Remove the superseded implementation only after a separately
-  qualified Rust installer is selected. Native hook delivery can precede this port.
-- Copy each applied executable and matching resources into the selected scope's
-  resolved canonical agents root under `runtime/<release>-<content-digest>/<target>/`.
-  The logical layout is `.agents/runtime/...`; derive it from the installer's
-  admitted root/link authority (`production_installer.py:10977–10991`), not a
-  reconstructed path that bypasses existing symlink/junction handling.
-  Registrations bind this retained pair, never npm cache, mutable `node_modules`,
-  `latest` links or PATH. Extend the existing installer owner/receipts for this
-  resource, not a parallel manager. Failed apply preserves the prior pair and
-  recovery; identity changes retain manual host trust. Initially retain old applied
-  versions without native-runtime reclamation. Codex and Claude can share this
-  root; later explicit removal must inspect all retained provider registrations
-  and configured coordinator bindings in that scope. Current single-registration
-  Python retirement (`production_installer.py:10846–10877`) is not that proof.
-  Unknown references preserve the version; no garbage collector/refcount service.
-- npm does not provision Python or SDK dependencies. Optional coordination follows
-  [PR #18's dependency contract](https://github.com/applicate2628/Orchestrarium/pull/18).
-  Native hooks do not load Python/SDK; legacy operations keep their declared Python
-  prerequisite until replaced. Retained-runtime removal must still account for any
-  configured coordinator consumer, as required above.
-- First native qualification target: Windows x64 MSVC
-  (`x86_64-pc-windows-msvc`). Subsequent candidates: Linux x64 GNU
-  (`x86_64-unknown-linux-gnu`) and macOS arm64 (`aarch64-apple-darwin`). All are
-  currently unqualified for the new native product; no other architecture is
-  implicitly supported. This is qualification order, not permission to drop any
-  currently supported hook consumer. Before each shared-hook cutover verify all
-  existing supported provider/host routes; qualify installer and process runner
-  independently.
+## Acquisition and authenticity
 
-Prove the complete payload from an unpacked archive without a checkout, including
-validators and dynamic resources. Check dependency closure, explicit apply,
-reinstall/update, failure recovery, foreign-file preservation, manual trust and
-survival of applied registrations after npm update/uninstall. No package publication
-or runtime activation is authorized by this design. Expanded native-role lifecycle
-is a dependency only for operations actually needing its broader ownership changes.
+All channels must:
+1. Resolve an explicitly selected release and supported target from the official
+   release origin. Unknown targets fail before changing installed state.
+2. Authenticate the release manifest and verify every payload digest before
+   executing its interpreter or entrypoint. A checksum beside an untrusted payload
+   is not independent publisher authentication. Signing trust, key rotation and
+   publisher ownership remain release gates; this plan provisions no keys.
+3. Bound download size, extraction size/count and time. Reject traversal, absolute
+   archive members, conflicting entries and escaping links/reparse points.
+   Do not treat local quiescent-tree checks as a hostile-archive extractor.
+4. Use exclusively owned staging, preserve the last working release on failure,
+   and never execute a partial or mixed-version payload.
+5. Forward exact arguments and exit status to the same operation owner.
+   No automatic elevation, execution-policy changes, certificate bypass or
+   provider activation is permitted.
 
-Minimize dependencies per consumer, not by a zero-dependency slogan. The existing
-`review_loop_state.py` standard-library JSON path avoids PyYAML for suitable owned
-ledgers; keep supported legacy YAML parsing explicit. The weaker string/regex
-fallback in `skill_pack_validator_runtime.py` is not equivalent validation: retain
-an adequate parser rather than silently weakening checks. Test dependencies remain
-separate. Python coordination is retained; there is no whole-product Python-free claim.
+PowerShell serves Windows; a thin POSIX entry serves Linux and macOS. The requested
+`irm` convenience is an acquisition surface, not a trust mechanism. Instructions
+must not require blindly executing unverified downloaded code.
 
+## npm channel
 
-## Delivery and acceptance
+npm distributes the same target-qualified bundle through a thin JavaScript
+dispatcher and exact-version platform payload packages. Platform selection may
+use optional dependencies, but absence of the selected platform must fail clearly.
+No postinstall model calls, downloads, compilation, Python setup, login, hook
+registration or project mutation.
 
-1. Verify publisher/name ownership at release time, exact package/payload closure
-   and supported operation prerequisites from an unpacked archive without a checkout.
-2. Implement the PowerShell bootstrap and thin npm dispatcher against one release
-   contract; do not create a second installer or activate unqualified Rust apply.
-3. Test selected qualified targets, missing target refusal, offline payload integrity,
-   foreign-file preservation, failed apply/reinstall/recovery and retained identities.
-4. npm update changes distribution; npm uninstall must not break applied packs.
-   Keep full-pack uninstall and automatic collection outside the initial channel
-   release. A later managed-pack removal command belongs only to the Rust operation
-   owner after explicit ownership/preservation qualification.
-5. Compare PowerShell and npm delivery of the same qualified release: executable
-   and resource identities, exact argv, exit codes, installed effects, update and
-   recovery. Reject tampering, unknown targets, download interruption, mixed versions
-   and invalid authenticity evidence before execution. No silent channel fallback.
+Python and SDK dependencies are delivered in the qualified payload, not installed
+from the network on the user's first run. A user need not install system Python.
+Do not silently omit native CLI dependencies to advertise a smaller package.
 
-The minimal shared payload contract belongs to the [existing installer](../scripts/production_installer.py):
-admitted resolved root, immutable retained executable/resources, explicit apply,
-recovery and persisted readback. Unknown references preserve a retained version;
-no new garbage collector, reference-count service or payload manager.
-The [Rust task](https://github.com/applicate2628/Orchestrarium/pull/21) may supply qualified targets
-independently. Python/SDK environment provisioning remains outside npm.
+Use the common installer's current selection and lifecycle semantics rather than
+introducing a second npm-only command language. The eventual entrypoint maps to
+the same selected-client, global/target, preview, migration and uninstall options.
+The exact public syntax must be checked against that release's actual help.
 
-## Architecture decisions and risks
+npm update changes the distribution, not applied packs. Applying an update is an
+explicit operation. npm uninstall removes the npm distribution only and must not
+break already applied hooks or executors. Managed-pack uninstall is a separate,
+ownership-checked operation implemented by the common installer.
 
-Prefer two thin delivery channels over one native operation owner, not a new
-daemon or global runtime manager. Rust owns qualified install/update/removal and
-recovery; current Python ownership remains only until each explicit cutover. The
-PowerShell channel removes npm as a mandatory prerequisite, not Python from SDK
-coordination or from deliberately retained legacy operations.
-Package downloads/builds and provider execution cannot occur through postinstall.
-Native payloads are shipped only for qualified targets; absence is a clear failure
-for that selected operation, never an implicit language/runtime fallback.
+## Applied runtime lifetime and uninstall
+
+Retain an admitted release outside mutable npm caches, temporary downloads and
+`node_modules` before registering consumers. The existing installer/lifetime owner
+records the selected release and content identity. Do not register against PATH,
+mutable latest links or a disposable acquisition directory.
+
+Selected-client uninstall deactivates owned registrations, removes exact unchanged
+owned payload and configuration portions, and preserves user additions, modified
+content and other clients. Unknown or inconsistent ownership is preserved and
+reported, not treated as empty. Verify rollback and repeated uninstall.
+
+Applied runtime cleanup is distinct from removing client payload. Retain a runtime
+while any verified consumer may reference it; unknown references preserve it.
+Initial delivery retains old runtimes. Automatic last-consumer garbage collection
+is not implemented or promised. Any later cleanup must use existing ownership and
+registration evidence, not guessed reference counts or a new daemon.
+
+## Qualification and release gates
+
+- Windows and Linux: test actual assembled bundles without a checkout, including
+  relocation, unavailable system Python/PATH, dependency imports, selected install,
+  reapply/update, migration, hook registration/health, rollback and uninstall.
+- Check unselected peer bytes, user-file preservation, interrupted acquisition,
+  mixed versions, missing dependencies, invalid targets and failed verification.
+- Compare npm, PowerShell and POSIX delivery by payload identity, arguments, exit
+  status and installed effects, not only matching command names.
+- macOS: documentation/static review only until a real macOS runner is available.
+  Never report Windows/Linux results as macOS execution evidence.
+- Architecture and operating-system tuples are qualification candidates, not a
+  claim that every archive exists. State the Linux libc floor from the complete
+  wheel/runtime closure; Alpine/musl requires separate evidence.
+- Complete license inventory and measured minimization before release. Preserve
+  required parsers/validators and runtime resources rather than weakening checks.
+- Installer qualification does not authorize model/API calls, activate SDK routes,
+  verify billing or establish complete provider lifecycle support.
+
+The local assembly and lifecycle results recorded in PR19 are scoped evidence.
+Authenticated remote release delivery, channel packaging, final versions and
+publisher/name ownership remain open until independently verified.
+No package publication, model launch or GitHub Actions dispatch follows from this
+design. Preserve the earlier manual-trust documentation/tests in this PR.
 
 ## Terms and Abbreviations
 
-- npm: optional JavaScript package distribution channel; package availability is unverified.
-- PowerShell bootstrap: Windows download/verification/launch script, not an operation owner.
-- SDK: software development kit; not provisioned by this distribution task.
-- CLI: command-line interface.
-- Retained payload: immutable applied executable/resources independent of npm cache.
+- SDK: software development kit used behind the common execution contract.
+- CLI: command-line interface; some SDKs still depend on a provider CLI.
+- npm: optional package distribution channel, not an installer-policy owner.
+- Bootstrap: bounded acquisition, verification and dispatch entrypoint.
+- Retained runtime: applied interpreter/resources kept independently of caches.
+- CPython: the Python implementation bundled with this release.

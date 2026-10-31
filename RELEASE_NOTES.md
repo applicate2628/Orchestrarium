@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-10-31
+
+- Delivery planning now follows the approved Orche sequence: integrate SDK execution and a minimal bundled Python runtime first, with npm, PowerShell and POSIX channels delegating to one installer; qualify Rust replacements later. The plan includes independent client copies, ownership-safe uninstall, retained runtime lifetime and honest Windows/Linux versus macOS qualification boundaries. This documentation does not publish a package or activate a provider.
+
 ## 2026-10-26
 
 - Refine the native delivery plan to one Rust CLI operation owner, a thin PowerShell download/verification bootstrap and npm as a compatible optional channel. Keep the current Python installer until qualified native cutover; delivery scripts must not duplicate managed-file, trust or recovery behavior. The first Rust implementation slice remains a joint decision after SDK acceptance.
