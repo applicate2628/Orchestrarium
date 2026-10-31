@@ -3401,15 +3401,25 @@ async def _native_push_selection(request: NativePushRequest, deadline: float) ->
 async def _native_commit_range_selection(
     primary: RangeRequest, request: NativePushRequest, deadline: float,
 ) -> RangeSelection | Refusal:
-    """Union each actual update's commit graph relative to its own old OID.
+    """Union actual updates relative to this receiver's native old-object set.
 
-    A separately advertised server is never evidence about a custom receiver.
+    Only old OIDs from this callback supply exclusions, matching the V4 owner.
+    Separate advertisements and local tracking refs provide no authority.
     Unknown old objects are conservatively included instead of excluded.
     """
     object_format = request.object_format
     if _detect_git_object_format(_remaining_seconds(deadline)) != object_format or _graft_overlay_present(_remaining_seconds(deadline)):
         return _refusal("PS-MSG-RANGE", "native-repository")
     zero = "0" * object_format.hex_length
+    loop_deadline = asyncio.get_running_loop().time() + _remaining_seconds(deadline)
+    native_old = tuple(RemoteRefTip(row.remote_ref, row.remote_oid)
+                       for row in request.updates if row.remote_oid != zero)
+    exclusions = await _local_remote_commit_tip_oids(
+        native_old, deadline=loop_deadline, object_format=object_format,
+        include_object_roots=True)
+    if isinstance(exclusions, Refusal):
+        return exclusions
+    exclusion = ("--not", *exclusions) if exclusions else ()
     parents: dict[str, tuple[str, ...]] = {}
     objects: set[str] = set()
     selected_primary = None
@@ -3423,14 +3433,6 @@ async def _native_commit_range_selection(
             continue
         if selected_primary is None:
             selected_primary = (os.fsdecode(row.remote_ref), tip)
-        exclusion = ()
-        if row.remote_oid != zero:
-            try:
-                old = _resolve_commit(row.remote_oid, _remaining_seconds(deadline), object_format=object_format)
-            except ValueError:
-                pass
-            else:
-                exclusion = ("--not", old)
         loop_deadline = asyncio.get_running_loop().time() + _remaining_seconds(deadline)
         graph = await _read_parent_graph_bounded(
             _range_git_argv("rev-list", "--parents", "--topo-order", tip, *exclusion),
@@ -3538,7 +3540,7 @@ class _ReaderFinalizerResult:
 
 
 class _AsyncGitObjectReader:
-    """One owned asynchronous `git cat-file --batch` session.
+    """One owned asynchronous `git cat-file --batch-command` session.
 
     The reader owns the child and all three pipe transitions. Every request is
     bounded by one monotonic deadline; the caller owns exactly one finalizer.
@@ -3547,11 +3549,12 @@ class _AsyncGitObjectReader:
     def __init__(
         self,
         *,
-        argv: tuple[str, ...] = _range_git_argv("cat-file", "--batch"),
+        argv: tuple[str, ...] | None = None,
         request_timeout: float = _OBJECT_REQUEST_TIMEOUT_SECONDS,
         settle_timeout: float = OBJECT_REAP_ATTEMPT_SECONDS,
     ) -> None:
-        self._argv = argv
+        self._command_mode = argv is None
+        self._argv = _range_git_argv("cat-file", "--batch-command") if argv is None else argv
         self._request_timeout = request_timeout
         self._settle_timeout = settle_timeout
         self._process: asyncio.subprocess.Process | None = None
@@ -3633,7 +3636,7 @@ class _AsyncGitObjectReader:
         if scan_deadline is not None:
             deadline = min(deadline, scan_deadline)
         try:
-            process.stdin.write(oid.encode("ascii") + b"\n")
+            process.stdin.write((b"contents " if self._command_mode else b"") + oid.encode("ascii") + b"\n")
             await self._within(process.stdin.drain(), deadline)
             header = await self._within(process.stdout.readline(), deadline)
             if not header.endswith(b"\n"):
@@ -3709,7 +3712,7 @@ class _AsyncGitObjectReader:
         if scan_deadline is not None:
             deadline = min(deadline, scan_deadline)
         try:
-            process.stdin.write(encoded_name + b"\n")
+            process.stdin.write((b"info " if self._command_mode else b"") + encoded_name + b"\n")
             await self._within(process.stdin.drain(), deadline)
             header = await self._within(process.stdout.readline(), deadline)
             if not header.endswith(b"\n") or len(header) > 256:
@@ -4285,14 +4288,15 @@ async def _acquire_history(
     for target_oid, declared_type in tag_targets.values():
         actual_type = target_types.get(target_oid)
         if actual_type is None:
-            try:
-                result = _run_range_git(["cat-file", "-t", target_oid], text=True,
-                                        timeout=max(0.001, scan_deadline - asyncio.get_running_loop().time()))
-            except subprocess.TimeoutExpired:
-                return _refusal("PS-MSG-READ-TIMEOUT", "tag-target")
-            except OSError:
-                return _refusal("PS-MSG-READ", "tag-target")
-            if result.returncode or result.stdout.splitlines() != [declared_type]:
+            # Reuse the active reader: another POSIX owned process would
+            # reacquire its lifecycle lock. Metadata-only info does not load
+            # excluded bodies or grant selected-content coverage.
+            classified = await reader.classify(
+                target_oid, object_format=selection.object_format,
+                scan_deadline=scan_deadline)
+            if isinstance(classified, Refusal):
+                return classified
+            if classified.returned_oid != target_oid or classified.object_type != declared_type:
                 return _refusal("PS-MSG-FRAME", "tag-target")
             target_types[target_oid] = declared_type
         elif actual_type != declared_type:

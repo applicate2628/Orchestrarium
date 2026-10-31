@@ -742,8 +742,8 @@ def test_actual_tag_only_push_retains_independent_v4_annotation_detection(native
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Uses captured Windows scanner children")
-@pytest.mark.parametrize("scenario", ["v3-only-active", "v3-only-revoked", "distinct-active", "distinct-revoked", "overlap", "conflict", "origin-return", "origin-content"])
-def test_v3_used_authority_is_received_again_after_v4_excludes_its_subject(native_repository, monkeypatch, request, scenario):
+@pytest.mark.parametrize("scenario", ["zero-union-active", "zero-union-revoked", "distinct-active", "distinct-revoked", "overlap", "conflict", "origin-return", "origin-content"])
+def test_native_union_and_used_authority_currentness(native_repository, monkeypatch, request, scenario):
     slot_names = ("_orchestrarium_publication_review_policy_v1", "_orchestrarium_linked_runtime_subroots_v1")
     absent = object()
     previous_slots = {name: sys.modules.get(name, absent) for name in slot_names}
@@ -798,7 +798,7 @@ def test_v3_used_authority_is_received_again_after_v4_excludes_its_subject(nativ
     record_b = policy.seal_record({**record, "id": "DEC-B"})
     changed_a = policy.seal_record({**record, "revision": 2,
         "previousRecordSha256": record_a["recordSha256"], "reason": "revised synthetic grant"})
-    policy_file.write_bytes(policy.canonical_document(1, [record_a]))
+    policy_file.write_bytes(policy.canonical_document(1, [] if scenario == "zero-union-revoked" else [record_a]))
     other_home = None
     if scenario == "origin-return":
         temporary_other = tempfile.TemporaryDirectory(prefix="native-reviewed-other-origin-")
@@ -807,19 +807,15 @@ def test_v3_used_authority_is_received_again_after_v4_excludes_its_subject(nativ
         other_origin = other_home / ".agents" / "publication"
         other_origin.mkdir(parents=True)
         (other_origin / "reviewed-exceptions.json").write_bytes(policy.canonical_document(1, [record_a]))
-    # V3 scans commit..old. The separate deletion's actual old root lets V4
-    # legitimately exclude that same subject without using its exception.
-    v3_only = scenario.startswith("v3-only-")
+    # Same-callback native old roots now apply to BOTH scans. A deletion
+    # advertising the entire selected commit makes this a zero-commit union,
+    # which remains non-authorizing regardless of any unused review grant.
+    zero_union = scenario.startswith("zero-union-")
     wire = f"HEAD {commit} refs/heads/first {old}\n".encode()
-    if v3_only:
+    if zero_union:
         wire += f"(delete) {'0' * 40} refs/heads/retired {commit}\n".encode()
-    original_child = owner._run_snapshot_child
     original_scan = owner._run_authoritative_scan
     seen = []
-    def child(pending, *args):
-        if isinstance(pending.binding, owner.NativePushScanBinding) and scenario == "v3-only-revoked":
-            policy_file.write_bytes(policy.canonical_document(1, []))
-        return original_child(pending, *args)
     def scan(*args, **kwargs):
         native_scan = isinstance(args[0], owner.NativePushInput)
         if native_scan and scenario == "origin-return":
@@ -872,17 +868,19 @@ def test_v3_used_authority_is_received_again_after_v4_excludes_its_subject(nativ
     with mock.patch.dict(sys.modules):
         for name in slot_names:
             sys.modules.pop(name, None)
-        with mock.patch.object(owner, "_run_snapshot_child", side_effect=child), \
-             mock.patch.object(owner, "_run_authoritative_scan", side_effect=scan), \
+        with mock.patch.object(owner, "_run_authoritative_scan", side_effect=scan), \
              mock.patch.object(owner, "_verify_used_review_currentness", side_effect=verify_current) as verify, \
              mock.patch.object(sys, "stdin", SimpleNamespace(buffer=io.BytesIO(wire))), \
              mock.patch.object(sys, "stdout", output), mock.patch.object(sys, "stderr", errors):
             result = owner._native_pre_push_main(["origin", str(remote)])
             assert "_orchestrarium_publication_review_policy_v1" not in sys.modules
             assert "_orchestrarium_linked_runtime_subroots_v1" not in sys.modules
-    assert [item.parsed_outcome.kind for item in seen] == ["qualified-v3", "valid-v4" if v3_only else "qualified-v4"], errors.getvalue()
-    if v3_only:
-        assert seen[1].parsed_outcome.receipt.objects == 0
+    if zero_union:
+        assert result == 2 and "PGG-SCAN-REFUSAL" in errors.getvalue()
+        assert seen == [] and verify.call_count == 0
+        assert output.getvalue() == ""
+        return
+    assert [item.parsed_outcome.kind for item in seen] == ["qualified-v3", "qualified-v4"], errors.getvalue()
     if scenario in {"origin-return", "origin-content"}:
         first_review = seen[0].execution.pending.captured_review
         second_review = seen[1].execution.pending.captured_review
@@ -890,14 +888,14 @@ def test_v3_used_authority_is_received_again_after_v4_excludes_its_subject(nativ
         assert (policy._origin_core_from_snapshot(first_review.snapshot) ==
                 policy._origin_core_from_snapshot(second_review.snapshot)) == (scenario == "origin-content")
         assert seen[0].parsed_outcome.qualification.used_decisions_b64 == seen[1].parsed_outcome.qualification.used_decisions_b64
-    assert verify.call_count == (2 if v3_only else 3)
+    assert verify.call_count == 3
     assert verification_origins == ["selected"] * verify.call_count
     if scenario in {"conflict", "origin-return"}:
         assert verification_used[-1] is None and verification_captures[-1] == 0
     else:
         assert [pair[0] for pair in verification_used[-1]] == (["DEC-A", "DEC-B"] if scenario.startswith("distinct-") else ["DEC-A"])
         assert verification_captures[-1] == 1
-    if scenario in {"v3-only-revoked", "distinct-revoked", "conflict", "origin-return"}:
+    if scenario in {"distinct-revoked", "conflict", "origin-return"}:
         assert result == 2 and "PGG-SCAN-REFUSAL" in errors.getvalue()
         assert output.getvalue() == ""
         if scenario == "distinct-revoked":

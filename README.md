@@ -181,7 +181,7 @@ If a repo-local lane policy explicitly asks for consultant input at closeout, it
 
 See [INSTALL.md](INSTALL.md) for quick install, pack-specific install details, dual-platform setup, and post-install customization.
 
-Publication scan-derived push credit requires the actual native Git callback to receive one fresh bounded, reaped, non-empty Version 3 union of actual update commit/tree/blob graphs relative to each old object ID and a separate Version 4 result covering actual transferred roots, including noncommit objects. Version 2 and manual/default/path scan output remain diagnostic only and cannot authorize a push.
+Publication scan-derived push credit requires the actual native Git callback to receive one fresh bounded, reaped, non-empty Version 3 union of actual update commit/tree/blob graphs relative to the union of known old objects from that same native callback and a separate Version 4 result covering actual transferred roots, including noncommit objects. Version 2 and manual/default/path scan output remain diagnostic only and cannot authorize a push.
 
 ## Orchestration utilities
 

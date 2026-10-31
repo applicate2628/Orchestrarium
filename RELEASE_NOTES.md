@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-31
 
+- Publication checks now use the union of old object bases supplied by the same native Git callback for both commit-range and transferred-object coverage. A genuine branch update and new tag can share already-held ancestry without trusting separate remote probes. New annotations and unknown history remain checked; standalone new tags retain conservative full-history checking. Scanner tests restore their synthetic module state so combined native-gate runs retain provenance isolation. Excluded tag-target types are checked through the existing owned Git reader using metadata-only commands, avoiding a nested POSIX process-owner deadlock without reading excluded object bodies.
+
 - Scratch cleanup now checks the complete bounded Git object-store layout before and after reachability verification. Linked or changing nested pack/loose-object storage cannot be credited as an independent recovery copy; uncertain entries remain preserved.
 
 - Windows and Linux Python bundles now retain the dependency notices declared by their pinned upstream full-build metadata, which the stripped install-only runtime does not carry. Source digests and byte-preservation tests prevent silent notice loss during packaging; full native/transitive release clearance remains separate.
