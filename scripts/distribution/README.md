@@ -114,3 +114,17 @@ established by the elevated tests; junction fallback is not shipped.
 API references: [FSCTL_SET_REPARSE_POINT](https://learn.microsoft.com/en-us/windows/desktop/api/winioctl/ni-winioctl-fsctl_set_reparse_point),
 [AdjustTokenPrivileges](https://learn.microsoft.com/windows/win32/api/securitybaseapi/nf-securitybaseapi-adjusttokenprivileges),
 and [impersonation restoration failure](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-reverttoself).
+
+## Version-bound upstream notices
+
+`notices/openai-codex/` supplies the upstream LICENSE and NOTICE for the two
+locked Codex 0.163.0 distributions whose installed wheel records did not contain
+those files. `source.json` pins the upstream release commit and file digests;
+the qualification test binds both platform lock versions to that metadata.
+The existing builder copies this directory with `scripts/`, preserving exact
+bytes. No runtime dependency, installer owner or download step is added.
+
+This closes that specific notice-file gap, not the complete release inventory.
+Other wheel notices and the interpreter license remain in the copied runtime;
+native/transitive components still require inventory. Do not infer a binary's
+complete provenance or blanket license compliance from these two upstream files.

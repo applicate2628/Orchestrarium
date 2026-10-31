@@ -130,3 +130,50 @@ def test_reparse_directory_is_refused_before_traversal(builder, tmp_path, monkey
     with pytest.raises(ValueError):
         builder.build(source, runtime, tmp_path / 'output', target='linux-x64', release='development')
     assert not (tmp_path / 'output').exists()
+
+
+def test_locked_codex_notices_are_version_bound_and_shipped(builder, tmp_path):
+    import hashlib
+    notice_root = SOURCE / 'scripts/distribution/notices/openai-codex'
+    manifest = json.loads((notice_root / 'source.json').read_text())
+    expected = {'openai-codex', 'openai-codex-cli-bin'}
+    assert set(manifest['packages']) == expected
+    for filename, key in [('linux-x64-cp315.sources.json', 'packages'),
+                          ('windows-x64-cp315.sources.json', 'wheels')]:
+        lock = json.loads((SOURCE / 'scripts/distribution/locks' / filename).read_text())
+        selected = {p['name']: p['version'] for p in lock[key] if p['name'] in expected}
+        assert selected == manifest['packages']
+    assert len(manifest['upstreamCommit']) == 40
+    assert set(manifest['files']) == {'LICENSE', 'NOTICE'}
+    for name, evidence in manifest['files'].items():
+        assert evidence['url'] == f"https://raw.githubusercontent.com/openai/codex/{manifest['upstreamCommit']}/{name}"
+        assert hashlib.sha256((notice_root / name).read_bytes()).hexdigest() == evidence['sha256']
+    runtime = tmp_path / 'runtime'; (runtime / 'bin').mkdir(parents=True)
+    (runtime / 'bin/python3').write_bytes(b'synthetic; never executed')
+    output = tmp_path / 'bundle'
+    builder.build(SOURCE, runtime, output, target='linux-x64', release='development')
+    for name in ('LICENSE', 'NOTICE', 'source.json'):
+        assert (output / 'app/scripts/distribution/notices/openai-codex' / name).read_bytes() == (notice_root / name).read_bytes()
+
+
+def test_vendor_notices_keep_exact_bytes_in_autocrlf_checkout(tmp_path):
+    import shutil
+    import subprocess
+    git = shutil.which('git')
+    assert git is not None
+    origin = tmp_path / 'origin'; origin.mkdir()
+    names = ['.gitattributes'] + [f'scripts/distribution/notices/openai-codex/{name}'
+                                  for name in ('LICENSE', 'NOTICE', 'source.json')]
+    for name in names:
+        path = origin / name; path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes((SOURCE / name).read_bytes())
+    def run(*args):
+        return subprocess.run([git, *args], check=True, capture_output=True, timeout=30)
+    run('init', '-q', str(origin))
+    run('-C', str(origin), '-c', 'core.autocrlf=false', 'add', '.')
+    run('-C', str(origin), '-c', 'user.name=Synthetic', '-c', 'user.email=synthetic@example.invalid',
+        'commit', '-qm', 'notice byte fixture')
+    checkout = tmp_path / 'checkout'
+    run('-c', 'core.autocrlf=true', 'clone', '-q', str(origin), str(checkout))
+    for name in names[1:]:
+        assert (checkout / name).read_bytes() == (SOURCE / name).read_bytes()

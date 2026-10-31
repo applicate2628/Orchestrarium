@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-31
 
+- Local delivery bundles now include version-pinned upstream Codex LICENSE and NOTICE files alongside the locked SDK and CLI binary distributions. Regression checks bind their digests and package versions and verify byte-preserving bundle and Git checkout transport. This closes a specific missing-notice-file inventory gap without adding a runtime or changing installation logic; complete native/transitive licensing inventory remains a release hold.
+
 - Full-history publication scans now have a finite 900-second work budget and a 960-second captured-invocation ceiling. Repeated baseline measurements required 485–530 seconds, so the former 240/300-second bounds rejected otherwise evaluable history before review could finish. Object/byte limits, detector coverage, identity checks, cancellation and cleanup-attempt bounds remain unchanged; unresolved findings still block publication. Incremental pushes do not wait for the ceiling.
 
 - Frozen model-routing migration fixtures now preserve their exact historical bytes across Git checkouts, including core.autocrlf=true. The existing digest manifest is unchanged; a real checkout regression prevents newline conversion from producing false migration failures. The overview documentation test now checks its link to the detailed installation contract instead of requiring a duplicate policy paragraph. No model profile or runtime setting is changed.
