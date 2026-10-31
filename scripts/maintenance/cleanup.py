@@ -913,6 +913,27 @@ def _git_unique_paths(git_root: Path, paths: list[Path]) -> set[Path] | None:
     return {path for path, sha in shas.items() if sha in missing}
 
 
+def _git_storage_snapshot(objects: Path, deadline: float) -> dict[Path, tuple]:
+    """Bounded no-link metadata census; object bytes remain owned by Git."""
+    result = {}
+    pending = [objects]
+    while pending:
+        path = pending.pop()
+        if time.monotonic() >= deadline or len(result) >= MAX_OWNED_TREE_ENTRIES:
+            raise OwnedTreeClassificationError("SCRATCH-INVENTORY-LIMIT", "Git storage census limit")
+        info = _path_lstat(path)
+        result[path] = _identity_parts(info)
+        if stat_module.S_ISDIR(info.st_mode):
+            with os.scandir(path) as entries:
+                for entry in entries:
+                    if len(result) + len(pending) >= MAX_OWNED_TREE_ENTRIES:
+                        raise OwnedTreeClassificationError("SCRATCH-INVENTORY-LIMIT", "Git storage census limit")
+                    pending.append(Path(entry.path))
+        elif not stat_module.S_ISREG(info.st_mode):
+            raise OwnedTreeClassificationError("SCRATCH-INVENTORY-UNSAFE", "nonregular Git storage")
+    return result
+
+
 def _durable_git_unique_paths(git_root: Path, paths: list[Path]) -> set[Path] | None:
     """Stricter cleanup proof; the cheap watchdog remains advisory only.
 
@@ -966,6 +987,7 @@ def _durable_git_unique_paths(git_root: Path, paths: list[Path]) -> set[Path] | 
             return None
         if any(part.casefold() == SCRATCH_DIRNAME for part in common.parts):
             return set(paths)
+        storage_before = _git_storage_snapshot(objects, deadline)
         alternates = objects / "info" / "alternates"
         if alternates.exists() or alternates.is_symlink():
             info = _path_lstat(alternates)
@@ -986,6 +1008,11 @@ def _durable_git_unique_paths(git_root: Path, paths: list[Path]) -> set[Path] | 
             return None
     reachable = query("rev-list", "--objects", "--no-object-names", "--branches", "--tags")
     if reachable is None or query(*refs_args) != before:
+        return None
+    try:
+        if _git_storage_snapshot(objects, deadline) != storage_before:
+            return None
+    except (OSError, OwnedTreeClassificationError):
         return None
     remaining = set(shas.values())
     for oid in reachable.splitlines():

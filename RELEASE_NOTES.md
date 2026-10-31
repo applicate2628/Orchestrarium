@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-10-31
 
+- Scratch cleanup now checks the complete bounded Git object-store layout before and after reachability verification. Linked or changing nested pack/loose-object storage cannot be credited as an independent recovery copy; uncertain entries remain preserved.
+
 - Windows and Linux Python bundles now retain the dependency notices declared by their pinned upstream full-build metadata, which the stripped install-only runtime does not carry. Source digests and byte-preservation tests prevent silent notice loss during packaging; full native/transitive release clearance remains separate.
 
 - Installer regression fixtures now explicitly seed both clients when checking paired projections, preserve ordinary per-client skills, and separately verify refusal of legacy linked skills. Rollback tests require the injected failure to execute instead of accepting an earlier refusal as success. Metadata fixtures create their disposable parent in a fresh checkout, so clearing scratch does not break test setup.

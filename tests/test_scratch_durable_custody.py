@@ -112,3 +112,36 @@ def test_long_scratch_path_keeps_exact_byte_custody_without_global_git_config(tm
     result = cleanup.classify_owned_tree(tree, root)
     assert result.git_check_complete and result.all_git_recoverable
     assert git(root, 'config', '--get', 'core.longpaths') == 'false'
+
+
+def test_packed_objects_linked_back_to_scratch_are_not_durable(tmp_path):
+    root = repo(tmp_path / 'repository'); commit(root)
+    git(root, 'gc', '--prune=now')
+    pack = root / '.git/objects/pack'
+    backing = tmp_path / '.scratch/pack'
+    backing.parent.mkdir()
+    pack.rename(backing)
+    if os.name == 'nt':
+        proc = subprocess.run(['cmd', '/c', 'mklink', '/J', str(pack), str(backing)],
+                              capture_output=True, text=True, timeout=30)
+        assert proc.returncode == 0, proc.stderr
+    else:
+        pack.symlink_to(backing, target_is_directory=True)
+    tree, _ = scratch(root)
+    result = cleanup.classify_owned_tree(tree, root)
+    assert not result.all_git_recoverable
+
+
+def test_git_storage_snapshot_rejects_file_link(tmp_path):
+    import pytest
+    objects = tmp_path / 'objects'; objects.mkdir()
+    target = tmp_path / 'payload'; target.write_bytes(b'synthetic')
+    link = objects / 'pack-data'
+    try:
+        link.symlink_to(target)
+    except OSError as error:
+        if os.name == 'nt' and getattr(error, 'winerror', None) == 1314:
+            pytest.skip('Windows symlink privilege unavailable')
+        raise
+    with pytest.raises(cleanup.OwnedTreeClassificationError):
+        cleanup._git_storage_snapshot(objects, cleanup.time.monotonic() + 30)
