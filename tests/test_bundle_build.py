@@ -232,3 +232,38 @@ def test_sdk_runtime_omits_only_qualified_linux_optional_dbm(builder, tmp_path, 
     assert (output / "python" / relative).exists() == (not omitted)
     assert optional.read_bytes() == b"synthetic optional extension"
     assert (output / "python/user-data" / optional.name).read_bytes() == b"must remain"
+
+
+@pytest.mark.parametrize("target", ["linux-x64", "windows-x64"])
+def test_codex_native_notices_are_pinned_and_preserved(builder, tmp_path, target):
+    import hashlib
+    root = SOURCE / "scripts/distribution/notices/openai-codex/native"
+    manifest = json.loads((root / "source.json").read_text(encoding="utf-8"))
+    codex = json.loads((root.parent / "source.json").read_text(encoding="utf-8"))
+    assert manifest["upstreamCommit"] == codex["upstreamCommit"]
+    assert manifest["packages"] == codex["packages"]
+    expected = {"bubblewrap/COPYING"} | {
+        f"ripgrep/{platform}/{name}"
+        for platform in ("linux-x64", "windows-x64")
+        for name in ("COPYING", "LICENSE-MIT", "UNLICENSE")
+    }
+    assert set(manifest["files"]) == expected
+    assert manifest["ripgrepVersion"] == "15.2.0"
+    for name, entry in manifest["files"].items():
+        assert hashlib.sha256((root / name).read_bytes()).hexdigest() == entry["sha256"]
+        if name.startswith("ripgrep/"):
+            platform = name.split("/")[1]
+            archive = manifest["ripgrepArchives"][platform]
+            assert entry["archiveSha256"] == archive["sha256"]
+            assert entry["archivePath"].endswith("/" + Path(name).name)
+        else:
+            assert entry["url"] == ("https://raw.githubusercontent.com/openai/codex/"
+                + codex["upstreamCommit"] + "/codex-rs/vendor/bubblewrap/COPYING")
+    runtime = tmp_path / "runtime"
+    interpreter = runtime / builder.TARGETS[target]
+    interpreter.parent.mkdir(parents=True)
+    interpreter.write_bytes(b"synthetic interpreter; never executed")
+    output = tmp_path / "bundle"
+    builder.build(SOURCE, runtime, output, target=target, release="development")
+    for name in (*expected, "source.json"):
+        assert (output / "app/scripts/distribution/notices/openai-codex/native" / name).read_bytes() == (root / name).read_bytes()

@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-01
 
+- Preserve version-bound bubblewrap and ripgrep notice texts in local SDK bundles, including exact platform archive bytes and source digests. This repairs missing component notices without changing the runtime or claiming complete redistribution qualification.
+
 - Review-loop recovery now receives verified later scout dispositions and existing owner-qualified same-artifact review closures without rewriting original results, fabricating execution failures, or changing the candidate to force another round. Effective closure preserves other obligations, source identity and the existing retry budget; terminal receiving rechecks the canonical ledger relation. The pre-SDK hotfix does not migrate installations to the SDK branch.
 
 ## 2026-10-31

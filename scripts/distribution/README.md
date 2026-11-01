@@ -179,3 +179,18 @@ extension: [python-build-standalone technical notes](https://gregoryszorc.com/do
 The exact pinned module was excluded in an isolated real-SDK qualification before
 this rule was added. New Python versions or other targets need their own inventory
 and qualification; this path-specific rule is not a blanket license clearance.
+
+## Supplemental native Codex notices
+
+`notices/openai-codex/native/` preserves the vendored bubblewrap COPYING
+from the pinned Codex commit and the three ripgrep notice texts from each
+locked upstream Linux/Windows archive. The archive hashes come from that
+Codex commit's package manifest; extracted ripgrep binaries match the retained
+platform runtime inventories. Platform-specific text bytes are kept unchanged.
+The existing builder carries these notices without additional executable logic.
+
+This closes the identified notice-presence gap only. Vendored source attribution
+is not a reproducible-build proof. Complete corresponding-source delivery for
+bubblewrap, its static dependencies, ripgrep dependencies, and the remaining
+Codex/host native components still require release qualification. No sandbox
+binary is removed or bypassed to avoid these obligations.
