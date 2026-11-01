@@ -3272,6 +3272,219 @@ def _qualify_review_semantic_results_v2(proof, admitted, inputs, target_ref, pas
         resolve_review_source_unit_v2(anchor, admitted_sources=admitted, inputs=inputs)
 
 
+
+def parse_review_loop_receiving_binding_v1(binding):
+    required = {"version", "action", "loop", "reviewedRole", "originalResult",
+                "targetSummary", "reviewerSummary", "evidenceLimitations", "proof"}
+    _review_exact_object(binding, required, "loop receiving")
+    if (type(binding["version"]) is not int or binding["version"] != 1
+            or binding["action"] != "receive-original-loop-review-association"):
+        raise ValueError("RL-source: explicit current Root receiving required")
+    _review_exact_object(binding["loop"], {"loopId", "round", "lane", "attemptId", "artifactRevision"}, "original loop")
+    if type(binding["loop"]["round"]) is not int or binding["loop"]["round"] < 1:
+        raise ValueError("RL-source: actual positive round required")
+    for name in ("loopId", "lane", "attemptId", "artifactRevision"):
+        _review_nonempty(binding["loop"][name], "original loop " + name)
+    _review_nonempty(binding["evidenceLimitations"], "retained evidence limitations")
+    _review_nonempty(binding["reviewedRole"], "actual review profession")
+    for name in ("originalResult", "targetSummary", "reviewerSummary"):
+        parse_review_source_anchor_v1(binding[name])
+    parse_review_closure_proof_v2(binding["proof"])
+    return _current_json_value(binding)
+
+
+def qualify_review_loop_receiving_sources_v1(
+    binding, *, state, round_number, lane, attempt_id, artifact_revision,
+    item, rows, validity, target_pos, reviewer_pos, initial_receiving=True,
+):
+    """Read-only CURRENT Root receiving; never synthesize a ledger event or old promise."""
+    binding = parse_review_loop_receiving_binding_v1(binding)
+    expected_loop = {"loopId": state["loop_id"], "round": round_number, "lane": lane,
+                     "attemptId": attempt_id, "artifactRevision": artifact_revision}
+    if binding["loop"] != expected_loop:
+        raise ValueError("RL-source: exact original loop identity differs")
+    _review_nonempty(binding["evidenceLimitations"], "retained evidence limitations")
+    _review_nonempty(binding["reviewedRole"], "actual review profession")
+    proof = parse_review_closure_proof_v2(binding["proof"])
+    target, reviewer = rows[target_pos].event, rows[reviewer_pos].event
+    for key, pos in (("target", target_pos), ("reviewerPass", reviewer_pos)):
+        if proof[key] != {"runId": rows[pos].event["runId"], "rawLineSha256": rows[pos].raw_line_sha256}:
+            raise ValueError("RL-source: actual terminal row binding differs")
+    if (not target_pos < reviewer_pos or reviewer.get("gate") != "PASS"
+            or reviewer.get("status") != "completed"
+            or not validity[reviewer_pos].authority.artifact_evidence_eligible
+            or reviewer.get("executionRole") != "internal"
+            or reviewer.get("role") in {"lead", "consultant", "external-worker", "external-reviewer"}
+            or target.get("role") != binding["reviewedRole"]
+            or reviewer.get("role") != binding["reviewedRole"]):
+        raise ValueError("RL-source: actual independent reviewer profession is unqualified")
+    if target.get("launchRunId") is not None and target.get("launchRunId") == reviewer.get("launchRunId"):
+        raise ValueError("RL-source: original and replacement cannot share one launch")
+    artifact = state["rounds"][round_number - 1]["artifact"]
+    subject = {"artifactKey": artifact.get("snapshot", "git-commit"), "revision": artifact_revision}
+    if proof["subject"] != {"before": subject, "after": subject}:
+        raise ValueError("RL-source: unchanged frozen subject binding differs")
+    original_anchor = parse_review_source_anchor_v1(binding["originalResult"])
+    target_anchor = parse_review_source_anchor_v1(binding["targetSummary"])
+    reviewer_anchor = parse_review_source_anchor_v1(binding["reviewerSummary"])
+    if (target_anchor["sourceSha256"] != proof["reports"]["targetSha256"]
+            or reviewer_anchor["sourceSha256"] != proof["reports"]["passSha256"]):
+        raise ValueError("RL-source: selected retained summary/report identity differs")
+    inputs = _CurrentEvidenceV1()
+    admitted = _review_selected_sources(item, (target, reviewer), inputs)
+    for anchor, event in ((target_anchor, target), (reviewer_anchor, reviewer)):
+        ref, digest = anchor["source"]["ref"], anchor["sourceSha256"]
+        if ref != event.get("artifact"):
+            if ref != "review-artifact-custody/" + digest or not _ordinary_custody_snapshot(item, ref, digest):
+                raise ValueError("RL-source: only existing verified immutable summary custody is admitted")
+            if initial_receiving:
+                selected = admitted.get(event.get("artifact"))
+                if selected is None or hashlib.sha256(inputs.read_selection(selected.selected)).hexdigest() != digest:
+                    raise ValueError("RL-source: captured summary differs from the actual source at receiving")
+            capture_errors = []
+            locator = inputs.artifact(item, ref, "current Root summary custody", event["runId"], capture_errors)
+            if locator is None or capture_errors:
+                raise ValueError("RL-source: summary custody unavailable")
+            admitted[ref] = locator
+    original_ref = original_anchor["source"]["ref"]
+    errors = []
+    if original_ref not in admitted:
+        locator = inputs.artifact(item, original_ref, "actual original loop result", target["runId"], errors)
+        if locator is None or errors:
+            raise ValueError("RL-source: original result source unavailable")
+        admitted[original_ref] = locator
+    original = resolve_review_source_unit_v2(original_anchor, admitted_sources=admitted, inputs=inputs)
+    if original.selector_kind != "json-value":
+        raise ValueError("RL-source: preserved original result JSON required, not a guessed summary")
+    loop_owner = load_review_loop_owner()
+    loop_owner.qualify_completed_verdict_result_v2(
+        state, original.value, round_number=round_number, lane=lane, attempt_id=attempt_id,
+        artifact_revision=artifact_revision,
+    )
+    if original.value.get("verdict") != "REVISE":
+        raise ValueError("RL-source: original result is not the completed refusal")
+    summaries = []
+    for anchor, event, expected_gate in ((target_anchor, target, "REVISE"),
+                                         (reviewer_anchor, reviewer, "PASS")):
+        unit = resolve_review_source_unit_v2(anchor, admitted_sources=admitted, inputs=inputs)
+        if unit.value in (None, "", [], {}) or type(unit.value) is str and unit.value.strip() == "PASS":
+            raise ValueError("RL-source: bare label is not retained review evidence")
+        # JSON summaries select an actual verdict-bearing report object, never
+        # a scalar claim fragment that can hide its typed parent.
+        if unit.selector_kind == "json-value" and (type(unit.value) is not dict or unit.value.get("verdict") != expected_gate):
+            raise ValueError("RL-source: actual typed verdict report boundary required")
+        # Respect exposed typed claims; whole prose remains Root's semantic duty.
+        if type(unit.value) is dict:
+            for key, expected in (("role", binding["reviewedRole"]), ("scope", event.get("scope")),
+                                  ("angle", proof["bindingEvidence"]["angle"]["value"]),
+                                  ("verdict", expected_gate), ("artifact_revision", artifact_revision)):
+                if key in unit.value and unit.value[key] != expected:
+                    raise ValueError("RL-source: exposed summary " + key + " contradicts receiving")
+        summaries.append(unit)
+        recorded = event.get("artifactRevision")
+        if isinstance(recorded, str) and recorded.startswith(("sha256:", "git:")) and recorded != artifact_revision:
+            raise ValueError("RL-source: exposed frozen subject revision differs")
+        if isinstance(recorded, str) and re.fullmatch(r"[0-9a-fA-F]{64}", recorded):
+            if recorded.lower() != anchor["sourceSha256"]:
+                raise ValueError("RL-source: exposed report revision differs")
+        if event.get("lane") is not None and event["lane"] != proof["bindingEvidence"]["angle"]["value"]:
+            raise ValueError("RL-source: exposed review angle differs")
+    binding_values = {}
+    for name in ("scope", "angle", "lineage", "nativeReceiving"):
+        units = [resolve_review_source_unit_v2(anchor, admitted_sources=admitted, inputs=inputs)
+                 for anchor in proof["bindingEvidence"][name]["sources"]]
+        if name != "nativeReceiving" and not units:
+            raise ValueError("RL-source: actual association sources required")
+        binding_values[name] = [unit.value for unit in units]
+        for unit in units:
+            if unit.value in (None, "", [], {}):
+                raise ValueError("RL-source: empty actual association source")
+            if name == "angle" and unit.selector_kind == "json-value" and type(unit.value) is str:
+                if unit.value != proof["bindingEvidence"]["angle"]["value"]:
+                    raise ValueError("RL-source: actual typed angle differs")
+            if name == "nativeReceiving" and type(unit.value) is dict:
+                if {"authorRunId", "reviewerRunId"} <= set(unit.value):
+                    if unit.value["authorRunId"] == unit.value["reviewerRunId"] or unit.value["reviewerRunId"] != reviewer["runId"]:
+                        raise ValueError("RL-source: exposed native independence contradicts receiving")
+    _qualify_review_semantic_results_v2(proof, admitted, inputs, original_ref,
+                                        reviewer_anchor["source"]["ref"], binding_values)
+    if original.value.get("blockers") and type(original.value["blockers"]) is not list:
+        raise ValueError("RL-source: original blocker collection is not qualified")
+    field = "blockers" if original.value.get("blockers") else "rationale"
+    expected_collection = (*original.coordinate, field)
+    complete = resolve_review_source_unit_v2(proof["findingEvidence"]["completeTargetFindings"],
+                                             admitted_sources=admitted, inputs=inputs)
+    if complete.source_ref != original_ref or complete.coordinate != expected_collection:
+        raise ValueError("RL-source: complete original refusal collection was not selected")
+    claims = proof["rootSemanticReceiving"]["findings"]
+    expected_paths = [(*expected_collection, i) for i in range(len(original.value["blockers"]))] if field == "blockers" else [expected_collection]
+    if len(claims) != len(expected_paths):
+        raise ValueError("RL-source: original obligations were omitted")
+    identifiers = {claim["findingId"] for claim in claims}
+    # Inspect own fields on the selected report's ancestry, not unrelated
+    # historical siblings in a shared report document.
+    for pass_report in [summaries[1].value, *(v for _c, v in summaries[1].ancestry)]:
+        if type(pass_report) is dict and "priorFindingDispositions" in pass_report:
+            dispositions = pass_report["priorFindingDispositions"]
+            if type(dispositions) is not list:
+                raise ValueError("RL-source: actual reviewer dispositions unavailable")
+            relevant = [entry for entry in dispositions
+                        if type(entry) is dict and entry.get("id") in identifiers]
+            if (len(relevant) != len(identifiers)
+                    or {entry.get("id") for entry in relevant} != identifiers
+                    or any(entry.get("verdict") != "verified" for entry in relevant)):
+                raise ValueError("RL-source: exposed dispositions do not verify every original finding")
+    for claim, expected_path in zip(claims, expected_paths):
+        before = resolve_review_source_unit_v2(claim["targetFinding"], admitted_sources=admitted, inputs=inputs)
+        after = resolve_review_source_unit_v2(claim["reviewerClaimUnit"], admitted_sources=admitted, inputs=inputs)
+        if before.source_ref != original_ref or before.coordinate != expected_path:
+            raise ValueError("RL-source: original finding coverage differs")
+        if after.value in (None, "", [], {}) or type(after.value) is str and after.value.strip() == "PASS":
+            raise ValueError("RL-source: no explicit retained replacement claim")
+        if type(before.value) is dict:
+            for key in ("id", "findingId"):
+                if key in before.value and before.value[key] != claim["findingId"]:
+                    raise ValueError("RL-source: exposed original finding identity differs")
+        # A selector cannot hide typed finding parents. Overall report/run ids
+        # are not finding ids; disposition vocabulary or collection is explicit.
+        finding_values = [after.value]
+        for coordinate, value in after.ancestry:
+            if type(value) is dict and (
+                    "findingId" in value
+                    or value.get("verdict") in {"verified", "not-verified", "rejected"}
+                    or len(coordinate) >= 2 and coordinate[-2] in {"claims", "priorFindingDispositions"}):
+                finding_values.append(value)
+        for value in finding_values:
+            if type(value) is dict:
+                for key in ("id", "findingId"):
+                    if key in value and value[key] != claim["findingId"]:
+                        raise ValueError("RL-source: exposed replacement finding identity differs")
+        if type(after.value) is dict and set(after.value) <= {"verdict", "gate", "id", "findingId"}:
+            if after.value.get("verdict") != "verified" or after.value.get("id", after.value.get("findingId")) != claim["findingId"]:
+                raise ValueError("RL-source: bare overall verdict is not finding re-verification")
+        for _coordinate, value in after.ancestry:
+            if type(value) is dict and isinstance(value.get("verdict"), str) and value["verdict"] in {"REVISE", "rejected", "not-verified"}:
+                raise ValueError("RL-source: exposed replacement claim is negative")
+    # This route must not discard a genuinely acquired stronger commissioning promise.
+    for pos, row in enumerate(rows):
+        event = row.event
+        if (event.get("role") == "lead" and event.get("executionRole") == "main"
+                and validity[pos].authority.artifact_evidence_eligible):
+            for entry, recognition in _review_contract_references(event):
+                if _review_contract_selects_proof(recognition, proof):
+                    contract = parse_review_source_contract_evidence(entry)
+                    if proof["rootSemanticReceiving"]["version"] != 2:
+                        raise ValueError("RL-source: actual prior source-contract promise cannot be downgraded")
+                    _qualify_review_source_contract(contract, entry, proof, rows, admitted, inputs)
+    inputs.freeze_selection_keys()
+    inputs.receive()
+    if not inputs.authority_qualified():
+        raise ValueError("RL-source: selected evidence changed during receiving")
+    return {"original_result_source_sha256": original.source_sha256,
+            "target_report_sha256": summaries[0].source_sha256,
+            "reviewer_report_sha256": summaries[1].source_sha256}
+
+
 def receive_review_association_v1(proof, *, resolved_sources, rows, validity, root_receiving):
     """Qualify a genuine reviewer result plus Root's anchored semantic receiving.
 
