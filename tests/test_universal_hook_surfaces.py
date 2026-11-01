@@ -59,7 +59,7 @@ class UniversalHookSurfaceTest(unittest.TestCase):
         relative = Path("scripts/mcp_continuity_policy.py")
         paths = (
             ROOT / "scripts" / "universal-hooks" / relative,
-            ROOT / "src.claude" / "agents" / relative,
+            ROOT / 'adapters/claude' / "agents" / relative,
             ROOT / "src.codex" / "skills" / "lead" / relative,
         )
         for path in paths:
@@ -87,9 +87,9 @@ class UniversalHookSurfaceTest(unittest.TestCase):
         universal_hooks = ROOT / "scripts" / "universal-hooks" / "hooks"
         provider_pairs = (
             ("src.codex/skills/lead/scripts", "scripts"),
-            ("src.claude/agents/scripts", "scripts"),
+            ("adapters/claude/agents/scripts", "scripts"),
             ("src.codex/skills/lead/hooks", "hooks"),
-            ("src.claude/agents/hooks", "hooks"),
+            ("adapters/claude/agents/hooks", "hooks"),
         )
 
         for name in RUNTIME_SCRIPT_NAMES:
@@ -119,7 +119,7 @@ class UniversalHookSurfaceTest(unittest.TestCase):
         genuinely provider-specific hook (check-typed-routing keys on the Agent
         dispatch tool, which Codex has no analog for) is declared, not smuggled."""
         canon = set(RUNTIME_HOOK_NAMES)
-        for rel in ("src.claude/agents/hooks", "src.codex/skills/lead/hooks"):
+        for rel in ("adapters/claude/agents/hooks", "src.codex/skills/lead/hooks"):
             pack_hooks = ROOT / Path(rel)
             extra = PACK_ONLY_HOOKS.get(rel, frozenset())
             excluded = MIRROR_EXCLUSIONS.get(rel, frozenset())
@@ -171,9 +171,9 @@ class UniversalHookSurfaceTest(unittest.TestCase):
         universal_hooks = ROOT / "scripts" / "universal-hooks" / "hooks"
         provider_pairs = (
             ("src.codex/skills/lead/scripts", "scripts"),
-            ("src.claude/agents/scripts", "scripts"),
+            ("adapters/claude/agents/scripts", "scripts"),
             ("src.codex/skills/lead/hooks", "hooks"),
-            ("src.claude/agents/hooks", "hooks"),
+            ("adapters/claude/agents/hooks", "hooks"),
         )
         expected_drifted: set[str] = set()
         for provider_rel, subdir in provider_pairs:

@@ -1,3 +1,4 @@
+"""Retired alias creation is inert; active copy-migration tests own conversion."""
 from __future__ import annotations
 
 import importlib.util
@@ -46,7 +47,7 @@ module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 print(module.validate_launch_profile("codex", [
-    "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=high",
+    "--model", "gpt-6.1-sol", "-c", "model_reasoning_effort=high",
     "--sandbox", "read-only",
 ]))
 try:
@@ -66,7 +67,7 @@ else:
     )
 
 
-def test_codex_install_keeps_legacy_lead_entrypoint_on_canonical_bundle(
+def test_codex_install_preserves_legacy_root_without_creating_aliases(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -95,7 +96,7 @@ def test_codex_install_keeps_legacy_lead_entrypoint_on_canonical_bundle(
     canonical_lead = home / ".agents" / "skills" / "lead"
     legacy_lead = legacy_skills / "lead"
     assert canonical_lead.is_dir()
-    assert legacy_lead.is_dir()
+    assert not os.path.lexists(legacy_lead)
     assert os.path.samefile(legacy_skills, legacy_store)
     assert installer._CreateOnlyMutablePath._identity(legacy_skills) == root_identity
     canonical_names = sorted(
@@ -103,12 +104,10 @@ def test_codex_install_keeps_legacy_lead_entrypoint_on_canonical_bundle(
     )
     assert canonical_names
     for name in canonical_names:
-        assert os.path.samefile(
-            legacy_skills / name, canonical_lead.parent / name
-        )
+        assert not os.path.lexists(legacy_skills / name)
     assert vendor_marker.read_text(encoding="utf-8") == "preserve vendor skill\n"
 
-    for label, lead in (("canonical", canonical_lead), ("legacy", legacy_lead)):
+    for label, lead in (("canonical", canonical_lead),):
         project = tmp_path / f"{label}-project"
         (project / "work-items").mkdir(parents=True)
         refreshed = run_python(
@@ -151,17 +150,11 @@ def test_codex_install_keeps_legacy_lead_entrypoint_on_canonical_bundle(
             lead / "scripts" / "validate-work-item-state.py"
         )
         assert probed.returncode == 0, (probed.stdout, probed.stderr)
-        assert "gpt-5.6-sol" in probed.stdout
+        assert "gpt-6.1-sol" in probed.stdout
         assert "INVALID: invalid launch flags" in probed.stdout
         assert "Traceback" not in probed.stdout + probed.stderr
 
 
-def tree_bytes(root: Path) -> dict[str, bytes]:
-    return {
-        path.relative_to(root).as_posix(): path.read_bytes()
-        for path in root.rglob("*")
-        if path.is_file()
-    }
 
 
 def configured_home(
@@ -176,7 +169,7 @@ def configured_home(
     return installer, home, legacy_skills
 
 
-def test_legacy_same_name_collision_preserves_tree_and_canonical_install(
+def test_unselected_legacy_custom_skill_does_not_block_independent_install(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -193,196 +186,39 @@ def test_legacy_same_name_collision_preserves_tree_and_canonical_install(
         "codex", ["--global", "--no-hypothesis-hook"]
     )
 
-    assert result == 1
+    assert result == 0
     assert marker.read_text(encoding="utf-8") == "ambiguous custom lead\n"
     assert vendor.read_text(encoding="utf-8") == "vendor\n"
     canonical = home / ".agents" / "skills"
     assert (canonical / "lead").is_dir()
-    assert os.path.samefile(
-        legacy_skills / "backend-engineer", canonical / "backend-engineer"
-    )
+    assert not os.path.lexists(legacy_skills / "backend-engineer")
     assert not os.path.samefile(legacy_lead, canonical / "lead")
 
 
-def test_exact_legacy_skill_authority_preserves_projects_and_replays(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    installer, home, legacy_skills = configured_home(tmp_path, monkeypatch)
-    legacy_lead = legacy_skills / "lead"
-    legacy_lead.mkdir(parents=True)
-    marker = legacy_lead / "legacy.txt"
-    marker.write_text("preserve exact legacy lead\n", encoding="utf-8")
-    legacy_digest = installer._tree_sha256(
-        legacy_lead, ignore_runtime_cache=True
-    )
-    assert legacy_digest is not None
-    vendor = legacy_skills / "vendor-extension" / "marker.txt"
-    vendor.parent.mkdir()
-    vendor.write_text("vendor\n", encoding="utf-8")
 
-    arguments = [
-        "--global",
-        "--no-hypothesis-hook",
-        "--migrate-legacy-skill",
-        "lead",
-    ]
-    before_dry_run = tree_bytes(home)
-    assert installer.install("codex", [*arguments, "--dry-run"]) == 0
-    dry_run_output = capsys.readouterr()
-    assert "[dry-run] would preserve" in dry_run_output.out
-    assert str(legacy_lead) in dry_run_output.out
-    assert tree_bytes(home) == before_dry_run
-
-    assert installer.install("codex", arguments) == 0
-    output = capsys.readouterr()
-    backup = (
-        home
-        / ".codex"
-        / "orchestrarium-legacy-skills"
-        / "lead"
-        / legacy_digest
-    )
-    canonical_lead = home / ".agents" / "skills" / "lead"
-    assert os.path.samefile(legacy_lead, canonical_lead)
-    assert backup.joinpath("legacy.txt").read_text(encoding="utf-8") == (
-        "preserve exact legacy lead\n"
-    )
-    assert str(backup) in output.out
-    assert vendor.read_text(encoding="utf-8") == "vendor\n"
-
-    before = tree_bytes(backup)
-    assert installer.install("codex", arguments) == 0
-    capsys.readouterr()
-    assert os.path.samefile(legacy_lead, canonical_lead)
-    assert tree_bytes(backup) == before
-
-
-@pytest.mark.parametrize(
-    ("provider", "arguments"),
-    (
-        ("codex", ("--global", "--migrate-legacy-skill", "../lead")),
-        ("codex", ("--global", "--migrate-legacy-skill", "unknown-skill")),
-        (
-            "codex",
-            (
-                "--global",
-                "--migrate-legacy-skill",
-                "lead",
-                "--migrate-legacy-skill",
-                "lead",
-            ),
-        ),
-        (
-            "codex",
-            (
-                "--target",
-                "project",
-                "--allow-unsafe-target",
-                "--migrate-legacy-skill",
-                "lead",
-            ),
-        ),
-        ("claude", ("--global", "--migrate-legacy-skill", "lead")),
-    ),
-)
-def test_legacy_skill_authority_rejects_invalid_scope_before_writes(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    provider: str,
-    arguments: tuple[str, ...],
-) -> None:
-    installer, home, _legacy_skills = configured_home(tmp_path, monkeypatch)
-    before = tree_bytes(home)
-    resolved_arguments = tuple(
-        str(tmp_path / value) if value == "project" else value
-        for value in arguments
-    )
-
-    result = installer.install(
-        provider,
-        [*resolved_arguments, "--no-hypothesis-hook"],
-    )
-
-    assert result == 1
-    assert tree_bytes(home) == before
-
-
-def test_repeated_distinct_legacy_skill_authority_is_admitted(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    installer, home, legacy_skills = configured_home(tmp_path, monkeypatch)
-
-    result = installer.install(
-        "codex",
-        [
-            "--global",
-            "--no-hypothesis-hook",
-            "--migrate-legacy-skill",
-            "lead",
-            "--migrate-legacy-skill",
-            "analyst",
-        ],
-    )
-
-    assert result == 0
-    for name in ("lead", "analyst"):
-        assert os.path.samefile(
-            legacy_skills / name, home / ".agents" / "skills" / name
-        )
-
-
-@pytest.mark.parametrize("boundary", ("before-move", "before-link", "after-link"))
-def test_legacy_skill_compatibility_failure_restores_exact_prestate(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    boundary: str,
-) -> None:
-    installer, home, legacy_skills = configured_home(tmp_path, monkeypatch)
-    legacy_lead = legacy_skills / "lead"
-    legacy_lead.mkdir(parents=True)
-    marker = legacy_lead / "legacy.txt"
-    marker.write_text("restore exact legacy lead\n", encoding="utf-8")
-    vendor = legacy_skills / "vendor-extension" / "marker.txt"
-    vendor.parent.mkdir()
-    vendor.write_text("vendor\n", encoding="utf-8")
-    legacy_before = tree_bytes(legacy_skills)
-    original_projection = installer._CreateOnlyMutablePath.create_projection
-    original_replace = installer.os.replace
-
-    def replace(source, target):
-        if boundary == "before-move" and Path(source) == legacy_lead:
-            raise OSError("injected before legacy move")
-        return original_replace(source, target)
-
-    def project(owner, relative, source):
-        if boundary == "before-link" and relative.name == "lead":
-            raise OSError("injected before legacy link")
-        result = original_projection(owner, relative, source)
-        if boundary == "after-link" and relative.name == "lead":
-            raise OSError("injected after legacy link")
-        return result
-
-    monkeypatch.setattr(installer.os, "replace", replace)
-    monkeypatch.setattr(
-        installer._CreateOnlyMutablePath, "create_projection", project
-    )
-
-    result = installer.install(
-        "codex",
-        [
-            "--global",
-            "--no-hypothesis-hook",
-            "--migrate-legacy-skill",
-            "lead",
-        ],
-    )
-
-    assert result == 1
-    assert legacy_lead.is_dir() and not legacy_lead.is_symlink()
-    assert tree_bytes(legacy_skills) == legacy_before
-    assert vendor.read_text(encoding="utf-8") == "vendor\n"
-    assert not (home / ".codex" / "orchestrarium-legacy-skills").exists()
-    assert (home / ".agents" / "skills" / "lead").is_dir()
+@pytest.mark.parametrize("provider", ("codex", "claude"))
+@pytest.mark.parametrize("scope", ("global", "target"))
+@pytest.mark.parametrize("dry_run", (False, True))
+def test_retired_alias_creation_flag_refuses_before_mutation(
+    tmp_path, monkeypatch, capsys, provider, scope, dry_run
+):
+    installer, home, legacy = configured_home(tmp_path, monkeypatch)
+    marker = legacy / "lead/user.txt"
+    marker.parent.mkdir(parents=True)
+    marker.write_bytes(b"unmanaged old skill")
+    target = tmp_path / "project"
+    target.mkdir()
+    (target / "user.txt").write_bytes(b"preserve project")
+    before_home = installer._InstallTransaction._observe(home)
+    before_target = installer._InstallTransaction._observe(target)
+    args = ["--global"] if scope == "global" else ["--target", str(target)]
+    args += ["--migrate-legacy-skill", "lead", "--migrate-legacy-skill", "analyst"]
+    if dry_run:
+        args.append("--dry-run")
+    assert installer.install(provider, args) == 1
+    assert installer._InstallTransaction._observe(home) == before_home
+    assert installer._InstallTransaction._observe(target) == before_target
+    error = capsys.readouterr().err
+    assert "E_LEGACY_CODEX_SKILL_ARGUMENT" in error
+    assert "retired" in error
+    assert "--materialize-legacy-skills" in error

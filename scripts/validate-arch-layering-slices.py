@@ -79,7 +79,7 @@ CLAUDE_UNIVERSAL_BODY_ROLES = {"architect"}
 def claude_path(root: Path, role: str) -> Path:
     if role in CLAUDE_UNIVERSAL_BODY_ROLES:
         return codex_path(root, role)
-    return root / "src.claude" / "agents" / f"{role}.md"
+    return root / "adapters/claude" / "agents" / f"{role}.md"
 
 
 def codex_path(root: Path, role: str) -> Path:
@@ -149,11 +149,11 @@ def main() -> int:
         print(f"stamped: {sha}")
         return 0
 
-    claude_present = (root / "src.claude" / "agents").is_dir()
+    claude_present = (root / "adapters/claude" / "agents").is_dir()
     codex_present = (root / "src.codex" / "skills").is_dir()
     packs = [p for p, ok in (("claude", claude_present), ("codex", codex_present)) if ok]
     if not packs:
-        print("SKIP: no role pack present (src.claude / src.codex both absent)")
+        print("SKIP: no role pack present (adapters/claude / src.codex both absent)")
         return 0
 
     failures = []

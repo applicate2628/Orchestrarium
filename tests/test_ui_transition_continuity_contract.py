@@ -333,7 +333,7 @@ def _mirror_verdict(english: str, russian: str) -> str:
 def _source_role_paths(provider: str) -> tuple[Path, ...]:
     if provider == "codex":
         return tuple(ROOT / "src.codex" / "skills" / role / "SKILL.md" for role in ROLES)
-    return tuple(ROOT / "src.claude" / "agents" / f"{role}.md" for role in ROLES)
+    return tuple(ROOT / 'adapters/claude' / "agents" / f"{role}.md" for role in ROLES)
 
 
 def _assert_role_routes() -> None:
@@ -668,7 +668,7 @@ def test_claim_13_allowed_surface_and_documentation_projection_reject_drift() ->
     installer = _read_required(INSTALLER, "UI-CONTINUITY-CONTRACT-DRIFT", "production installer projection owner")
     assert len(ROLLOUT_PATHS) == 30
     assert not (ROOT / "src.codex" / "contracts").exists()
-    assert not (ROOT / "src.claude" / "contracts").exists()
+    assert not (ROOT / 'adapters/claude' / "contracts").exists()
     assert [path.name for path in ROOT.glob("tests/test_ui_transition_continuity_contract*.py")] == ["test_ui_transition_continuity_contract.py"]
     _assert_tokens(installer, ("ui-transition-continuity.md", "shared", "references", "contracts"), "UI-CONTINUITY-CONTRACT-DRIFT")
     _assert_tokens(contract, ("no new workflow stage", "no new hook", "no new operator command", "no new dependency", "no documentation semantic owner"), "UI-CONTINUITY-CONTRACT-DRIFT")

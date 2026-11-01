@@ -9,43 +9,43 @@ SHARED = ROOT / "shared" / "AGENTS.shared.md"
 CORE_PROJECTIONS = (
     ROOT / "src.codex" / "skills" / "lead" / "operating-model.md",
     ROOT / "src.codex" / "skills" / "lead" / "subagent-contracts.md",
-    ROOT / "src.claude" / "agents" / "contracts" / "operating-model.md",
-    ROOT / "src.claude" / "agents" / "contracts" / "subagent-contracts.md",
+    ROOT / 'adapters/claude' / "agents" / "contracts" / "operating-model.md",
+    ROOT / 'adapters/claude' / "agents" / "contracts" / "subagent-contracts.md",
 )
 VAK_PROJECTIONS = (
     ROOT / "src.codex" / "skills" / "vak-dissertation-review" / "SKILL.md",
-    ROOT / "src.claude" / "skills" / "vak-dissertation-review" / "SKILL.md",
+    ROOT / 'adapters/claude' / "skills" / "vak-dissertation-review" / "SKILL.md",
 )
 ARCHIVIST_PROJECTIONS = (
     ROOT / "src.codex" / "skills" / "knowledge-archivist" / "SKILL.md",
-    ROOT / "src.claude" / "agents" / "knowledge-archivist.md",
+    ROOT / 'adapters/claude' / "agents" / "knowledge-archivist.md",
 )
 CURRENT_TRUTH_PROJECTIONS = (
     SHARED,
     *CORE_PROJECTIONS,
     ROOT / "docs" / "new-session-guide.md",
-    ROOT / "references-claude" / "repository-task-memory.md",
-    ROOT / "references-claude" / "ru" / "repository-task-memory.md",
-    ROOT / "src.claude" / "agents" / "knowledge-archivist.md",
-    ROOT / "src.claude" / "commands" / "agents-bugfix.md",
-    ROOT / "src.claude" / "commands" / "agents-design.md",
-    ROOT / "src.claude" / "commands" / "agents-implement.md",
-    ROOT / "src.claude" / "commands" / "agents-perf.md",
-    ROOT / "src.claude" / "commands" / "agents-refactor.md",
-    ROOT / "src.claude" / "commands" / "agents-research.md",
-    ROOT / "src.claude" / "commands" / "agents-review.md",
-    ROOT / "src.claude" / "commands" / "agents-second-opinion.md",
-    ROOT / "src.claude" / "commands" / "agents-security.md",
-    ROOT / "src.claude" / "commands" / "agents-test.md",
-    ROOT / "src.claude" / "skills" / "lead" / "SKILL.md",
+    ROOT / 'adapters/claude/references' / "repository-task-memory.md",
+    ROOT / 'adapters/claude/references' / "ru" / "repository-task-memory.md",
+    ROOT / 'adapters/claude' / "agents" / "knowledge-archivist.md",
+    ROOT / 'adapters/claude' / "commands" / "agents-bugfix.md",
+    ROOT / 'adapters/claude' / "commands" / "agents-design.md",
+    ROOT / 'adapters/claude' / "commands" / "agents-implement.md",
+    ROOT / 'adapters/claude' / "commands" / "agents-perf.md",
+    ROOT / 'adapters/claude' / "commands" / "agents-refactor.md",
+    ROOT / 'adapters/claude' / "commands" / "agents-research.md",
+    ROOT / 'adapters/claude' / "commands" / "agents-review.md",
+    ROOT / 'adapters/claude' / "commands" / "agents-second-opinion.md",
+    ROOT / 'adapters/claude' / "commands" / "agents-security.md",
+    ROOT / 'adapters/claude' / "commands" / "agents-test.md",
+    ROOT / 'adapters/claude' / "skills" / "lead" / "SKILL.md",
     ROOT / "src.codex" / "skills" / "knowledge-archivist" / "SKILL.md",
     ROOT / "src.codex" / "skills" / "lead" / "SKILL.md",
     ROOT / "src.codex" / "skills" / "review-changes" / "SKILL.md",
     ROOT / "src.codex" / "skills" / "second-opinion" / "SKILL.md",
     ROOT / "references-codex" / "operating-model-diagram.md",
-    ROOT / "references-claude" / "operating-model-diagram.md",
+    ROOT / 'adapters/claude/references' / "operating-model-diagram.md",
     ROOT / "references-codex" / "ru" / "operating-model-diagram.md",
-    ROOT / "references-claude" / "ru" / "operating-model-diagram.md",
+    ROOT / 'adapters/claude/references' / "ru" / "operating-model-diagram.md",
     *VAK_PROJECTIONS,
 )
 STALE_MANDATORY_CLAIMS = (
@@ -113,7 +113,7 @@ class SessionPersistenceContractTest(unittest.TestCase):
                     self.assertNotIn(stale, text)
 
     def test_claude_artifact_and_registry_table_is_truthful_and_two_columns(self) -> None:
-        path = ROOT / "src.claude" / "agents" / "contracts" / "operating-model.md"
+        path = ROOT / 'adapters/claude' / "agents" / "contracts" / "operating-model.md"
         text = path.read_text(encoding="utf-8")
         self.assertIn(
             "The registry rows name their own canonical cross-item registries and are not active-item artifact paths.",
@@ -132,7 +132,7 @@ class SessionPersistenceContractTest(unittest.TestCase):
         self.assertNotIn("| — |", "\n".join(rows))
 
     def test_claude_implement_completion_uses_active_artifact_and_root_ledger(self) -> None:
-        path = ROOT / "src.claude" / "commands" / "agents-implement.md"
+        path = ROOT / 'adapters/claude' / "commands" / "agents-implement.md"
         text = path.read_text(encoding="utf-8")
         self.assertIn("work-items/active/<slug>/implementation-report.md", text)
         self.assertIn("root records the concise lane result/provenance in `agent-runs.jsonl`", text)

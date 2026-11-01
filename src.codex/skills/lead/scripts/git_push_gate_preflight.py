@@ -2399,7 +2399,14 @@ def classify_generic_push(parsed: ShellParseResult) -> GenericPushDecision:
     literal_command = literal_direct_command(parsed)
     literal_root = (
         literal_context is not None and literal_command is push.command
-        and (parsed.dialect == "powershell" or _is_exact_direct_literal(parsed.raw_command, parsed))
+        and (
+            parsed.dialect == "powershell"
+            or _is_exact_direct_literal(parsed.raw_command, parsed)
+            or (
+                literal_command.trailing_linebreak_only
+                and shlex.join(literal_command.tokens) == parsed.raw_command.rstrip("\r\n")
+            )
+        )
         and len(literal_command.tokens) == 6 and push.positionals == literal_command.tokens[4:]
         and not push.push_options and not push.push_option_occurrences
     )

@@ -175,7 +175,7 @@ def test_six_scenario_process_supervision_benchmark(tmp_path: Path) -> None:
 
     validators = {
         "normal-codex-validator": ROOT / "src.codex" / "skills" / "lead" / "scripts" / "validate-skill-pack.py",
-        "normal-claude-validator": ROOT / "src.claude" / "agents" / "scripts" / "validate-skill-pack.py",
+        "normal-claude-validator": ROOT / 'adapters/claude' / "agents" / "scripts" / "validate-skill-pack.py",
     }
     env = {row.name: row.value for row in _environment(runner)}
     for name, validator in validators.items():

@@ -6,7 +6,26 @@ Visual companion: [operating-model-diagram.md](operating-model-diagram.md)
 
 This file keeps only Codex-specific runtime and repository concretization for the shared subagent operating model. Use the shared core for canonical blueprint, routing, role, and governance-model text.
 
+### Native context reuse
+
+Apply the shared **Context handoff economy** owner. Native role TOML files already reference AGENTS and the selected role instead of embedding the full corpus; preserve that thin overlay. Do not assume that an inherited skills catalog proves a loaded skill body, or that a new thread has the parent's full history. Use the supported invocation's actual context contract, supply missing instructions when uncertain, and send only changed task requirements on follow-up. This is dispatch guidance, not a new host setting or proof of token savings. Global/project automatic AGENTS concatenation remains a separate installation/loading compatibility question; never omit standalone project governance merely because a global file exists.
+
+### Explicit Codex SDK review integration
+
+The repository-local `--sdk-review-binding` opt-in uses the official Python Codex
+App Server software development kit (SDK), not an ACP proxy or a new Agents
+coordinator. Only an admitted external-reviewer invocation selects it; other roles
+and invocations without the option retain their legacy paths. The same Host retains
+authority. A binding file is nonauthorizing, the current containment path is
+Windows-only, and this bridge selects an empty MCP scope. Installer-managed helper
+files do not install dependencies or qualify execution. Current installed-bridge
+qualification remains pending. Diagnostic recovery is implemented but not yet
+native-qualified; earlier native observations cover an older source snapshot.
+V3 SDK evidence keeps existing receiving/ledger owners and cannot close another run. See [the exact opt-in contract and limits](../docs/sdk-execution.md).
+
 ## Codex-specific runtime notes
+
+- Mechanical-plan filesystem preflight is a repo-local check, not host containment. An explicitly observed exact root may be located on an ordinary mounted volume; native identity is rechecked across its ancestor chain. Detected descendant mounts and all links/junctions/reparse points remain refused. Python documents that [os.path.ismount](https://docs.python.org/3/library/os.path.html#os.path.ismount) cannot reliably detect same-filesystem bind mounts and also treats Linux btrfs subvolumes as mount points. No stronger mount-detection guarantee is claimed; caller authority and host restrictions remain independent.
 
 - Codex native subagent dispatch is available when the current host exposes it. Admit those native lanes through the shared rolling lane-ready-set contract; do not assume sequential-only internal execution, and do not infer a numeric concurrency cap from an earlier refusal or another runtime.
 - Ordinary discovery presents admissible choices and a default suggestion. The caller evaluates task fit, honors genuine current custom controls, and consciously selects and supplies both model and effort when deciding by task, including when choosing the suggestion. An omitted pair remains compatible and resolves to an explicit default pair; rationale is not automatically classified and higher effort remains caller judgment. Resolution checks the resulting tuple before the generic carrier; old-generation factory migration requires positive stock provenance and preserves noncontrol bytes. Direct bare `default` calls inherit provider/parent settings instead; policy-requiring callers use the selector. Role policy owns exact profile membership and separate special-corridor/explicit-profile rules; the installed `Native Astra task-dependent route` owns explicit-tuple and custom-pin conflict semantics. Claim an override only when the host explicitly supports it and returned actual runtime metadata confirms the effective model and effort; otherwise record `unspecified by runtime`. The same ordinary selector exposes explicit supervised `luna-high` and `luna-xhigh` only at the existing exploration/engineering producer task-role intersection; it retains the profession and independent gates. Admission requires an eligible task-role pair and exact task/role profile membership, followed by host filtering; ordinary tier/effort metadata is descriptive. Shared task-first economics favors High for clear bounded work and considers Extra high directly for deeper bounded reasoning when the existing caller rationale justifies extra time by expected reduction in substantive error/rework. The named mechanical V1 route and final review/critical/recovery membership remain unchanged; current High observations support bounded task fit, while comparative Extra high benefit and general speed/coding quality remain unverified. Product Manager uses the same generic skill-only route when policy admits its planning pair; its recommendation does not grant user consent or expand accepted delivery scope.
@@ -29,9 +48,34 @@ This file keeps only Codex-specific runtime and repository concretization for th
 - Shared review/gate semantics, periodic-controls model, rolling lane-ready admission, parallel-work guidance, and generic task-memory expectations
 - The generic lead memo and final wording
 
+## Global-backed project installation
+
+The Codex installer may omit the duplicate managed project policy only after an
+exact match with the selected native global managed block. A nonempty override
+hides the base; CODEX_HOME selects the global root. Failure to establish the match
+keeps the full local policy. `--standalone-instructions` explicitly keeps the
+complete project copy. User additions stay outside the managed replacement.
+New sessions receive the updated native instruction snapshot; running sessions
+are not retroactively rewritten. Global uninstall warns rather than inventing a
+complete dependent-project census. See INSTALL.md for the supported lifecycle.
+
 ## Terms and Abbreviations
+
+- SDK: Software Development Kit.
+- MCP: Model Context Protocol.
+- ACP: Agent Client Protocol.
+- Host: existing invoking orchestration session.
+- V3: version-three SDK provider-result envelope.
 
 - Luna/High and Luna/Extra high (`xhigh`): explicit Luna model profiles at their model-local reasoning efforts; neither adds role authority.
 - V1: the existing named mechanical execution and facts contract.
 - TOML: the configuration format used by native role definitions.
 - Other governance terms follow the [shared glossary](../shared/references/spine/governance-glossary.md).
+
+## Scratch-independent recovery
+
+Apply the [shared artifact owner](../shared/references/repository-source-hygiene.md#scratch-independent-recovery). Important edits, unpublished commits and required evidence need verified custody outside disposable storage before pause or handoff; a worktree is insufficient if its Git common directory or object alternates still depend on scratch. This adds no provider-specific storage owner or publication permission.
+
+## Review-loop receiving
+
+Review-loop receiving uses the shared review-loop methodology and the existing Python state owner. A completed same-artifact REVISE may receive an owner-qualified recorded-equivalent closure without overwriting the original result; an empty original scout reconciliation may receive explicit later dispositions through version-2 amendment metadata. Keep original provenance and independent acceptance requirements; the helper never launches reviewers or invents PASS.

@@ -1,13 +1,13 @@
 # Repository Source Hygiene — Reference
 
-Этот reference document для правил организации source-tree `Directory-level entity separation` и `Trash hygiene and archival`, определённых в `shared/AGENTS.shared.md` `### Scope and ownership discipline`. **НЕ** устанавливается в target projects — это methodology reference + repo-local concretization для этого monorepo.
+Этот reference document для правил организации source-tree `Directory-level entity separation` и `Artifact disposition and project hygiene`, определённых в `shared/AGENTS.shared.md` `### Scope and ownership discipline`. **НЕ** устанавливается в target projects — это methodology reference + repo-local concretization для этого monorepo.
 
 ## Краткое описание правил
 
 Два правила управляют source-tree hygiene:
 
 1. **Directory-level entity separation** — каждая source directory имеет один primary entity type и ownership/lifecycle contract; назначение directory выражается одним предложением; новые файлы размещаются после классификации по owner/lifecycle + I/O contract.
-2. **Trash hygiene and archival** — удалять или архивировать obsolete files внутри admitted change surface, subject to `Worktree safety`; archival path с breadcrumb если deletion потеряет recoverable history.
+2. **Artifact disposition and project hygiene** — по мере работы сразу переносить подтверждённо ненужные и неиспользуемые материалы в trash в пределах согласованной области, без предварительной попытки удаления. Trash можно полностью очистить вручную: нужные изменения, результаты и восстановление от него не зависят. Ценные, активные и сомнительные материалы сохранять вне trash. Окончательное удаление, когда оно требуется и разрешено, выполнять только из trash. Проверки владельца, прав, границ и результата остаются у существующего владельца.
 
 ## Что считается "entity type"
 
@@ -23,7 +23,7 @@ Platform variants (`.sh`/`.ps1`/`.py`) той же команды с тем же
 
 `shared/AGENTS.shared.md` `Directory-level entity separation` требует чтобы directories организовывались вокруг одного primary entity type. Orchestrarium monorepo имеет **три намеренно co-located директории**, которые служат documented design constraint и exempt от per-entity-type split:
 
-- `src.claude/agents/scripts/` — Claude pack: co-locates blocking-enforcement hooks (`check-bugfix-discipline.*`, `check-git-push-gate.*`, `check-passive-polling-stop.*`, плюс общий `hook_common.py`), SessionStart context hooks (`mcp-usage-reminder.*`, `agents-mode-reminder.*`), provider invocation wrappers (`invoke-claude-api.*`, `invoke-claude-prompt.*`, `invoke-codex-prompt.*`), publication gates (`check-publication-safety.*`), и pack validators (`validate-skill-pack.*`).
+- `adapters/claude/agents/scripts/` — Claude pack: co-locates blocking-enforcement hooks (`check-bugfix-discipline.*`, `check-git-push-gate.*`, `check-passive-polling-stop.*`, плюс общий `hook_common.py`), SessionStart context hooks (`mcp-usage-reminder.*`, `agents-mode-reminder.*`), provider invocation wrappers (`invoke-claude-api.*`, `invoke-claude-prompt.*`, `invoke-codex-prompt.*`), publication gates (`check-publication-safety.*`), и pack validators (`validate-skill-pack.*`).
 
 - `src.codex/skills/lead/scripts/` — Codex pack: тот же entity-type co-location pattern (минус prompt-invocation wrappers, которые Claude-side only).
 
@@ -69,7 +69,7 @@ Cost-vs-benefit принудительного refactor'а на каждый exi
 Maintainer переписывает `scripts/validate-agents-mode-contract.py` в `scripts/validate-agents-mode-contract-v2.py`, потому что v2 меняет public CLI surface и adopters'ам нужно migration time.
 
 - Если v1 file preserved в `git log` и migration docs reference обе версии для ~1 release → keep v1 in place temporarily с `# DEPRECATED: replaced by validate-agents-mode-contract-v2.py — remove after 2026-Q3` header comment.
-- Если v1 не имеет callers и serves only history → delete it; git history preserves the file.
+- Если у v1 больше нет вызывающих потребителей и нужна только история, сразу перенести устаревшую рабочую копию в trash по общему правилу; Git сохраняет историю. При необходимости разрешённое окончательное удаление выполняется только из trash.
 - Если v1 captures hard-won bug fix logic, которую v2 might lose → move to `scripts/archive/validate-agents-mode-contract-v1.py` с one-line breadcrumb в `scripts/README.md` объясняющим why archived.
 
 Subject to `Worktree safety`: не удалять или двигать v1 files которые не часть v2-replacement task. Restrict archival к files внутри admitted change surface.
@@ -87,3 +87,18 @@ Subject to `Worktree safety`: не удалять или двигать v1 files
 - **Worktree safety**: существующее правило против модификации файлов вне admitted change surface (`shared/AGENTS.shared.md` `### Operational and environment safety`).
 - **Classification test**: two-signal placement check (actor/lifecycle + I/O contract) применённый перед added or moving any source file.
 - **Repo-local concretization**: per-repo extension of shared rule, declared в `AGENTS.md` / `CLAUDE.md` или в repo-specific shared reference как этот документ.
+
+## Восстановление независимо от scratch
+
+Владелец правила — **Artifact disposition and project hygiene** в shared/AGENTS.shared.md.
+Важные правки, неопубликованные коммиты и обязательные свидетельства нельзя хранить
+единственным экземпляром в .scratch или другом временном хранилище. На значимых
+этапах и до паузы, передачи, приёмки или очистки нужна проверенная копия у
+существующего канонического владельца вне временной области. Для Git проверяются
+общий каталог объектов, доступность нужных объектов и отсутствие зависимости через
+alternates; внешний worktree со служебным Git-каталогом в scratch недостаточен.
+Данные назначения перечитываются; ссылки и .gitignore не заменяют сохранение.
+Сырые материалы остаются локальными, без автоматической публикации. Новое хранилище
+или механизм жизненного цикла не вводится. Воспроизводимые кэши могут оставаться
+временными; единственная важная копия запрещает зависимую очистку. Это независимость
+от удаления scratch, а не гарантия внешнего резервного копирования или сохранности диска.

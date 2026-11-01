@@ -18,6 +18,7 @@ The rules below apply to every tracked file in the repository, including docs, r
 
 - Use `/.scratch/` for raw logs, transcripts, temp outputs, one-off experiments, and pre-redaction material.
 - Keep disposable material out of tracked paths until it is redacted and intentionally promoted.
+- Required recovery/acceptance evidence and important edits must also have verified custody outside disposable storage under the shared artifact-disposition owner. Keep raw/private copies local and ignored; preservation alone never authorizes publication.
 - The root `.gitignore` owns this boundary.
 
 ## Review and publication
@@ -38,7 +39,7 @@ Root confirms the genuine human review and consent for the selected publication 
 - If tracked content looks like scratch material, move it back to local-only space or redact it before commit.
 - `$security-reviewer`, `$knowledge-archivist`, or another relevant reviewer may also run the scan as part of a spot check or publication gate.
 - Any author may run the scan as a local self-check, but that does not replace the required human publication review.
-- Scan-derived push authorization requires one callback-owned, nonempty Version 3 union of the actual update commit/tree/blob graphs relative to each update's old object ID, and a separate Version 4 result covering actual transferred roots, including noncommit objects. Unknown old objects are conservatively included, not excluded. An ordinary clean result or the explicit reviewed-exception `qualified` result must satisfy the same nonempty coverage, target, currentness, complete evaluation and resource-settlement contract. Version 2, tracked, path, manual, zero-commit, incomplete, mixed, malformed, unresolved-finding, refusal, timeout, cancellation, relevant drift or cleanup-failed evidence is non-authorizing. A qualified staged result remains a pre-commit check and cannot authorize a later push.
+- Scan-derived push authorization requires one callback-owned, nonempty Version 3 union of the actual update commit/tree/blob graphs relative to the union of known old objects from that same native callback, and a separate Version 4 result covering actual transferred roots, including noncommit objects. Unknown old objects are conservatively included, not excluded. An ordinary clean result or the explicit reviewed-exception `qualified` result must satisfy the same nonempty coverage, target, currentness, complete evaluation and resource-settlement contract. Version 2, tracked, path, manual, zero-commit, incomplete, mixed, malformed, unresolved-finding, refusal, timeout, cancellation, relevant drift or cleanup-failed evidence is non-authorizing. A qualified staged result remains a pre-commit check and cannot authorize a later push.
 - Range content inspection distinguishes text from binary payloads. Binary payloads remain acquired and bound into complete coverage, with filename checks and embedded credential detection retained. Bare symbol names and transcript markers are text-only heuristics, not evidence of a binary credential. The exact binary metadata assignment `publicKeyToken` denotes a public assembly identity; excluding that assignment must not suppress another credential in the same payload. Text and commit-message checks remain unchanged. This is not a vendor, path, hash, or publication exemption.
 - A generic source-text token value may be declared intentionally public only by placing `# orchestrarium:public-token` or `// orchestrarium:public-token` immediately after its matching single- or double-quoted value and the ordinary closing separators. The marker must end the line, stays outside the quotes, and binds only that candidate. It is never honored for credential-cued identifiers, binary content, or commit messages, and it does not suppress other candidates, known-secret signatures, sibling credential families, or machine-path checks. Credential classification uses the complete identifier, including separator and camelCase components; a public lexical component does not erase a separate credential cue.
 - Manual `--range` remains diagnostic. Its Version 3 range selection resolves the unique configured push destination without exposing it in child arguments. When the destination ref exists, its exact authoritative object identifier remains the sole exclusion. When the destination ref is absent, the scanner queries that same push destination with a bounded `git ls-remote <remote> refs/*` inventory, validates unique Git refnames and exact repository-format object identifiers, and admits only ordinary refs plus an exact `refs/tags/<name>^{}` peel paired with one unique tag ref. It then uses one bounded local `git cat-file --batch-check` owner to derive ancestry exclusions. An ordinary remote tip absent from the local object database is skipped. When an annotated-tag object is absent locally, its advertised peel is retained only if that exact peeled object exists locally as a commit; when the tag object is local, the scanner preserves exact local tag-to-commit peeling and requires any advertised peel to match. A tag and peel both absent locally are skipped, while any locally present noncommit peel or other unsupported local object type refuses. `HEAD`, pseudorefs, invalid refnames, unpaired peels, duplicate or conflicting base/peel rows, empty inventories, over-limit inventories, and failed probes refuse; local tracking refs are never selection authority, and a source already fully reachable from the derived commit tips remains a non-authorizing zero-commit selection.
@@ -69,3 +70,67 @@ The push hook does not acquire transcript data or read/write old consent sidecar
 
 - **HEAD** — the current local Git commit; it may differ from the separately approved publication source.
 - **PR** — pull request.
+
+### Terminal line breaks in literal push commands
+
+A parser-proven terminal CR/LF suffix on one otherwise canonical absolute-root push command is formatting, not another command. Literal-token serialization must still match the command without that suffix. Additional commands, redirections, lexical transformations, executable and repository qualification, native callback scanning, and human publication authorization retain their existing checks.
+
+### Scan resource budgets
+
+The canonical scanner admits at most **2 GiB of unique selected blob content**.
+This is a bounded work-volume policy, not a reservation or guarantee of process
+memory. The former 512 MiB value originated with complete-history scanning in
+commit `8f92dc73`; that change did not record a measurement justifying the number.
+The 2 GiB capacity was explicitly selected after an existing baseline exceeded the former 512 MiB cap:
+commit `d288cf7845cf0dabd2ebf80d1605e2793bbe629c` has 9,511 unique blobs totaling
+604,769,249 bytes in its reachable history. These figures come from Git object
+inventory (`rev-list --objects --no-object-names`, then `cat-file --batch-check`),
+not compressed repository size. The new capacity provides roughly 3.55 times that
+reference volume; it is not a claim of a universally optimal setting.
+
+The scanner retains blob sizes and content digests, then reacquires one body at a
+time through its existing bounded reader. Reacquired object identity, type, size
+and digest must agree before scanning. Every selected commit/path/blob subject
+remains covered. The 64 MiB individual-blob limit, 64 MiB raw-tree-cache limit,
+object/subject bounds, 900-second scan deadline and 960-second captured invocation
+bound remain separate limits. Metadata, decoded text and process overhead still
+consume RAM. Deadline checks also surround each blob's detector pass; a refusal
+or unfinished scan never becomes publication credit.
+
+The finite time budgets follow full-history Windows measurements of approximately
+485, 519 and 530 seconds for the reference graph above, with about 301 MB peak
+working set in the latest run. The 900-second scanner budget leaves approximately
+70% headroom over the slowest observed scan; the captured invocation adds 60
+seconds of supervision margin. This is a measured operating allowance, not an
+optimality claim or a guarantee that every 2 GiB history finishes. Per-request
+reader timeouts and cleanup-attempt limits are unchanged. Ordinary incremental
+pushes finish as soon as their selected graph is evaluated; they do not wait for
+the ceiling. Historical findings still block regardless of available time.
+
+ASCII-only keyword prefiltering skips a value regex only when its mandatory
+keyword is absent. Non-ASCII text takes the original regex path, preserving
+Unicode case-insensitive matches, overlapping observations and review coordinates.
+The differential and budget-boundary checks live in
+`tests/test_publication_safety_scanner.py`. Resource tuning does not exempt tags,
+existing history, binary content or any finding, and does not weaken the native
+Version 3/Version 4 publication contract.
+
+## Same-receiver native old-object union
+
+V3 and V4 use the combined known old-object bases supplied by the actual Git
+callback. A new tag sent alongside a genuine branch update can therefore reuse
+that receiver's demonstrated existing history, without consulting another
+advertisement or local tracking refs. Unknown old objects remain included.
+All update roots still participate; V4 checks new tag annotations and noncommit
+objects. V3 must remain nonempty. Do not fabricate a no-op row or reuse a receipt.
+
+A standalone new tag has no native old base and retains conservative full-history
+checking. When both a real PR update and its baseline tag are authorized, an
+atomic multi-ref push can carry them together. No main-branch change, force push,
+hostname exception or claim of arbitrary tag-only optimization is implied.
+
+The main object reader requires Git 2.36+ batch-command support. It sends contents
+for selected bodies and info for excluded tag-target type validation through one
+owned process. Metadata-only info must not acquire a body or add selected coverage.
+Explicit batch-check or test producers retain their existing bare-object protocol.
+Unknown framing or unsupported Git refuses; no nested-owner or unowned fallback.

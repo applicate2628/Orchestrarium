@@ -283,7 +283,7 @@ def test_posix_global_dry_run_uses_home_without_userprofile(entrypoint: str) -> 
 
 def test_publication_scanner_python_mirrors_match_canon() -> None:
     canon = (ROOT / "scripts/universal-hooks/scripts/check-publication-safety.py").read_bytes()
-    assert (ROOT / "src.claude/agents/scripts/check-publication-safety.py").read_bytes() == canon
+    assert (ROOT / 'adapters/claude/agents/scripts/check-publication-safety.py').read_bytes() == canon
     assert (ROOT / "src.codex/skills/lead/scripts/check-publication-safety.py").read_bytes() == canon
 
 
@@ -297,7 +297,7 @@ def test_publication_scanner_python_mirrors_match_canon() -> None:
         ),
         (
             INSTALLER._CLAUDE_RETIRED_PS1,
-            ROOT / "src.claude/agents/scripts/check-publication-safety.ps1",
+            ROOT / 'adapters/claude/agents/scripts/check-publication-safety.ps1',
             "agents/scripts/check-publication-safety.ps1",
         ),
     ),

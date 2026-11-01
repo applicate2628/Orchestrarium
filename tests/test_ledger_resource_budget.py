@@ -2,6 +2,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -168,10 +169,19 @@ def test_h1_physical_count_is_distinct_and_diagnostic_default_is_incomplete(tmp_
     assert complete == [False] and 'WI-LEDGER-RESOURCE-INCOMPLETE' in errors[0]
 
 
-def test_wrapper_admission_carries_context_and_complete_terminal_readback(tmp_path, monkeypatch, capsys):
-    """Synthetic wrapper transport using actual local public support commands.
+@pytest.mark.parametrize('transport', [
+    'direct-cli',
+    pytest.param('process-runner', marks=pytest.mark.skipif(
+        os.name != 'nt', reason='ProcessRunnerV1 intentionally refuses generic POSIX launches',
+    )),
+])
+def test_wrapper_admission_carries_context_and_complete_terminal_readback(tmp_path, monkeypatch, transport):
+    """Wrapper admission/readback around actual local public ledger commands.
 
-    The simulated external outcome is not external-provider functional proof.
+    Direct CLI transport qualifies ledger behavior on every host; native wrapper
+    transport additionally runs on its supported Windows platform. Neither the
+    synthetic external outcome nor direct CLI transport proves provider execution
+    or native ProcessRunner containment.
     """
     p = owner('provider_prompt.py')
     v = owner('validate-work-item-state.py')
@@ -192,8 +202,19 @@ def test_wrapper_admission_carries_context_and_complete_terminal_readback(tmp_pa
                         lambda env: {**original_env(env), 'PYTHONDONTWRITEBYTECODE': '1'})
     assert Path(p.__file__).resolve().is_relative_to(ROOT)
     assert Path(sys.modules[p.ProcessRunnerV1.__module__].__file__).resolve().is_relative_to(ROOT)
+
+    def run_ledger(runner, arguments):
+        if transport == 'process-runner':
+            assert p.run_ledger(runner, arguments)
+        else:
+            result = subprocess.run(
+                [sys.executable, '-X', 'utf8', '-B', str(ROOT / 'scripts/agent-run-ledger.py'), *arguments],
+                cwd=ROOT, text=True, capture_output=True, timeout=30,
+            )
+            assert result.returncode == 0, result.stderr
+
     with p.ProcessRunnerV1() as runner:
-        assert p.run_ledger(runner, [*p.ledger_resource_options(control), *args])
+        run_ledger(runner, [*p.ledger_resource_options(control), *args])
         terminal = ['--work-item', str(item), *p.ledger_resource_options(control), 'settle-launch',
                     '--launch-run-id', 'synthetic-wrapper-launch-v4', '--run-id', 'synthetic-wrapper-result-v4',
                     '--status', 'completed', '--gate', 'PASS', '--artifact', 'reviews/qa.md',
@@ -201,7 +222,7 @@ def test_wrapper_admission_carries_context_and_complete_terminal_readback(tmp_pa
                     '--terminal-class', 'external-nonauthorizing', '--authorizing', 'false',
                     '--actual-execution-path', 'direct-external-cli', '--artifact-identity', 'synthetic-v4',
                     '--started-at', '2026-10-19T00:01:00Z', '--updated-at', '2026-10-19T00:01:00Z']
-        assert p.run_ledger(runner, terminal)
+        run_ledger(runner, terminal)
     ledger = item / 'agent-runs.jsonl'
     after = ledger.read_bytes()
     row = p.read_back_external_terminal(control, 'codex', 'synthetic-wrapper-launch-v4')
@@ -231,7 +252,21 @@ def test_wrapper_admission_carries_context_and_complete_terminal_readback(tmp_pa
     with pytest.raises(ValueError, match='WI-LEDGER-RESOURCE-INVALID'):
         p.ledger_resource_options(p.Control(ledger=str(item), ledger_max_events=4200))
     with p.ProcessRunnerV1() as runner:
-        assert p.run_ledger(runner, ['--work-item', str(item), 'rollup'])
+        run_ledger(runner, ['--work-item', str(item), 'rollup'])
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX-only fail-closed wrapper boundary')
+def test_wrapper_posix_refusal_leaves_ledger_unchanged(tmp_path):
+    p = owner('provider_prompt.py')
+    item, before = fixture(tmp_path, 3)
+    with p.ProcessRunnerV1() as runner:
+        assert not p.run_ledger(runner, [
+            '--work-item', str(item), 'append', '--run-id', 'synthetic-refused-launch',
+            '--role', 'analyst', '--execution-role', 'internal', '--status', 'running',
+            '--gate', 'none', '--scope', 'synthetic refused POSIX transport', '--event-kind', 'launch',
+        ])
+    assert (item / 'agent-runs.jsonl').read_bytes() == before
+    assert not list(item.glob('*.lock')) and not list(item.glob('*.tmp'))
 
 
 def test_release_binding_direct_and_capture_paths_share_budget(tmp_path):

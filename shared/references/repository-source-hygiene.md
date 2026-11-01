@@ -7,7 +7,45 @@ This is a reference document for the source-tree organization rule `Directory-le
 Two rules govern source-tree hygiene:
 
 1. **Directory-level entity separation** — every source directory has one primary entity type and ownership/lifecycle contract; the directory's purpose must be expressible in one sentence; new files placed by classifying owner/lifecycle + I/O contract.
-2. **Artifact disposition and project hygiene** — settle artifacts and resources during ordinary work under their existing owner; resolve correctable causes and genuinely missing permission through supported, authorized work. Before handoff or retaining an owned disposable remainder as blocked, assess the preserving route and carry out the selected permitted action with current readback, or retain its exact hold and next step. Refusal alone neither selects trash nor creates authority; keep proved manual custody separate from physical deletion, lifecycle completion and live-resource settlement; the full preservation contract remains in `shared/AGENTS.shared.md`.
+2. **Artifact disposition and project hygiene** - producers promptly move confirmed unnecessary, quiescent artifacts to trash under the shared trash-first rule, without a failed-deletion prerequisite. Trash is safe for complete manual emptying, never required evidence or recovery storage. Preserve unknown, valuable and active material outside it; ownership, authority, no-overwrite and current readback remain required. Permanent deletion is a distinct authorized action only from trash; the coordinator stays read-only.
+
+## Scratch-independent recovery
+
+The shared **Artifact disposition and project hygiene** rule remains the owner.
+Important edits, unpublished commits and required acceptance/recovery evidence
+cannot exist only in `.scratch/` or another disposable area. Existing canonical
+source and artifact storage outside that area is sufficient; do not create a
+second backup registry, lifecycle engine or mandatory archive for trivial work.
+
+- At meaningful checkpoints and before pause, handoff, acceptance or cleanup,
+  preserve staged, unstaged, and required untracked changes under that owner.
+  A named Git ref is useful only when its Git common directory and required
+  objects are outside disposable storage. Check missing objects and Git
+  alternates; a worktree outside scratch can still depend on a Git store inside it.
+  Conversely, a temporary worktree may use an independent common store with a
+  retained named ref; its uncommitted changes still need separate preservation.
+- For required evidence or patches, copy into the existing canonical artifact
+  location and re-read the destination to verify the content or inventory. A
+  pointer, filename, commit label, `.gitignore` entry or remembered tool output
+  does not make scratch archival. Durable complete supported tool returns remain
+  acceptable evidence under the existing resource-lifecycle contract.
+- Keep raw/private evidence local and ignored. Preservation does not authorize publication
+  or force committing sensitive logs, generated payloads or unrelated user files.
+  Preserve user changes and never overwrite another artifact to create a checkpoint.
+- Reproducible caches, test fixtures and rebuildable tools may remain temporary.
+  If the only required copy is still there, cleanup is blocked until preservation
+  succeeds or the exact recovery hold is recorded. Do not delete scratch as a test.
+- This guarantees independence from disposal of the temporary workspace, not off-site backup
+  or survival of a disk failure. Do not claim stronger durability than was checked.
+
+The SessionStart watchdog remains a cheap advisory: existing blobs and ignored
+log/cache patterns do not prove that cleanup is safe. The existing owned-tree
+cleanup proof separately checks current raw bytes without Git filters or a
+stat-only hash cache, retained branch/tag reachability, and an independent Git
+common store without alternates. It runs for the selected disposition, not for
+every command. Unknown proof retains that entry while independently ready work
+continues. Blob matching preserves bytes, not an otherwise unrecorded directory
+layout or metadata; canonical artifact promotion still owns those requirements.
 
 ## What counts as an "entity type"
 
@@ -29,7 +67,7 @@ When an admitted maintenance change finds an independent `.sh` or `.ps1` impleme
 
 `shared/AGENTS.shared.md` `Directory-level entity separation` requires directories to organize around one primary entity type. The Orchestrarium monorepo has **three deliberately co-located directories** that serve a documented design constraint and are exempt from the per-entity-type split:
 
-- `src.claude/agents/scripts/` — Claude pack: co-locates blocking-enforcement hooks (`check-bugfix-discipline.*`, `check-git-push-gate.*`, `check-passive-polling-stop.*`, plus the shared `hook_common.py`), SessionStart context hooks (`mcp-usage-reminder.*`, `agents-mode-reminder.*`), provider invocation wrappers (`invoke-claude-api.*`, `invoke-claude-prompt.*`, `invoke-codex-prompt.*`), publication gates (`check-publication-safety.*`), and pack validators (`validate-skill-pack.*`).
+- `adapters/claude/agents/scripts/` — Claude pack: co-locates blocking-enforcement hooks (`check-bugfix-discipline.*`, `check-git-push-gate.*`, `check-passive-polling-stop.*`, plus the shared `hook_common.py`), SessionStart context hooks (`mcp-usage-reminder.*`, `agents-mode-reminder.*`), provider invocation wrappers (`invoke-claude-api.*`, `invoke-claude-prompt.*`, `invoke-codex-prompt.*`), publication gates (`check-publication-safety.*`), and pack validators (`validate-skill-pack.*`).
 
 - `src.codex/skills/lead/scripts/` — Codex pack: same entity-type co-location pattern (minus the prompt-invocation wrappers, which are Claude-side only).
 
@@ -75,7 +113,7 @@ Had the same hook been a warn-only audit instead (stderr warning, always allow),
 A maintainer rewrites `scripts/validate-agents-mode-contract.py` into `scripts/validate-agents-mode-contract-v2.py` because the v2 changes the public CLI surface and adopters need migration time.
 
 - If the v1 file is preserved in `git log` and migration docs reference both versions for ~1 release → keep v1 in place temporarily with a `# DEPRECATED: replaced by validate-agents-mode-contract-v2.py — remove after 2026-Q3` header comment.
-- If v1 has no callers and serves only history → delete it; git history preserves the file.
+- If v1 has no callers and serves only history, move the obsolete working copy to trash under the shared rule; Git history preserves the file. Any required, authorized permanent deletion happens later only from trash.
 - If v1 captures a hard-won bug fix logic that v2 might lose → move to `scripts/archive/validate-agents-mode-contract-v1.py` with a one-line breadcrumb in `scripts/README.md` explaining why archived.
 
 Subject to `Worktree safety`: do not delete or move v1 files that aren't part of the v2-replacement task. Restrict archival to files inside the admitted change surface.

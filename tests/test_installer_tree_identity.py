@@ -172,6 +172,8 @@ def test_independent_structural_receipt_precedes_stock_fallback(
     assert bool(calls) == (evidence == "legacy")
 
 @pytest.mark.parametrize("baseline,name", [
+    ("06b1838500fa9c656e13565698f517e5f9ce4eca", "consultant"),
+    ("e55b2466281ecc50ad2a940a4de14a5ea90fb98c", "consultant"),
     ("2dbf91b3e96e9dbf2bf785d16bf6964faf766d46", "github-pr-review-bot"),
     ("2dbf91b3e96e9dbf2bf785d16bf6964faf766d46", "manual-repo-transfer"),
     ("4e193102e852b25437b3244a4896b31a5e8fc6c5", "architect"),

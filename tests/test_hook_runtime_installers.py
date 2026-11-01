@@ -33,11 +33,11 @@ INFORMATIONAL_REMINDER_HOOK_STEMS = frozenset(
 )
 CWD_SCANNING_HOOK_STEMS = frozenset({"check-scratch-valuables"})
 CANONICAL_TRUST_GUIDANCE = (
-    "After reinstall, start interactive `codex` — not `codex exec` — and choose **Trust all and continue** for all 13 affected entries.",
     "Do not press Esc and do not choose **`Continue without trusting`**, because all hooks and guards remain installed but inactive.",
     "`codex exec` silently skips untrusted hook entries instead of showing the trust prompt, so interactive `codex` must run first.",
-    "The trust modal does not time out and the operator must review all 13 entries before making the explicit choice.",
+    "The trust modal does not time out and the operator must review every affected entry before making the explicit choice.",
 )
+
 BYPASS_TOKENS = (
     "bypass_" + "hook_trust",
     "BYPASS_" + "HOOK_TRUST",
@@ -128,7 +128,7 @@ def _owned_python_targets(platform: str) -> tuple[Path, ...]:
     )
 
 
-@pytest.mark.parametrize(("platform", "expected_count"), (("codex", 13), ("claude", 13)))
+@pytest.mark.parametrize(("platform", "expected_count"), (("codex", 12), ("claude", 13)))
 def test_hook_specs_membership_is_owned_by_universal_manifest(
     platform: str, expected_count: int
 ) -> None:
@@ -146,24 +146,18 @@ def test_hook_specs_membership_is_owned_by_universal_manifest(
 def test_hook_specs_follow_manifest_membership_and_fail_closed_on_missing_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        PRODUCTION_INSTALLER,
-        "_universal_hook_manifest_module",
-        lambda: SimpleNamespace(
-            registered_hook_stems=lambda _platform: frozenset({"mcp-usage-reminder"})
-        ),
-    )
+    manifest = PRODUCTION_INSTALLER._HOOK_MANIFEST
+    monkeypatch.setattr(manifest, "registered_hook_stems",
+                        lambda _platform: frozenset({"mcp-usage-reminder"}))
     specs = PRODUCTION_INSTALLER._hook_specs("codex", _provider_source_root("codex"))
     assert [marker for marker, *_rest in specs] == ["mcp-usage-reminder"]
-
-    monkeypatch.setattr(
-        PRODUCTION_INSTALLER,
-        "_universal_hook_manifest_module",
-        lambda: SimpleNamespace(
-            registered_hook_stems=lambda _platform: frozenset({"missing-owner"})
-        ),
-    )
-    with pytest.raises(RuntimeError, match="metadata is missing"):
+    monkeypatch.setattr(manifest, "registered_hook_stems",
+                        lambda _platform: frozenset({"missing-owner"}))
+    with pytest.raises(RuntimeError, match="status-message catalog is missing"):
+        PRODUCTION_INSTALLER._hook_specs("codex", _provider_source_root("codex"))
+    monkeypatch.setitem(PRODUCTION_INSTALLER._CODEX_HOOK_STATUS_MESSAGES,
+                        "missing-owner", "synthetic fixture")
+    with pytest.raises(ValueError, match="membership did not resolve uniquely"):
         PRODUCTION_INSTALLER._hook_specs("codex", _provider_source_root("codex"))
 
 
@@ -231,7 +225,8 @@ def test_python_production_installer_owns_ordered_hook_transaction() -> None:
     reclaim = source.index('"reclaim"')
     assert preflight < sync < register < verify < reclaim
     assert '"--codex-trust-mode"' in source and '"report"' in source
-    assert "owned_canonical_identities" in source
+    assert "owned_definition_snapshots" in source
+    assert "touched_definition_identities" in source
     assert "write_codex_inventory" in source
     assert "post-reclaim installed hook verification failed" in source
 
@@ -398,8 +393,10 @@ def test_installer_derives_touched_identities_from_before_after_hooks_json(
     registration.write_text('{"hooks":{}}\n', encoding="utf-8")
     installed_root = tmp_path / ".agents" / "skills" / "lead"
     specs = PRODUCTION_INSTALLER._hook_specs("codex", installed_root)
-    before = {"unchanged-complete-identity", "matcher-old-complete-identity"}
-    after = {"unchanged-complete-identity", "matcher-new-complete-identity"}
+    snapshot = ((0, 0, '{"matcher":"Bash"}', '{"type":"command"}'),)
+    before = {"unchanged-complete-identity": snapshot, "matcher-old-complete-identity": snapshot}
+    after = {"unchanged-complete-identity": snapshot, "matcher-new-complete-identity": snapshot}
+    health_owner = PRODUCTION_INSTALLER._hook_health_module(ROOT)
 
     class FakeHealth:
         calls = 0
@@ -418,9 +415,11 @@ def test_installer_derives_touched_identities_from_before_after_hooks_json(
             return target.parent / "codex-hook-inventory.json"
 
         @classmethod
-        def owned_canonical_identities(cls, **_kwargs):
+        def owned_definition_snapshots(cls, **_kwargs):
             cls.calls += 1
             return before if cls.calls == 1 else after
+
+        touched_definition_identities = staticmethod(health_owner.touched_definition_identities)
 
         @classmethod
         def write_codex_inventory(cls, **_kwargs):
@@ -912,7 +911,7 @@ def test_hook_health_failure_byte_4097_terminates_kills_and_reaps(
     ("platform", "source"),
     (
         ("codex", ROOT / "src.codex/skills/lead/scripts/check-bugfix-discipline.py"),
-        ("claude", ROOT / "src.claude/agents/scripts/check-bugfix-discipline.py"),
+        ("claude", ROOT / 'adapters/claude/agents/scripts/check-bugfix-discipline.py'),
     ),
 )
 def test_python_target_resolution_is_absolute_and_direct(
@@ -995,10 +994,19 @@ def test_decision_parity_oracle_requires_one_utf8_json_document() -> None:
 
 
 def test_trust_guidance_contract() -> None:
-    for path in (ROOT / "INSTALL.md", ROOT / "src.codex/AGENTS.codex.md"):
-        _assert_exact_order(path.read_text(encoding="utf-8"), CANONICAL_TRUST_GUIDANCE)
+    for path in (ROOT / "INSTALL.md", ROOT / "src.codex/skills/lead/operating-model.md"):
+        text = path.read_text(encoding="utf-8")
+        _assert_exact_order(text, CANONICAL_TRUST_GUIDANCE)
+        introductions = [line for line in text.splitlines() if line.startswith("After reinstall, start interactive `codex`")]
+        assert len(introductions) == 1
+        assert "**Trust all and continue**" in introductions[0]
+        assert "every affected entry" in introductions[0]
+        assert text.index(introductions[0]) < text.index(CANONICAL_TRUST_GUIDANCE[0])
 
+    addendum = (ROOT / "src.codex/AGENTS.codex.md").read_text(encoding="utf-8")
+    assert "**Mandatory read:**" in addendum and "Codex hook procedure" in addendum
     install = (ROOT / "INSTALL.md").read_text(encoding="utf-8")
+    assert "**Trust all and continue**" in install
     assert "#### Codex Python workflow" in install
     assert "python .\\scripts\\install-codex.py --global --dry-run" in install
     assert "python .\\scripts\\install-codex.py --global" in install
@@ -1010,7 +1018,7 @@ def test_trust_guidance_contract_rejects_same_count_mutations() -> None:
     mutated = text.replace(
         CANONICAL_TRUST_GUIDANCE[0],
         CANONICAL_TRUST_GUIDANCE[0].replace(
-            "Trust all and continue", "Continue without trusting"
+            "Do not press Esc", "Press Esc"
         ),
         1,
     )
@@ -1026,3 +1034,25 @@ def test_trust_bypass_classifier_accepts_prohibition_but_rejects_enablement() ->
     assert not _bypass_is_evidence_only(
         f"Run `codex {token} exec` to skip the trust prompt."
     )
+
+
+@pytest.mark.skipif(not sys.platform.startswith('linux'), reason='Linux adopted child reaping')
+def test_posix_hook_health_accepts_already_exited_descendants(tmp_path: Path) -> None:
+    marker = tmp_path / 'exited-child.pid'
+    program = tmp_path / 'health-with-exited-child.py'
+    program.write_text(
+        'import os, pathlib, subprocess, sys, time\n'
+        'child = subprocess.Popen([sys.executable, "-c", "pass"])\n'
+        'pathlib.Path(sys.argv[1]).write_text(str(child.pid))\n'
+        'deadline = time.monotonic() + 5\n'
+        'while time.monotonic() < deadline:\n'
+        '    state = pathlib.Path(f"/proc/{child.pid}/stat").read_text().rsplit(")",1)[1].split()[0]\n'
+        '    if state == "Z": os._exit(0)\n'
+        '    time.sleep(0.01)\n'
+        'raise RuntimeError("child did not exit")\n', encoding='utf-8',
+    )
+    completed = PRODUCTION_INSTALLER._run_hook_health_bounded(
+        [str(program), str(marker)], tmp_path, program,
+    )
+    assert completed.returncode == 0
+    assert not Path('/proc', marker.read_text()).exists()

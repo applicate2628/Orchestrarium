@@ -14,21 +14,21 @@ ROOT = Path(__file__).resolve().parent.parent
 
 HANDOFFS = (
     ROOT / "src.codex" / "skills" / "lead" / "subagent-contracts.md",
-    ROOT / "src.claude" / "agents" / "contracts" / "subagent-contracts.md",
+    ROOT / 'adapters/claude' / "agents" / "contracts" / "subagent-contracts.md",
 )
 LEADS = (
     ROOT / "src.codex" / "skills" / "lead" / "SKILL.md",
-    ROOT / "src.claude" / "skills" / "lead" / "SKILL.md",
+    ROOT / 'adapters/claude' / "skills" / "lead" / "SKILL.md",
 )
 OPERATING_MODELS = (
     ROOT / "src.codex" / "skills" / "lead" / "operating-model.md",
-    ROOT / "src.claude" / "agents" / "contracts" / "operating-model.md",
+    ROOT / 'adapters/claude' / "agents" / "contracts" / "operating-model.md",
 )
 CODEX_LEAD = LEADS[0]
 CLAUDE_LEAD = LEADS[1]
 SHARED = ROOT / "shared" / "references" / "subagent-operating-model.md"
 CLAUDE_FULL_DELIVERY = (
-    ROOT / "src.claude" / "agents" / "team-templates" / "full-delivery.json"
+    ROOT / 'adapters/claude' / "agents" / "team-templates" / "full-delivery.json"
 )
 
 

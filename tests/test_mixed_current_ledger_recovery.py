@@ -641,13 +641,16 @@ def test_mixed_orphan_only_disposition_needs_no_migration(tmp_path: Path) -> Non
     assert ledger.read_bytes() == v2_only
 
 
-def test_preexisting_valid_revise_terminal_still_settles_its_launch(tmp_path: Path) -> None:
-    """Conservation uses actual post-reduction terminal authority, not gate labels."""
+@pytest.mark.parametrize("launch_effort,settles", [("high", True), (None, False), ("low", False)])
+def test_review_terminal_settles_only_its_bound_launch(tmp_path: Path, launch_effort, settles) -> None:
+    """Keep findings while exact commission binding controls launch settlement."""
     lifecycle = load_script(LIFECYCLE, "mixed_valid_review_lifecycle")
     item = tmp_path / "work-items" / "active" / "mixed-item"
     raw, request = _raw_mixed_request(item)
     rows = [json.loads(line) for line in raw.splitlines()]
     launch = {**rows[1], "runId": "earlier-launch-001"}
+    if launch_effort is not None:
+        launch["effort"] = launch_effort
     revise = {
         **rows[2], "runId": "earlier-revise-001",
         "launchRunId": launch["runId"], "findingClass": "correctness",
@@ -664,8 +667,8 @@ def test_preexisting_valid_revise_terminal_still_settles_its_launch(tmp_path: Pa
     assert set(result["openReviseRunIds"]) == {
         "earlier-revise-001", "review-revise-001",
     }
-    assert "earlier-launch-001" in result["settledLaunchRunIds"]
-    assert "earlier-launch-001" not in result["openLaunchRunIds"]
+    assert ("earlier-launch-001" in result["settledLaunchRunIds"]) is settles
+    assert ("earlier-launch-001" in result["openLaunchRunIds"]) is not settles
 
 
 def test_ordinary_append_and_strict_close_after_recovery(tmp_path: Path) -> None:
@@ -1257,10 +1260,12 @@ def test_controlled_history_preserves_exact_closing_dependencies(tmp_path: Path)
     (item / "design.md").write_text("synthetic current evidence\n")
     targets = [_revise("required-first-revise"), _revise("required-second-revise")]
     unrelated = _revise("unrelated-live-revise")
-    launch = _event("old-closer-launch", eventKind="launch", status="running")
+    launch = _event("old-closer-launch", eventKind="launch", status="running",
+                    effort="low", provider="codex")
     closer = _event("old-current-closer", eventKind="terminal", launchRunId=launch["runId"],
         gate="PASS", artifact="design.md", lane="architecture", effort="low", provider="codex",
         closesRunIds=[target["runId"] for target in targets], evidence=[{"kind":"review","ref":"synthetic review"}])
+    assert v.launch_terminal_binding_mismatches(launch, closer) == ()
     old = targets + [unrelated, launch, closer]
     control = _recovery("unknown-original-control", closer, _line(closer).rstrip(b"\n"))
     raw = b"".join(map(_line, old + [control]))
@@ -1512,3 +1517,17 @@ def test_received_raw_controls_and_transformed_origins_keep_required_effects(tmp
             diagnostics, candidate, candidate, (events[2],))
     assert observed[0] == (3,)
     assert ledger.read_bytes() == candidate
+
+
+@pytest.mark.parametrize("opaque_id", [None, {}, {"opaque": "history"}, [], ["id"], 17, True, ""])
+def test_review_source_preparation_does_not_index_opaque_history_ids(opaque_id, tmp_path):
+    from types import SimpleNamespace
+
+    validator = load_validator()
+    event = {"schemaVersion": 2, "eventKind": "provider-result", "runId": opaque_id}
+    before = copy.deepcopy(event)
+    rows = [SimpleNamespace(event=event)]
+    inputs = SimpleNamespace(review_source_errors={})
+    validator._prepare_review_proof_inputs(rows, tmp_path, inputs)
+    assert event == before
+    assert inputs.review_source_errors == {}

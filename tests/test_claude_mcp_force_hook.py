@@ -14,7 +14,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CLAUDE_SCRIPTS = ROOT / "src.claude" / "agents" / "scripts"
+CLAUDE_SCRIPTS = ROOT / 'adapters/claude' / "agents" / "scripts"
 CLAUDE_HOOK = CLAUDE_SCRIPTS / "check-mcp-momentum.py"
 MODE_REMINDER = CLAUDE_SCRIPTS / "agents-mode-reminder.py"
 MODE_RUNTIME = CLAUDE_SCRIPTS / "agents_mode_runtime.py"

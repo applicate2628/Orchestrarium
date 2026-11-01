@@ -28,7 +28,7 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-MODULE_PATH = REPO_ROOT / "src.claude" / "agents" / "hooks" / "dispatch_sentinels.py"
+MODULE_PATH = REPO_ROOT / 'adapters/claude' / "agents" / "hooks" / "dispatch_sentinels.py"
 
 
 def _load_dispatch_sentinels():

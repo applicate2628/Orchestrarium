@@ -1,0 +1,30 @@
+# Модель работы субагентов — Claude Addendum
+
+> **Примечание**: этот файл хранит Claude-specific addendum к shared blueprint. Канонические routing и operator semantics живут в shared core и в текущих Claude operator reference surfaces.
+
+Канонический shared core: [shared/references/ru/subagent-operating-model.md](../../../../shared/references/ru/subagent-operating-model.md)
+
+Визуальное дополнение: [operating-model-diagram.md](operating-model-diagram.md)
+
+Этот файл хранит только Claude-specific runtime и repository concretization для общей модели работы субагентов. Канонический blueprint, routing, role и governance-model текст теперь живёт в shared core.
+
+## Claude-specific runtime notes
+
+- Claude runtime использует Agent tool и текущие Claude operator reference surfaces. Считайте этот файл локальным runtime addendum к shared blueprint, а не канонической полной копией методологии.
+- Consultant config живёт в `.claude/.agents-mode.yaml`.
+- Claude-line canonical config не включает `externalClaudeProfile`; Claude-side `externalProvider: auto` разрешается через active named production priority profile, shipped production `auto` использует только `codex | claude`. Явный выбор Kimi допускается для разрешённой политикой работы только на чтение либо инженерной работы, для которой допустимость задачи и назначенная профессия соответствуют `external-worker`. Выбранный файл возможностей предоставляет только ограниченные вызывающей стороной инструменты в рамках существующего класса мутаций и соответствия роли; он не предоставляет полномочий и не является песочницей. Grok остаётся unavailable, а удалённые Gemini/Qwen scalar values fail closed с `E_EXTERNAL_PROVIDER_REMOVED`.
+- `$external-worker` и `$external-reviewer` dispatch'ят из Claude Code в провайдера, выбранного `.claude/.agents-mode.yaml`.
+
+## Claude-side repository concretization
+
+- Допущенные предложения о смежных дефектах используют `work-items/bugs/` по контракту допуска ошибок `qa-engineer`. Типизированные остановки сохраняют фактическую причину, обязательный остаток работы, владельца и следующее действие по общему ядру.
+- Human-readable recovery начинается с generated `work-items/README.md`; состояние определяется по физическим `work-items/backlog/`, `work-items/active/<date>-<slug>/` и `work-items/archive/YYYY-MM/<date>-<slug>/` плюс owning artifacts. `work-items/index.md` остаётся только compatibility snapshot.
+- Periodic controls остаются pack-local в [periodic-control-matrix.md](periodic-control-matrix.md).
+- Claude-side examples используют `Gate: PASS | REVISE | BLOCKED:<class> | RETURN(role)`.
+- Claude runtime docs дополнительно держат явные `Artifact invalidation protocol` и `Parallel execution protocol`; используйте их вместе с shared core.
+
+## Shared core теперь владеет
+
+- Основным правилом, core management rules, delivery loops, routing patterns, role map, prompts, gates и team composition
+- Shared review/gate semantics, periodic-controls model, parallel-work guidance и generic task-memory expectations
+- Универсальной запиской для lead и финальной формулировкой

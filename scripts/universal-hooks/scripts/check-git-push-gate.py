@@ -72,7 +72,8 @@ PROCESS_TIMEOUT_SECONDS = 8.0
 ORACLE_TIMEOUT_SECONDS = 45.0
 SCAN_SNAPSHOT_BYTE_CAP = 1024 * 1024
 SCAN_OUTPUT_BYTE_CAP = 256 * 1024
-SCAN_TIMEOUT_SECONDS = 300.0
+# Enclose the scanner's 900-second work budget with a finite 60-second margin.
+SCAN_TIMEOUT_SECONDS = 960.0
 SCAN_SETTLEMENT_ATTEMPT_SECONDS = 3.0
 SCAN_SETTLEMENT_MAX_ENTRIES = 2
 
@@ -240,15 +241,15 @@ SOURCE_LAYOUTS = (
         ),
     ),
     SourceLayout(
-        "claude-source", ("src.claude", "agents", "scripts", "check-git-push-gate.py"), 3,
+        "claude-source", ("adapters", "claude", "agents", "scripts", "check-git-push-gate.py"), 4,
         (
-            ("gate", "src.claude/agents/scripts/check-git-push-gate.py"),
-            ("hook_common", "src.claude/agents/scripts/hook_common.py"),
-            ("classifier", "src.claude/agents/hooks/check-machine-local-path.py"),
+            ("gate", "adapters/claude/agents/scripts/check-git-push-gate.py"),
+            ("hook_common", "adapters/claude/agents/scripts/hook_common.py"),
+            ("classifier", "adapters/claude/agents/hooks/check-machine-local-path.py"),
             ("posix_helper", "scripts/process_supervision/posix_process_group.py"),
             ("windows_job", "scripts/process_supervision/windows_job.py"),
-            ("scanner", "src.claude/agents/scripts/check-publication-safety.py"),
-            ("publication_review_policy", "src.claude/agents/scripts/publication_review_policy.py"),
+            ("scanner", "adapters/claude/agents/scripts/check-publication-safety.py"),
+            ("publication_review_policy", "adapters/claude/agents/scripts/publication_review_policy.py"),
             ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
         ),
     ),

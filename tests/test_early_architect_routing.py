@@ -10,11 +10,11 @@ DETAIL = ROOT / "shared/references/spine/functional-first-delivery.md"
 ARCHITECT_SKILLS = (
     ROOT / "src.codex/skills/architect/SKILL.md",
 )
-CLAUDE_ARCHITECT_WRAPPER = ROOT / "src.claude/agents/architect.md"
-CLAUDE_INLINE_POLICY = ROOT / "src.claude/CLAUDE.md"
+CLAUDE_ARCHITECT_WRAPPER = ROOT / 'adapters/claude/agents/architect.md'
+CLAUDE_INLINE_POLICY = ROOT / 'adapters/claude/CLAUDE.md'
 LEAD_SKILLS = (
     ROOT / "src.codex/skills/lead/SKILL.md",
-    ROOT / "src.claude/skills/lead/SKILL.md",
+    ROOT / 'adapters/claude/skills/lead/SKILL.md',
 )
 
 

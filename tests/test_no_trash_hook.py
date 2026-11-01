@@ -30,7 +30,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOKS = (
-    REPO_ROOT / "src.claude" / "agents" / "hooks" / "check-no-trash-in-repo.py",
+    REPO_ROOT / 'adapters/claude' / "agents" / "hooks" / "check-no-trash-in-repo.py",
     REPO_ROOT / "src.codex" / "skills" / "lead" / "hooks" / "check-no-trash-in-repo.py",
 )
 

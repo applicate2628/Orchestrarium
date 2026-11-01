@@ -18,7 +18,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-CLAUDE_HOOKS = REPO_ROOT / "src.claude" / "agents" / "hooks"
+CLAUDE_HOOKS = REPO_ROOT / 'adapters/claude' / "agents" / "hooks"
 UNIVERSAL_HOOKS = REPO_ROOT / "scripts" / "universal-hooks" / "hooks"
 CODEX_HOOKS = REPO_ROOT / "src.codex" / "skills" / "lead" / "hooks"
 

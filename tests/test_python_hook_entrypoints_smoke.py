@@ -20,8 +20,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CLAUDE_SCRIPTS = ROOT / "src.claude" / "agents" / "scripts"
-CLAUDE_HOOKS = ROOT / "src.claude" / "agents" / "hooks"
+CLAUDE_SCRIPTS = ROOT / 'adapters/claude' / "agents" / "scripts"
+CLAUDE_HOOKS = ROOT / 'adapters/claude' / "agents" / "hooks"
 CODEX_SCRIPTS = ROOT / "src.codex" / "skills" / "lead" / "scripts"
 CODEX_HOOKS = ROOT / "src.codex" / "skills" / "lead" / "hooks"
 

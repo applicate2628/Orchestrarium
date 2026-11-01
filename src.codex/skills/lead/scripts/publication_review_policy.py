@@ -802,7 +802,7 @@ def _declared_linked_helper_path(module_file: str) -> Path | None:
     layouts: tuple[tuple[tuple[str, ...], int, bool], ...] = (
         (("scripts", "universal-hooks", "scripts", "publication_review_policy.py"), 3, False),
         (("src.codex", "skills", "lead", "scripts", "publication_review_policy.py"), 4, False),
-        (("src.claude", "agents", "scripts", "publication_review_policy.py"), 3, False),
+        (("adapters", "claude", "agents", "scripts", "publication_review_policy.py"), 4, False),
         (("scripts", "publication_review_policy.py"), 0, True),
     )
     matches = [

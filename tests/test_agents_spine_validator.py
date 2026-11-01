@@ -98,3 +98,22 @@ if __name__ == "__main__":
         if name.startswith("test_") and callable(fn):
             fn()
             print(f"PASS {name}")
+
+
+def test_proactive_discovery_stays_with_reuse_owner_and_keeps_permission_boundary(tmp_path):
+    spine = (REPO_ROOT / "shared/AGENTS.shared.md").read_text(encoding="utf-8")
+    cards = [line for line in spine.splitlines() if line.startswith("- **Reuse before hand-rolling:**")]
+    assert len(cards) == 1
+    for phrase in ("Proactively discover applicable ready-made solutions",
+                   "libraries, tools, skills and Model Context Protocol (MCP) integrations",
+                   "propose installation or connection",
+                   "Discovery grants no installation, paid-execution or model-quota authority"):
+        assert phrase in cards[0]
+    # Existing deletion detection must catch removal of the new duty or its boundary.
+    for index, phrase in enumerate(("Proactively discover applicable ready-made solutions",
+                                   "Discovery grants no installation, paid-execution or model-quota authority")):
+        changed = tmp_path / f"missing-discovery-{index}.md"
+        changed.write_text(spine.replace(phrase, "", 1), encoding="utf-8")
+        result = _run("--spine", str(changed))
+        assert result.returncode == 1
+        assert phrase in result.stdout

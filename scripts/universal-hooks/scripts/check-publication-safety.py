@@ -94,10 +94,11 @@ def _load_posix_process_group_module():
     elif (
         script.parents[0].name == "scripts"
         and script.parents[1].name == "agents"
-        and script.parents[2].name == "src.claude"
+        and script.parents[2].name == "claude"
+        and script.parents[3].name == "adapters"
     ):
         candidates.append(
-            script.parents[3]
+            script.parents[4]
             / "scripts"
             / "process_supervision"
             / "posix_process_group.py"
@@ -161,9 +162,10 @@ def _load_windows_job_module():
         elif (
             script.parents[0].name == "scripts"
             and script.parents[1].name == "agents"
-            and script.parents[2].name == "src.claude"
+            and script.parents[2].name == "claude"
+        and script.parents[3].name == "adapters"
         ):
-            candidates.append(script.parents[3] / "scripts" / "process_supervision" / "windows_job.py")
+            candidates.append(script.parents[4] / "scripts" / "process_supervision" / "windows_job.py")
         available = tuple(path for path in candidates if path.is_file())
         if len(available) != 1:
             raise RuntimeError("Windows Job helper unavailable or ambiguous")
@@ -212,7 +214,7 @@ else:
 _SCANNER_EXEMPT_PATHS = frozenset({
     "scripts/universal-hooks/scripts/check-publication-safety.py",
     "src.codex/skills/lead/scripts/check-publication-safety.py",
-    "src.claude/agents/scripts/check-publication-safety.py",
+    "adapters/claude/agents/scripts/check-publication-safety.py",
 })
 _SIMPLE_RULES = (
     (True, re.compile(r"AKIA[0-9A-Z]{16}")),
@@ -295,6 +297,7 @@ _VALUE_RULES = (("token", _CONCATENATED_CREDENTIAL_TOKEN),) + tuple(
     for family, keyword, title, upper in _KEYWORDS
 )
 _VALUE_PATTERNS = tuple(pattern for _family, pattern in _VALUE_RULES)
+_VALUE_ASSIGNMENT_HINT = re.compile(r"(?:password|secret|token|key)\s*[:=]")
 _IDENTIFIER_COMPONENT = re.compile(
     r"[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+|[A-Z]+|[0-9]+"
 )
@@ -316,12 +319,15 @@ _MAX_AGGREGATE_MESSAGE_BYTES = 16_777_216
 _MAX_COMMIT_TREE_BYTES = 1_048_576
 _MAX_TREE_CACHE_BYTES = 64 * 1_048_576
 _MAX_BLOB_BYTES = 64 * 1_048_576
-_MAX_AGGREGATE_BLOB_BYTES = 512 * 1_048_576
+# Selected unique-object volume, not resident memory: bodies are read on demand.
+# 2 GiB admits repository history growth; per-object and wall-time guards remain.
+_MAX_AGGREGATE_BLOB_BYTES = 2 * 1024 * 1_048_576
 _MAX_LINE_BYTES = 8 * 1_048_576
 _MAX_PARENT_GRAPH_BYTES = 16 * 1_048_576
 _MAX_FINDINGS = 32
 _READ_CHUNK_BYTES = 64 * 1_024
-_SCAN_DEADLINE_SECONDS = 240.0
+# Full baseline scans measured 485–530 seconds; retain a finite 15-minute ceiling.
+_SCAN_DEADLINE_SECONDS = 900.0
 _MAX_TREE_VISITS = _MAX_SUBJECTS
 _MAX_TREE_FRONTIER = _MAX_OBJECTS
 _MAX_TREE_CACHE_ENTRIES = _MAX_OBJECTS
@@ -1457,7 +1463,15 @@ def _line_observations(
             continue
         for match in _matching_starts(pattern, line):
             yield _TextObservation(line, line_number, line_start, None, index, pattern, match)
+    # Every value rule requires its family keyword. ASCII-only prefiltering
+    # preserves Python re's additional Unicode IGNORECASE equivalents.
+    ascii_lower = line.lower() if line.isascii() else None
+    if ascii_lower is not None and _VALUE_ASSIGNMENT_HINT.search(ascii_lower) is None:
+        return
     for index, (family, pattern) in enumerate(_VALUE_RULES):
+        required = "key" if family == "api-key" else family
+        if ascii_lower is not None and required not in ascii_lower:
+            continue
         for match in _matching_starts(pattern, line):
             # Callable syntax is meaningful in blob text. Retain the legacy
             # commit-message contract without granting it to new metadata.
@@ -3387,15 +3401,25 @@ async def _native_push_selection(request: NativePushRequest, deadline: float) ->
 async def _native_commit_range_selection(
     primary: RangeRequest, request: NativePushRequest, deadline: float,
 ) -> RangeSelection | Refusal:
-    """Union each actual update's commit graph relative to its own old OID.
+    """Union actual updates relative to this receiver's native old-object set.
 
-    A separately advertised server is never evidence about a custom receiver.
+    Only old OIDs from this callback supply exclusions, matching the V4 owner.
+    Separate advertisements and local tracking refs provide no authority.
     Unknown old objects are conservatively included instead of excluded.
     """
     object_format = request.object_format
     if _detect_git_object_format(_remaining_seconds(deadline)) != object_format or _graft_overlay_present(_remaining_seconds(deadline)):
         return _refusal("PS-MSG-RANGE", "native-repository")
     zero = "0" * object_format.hex_length
+    loop_deadline = asyncio.get_running_loop().time() + _remaining_seconds(deadline)
+    native_old = tuple(RemoteRefTip(row.remote_ref, row.remote_oid)
+                       for row in request.updates if row.remote_oid != zero)
+    exclusions = await _local_remote_commit_tip_oids(
+        native_old, deadline=loop_deadline, object_format=object_format,
+        include_object_roots=True)
+    if isinstance(exclusions, Refusal):
+        return exclusions
+    exclusion = ("--not", *exclusions) if exclusions else ()
     parents: dict[str, tuple[str, ...]] = {}
     objects: set[str] = set()
     selected_primary = None
@@ -3409,14 +3433,6 @@ async def _native_commit_range_selection(
             continue
         if selected_primary is None:
             selected_primary = (os.fsdecode(row.remote_ref), tip)
-        exclusion = ()
-        if row.remote_oid != zero:
-            try:
-                old = _resolve_commit(row.remote_oid, _remaining_seconds(deadline), object_format=object_format)
-            except ValueError:
-                pass
-            else:
-                exclusion = ("--not", old)
         loop_deadline = asyncio.get_running_loop().time() + _remaining_seconds(deadline)
         graph = await _read_parent_graph_bounded(
             _range_git_argv("rev-list", "--parents", "--topo-order", tip, *exclusion),
@@ -3524,7 +3540,7 @@ class _ReaderFinalizerResult:
 
 
 class _AsyncGitObjectReader:
-    """One owned asynchronous `git cat-file --batch` session.
+    """One owned asynchronous `git cat-file --batch-command` session.
 
     The reader owns the child and all three pipe transitions. Every request is
     bounded by one monotonic deadline; the caller owns exactly one finalizer.
@@ -3533,11 +3549,12 @@ class _AsyncGitObjectReader:
     def __init__(
         self,
         *,
-        argv: tuple[str, ...] = _range_git_argv("cat-file", "--batch"),
+        argv: tuple[str, ...] | None = None,
         request_timeout: float = _OBJECT_REQUEST_TIMEOUT_SECONDS,
         settle_timeout: float = OBJECT_REAP_ATTEMPT_SECONDS,
     ) -> None:
-        self._argv = argv
+        self._command_mode = argv is None
+        self._argv = _range_git_argv("cat-file", "--batch-command") if argv is None else argv
         self._request_timeout = request_timeout
         self._settle_timeout = settle_timeout
         self._process: asyncio.subprocess.Process | None = None
@@ -3619,7 +3636,7 @@ class _AsyncGitObjectReader:
         if scan_deadline is not None:
             deadline = min(deadline, scan_deadline)
         try:
-            process.stdin.write(oid.encode("ascii") + b"\n")
+            process.stdin.write((b"contents " if self._command_mode else b"") + oid.encode("ascii") + b"\n")
             await self._within(process.stdin.drain(), deadline)
             header = await self._within(process.stdout.readline(), deadline)
             if not header.endswith(b"\n"):
@@ -3695,7 +3712,7 @@ class _AsyncGitObjectReader:
         if scan_deadline is not None:
             deadline = min(deadline, scan_deadline)
         try:
-            process.stdin.write(encoded_name + b"\n")
+            process.stdin.write((b"info " if self._command_mode else b"") + encoded_name + b"\n")
             await self._within(process.stdin.drain(), deadline)
             header = await self._within(process.stdout.readline(), deadline)
             if not header.endswith(b"\n") or len(header) > 256:
@@ -4158,7 +4175,10 @@ async def _acquire_history(
     commit_records: dict[str, CommitRecord] = {}
     tag_targets: dict[str, tuple[str, str]] = {}
     tree_cache: dict[str, bytes] = {}
-    blob_contents: dict[str, bytes] = {}
+    # Keep identities, not the whole selected history in resident memory.
+    # The same bounded reader reacquires each body immediately before scanning.
+    blob_bindings: dict[str, tuple[int, bytes]] = {}
+    binary_blobs: set[str] = set()
     findings: list[Finding] = []
     aggregate_messages = 0
     aggregate_blobs = 0
@@ -4235,12 +4255,14 @@ async def _acquire_history(
                 return _refusal("PS-MSG-LIMIT", "tree-cache-bytes")
             tree_cache[oid] = result.raw
         elif result.object_type == "blob":
-            if len(blob_contents) >= _MAX_BLOBS:
+            if len(blob_bindings) >= _MAX_BLOBS:
                 return _refusal("PS-MSG-LIMIT", "blob-count")
             aggregate_blobs += len(result.raw)
             if aggregate_blobs > _MAX_AGGREGATE_BLOB_BYTES:
                 return _refusal("PS-MSG-LIMIT", "aggregate-blob-bytes")
-            blob_contents[oid] = result.raw
+            blob_bindings[oid] = (len(result.raw), hashlib.sha256(result.raw).digest())
+            if _is_binary(result.raw):
+                binary_blobs.add(oid)
         else:
             return _refusal("PS-MSG-FRAME", "object-type")
 
@@ -4266,14 +4288,15 @@ async def _acquire_history(
     for target_oid, declared_type in tag_targets.values():
         actual_type = target_types.get(target_oid)
         if actual_type is None:
-            try:
-                result = _run_range_git(["cat-file", "-t", target_oid], text=True,
-                                        timeout=max(0.001, scan_deadline - asyncio.get_running_loop().time()))
-            except subprocess.TimeoutExpired:
-                return _refusal("PS-MSG-READ-TIMEOUT", "tag-target")
-            except OSError:
-                return _refusal("PS-MSG-READ", "tag-target")
-            if result.returncode or result.stdout.splitlines() != [declared_type]:
+            # Reuse the active reader: another POSIX owned process would
+            # reacquire its lifecycle lock. Metadata-only info does not load
+            # excluded bodies or grant selected-content coverage.
+            classified = await reader.classify(
+                target_oid, object_format=selection.object_format,
+                scan_deadline=scan_deadline)
+            if isinstance(classified, Refusal):
+                return classified
+            if classified.returned_oid != target_oid or classified.object_type != declared_type:
                 return _refusal("PS-MSG-FRAME", "tag-target")
             target_types[target_oid] = declared_type
         elif actual_type != declared_type:
@@ -4317,7 +4340,7 @@ async def _acquire_history(
     unpublished_trees = {
         oid for oid, object_type in object_types.items() if object_type == "tree"
     }
-    unpublished_blobs = set(blob_contents)
+    unpublished_blobs = set(blob_bindings)
     reached_unpublished_trees: set[str] = set()
     visited_tree_ids: set[str] = set()
     tree_visits = 0
@@ -4430,8 +4453,7 @@ async def _acquire_history(
     if len(blob_paths) > _MAX_BLOB_PATHS:
         return _refusal("PS-MSG-LIMIT", "blob-path-count")
 
-    binary_blobs = {oid for oid, raw in blob_contents.items() if _is_binary(raw)}
-    text_blobs = set(blob_contents) - binary_blobs
+    text_blobs = set(blob_bindings) - binary_blobs
     subjects_by_path: dict[tuple[bytes, str], list[tuple[str, str]]] = {}
     if review_evaluation is not None:
         for commit_oid, raw_path, blob_oid in sorted(subjects):
@@ -4439,10 +4461,18 @@ async def _acquire_history(
                 (commit_oid, subject_modes[(commit_oid, raw_path, blob_oid)])
             )
     for path, blob_oid in sorted(blob_paths):
+        if asyncio.get_running_loop().time() >= scan_deadline:
+            return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
         decoded_path = path.decode("utf-8", "surrogateescape")
         if not native:
             _append_findings(findings, _filename_findings(decoded_path, "history-blob"))
-        raw = blob_contents[blob_oid]
+        reread = await reader.read(blob_oid, "blob", scan_deadline=scan_deadline)
+        if isinstance(reread, Refusal):
+            return reread
+        raw = reread.raw
+        if (reread.returned_oid != blob_oid or reread.object_type != "blob"
+            or (len(raw), hashlib.sha256(raw).digest()) != blob_bindings[blob_oid]):
+            return _refusal("PS-MSG-COVERAGE", "blob-content-drift")
         line_refusal = _line_limit_refusal(raw)
         if line_refusal is not None:
             return line_refusal
@@ -4478,6 +4508,8 @@ async def _acquire_history(
                 max_findings=max(0, _MAX_FINDINGS - len(findings)),
             )
         _append_findings(findings, content_findings)
+        if asyncio.get_running_loop().time() >= scan_deadline:
+            return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
 
     if native:
         for oid in selection.object_oids:
@@ -4490,7 +4522,7 @@ async def _acquire_history(
     canonical_subjects = tuple(sorted(subjects))
     canonical_paths = tuple(sorted((blob, path) for path, blob in blob_paths))
     canonical_objects = tuple(sorted(selection.object_oids))
-    canonical_blobs = tuple(sorted(blob_contents))
+    canonical_blobs = tuple(sorted(blob_bindings))
     proof = HistoryProof(
         selection.expected_oids,
         canonical_objects,

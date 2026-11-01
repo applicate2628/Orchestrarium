@@ -36,7 +36,7 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-CL = REPO_ROOT / "src.claude" / "agents" / "hooks"
+CL = REPO_ROOT / 'adapters/claude' / "agents" / "hooks"
 CX = REPO_ROOT / "src.codex" / "skills" / "lead" / "hooks"
 
 RESIDUE_SCRIPTS = (CL / "check-stale-relation-residue.py", CX / "check-stale-relation-residue.py")

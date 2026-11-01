@@ -42,6 +42,8 @@ FINDING_CLASSES = {"publication-safety", "security", "correctness", "performance
 PROTECTED_CLASSES = {"publication-safety", "security", "legacy-unclassified"}  # non-user-waivable (spine: $security-reviewer only)
 LEGACY_MIGRATION_KIND = "legacy-obligation-migration"
 LEGACY_MIGRATION_SCOPE = ["ledger-migration:invalid-finding-class"]
+
+
 LEGACY_MIGRATION_NORMALIZATIONS = {
     "invalid-finding-class": {
         "scope": ["ledger-migration:invalid-finding-class"],
@@ -65,6 +67,7 @@ V2_ONLY_FIELDS = {
     "launchRunId",
     "closesRunIds",
     "artifactRevision",
+    "artifactSizeBytes",
     "lane",
     "effort",
     "findingClass",
@@ -88,6 +91,7 @@ V2_ONLY_FIELDS = {
     "externalEvidenceRunId",
     "effortMappingLoss",
     "launchFlags",
+    "sdkExecution",
     "closerRunId",
     "targetTuple",
 }
@@ -148,6 +152,7 @@ ALLOWED_FIELDS = {
     "launchRunId",
     "closesRunIds",
     "artifactRevision",
+    "artifactSizeBytes",
     "lane",
     "effort",
     "findingClass",
@@ -171,6 +176,7 @@ ALLOWED_FIELDS = {
     "externalEvidenceRunId",
     "effortMappingLoss",
     "launchFlags",
+    "sdkExecution",
     "closerRunId",
     "targetTuple",
 }
@@ -347,6 +353,108 @@ def validate_launch_profile(
             continue
         raise ValueError("invalid launch flags")
     return exact, model, effort
+
+
+
+def validate_sdk_execution(
+    value: object, *, provider: object, model: object, effort: object
+) -> dict[str, object]:
+    """Validate selected SDK configuration, not observed execution or authority.
+
+    The existing ledger schema owns the shape. Provider adapters and result
+    parsers reuse this callable rather than copying its validation. Native SDK
+    availability, current permissions and process settlement remain other owners.
+    """
+    schema = AGENT_RUN_SCHEMA["properties"]["sdkExecution"]
+    if (type(value) is not dict or not set(schema["required"]) <= set(value)
+        or not set(value) <= set(schema["properties"])):
+        raise ValueError("sdkExecution requires its exact versioned fields")
+    revision = next((branch for branch in schema["oneOf"]
+                     if type(value["schemaVersion"]) is int
+                     and value["schemaVersion"] == branch["properties"]["schemaVersion"]["const"]), None)
+    if (revision is None or not set(revision["required"]) <= set(value)
+        or any(name in value for name, rule in revision["properties"].items() if rule is False)):
+        raise ValueError("sdkExecution requires its exact versioned fields")
+    for name, rules in schema["properties"].items():
+        if name not in value:
+            continue
+        field = value[name]
+        if "const" in rules and (type(field) is not type(rules["const"]) or field != rules["const"]):
+            raise ValueError(f"sdkExecution {name} is unsupported")
+        if "enum" in rules and not any(type(field) is type(allowed) and field == allowed for allowed in rules["enum"]):
+            raise ValueError(f"sdkExecution {name} is unsupported")
+        if rules.get("type") == "string" and (
+            type(field) is not str
+            or not rules["minLength"] <= len(field) <= rules["maxLength"]
+            or re.fullmatch(rules["pattern"], field, re.ASCII) is None
+        ):
+            raise ValueError(f"sdkExecution {name} must be one safe domain token")
+    supported_binding = (
+        (provider, value["adapter"], value["sandboxMode"], value["approvalPolicy"])
+        in (
+            ("codex", "openai-codex", "read-only", "deny_all"),
+            ("claude", "claude-agent-sdk", "tool-restricted-read-only", "deny_unadmitted"),
+        )
+    )
+    if not supported_binding or value["model"] != model or value["effort"] != effort:
+        raise ValueError("sdkExecution must bind the declared provider, model, effort and adapter controls")
+    if value["schemaVersion"] == 3 and (
+        provider != "codex" or value["outerBudgetBinding"] == value["innerBudgetBinding"]
+    ):
+        raise ValueError("coordination inference requires Codex and distinct turn reservations")
+    return dict(value)
+
+
+def _validate_sdk_event(event: Mapping[str, object], errors: list[str]) -> None:
+    """Receive supported SDK routes through the existing event owner only."""
+    run_id = event.get("runId")
+    if "sdkExecution" not in event and event.get("actualExecutionPath") != "direct-external-sdk":
+        return
+    try:
+        validate_sdk_execution(
+            event.get("sdkExecution"), provider=event.get("provider"),
+            model=event.get("model"), effort=event.get("effort"),
+        )
+    except ValueError as exc:
+        fail(errors, f"{run_id}: {exc}")
+    selected = event.get("sdkExecution")
+    if type(selected) is dict and selected.get("schemaVersion") == 3:
+        if any(event.get(k) != expected for k, expected in
+               (("provider", "codex"), ("role", "lead"), ("executionRole", "main"),
+                ("assignedRole", "lead"), ("gate", "none"))):
+            fail(errors, f"{run_id}: coordination inference requires its nonauthorizing main/lead operation binding")
+    if event.get("schemaVersion") != 2 or event.get("actualExecutionPath") != "direct-external-sdk":
+        fail(errors, f"{run_id}: sdkExecution requires the V2 direct-external-sdk route")
+    if event.get("eventKind") not in ("launch", "terminal"):
+        fail(errors, f"{run_id}: sdkExecution requires a launch/terminal pair")
+    if "launchFlags" in event:
+        fail(errors, f"{run_id}: sdkExecution forbids fabricated launchFlags")
+    for field in ("assignedRole", "artifactIdentity", "externalDispatchId", "externalEvidenceRunId", "effortMappingLoss"):
+        if not isinstance(event.get(field), str) or not event[field].strip():
+            fail(errors, f"{run_id}: sdkExecution requires {field}")
+    if event.get("externalDispatchId") == event.get("externalEvidenceRunId"):
+        fail(errors, f"{run_id}: SDK dispatch and terminal identities must be distinct")
+    if event.get("eventKind") == "launch":
+        if event.get("externalDispatchId") != run_id:
+            fail(errors, f"{run_id}: SDK launch runId must equal externalDispatchId")
+        if event.get("status") != "running" or event.get("gate") != "none":
+            fail(errors, f"{run_id}: SDK launch requires running status and gate none")
+        if event.get("externalEvidenceRunId") == run_id:
+            fail(errors, f"{run_id}: SDK launch and terminal identities must be distinct")
+        for field in ("terminalClass", "authorizing", "closesRunIds", "closerRunId", "targetTuple"):
+            if field in event:
+                fail(errors, f"{run_id}: SDK launch forbids terminal authority field {field}")
+    elif event.get("eventKind") == "terminal":
+        if event.get("launchRunId") != event.get("externalDispatchId"):
+            fail(errors, f"{run_id}: SDK terminal launchRunId must equal externalDispatchId")
+        if event.get("status") not in ("completed", "revise", "blocked", "cancelled"):
+            fail(errors, f"{run_id}: SDK terminal requires terminal status")
+        if event.get("terminalClass") != "external-nonauthorizing":
+            fail(errors, f"{run_id}: SDK terminal requires external-nonauthorizing")
+        if event.get("authorizing") is not False or event.get("closesRunIds") != []:
+            fail(errors, f"{run_id}: SDK terminal cannot authorize or close another run")
+        if event.get("externalEvidenceRunId") != run_id:
+            fail(errors, f"{run_id}: SDK terminal evidence run must equal its runId")
 
 
 def _kimi_empty_flags_resolved_effort(event: Mapping[str, object]) -> bool:
@@ -1377,6 +1485,8 @@ def _artifact_archive_locator(root, candidate, recorded):
         if locator.selected.exists():
             return locator
     return None
+
+
 
 
 def _resolve_active_slug_in_archive(root: Path, candidate: Path) -> Path | None:
@@ -2664,13 +2774,13 @@ class _CurrentEvidenceV1:
                 self.predicates[key] = selected
                 self.selection_inputs.append(selected)
 
-    def bind_bytes(self, path, raw, *, snapshot=None):
-        key = ("bytes", path, raw)
+    def bind_bytes(self, path, raw, *, snapshot=None, _locator=None):
+        key = ("bytes", path, raw) if _locator is None else ("bytes", path, raw, _locator)
         if key not in self.predicates:
             if self.received:
                 raise ValueError("WI-LEDGER-CUSTODY-STALE-TARGET: unprepared selected bytes")
             self.predicates[key] = _CurrentPredicateV1("bytes", path, True,
-                snapshot=snapshot, expected_bytes=raw)
+                snapshot=snapshot, expected_bytes=raw, artifact_locator=_locator)
         return self.predicates[key]
 
     def bind_selection(self, path, raw, *, snapshot=None):
@@ -3272,6 +3382,219 @@ def _qualify_review_semantic_results_v2(proof, admitted, inputs, target_ref, pas
         resolve_review_source_unit_v2(anchor, admitted_sources=admitted, inputs=inputs)
 
 
+
+def parse_review_loop_receiving_binding_v1(binding):
+    required = {"version", "action", "loop", "reviewedRole", "originalResult",
+                "targetSummary", "reviewerSummary", "evidenceLimitations", "proof"}
+    _review_exact_object(binding, required, "loop receiving")
+    if (type(binding["version"]) is not int or binding["version"] != 1
+            or binding["action"] != "receive-original-loop-review-association"):
+        raise ValueError("RL-source: explicit current Root receiving required")
+    _review_exact_object(binding["loop"], {"loopId", "round", "lane", "attemptId", "artifactRevision"}, "original loop")
+    if type(binding["loop"]["round"]) is not int or binding["loop"]["round"] < 1:
+        raise ValueError("RL-source: actual positive round required")
+    for name in ("loopId", "lane", "attemptId", "artifactRevision"):
+        _review_nonempty(binding["loop"][name], "original loop " + name)
+    _review_nonempty(binding["evidenceLimitations"], "retained evidence limitations")
+    _review_nonempty(binding["reviewedRole"], "actual review profession")
+    for name in ("originalResult", "targetSummary", "reviewerSummary"):
+        parse_review_source_anchor_v1(binding[name])
+    parse_review_closure_proof_v2(binding["proof"])
+    return _current_json_value(binding)
+
+
+def qualify_review_loop_receiving_sources_v1(
+    binding, *, state, round_number, lane, attempt_id, artifact_revision,
+    item, rows, validity, target_pos, reviewer_pos, initial_receiving=True,
+):
+    """Read-only CURRENT Root receiving; never synthesize a ledger event or old promise."""
+    binding = parse_review_loop_receiving_binding_v1(binding)
+    expected_loop = {"loopId": state["loop_id"], "round": round_number, "lane": lane,
+                     "attemptId": attempt_id, "artifactRevision": artifact_revision}
+    if binding["loop"] != expected_loop:
+        raise ValueError("RL-source: exact original loop identity differs")
+    _review_nonempty(binding["evidenceLimitations"], "retained evidence limitations")
+    _review_nonempty(binding["reviewedRole"], "actual review profession")
+    proof = parse_review_closure_proof_v2(binding["proof"])
+    target, reviewer = rows[target_pos].event, rows[reviewer_pos].event
+    for key, pos in (("target", target_pos), ("reviewerPass", reviewer_pos)):
+        if proof[key] != {"runId": rows[pos].event["runId"], "rawLineSha256": rows[pos].raw_line_sha256}:
+            raise ValueError("RL-source: actual terminal row binding differs")
+    if (not target_pos < reviewer_pos or reviewer.get("gate") != "PASS"
+            or reviewer.get("status") != "completed"
+            or not validity[reviewer_pos].authority.artifact_evidence_eligible
+            or reviewer.get("executionRole") != "internal"
+            or reviewer.get("role") in {"lead", "consultant", "external-worker", "external-reviewer"}
+            or target.get("role") != binding["reviewedRole"]
+            or reviewer.get("role") != binding["reviewedRole"]):
+        raise ValueError("RL-source: actual independent reviewer profession is unqualified")
+    if target.get("launchRunId") is not None and target.get("launchRunId") == reviewer.get("launchRunId"):
+        raise ValueError("RL-source: original and replacement cannot share one launch")
+    artifact = state["rounds"][round_number - 1]["artifact"]
+    subject = {"artifactKey": artifact.get("snapshot", "git-commit"), "revision": artifact_revision}
+    if proof["subject"] != {"before": subject, "after": subject}:
+        raise ValueError("RL-source: unchanged frozen subject binding differs")
+    original_anchor = parse_review_source_anchor_v1(binding["originalResult"])
+    target_anchor = parse_review_source_anchor_v1(binding["targetSummary"])
+    reviewer_anchor = parse_review_source_anchor_v1(binding["reviewerSummary"])
+    if (target_anchor["sourceSha256"] != proof["reports"]["targetSha256"]
+            or reviewer_anchor["sourceSha256"] != proof["reports"]["passSha256"]):
+        raise ValueError("RL-source: selected retained summary/report identity differs")
+    inputs = _CurrentEvidenceV1()
+    admitted = _review_selected_sources(item, (target, reviewer), inputs)
+    for anchor, event in ((target_anchor, target), (reviewer_anchor, reviewer)):
+        ref, digest = anchor["source"]["ref"], anchor["sourceSha256"]
+        if ref != event.get("artifact"):
+            if ref != "review-artifact-custody/" + digest or not _ordinary_custody_snapshot(item, ref, digest):
+                raise ValueError("RL-source: only existing verified immutable summary custody is admitted")
+            if initial_receiving:
+                selected = admitted.get(event.get("artifact"))
+                if selected is None or hashlib.sha256(inputs.read_selection(selected.selected)).hexdigest() != digest:
+                    raise ValueError("RL-source: captured summary differs from the actual source at receiving")
+            capture_errors = []
+            locator = inputs.artifact(item, ref, "current Root summary custody", event["runId"], capture_errors)
+            if locator is None or capture_errors:
+                raise ValueError("RL-source: summary custody unavailable")
+            admitted[ref] = locator
+    original_ref = original_anchor["source"]["ref"]
+    errors = []
+    if original_ref not in admitted:
+        locator = inputs.artifact(item, original_ref, "actual original loop result", target["runId"], errors)
+        if locator is None or errors:
+            raise ValueError("RL-source: original result source unavailable")
+        admitted[original_ref] = locator
+    original = resolve_review_source_unit_v2(original_anchor, admitted_sources=admitted, inputs=inputs)
+    if original.selector_kind != "json-value":
+        raise ValueError("RL-source: preserved original result JSON required, not a guessed summary")
+    loop_owner = load_review_loop_owner()
+    loop_owner.qualify_completed_verdict_result_v2(
+        state, original.value, round_number=round_number, lane=lane, attempt_id=attempt_id,
+        artifact_revision=artifact_revision,
+    )
+    if original.value.get("verdict") != "REVISE":
+        raise ValueError("RL-source: original result is not the completed refusal")
+    summaries = []
+    for anchor, event, expected_gate in ((target_anchor, target, "REVISE"),
+                                         (reviewer_anchor, reviewer, "PASS")):
+        unit = resolve_review_source_unit_v2(anchor, admitted_sources=admitted, inputs=inputs)
+        if unit.value in (None, "", [], {}) or type(unit.value) is str and unit.value.strip() == "PASS":
+            raise ValueError("RL-source: bare label is not retained review evidence")
+        # JSON summaries select an actual verdict-bearing report object, never
+        # a scalar claim fragment that can hide its typed parent.
+        if unit.selector_kind == "json-value" and (type(unit.value) is not dict or unit.value.get("verdict") != expected_gate):
+            raise ValueError("RL-source: actual typed verdict report boundary required")
+        # Respect exposed typed claims; whole prose remains Root's semantic duty.
+        if type(unit.value) is dict:
+            for key, expected in (("role", binding["reviewedRole"]), ("scope", event.get("scope")),
+                                  ("angle", proof["bindingEvidence"]["angle"]["value"]),
+                                  ("verdict", expected_gate), ("artifact_revision", artifact_revision)):
+                if key in unit.value and unit.value[key] != expected:
+                    raise ValueError("RL-source: exposed summary " + key + " contradicts receiving")
+        summaries.append(unit)
+        recorded = event.get("artifactRevision")
+        if isinstance(recorded, str) and recorded.startswith(("sha256:", "git:")) and recorded != artifact_revision:
+            raise ValueError("RL-source: exposed frozen subject revision differs")
+        if isinstance(recorded, str) and re.fullmatch(r"[0-9a-fA-F]{64}", recorded):
+            if recorded.lower() != anchor["sourceSha256"]:
+                raise ValueError("RL-source: exposed report revision differs")
+        if event.get("lane") is not None and event["lane"] != proof["bindingEvidence"]["angle"]["value"]:
+            raise ValueError("RL-source: exposed review angle differs")
+    binding_values = {}
+    for name in ("scope", "angle", "lineage", "nativeReceiving"):
+        units = [resolve_review_source_unit_v2(anchor, admitted_sources=admitted, inputs=inputs)
+                 for anchor in proof["bindingEvidence"][name]["sources"]]
+        if name != "nativeReceiving" and not units:
+            raise ValueError("RL-source: actual association sources required")
+        binding_values[name] = [unit.value for unit in units]
+        for unit in units:
+            if unit.value in (None, "", [], {}):
+                raise ValueError("RL-source: empty actual association source")
+            if name == "angle" and unit.selector_kind == "json-value" and type(unit.value) is str:
+                if unit.value != proof["bindingEvidence"]["angle"]["value"]:
+                    raise ValueError("RL-source: actual typed angle differs")
+            if name == "nativeReceiving" and type(unit.value) is dict:
+                if {"authorRunId", "reviewerRunId"} <= set(unit.value):
+                    if unit.value["authorRunId"] == unit.value["reviewerRunId"] or unit.value["reviewerRunId"] != reviewer["runId"]:
+                        raise ValueError("RL-source: exposed native independence contradicts receiving")
+    _qualify_review_semantic_results_v2(proof, admitted, inputs, original_ref,
+                                        reviewer_anchor["source"]["ref"], binding_values)
+    if original.value.get("blockers") and type(original.value["blockers"]) is not list:
+        raise ValueError("RL-source: original blocker collection is not qualified")
+    field = "blockers" if original.value.get("blockers") else "rationale"
+    expected_collection = (*original.coordinate, field)
+    complete = resolve_review_source_unit_v2(proof["findingEvidence"]["completeTargetFindings"],
+                                             admitted_sources=admitted, inputs=inputs)
+    if complete.source_ref != original_ref or complete.coordinate != expected_collection:
+        raise ValueError("RL-source: complete original refusal collection was not selected")
+    claims = proof["rootSemanticReceiving"]["findings"]
+    expected_paths = [(*expected_collection, i) for i in range(len(original.value["blockers"]))] if field == "blockers" else [expected_collection]
+    if len(claims) != len(expected_paths):
+        raise ValueError("RL-source: original obligations were omitted")
+    identifiers = {claim["findingId"] for claim in claims}
+    # Inspect own fields on the selected report's ancestry, not unrelated
+    # historical siblings in a shared report document.
+    for pass_report in [summaries[1].value, *(v for _c, v in summaries[1].ancestry)]:
+        if type(pass_report) is dict and "priorFindingDispositions" in pass_report:
+            dispositions = pass_report["priorFindingDispositions"]
+            if type(dispositions) is not list:
+                raise ValueError("RL-source: actual reviewer dispositions unavailable")
+            relevant = [entry for entry in dispositions
+                        if type(entry) is dict and entry.get("id") in identifiers]
+            if (len(relevant) != len(identifiers)
+                    or {entry.get("id") for entry in relevant} != identifiers
+                    or any(entry.get("verdict") != "verified" for entry in relevant)):
+                raise ValueError("RL-source: exposed dispositions do not verify every original finding")
+    for claim, expected_path in zip(claims, expected_paths):
+        before = resolve_review_source_unit_v2(claim["targetFinding"], admitted_sources=admitted, inputs=inputs)
+        after = resolve_review_source_unit_v2(claim["reviewerClaimUnit"], admitted_sources=admitted, inputs=inputs)
+        if before.source_ref != original_ref or before.coordinate != expected_path:
+            raise ValueError("RL-source: original finding coverage differs")
+        if after.value in (None, "", [], {}) or type(after.value) is str and after.value.strip() == "PASS":
+            raise ValueError("RL-source: no explicit retained replacement claim")
+        if type(before.value) is dict:
+            for key in ("id", "findingId"):
+                if key in before.value and before.value[key] != claim["findingId"]:
+                    raise ValueError("RL-source: exposed original finding identity differs")
+        # A selector cannot hide typed finding parents. Overall report/run ids
+        # are not finding ids; disposition vocabulary or collection is explicit.
+        finding_values = [after.value]
+        for coordinate, value in after.ancestry:
+            if type(value) is dict and (
+                    "findingId" in value
+                    or value.get("verdict") in {"verified", "not-verified", "rejected"}
+                    or len(coordinate) >= 2 and coordinate[-2] in {"claims", "priorFindingDispositions"}):
+                finding_values.append(value)
+        for value in finding_values:
+            if type(value) is dict:
+                for key in ("id", "findingId"):
+                    if key in value and value[key] != claim["findingId"]:
+                        raise ValueError("RL-source: exposed replacement finding identity differs")
+        if type(after.value) is dict and set(after.value) <= {"verdict", "gate", "id", "findingId"}:
+            if after.value.get("verdict") != "verified" or after.value.get("id", after.value.get("findingId")) != claim["findingId"]:
+                raise ValueError("RL-source: bare overall verdict is not finding re-verification")
+        for _coordinate, value in after.ancestry:
+            if type(value) is dict and isinstance(value.get("verdict"), str) and value["verdict"] in {"REVISE", "rejected", "not-verified"}:
+                raise ValueError("RL-source: exposed replacement claim is negative")
+    # This route must not discard a genuinely acquired stronger commissioning promise.
+    for pos, row in enumerate(rows):
+        event = row.event
+        if (event.get("role") == "lead" and event.get("executionRole") == "main"
+                and validity[pos].authority.artifact_evidence_eligible):
+            for entry, recognition in _review_contract_references(event):
+                if _review_contract_selects_proof(recognition, proof):
+                    contract = parse_review_source_contract_evidence(entry)
+                    if proof["rootSemanticReceiving"]["version"] != 2:
+                        raise ValueError("RL-source: actual prior source-contract promise cannot be downgraded")
+                    _qualify_review_source_contract(contract, entry, proof, rows, admitted, inputs)
+    inputs.freeze_selection_keys()
+    inputs.receive()
+    if not inputs.authority_qualified():
+        raise ValueError("RL-source: selected evidence changed during receiving")
+    return {"original_result_source_sha256": original.source_sha256,
+            "target_report_sha256": summaries[0].source_sha256,
+            "reviewer_report_sha256": summaries[1].source_sha256}
+
+
 def receive_review_association_v1(proof, *, resolved_sources, rows, validity, root_receiving):
     """Qualify a genuine reviewer result plus Root's anchored semantic receiving.
 
@@ -3498,7 +3821,10 @@ def _prepare_review_proof_inputs(rows, item, inputs):
     """
     index = {}
     for row in rows:
-        index.setdefault(row.event.get("runId"), []).append(row.event)
+        run_id = row.event.get("runId")
+        # Opaque historical IDs remain diagnostic data, never proof references.
+        if type(run_id) is str and run_id:
+            index.setdefault(run_id, []).append(row.event)
     for row in rows:
         event = row.event
         if "reviewClosureProofs" not in event:
@@ -4669,6 +4995,33 @@ def _validate_event_fields(
     elif "artifact" in event and not isinstance(artifact, str):
         fail(errors, f"{run_id}: artifact must be a string")
 
+    sdk_terminal = (event.get("actualExecutionPath") == "direct-external-sdk"
+                    and event.get("eventKind") == "terminal")
+    if "artifactSizeBytes" in event and not (sdk_terminal and artifact):
+        fail(errors, f"{run_id}: artifactSizeBytes requires a persisted SDK terminal artifact")
+    if sdk_terminal and artifact:
+        digest, size = event.get("artifactRevision"), event.get("artifactSizeBytes")
+        if (not isinstance(digest, str) or SHA256_RE.fullmatch(digest) is None
+            or type(size) is not int or size < 0):
+            fail(errors, f"{run_id}: SDK artifact requires exact SHA-256 artifactRevision and artifactSizeBytes (WI-SDK-ARTIFACT-BINDING)")
+        elif artifact_path is not None:
+            owner = load_lifecycle_owner()
+            try:
+                if isinstance(artifact_path, _CapturedHistoryPath):
+                    raw, snapshot = artifact_path.read_bytes(), None
+                else:
+                    snapshot = owner._capture_file_snapshot(artifact_path,
+                        failure_id="WI-SDK-ARTIFACT-BINDING", maximum_bytes=size)
+                    raw = snapshot.data
+                if len(raw) != size or hashlib.sha256(raw).hexdigest() != digest:
+                    raise ValueError("received SDK artifact content differs")
+                predicate = _inputs.bind_bytes(artifact_path, raw, snapshot=snapshot,
+                                               _locator=artifact_locator)
+                _evidence.require(predicate,
+                    f"{run_id}: received SDK artifact or locator changed (WI-SDK-ARTIFACT-BINDING)")
+            except (OSError, ValueError, owner.LifecycleError) as exc:
+                fail(errors, f"{run_id}: WI-SDK-ARTIFACT-BINDING: {exc}")
+
     if evidence is not None:
         validate_evidence(evidence, run_id, errors, gate == "PASS")
         for entry, profile in retained_preimage_profiles(event, item, errors):
@@ -4912,6 +5265,8 @@ def _validate_event_fields(
             fail(errors, f"{run_id}: launchRunId is only legal on eventKind terminal")
     if event_kind == "terminal" and "launchRunId" not in event:
         fail(errors, f"{run_id}: eventKind terminal requires launchRunId")
+    _validate_sdk_event(event, errors)
+    sdk_route = event.get("actualExecutionPath") == "direct-external-sdk"
     terminal_class = event.get("terminalClass")
     typed_terminal_fields = {
         "terminalClass", "authorizing", "actualExecutionPath", "artifactIdentity",
@@ -4933,17 +5288,25 @@ def _validate_event_fields(
                 fail(errors, f"{run_id}: external terminal requires {key}")
             if event.get("authorizing") is not False:
                 fail(errors, f"{run_id}: external terminal requires authorizing=false")
-            if event.get("actualExecutionPath") != "direct-external-cli":
-                fail(errors, f"{run_id}: external terminal requires direct-external-cli")
+            if event.get("actualExecutionPath") not in {"direct-external-cli", "direct-external-sdk"}:
+                fail(errors, f"{run_id}: external terminal requires a direct external execution path")
+            selected_sdk = event.get("sdkExecution")
+            coordination_actor = (
+                sdk_route and event.get("provider") == "codex"
+                and type(selected_sdk) is dict and selected_sdk.get("schemaVersion") == 3
+                and selected_sdk.get("operationKind") == "coordination-inference"
+                and event.get("role") == event.get("assignedRole") == "lead"
+                and event.get("gate") == "none"
+            )
             if event.get("executionRole") not in {
                 "external-worker", "external-reviewer", "consultant", "none",
-            }:
+            } and not (coordination_actor and event.get("executionRole") == "main"):
                 fail(errors, f"{run_id}: external terminal has invalid executionRole")
             if event.get("closesRunIds") != []:
                 fail(errors, f"{run_id}: external terminal requires empty closesRunIds")
             provider = event.get("provider")
             extended = {"externalDispatchId", "externalEvidenceRunId", "effortMappingLoss"}
-            if provider in {"codex", "claude"}:
+            if provider in {"codex", "claude"} and not sdk_route:
                 for key in sorted(extended & set(event)):
                     fail(errors, f"{run_id}: {provider} external terminal forbids {key}")
             elif provider in {"kimi", "grok"}:
@@ -4951,7 +5314,7 @@ def _validate_event_fields(
                     fail(errors, f"{run_id}: {provider} external terminal requires {key}")
                 if event.get("externalEvidenceRunId") != run_id:
                     fail(errors, f"{run_id}: external terminal evidence run must equal its runId")
-            else:
+            elif not sdk_route:
                 fail(errors, f"{run_id}: external terminal provider must be codex, claude, kimi, or grok")
         elif terminal_class == "internal-authorizing":
             required = {
@@ -5009,6 +5372,8 @@ def _validate_event_fields(
             and event.get("invalidationMode") in {"invalid-current-nonauthorizing", "historical-custody"}
         )
         unexpected_typed = typed_terminal_fields & set(event)
+        if sdk_route and event_kind == "launch":
+            unexpected_typed -= {"actualExecutionPath", "artifactIdentity", "externalDispatchId", "externalEvidenceRunId", "effortMappingLoss"}
         internal_closer_identity = (
             event.get("schemaVersion") == 2
             and unexpected_typed == {"artifactIdentity"}
@@ -5200,6 +5565,13 @@ def launch_terminal_binding_mismatches(launch, terminal) -> tuple[str, ...]:
         "workItem", "role", "executionRole", "assignedRole", "provider", "model",
         "scope", "promptFile", "effort", "launchFlags",
     )
+    if (launch.get("actualExecutionPath") == "direct-external-sdk"
+        or terminal.get("actualExecutionPath") == "direct-external-sdk"
+        or "sdkExecution" in launch or "sdkExecution" in terminal):
+        binding_fields += (
+            "sdkExecution", "actualExecutionPath", "artifactIdentity",
+            "externalDispatchId", "externalEvidenceRunId", "effortMappingLoss",
+        )
     return tuple(key for key in binding_fields
                  if (key in launch) != (key in terminal)
                  or (key in launch and not equal(launch[key], terminal[key])))
@@ -5317,7 +5689,10 @@ def _derive_authority_masks(
         binding_matches = False
         mismatches = ()
         if target is not None:
-            if not historical_definition:
+            if (not historical_definition
+                or target.get("actualExecutionPath") == "direct-external-sdk"
+                or event.get("actualExecutionPath") == "direct-external-sdk"
+                or "sdkExecution" in target or "sdkExecution" in event):
                 mismatches = launch_terminal_binding_mismatches(target, event)
                 binding_matches = not mismatches
             elif "launchFlags" not in target:
@@ -8647,6 +9022,8 @@ def _history_hold_errors(holds: Sequence[HistoricalLedgerHoldV1], errors: list[s
 
 def _unresolved_history(holds: Sequence[HistoricalLedgerHoldV1]) -> tuple[HistoricalLedgerHoldV1, ...]:
     return tuple(hold for hold in holds if hold.disposition_run_id is None)
+
+
 
 
 def _ordinary_current_disposition_rows(
@@ -12564,11 +12941,22 @@ def _obligations_observation(
     acquisition_complete: list[bool] = []
     try:
         captured = None
-        selected_absent = False
+        owner = load_lifecycle_owner()
+        selection_evidence = []
         try:
-            captured = read_ledger_bytes(selected, ledger_resource_budget)
-        except FileNotFoundError:
-            selected_absent = True
+            # Capture absence through its owner, not a failed file capture:
+            # missing, unreadable and drifting files share the latter's error.
+            selected_absent = owner._observe_project_path_at(
+                selected, "file", selection_evidence, "WI-LEDGER-RESOURCE-DRIFT"
+            ) is None
+            if not selected_absent:
+                captured = read_ledger_bytes(selected, ledger_resource_budget)
+            owner._verify_project_binding_evidence(
+                tuple(selection_evidence), "WI-LEDGER-RESOURCE-DRIFT"
+            )
+        except owner.LifecycleError as exc:
+            raise ValueError(f"{exc.failure_id}: {exc}") from exc
+        if selected_absent:
             if ledger_path is None:
                 status = item / "status.md"
                 if status.exists() and is_quick_fix_status(status.read_text(encoding="utf-8")):

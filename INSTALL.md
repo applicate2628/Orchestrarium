@@ -1,8 +1,143 @@
-# Installation
+# Install Orche
+
+## Selected-client copies and uninstall
+
+Codex is the primary host. The common installer lifecycle serves the qualified
+client catalog; other integrations do not own separate install/update/remove logic.
+Each client gets ordinary independent skill files from the same repository source:
+Codex under `.agents/skills`, the existing Claude adapter under `.claude/skills`.
+The installer no longer creates shared installed skill links or updates an
+unselected client's transport.
+
+Preview selected removal, then apply it explicitly:
+
+```sh
+python install.py --clients codex --global --uninstall
+python install.py --clients codex --global --uninstall --apply
+```
+
+The versioned installation record owns exact payload files and structural
+configuration entries, not whole user directories. Modified files, user additions
+and unrelated settings are preserved. A partially preserved payload returns status
+2 with its residual record; conflicting owned configuration fails before removal.
+No record means no inferred deletion authority. The bundled interpreter is retained;
+automatic last-consumer runtime reclamation is not implemented.
+
+### Legacy shared skill links
+
+Explicit migration is separate from installation. Preview selected known legacy
+skill links before conversion:
+
+```sh
+python install.py --clients claude --global --materialize-legacy-skills
+python install.py --clients claude --global --materialize-legacy-skills --apply
+```
+
+Conversion uses the existing transaction owner, preserves the referent and user
+extras, and restores original link objects on an ordinary failed transaction.
+For Codex, the ordinary source already belongs to that client: obsolete
+`.codex/skills` aliases are retired rather than duplicated. A secondary client
+receives its own independent ordinary copy.
+It does not log in, launch models, install a new version, or grant uninstall
+ownership over arbitrary legacy files. Unknown/external referents and nested links
+are refused. An unselected client that still depends on shared storage blocks
+mutation of that storage; select and migrate that consumer first.
+
+For an old shared installation, conversion alone is not an SDK upgrade. After
+conversion, run the normal installer for that same selected secondary client
+(for example, `python install.py --clients claude --global`). This installs its
+own transport and records the independent layout. Only then update Codex. Old
+receipts are carried only for authenticated converted skill trees; unknown or
+modified files do not acquire removal authority through conversion.
+
+Fresh-install/uninstall and the migrated secondary-client roundtrip pass on
+Windows (Python 3.15.2) and Linux (Python 3.12.14). Exact Codex alias retirement
+and rollback pass on Linux; the corresponding final Windows run is pending.
+These scoped results do not qualify every global layout, SDK containment, macOS
+or release-publication requirement.
+
+## Bundled Python entry and local assembly
+
+The public product is Orche (formerly Orchestrarium). Existing technical receipt,
+configuration and ownership identifiers remain unchanged. The source installer
+still supports the established Python entry points; the new distribution layer
+does not rewrite their file/update/rollback rules.
+
+The common root selector supports `--list-clients` and explicit `--clients codex
+claude`, followed by the existing installer flags. Without an explicit selection
+an interactive console offers multiple selection, the real installer dry-run and
+confirmation. Noninteractive input without `--clients` refuses without applying;
+blank/invalid menu input does not silently select every client. Only currently
+supported Codex and Claude pack integrations are listed.
+
+Local bundle assembly is implemented by `scripts/distribution/build.py`. Supply a
+previously verified, dependency-complete Python tree, an absent output directory
+outside the source/runtime trees, a target tuple and an explicit release label:
+
+```sh
+python scripts/distribution/build.py --runtime /path/to/verified/python \
+  --output /path/to/orche-bundle --target linux-x64 --release development
+```
+
+`development` denotes an unpublished local build, not a chosen product version
+or Git tag. This command does not download, sign, publish or activate a release.
+It preserves interpreter-relative layout and copies the installer/resources plus
+the Orche mascot. Build interruption leaves an incomplete output for diagnosis;
+a completed `bundle.json` is written last. Existing output is never overwritten.
+
+The bundle's `orche` shell entry or `orche.ps1` Windows entry invokes only its
+bundled Python and shared `launch.py`. All manifest paths are relative to the
+bundle, independent of caller CWD. The shared entry rejects a missing/mismatched
+interpreter/target and normalizes Python-specific environment for child processes;
+there is no system-Python fallback. It delegates to the unchanged pack installer:
+
+```sh
+./orche --clients codex --target /path/to/project --allow-unsafe-target --dry-run
+```
+
+Before actual apply, retain the complete bundle in its permanent location: current
+hooks record the installer's absolute interpreter path. The shared launcher offers
+an explicit create-only retention operation, using the same bundle builder:
+
+```sh
+./orche --retain-to /absolute/permanent/orche/development --clients codex \
+  --target /path/to/project --allow-unsafe-target
+```
+
+`--retain-to` must precede installer arguments. It copies the complete payload,
+then restarts through the retained Python before invoking the pack installer.
+The destination must be absent and absolute; existing releases are never replaced
+or automatically removed. The copy is an explicit effect even if the forwarded
+installer is in dry-run mode. For repeat installs, invoke the retained `orche`
+with `--permanent-runtime` instead of `--retain-to`. This explicit acknowledgement
+means the selected runtime will be kept while its installed hooks depend on it.
+Mutating apply without either lifetime choice is refused; listing/help and dry-run
+need no placement acknowledgement. An interrupted copy stays for diagnosis and has no
+completed manifest. Moving/deleting a retained location after apply requires
+explicit re-registration; relative archive paths alone do not make that safe.
+Automatic retained-release placement, remote authenticity verification and npm/irm
+acquisition are not implemented. Do not use this as an authenticated internet
+bootstrap.
+
+Local assembly and retention require verified, quiescent source/runtime trees and
+an exclusively controlled destination-parent hierarchy throughout copying and
+launch. Static root/parent links and Windows reparse points are refused; ordinary
+POSIX payload symlinks must stay inside the payload. Copying preserves links it
+observes for final validation, but its link check and open are not atomic. Any
+concurrent leaf or ancestor replacement is outside this local contract; stronger
+confinement would require native-handle-bound acquisition/publication.
+
+Linux local no-hook installation is exercised separately from SDK native process
+containment, which remains Windows-only. Windows bundle execution awaits native
+tests; macOS is documentation/static-only because no test machine is available.
+The builder's target list does not imply those platform checks have passed.
+
 
 This monorepo ships a Python-owned root installer (`install.py`) plus the thin POSIX launcher `install.sh`. They require Python 3.11 or newer, offer the supported Codex and Claude Code packs, then forward arguments to the matching pack-specific installers in the `scripts/` directory.
 
 The Codex installer materializes 18 manifest native-role TOMLs and registers their compatible name/description/file mappings in `.codex/config.toml`. Ordinary role defaults follow the current role policy, including GPT-6.1 Terra and Sol profiles; scientific-software-engineer defaults to Sol high. The named Luna `mechanical-scout` and `mechanical-worker` roles have zero decision authority: when its feature is enabled and the caller supplies a valid exact plan, `resolve_role_dispatch` returns `native-required`; disabled state returns `E_NATIVE_V2_DISABLED`. This named corridor requires exact `gpt-6-luna` with `high` as the default and minimum, allowing only `high`, `xhigh`, or `max`; host rejection is the nonauthorizing `E_LUNA_UNAVAILABLE` handoff. Factory payload hashes and approved stock-only migrations remain exact. All 18 factory role TOMLs ship `[features] apps=false` and `plugins=false`; compatible user tuning remains supported, main-session settings stay unchanged, and these flags do not establish selective MCP-server startup isolation. Manifest version 2 separately binds the owned parsed profession instructions, so compatible user runtime tuning and descriptions are preserved byte-for-byte without re-signing or rewriting TOML. Incompatible profession instructions, logical names or ambiguous registration sources remain preserved and fail closed; a known configured model/effort conflict holds the affected invocation under existing policy rather than declaring the model unavailable. These roles are native shared-policy corridors, not agents-mode or external-provider settings. Named mechanical callers consume the policy-only `resolve_role_dispatch` contract before considering native launch; host outcomes are not replayed and no fallback exists. Ordinary producer professions may explicitly select nonauthorizing `luna-high` or `luna-xhigh` at the policy-admitted `exploration`/`engineering` intersection through `describe_ordinary_native_role_options` then `resolve_ordinary_native_dispatch`, retaining profession, scoped tools/effects, omitted defaults, independent gates and final review/critical/recovery membership. Choose an exact admissible model/effort by actual task fit and expected total cost, time and quality of a verified result, including supervision, validation and rework; compare higher effort with the next suitable model without a fixed unit-price ranking, quota, weak-first trial or fallback. Prefer exact `gpt-6.1-terra` Medium for suitable ordinary producer work; High/Extra high require the same task-first comparison. Luna ordinary minimum is High and Terra minimum is Medium; Low is not selected on any model. Sol remains primary for science. Exceptional supplemental scientific Terra Max is individually agreed instead of recommending Sol Max for that extra lane; it does not replace independent domain/critical/final acceptance. Every Astra launch at any admitted effort and every model Max needs one genuine user agreement for that exact task, scope, route, tuple and single attempt; Astra Max needs one combined agreement. A routing-table approval, prior launch or flag is not that agreement. Preserve genuine current user controls, generic recovery and science defaults, eligible role/task membership, host controls and the named mechanical luna-high corridor; migrate factory controls only with positive stock provenance. Main-session model selection remains the user/app choice.
+
+The installer-managed helper payload includes optional software development kit (SDK) modules for both host packs; it does not provision their Python dependencies, log in, change billing, or activate execution. The explicit `--sdk-review-binding` option is limited to Codex reviews on the current Windows containment path; omission retains the legacy command-line interface (CLI) route. The dispatch module is registered in the source installer payload; installed readback and bridge qualification must be verified before use; diagnostic recovery is implemented but not yet native-qualified. See [SDK execution](docs/sdk-execution.md).
 
 ## Quick install
 
@@ -55,6 +190,8 @@ Copied metadata is checked at each operation boundary. Timestamp assignment must
 
 Forward extended-attribute copying is best effort only for an accounted record of an explicitly permitted error from that extended-attribute operation itself. A similar error from acquisition, identity checks, timestamps, mode or recording is not optional. Inverse metadata restoration errors remain mandatory failures. Unknown effects, foreign changes or missing operation proof preserve the primary cause and guarded recovery instead of continuing or reporting a clean rollback. A successful bounded metadata check does not establish installed pack delivery, global rollout success or settlement of earlier recovery.
 
+**Qualification note (2026-10-31):** a broad Windows regression run observed an intermittent `E_ROLLBACK_SETTLEMENT_FAILED` during initial-install backup cleanup. An isolated retry and an adjacent-test sequence completed that initial installation without reproducing the failure; the later linked-subroot exercise remained unavailable without symlink privilege. This does not establish the intermittent failure as fixed or native linked-path coverage as passing. A separately reproduced Windows shared-handle delay now receives up to 250 ms of observation-only grace after native deletion has been issued. A replacement, persistent hold or OS error still fails; deletion is never retried against the path. This bounded fix has not been established as the cause of that original intermittent failure. Preserve any reported recovery data; do not bypass identity checks or report whole-suite acceptance from the focused green runs.
+
 Maintainer note for this monorepo: `Orchestrarium/` is the installer/source tree, not automatically a repo-local installed Codex runtime. When you are editing this repository itself, a missing local `.agents/` tree can be perfectly valid if you are using the global install under `~/.codex/`. If you want this repository to behave as a repo-local install target, create that state intentionally through `scripts/install-codex.*` or the root router instead of hand-writing `.agents/` files.
 
 ## Init-time preset shortcuts
@@ -97,16 +234,17 @@ Use `python scripts/install-codex.py` or its thin POSIX launcher `scripts/instal
 Notes:
 
 - Project-level Codex installs use `.agents/skills/` plus the project root `AGENTS.md`.
-- Global Codex installs keep `$HOME/.agents/skills/` as the one canonical skill tree and preserve `~/.codex/skills/` as a compatibility entrypoint through per-Orchestrarium-skill directory projections. The installer never replaces the legacy `skills/` root or unrelated names. An absent owned name is projected automatically; an existing ordinary same-name tree remains untouched and makes compatibility non-PASS unless the operator supplies the exact repeatable `--migrate-legacy-skill <name>` flag. That flag is global-Codex-only: it moves only the named tree to `.codex/orchestrarium-legacy-skills/<name>/<tree-sha256>` before creating the projection. Unknown, duplicate, unsafe, local, or Claude uses fail before writes.
-- Global Codex and Claude installs share one installer-owned canonical Lead receipt at `$HOME/.agents/skills/.orchestrarium-lead-receipt.v1.json`. It records the verified authored Lead projection, excluding ordinary derived runtime bytecode; it does not attest to cache authenticity or ownership. Later clean versions upgrade without adding another source hash constant; a customized authored tree or invalid receipt still refuses. `--dry-run --global` checks admission without writing. An unlisted pre-receipt Lead tree needs a one-time explicit `--replace-unreceipted-lead-sha256 <observed-digest>` on a global install; obtain that digest from controlled selected-tree evidence. This option selects the exact observed authored projection for replacement, does not certify it as stock, cannot override a present receipt, and does not change `--force`. Preserve a paired backup of Lead and its receipt before a real migration: an older installer cannot be assumed to downgrade an already committed receipt-bearing install. Project-target installs do not use this receipt or option.
-- Global Codex and Claude installs also share one non-Lead receipt map at `$HOME/.agents/skills/.orchestrarium-nonlead-skills-receipt.v1.json`. Each entry binds a canonical skill name to its verified tree digest, so later clean changes upgrade through an ordinary install; modified trees, malformed maps, missing entries, and removed source skills fail closed. A legacy unlisted tree with no map needs one reviewed `--replace-unreceipted-skill-sha256 NAME=SHA256` grant per affected skill; the global-only flag is repeatable and `--dry-run` reports exact names, digests, and replacement count without writing. Wrong, unused, duplicate, Lead, or project-target grants refuse; `--force` does not bypass this rule. Preserve a paired tree/map backup before a real migration or downgrade. The canonical tree and map share the main installer transaction, but optional legacy `.codex/skills` compatibility still runs in its existing separate post-commit pass.
-- The common `$vcpkg-ports-updater` and `$vcpkg-builder` skills cover admitted vcpkg overlay synchronization, named-root inventory sweeps, and separately admitted runtime build gates. Codex installs materialize their canonical trees through the existing skill iterator; exact reinstall is a no-op, and a differing same-name tree is admitted only by a matching global receipt, a historical stock predecessor, or a one-time exact unreceipted grant. Claude carries provider-neutral body/reference sources and uses the existing shared canonical projection at install time; it does not copy Codex-only `agents/openai.yaml` metadata into the Claude source tree.
+- Codex owns its ordinary `.agents/skills/` payload. New installs do not synthesize `.codex/skills/` compatibility links. The historical `--migrate-legacy-skill` projection-creation option is retired; use the explicit legacy-copy migration preview above.
+- Each client's own skill root holds its Lead and non-Lead receipts. Clean receipted trees update through the same canonical materializer; user extras remain outside managed-member ownership. Global-only exact unreceipted adoption flags remain separate admission controls. Preserve the tree and receipts together for downgrade/recovery.
+- The non-Lead receipt map `.orchestrarium-nonlead-skills-receipt.v1.json` lives in each selected client's own skill root; clients do not share an installed map. New entries bind each canonical skill to its complete managed-member manifest. Changes to managed members, malformed maps, missing entries and removed source skills fail closed; unrelated user files remain protected. Legacy string digests require independent factory structure and are not upgraded to ownership proof merely by being read. A legacy unlisted tree with no map needs one reviewed `--replace-unreceipted-skill-sha256 NAME=tree-v2:SHA256` grant per affected skill; the global-only flag is repeatable and `--dry-run` reports exact names, digests, and replacement count without writing. Wrong, unused, duplicate, Lead, or project-target grants refuse; `--force` does not bypass this rule. Preserve a paired tree/map backup before a real migration or downgrade. The selected client's canonical tree and map share the main installer transaction. Legacy link conversion is a separate explicitly requested preview/apply operation; normal installation does not run a post-commit alias-creation pass.
+- The common `$vcpkg-ports-updater` and `$vcpkg-builder` skills cover admitted vcpkg overlay synchronization, named-root inventory sweeps, and separately admitted runtime build gates. Codex installs materialize their canonical trees through the existing skill iterator; exact reinstall is a no-op, and a differing same-name tree is admitted only by a matching global receipt, a historical stock predecessor, or a one-time exact unreceipted grant. Claude carries provider-neutral body/reference sources and receives an independent copy of the same canonical source at install time; it does not copy Codex-only `agents/openai.yaml` metadata into the Claude source tree.
 - The common knowledge-style [`$post-spawn-cleanup`](src.codex/skills/post-spawn-cleanup/SKILL.md) uses the same canonical skill iterator, non-Lead receipt and existing provider compatibility/discovery paths; it adds no standalone install target or cleanup process. Its [conditional Windows reference](src.codex/skills/post-spawn-cleanup/references/windows-native-mcp.md) is conditional guidance for the selected endpoint and capabilities. Creator-bound resource ownership and actual teardown readback remain required: a ProcessRunner Job covers only the processes it launched, not unknown native Model Context Protocol (MCP) servers. Source availability is not installed discovery; receive the selected canonical tree, receipt and compatibility through the normal installer owner.
 - The common `$generalize-from-instance` skill turns fixture-, geometry-, dataset-, user-case-, or one-off behavior into an owner-level general contract while retaining the original case only as regression evidence.
 - The `$implementation-to-theory` utility reconstructs the theory, numerical algorithms, and derivation behind existing scientific code while tracing equations to implementation; importing it does not authorize solver changes, expensive computations, or publication.
 - The installed Codex `AGENTS.md` is intentionally the compact universal minimum: it carries the shared governance layer plus the thin Codex runtime entrypoint, while detailed installed role behavior lives in the `skills/<role>/SKILL.md` files. Shared/provider reference docs remain source-tree maintainer canon and are not copied into target projects.
 - Codex installs create absent native role TOMLs under `.codex/agents/`; the source manifest validates all 18 current payloads and is never installed as an ownership receipt. Identical regular files are no-ops. Recognized exact hash-pinned prior working or currently-disabled stock role payloads may migrate; compatible user runtime settings and formatting are preserved, while customized payloads fail closed when profession instructions or identities are incompatible. Type collisions and reparse points fail without mutation. The same manifest drives `[agents.<name>]` config registration: exact mappings no-op, absent mappings append deterministically, and same-name field/shape collisions fail without changing config. Every unrelated config byte/comment/key and `agents.max_concurrent_threads_per_session` is preserved; an absent config receives `[features] multi_agent_v2 = true` plus every mapping. The exact frozen `agents.luna_mechanical` mapping is the sole other 1.x migration exception: it is removed only with a missing legacy file or the exact hash-pinned `agents/luna-mechanical.toml`; any differing mapping/file fails closed and remains. All config and legacy changes share the installer transaction and rollback. Other adoption, update, deletion, and reclaim remain 2.0 work.
 - Codex hook inventory authority is exactly `codex-hook-inventory.json` beside the final ordinary `hooks.json` storage file. An ordinary selected file remains unchanged; a selected file symlink and any directory symlink or junction components in its referent path are preserved and resolved through one bounded component walk. Every supported link/junction identity, kind, and raw target plus the resolved file, real parent, and ordinary inventory are bound against later retargeting or drift. Dangling components, directory leaf targets, link cycles, opaque unsupported reparse points, alternate inventory names or locations, and inventory links remain rejected. Hook-health failures use a strict 4,096-byte internal envelope and the two health-owned failure identifiers, while successful health output is temporary-file-backed and replayed byte-for-byte without a semantic size ceiling. Failed installs continue every independent rollback action and preserve the exact original exception and all acquired cleanup causes privately. A selected cache-aware tree keeps every sealed member exact while recognizing completed ordinary runtime cache observations; unknown members, changing writers, links and identity drift still refuse. Rollback restores the exact original target or target absence and preserves a cache-bearing current tree at the bound `.after` location, together with only the verified enclosing directories needed to support it. Those retained entries are fulfilled custody, distinct from unresolved actions, original beforeimages and permission to replay or delete recovery data. Both installers emit line-oriented `FAIL:` stderr and exit 1. Public bodies replace raw primary/member messages, payloads, link values and absolute or relative paths with fixed categories, supported stable identifiers and contexts, participant domains, managed slots and target-path hashes; unsupported or failed rendering is explicitly unavailable. The internal exception arguments, objects and member order remain intact. Copy-setter details retain operation, installation or rollback direction, failure stage, comparison fields, before/projected/observed timestamps in Unix-epoch nanoseconds and decimal flags (none remains distinct from zero/unavailable), plus the SHA256 digest of the actual normalized target path. Resolve a target hash only through controlled same-operation context or complete selected-path evidence. Scalar text remains limited to 40 ASCII bytes and retained path evidence to 131072 UTF-8 bytes; oversized components remain unavailable without changing metadata acceptance. Each scalar diagnostic addition retains its 768-byte payload and 2048-byte envelope budget; acquired members, safe comparisons, recovery roles and custody outcomes have no aggregate detail cap. Unavailable optional context does not weaken settlement or change failure polarity. Consumers of the removed raw prose or path text must migrate to these safe fields. A process terminated before ordinary failure output runs supplies no diagnostic packet.
+- Unreceipted-tree adoption refusals use the existing typed failure boundary and expose only a validated canonical skill name (up to 128 ASCII characters) and `tree-v2:<sha256>` token in the `adoption=` field. The token describes the observed tree; it is not consent and does not bypass later identity, receipt or scope checks. Old bare digests remain legacy lookup keys requiring independent factory evidence. Malformed evidence, arbitrary exception text and paths are not rendered as adoption hints.
 - Immediate installer cause details append `primary-cause=kind:...;id:...;context:...;errno:...;winerror:...` to the existing failure body and append `cause-kind`, `cause-id`, `cause-context`, `errno`, and `winerror` to each cleanup detail. The fixed kinds are `installer-failure`, `filesystem-error`, `validation-error`, `runtime-error`, `unsupported`, and `unavailable`; typed IDs and contexts reuse the existing allowlists. Native error numbers appear only for exact supported built-in filesystem error types when the exact integer exists in Python's standard error-code map and is nonzero. A Windows error code appears only when its native descriptor returns an exact integer from 1 through 4294967295. Missing, malformed, unknown, or unsupported values are `unavailable`. These fields describe only the immediate cause: the installer does not print exception text or walk exception chains, and diagnostics do not alter rollback, exit status, or recovery authority.
 - Codex installs copy `agent-run-ledger.*`, `validate-work-item-state.*`, and `check-work-items-state.*` into `.agents/skills/lead/scripts/` for project installs or `$HOME/.agents/skills/lead/scripts/` for global installs so task-memory operators can use the helpers without the source checkout.
 - On reinstall, absent native roles are created and exact role files and config mappings are no-ops. Recognized exact-stock role payloads can migrate, and compatible configured role files are preserved unless positively identified factory controls admit the documented migration. Incompatible instructions and ambiguous mappings are preserved and fail closed. Without stock provenance, factory-control migration is not authorized; compatible configured role bytes remain preserved and admissible. The source manifest is not an installed ownership receipt; the frozen `luna_mechanical` migration remains separately bounded as above.
@@ -161,8 +299,8 @@ Notes:
 - Full mode tables live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).
 - After first-time Claude project install, run `/agents-init-project` in Claude Code to write `## Project policies` in `.claude/CLAUDE.md` and review or update the installed default `.claude/.agents-mode.yaml`.
 - If a repo-local lane policy explicitly asks for consultant input at closeout, it follows the configured `consultantMode`. `consultantMode: disabled` waives consultant closeout instead of blocking the batch, and any requested consultant sweep stays advisory-only rather than replacing review or human gates.
-- The design-panel technique installs as `~/.claude/agents/contracts/design-panel.md` + `~/.claude/commands/agents-design-panel.md` (global) or the `<project>/.claude/` equivalents (project), source `src.claude/agents/contracts/design-panel.md` + `src.claude/commands/agents-design-panel.md`. No dedicated panel-state validator is installed; the pack validator checks only file presence and invariant markers (`DP1`-`DP8`).
-- Validation commands: `python src.claude/agents/scripts/validate-skill-pack.py` or its POSIX launcher `bash src.claude/agents/scripts/validate-skill-pack.sh`.
+- The design-panel technique installs as `~/.claude/agents/contracts/design-panel.md` + `~/.claude/commands/agents-design-panel.md` (global) or the `<project>/.claude/` equivalents (project), source `adapters/claude/agents/contracts/design-panel.md` + `adapters/claude/commands/agents-design-panel.md`. No dedicated panel-state validator is installed; the pack validator checks only file presence and invariant markers (`DP1`-`DP8`).
+- Validation commands: `python adapters/claude/agents/scripts/validate-skill-pack.py` or its POSIX launcher `bash adapters/claude/agents/scripts/validate-skill-pack.sh`.
 
 ## Multi-pack setup
 
@@ -194,7 +332,7 @@ Reference directories are development-only and are not installed:
 - `shared/references/`
 - `docs/`
 - `references-codex/`
-- `references-claude/`
+- `adapters/claude/references/`
 
 
 ## Post-install customization
@@ -279,7 +417,7 @@ Runtime installation is English-only. `shared/references/ru/ui-transition-contin
 The git-push marker now registers `check-git-push-gate-runner.py`, a minimal cached-import entry point for fixed siblings `hook_common.py` and `git_push_gate_preflight.py`, with policy `check-git-push-gate.py` loaded when required. Any load or delegation failure denies without raw detail. This changes the Codex command identity, so the next install requires the documented interactive trust review.
 
 - **PreToolUse bugfix-discipline hook** (`check-bugfix-discipline.py`): catches the model about to make a code-mutating tool call (`Edit`/`Write`/`NotebookEdit`/`apply_patch`) in response to a bug-report or change-request signal (`fix`, `change`, `broken`, `не работает`, `исправь`, `пофикси`, traceback, `Error:`), without first invoking `/agents-bugfix` or otherwise capturing diagnostic data. It reads the PreToolUse envelope's `transcript_path`, checks the current turn for discipline signals, and emits a structured deny payload when the pre-fix gate was skipped. It skips subagent contexts (envelope `agent_id` present) and exempts writes to non-code artifact paths (`.reports/`, `.scratch/`, `.plans/`, `work-items/`, `docs/`), so a report/plan/doc write under a bug-vocabulary prompt is never falsely blocked (proven on a real transcript).
-- **PreToolUse git-push publication-gate hook** (`check-git-push-gate.py`; registered on a `Bash` matcher): a technical target and leak-check backstop. Root receives genuine human review and consent for the specific publication before submitting the command; the hook does not reconstruct consent from chat history, special markers, stored bindings or a PR oracle. It qualifies one supported actual push and its command-scoped native Git pre-push callback. Git supplies the actual updates to that callback, which requires one fresh bounded, reaped, nonempty version-3 union of their commit/tree/blob graphs relative to each old object ID and a separate version-4 result covering actual transferred roots; the callback rechecks currentness around the scans. Ordinary clean and explicit security-reviewer-qualified outcomes keep their coverage, provenance, current used-authority and resource guarantees; failed or incomplete checks and target drift refuse. PR and ordinary pushes share this technical path. Human consent, revocation/no-push, PR scope and actual host/server restrictions remain separately binding; hook success proves neither human consent nor completed publication.
+- **PreToolUse git-push publication-gate hook** (`check-git-push-gate.py`; registered on a `Bash` matcher): a technical target and leak-check backstop. Root receives genuine human review and consent for the specific publication before submitting the command; the hook does not reconstruct consent from chat history, special markers, stored bindings or a PR oracle. It qualifies one supported actual push and its command-scoped native Git pre-push callback. Git supplies the actual updates to that callback, which requires one fresh bounded, reaped, nonempty version-3 union of their commit/tree/blob graphs relative to the union of known old objects from that same native callback and a separate version-4 result covering actual transferred roots; the callback rechecks currentness around the scans. Ordinary clean and explicit security-reviewer-qualified outcomes keep their coverage, provenance, current used-authority and resource guarantees; failed or incomplete checks and target drift refuse. PR and ordinary pushes share this technical path. Human consent, revocation/no-push, PR scope and actual host/server restrictions remain separately binding; hook success proves neither human consent nor completed publication. Publication scanning requires Git 2.36 or newer for the owned reader's batch-command protocol; native-hook registration has its separate capability check.
 - The new `publication_review_policy.py` runtime module follows the existing universal-hook mirror/provider-tree installation path; it is not a second `RUNTIME_HELPERS` destination. It reuses the existing `linked_runtime_subroots.py` materialization and declared source-pack binding. Source, both source packs and installed components must provide the coherent eight-role closure before qualified receiving. Runtime reviewed-policy data remains separate at `$HOME/.agents/publication/reviewed-exceptions.json`: only the trusted caller promotes an actual security-reviewer decision received by Root. Installing or rolling back code never provisions a grant, overwrites that policy or restores a revoked grant. Host-required hook trust remains the existing separate host step.
 
 - **Stop passive-polling hook** (`check-passive-polling-stop.py`): catches the model about to end its turn by saying it is waiting for an async external source (bot/review/CI/job/notification/reply) without a relevant current-turn state check. It reads `last_assistant_message` from the Stop envelope, respects `stop_hook_active=true`, exempts user handoffs like `waiting for your response` / `жду твоего подтверждения`, supports the per-stop `[acknowledge-passive-stop]` override, and otherwise requires a relevant probe such as `date`, `Get-Date`, `gh pr view`, `gh run list`, `gh api`, `curl`, process/task output, or reading an output/log/task file. After preserving that decision, one stable staged `status.md` explicitly armed with the exact current `session_id` and `turn_id`, `Continuation intent: ready`, active state, and a nonempty `Next action` produces one `STOP-CONTINUITY-READY` continuation; missing, stale, ambiguous, or drifting intent allows Stop.
@@ -293,7 +431,7 @@ The git-push marker now registers `check-git-push-gate-runner.py`, a minimal cac
 - **PreToolUse typed-routing hook** (`check-typed-routing.py`; **Claude-only**, same typed `agents/hooks/` dir, registered on the `Agent` subagent-dispatch matcher): a **warn-only AUDIT** hook that nudges when the orchestrator dispatches the built-in catch-all `subagent_type: general-purpose` for work that looks like typed specialist work (an implementation/review/design/security/performance/toolchain signal in the dispatch prompt), so the routing smell surfaces at the dispatch decision — the one moment it is observable. It skips subagent contexts (`agent_id`), keys on the Phase-0-captured dispatch shape (`tool_name` `Agent`, `tool_input.subagent_type`) and is INERT if that shape is absent (a mismatch makes it fire nothing, never a false block). A nudge is delivered as `hookSpecificOutput.additionalContext` JSON on standard output; hit, clean, and internal-error paths return 0, and it never blocks (never exit 2). It has no Codex mirror — Codex CLI exposes no analogous subagent-dispatch tool, so the Codex pack's hook count is unchanged.
 - **SessionStart MCP-usage reminder** (`mcp-usage-reminder.py`): informational context injection at startup/resume/compaction. It does not block, but it makes MCP/tool-discovery a visible checkpoint for codebase, architecture, API/docs, search, browser, debugger, profiler, and repository-understanding tasks; under `mcpMode: force`, relevant MCP use remains a standing instruction.
 - **SessionStart delegation-posture reminder** (`agents-mode-reminder.py`): informational context injection at startup/resume/compaction. It reads the effective `delegationMode` from a self-contained first-match walk of the documented `.agents-mode.yaml` read-order and, ONLY when that mode is `force` or `auto`, emits an imperative directive telling the main conversation to adopt the `$lead` orchestration role in-session and route non-trivial tasks to the matching specialist role (spawned via the Agent tool on Claude; activated as a skill on Codex), and maintain `work-items/` recovery state; it is SILENT on `manual` and on the no-file/unresolved state (fail-safe). Because the shipped default is now `auto`, a default install surfaces the auto delegation directive automatically, without an `/agents-init-project` run. It exists because `delegationMode` is pack governance the host never parses on its own — without it the main conversation never sees `force` and never applies it. Generic and fail-open (any error emits nothing and exits 0).
-- **SessionStart scratch-valuables watchdog** (`check-scratch-valuables.py`): informational, CONDITIONAL context injection at startup/resume/compaction — a read-only detector for `.scratch/` (the pack's own local-scratch convention) that surfaces valuable-looking data before the operator accidentally overwrites it, instead of a command someone has to remember to run. It NEVER deletes, moves, quarantines, or otherwise mutates anything; its only filesystem/process calls are directory reads, stats, junction detection, and two READ-ONLY git subprocesses. The PRIMARY signal is git-content-uniqueness: a candidate is a non-empty, non-junk file whose exact bytes are not already recoverable from the local repository's git object database (checked via `git hash-object` — never with `-w` — plus `git cat-file --batch-check`); age is a severity/sort key (newest-modified first), not a filter. When `.scratch/` is not inside a git repository, git is unavailable, or any git call fails, it falls back to the prior age-gated behavior (older than 7 days) rather than going silent or noisy. A narrow junk denylist (editor/OS litter, cache and dependency directories, known external-CLI prompt-capture shapes) is applied as a secondary filter on top of the uniqueness check, biased to over-warn rather than hide real data. It is SILENT when nothing is found; when the candidate count is large it summarizes by top-level `.scratch/` subdirectory and lists a short window led by the longest-lingering files plus the newest-modified, instead of a flat dump. Fail-open (any error emits nothing and exits 0).
+- **SessionStart scratch-valuables watchdog** (`check-scratch-valuables.py`): informational context at startup/resume/compaction. It does not delete, move or modify repository data. A bounded directory walk and read-only Git probes identify non-empty, non-junk content absent from the current object database; age ranks candidates, with an age-based fallback when Git cannot be used. Git hashing bypasses clean filters and enables long Windows paths only for that command. Temporary stdin transport files are privately created and settled outside the target repository. A quiet or partial scan is not permission to dispose of scratch: existing blobs may be unreferenced, and required logs may be excluded from this advisory. The existing owned-tree lifecycle proof separately checks independent retained custody before its selected disposition. See [source hygiene](shared/references/repository-source-hygiene.md#scratch-independent-recovery). Errors or unavailable advisory checks never become a global work gate.
 - **UserPromptSubmit turn-anchor reminder** (`turn-anchor-reminder.py`): informational context injection at the START OF EVERY TURN, not just SessionStart/compaction. It re-anchors two turn-boundary postures ("a passed slice is not completion, keep going until blocked" and "delegate at the first decision point via `$lead`") because their failure moment is the turn boundary itself, which a once-per-session reminder cannot reach once a long turn's own momentum takes over (measured in-session: ~100 consecutive successful tool calls with the reminder still in context, never consulted). It also appends the current bounded `session_id` and `turn_id` for selective lifecycle-owner arming; it never writes or arms status itself. Deliberately short — this text is paid for on every turn, so detail stays in the SessionStart reminders and the spine. Always emits; fail-open (never exit 2, which would erase the user's prompt per the hooks reference).
 
 **The production installers auto-register all retained entries by default** (thirteen for Claude Code, including the Claude-only `check-typed-routing` audit, and twelve for Codex CLI, including the Codex-only parallel/MCP reminder) in both `--global` and `--target <project>` modes via an idempotent JSON merge that preserves all your other settings and hooks. Upgrade removes the exact owned Codex search-audit registration, preserves custom siblings and metadata, and reclaims only its hash-matching retired file after synchronization and health verification:
@@ -348,9 +486,54 @@ Entries are identified independently by script marker: `check-bugfix-discipline`
 
 When both packs are installed, keep shared project policies aligned across both files. The repository's dev overlays, `AGENTS.md` and `CLAUDE.md`, are for maintaining this monorepo and are not copied into target projects by the install scripts.
 
+Coordination Model candidate: [design and qualification holds](docs/codex-coordination-model.md). The candidate is not activated and does not provision dependencies.
+
 Managed adapters supply actual assigned-role provenance and consume `--user-approved-launch` locally before `--`; that flag is only the caller projection of one genuine exact-attempt Astra/Max agreement. `provider_prompt.launch` and the native selector share the pure `model_routing/launch_policy.py` rule. A complete selected logical package includes that nested module, including relocated transports; a FILE link on R/P does not move its companion namespace to the referent directory. Missing/broken mandatory support fails truthfully before effects. Prefer completing the qualified package; declared same-owner Assistance with all canonical rule, scope, genuine permission where needed, resources and readback guarantees may be selected by Root without a new ordinary permission loop. There is no catch-and-allow, raw-flag authority or automatic retry. Roleless direct-user compatibility does not permit managed callers to omit their assigned profession.
 
+## Codex global-backed project instructions
+
+Codex project installation reuses the full native global policy only when the
+selected global file contains the exact current managed Orche block. The full
+rules are not shortened. The installer checks CODEX_HOME (or the normal global
+Codex home), gives a nonempty AGENTS.override.md precedence over AGENTS.md,
+and keeps complete project instructions when that source is missing, unreadable,
+ambiguous, or different. Explicit CODEX_HOME reuse requires an absolute path;
+relative or literal-tilde values conservatively keep the full project policy.
+Only ASCII-whitespace-only candidates are skipped for reuse; other whitespace
+ambiguity conservatively keeps the complete local policy. A global installation always keeps the complete policy.
+This is an Orche installer decision based on the qualified Codex native loader,
+not a promise that other clients load the same files.
+
+
+Windows default discovery reads the OS Profile Known Folder used by the pinned
+native client, not HOME/USERPROFILE overrides. POSIX reuse admits an absolute
+HOME; unavailable default-home evidence keeps the full project policy. This does
+not change the existing installer's global target selection. The lookup is read-only.
+
+The project then contains a short managed dependency notice and preserves user
+instructions outside that block. To keep an independently portable project,
+use `python install.py --clients codex --standalone-instructions` with the same
+project target options. Reapplying without that flag may reuse a matching global
+policy again. This option does not change other clients or remove the global file.
+Preview reports the selected layout without writing either instruction file.
+
+Start a new Codex session after changing the instruction layout: existing sessions
+may hold an earlier global snapshot. A different machine, CODEX_HOME, or removed
+global installation requires reinstallation with --standalone-instructions.
+Global uninstall warns about that dependency; it neither scans arbitrary projects
+nor silently rewrites them. The uninstall ownership receipt continues to protect
+user additions and modified managed content. No global consumer registry is added.
+
+The pinned Codex 0.163.0 source reads the first nonempty global candidate fully:
+[codex-home instructions](https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/codex-home/src/instructions/mod.rs).
+Project document size limits are a separate mechanism. Source inspection and
+isolated file-lifecycle tests do not establish live model compliance or measured
+token savings. External worker framing remains self-contained where required.
+
 ## Terms and Abbreviations
+
+- `SDK`: Software Development Kit; optional provider integration helpers, not launch authority.
+- `Host`: existing invoking orchestration session that retains authorization.
 
 - `AGENTS.md`: agent governance file installed for Codex and materialized as a shared-governance module for example providers.
 - `agent-run-ledger.*`: helper script family that initializes legacy work-item ledger files and appends validated `agent-runs.jsonl` events.

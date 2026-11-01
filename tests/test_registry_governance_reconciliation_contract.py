@@ -5,21 +5,21 @@ ROOT = Path(__file__).resolve().parents[1]
 
 ARCHIVIST_BINDINGS = (
     ROOT / "src.codex" / "skills" / "knowledge-archivist" / "SKILL.md",
-    ROOT / "src.claude" / "agents" / "knowledge-archivist.md",
+    ROOT / 'adapters/claude' / "agents" / "knowledge-archivist.md",
 )
 
 LEAD_BINDINGS = (
     ROOT / "src.codex" / "skills" / "lead" / "SKILL.md",
-    ROOT / "src.claude" / "skills" / "lead" / "SKILL.md",
+    ROOT / 'adapters/claude' / "skills" / "lead" / "SKILL.md",
 )
 
 CONTROL_SURFACES = (
     ROOT / "src.codex" / "skills" / "lead" / "operating-model.md",
-    ROOT / "src.claude" / "agents" / "contracts" / "operating-model.md",
+    ROOT / 'adapters/claude' / "agents" / "contracts" / "operating-model.md",
     ROOT / "references-codex" / "periodic-control-matrix.md",
-    ROOT / "references-claude" / "periodic-control-matrix.md",
+    ROOT / 'adapters/claude/references' / "periodic-control-matrix.md",
     ROOT / "references-codex" / "ru" / "periodic-control-matrix.md",
-    ROOT / "references-claude" / "ru" / "periodic-control-matrix.md",
+    ROOT / 'adapters/claude/references' / "ru" / "periodic-control-matrix.md",
 )
 
 SHARED_OPERATING_MODEL = ROOT / "shared" / "references" / "subagent-operating-model.md"

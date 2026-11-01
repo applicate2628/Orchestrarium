@@ -573,6 +573,7 @@ def _record_round(
     *,
     findings: list | None = None,
     reconciliation: list | None = None,
+    blockers: list | None = None,
 ) -> subprocess.CompletedProcess[str]:
     payload = {
         "verdict": verdict,
@@ -581,6 +582,8 @@ def _record_round(
         "scope_unchanged": "yes",
         "verification_adequate": "yes",
     }
+    if blockers is not None:
+        payload["blockers"] = blockers
     if lane == "scout":
         payload = {
             "findings": [] if findings is None else findings,
@@ -2281,8 +2284,8 @@ def test_runtime_engine_is_projected_and_observability_record_is_current() -> No
     live_surfaces = (
         ROOT / "shared" / "references" / "review-loop-methodology.md",
         ROOT / "shared" / "references" / "ru" / "review-loop-methodology.md",
-        ROOT / "src.claude" / "agents" / "contracts" / "review-loop.md",
-        ROOT / "src.claude" / "commands" / "agents-review-loop.md",
+        ROOT / 'adapters/claude' / "agents" / "contracts" / "review-loop.md",
+        ROOT / 'adapters/claude' / "commands" / "agents-review-loop.md",
         ROOT / "src.codex" / "skills" / "review-loop" / "SKILL.md",
     )
     old_bug = "work-items/bugs/2026-07-26-nothing-observes-a-review-loop-that-ran-without-a-ledger.md"
@@ -2336,3 +2339,479 @@ def test_runtime_engine_is_copied_by_production_installers(
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert (project / installed).read_bytes() == ENGINE.read_bytes()
+
+
+def test_empty_scout_can_receive_new_dispositions_without_rewriting_result(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, receipt = _completed_grouped_scout(repo, ["finding-a", "finding-b"], [])
+    original = json.loads(state.read_text(encoding="utf-8"))
+    original_file = (repo / ".scratch" / "round-1-scout.json").read_bytes()
+    metadata = {
+        **_scout_metadata(state, [0, 1]),
+        "version": 2,
+        "reconciliation": [
+            {"finding": "finding-a", "disposition": "Independently checked; no candidate change required."},
+            {"finding": "finding-b", "disposition": "Accepted comparison confirms existing implementation."},
+        ],
+        "evidence": "Synthetic independently verified Root dispositions, received now; original scout had no rows.",
+    }
+    arguments = _amend_arguments(repo, state, receipt, metadata, "receive-empty-scout")
+    result = _run(repo, *arguments)
+    assert result.returncode == 0, result.stderr
+    after = json.loads(state.read_text(encoding="utf-8"))
+    assert after["rounds"][0]["scout"] == original["rounds"][0]["scout"]
+    assert after["operations"][:-1] == original["operations"]
+    assert (repo / ".scratch" / "round-1-scout.json").read_bytes() == original_file
+    effective = _engine_module().effective_scout_reconciliation(after, 0)
+    assert [row["disposition"] for row in effective["reconciliation"]] == metadata["reconciliation"]
+    before = state.read_bytes()
+    assert _run(repo, *arguments).returncode == 0
+    assert state.read_bytes() == before
+    assert _run(repo, "close", "--state", state, "--operation-id", "close-after-receiving",
+                "--outcome", "converged").returncode == 0
+    assert _run(repo, "validate", "--state", state, "--require-v2", "--require-terminal").returncode == 0
+
+
+@pytest.mark.parametrize("fault", ["missing_rows", "empty_rows", "missing_finding", "wrong_digest",
+                                  "missing_evidence", "replace_original_rows"])
+def test_empty_scout_disposition_receiving_rejects_unqualified_input(tmp_path: Path, fault: str) -> None:
+    repo = _repo(tmp_path)
+    original_rows = ["original disposition"] if fault == "replace_original_rows" else []
+    state, receipt = _completed_grouped_scout(repo, ["a", "b"], original_rows)
+    metadata = {**_scout_metadata(state, [0, 1]), "version": 2,
+                "reconciliation": ["verified a", "verified b"]}
+    if fault == "missing_rows":
+        del metadata["reconciliation"]
+    elif fault == "empty_rows":
+        metadata["reconciliation"] = []
+    elif fault == "missing_finding":
+        metadata["links"].pop()
+    elif fault == "wrong_digest":
+        metadata["scout_result_sha256"] = "0" * 64
+    elif fault == "missing_evidence":
+        metadata["evidence"] = ""
+    before = state.read_bytes()
+    result = _run(repo, *_amend_arguments(repo, state, receipt, metadata, "invalid-new-rows"))
+    assert result.returncode == 1 and "RLSTATE_" in result.stderr
+    assert state.read_bytes() == before
+
+
+
+def _bind_loop_receiving_sources(item: Path, data: dict, receipt: dict, events: list[dict], metadata: dict):
+    block = data["rounds"][0]["deep"]
+    original = {key: block[key] for key in _engine_module().VERDICT_RESULT_FIELDS if key in block}
+    original_path = item / "original-result.json"
+    original_path.write_text(json.dumps(original), encoding="utf-8")
+    claims = block.get("blockers") or [block["rationale"]]
+    summary = {
+        "target": {"role": "architecture-reviewer", "scope": events[0]["scope"],
+                   "angle": "architecture-deep", "artifact_revision": receipt["artifact_revision"],
+                   "verdict": "REVISE", "text": "Original independent-input procedural refusal."},
+        "replacement": {"role": "architecture-reviewer", "scope": events[1]["scope"],
+                        "angle": "architecture-deep", "artifact_revision": receipt["artifact_revision"],
+                        "verdict": "PASS", "claims": [
+                            {"id": f"finding-{i}", "verdict": "verified",
+                             "text": "Fresh independent review explicitly reverified this original obligation."}
+                            for i in range(len(claims))]},
+        "native": {"authorRunId": "separate-artifact-author", "reviewerRunId": events[1]["runId"]},
+    }
+    (item / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+    def anchor(ref, path):
+        return {"source": {"kind": "artifact", "ref": ref},
+                "sourceSha256": hashlib.sha256((item / ref).read_bytes()).hexdigest(),
+                "selector": {"kind": "json-value", "path": path}}
+    field = "blockers" if original.get("blockers") else "rationale"
+    subject = {"artifactKey": data["rounds"][0]["artifact"]["snapshot"],
+               "revision": receipt["artifact_revision"]}
+    proof = {
+        "version": 2,
+        "target": {"runId": events[0]["runId"], "rawLineSha256": hashlib.sha256(json.dumps(events[0]).encode()).hexdigest()},
+        "reviewerPass": {"runId": events[1]["runId"], "rawLineSha256": hashlib.sha256(json.dumps(events[1]).encode()).hexdigest()},
+        "reports": {"targetSha256": anchor("summary.json", [])["sourceSha256"],
+                    "passSha256": anchor("summary.json", [])["sourceSha256"]},
+        "subject": {"before": subject, "after": subject},
+        "bindingEvidence": {
+            "scope": {"relation": "same", "sources": [anchor("summary.json", ["target", "scope"]), anchor("summary.json", ["replacement", "scope"])]},
+            "angle": {"value": "architecture-deep", "sources": [anchor("summary.json", ["target", "angle"]), anchor("summary.json", ["replacement", "angle"])]},
+            "lineage": {"sources": [anchor("summary.json", ["target", "artifact_revision"]), anchor("summary.json", ["replacement", "artifact_revision"])]},
+            "nativeReceiving": {"facts": [{"kind": "review", "ref": "summary.json", "result": "Actual synthetic Root receiving, not a recovered transcript."}],
+                                "sources": [anchor("summary.json", ["native"])]},
+        },
+        "findingEvidence": {"completeTargetFindings": anchor("original-result.json", [field])},
+        "rootSemanticReceiving": {"version": 1, "action": "receive-independent-review-claims",
+            "findings": [{"findingId": f"finding-{i}",
+                          "targetFinding": anchor("original-result.json", [field, i] if field == "blockers" else [field]),
+                          "reviewerClaimUnit": anchor("summary.json", ["replacement", "claims", i]),
+                          "reviewedRevision": receipt["artifact_revision"],
+                          "meaning": "reviewer-explicitly-reverified-corrected-finding"} for i in range(len(claims))]},
+    }
+    metadata["version"] = 2
+    metadata["source_binding"] = {
+        "version": 1, "action": "receive-original-loop-review-association",
+        "loop": {"loopId": data["loop_id"], "round": 1, "lane": "deep",
+                 "attemptId": receipt["attempts"]["deep"], "artifactRevision": receipt["artifact_revision"]},
+        "reviewedRole": "architecture-reviewer",
+        "originalResult": anchor("original-result.json", []),
+        "targetSummary": anchor("summary.json", ["target"]),
+        "reviewerSummary": anchor("summary.json", ["replacement"]),
+        "evidenceLimitations": "Synthetic retained canonical summary; not a recovered full input-access transcript.",
+        "proof": proof,
+    }
+    return metadata
+
+
+def _completed_revise_with_ledger(repo: Path, *, scout_findings=(), surgical_verdict="PASS", deep_retries=0, deep_blockers=None):
+    state, receipt = _begin(repo)
+    for index in range(deep_retries):
+        attempt = receipt["attempts"]["deep"]
+        failure = _run(repo, "record-failure", "--state", state, "--operation-id", f"failure-{index}",
+                       "--round", 1, "--lane", "deep", "--attempt-id", attempt,
+                       "--artifact-revision", receipt["artifact_revision"], "--failure", "error")
+        assert failure.returncode == 0, failure.stderr
+        retry = _run(repo, "admit-retry", "--state", state, "--operation-id", f"retry-{index}",
+                     "--round", 1, "--lane", "deep", "--failed-attempt-id", attempt)
+        assert retry.returncode == 0, retry.stderr
+        receipt["attempts"]["deep"] = json.loads(retry.stdout)["attempt_id"]
+    for lane in ("surgical", "deep", "scout"):
+        verdict = "REVISE" if lane == "deep" else surgical_verdict if lane == "surgical" else "PASS"
+        extra = {"findings": list(scout_findings), "reconciliation": []} if lane == "scout" else {}
+        if lane == "deep" and deep_blockers is not None:
+            extra["blockers"] = deep_blockers
+        result = _record_round(repo, state, receipt, 1, lane, verdict, **extra)
+        assert result.returncode == 0, result.stderr
+    assert _run(repo, "complete-round", "--state", state, "--operation-id", "complete-revise",
+                "--round", 1).returncode == 0
+    item = repo / "work-items/active/review-fixture"
+    item.mkdir(parents=True)
+    (item / "status.md").write_text("# Status\n\n## Current state\nopen\n", encoding="utf-8")
+    data = json.loads(state.read_text(encoding="utf-8"))
+    (item / "design.md").write_bytes((repo / data["rounds"][0]["artifact"]["snapshot"]).read_bytes())
+    base = {
+        "schemaVersion": 2, "workItem": "review-fixture", "role": "architecture-reviewer",
+        "executionRole": "internal", "scope": ["Original architecture deep review"],
+        "artifact": "summary.json", "effort": "xhigh", "provider": "codex",
+        "startedAt": "2026-10-29T10:00:00Z", "updatedAt": "2026-10-29T10:00:00Z",
+    }
+    target = {**base, "runId": "original-procedural-review", "status": "revise", "gate": "REVISE",
+              "findingClass": "correctness"}
+    closer = {**base, "runId": "independent-same-artifact-review", "status": "completed", "gate": "PASS",
+              "scope": ["Independent same-subject re-verification"], "closesRunIds": [target["runId"]],
+              "evidence": [{"kind": "review", "ref": "synthetic independent review of unchanged frozen artifact"}]}
+    (item / "agent-runs.jsonl").write_text("\n".join(json.dumps(e) for e in (target, closer)) + "\n", encoding="utf-8")
+    metadata = {
+        "version": 1, "original_result_sha256": _engine_module()._value_sha256(data["rounds"][0]["deep"]),
+        "expected_head": None, "work_item": "work-items/active/review-fixture",
+        "target_run_id": target["runId"], "closer_run_id": closer["runId"],
+        "ledger_lane": "architecture-deep",
+        "evidence": "Synthetic Root association of the actual original deep result and its independently qualified recorded-equivalent closure.",
+    }
+    metadata = _bind_loop_receiving_sources(item, data, receipt, [target, closer], metadata)
+    return state, receipt, item, metadata
+
+
+def _verdict_closure_arguments(repo: Path, state: Path, receipt: dict, metadata: dict, operation="receive-closure"):
+    path = _text(repo / ".scratch" / (operation + "-closure.json"), json.dumps(metadata))
+    return ["receive-verdict-closure", "--state", state, "--operation-id", operation,
+            "--round", 1, "--lane", "deep", "--attempt-id", receipt["attempts"]["deep"],
+            "--artifact-revision", receipt["artifact_revision"], "--metadata-file", path]
+
+
+def test_same_artifact_qualified_closure_preserves_original_revise_and_replays(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, receipt, item, metadata = _completed_revise_with_ledger(repo)
+    before = json.loads(state.read_text(encoding="utf-8"))
+    ledger_before = (item / "agent-runs.jsonl").read_bytes()
+    args = _verdict_closure_arguments(repo, state, receipt, metadata)
+    result = _run(repo, *args)
+    assert result.returncode == 0, result.stderr
+    after = json.loads(state.read_text(encoding="utf-8"))
+    assert after["rounds"][0]["deep"] == before["rounds"][0]["deep"]
+    assert after["rounds"][0]["deep"]["verdict"] == "REVISE"
+    assert after["rounds"][0]["lane_failures"] == before["rounds"][0]["lane_failures"]
+    assert after["operations"][:-1] == before["operations"]
+    assert (item / "agent-runs.jsonl").read_bytes() == ledger_before
+    assert _engine_module().effective_verdict(after, 0, "deep") == "PASS"
+    image = state.read_bytes()
+    assert _run(repo, *args).returncode == 0
+    assert state.read_bytes() == image
+    close = _run(repo, "close", "--state", state, "--operation-id", "close-reverified", "--outcome", "converged")
+    assert close.returncode == 0, close.stderr
+    result = _run(repo, "validate", "--state", state, "--require-v2", "--require-terminal")
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["effective_verdicts"] == {"surgical": "PASS", "deep": "PASS"}
+
+
+@pytest.mark.parametrize("fault", ["wrong_revision", "wrong_lane", "wrong_role", "wrong_scope",
+                                  "missing_relation", "unknown_target", "wrong_result", "empty_evidence"])
+def test_verdict_closure_rejects_unqualified_replacements_without_effects(tmp_path: Path, fault: str) -> None:
+    repo = _repo(tmp_path)
+    state, receipt, item, metadata = _completed_revise_with_ledger(repo)
+    ledger = item / "agent-runs.jsonl"
+    events = [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()]
+    if fault == "wrong_revision":
+        events[1]["artifactRevision"] = "sha256:" + "0" * 64
+    elif fault == "wrong_lane":
+        events[1]["lane"] = "different-angle"
+    elif fault == "wrong_role":
+        events[1]["role"] = "qa-engineer"
+    elif fault == "wrong_scope":
+        events[1]["scope"] = ["different task"]
+    elif fault == "missing_relation":
+        events[1].pop("closesRunIds")
+    elif fault == "unknown_target":
+        metadata["target_run_id"] = "unrelated-review"
+    elif fault == "wrong_result":
+        metadata["original_result_sha256"] = "0" * 64
+    elif fault == "empty_evidence":
+        metadata["evidence"] = ""
+    ledger.write_text("\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8")
+    before = state.read_bytes()
+    result = _run(repo, *_verdict_closure_arguments(repo, state, receipt, metadata))
+    assert result.returncode != 0
+    assert state.read_bytes() == before
+
+
+@pytest.mark.parametrize("pending", ["surgical", "scout"])
+def test_receiving_one_verdict_does_not_clear_other_obligations(tmp_path: Path, pending: str) -> None:
+    repo = _repo(tmp_path)
+    state, receipt, _item, metadata = _completed_revise_with_ledger(
+        repo, scout_findings=["unreconciled"] if pending == "scout" else [],
+        surgical_verdict="REVISE" if pending == "surgical" else "PASS")
+    result = _run(repo, *_verdict_closure_arguments(repo, state, receipt, metadata))
+    assert result.returncode == 0, result.stderr
+    before = state.read_bytes()
+    close = _run(repo, "close", "--state", state, "--operation-id", "not-converged", "--outcome", "converged")
+    assert close.returncode == 1
+    assert state.read_bytes() == before
+
+
+def test_verdict_closure_rechecks_current_source_before_convergence(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, receipt, item, metadata = _completed_revise_with_ledger(repo)
+    result = _run(repo, *_verdict_closure_arguments(repo, state, receipt, metadata))
+    assert result.returncode == 0, result.stderr
+    ledger = item / "agent-runs.jsonl"
+    events = [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()]
+    events[1]["gate"] = "REVISE"
+    events[1]["status"] = "revise"
+    events[1].pop("closesRunIds")
+    ledger.write_text("\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8")
+    before = state.read_bytes()
+    result = _run(repo, "close", "--state", state, "--operation-id", "stale-close", "--outcome", "converged")
+    assert result.returncode == 1 and "RLSTATE_CLOSURE_UNQUALIFIED" in result.stderr
+    assert state.read_bytes() == before
+
+
+def test_verdict_receiving_does_not_reset_retry_budget(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, receipt, _item, metadata = _completed_revise_with_ledger(repo, deep_retries=3)
+    before = state.read_bytes()
+    result = _run(repo, *_verdict_closure_arguments(repo, state, receipt, metadata))
+    assert result.returncode == 1 and "budget" in result.stderr
+    assert state.read_bytes() == before
+
+
+def test_received_verdict_history_rejects_malformed_and_dangling_receipts(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, receipt, _item, metadata = _completed_revise_with_ledger(repo)
+    result = _run(repo, *_verdict_closure_arguments(repo, state, receipt, metadata))
+    assert result.returncode == 0, result.stderr
+    original = json.loads(state.read_text(encoding="utf-8"))
+    module = _engine_module()
+    for fault in ("closer_type", "head", "fingerprint", "original"):
+        data = json.loads(json.dumps(original))
+        if fault == "closer_type":
+            data["operations"][-1]["receipt"]["verdict_closure"]["closer_run_id"] = []
+        elif fault == "head":
+            data["rounds"][0]["verdict_closures"]["deep"]["operation_id"] = "not-present"
+        elif fault == "fingerprint":
+            data["operations"][-1]["fingerprint"] = "0" * 64
+        else:
+            data["rounds"][0]["deep"]["rationale"] = "rewritten original"
+        assert module.validate_v2(data), fault
+
+
+def _refresh_proof_row_hashes(metadata, events):
+    proof = metadata["source_binding"]["proof"]
+    for key, event in zip(("target", "reviewerPass"), events):
+        proof[key] = {"runId": event["runId"], "rawLineSha256": hashlib.sha256(json.dumps(event).encode()).hexdigest()}
+
+
+def _rewrite_bound_source(value, old_ref, new_ref, payload, *, prose=False):
+    if isinstance(value, dict):
+        if set(value) == {"source", "sourceSha256", "selector"} and value["source"]["ref"] == old_ref:
+            value["source"]["ref"] = new_ref
+            value["sourceSha256"] = hashlib.sha256(payload).hexdigest()
+            if prose:
+                value["selector"] = {"kind": "utf8-range", "start": 0, "end": len(payload)}
+        else:
+            for child in value.values():
+                _rewrite_bound_source(child, old_ref, new_ref, payload, prose=prose)
+    elif isinstance(value, list):
+        for child in value:
+            _rewrite_bound_source(child, old_ref, new_ref, payload, prose=prose)
+
+
+def test_current_receiving_rejects_coherent_wrong_pair_and_angle(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, receipt, item, metadata = _completed_revise_with_ledger(repo)
+    ledger = item / "agent-runs.jsonl"
+    events = [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()]
+    for event in events:
+        event.update(role="qa-engineer", lane="unrelated-angle", scope=["unrelated task"])
+    metadata["ledger_lane"] = "unrelated-angle"
+    metadata["source_binding"]["reviewedRole"] = "qa-engineer"
+    metadata["source_binding"]["proof"]["bindingEvidence"]["angle"]["value"] = "unrelated-angle"
+    _refresh_proof_row_hashes(metadata, events)
+    ledger.write_text("\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8")
+    before = state.read_bytes()
+    result = _run(repo, *_verdict_closure_arguments(repo, state, receipt, metadata))
+    assert result.returncode == 1 and "RLSTATE_CLOSURE_UNQUALIFIED" in result.stderr
+    assert state.read_bytes() == before
+
+
+@pytest.mark.parametrize("source", ["summary.json", "original-result.json"])
+def test_received_source_content_drift_cannot_converge(tmp_path: Path, source: str) -> None:
+    repo = _repo(tmp_path)
+    state, receipt, item, metadata = _completed_revise_with_ledger(repo)
+    result = _run(repo, *_verdict_closure_arguments(repo, state, receipt, metadata))
+    assert result.returncode == 0, result.stderr
+    (item / source).write_text('{"unrelated": "replacement bytes"}', encoding="utf-8")
+    before = state.read_bytes()
+    close = _run(repo, "close", "--state", state, "--operation-id", "drift-close", "--outcome", "converged")
+    assert close.returncode == 1 and "RLSTATE_CLOSURE_UNQUALIFIED" in close.stderr
+    assert state.read_bytes() == before
+
+
+def test_original_source_must_equal_recorded_result_even_with_fresh_labels(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, receipt, item, metadata = _completed_revise_with_ledger(repo)
+    path = item / "original-result.json"
+    original = json.loads(path.read_text(encoding="utf-8"))
+    original["rationale"] = "Different original review"
+    path.write_text(json.dumps(original), encoding="utf-8")
+    _rewrite_bound_source(metadata, path.name, path.name, path.read_bytes())
+    before = state.read_bytes()
+    result = _run(repo, *_verdict_closure_arguments(repo, state, receipt, metadata))
+    assert result.returncode == 1 and "RLSTATE_CLOSURE_UNQUALIFIED" in result.stderr
+    assert state.read_bytes() == before
+
+
+def test_retained_prose_summary_needs_no_fabricated_historical_fields(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, receipt, item, metadata = _completed_revise_with_ledger(repo)
+    ledger = item / "agent-runs.jsonl"
+    events = [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()]
+    assert "artifactRevision" not in events[0] and "lane" not in events[0]
+    assert events[0]["scope"] != events[1]["scope"]
+    text = ("Original architecture deep review refused acceptance for input contamination. "
+            "The fresh independent architecture reviewer explicitly reverified that procedural "
+            "obligation on unchanged " + receipt["artifact_revision"] +
+            " and returned design-only PASS. Runtime/contact holds remain. "
+            "This is a retained canonical summary, not a recovered full input-access transcript.\n")
+    payload = text.encode("utf-8")
+    (item / "status.md").write_bytes(payload)
+    for event in events:
+        event["artifact"] = "status.md"
+    _refresh_proof_row_hashes(metadata, events)
+    _rewrite_bound_source(metadata, "summary.json", "status.md", payload, prose=True)
+    proof = metadata["source_binding"]["proof"]
+    proof["reports"] = {"targetSha256": hashlib.sha256(payload).hexdigest(),
+                        "passSha256": hashlib.sha256(payload).hexdigest()}
+    ledger.write_text("\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8")
+    before = ledger.read_bytes()
+    result = _run(repo, *_verdict_closure_arguments(repo, state, receipt, metadata))
+    assert result.returncode == 0, result.stderr
+    assert ledger.read_bytes() == before
+    result = _run(repo, "close", "--state", state, "--operation-id", "prose-close", "--outcome", "converged")
+    assert result.returncode == 0, result.stderr
+
+
+def test_explicit_immutable_summary_capture_preserves_current_receiving(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, receipt, item, metadata = _completed_revise_with_ledger(repo)
+    payload = (item / "summary.json").read_bytes()
+    digest = hashlib.sha256(payload).hexdigest()
+    ref = "review-artifact-custody/" + digest
+    capture = item / ref
+    capture.parent.mkdir()
+    capture.write_bytes(payload)  # Actual present source captured now, no invented old transcript.
+    _rewrite_bound_source(metadata, "summary.json", ref, payload)
+    result = _run(repo, *_verdict_closure_arguments(repo, state, receipt, metadata))
+    assert result.returncode == 0, result.stderr
+    # An unrelated live status update cannot alter the explicitly retained reviewed summary.
+    (item / "summary.json").write_text('{"later_status": "independent progress"}', encoding="utf-8")
+    result = _run(repo, "close", "--state", state, "--operation-id", "captured-close", "--outcome", "converged")
+    assert result.returncode == 0, result.stderr
+    capture.write_text("changed authoritative capture", encoding="utf-8")
+    result = _run(repo, "validate", "--state", state, "--require-v2", "--require-terminal")
+    assert result.returncode == 1 and "RLSTATE_CLOSURE_UNQUALIFIED" in result.stderr
+
+
+def test_unrelated_capture_cannot_replace_actual_summary_at_receiving(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, receipt, item, metadata = _completed_revise_with_ledger(repo)
+    payload = b'{"unrelated": "not the actual current summary"}'
+    digest = hashlib.sha256(payload).hexdigest()
+    ref = "review-artifact-custody/" + digest
+    capture = item / ref
+    capture.parent.mkdir()
+    capture.write_bytes(payload)
+    _rewrite_bound_source(metadata, "summary.json", ref, payload)
+    metadata["source_binding"]["proof"]["reports"] = {"targetSha256": digest, "passSha256": digest}
+    before = state.read_bytes()
+    result = _run(repo, *_verdict_closure_arguments(repo, state, receipt, metadata))
+    assert result.returncode == 1 and "RLSTATE_CLOSURE_UNQUALIFIED" in result.stderr
+    assert state.read_bytes() == before
+
+@pytest.mark.parametrize("fault", ["wrong_claim_id", "wrong_claim_finding_id", "negative_sibling", "negative_claim", "bare_pass", "wrong_parent_id", "hidden_dispositions", "scalar_summary_wrong_id", "scalar_summary_negative", "nested_pass_negative", "nested_pass_wrong_id"])
+def test_receiving_rejects_exposed_finding_contradictions(tmp_path: Path, fault: str) -> None:
+    repo = _repo(tmp_path)
+    state, receipt, item, metadata = _completed_revise_with_ledger(repo)
+    source = item / "summary.json"
+    summary = json.loads(source.read_text(encoding="utf-8"))
+    claim = summary["replacement"]["claims"][0]
+    if fault in {"wrong_claim_id", "wrong_parent_id", "scalar_summary_wrong_id", "nested_pass_wrong_id"}:
+        claim["id"] = "different-obligation"
+    elif fault == "wrong_claim_finding_id":
+        claim["findingId"] = "different-obligation"
+    elif fault in {"negative_sibling", "hidden_dispositions", "scalar_summary_negative", "nested_pass_negative"}:
+        summary["replacement"]["priorFindingDispositions"] = [
+            {"id": "finding-0", "verdict": "not-verified", "text": "The original obligation remains."}]
+    elif fault == "negative_claim":
+        claim["verdict"] = "not-verified"
+    else:
+        summary["replacement"]["claims"][0] = "PASS"
+    if fault == "wrong_parent_id":
+        metadata["source_binding"]["proof"]["rootSemanticReceiving"]["findings"][0]["reviewerClaimUnit"]["selector"]["path"].append("text")
+    if fault == "hidden_dispositions":
+        metadata["source_binding"]["reviewerSummary"]["selector"]["path"] = ["replacement", "claims", 0]
+    if fault.startswith("nested_pass_"):
+        claim["nested"] = {"verdict": "PASS", "text": "Selected positive subreport."}
+        metadata["source_binding"]["reviewerSummary"]["selector"]["path"] = ["replacement", "claims", 0, "nested"]
+        metadata["source_binding"]["proof"]["rootSemanticReceiving"]["findings"][0]["reviewerClaimUnit"]["selector"]["path"] = ["replacement", "claims", 0, "nested", "text"]
+    if fault.startswith("scalar_summary_"):
+        metadata["source_binding"]["reviewerSummary"]["selector"]["path"] = ["replacement", "claims", 0, "text"]
+        metadata["source_binding"]["proof"]["rootSemanticReceiving"]["findings"][0]["reviewerClaimUnit"]["selector"]["path"] = ["replacement", "claims", 0, "text"]
+    payload = json.dumps(summary).encode()
+    source.write_bytes(payload)
+    _rewrite_bound_source(metadata, "summary.json", "summary.json", payload)
+    proof = metadata["source_binding"]["proof"]
+    proof["reports"]["targetSha256"] = proof["reports"]["passSha256"] = hashlib.sha256(payload).hexdigest()
+    before = state.read_bytes()
+    result = _run(repo, *_verdict_closure_arguments(repo, state, receipt, metadata))
+    assert result.returncode == 1 and "RLSTATE_CLOSURE_UNQUALIFIED" in result.stderr
+    assert state.read_bytes() == before
+
+@pytest.mark.parametrize("blocker", [
+    {"findingId": "actual-original", "text": "Original obligation."},
+    {"id": "finding-0", "findingId": "actual-original", "text": "Conflicting original identities."},
+    {"id": "actual-original", "findingId": "finding-0", "text": "Conflicting original identities."},
+])
+def test_receiving_preserves_original_typed_finding_identity(tmp_path: Path, blocker: dict) -> None:
+    repo = _repo(tmp_path)
+    state, receipt, _item, metadata = _completed_revise_with_ledger(repo, deep_blockers=[blocker])
+    before = state.read_bytes()
+    result = _run(repo, *_verdict_closure_arguments(repo, state, receipt, metadata))
+    assert result.returncode == 1 and "RLSTATE_CLOSURE_UNQUALIFIED" in result.stderr
+    assert state.read_bytes() == before

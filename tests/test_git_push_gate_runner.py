@@ -26,7 +26,7 @@ CANON_DIR = ROOT / "scripts" / "universal-hooks" / "scripts"
 SCRIPT_DIRS = (
     CANON_DIR,
     ROOT / "src.codex" / "skills" / "lead" / "scripts",
-    ROOT / "src.claude" / "agents" / "scripts",
+    ROOT / 'adapters/claude' / "agents" / "scripts",
 )
 POLICY_NAME = "check-git-push-gate.py"
 RUNNER_NAME = "check-git-push-gate-runner.py"
