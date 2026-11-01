@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-01
 
+- Make post-work artifact cleanup trash-first: move confirmed unnecessary material promptly, without trying deletion first. Trash must contain no required evidence or recovery dependency and be safe for complete manual emptying; permanent deletion remains a separately authorized action from trash. Preserve existing owner, host-denial, lifecycle and read-only watchdog boundaries.
+
 - Review-loop recovery now receives verified later scout dispositions and existing owner-qualified same-artifact review closures without rewriting original results, fabricating execution failures, or changing the candidate to force another round. Effective closure preserves other obligations, source identity and the existing retry budget; terminal receiving rechecks the canonical ledger relation. The pre-SDK hotfix does not migrate installations to the SDK branch.
 
 ## 2026-10-28
