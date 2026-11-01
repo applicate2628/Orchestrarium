@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-01
 
+- Read historically admitted flat backlog records with a single legacy `status: backlog` without rewriting their bytes or inventing activation. The existing audit and generated view label the bounded legacy case explicitly; ambiguous/current-schema records and canonical creation/start checks remain strict, so an old record no longer blocks unrelated valid work merely because its status vocabulary predates the current writer.
+
 - Clarify the existing repository-orientation owner for work across additional directories and repositories, including parallel assignments: read each target's applicable local instruction chain instead of assuming the original working-directory context applies. Keep the rule generic, retain permission boundaries and avoid repeating unchanged guidance or embedding machine-specific paths.
 
 

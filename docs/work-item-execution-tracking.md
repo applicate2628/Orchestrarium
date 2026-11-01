@@ -913,6 +913,22 @@ derives the archive month from strict UTC closure evidence, and preserves the
 archived identity. `README.md` and `index.md` are generated compatibility
 views; do not use either to infer, backfill, or execute a state transition.
 
+Existing flat backlog records with exactly one authoritative `status: backlog`
+and no lifecycle-schema marker have a byte-preserving read-compatibility route.
+`audit`, `audit_categories` and the generated README view identify them as
+`WI-LEGACY-READ-COMPAT`, retaining their raw status, source digest, admission,
+priority and history. This is structural reading, not proof of historical approval, new admission or activation.
+Conflicting/duplicate statuses, current-schema records and unrelated invalid
+states remain refused. Canonical `candidate` creation and `start` keep their
+existing strict checks; a read-compatible label is never their authority.
+
+If a previously generated README contains the old diagnostic, use the existing
+`observe_readme` read-only API and separately authorized `refresh` operation before
+expecting its independent stale-view audit to pass. Reading compatibility does
+not silently rewrite the historical record or its generated view. Complete or
+retire a legacy item only through its existing selected-operation evidence and
+permission contract below.
+
 Legacy directory-shaped backlog records use the same owner. Run
 `mutate-work-item.py convert-legacy-candidate` only for an admitted record and
 supply the current candidate text; the command appends every legacy source text

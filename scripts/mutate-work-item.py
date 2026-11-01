@@ -9894,9 +9894,24 @@ def _relative_link(work_items: Path, path: Path) -> str:
     return Path(os.path.relpath(path, work_items)).as_posix()
 
 
-def _current_readme_status_error(fields: dict[str, str], location: str, source: Path) -> LifecycleError | None:
+def _current_readme_status_error(
+    fields: dict[str, str], location: str, source: Path, *, existing_record: bytes | None = None,
+) -> LifecycleError | None:
     status = fields.get("status", "")
     if location == "backlog":
+        if existing_record is not None:
+            statuses = [value for _line, name, value, _raw in
+                        _authoritative_field_occurrences(existing_record.decode("utf-8"))
+                        if name == "status"]
+            if "backlog" in statuses:
+                # Historical reading preserves admission; canonical admission checks omit this image.
+                if (statuses == ["backlog"] and "lifecycle-schema" not in fields
+                        and not _schema_marker_occurrences(existing_record, source.name)):
+                    return None
+                return LifecycleError(
+                    "WI-CATEGORY-STATUS-INVALID",
+                    f"ambiguous or current-schema legacy backlog status: {source.stem}",
+                )
         if not status or status == "candidate":
             return None
         failure = (
@@ -9922,7 +9937,7 @@ def _project_current_readme_status(
     entry: ReadmeEntry, fields: dict[str, str], data: bytes, location: str,
     *, diagnostic: bool,
 ) -> ReadmeEntry:
-    failure = _current_readme_status_error(fields, location, entry.link)
+    failure = _current_readme_status_error(fields, location, entry.link, existing_record=data)
     if failure is not None:
         if not diagnostic:
             raise failure
@@ -9930,6 +9945,11 @@ def _project_current_readme_status(
         entry.checked = False
         entry.classification = (
             f"{failure.failure_id}: status={json.dumps(fields.get('status'), ensure_ascii=False)}"
+            f"; source sha256:{_sha256_bytes(data)}"
+        )
+    elif location == "backlog" and fields.get("status") == "backlog":
+        entry.classification = (
+            f"{LEGACY_READ_CLASSIFICATION}: status=backlog; read-only"
             f"; source sha256:{_sha256_bytes(data)}"
         )
     return entry
@@ -14963,9 +14983,13 @@ def audit_categories(root: Path, *, ledger_resource_budget=None) -> tuple[str, .
                 continue
             if category.current_kind == "work-item" and locations and locations[0].parent == work_items / "backlog":
                 source = locations[0]
-                failure = _current_readme_status_error(_parse_fields(source.read_text(encoding="utf-8")), "backlog", source)
+                data = source.read_bytes()
+                fields = _parse_fields(data.decode("utf-8"))
+                failure = _current_readme_status_error(fields, "backlog", source, existing_record=data)
                 if failure is not None:
                     raise failure
+                if fields.get("status") == "backlog":
+                    legacy_read_compatible.append(source.relative_to(work_items).as_posix())
             if category.current_kind == "flat" and locations:
                 path = locations[0]
                 archived = "archive" in path.parts
