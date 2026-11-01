@@ -722,6 +722,8 @@ def _parser(provider: str) -> argparse.ArgumentParser:
     parser.add_argument("--apply", action="store_true", help="Apply an explicitly selected uninstall or legacy-link conversion")
     parser.add_argument("--allow-unsafe-target", "-AllowUnsafeTarget", action="store_true")
     parser.add_argument("--no-hypothesis-hook", "-NoHypothesisHook", action="store_true")
+    parser.add_argument("--standalone-instructions", action="store_true",
+                        help="Keep complete project instructions even with a matching native global policy")
     kimi_maintenance = parser.add_mutually_exclusive_group()
     kimi_maintenance.add_argument("--enroll-kimi", action="store_true")
     kimi_maintenance.add_argument("--replace-kimi-enrollment", action="store_true")
@@ -10414,8 +10416,74 @@ def _write_owned_text(target: Path, content: str, owner: _CreateOnlyMutablePath 
                               mode=None, fsync="none")
 
 
+def _native_codex_default_home() -> Path | None:
+    """Observe the qualified native home, not the install target environment."""
+    if os.name != "nt":
+        value = os.environ.get("HOME")
+        return Path(value) / ".codex" if value and Path(value).is_absolute() else None
+    import ctypes
+    import uuid
+    try:
+        # dirs 6 uses the OS profile Known Folder, not HOME or USERPROFILE.
+        folder = (ctypes.c_ubyte * 16).from_buffer_copy(
+            uuid.UUID("5e6c858f-0e22-4760-9afe-ea3317b67173").bytes_le)
+        get_path = ctypes.WinDLL("shell32").SHGetKnownFolderPath
+        get_path.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p,
+                            ctypes.POINTER(ctypes.c_wchar_p)]
+        get_path.restype = ctypes.c_long
+        free = ctypes.WinDLL("ole32").CoTaskMemFree
+        free.argtypes = [ctypes.c_void_p]
+        free.restype = None
+        result = ctypes.c_wchar_p()
+        try:
+            status = get_path(ctypes.byref(folder), 0, None, ctypes.byref(result))
+            return Path(result.value) / ".codex" if status == 0 and result.value else None
+        finally:
+            free(ctypes.cast(result, ctypes.c_void_p))
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def _matching_native_codex_global_policy(root: Path, target: Path, pack: str) -> str | None:
+    """Reuse only the current visible native global block, never a task marker."""
+    try:
+        explicit = os.environ.get("CODEX_HOME")
+        home = Path(explicit) if explicit else _native_codex_default_home()
+        if home is None or not home.is_absolute() or _contains_reparse(home):
+            return None
+        if Path(os.path.abspath(target)).parent == Path(os.path.abspath(home)):
+            return None  # A global update must always retain the complete policy.
+        codec = _provider_ownership_module(root)
+        configuration = _provider_configuration_module(root)
+        for name in ("AGENTS.override.md", "AGENTS.md"):
+            path = home / name
+            if _contains_reparse(path):
+                return None
+            try:
+                if not path.is_file():
+                    continue  # Native loader skips directories and special files.
+                with path.open("rb") as stream:
+                    payload = stream.read(codec.MAX_BYTES + 1)
+            except FileNotFoundError:
+                continue
+            if len(payload) > codec.MAX_BYTES:
+                return None
+            text = payload.decode("utf-8").replace("\r\n", "\n")
+            # Do not mistake Python-only whitespace controls for an empty native override.
+            if not text.strip(' \t\r\n\x0b\x0c'):
+                continue
+            bounds = configuration.owned_block(text, "codex", _claude_document_context)
+            if bounds is not None and text[bounds[0]:bounds[1]] == pack.rstrip("\n"):
+                return name
+            return None  # A nonempty override hides the base, even if it differs.
+    except (OSError, ValueError, UnicodeError):
+        return None  # Unproved global availability keeps standalone local rules.
+    return None
+
+
 def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *,
-                       mutable_owner: _CreateOnlyMutablePath | None = None) -> None:
+                       mutable_owner: _CreateOnlyMutablePath | None = None,
+                       prefer_global: bool = True) -> None:
     pack = (
         CODEX_BEGIN
         + "\n"
@@ -10426,6 +10494,20 @@ def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *
         + CODEX_END
         + "\n"
     )
+    global_source = _matching_native_codex_global_policy(root, target, pack) if prefer_global else None
+    if global_source is not None:
+        pack = (
+            CODEX_BEGIN + "\n"
+            + "# Orche project instructions\n"
+            + "Installation mode: global-backed. The complete Orche policy is supplied "
+              "by Codex native global instructions.\n"
+            + "Standalone use requires reinstalling with --standalone-instructions. "
+              "Project-specific instructions outside this block are retained.\n"
+            + CODEX_END + "\n"
+        )
+        print(f"  Instructions layout: global-backed ({global_source}); full local copy omitted")
+    elif prefer_global:
+        print("  Instructions layout: standalone (matching native global policy not established)")
     existing = _read_owned_text(target, mutable_owner)
     if existing is not None:
         if CODEX_BEGIN in existing and CODEX_END in existing:
@@ -12720,7 +12802,8 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     manifest=codex_role_manifest,
                     plan=codex_native_role_plan,
                 )
-                _merge_codex_agents(root, source, docs_target, args.dry_run, mutable_owner=create_only)
+                _merge_codex_agents(root, source, docs_target, args.dry_run, mutable_owner=create_only,
+                                    prefer_global=mode != "global" and not args.standalone_instructions)
             else:
                 _merge_claude_docs(root, source, docs_target, args.dry_run, mutable_owner=create_only)
             if provider != "codex":

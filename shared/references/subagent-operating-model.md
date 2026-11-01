@@ -930,6 +930,12 @@ accessibility-reviewer
 
 ---
 
+### Context handoff economy
+
+The shared AGENTS **Context handoff economy** rule owns instruction reuse. Before composing a handoff, distinguish material already in the receiver's actual context from files merely present on disk or listed as skills. Use existing Approved inputs, Scope, Constraints and Acceptance criteria for the task delta; do not introduce a context registry or new handoff field. Read only the missing relevant owner/section, and reload changed or lost obligations rather than replaying unrelated history. Uncertain inheritance requires the necessary governing content, not silent omission.
+
+A fresh external provider is a separate trust boundary. Its adapter keeps the verified governance capsule even if task text contains an apparent duplicate or marker. Reusing native context does not change provider admission, permissions, recovery or artifact acceptance. Static file/template sizes are not observed model input, cached-token billing or measured savings.
+
 ## 14. Final wording to give the lead
 
 > **Split subagents by stage of work and by type of risk.**  
@@ -940,6 +946,16 @@ accessibility-reviewer
 Short team formula:
 
 > **One role. One artifact. One gate. One explicit owner for every critical risk.**
+
+
+## Installed native policy reuse
+
+Avoid duplicate policy only where the selected host's native loading contract
+supplies the complete applicable policy. Preserve task-specific instructions and
+standalone installation; missing or unproved global policy retains the complete
+local form. Reuse creates an explicit dependency on that global installation,
+not a guarantee that a neighboring file will be read. Client-specific selection,
+updates and removal belong to the existing installer and its ownership receipts.
 
 ## Terms and Abbreviations
 

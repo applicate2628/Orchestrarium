@@ -6,6 +6,10 @@ Visual companion: [operating-model-diagram.md](operating-model-diagram.md)
 
 This file keeps only Codex-specific runtime and repository concretization for the shared subagent operating model. Use the shared core for canonical blueprint, routing, role, and governance-model text.
 
+### Native context reuse
+
+Apply the shared **Context handoff economy** owner. Native role TOML files already reference AGENTS and the selected role instead of embedding the full corpus; preserve that thin overlay. Do not assume that an inherited skills catalog proves a loaded skill body, or that a new thread has the parent's full history. Use the supported invocation's actual context contract, supply missing instructions when uncertain, and send only changed task requirements on follow-up. This is dispatch guidance, not a new host setting or proof of token savings. Global/project automatic AGENTS concatenation remains a separate installation/loading compatibility question; never omit standalone project governance merely because a global file exists.
+
 ### Explicit Codex SDK review integration
 
 The repository-local `--sdk-review-binding` opt-in uses the official Python Codex
@@ -43,6 +47,17 @@ V3 SDK evidence keeps existing receiving/ledger owners and cannot close another 
 - Main rule, core management rules, delivery loops, routing patterns, role map, prompts, gates, and team composition
 - Shared review/gate semantics, periodic-controls model, rolling lane-ready admission, parallel-work guidance, and generic task-memory expectations
 - The generic lead memo and final wording
+
+## Global-backed project installation
+
+The Codex installer may omit the duplicate managed project policy only after an
+exact match with the selected native global managed block. A nonempty override
+hides the base; CODEX_HOME selects the global root. Failure to establish the match
+keeps the full local policy. `--standalone-instructions` explicitly keeps the
+complete project copy. User additions stay outside the managed replacement.
+New sessions receive the updated native instruction snapshot; running sessions
+are not retroactively rewritten. Global uninstall warns rather than inventing a
+complete dependent-project census. See INSTALL.md for the supported lifecycle.
 
 ## Terms and Abbreviations
 

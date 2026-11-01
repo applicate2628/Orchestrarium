@@ -490,6 +490,46 @@ Coordination Model candidate: [design and qualification holds](docs/codex-coordi
 
 Managed adapters supply actual assigned-role provenance and consume `--user-approved-launch` locally before `--`; that flag is only the caller projection of one genuine exact-attempt Astra/Max agreement. `provider_prompt.launch` and the native selector share the pure `model_routing/launch_policy.py` rule. A complete selected logical package includes that nested module, including relocated transports; a FILE link on R/P does not move its companion namespace to the referent directory. Missing/broken mandatory support fails truthfully before effects. Prefer completing the qualified package; declared same-owner Assistance with all canonical rule, scope, genuine permission where needed, resources and readback guarantees may be selected by Root without a new ordinary permission loop. There is no catch-and-allow, raw-flag authority or automatic retry. Roleless direct-user compatibility does not permit managed callers to omit their assigned profession.
 
+## Codex global-backed project instructions
+
+Codex project installation reuses the full native global policy only when the
+selected global file contains the exact current managed Orche block. The full
+rules are not shortened. The installer checks CODEX_HOME (or the normal global
+Codex home), gives a nonempty AGENTS.override.md precedence over AGENTS.md,
+and keeps complete project instructions when that source is missing, unreadable,
+ambiguous, or different. Explicit CODEX_HOME reuse requires an absolute path;
+relative or literal-tilde values conservatively keep the full project policy.
+Only ASCII-whitespace-only candidates are skipped for reuse; other whitespace
+ambiguity conservatively keeps the complete local policy. A global installation always keeps the complete policy.
+This is an Orche installer decision based on the qualified Codex native loader,
+not a promise that other clients load the same files.
+
+
+Windows default discovery reads the OS Profile Known Folder used by the pinned
+native client, not HOME/USERPROFILE overrides. POSIX reuse admits an absolute
+HOME; unavailable default-home evidence keeps the full project policy. This does
+not change the existing installer's global target selection. The lookup is read-only.
+
+The project then contains a short managed dependency notice and preserves user
+instructions outside that block. To keep an independently portable project,
+use `python install.py --clients codex --standalone-instructions` with the same
+project target options. Reapplying without that flag may reuse a matching global
+policy again. This option does not change other clients or remove the global file.
+Preview reports the selected layout without writing either instruction file.
+
+Start a new Codex session after changing the instruction layout: existing sessions
+may hold an earlier global snapshot. A different machine, CODEX_HOME, or removed
+global installation requires reinstallation with --standalone-instructions.
+Global uninstall warns about that dependency; it neither scans arbitrary projects
+nor silently rewrites them. The uninstall ownership receipt continues to protect
+user additions and modified managed content. No global consumer registry is added.
+
+The pinned Codex 0.163.0 source reads the first nonempty global candidate fully:
+[codex-home instructions](https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/codex-home/src/instructions/mod.rs).
+Project document size limits are a separate mechanism. Source inspection and
+isolated file-lifecycle tests do not establish live model compliance or measured
+token savings. External worker framing remains self-contained where required.
+
 ## Terms and Abbreviations
 
 - `SDK`: Software Development Kit; optional provider integration helpers, not launch authority.

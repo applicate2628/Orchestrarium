@@ -8,6 +8,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 - Review-loop recovery now receives verified later scout dispositions and existing owner-qualified same-artifact review closures without rewriting original results, fabricating execution failures, or changing the candidate to force another round. Effective closure preserves other obligations, source identity and the existing retry budget; terminal receiving rechecks the canonical ledger relation. The pre-SDK hotfix does not migrate installations to the SDK branch.
 
+- Reuse an exact matching native Codex global policy instead of duplicating the complete rules in project instructions. Preserve project additions, keep a standalone option and conservative fallback, and warn about dependent projects when removing global instructions. No rules are shortened or external worker framing weakened.
+
 ## 2026-10-31
 
 - Omit the unused optional Berkeley DB extension from the qualified Linux x64 Python 3.15.2 SDK bundle, keeping the verified acquisition archive and notices unchanged. This narrows the internal runtime without altering Windows or pretending to provide a general-purpose Python installation.
@@ -20,6 +22,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 - Scratch cleanup now checks the complete bounded Git object-store layout before and after reachability verification. Linked or changing nested pack/loose-object storage cannot be credited as an independent recovery copy; uncertain entries remain preserved.
 
 - Windows and Linux Python bundles now retain the dependency notices declared by their pinned upstream full-build metadata, which the stripped install-only runtime does not carry. Source digests and byte-preservation tests prevent silent notice loss during packaging; full native/transitive release clearance remains separate.
+
+- Handoff guidance now reuses common rules already present and unchanged in the receiver context instead of requiring verbatim rule copies on every dispatch. Both provider templates retain task-specific evidence requirements and a missing-context fallback. Fresh external workers still receive the trusted governance frame; this does not change automatic global/project AGENTS loading or claim measured token savings.
 
 - Installer regression fixtures now explicitly seed both clients when checking paired projections, preserve ordinary per-client skills, and separately verify refusal of legacy linked skills. Rollback tests require the injected failure to execute instead of accepting an earlier refusal as success. Metadata fixtures create their disposable parent in a fresh checkout, so clearing scratch does not break test setup.
 

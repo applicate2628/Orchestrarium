@@ -117,6 +117,13 @@ def run(backend, root: Path, provider: str, args) -> int:
                 after = None
             if after != payload:
                 config_effects.append((relative, payload, after))
+        if provider == "codex" and scope == "global" and any(
+            relative in backend.get_client(provider)["documents"]["global"]
+            for relative, _before, _after in config_effects
+        ):
+            print("NOTICE: Removing global instructions can affect global-backed project "
+                  "installations. Project files are not scanned or changed; reinstall "
+                  "those projects with --standalone-instructions for independent use.")
         print(json.dumps({"provider": provider, "apply": apply, "removeFiles": len(remove),
                           "preservedFiles": sorted(preserve), "absentFiles": len(plan["absent"]),
                           "configurationChanges": len(config_effects),

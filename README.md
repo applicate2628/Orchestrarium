@@ -274,6 +274,14 @@ Optional Codex coordination Model: [implemented boundary, observed qualification
 
 Managed adapters supply actual assigned-role provenance and consume `--user-approved-launch` locally before `--`; that flag is only the caller projection of one genuine exact-attempt Astra/Max agreement. `provider_prompt.launch` and the native selector share the pure `model_routing/launch_policy.py` rule. A complete selected logical package includes that nested module, including relocated transports; a FILE link on R/P does not move its companion namespace to the referent directory. Missing/broken mandatory support fails truthfully before effects. Prefer completing the qualified package; declared same-owner Assistance with all canonical rule, scope, genuine permission where needed, resources and readback guarantees may be selected by Root without a new ordinary permission loop. There is no catch-and-allow, raw-flag authority or automatic retry. Roleless direct-user compatibility does not permit managed callers to omit their assigned profession.
 
+## Codex instruction layout
+
+Project installs reuse an exact matching native global Orche policy while keeping
+project-specific additions. Missing or different global rules retain the complete
+local policy. Use `--standalone-instructions` for a portable project independent
+of that global installation. See [instruction lifecycle](INSTALL.md#codex-global-backed-project-instructions)
+for override precedence, preview, reapply and global uninstall implications.
+
 ## Terms and Abbreviations
 
 - `SDK`: Software Development Kit; optional provider integration helpers, not launch authority.

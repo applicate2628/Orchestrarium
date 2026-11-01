@@ -681,3 +681,30 @@ def test_kimi_consumer_raw_surface_guard_is_structural(
 )
 def test_lowercase_kimi_provider_labels_are_not_executable_surfaces(line: str) -> None:
     assert _raw_kimi_executable_surfaces(line) == ()
+
+
+def test_context_economy_reuses_only_known_current_context_and_keeps_fallback() -> None:
+    spine = (ROOT / "shared/AGENTS.shared.md").read_text(encoding="utf-8")
+    line = next(line for line in spine.splitlines() if line.startswith("- **Context handoff economy"))
+    for requirement in ("already present", "unchanged", "missing or uncertain", "task-local marker", "trusted external governance frame", "recovery obligations", "restore missing obligations", "only changed or unavailable"):
+        assert requirement in line
+    assert "copy verbatim into dispatch prompts" not in spine
+    assert "**Evidence-citation discipline:**" in spine
+    assert "Banned fix drivers:" in spine
+    reference = (ROOT / "shared/references/spine/verification-and-decision-discipline.md").read_text(encoding="utf-8")
+    assert "dispatch prompts must carry the constraint verbatim" not in reference
+    assert "Context handoff economy" in reference
+
+
+@pytest.mark.parametrize("relative", (
+    "src.codex/skills/lead/subagent-contracts.md",
+    "adapters/claude/agents/contracts/subagent-contracts.md",
+))
+def test_context_economy_handoffs_keep_task_evidence_without_repeating_base(relative: str) -> None:
+    text = (ROOT / relative).read_text(encoding="utf-8")
+    field = text.split("Evidence discipline:\n", 1)[1].split("Defect-class inventory:", 1)[0]
+    assert "task-specific" in field
+    assert "Evidence-citation discipline" in field
+    assert "missing" in field and "trusted" in field
+    assert 'never use "should work"' not in field
+    assert "Context handoff economy" in text
