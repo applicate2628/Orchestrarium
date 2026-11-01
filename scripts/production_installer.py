@@ -12203,7 +12203,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
     if args.migrate_legacy_skill:
         print(
             "FAIL: E_LEGACY_CODEX_SKILL_ARGUMENT: "
-            "--migrate-legacy-skill requires global Codex install",
+            "--migrate-legacy-skill is retired; use --materialize-legacy-skills preview",
             file=sys.stderr,
         )
         return 1
