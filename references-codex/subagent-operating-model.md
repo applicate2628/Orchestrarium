@@ -60,3 +60,7 @@ V3 SDK evidence keeps existing receiving/ledger owners and cannot close another 
 ## Scratch-independent recovery
 
 Apply the [shared artifact owner](../shared/references/repository-source-hygiene.md#scratch-independent-recovery). Important edits, unpublished commits and required evidence need verified custody outside disposable storage before pause or handoff; a worktree is insufficient if its Git common directory or object alternates still depend on scratch. This adds no provider-specific storage owner or publication permission.
+
+## Review-loop receiving
+
+Review-loop receiving uses the shared review-loop methodology and the existing Python state owner. A completed same-artifact REVISE may receive an owner-qualified recorded-equivalent closure without overwriting the original result; an empty original scout reconciliation may receive explicit later dispositions through version-2 amendment metadata. Keep original provenance and independent acceptance requirements; the helper never launches reviewers or invents PASS.

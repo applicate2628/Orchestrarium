@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-01
+
+- Review-loop recovery now receives verified later scout dispositions and existing owner-qualified same-artifact review closures without rewriting original results, fabricating execution failures, or changing the candidate to force another round. Effective closure preserves other obligations, source identity and the existing retry budget; terminal receiving rechecks the canonical ledger relation. The pre-SDK hotfix does not migrate installations to the SDK branch.
+
 ## 2026-10-31
 
 - Omit the unused optional Berkeley DB extension from the qualified Linux x64 Python 3.15.2 SDK bundle, keeping the verified acquisition archive and notices unchanged. This narrows the internal runtime without altering Windows or pretending to provide a general-purpose Python installation.
