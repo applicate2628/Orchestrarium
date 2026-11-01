@@ -9,6 +9,10 @@ Two rules govern source-tree hygiene:
 1. **Directory-level entity separation** — every source directory has one primary entity type and ownership/lifecycle contract; the directory's purpose must be expressible in one sentence; new files placed by classifying owner/lifecycle + I/O contract.
 2. **Artifact disposition and project hygiene** - producers promptly move confirmed unnecessary, quiescent artifacts to trash under the shared trash-first rule, without a failed-deletion prerequisite. Trash is safe for complete manual emptying, never required evidence or recovery storage. Preserve unknown, valuable and active material outside it; ownership, authority, no-overwrite and current readback remain required. Permanent deletion is a distinct authorized action only from trash; the coordinator stays read-only.
 
+## Instruction scope across work areas
+
+The shared **Repository orientation; Mechanism inventory before new paths** rule owns instruction discovery for every additional directory/repository, including parallel assignments. Resolve that target's applicable local instruction chain before operating there; startup guidance for another working directory is not a substitute. Keep local policies scoped, reuse unchanged loaded guidance and forward only relevant instructions to workers. This is a general rule, not a registry of machine paths or special-case folders.
+
 ## What counts as an "entity type"
 
 An entity type is the **kind of work the file does**, classified by:
