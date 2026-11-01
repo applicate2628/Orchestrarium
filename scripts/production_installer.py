@@ -400,7 +400,12 @@ STOCK_CONSULTANT_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
 )
 # Independently reconstructed from the immutable e7a691de factory archive.
 # Legacy digests are lookup keys only; values bind the versioned member structure.
-ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {'accessibility-reviewer': {'bef5e73f3e5f4b8263d07c877a7c940a169fe895d5e84bddbed2b148f6fac3a8': '0ff9f88e2f685a22c624acff1c03d04cace35ae110fd2e93dfc0d30367039137'},
+ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
+ 'repo-cleanup': {
+    # Exact factory tree at 815e9dfbc5932cc13ed1a8b01f44204e4b4d2349 and
+    # 4db8714fa09dd9e42de134e9df6b6448dcb957fb, before trash-first delivery.
+    '36ca45866892cab034addd9eb69a849fc1dcd82e473846093bd4e38107736b24': '8f56fb527cb1d92527b1fc1f4976508dbf1115d85a340bdd57322da6e1985e57',
+ },'accessibility-reviewer': {'bef5e73f3e5f4b8263d07c877a7c940a169fe895d5e84bddbed2b148f6fac3a8': '0ff9f88e2f685a22c624acff1c03d04cace35ae110fd2e93dfc0d30367039137'},
  'algorithm-scientist': {'359a20634fe1b18f051531278e27dcb1b9c05b761dba96d0e52bf32772f54e22': '10805b5d70d233deea21e52556e764fafdea2423a795f1b26179adf2d6387247'},
  'analyst': {'d66d3d8c1ddb2eb81bfd3cb4b35c0466779effb6a87fe6043f7417dbd8e4c8cf': '30f249624964a1a818ecce187777e3658c6c1c06b268d2fd40e38f4b39f2b109'},
  'analyzing-video-bugs': {'d9d0ab65e70080f6bc39bd4e20fca007504425fdc02a874ef1415684ced79ca0': '236d9da0daa96e6bdd96c8bde7710da9820ffd5d721e3eb19ea303f29201cb30'},

@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REVISION = "815e9dfbc5932cc13ed1a8b01f44204e4b4d2349"
 
 
-@pytest.mark.parametrize("name", ("consultant", "github-pr-review-bot", "manual-repo-transfer"))
+@pytest.mark.parametrize("name", ("consultant", "github-pr-review-bot", "manual-repo-transfer", "repo-cleanup"))
 def test_authenticated_prior_migrates_but_modified_prior_refuses(tmp_path, monkeypatch, name):
     archive = subprocess.check_output([
         "git", "archive", "--format=tar", REVISION, f"src.codex/skills/{name}"], cwd=ROOT)

@@ -1,6 +1,7 @@
 """Frozen coordinator-only repository-cleanup contract."""
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import re
@@ -36,12 +37,14 @@ def _common_skills() -> tuple[str, ...]:
     return tuple(re.findall(r"`\$([a-z][a-z0-9-]+)`", match.group(1)))
 
 
-def test_repo_cleanup_is_one_common_skill_with_byte_equivalent_provider_semantics() -> None:
+def test_repo_cleanup_has_one_live_owner_and_frozen_adapter_migration_input() -> None:
     assert "repo-cleanup" in _common_skills()
     assert CODEX_SKILL.is_file()
     assert CLAUDE_SKILL.is_file()
     assert CODEX_INTERFACE.is_file()
-    assert _body(CODEX_SKILL) == _body(CLAUDE_SKILL)
+    # The adapter tree is migration evidence, not a second live skill owner.
+    assert hashlib.sha256(CLAUDE_SKILL.read_bytes()).hexdigest() == "06fe776be7a9c75ec5491fdf8a54e16c65e2586ab0f04ec972d3501cae55c060"
+    assert "trash-first" in _body(CODEX_SKILL)
 
     codex_members = {
         path.relative_to(CODEX_SKILL.parent).as_posix()
@@ -388,7 +391,12 @@ def test_evidence_prompts_require_canonical_retention_not_scratch_only() -> None
         "adapters/claude/agents/contracts/subagent-contracts.md",
     ):
         text = (ROOT / relative).read_text(encoding="utf-8")
-        assert "retained by its canonical artifact owner" in text
+        if relative == "shared/AGENTS.shared.md":
+            assert "retained by its canonical artifact owner" in text
+        else:
+            # K5 references shared governance instead of duplicating all rules.
+            assert "Apply the binding shared **Workflow economy (binding)** rule" in text
+            assert "one-canonical-artifact/concise-root-ledger boundary" in text
         assert "smoke test preserved under .scratch/" not in text
         assert "smoke preserved under `/.scratch/`" not in text
 
@@ -401,3 +409,48 @@ def test_repository_guidance_covers_independent_git_and_evidence_custody() -> No
         assert required in text
     guide = (ROOT / "docs/new-session-guide.md").read_text(encoding="utf-8")
     assert "outside disposable storage" in guide
+
+
+def test_general_disposition_moves_disposable_artifacts_to_purgable_trash_first() -> None:
+    spine = SPINE.read_text(encoding="utf-8")
+    paragraph = next(line for line in spine.splitlines()
+                     if line.startswith("- **Artifact disposition and project hygiene:**"))
+    for required in (
+        "Trash-first",
+        "as soon as it is confirmed unnecessary",
+        "do not wait for a failed deletion",
+        "safe to empty completely",
+        "no required recovery or acceptance evidence depends on trash",
+        "only from trash",
+        "Agents never automatically purge manual-deletion trash",
+        "Unknown, foreign, ambiguous, valuable, active or prohibited material stays preserved",
+        "Never bypass a denial",
+    ):
+        assert required in paragraph
+    for obsolete in (
+        "First establish the actual deletion outcome",
+        "normal permitted resolution cannot complete deletion",
+        "A first failure or refusal alone does not select trash",
+    ):
+        assert obsolete not in paragraph
+
+
+def test_cleanup_consumers_do_not_restore_delete_first_or_unsafe_trash() -> None:
+    for path in (CODEX_SKILL, REFERENCE):
+        text = path.read_text(encoding="utf-8")
+        assert "trash-first" in text
+        assert "attempted-deletion fallback" not in text
+        assert "manual quarantine" not in text
+        assert "quarantine prepared; manual deletion pending" not in text
+    for path in (CODEX_SKILL,):
+        text = path.read_text(encoding="utf-8")
+        assert "only from trash" in text
+        assert "disposable material already in trash" in text
+        assert "owner may delete only classified disposable material" not in text
+
+
+def test_russian_hygiene_mirror_preserves_trash_first_guarantees() -> None:
+    text = (ROOT / "shared/references/ru/repository-source-hygiene.md").read_text(encoding="utf-8")
+    for phrase in ('без предварительной попытки удаления', 'можно полностью очистить вручную', 'не зависят', 'только из trash'):
+        assert phrase in text
+    assert "delete it; git history preserves the file" not in text

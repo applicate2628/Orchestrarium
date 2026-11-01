@@ -7,7 +7,7 @@
 Два правила управляют source-tree hygiene:
 
 1. **Directory-level entity separation** — каждая source directory имеет один primary entity type и ownership/lifecycle contract; назначение directory выражается одним предложением; новые файлы размещаются после классификации по owner/lifecycle + I/O contract.
-2. **Artifact disposition and project hygiene** — сохранять ценные материалы у существующего владельца, проверять независимость важных копий от временного хранилища и выполнять только разрешённое удаление или архивирование. Полный контракт находится в `shared/AGENTS.shared.md`; отказ сам по себе не разрешает перенос или удаление.
+2. **Artifact disposition and project hygiene** — по мере работы сразу переносить подтверждённо ненужные и неиспользуемые материалы в trash в пределах согласованной области, без предварительной попытки удаления. Trash можно полностью очистить вручную: нужные изменения, результаты и восстановление от него не зависят. Ценные, активные и сомнительные материалы сохранять вне trash. Окончательное удаление, когда оно требуется и разрешено, выполнять только из trash. Проверки владельца, прав, границ и результата остаются у существующего владельца.
 
 ## Что считается "entity type"
 
@@ -69,7 +69,7 @@ Cost-vs-benefit принудительного refactor'а на каждый exi
 Maintainer переписывает `scripts/validate-agents-mode-contract.py` в `scripts/validate-agents-mode-contract-v2.py`, потому что v2 меняет public CLI surface и adopters'ам нужно migration time.
 
 - Если v1 file preserved в `git log` и migration docs reference обе версии для ~1 release → keep v1 in place temporarily с `# DEPRECATED: replaced by validate-agents-mode-contract-v2.py — remove after 2026-Q3` header comment.
-- Если v1 не имеет callers и serves only history → delete it; git history preserves the file.
+- Если у v1 больше нет вызывающих потребителей и нужна только история, сразу перенести устаревшую рабочую копию в trash по общему правилу; Git сохраняет историю. При необходимости разрешённое окончательное удаление выполняется только из trash.
 - Если v1 captures hard-won bug fix logic, которую v2 might lose → move to `scripts/archive/validate-agents-mode-contract-v1.py` с one-line breadcrumb в `scripts/README.md` объясняющим why archived.
 
 Subject to `Worktree safety`: не удалять или двигать v1 files которые не часть v2-replacement task. Restrict archival к files внутри admitted change surface.

@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-01
 
+- Carry the current-version trash-first hotfix into SDK delivery: producers promptly move confirmed disposable artifacts to trash, preserve required work outside it, and keep permanent deletion separately authorized. Preserve the SDK durable-custody contract and derive the external policy capsule from its own canonical spine; historical adapter migration trees remain unchanged. Admit the exact authenticated pre-change repo-cleanup factory tree through the existing migration owner; modified or ambiguous trees still refuse.
+
 - Preserve version-bound bubblewrap and ripgrep notice texts in local SDK bundles, including exact platform archive bytes and source digests. This repairs missing component notices without changing the runtime or claiming complete redistribution qualification.
 
 - Review-loop recovery now receives verified later scout dispositions and existing owner-qualified same-artifact review closures without rewriting original results, fabricating execution failures, or changing the candidate to force another round. Effective closure preserves other obligations, source identity and the existing retry budget; terminal receiving rechecks the canonical ledger relation. The pre-SDK hotfix does not migrate installations to the SDK branch.
