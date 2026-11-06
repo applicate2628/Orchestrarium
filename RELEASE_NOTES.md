@@ -4,6 +4,9 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-06
 
+- Add explicit exact-current Claude instruction replacement through repeatable provider-relative PATH=SHA256 selections. Only selected existing source-listed agents/commands use the existing exact-file transaction writer; unselected instructions retain legacy preservation. The shared receipt planner receives actual selected outcomes and fresh creations in one pre-commit projection, preserving unrelated claims and layout without assuming historical ownership from V1 hashes. Pure/static qualification covers this source integration; physical replacement, races and recovery acceptance remain open.
+
+
 - Bootstrap absent provider receipts from positively received new payload files using the existing transaction owner and recovery path. Existing receipts and user document blocks remain untouched; no layout or historical ownership is inferred. Publication requires fresh writer provenance and bound payload/receipt readback before commit. Pure/static qualification covers the source integration; physical creation, races, directory-chain and recovery acceptance remain open.
 
 

@@ -60,6 +60,19 @@ except ModuleNotFoundError as error:
         serialize_fresh_payloads as _serialize_fresh_payloads)
 
 try:
+    from installation.instruction_selection import parse_claude_instruction_grants as _parse_claude_instruction_grants
+    from installation.receipt_plan import (
+        Outcome as _ReceiptOutcome, plan_changes as _plan_receipt_changes,
+        serialize_delta as _serialize_receipt_delta)
+except ModuleNotFoundError as error:
+    if error.name not in {"installation", "installation.instruction_selection", "installation.receipt_plan"}:
+        raise
+    from scripts.installation.instruction_selection import parse_claude_instruction_grants as _parse_claude_instruction_grants
+    from scripts.installation.receipt_plan import (
+        Outcome as _ReceiptOutcome, plan_changes as _plan_receipt_changes,
+        serialize_delta as _serialize_receipt_delta)
+
+try:
     from provider_prompt import enroll_kimi_executable, replace_kimi_enrollment
 except ModuleNotFoundError:
     from scripts.provider_prompt import enroll_kimi_executable, replace_kimi_enrollment
@@ -651,6 +664,10 @@ def _parser(provider: str) -> argparse.ArgumentParser:
         default=[],
         metavar="NAME=SHA256",
         help="Global Codex/Claude only: adopt one unreceipted non-Lead canonical skill with its exact observed SHA-256 digest",
+    )
+    parser.add_argument(
+        "--replace-claude-instruction", action="append", default=[], metavar="PATH=SHA256",
+        help="Claude only: replace explicitly reviewed current agents/NAME.md or commands/...md bytes; not historical ownership",
     )
     parser.add_argument(
         "--migrate-legacy-skill",
@@ -5550,8 +5567,11 @@ class _CreateOnlyMutablePath:
                 or self.linked_authority is not None
                 or any(path in image for image in transaction._original.values())):
             return None
+        return self._file_parent_identities(path)
+
+    def _file_parent_identities(self, path: Path):
         self.destination(path.relative_to(self.anchor))
-        if not transaction._binding_identity_matches(
+        if not self.transaction._binding_identity_matches(
                 self._anchor_identity, self._identity(self.anchor)):
             raise ValueError("E_PROVIDER_RECEIPT_DRIFT: creator anchor")
         parents = []
@@ -5570,11 +5590,14 @@ class _CreateOnlyMutablePath:
     def _assert_fresh_file(self, witness: _FreshFileWitness) -> bytes:
         if witness.owner is not self or witness.node.kind != "file":
             raise ValueError("E_PROVIDER_RECEIPT_DRIFT: creator witness")
-        self.destination(witness.path.relative_to(self.anchor))
+        return self._assert_bound_file(witness.path, witness.node, witness.parents)
+
+    def _assert_bound_file(self, path: Path, node: _PhysicalNode, parents) -> bytes:
+        self.destination(path.relative_to(self.anchor))
         if any(not self.transaction._binding_identity_matches(identity, self._identity(parent))
-               for parent, identity in witness.parents):
+               for parent, identity in parents):
             raise ValueError("E_PROVIDER_RECEIPT_DRIFT: creator parents")
-        return self.transaction._image_file_bytes(witness.path, witness.node)
+        return self.transaction._image_file_bytes(path, node)
 
     def _record_fresh_file(self, path: Path, node: _PhysicalNode, parents) -> None:
         if parents is None:
@@ -7351,6 +7374,7 @@ def _sync_tree(
     excluded_files: frozenset[Path] = frozenset(),
     mutable_owner: _CreateOnlyMutablePath | None = None,
     instruction_scope: str | None = None,
+    instruction_updates: "_ClaudeInstructionUpdates | None" = None,
 ) -> None:
     if instruction_scope not in (None, "agents", "commands"):
         raise ValueError("invalid Claude instruction scope")
@@ -7366,6 +7390,11 @@ def _sync_tree(
                            and relative.suffix.casefold() == ".md"
                            and (instruction_scope == "commands" or len(relative.parts) == 1))
             if instruction:
+                key = instruction_scope + "/" + relative.as_posix()
+                if instruction_updates is not None and key in instruction_updates.items:
+                    _apply_selected_claude_instruction(
+                        instruction_updates, key, item, destination, mutable_owner, dry_run)
+                    continue
                 if mutable_owner is not None and mutable_owner.transaction.enabled:
                     transaction = mutable_owner.transaction
                     image = _admitted_mutation_image(transaction, destination)
@@ -11663,17 +11692,10 @@ def _fresh_provider_receipt_candidate(target: Path) -> Path | None:
     return None
 
 
-def _record_fresh_provider_receipt(
-    provider: str, scope: str, receipt: Path | None, owner: _CreateOnlyMutablePath,
-) -> None:
-    """Bootstrap only successful fresh payload files in the current transaction."""
+def _fresh_provider_receipt_files(
+    provider: str, scope: str, receipt: Path, owner: _CreateOnlyMutablePath,
+) -> dict[str, _FreshFileWitness]:
     transaction = owner.transaction
-    if receipt is None or owner.dry_run or not transaction.enabled:
-        return
-    receipt = Path(os.path.abspath(receipt))
-    if (not any(receipt == root or root in receipt.parents for root in transaction._original)
-            or any(receipt in image for image in transaction._original.values())):
-        return
     transient = {path for path in (transaction._temporary, *transaction._migration_retention)
                  if path is not None}
     for effect in transaction._effects:
@@ -11693,9 +11715,27 @@ def _record_fresh_provider_receipt(
     payload = _serialize_fresh_payloads(
         {key: witness.node.data for key, witness in selected.items()}, provider, scope)
     if payload is None:
-        return
+        return {}
     files = json.loads(payload)["files"]
-    selected = {key: selected[key] for key in files}
+    return {key: selected[key] for key in files}
+
+
+def _record_fresh_provider_receipt(
+    provider: str, scope: str, receipt: Path | None, owner: _CreateOnlyMutablePath,
+) -> None:
+    """Bootstrap only successful fresh payload files in the current transaction."""
+    transaction = owner.transaction
+    if receipt is None or owner.dry_run or not transaction.enabled:
+        return
+    receipt = Path(os.path.abspath(receipt))
+    if (not any(receipt == root or root in receipt.parents for root in transaction._original)
+            or any(receipt in image for image in transaction._original.values())):
+        return
+    selected = _fresh_provider_receipt_files(provider, scope, receipt, owner)
+    payload = _serialize_fresh_payloads(
+        {key: witness.node.data for key, witness in selected.items()}, provider, scope)
+    if payload is None:
+        return
     for witness in selected.values():
         owner._assert_fresh_file(witness)
     # A receipt that appeared after admission remains foreign and is not adopted.
@@ -11713,6 +11753,160 @@ def _record_fresh_provider_receipt(
         raise ValueError("E_PROVIDER_RECEIPT_DRIFT: receipt readback")
 
 
+@dataclass(frozen=True)
+class _SelectedClaudeInstruction:
+    source: Path
+    source_node: _PhysicalNode
+    path: Path
+    before_node: _PhysicalNode
+    before: bytes
+    after: bytes
+    digest: str
+    parents: tuple[tuple[Path, tuple[int, int, int, int]], ...]
+
+
+@dataclass(frozen=True)
+class _ClaudeInstructionUpdates:
+    owner: _CreateOnlyMutablePath
+    scope: str
+    receipt: Path
+    receipt_node: _PhysicalNode | None
+    receipt_before: bytes | None
+    receipt_parents: tuple[tuple[Path, tuple[int, int, int, int]], ...]
+    items: dict[str, _SelectedClaudeInstruction]
+    outcomes: tuple[_ReceiptOutcome, ...]
+    payload: bytes
+    received: dict[str, _PhysicalNode] = field(default_factory=dict)
+
+
+def _claude_instruction_source_names(source: Path) -> frozenset[str]:
+    return frozenset(scope + "/" + item.relative_to(source / scope).as_posix()
+        for scope in ("agents", "commands")
+        for item in (source / scope).rglob("*")
+        if item.is_file() and item.suffix.casefold() == ".md"
+        and "__pycache__" not in item.relative_to(source / scope).parts
+        and (scope == "commands" or len(item.relative_to(source / scope).parts) == 1))
+
+
+def _prepare_selected_claude_instructions(
+    grants: dict[str, str], source: Path, target: Path, scope: str,
+    owner: _CreateOnlyMutablePath,
+) -> _ClaudeInstructionUpdates | None:
+    if not grants:
+        return None
+    transaction, items, outcomes = owner.transaction, {}, []
+    receipt = owner.destination((target / _PROVIDER_RECEIPT_NAME).relative_to(owner.anchor))
+    receipt_node = _admitted_mutation_image(transaction, receipt).get(receipt)
+    receipt_before = (None if receipt_node is None
+                      else transaction._image_file_bytes(receipt, receipt_node))
+    receipt_parents = owner._file_parent_identities(receipt)
+    for key, digest in grants.items():
+        path = owner.destination((target / key).relative_to(owner.anchor))
+        before_node = _admitted_mutation_image(transaction, path).get(path)
+        parents = owner._file_parent_identities(path)
+        before = owner._assert_bound_file(path, before_node, parents)
+        if hashlib.sha256(before).hexdigest() != digest:
+            raise ValueError("E_CLAUDE_INSTRUCTION_SELECTION_DRIFT: " + key)
+        source_path = Path(os.path.abspath(source / key))
+        source_node = transaction._capture_node(source_path)
+        after = transaction._image_file_bytes(source_path, source_node)
+        items[key] = _SelectedClaudeInstruction(
+            source_path, source_node, path, before_node, before, after, digest, parents)
+        outcomes.append(_ReceiptOutcome(".claude/" + key, "file", before, after,
+                                        intent="replace", adoption_sha256=digest))
+    outcomes = tuple(outcomes)
+    plan = _plan_receipt_changes(receipt_before, "claude", scope, outcomes, _markdown_document_context)
+    if any(item.route != "selected-replacement-proposal" for item in plan.artifacts):
+        raise ValueError("E_CLAUDE_INSTRUCTION_SELECTION_INVALID: receipt plan")
+    payload = _serialize_receipt_delta(receipt_before, plan)
+    return _ClaudeInstructionUpdates(owner, scope, receipt, receipt_node, receipt_before,
+                                    receipt_parents, items, outcomes, payload)
+
+
+def _assert_selected_claude_instruction(
+    selected: _SelectedClaudeInstruction, owner: _CreateOnlyMutablePath, node: _PhysicalNode,
+) -> None:
+    if owner.transaction._image_file_bytes(selected.source, selected.source_node) != selected.after:
+        raise ValueError("E_CLAUDE_INSTRUCTION_SELECTION_DRIFT: source")
+    if owner._assert_bound_file(selected.path, node, selected.parents) != selected.after:
+        raise ValueError("E_CLAUDE_INSTRUCTION_SELECTION_DRIFT: outcome")
+
+
+def _apply_selected_claude_instruction(
+    batch: _ClaudeInstructionUpdates, key: str, source: Path, path: Path,
+    owner: _CreateOnlyMutablePath | None, dry_run: bool,
+) -> None:
+    selected = batch.items[key]
+    if (owner is not batch.owner or owner.linked_authority is not None
+            or Path(os.path.abspath(source)) != selected.source
+            or Path(os.path.abspath(path)) != selected.path or key in batch.received):
+        raise ValueError("E_CLAUDE_INSTRUCTION_SELECTION_DRIFT: route")
+    transaction = owner.transaction
+    if transaction._image_file_bytes(selected.source, selected.source_node) != selected.after:
+        raise ValueError("E_CLAUDE_INSTRUCTION_SELECTION_DRIFT: source")
+    if owner._assert_bound_file(selected.path, selected.before_node, selected.parents) != selected.before:
+        raise ValueError("E_CLAUDE_INSTRUCTION_SELECTION_DRIFT: preimage")
+    if dry_run:
+        print(f"  [dry-run] selected instruction replacement: {key}")
+        return
+    if selected.before != selected.after:
+        owner.replace_exact_file(selected.path.relative_to(owner.anchor), selected.digest, selected.after)
+    node = _admitted_mutation_image(transaction, selected.path).get(selected.path)
+    _assert_selected_claude_instruction(selected, owner, node)
+    batch.received[key] = node
+
+
+def _record_selected_claude_receipt(batch: _ClaudeInstructionUpdates) -> None:
+    owner, transaction = batch.owner, batch.owner.transaction
+    if owner.dry_run:
+        return
+    if not transaction.enabled or set(batch.received) != set(batch.items):
+        raise ValueError("E_CLAUDE_INSTRUCTION_SELECTION_DRIFT: incomplete outcomes")
+    for key, selected in batch.items.items():
+        _assert_selected_claude_instruction(selected, owner, batch.received[key])
+    fresh = _fresh_provider_receipt_files("claude", batch.scope, batch.receipt, owner)
+    selected_keys = {item.path for item in batch.outcomes}
+    fresh = {key: value for key, value in fresh.items() if key not in selected_keys}
+    outcomes = batch.outcomes + tuple(
+        _ReceiptOutcome(key, "file", None, owner._assert_fresh_file(witness), intent="create")
+        for key, witness in fresh.items())
+    if fresh:
+        plan = _plan_receipt_changes(batch.receipt_before, "claude", batch.scope,
+                                     outcomes, _markdown_document_context)
+        expected_routes = {item.path: ("selected-replacement-proposal" if item.intent == "replace"
+                                      else "creation-proposal") for item in outcomes}
+        if {item.path: item.route for item in plan.artifacts} != expected_routes:
+            raise ValueError("E_CLAUDE_INSTRUCTION_SELECTION_INVALID: receipt outcome conflict")
+        payload = _serialize_receipt_delta(batch.receipt_before, plan)
+    else:
+        payload = batch.payload
+    owner.destination(batch.receipt.relative_to(owner.anchor))
+    if batch.receipt_node is None:
+        if not transaction._image_matches(batch.receipt, {}):
+            raise ValueError("E_PROVIDER_RECEIPT_DRIFT: selected receipt absence")
+        start = len(transaction._fresh_files)
+        owner.create_file(batch.receipt.relative_to(owner.anchor), payload)
+        created = [witness for witness in transaction._fresh_files[start:]
+                   if witness.owner is owner and witness.path == batch.receipt]
+        if len(created) != 1:
+            raise ValueError("E_PROVIDER_RECEIPT_DRIFT: selected receipt creation")
+        receipt_after = created[0].node
+    else:
+        if owner._assert_bound_file(batch.receipt, batch.receipt_node,
+                                    batch.receipt_parents) != batch.receipt_before:
+            raise ValueError("E_PROVIDER_RECEIPT_DRIFT: selected receipt preimage")
+        if payload != batch.receipt_before:
+            owner.replace_exact_file(batch.receipt.relative_to(owner.anchor),
+                                     hashlib.sha256(batch.receipt_before).hexdigest(), payload)
+        receipt_after = _admitted_mutation_image(transaction, batch.receipt).get(batch.receipt)
+    for key, selected in batch.items.items():
+        _assert_selected_claude_instruction(selected, owner, batch.received[key])
+    for witness in fresh.values():
+        owner._assert_fresh_file(witness)
+    if owner._assert_bound_file(batch.receipt, receipt_after, batch.receipt_parents) != payload:
+        raise ValueError("E_PROVIDER_RECEIPT_DRIFT: selected receipt readback")
+
+
 def install(provider: str, argv: list[str] | None = None) -> int:
     args = _parser(provider).parse_args(argv)
     # Even dry-run builds and disposes staging before entering the transaction.
@@ -11724,6 +11918,9 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             "No target or staging operations were started.",
             file=sys.stderr,
         )
+        return 1
+    if args.replace_claude_instruction and provider != "claude":
+        print("FAIL: E_CLAUDE_INSTRUCTION_SELECTION_INVALID: Claude only", file=sys.stderr)
         return 1
     if args.replace_unreceipted_skill_sha256 and not args.global_install:
         print("FAIL: E_CANONICAL_SKILL_ADOPTION_MISMATCH", file=sys.stderr)
@@ -11751,6 +11948,9 @@ def install(provider: str, argv: list[str] | None = None) -> int:
     source = root / f"src.{provider}"
     try:
         mode, target, project = _target(provider, args)
+        instruction_grants = (_parse_claude_instruction_grants(
+            tuple(args.replace_claude_instruction), _claude_instruction_source_names(source))
+            if args.replace_claude_instruction else {})
         if (
             args.enroll_kimi or args.replace_kimi_enrollment
         ) and (provider != "codex" or mode != "global"):
@@ -11820,6 +12020,11 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             target_tree = claude_agents_root
             mode_target = target / ".agents-mode.yaml"
             normalize_provider = "shared"
+        if instruction_grants and any(
+            authority.name in {key.split("/")[0] for key in instruction_grants}
+            for authority in claude_link_authorities
+        ):
+            raise ValueError("E_CLAUDE_INSTRUCTION_SELECTION_INVALID: linked subroot")
         home = _resolve_global_home() if mode == "global" else None
         shared_mode_target: Path | None = None
         if mode == "global":
@@ -12061,14 +12266,16 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             copy_paths.update(_sync_file_destinations(source / "commands", claude_commands_target))
             copy_paths.update(destination for _source, destination in claude_runtime_destinations)
         fresh_receipt = None if args.dry_run else _fresh_provider_receipt_candidate(target)
-        if fresh_receipt is not None:
+        if instruction_grants:
+            transaction_paths.append(target / _PROVIDER_RECEIPT_NAME)
+        elif fresh_receipt is not None:
             transaction_paths.append(fresh_receipt)
         transaction = _InstallTransaction(
             transaction_paths,
             enabled=not args.dry_run,
             copy_paths=tuple(sorted(copy_paths)),
             link_object_paths=byte_pointer_objects,
-            track_fresh_files=fresh_receipt is not None,
+            track_fresh_files=fresh_receipt is not None or bool(instruction_grants),
         )
         for authority in claude_link_authorities:
             _assert_global_claude_linked_subroot_authority(root, authority)
@@ -12158,6 +12365,10 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     dry_run=args.dry_run,
                     linked_authority=codex_agents_authority,
                 )
+            instruction_updates = _prepare_selected_claude_instructions(
+                instruction_grants, source, target, "global" if mode == "global" else "project",
+                create_only,
+            )
             # Canonical roles resolve the neutral contract through .agents.
             # Publish that leaf before the canonical skills tree, while the
             # transaction still owns both canonical and provider destinations.
@@ -12205,11 +12416,13 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     excluded_files=claude_sync_excluded,
                     mutable_owner=claude_agents_owner,
                     instruction_scope="agents",
+                    instruction_updates=instruction_updates,
                 )
                 for authority in claude_link_authorities:
                     _assert_global_claude_linked_subroot_authority(root, authority)
                 _sync_tree(source / "commands", claude_commands_target, args.dry_run,
-                           mutable_owner=claude_commands_owner, instruction_scope="commands")
+                           mutable_owner=claude_commands_owner, instruction_scope="commands",
+                           instruction_updates=instruction_updates)
                 for authority in claude_link_authorities:
                     _assert_global_claude_linked_subroot_authority(root, authority)
                 _reclaim_claude_namespace(
@@ -12456,9 +12669,12 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             _finalize_canonical_lead_receipt(
                 canonical_plan, canonical_skills_target, canonical_skills_owner, reclaimed
             )
-            _record_fresh_provider_receipt(
-                provider, "global" if mode == "global" else "project", fresh_receipt, create_only
-            )
+            if instruction_updates is not None:
+                _record_selected_claude_receipt(instruction_updates)
+            else:
+                _record_fresh_provider_receipt(
+                    provider, "global" if mode == "global" else "project", fresh_receipt, create_only
+                )
             transaction.commit()
         if provider == "codex" and mode == "global":
             assert home is not None

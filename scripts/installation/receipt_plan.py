@@ -21,7 +21,7 @@ class Outcome:
     kind: str  # file or block
     before: bytes | None
     after: bytes | None
-    intent: str = "update"  # update, create, adopt, remove
+    intent: str = "update"  # update, create, adopt, remove, replace
     adoption_sha256: str | None = None
     adoption_span: tuple[int, int] | None = None
 
@@ -171,7 +171,7 @@ def plan_changes(receipt: bytes | None, provider: str, scope: str,
     artifacts, changes, seen = [], [], set()
     for item in outcomes:
         if (type(item) is not Outcome or item.kind not in {"file", "block"}
-                or item.intent not in {"update", "create", "adopt", "remove"}
+                or item.intent not in {"update", "create", "adopt", "remove", "replace"}
                 or item.before is not None and type(item.before) is not bytes
                 or item.after is not None and type(item.after) is not bytes):
             raise ValueError("E_RECEIPT_PLAN_OUTCOME")
@@ -189,7 +189,7 @@ def plan_changes(receipt: bytes | None, provider: str, scope: str,
         if existing is not None and (existing[0] != category or existing[1] != item.path):
             raise ValueError("E_RECEIPT_PLAN_ALIAS")
         claim = existing[2] if existing is not None else None
-        if item.intent != "adopt" and (item.adoption_sha256 is not None or item.adoption_span is not None):
+        if item.intent not in {"adopt", "replace"} and (item.adoption_sha256 is not None or item.adoption_span is not None):
             raise ValueError("E_RECEIPT_PLAN_UNUSED_SELECTION")
         def result(route, reason, requirements=()):
             return ArtifactPlan(item.path, route, _digest(item.before), _digest(item.after),
@@ -201,7 +201,14 @@ def plan_changes(receipt: bytes | None, provider: str, scope: str,
             artifacts.append(result("preserve", "Unrecorded removal is not planned."))
             continue
         try:
-            if claim is not None:
+            if item.intent == "replace":
+                # Exact-current selection is separate from historical ownership.
+                # Its digest is a precondition, never approval or a capability.
+                if item.kind != "file" or item.adoption_span is not None:
+                    raise ValueError("selected replacement requires a complete file")
+                if item.before is None or item.adoption_sha256 != _digest(item.before):
+                    raise ValueError("selected replacement preimage changed")
+            elif claim is not None:
                 if item.intent != "update" and item.intent != "remove":
                     raise ValueError("creation or adoption cannot override a claim")
                 if item.before is None:
@@ -230,14 +237,17 @@ def plan_changes(receipt: bytes | None, provider: str, scope: str,
             artifacts.append(result("preserve", str(error)))
             continue
         requirements = ["artifact-and-receipt-currentness", "atomic-owner-commit-and-rollback"]
-        if claim is not None:
+        if item.intent == "replace":
+            requirements.extend(("exact-current-replacement-approval", "selected-storage-acquisition"))
+        elif claim is not None:
             requirements.append("historical-storage-authority")
         elif item.intent == "adopt":
             requirements.extend(("exact-user-adoption-approval", "selected-storage-acquisition"))
         else:
             requirements.append("fresh-creation-acquisition")
         route = {"update": "recorded-proposal", "create": "creation-proposal",
-                 "adopt": "adoption-proposal", "remove": "removal-proposal"}[item.intent]
+                 "adopt": "adoption-proposal", "remove": "removal-proposal",
+                 "replace": "selected-replacement-proposal"}[item.intent]
         artifacts.append(result(route, "Semantic proposal only; acquisition is outstanding.", requirements))
         changes.append(Change(category, item.path, None if claim is None else _json(claim),
                               None if proposed is None else _json(proposed)))

@@ -99,8 +99,10 @@ class FreshProviderWiringTests(unittest.TestCase):
             self.require(guard.test, clause)
         self.assertIsInstance(guard.body[0], ast.Return)
         self.assertEqual(shape(guard.body[0].value), shape(expression("None")))
-        self.require(capture, "transaction._binding_identity_matches(self._anchor_identity, self._identity(self.anchor))")
-        self.require(capture, "parents.append((current, identity))")
+        self.require(capture, "self._file_parent_identities(path)")
+        capture_shared = self.method("_file_parent_identities")
+        self.require(capture_shared, "self.transaction._binding_identity_matches(self._anchor_identity, self._identity(self.anchor))")
+        self.require(capture_shared, "parents.append((current, identity))")
 
     def test_success_append_requires_creator_and_parent_bound_readback(self):
         record = self.method("_record_fresh_file")
@@ -114,8 +116,10 @@ class FreshProviderWiringTests(unittest.TestCase):
         bound = self.method("_assert_fresh_file")
         self.require(bound, "witness.owner is not self")
         self.require(bound, 'witness.node.kind != "file"')
-        self.require(bound, "self.transaction._binding_identity_matches(identity, self._identity(parent))")
-        self.require(bound, "self.transaction._image_file_bytes(witness.path, witness.node)")
+        self.require(bound, "self._assert_bound_file(witness.path, witness.node, witness.parents)")
+        shared = self.method("_assert_bound_file")
+        self.require(shared, "self.transaction._binding_identity_matches(identity, self._identity(parent))")
+        self.require(shared, "self.transaction._image_file_bytes(path, node)")
 
     def test_only_three_explicit_writer_seams_record_success(self):
         writers = {method.name for method in self.owner.body
@@ -198,6 +202,16 @@ class FreshProviderWiringTests(unittest.TestCase):
         for text in (
             "receipt is None", "owner.dry_run", "not transaction.enabled",
             "any(receipt in image for image in transaction._original.values())",
+        ):
+            self.require(final, text)
+        collector_call = self.one_call(final, "_fresh_provider_receipt_files")
+        for guard in (node for node in final.body if isinstance(node, ast.If)
+                      and node.lineno < collector_call.lineno):
+            self.assertIsInstance(guard.body[0], ast.Return)
+        self.assertEqual(calls(final, "replace_file_atomic"), [])
+        self.assertEqual(calls(final, "replace_exact_file"), [])
+        final = named(self.tree, "_fresh_provider_receipt_files")
+        for text in (
             "witness.owner is not owner", "path == receipt",
             "not path.is_relative_to(owner.anchor)",
             "any(path == root or root in path.parents for root in transient)",
@@ -240,7 +254,7 @@ class FreshProviderWiringTests(unittest.TestCase):
         install = named(self.tree, "install")
         transaction = self.one_call(install, "_InstallTransaction")
         self.assertTrue(any(kw.arg == "track_fresh_files"
-                            and shape(kw.value) == shape(expression("fresh_receipt is not None"))
+                            and shape(kw.value) == shape(expression("fresh_receipt is not None or bool(instruction_grants)"))
                             for kw in transaction.keywords))
         admission = next(node for node in ast.walk(install)
                          if isinstance(node, ast.Assign)
@@ -256,7 +270,11 @@ class FreshProviderWiringTests(unittest.TestCase):
         final = self.one_call(scope, "_record_fresh_provider_receipt")
         self.assertEqual(ast.unparse(final.args[-1]), "create_only")
         self.assertEqual(ast.unparse(final.args[-2]), "fresh_receipt")
-        self.assertIs(scope.body[-2].value, final)
+        branch = scope.body[-2]
+        self.assertIsInstance(branch, ast.If)
+        self.require(branch.test, "instruction_updates is not None")
+        self.assertIs(branch.orelse[0].value, final)
+        self.assertEqual(len(branch.orelse), 1)
         self.assertEqual(ast.unparse(scope.body[-1]), "transaction.commit()")
         for call in calls(scope, "_CreateOnlyMutablePath") + calls(scope, "bind_or_create_anchor"):
             if any(isinstance(arg, ast.Name) and arg.id == "transaction" for arg in call.args):
