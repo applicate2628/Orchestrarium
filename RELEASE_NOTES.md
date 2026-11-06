@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-06
 
+- Report historical Codex skill-catalog size calculations as estimates rather than runtime PASS/FAIL decisions. Large estimates warn without requiring shorter role descriptions; actual observed missing identities and unavailable runtime evidence retain their failure behavior. The optional live-client test requires explicit authorization and opt-in.
+
 - Reuse governing instructions during handoff only when they are already present and unchanged in the receiving context. The shared rule requires missing instructions through the trusted input path and restores obligations after compaction without resetting permissions. Existing concrete evidence requirements remain intact. This is source guidance, not proof of runtime loading, token savings or a solution to project-instruction budget limits; external governance transport and installation behavior are unchanged.
 
 - Keep an adopted ready solution as the baseline before nontrivial reimplementation, with safe entry-path evidence or an explicit unresolved hold. Existing receiving now checks whether the chosen route and the next real action still serve the original reuse outcome, including after a user correction; passing tests of custom scaffolding cannot justify the scaffolding or stand in for the ready product. Concrete incompatibility and safety repairs remain allowed without unsafe execution, and no new review stage is introduced.
