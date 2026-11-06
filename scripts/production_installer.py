@@ -36,6 +36,15 @@ except ModuleNotFoundError as error:
     from scripts.installer_markdown import document_context as _markdown_document_context
 
 try:
+    from installation.document_outcomes import (
+        DocumentResult as _DocumentResult, render_documents as _render_document_outcomes)
+except ModuleNotFoundError as error:
+    if error.name not in {"installation", "installation.document_outcomes"}:
+        raise
+    from scripts.installation.document_outcomes import (
+        DocumentResult as _DocumentResult, render_documents as _render_document_outcomes)
+
+try:
     from provider_prompt import enroll_kimi_executable, replace_kimi_enrollment
 except ModuleNotFoundError:
     from scripts.provider_prompt import enroll_kimi_executable, replace_kimi_enrollment
@@ -10175,9 +10184,10 @@ def _render_codex_document(existing: str | None, pack: str) -> str:
     return content
 
 
-def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *,
-                       mutable_owner: _CreateOnlyMutablePath | None = None,
-                       project_scope: bool = False) -> None:
+def _prepare_codex_agents(root: Path, source: Path, target: Path, *,
+                         mutable_owner: _CreateOnlyMutablePath | None = None,
+                         project_scope: bool = False) -> _DocumentResult:
+    """Read exact inputs and propose Codex text without writing or claiming ownership."""
     pack = (
         CODEX_BEGIN
         + "\n"
@@ -10189,7 +10199,21 @@ def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *
         + "\n"
     )
     existing = _read_owned_text(target, mutable_owner, preserve_newlines=True)
-    content = _render_codex_document(existing, pack)
+    scope = "project" if project_scope else "global"
+    logical_path = "AGENTS.md" if project_scope else ".codex/AGENTS.md"
+    before = None if existing is None else existing.encode("utf-8")
+    result, = _render_document_outcomes(
+        "codex", scope, {logical_path: before},
+        lambda _kind, text: _render_codex_document(text, pack))
+    return result
+
+
+def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *,
+                       mutable_owner: _CreateOnlyMutablePath | None = None,
+                       project_scope: bool = False) -> None:
+    proposed = _prepare_codex_agents(
+        root, source, target, mutable_owner=mutable_owner, project_scope=project_scope)
+    content = proposed.after.decode("utf-8")
     if project_scope:
         print(f"  WARNING: standalone project instruction budget may be exceeded "
               f"(rendered document: {len(content.encode('utf-8'))} UTF-8 bytes). "

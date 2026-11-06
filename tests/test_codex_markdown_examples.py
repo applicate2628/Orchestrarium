@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "scripts" / "production_installer.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 from installer_markdown import document_context
+from installation.document_outcomes import render_documents
 
 
 class MemoryPath(PurePosixPath):
@@ -25,7 +26,7 @@ class MemoryPath(PurePosixPath):
 class CodexMarkdownExampleTests(unittest.TestCase):
     def setUp(self):
         tree = ast.parse(SOURCE.read_bytes())
-        names = {"_merge_codex_agents", "_render_codex_document"}
+        names = {"_merge_codex_agents", "_render_codex_document", "_prepare_codex_agents"}
         functions = [node for node in tree.body
                      if isinstance(node, ast.FunctionDef) and node.name in names]
         self.assertEqual(len(functions), len(names))
@@ -40,6 +41,7 @@ class CodexMarkdownExampleTests(unittest.TestCase):
         self.existing = None
         self.writes = []
         self.scope = dict(constants,
+                          _render_document_outcomes=render_documents,
                           _markdown_document_context=document_context,
                           _read_owned_text=lambda *_args, preserve_newlines: self.existing,
                           _write_owned_text=lambda *args: self.writes.append(args))

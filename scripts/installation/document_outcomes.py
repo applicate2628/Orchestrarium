@@ -1,7 +1,8 @@
 """Pure byte-to-renderer adapter; no reads, writes, receipt or storage authority.
 
 The renderer is the existing producer supplied by its caller, never a second
-merge implementation. This adapter is not wired into installer entry points.
+merge implementation. Codex preparation uses this adapter; receipt ownership
+remains a separate lifecycle decision.
 """
 from __future__ import annotations
 
