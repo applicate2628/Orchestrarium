@@ -164,38 +164,14 @@ class FinalizerStaticWiringTests(unittest.TestCase):
         self.assertEqual([ast.unparse(arg) for arg in calls[0].args],
                          ["plan.stage.manifest", "lead", "reclaimed"])
 
-    def test_enabled_transaction_selects_image_and_owned_reader(self):
-        branches = [n for n in ast.walk(self.node)
-                    if isinstance(n, ast.If)
-                    and "enabled" in ast.unparse(n.test)]
-        self.assertEqual(len(branches), 1)
-        branch = branches[0]
-        self.assertEqual(ast.unparse(branch.test), "owner.transaction.enabled")
-        self.assertEqual(len(_calls(self.node, "_admitted_mutation_image")), 1)
-        self.assertEqual(len(_calls(self.node, "_image_file_bytes")), 1)
-        self.assertEqual(len(_calls(branch, "_admitted_mutation_image")), 1)
-        self.assertEqual(len(_calls(branch, "_image_file_bytes")), 1)
-        callback = next(n for n in ast.walk(branch) if isinstance(n, ast.Lambda))
-        self.assertEqual(ast.unparse(callback.body),
-                         "owner.transaction._image_file_bytes(member, image.get(member))")
-        image_call = _calls(branch, "_admitted_mutation_image")[0]
-        self.assertEqual([ast.unparse(arg) for arg in image_call.args],
-                         ["owner.transaction", "storage_lead"])
-        assignments = [n for n in self.node.body if isinstance(n, ast.Assign)]
-        storage = next(n for n in assignments
-                       if any(isinstance(t, ast.Name) and t.id == "storage_lead"
-                              for t in n.targets))
-        self.assertEqual(ast.unparse(storage.value), "Path(os.path.abspath(lead))")
-        default = next(n for n in assignments
-                       if any(isinstance(t, ast.Name) and t.id == "read_file"
-                              for t in n.targets))
-        self.assertIsNone(ast.literal_eval(default.value))
-        self.assertLess(default.lineno, branch.lineno)
-        scan = _calls(self.node, "_stage_tree_manifest")[0]
-        self.assertEqual(ast.unparse(scan.args[0]), "storage_lead")
-        self.assertEqual(ast.unparse(next(
-            kw.value for kw in scan.keywords if kw.arg == "read_file")), "read_file")
-        self.assertGreater(scan.lineno, branch.end_lineno)
+    def test_lead_uses_shared_admitted_reader(self):
+        calls = _calls(self.node, "_admitted_tree_manifest")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(ast.unparse(calls[0]),
+                         "_admitted_tree_manifest(owner.transaction, lead, ignore_runtime_cache=True)")
+        for name in ("_stage_tree_manifest", "_admitted_mutation_image",
+                     "_image_file_bytes"):
+            self.assertEqual(_calls(self.node, name), [])
 
     def test_actual_manifest_is_compared_and_hashed_once(self):
         hashes = _calls(self.node, "_tree_manifest_sha256")
@@ -212,7 +188,7 @@ class FinalizerStaticWiringTests(unittest.TestCase):
         self.assertEqual(len(comparisons), 1)
         self.assertLess(comparisons[0].lineno, hashes[0].lineno)
         self.assertEqual(_calls(self.node, "_tree_sha256"), [])
-        scans = _calls(self.node, "_stage_tree_manifest")
+        scans = _calls(self.node, "_admitted_tree_manifest")
         self.assertEqual(len(scans), 1)
         assignment = next(n for n in self.node.body
                           if isinstance(n, ast.Assign) and n.value is scans[0])
@@ -232,6 +208,75 @@ class FinalizerStaticWiringTests(unittest.TestCase):
         self.assertIn(
             "owner.replace_exact_file(relative, hashlib.sha256(prior_receipt[0]).hexdigest(), payload)",
             text)
+
+
+class AdmittedManifestStaticWiringTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tree = _source_tree()
+        cls.node = _function(cls.tree, "_admitted_tree_manifest")
+        cls.apply = _function(cls.tree, "_apply_canonical_skills_plan")
+
+    def test_shared_reader_has_exact_gating_and_single_traversal(self):
+        # Parse the approved body only. Never compile or invoke this reader.
+        expected = ast.parse("""
+storage_path = Path(os.path.abspath(path))
+read_file = None
+if transaction.enabled:
+    image = _admitted_mutation_image(transaction, storage_path)
+    read_file = lambda member: transaction._image_file_bytes(member, image.get(member))
+return _stage_tree_manifest(storage_path, ignore_runtime_cache=ignore_runtime_cache, read_file=read_file)
+""")
+        body = [n for n in self.node.body
+                if not (isinstance(n, ast.Expr)
+                        and isinstance(n.value, ast.Constant)
+                        and isinstance(n.value.value, str))]
+        self.assertEqual([ast.dump(n) for n in body],
+                         [ast.dump(n) for n in expected.body])
+        args = self.node.args
+        self.assertEqual([a.arg for a in args.args], ["transaction", "path"])
+        self.assertEqual([a.arg for a in args.kwonlyargs], ["ignore_runtime_cache"])
+        self.assertEqual([ast.literal_eval(n) for n in args.kw_defaults], [False])
+        self.assertEqual(args.defaults, [])
+        self.assertEqual(args.posonlyargs, [])
+        self.assertIsNone(args.vararg)
+        self.assertIsNone(args.kwarg)
+
+    def test_exactly_two_real_consumers(self):
+        consumers = [(node.name, call) for node in self.tree.body
+                     if isinstance(node, ast.FunctionDef)
+                     for call in _calls(node, "_admitted_tree_manifest")]
+        self.assertEqual(sorted(name for name, _ in consumers),
+                         ["_apply_canonical_skills_plan",
+                          "_finalize_canonical_lead_receipt"])
+
+    def test_ordinary_tuple_branch_and_selection_bypasses(self):
+        loop = next(n for n in ast.walk(self.apply)
+                    if isinstance(n, ast.For)
+                    and ast.unparse(n.iter) == "plan.nonlead_expected")
+        expected = ast.parse("""
+for name, digest in plan.nonlead_expected:
+    member = next((skill for skill in plan.skills if skill.name == name and skill.managed_after is not None), None)
+    if member is not None:
+        _assert_canonical_member_state(member, target / name, after=True, transaction=owner.transaction)
+        continue
+    if plan.member_selection is not None:
+        continue
+    if isinstance(digest, tuple):
+        if _admitted_tree_manifest(owner.transaction, target / name, ignore_runtime_cache=True) != digest:
+            raise ValueError(f"E_MUTABLE_PATH_POSTCONDITION: non-Lead {name}")
+    else:
+        raise ValueError("E_LEGACY_TREE_WITNESS_UNAVAILABLE: " + name)
+""").body[0]
+        self.assertEqual(ast.dump(loop), ast.dump(expected))
+        calls = _calls(self.apply, "_admitted_tree_manifest")
+        self.assertEqual(len(calls), 1)
+        for name in ("_stage_tree_manifest", "_admitted_mutation_image",
+                     "_image_file_bytes"):
+            self.assertEqual(_calls(self.apply, name), [])
+        container = next(n for n in ast.walk(self.apply)
+                         if isinstance(n, ast.If) and loop in n.body)
+        self.assertEqual(ast.unparse(container.test), "not owner.dry_run")
 
 
 if __name__ == "__main__":

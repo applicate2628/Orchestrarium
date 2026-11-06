@@ -9359,7 +9359,7 @@ def _apply_canonical_skills_plan(
                 if plan.member_selection is not None:
                     continue  # Other receipt entries retain their exact authenticated meanings.
                 if isinstance(digest, tuple):
-                    if _stage_tree_manifest(target / name, ignore_runtime_cache=True) != digest:
+                    if _admitted_tree_manifest(owner.transaction, target / name, ignore_runtime_cache=True) != digest:
                         raise ValueError(f"E_MUTABLE_PATH_POSTCONDITION: non-Lead {name}")
                 else:
                     # A legacy unselected entry may only be carried unchanged;
@@ -10091,6 +10091,19 @@ def _admitted_mutation_image(transaction: _InstallTransaction, path: Path) -> di
             return {member: value for member, value in image.items()
                     if member == path or path in member.parents}
     raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing admitted mutation image")
+
+
+def _admitted_tree_manifest(
+    transaction: _InstallTransaction, path: Path, *, ignore_runtime_cache: bool = False,
+) -> tuple[tuple[str, str], ...]:
+    """Bind included payload reads; traversal policy is not complete tree custody."""
+    storage_path = Path(os.path.abspath(path))
+    read_file = None
+    if transaction.enabled:
+        image = _admitted_mutation_image(transaction, storage_path)
+        read_file = lambda member: transaction._image_file_bytes(member, image.get(member))
+    return _stage_tree_manifest(
+        storage_path, ignore_runtime_cache=ignore_runtime_cache, read_file=read_file)
 
 
 def _reclaim_claude_namespace(
@@ -11446,14 +11459,8 @@ def _finalize_canonical_lead_receipt(
         return
     lead = target / "lead"
     expected = _canonical_lead_expected_manifest(plan.stage.manifest, lead, reclaimed)
-    storage_lead = Path(os.path.abspath(lead))
-    read_file = None
-    if owner.transaction.enabled:
-        # Included payloads retain this transaction's admitted/composed identity.
-        # Keep traversal/cache policy separate from full-image membership checks.
-        image = _admitted_mutation_image(owner.transaction, storage_lead)
-        read_file = lambda member: owner.transaction._image_file_bytes(member, image.get(member))
-    actual = _stage_tree_manifest(storage_lead, ignore_runtime_cache=True, read_file=read_file)
+    actual = _admitted_tree_manifest(
+        owner.transaction, lead, ignore_runtime_cache=True)
     if actual != expected:
         raise ValueError("E_MUTABLE_PATH_POSTCONDITION: final Lead manifest")
     if plan.lead_receipt is not None:

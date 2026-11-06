@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-06
 
+- Reuse the transaction-bound included-file reader for ordinary non-Lead tuple receipt verification as well as Lead. The shared manifest helper keeps prior traversal/cache exclusions and disabled direct-mode behavior; member-selection branches, legacy-entry handling and receipt writers remain unchanged. Qualification is pure/static source coverage, not physical lifecycle or rollback acceptance.
+
 - Derive the canonical Lead receipt digest from the same compared manifest, binding included payload reads to the enabled transaction's admitted state instead of a second independent pathname census. Existing cache exclusions, dry-run, direct-operation reader and receipt writers are retained. Pure/static source checks do not qualify physical execution, directory-chain custody or rollback.
 
 - Connect Claude document preparation to the common exact-byte adapter while preserving sequential read/render failures, current newline normalization and both-results-before-write behavior. The existing wrapper retains its writer order, dry-run output and None return. Single-document and batch adapters share one decoding/rendering path; no receipt acquisition, persistence or physical lifecycle authority is enabled.
