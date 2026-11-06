@@ -38,6 +38,14 @@ Codex preparation now uses the common adapter. The read-only _prepare_codex_agen
 
 Claude preparation now uses the single-document render_document adapter. It validates the logical path against the provider/scope map and shares decoding/rendering helpers with the batch API. The batch API still validates and decodes its complete input set before any callback; the single-document API lets _prepare_claude_docs retain the existing sequence: read and validate sources, read/render CLAUDE.md, then read/render AGENTS.md. Both immutable proposals are returned before the wrapper can write either. The wrapper retains its None return, dry-run output and Claude-first writer order. Exact input bytes are retained while the existing universal-newline renderer view remains unchanged. project_scope selects logical scope explicitly; neither an absent input nor a successful render acquires ownership. Receipt planning/persistence, historical storage authority, physical creation receiving, coupled writes and repeat lifecycle acceptance remain future work under the existing restrictions. Tests use AST-isolated source functions and memory-only input transport with the real pure adapter/parser, never a full installer import or physical-chain execution.
 
+## Existing transaction-derived receipt outcome
+
+The canonical Lead receipt finalizer now reads included payload bytes through the enabled transaction's admitted/composed image, using the existing _image_file_bytes reader. It retains the existing no-follow manifest traversal and runtime-cache exclusions. It compares that manifest with the admitted stage minus exact proven reclamations, then hashes the same compared manifest using the existing tree-manifest codec. It no longer hashes a second independent pathname census for the receipt.
+
+The pure _canonical_lead_expected_manifest helper preserves the prior reclamation calculation. Dry-run returns before reading. Disabled direct-operation transactions retain the existing default reader rather than gaining a new full-image census. Receipt format, no-op handling and create/replace writers are unchanged. This is a connected improvement to the existing Lead receipt producer, not provider-receipt persistence or proof of historical root identity.
+
+Qualification of this change is limited to pure manifest semantics, static source wiring and independent source review. The finalizer, physical image reader, complete directory/chain custody, cache races, transaction settlement and rollback have not been executed or qualified by those checks. Their existing restrictions remain in force; pure tests must not be represented as live lifecycle acceptance.
+
 ## Terms and Abbreviations
 
 - Provider receipt: the version-one Orchestrarium record of claimed artifact paths and content digests.

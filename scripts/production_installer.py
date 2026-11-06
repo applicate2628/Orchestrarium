@@ -11417,6 +11417,24 @@ def _checkpoint(
         raise RuntimeError(f"hook transaction checkpoint failed at {stage}")
 
 
+def _canonical_lead_expected_manifest(
+    manifest: tuple[tuple[str, str], ...],
+    lead: Path,
+    reclaimed: tuple[tuple[Path, str], ...] = (),
+) -> tuple[tuple[str, str], ...]:
+    """Project the admitted stage minus its exact proven reclamations, without I/O."""
+    expected = dict(manifest)
+    for removed, digest in reclaimed:
+        try:
+            relative = removed.relative_to(lead).as_posix()
+        except ValueError:
+            continue
+        if expected.get(relative) != digest:
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: unbound Lead reclamation")
+        del expected[relative]
+    return tuple(sorted(expected.items()))
+
+
 def _finalize_canonical_lead_receipt(
     plan: _CanonicalSkillsPlan,
     target: Path,
@@ -11427,21 +11445,20 @@ def _finalize_canonical_lead_receipt(
     if owner.dry_run:
         return
     lead = target / "lead"
-    expected = dict(plan.stage.manifest)
-    for removed, digest in reclaimed:
-        try:
-            relative = removed.relative_to(lead).as_posix()
-        except ValueError:
-            continue
-        if expected.get(relative) != digest:
-            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: unbound Lead reclamation")
-        del expected[relative]
-    if _stage_tree_manifest(lead, ignore_runtime_cache=True) != tuple(sorted(expected.items())):
+    expected = _canonical_lead_expected_manifest(plan.stage.manifest, lead, reclaimed)
+    storage_lead = Path(os.path.abspath(lead))
+    read_file = None
+    if owner.transaction.enabled:
+        # Included payloads retain this transaction's admitted/composed identity.
+        # Keep traversal/cache policy separate from full-image membership checks.
+        image = _admitted_mutation_image(owner.transaction, storage_lead)
+        read_file = lambda member: owner.transaction._image_file_bytes(member, image.get(member))
+    actual = _stage_tree_manifest(storage_lead, ignore_runtime_cache=True, read_file=read_file)
+    if actual != expected:
         raise ValueError("E_MUTABLE_PATH_POSTCONDITION: final Lead manifest")
     if plan.lead_receipt is not None:
-        digest = _tree_sha256(lead, ignore_runtime_cache=True)
-        if digest is None:
-            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: final Lead digest")
+        # Hash exactly the compared manifest, never a second pathname census.
+        digest = _tree_manifest_sha256(actual)
         payload = _lead_receipt_bytes(digest)
         current_receipt = _read_lead_receipt(target / _LEAD_RECEIPT_NAME)
         if current_receipt is not None and current_receipt[0] == payload:
