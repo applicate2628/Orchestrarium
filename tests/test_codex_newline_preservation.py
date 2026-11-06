@@ -47,7 +47,7 @@ class MemoryPath(PurePosixPath):
 class NewlinePreservationTests(unittest.TestCase):
     def setUp(self):
         tree = ast.parse(SOURCE.read_bytes())
-        names = {"_read_owned_text", "_write_owned_text", "_merge_codex_agents"}
+        names = {"_read_owned_text", "_write_owned_text", "_merge_codex_agents", "_render_codex_document"}
         functions = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in names]
         self.assertEqual(len(functions), len(names))
         future = ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0)

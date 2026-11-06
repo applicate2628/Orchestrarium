@@ -34,7 +34,7 @@ All document inputs are validated and decoded before rendering. Both Claude docu
 
 Conversion to the existing planner always uses update intent. Neither an absent preimage, familiar markers, nor successful rendering is a positively received creation or adoption event. The adapter does not select adoption spans or grant permission. Exact bytes remain available for the planner to reject an outside-text change, including current Claude newline normalization. Public result dataclasses are not trusted capabilities.
 
-This adapter is intentionally unwired. Tests exercise AST-isolated existing producer functions with memory-only readers/writers and the real bundled Markdown parser; no installer module or physical lifecycle is executed. Real input acquisition, direct pure-renderer extraction/caller wiring, physical creation receiving, coupled writes, and repeat lifecycle acceptance remain future work under the existing restrictions.
+The adapter remains unwired into the receipt lifecycle. Codex selection is now the pure _render_codex_document function in the existing installer source, called by the original merge wrapper. Source reads, warning output, dry-run behavior and the writer remain in that wrapper. Adapter tests call the pure renderer directly with a bound pack, rather than capturing a merge writer. The other focused tests retain memory-only wrapper I/O checks; no installer module or physical lifecycle is executed. Real input acquisition, adapter/lifecycle wiring, physical creation receiving, coupled writes, and repeat lifecycle acceptance remain future work under the existing restrictions.
 
 ## Terms and Abbreviations
 

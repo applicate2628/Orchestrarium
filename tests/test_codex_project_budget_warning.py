@@ -23,10 +23,12 @@ class MemoryPath(PurePosixPath):
 class CodexProjectBudgetWarningTests(unittest.TestCase):
     def setUp(self):
         self.tree = ast.parse(SOURCE.read_bytes())
-        function = next(n for n in self.tree.body
-                        if isinstance(n, ast.FunctionDef) and n.name == "_merge_codex_agents")
+        names = {"_merge_codex_agents", "_render_codex_document"}
+        functions = [n for n in self.tree.body
+                     if isinstance(n, ast.FunctionDef) and n.name in names]
+        self.assertEqual(len(functions), len(names))
         future = ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0)
-        isolated = ast.fix_missing_locations(ast.Module(body=[future, function], type_ignores=[]))
+        isolated = ast.fix_missing_locations(ast.Module(body=[future, *functions], type_ignores=[]))
         constants = {}
         for node in self.tree.body:
             if isinstance(node, ast.Assign):

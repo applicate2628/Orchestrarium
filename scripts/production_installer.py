@@ -10143,20 +10143,8 @@ def _write_owned_text(target: Path, content: str, owner: _CreateOnlyMutablePath 
                               mode=None, fsync="none")
 
 
-def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *,
-                       mutable_owner: _CreateOnlyMutablePath | None = None,
-                       project_scope: bool = False) -> None:
-    pack = (
-        CODEX_BEGIN
-        + "\n"
-        + (root / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8").rstrip()
-        + "\n\n"
-        + (source / "AGENTS.codex.md").read_text(encoding="utf-8").rstrip()
-        + "\n"
-        + CODEX_END
-        + "\n"
-    )
-    existing = _read_owned_text(target, mutable_owner, preserve_newlines=True)
+def _render_codex_document(existing: str | None, pack: str) -> str:
+    """Render proposed Codex text using the existing compatible boundaries."""
     if existing is not None:
         # Select starts outside code, but retain the old raw ending boundary:
         # filtering an END or policy heading could expand the replaced extent.
@@ -10184,6 +10172,24 @@ def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *
             content = pack + "\n" + existing
     else:
         content = pack
+    return content
+
+
+def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *,
+                       mutable_owner: _CreateOnlyMutablePath | None = None,
+                       project_scope: bool = False) -> None:
+    pack = (
+        CODEX_BEGIN
+        + "\n"
+        + (root / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8").rstrip()
+        + "\n\n"
+        + (source / "AGENTS.codex.md").read_text(encoding="utf-8").rstrip()
+        + "\n"
+        + CODEX_END
+        + "\n"
+    )
+    existing = _read_owned_text(target, mutable_owner, preserve_newlines=True)
+    content = _render_codex_document(existing, pack)
     if project_scope:
         print(f"  WARNING: standalone project instruction budget may be exceeded "
               f"(rendered document: {len(content.encode('utf-8'))} UTF-8 bytes). "

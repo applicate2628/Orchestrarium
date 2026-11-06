@@ -25,10 +25,12 @@ class MemoryPath(PurePosixPath):
 class CodexMarkdownExampleTests(unittest.TestCase):
     def setUp(self):
         tree = ast.parse(SOURCE.read_bytes())
-        function = next(node for node in tree.body
-                        if isinstance(node, ast.FunctionDef) and node.name == "_merge_codex_agents")
+        names = {"_merge_codex_agents", "_render_codex_document"}
+        functions = [node for node in tree.body
+                     if isinstance(node, ast.FunctionDef) and node.name in names]
+        self.assertEqual(len(functions), len(names))
         future = ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0)
-        isolated = ast.fix_missing_locations(ast.Module(body=[future, function], type_ignores=[]))
+        isolated = ast.fix_missing_locations(ast.Module(body=[future, *functions], type_ignores=[]))
         constants = {}
         for node in tree.body:
             if isinstance(node, ast.Assign):

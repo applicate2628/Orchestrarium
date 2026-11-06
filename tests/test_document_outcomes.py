@@ -2,10 +2,8 @@
 from __future__ import annotations
 
 import ast
-import contextlib
 from dataclasses import FrozenInstanceError
-import io
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import re
 import sys
 import unittest
@@ -17,17 +15,11 @@ from installation.receipt_plan import plan_changes
 from installer_markdown import document_context
 
 
-class MemoryPath(PurePosixPath):
-    def read_text(self, *, encoding):
-        assert encoding == "utf-8"
-        return "# Shared Governance\nShared rule.\n" if self.name == "AGENTS.shared.md" else "# Codex Platform Rules\nCodex rule.\n"
-
-
 class DocumentOutcomesTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         tree = ast.parse((ROOT / "scripts/production_installer.py").read_bytes())
-        names = {"_merge_codex_agents", "_render_claude_document", "_claude_document_context"}
+        names = {"_render_codex_document", "_render_claude_document", "_claude_document_context"}
         nodes = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in names]
         constants = [n for n in tree.body if isinstance(n, ast.Assign)
                      and any(isinstance(t, ast.Name) and t.id in
@@ -41,18 +33,13 @@ class DocumentOutcomesTests(unittest.TestCase):
         self.scope = {"re": re, "_markdown_document_context": document_context}
         exec(compile(self.module, "isolated-existing-producers", "exec"), self.scope)
         self.calls = []
-        self.writes = []
 
     def codex(self, kind, text):
         self.assertEqual(kind, "codex")
         self.calls.append((kind, text))
-        self.scope["_read_owned_text"] = lambda *_a, **_k: text
-        self.scope["_write_owned_text"] = lambda _p, content, _o: self.writes.append(content)
-        with contextlib.redirect_stdout(io.StringIO()):
-            self.scope["_merge_codex_agents"](
-                MemoryPath("/source"), MemoryPath("/source/src.codex"),
-                MemoryPath("/synthetic/AGENTS.md"), False)
-        return self.writes[-1]
+        pack = (self.scope["CODEX_BEGIN"] + "\n# Shared Governance\nShared rule.\n\n"
+                "# Codex Platform Rules\nCodex rule.\n" + self.scope["CODEX_END"] + "\n")
+        return self.scope["_render_codex_document"](text, pack)
 
     def claude(self, kind, text):
         self.calls.append((kind, text))
@@ -117,7 +104,6 @@ class DocumentOutcomesTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "LEGACY_AMBIGUOUS"):
             render_documents("claude", "project", inputs, self.claude)
         self.assertEqual([k for k, _ in self.calls], ["claude", "shared"])
-        self.assertEqual(self.writes, [])
         self.assertEqual(inputs[".claude/AGENTS.md"], b"# Shared Governance\nChanged unknown old body\n")
 
     def test_decode_all_preimages_before_render(self):
@@ -227,7 +213,6 @@ class DocumentOutcomesTests(unittest.TestCase):
             render_documents("codex", "project", {"AGENTS.md": raw}, self.codex)
         self.assertEqual(str(caught.exception),
                          "E_CODEX_DOCUMENT_AMBIGUOUS: missing managed end marker")
-        self.assertEqual(self.writes, [])
 
     def test_adapter_absent_codex_does_not_invoke_parser(self):
         def unexpected(_text):
