@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-06
 
+- Temporarily refuse pre-SDK Codex and Claude installer operations on POSIX hosts, including ordinary dry-run, before target resolution or staging. This prevents the public installer route from reaching the unresolved deletion race; it does not repair that race. Linux, macOS and Windows Subsystem for Linux installation and update remain unavailable, with a clear diagnostic and no force bypass. Windows dispatch and help remain unchanged; no existing installation or SDK source is updated by this change.
+
 - Warn during current-version Codex project instruction rendering that client-budget coverage is unverified, and report the rendered UTF-8 size. Operators can see this delivery limitation without a new hardcoded cap or changes to instruction content, user configuration, or installation permissions.
 
 - Report historical Codex skill-catalog size calculations as estimates rather than runtime PASS/FAIL decisions. Large estimates warn without requiring shorter role descriptions; actual observed missing identities and unavailable runtime evidence retain their failure behavior. The optional live-client test requires explicit authorization and opt-in.
