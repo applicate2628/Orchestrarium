@@ -4896,12 +4896,12 @@ def test_import_active_successor_fault_recovery_and_replay(tmp_path: Path) -> No
             if checkpoint == "after-source-hold":
                 with module.LifecycleTransaction(root):
                     try:
-                        module._recover_transition(root, intent_path)
+                        module.recover_transition(root, operation)
                     except module.LifecycleError as error:
                         assert error.failure_id == "WI-LIFECYCLE-LOCK-HELD"
                     else:
                         raise AssertionError("successor recovery bypassed the lifecycle lock")
-            module._recover_transition(root, intent_path)
+            module.recover_transition(root, operation)
         successor = root / "work-items" / "active" / fixture["new"]
         if checkpoint == "after-receipt-publish":
             assert successor.is_dir() and not fixture["source"].exists()
@@ -4940,7 +4940,7 @@ def test_import_active_successor_fault_recovery_and_replay(tmp_path: Path) -> No
     held_design.write_bytes(b"corrupt held source\n")
     corrupted_before = tree_file_bytes(corrupt_root)
     try:
-        corrupt_module._recover_transition(corrupt_root, corrupt_intent_path)
+        corrupt_module.recover_transition(corrupt_root, "front-corrupt-1")
     except corrupt_module.LifecycleError as error:
         assert error.failure_id == "WI-SUCCESSOR-IMPORT-RECOVERY"
         assert "front-corrupt-1" in str(error)
@@ -11996,24 +11996,23 @@ def test_convert_legacy_candidate_commits_before_partial_cleanup_failure(
         {"brief.md": b"preserve brief bytes\n", "notes/design.md": b"preserve design bytes\n"},
     )
     module.refresh_readme(root, allow_marker_bootstrap=True)
-    original_rmtree = module.shutil.rmtree
+    original_remove = module._remove_lifecycle_file
     injected = False
 
     def partial_cleanup(path: Path | str, *args: object, **kwargs: object) -> None:
         nonlocal injected
         candidate = Path(path)
-        if candidate.name == "source" and not injected:
+        original_remove(path, *args, **kwargs)
+        if any(part.startswith(f".{slug}.legacy-candidate.") for part in candidate.parts) and not injected:
             injected = True
-            (candidate / "brief.md").unlink()
-            raise OSError("injected partial cleanup failure")
-        original_rmtree(path, *args, **kwargs)
+            raise OSError("injected failure after one owned leaf retirement")
 
     candidate_data = (
         b"status: candidate\n"
         b"Task: preserve complete legacy evidence\n"
         b"Next action: verify\n"
     )
-    module.shutil.rmtree = partial_cleanup
+    module._remove_lifecycle_file = partial_cleanup
     try:
         try:
             module.convert_legacy_candidate(root, slug, candidate_data)
@@ -12023,7 +12022,7 @@ def test_convert_legacy_candidate_commits_before_partial_cleanup_failure(
         else:
             raise AssertionError("post-commit cleanup fault returned success")
     finally:
-        module.shutil.rmtree = original_rmtree
+        module._remove_lifecycle_file = original_remove
 
     assert injected
     target = root / "work-items" / "backlog" / f"{slug}.md"
@@ -12072,11 +12071,13 @@ def test_convert_legacy_candidate_replays_final_rmdir_failure_with_sidecar_marke
         b"Next action: verify\n"
     )
     backlog = root / "work-items" / "backlog"
-    original_rmdir = module.Path.rmdir
+    original_rmdir = module.LifecycleWriteTarget._remove_empty_directory_snapshot
+    original_descriptor = module.LifecycleWriteTarget.__dict__["_remove_empty_directory_snapshot"]
     injected = False
 
-    def fail_final_rmdir(path: Path, *args: object, **kwargs: object) -> None:
+    def fail_final_rmdir(snapshot, transaction, **kwargs: object) -> None:
         nonlocal injected
+        path = snapshot.path
         if (
             path.parent == backlog
             and path.name.startswith(f".{slug}.legacy-candidate.")
@@ -12084,9 +12085,9 @@ def test_convert_legacy_candidate_replays_final_rmdir_failure_with_sidecar_marke
         ):
             injected = True
             raise OSError("injected final transaction rmdir failure")
-        original_rmdir(path, *args, **kwargs)
+        original_rmdir(snapshot, transaction, **kwargs)
 
-    module.Path.rmdir = fail_final_rmdir
+    module.LifecycleWriteTarget._remove_empty_directory_snapshot = staticmethod(fail_final_rmdir)
     try:
         try:
             module.convert_legacy_candidate(root, slug, candidate_data)
@@ -12096,7 +12097,7 @@ def test_convert_legacy_candidate_replays_final_rmdir_failure_with_sidecar_marke
         else:
             raise AssertionError("final transaction rmdir fault returned success")
     finally:
-        module.Path.rmdir = original_rmdir
+        module.LifecycleWriteTarget._remove_empty_directory_snapshot = original_descriptor
 
     target = backlog / f"{slug}.md"
     readme = root / "work-items" / "README.md"
@@ -12134,7 +12135,7 @@ def test_convert_legacy_candidate_replays_sidecar_marker_unlink_failure(
         b"Next action: verify\n"
     )
     backlog = root / "work-items" / "backlog"
-    original_unlink = module.Path.unlink
+    original_unlink = module._remove_lifecycle_file
     injected = False
 
     def fail_sidecar_unlink(path: Path, *args: object, **kwargs: object) -> None:
@@ -12148,7 +12149,7 @@ def test_convert_legacy_candidate_replays_sidecar_marker_unlink_failure(
             raise OSError("injected sidecar marker unlink failure")
         original_unlink(path, *args, **kwargs)
 
-    module.Path.unlink = fail_sidecar_unlink
+    module._remove_lifecycle_file = fail_sidecar_unlink
     try:
         try:
             module.convert_legacy_candidate(root, slug, candidate_data)
@@ -12158,7 +12159,7 @@ def test_convert_legacy_candidate_replays_sidecar_marker_unlink_failure(
         else:
             raise AssertionError("sidecar marker cleanup fault returned success")
     finally:
-        module.Path.unlink = original_unlink
+        module._remove_lifecycle_file = original_unlink
 
     target = backlog / f"{slug}.md"
     readme = root / "work-items" / "README.md"
@@ -12229,19 +12230,18 @@ def test_convert_legacy_candidate_replay_rejects_marker_mismatch_without_deletio
         b"Task: preserve owner marker\n"
         b"Next action: verify\n"
     )
-    original_rmtree = module.shutil.rmtree
+    original_remove = module._remove_lifecycle_file
     injected = False
 
     def partial_cleanup(path: Path | str, *args: object, **kwargs: object) -> None:
         nonlocal injected
         candidate = Path(path)
-        if candidate.name == "source" and not injected:
+        original_remove(path, *args, **kwargs)
+        if any(part.startswith(f".{slug}.legacy-candidate.") for part in candidate.parts) and not injected:
             injected = True
-            (candidate / "brief.md").unlink()
-            raise OSError("injected partial cleanup failure")
-        original_rmtree(path, *args, **kwargs)
+            raise OSError("injected failure after one owned leaf retirement")
 
-    module.shutil.rmtree = partial_cleanup
+    module._remove_lifecycle_file = partial_cleanup
     try:
         try:
             module.convert_legacy_candidate(root, slug, candidate_data)
@@ -12250,7 +12250,7 @@ def test_convert_legacy_candidate_replay_rejects_marker_mismatch_without_deletio
         else:
             raise AssertionError("post-commit cleanup fault returned success")
     finally:
-        module.shutil.rmtree = original_rmtree
+        module._remove_lifecycle_file = original_remove
 
     target = root / "work-items" / "backlog" / f"{slug}.md"
     readme = root / "work-items" / "README.md"

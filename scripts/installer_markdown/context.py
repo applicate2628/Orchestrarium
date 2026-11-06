@@ -1,6 +1,6 @@
 """Lift committed stock Markdown code nodes to original LF string offsets.
 
-The pinned paragraph/heading extractors preserve backticks in source order.
+The bundled paragraph/heading extractors preserve backticks in source order.
 Ordinal backtick correspondence therefore lifts parser-chosen endpoints without
 searching normalized token text or implementing Markdown extraction grammar.
 Image labels transport an exact parent slice; link parsing retains its source.
@@ -14,7 +14,7 @@ from markdown_it.rules_inline.backticks import backtick
 
 
 class ContextProvenanceError(RuntimeError):
-    """The pinned parser's source-origin contract was not acquired."""
+    """The bundled parser's source-origin contract was not acquired."""
 
 
 def _require(condition: bool, label: str) -> None:
@@ -190,5 +190,27 @@ class _CodeContext:
 
 
 def document_context(source: str) -> tuple[str, list[tuple[int, int]]]:
-    """Return a same-offset projection and committed code spans in LF input."""
-    return _CodeContext(source).run()
+    """Return same-offset visibility and original-character code spans.
+
+    Keep the bundled parser's LF contract. Lift CRLF boundaries back to the
+    original string; lone CR is visible as LF at the same character offset.
+    The caller's source bytes are never normalized or rewritten.
+    """
+    if "\r" not in source:
+        return _CodeContext(source).run()
+    normalized = source.replace("\r\n", "\n").replace("\r", "\n")
+    visible, spans = _CodeContext(normalized).run()
+    boundaries = [0]
+    projection = []
+    offset = 0
+    for char in visible:
+        if source.startswith("\r\n", offset):
+            _require(char == "\n", "newline-projection")
+            projection.append("\r\n")
+            offset += 2
+        else:
+            projection.append(char)
+            offset += 1
+        boundaries.append(offset)
+    _require(offset == len(source), "newline-source-identity")
+    return "".join(projection), [(boundaries[start], boundaries[stop]) for start, stop in spans]

@@ -113,6 +113,13 @@ different repository location or a nested category hierarchy.
 
 ## Lifecycle behavior
 
+The existing lifecycle owner distinguishes byte-preserving reading of a historical
+flat backlog label from canonical write admission. The qualified `status: backlog`
+case is reported as `WI-LEGACY-READ-COMPAT`; it neither declares another root nor
+authorizes activation, completion or a status rewrite. See
+[Physical lifecycle V1](../../docs/work-item-execution-tracking.md#physical-lifecycle-v1)
+for exact record and receiving conditions.
+
 `ProjectTopology` supplies the same allowed-root set to audit, close, reopen,
 and generated `work-items/README.md` refresh. A declared `flat-json` root is a
 project-owned top-level auxiliary directory, so audit does not classify it as

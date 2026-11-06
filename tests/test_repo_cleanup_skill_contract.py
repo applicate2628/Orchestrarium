@@ -365,3 +365,48 @@ def test_installer_accepts_only_the_exact_immediate_predecessor_skill_trees() ->
     ) not in installer.ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256[
         "manual-repo-transfer"
     ]
+
+
+def test_general_disposition_moves_disposable_artifacts_to_purgable_trash_first() -> None:
+    spine = SPINE.read_text(encoding="utf-8")
+    paragraph = next(line for line in spine.splitlines()
+                     if line.startswith("- **Artifact disposition and project hygiene:**"))
+    for required in (
+        "Trash-first",
+        "as soon as it is confirmed unnecessary",
+        "do not wait for a failed deletion",
+        "safe to empty completely",
+        "no required recovery or acceptance evidence depends on trash",
+        "only from trash",
+        "Agents never automatically purge manual-deletion trash",
+        "Unknown, foreign, ambiguous, valuable, active or prohibited material stays preserved",
+        "Never bypass a denial",
+    ):
+        assert required in paragraph
+    for obsolete in (
+        "First establish the actual deletion outcome",
+        "normal permitted resolution cannot complete deletion",
+        "A first failure or refusal alone does not select trash",
+    ):
+        assert obsolete not in paragraph
+
+
+def test_cleanup_consumers_do_not_restore_delete_first_or_unsafe_trash() -> None:
+    for path in (CODEX_SKILL, CLAUDE_SKILL, REFERENCE):
+        text = path.read_text(encoding="utf-8")
+        assert "trash-first" in text
+        assert "attempted-deletion fallback" not in text
+        assert "manual quarantine" not in text
+        assert "quarantine prepared; manual deletion pending" not in text
+    for path in (CODEX_SKILL, CLAUDE_SKILL):
+        text = path.read_text(encoding="utf-8")
+        assert "only from trash" in text
+        assert "disposable material already in trash" in text
+        assert "owner may delete only classified disposable material" not in text
+
+
+def test_russian_hygiene_mirror_preserves_trash_first_guarantees() -> None:
+    text = (ROOT / "shared/references/ru/repository-source-hygiene.md").read_text(encoding="utf-8")
+    for phrase in ('без предварительной попытки удаления', 'можно полностью очистить вручную', 'не зависят', 'только из trash'):
+        assert phrase in text
+    assert "delete it; git history preserves the file" not in text

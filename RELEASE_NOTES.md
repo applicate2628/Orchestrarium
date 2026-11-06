@@ -2,6 +2,73 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-06
+
+- Add an explicit receipt-pinned current migration for Claude agents and commands. --replace-claude-receipted-instructions RECEIPT_SHA256 selects only current source-listed instruction files from one exact existing receipt and reuses the established selected writer and shared receipt finalizer. This reduces per-file selection work for historical installations while requiring every selected current file to match its recorded bytes before content writes. Modified, missing, nonordinary or linked selected members refuse the explicit batch; default preservation stays unchanged. The receipt pin is a current selection, not recovered historical ownership, and physical replacement/recovery acceptance remains open.
+
+- Connect explicit current Codex document-span replacement through --replace-codex-document SHA256:START:END. The strict shared renderer preserves surrounding user text when closed examples contain END markers; default legacy merging is unchanged. Codex and selected Claude instructions now share one receipt finalizer and the existing exact-file transaction writer, with raw source witnesses, actual afterimages and parent provenance for a newly created receipt. This is per-invocation selected acquisition, not automatic ownership from old hashes. Pure/static source qualification does not establish physical race, chain or recovery acceptance.
+
+
+- Share exact-current Markdown selection validation between receipt planning and a pure selected-document renderer. The renderer reuses the SDK managed-frame rules and preserves surrounding user text when examples contain literal end markers; ambiguous frames refuse. This internal seam does not change default Codex merging or enable document adoption in the installer. Physical ownership and coupled content/receipt receiving remain open.
+
+
+- Add explicit exact-current Claude instruction replacement through repeatable provider-relative PATH=SHA256 selections. Only selected existing source-listed agents/commands use the existing exact-file transaction writer; unselected instructions retain legacy preservation. The shared receipt planner receives actual selected outcomes and fresh creations in one pre-commit projection, preserving unrelated claims and layout without assuming historical ownership from V1 hashes. Pure/static qualification covers this source integration; physical replacement, races and recovery acceptance remain open.
+
+
+- Bootstrap absent provider receipts from positively received new payload files using the existing transaction owner and recovery path. Existing receipts and user document blocks remain untouched; no layout or historical ownership is inferred. Publication requires fresh writer provenance and bound payload/receipt readback before commit. Pure/static qualification covers the source integration; physical creation, races, directory-chain and recovery acceptance remain open.
+
+
+- Managed canonical-member receipt checks now read included payload bytes through the already composed member witnesses for enabled transactions. No-transaction projection checks and disabled direct-operation behavior remain compatible, and runtime-cache filtering is unchanged. This closes another unbound read in the existing receipt path without enabling provider receipts or claiming historical storage ownership. Qualification is pure/static source coverage and independent review only; physical installer, transaction, directory-chain and rollback acceptance remain open.
+
+- Reuse the transaction-bound included-file reader for ordinary non-Lead tuple receipt verification as well as Lead. The shared manifest helper keeps prior traversal/cache exclusions and disabled direct-mode behavior; member-selection branches, legacy-entry handling and receipt writers remain unchanged. Qualification is pure/static source coverage, not physical lifecycle or rollback acceptance.
+
+- Derive the canonical Lead receipt digest from the same compared manifest, binding included payload reads to the enabled transaction's admitted state instead of a second independent pathname census. Existing cache exclusions, dry-run, direct-operation reader and receipt writers are retained. Pure/static source checks do not qualify physical execution, directory-chain custody or rollback.
+
+- Connect Claude document preparation to the common exact-byte adapter while preserving sequential read/render failures, current newline normalization and both-results-before-write behavior. The existing wrapper retains its writer order, dry-run output and None return. Single-document and batch adapters share one decoding/rendering path; no receipt acquisition, persistence or physical lifecycle authority is enabled.
+
+- Connect Codex document preparation to the common exact-byte outcome adapter before the existing merge writes. The read-only preparation function makes original bytes and proposed content available without acquiring ownership; the wrapper preserves source-read order, warning output, dry-run behavior and its existing writer. Receipt persistence and live ownership migration remain disabled.
+
+- Extract Codex document rendering into the existing producer's pure function so receipt-outcome preparation can call the same selection logic without intercepting a writer. The installer wrapper keeps its previous reads, warning, dry-run and write behavior; raw ending boundaries and user-text preservation are unchanged. This does not enable receipt ownership or live migration.
+
+- Prepare a pure document-outcome adapter that retains exact input bytes separately from provider rendering views and returns both Claude document results only after successful rendering. It does not enable installation or acquire ownership: absent and existing inputs remain non-adopting update proposals for the common receipt planner.
+
+- Prepare the common provider-receipt semantic planner using the existing ownership codecs. Per-artifact outcomes keep unrecorded legacy updates separate from conditional creation/adoption and verified-digest changes, preserve unrelated records and exact input fingerprints, and never publish a receipt or claim storage authority. This source-only foundation does not change default installation or complete migration, rollback or uninstall qualification.
+
+- Preserve original line endings in Codex instruction text outside the existing selected replacement extent. The reader and bundled Markdown source-offset adapter now handle CRLF, lone CR and mixed inputs together, keeping user prefixes, suffixes and examples byte-identical while newly rendered managed text remains LF. Other document producers retain their existing normalization; ownership, legacy boundaries and live installer qualification remain separate.
+
+- Do not mistake fenced, indented or inline-code examples for the start of Codex installed instructions. The bundled parser selects starts at their original positions while the previous raw ending rules remain intact, preventing the correction from widening replacement across user text or another block. Missing required markers refuse before writing. This bounded correction preserves ordinary update behavior; it is not complete Markdown-frame parsing, receipt ownership or safe migration of unowned active blocks and legacy headings.
+
+- Repair post-commit cleanup of converted legacy candidate directories by reusing the lifecycle native-effect owner. Removed descendants no longer leave stale parent observations that block cleanup; partial cleanup keeps the committed candidate and supports exact replay while refusing changed source, marker or target bytes.
+
+- Lifecycle source-snapshot refusals now identify the controlled validator/schema source, capture stage and first failed invariant, with bounded non-content stat/read context. Operators can distinguish an actual drift observation from an unexplained loader refusal without disabling source guards or inferring the original cause from a later retry.
+
+- Same-artifact review receiving now requires a positive owner-qualified selected closure instead of treating unrelated historical ledger diagnostics as a global veto. Parsing, identity, launch authority, invalidation and evidence-currentness guarantees remain required; original history is never repaired or rewritten by this operation.
+
+- Temporarily refuse pre-SDK Codex and Claude installer operations on POSIX hosts, including ordinary dry-run, before target resolution or staging. This prevents the public installer route from reaching the unresolved deletion race; it does not repair that race. Linux, macOS and Windows Subsystem for Linux installation and update remain unavailable, with a clear diagnostic and no force bypass. Windows dispatch and help remain unchanged; no existing installation or SDK source is updated by this change.
+
+- Warn during current-version Codex project instruction rendering that client-budget coverage is unverified, and report the rendered UTF-8 size. Operators can see this delivery limitation without a new hardcoded cap or changes to instruction content, user configuration, or installation permissions.
+
+- Report historical Codex skill-catalog size calculations as estimates rather than runtime PASS/FAIL decisions. Large estimates warn without requiring shorter role descriptions; actual observed missing identities and unavailable runtime evidence retain their failure behavior. The optional live-client test requires explicit authorization and opt-in.
+
+- Reuse governing instructions during handoff only when they are already present and unchanged in the receiving context. The shared rule requires missing instructions through the trusted input path and restores obligations after compaction without resetting permissions. Existing concrete evidence requirements remain intact. This is source guidance, not proof of runtime loading, token savings or a solution to project-instruction budget limits; external governance transport and installation behavior are unchanged.
+
+- Keep an adopted ready solution as the baseline before nontrivial reimplementation, with safe entry-path evidence or an explicit unresolved hold. Existing receiving now checks whether the chosen route and the next real action still serve the original reuse outcome, including after a user correction; passing tests of custom scaffolding cannot justify the scaffolding or stand in for the ready product. Concrete incompatibility and safety repairs remain allowed without unsafe execution, and no new review stage is introduced.
+
+- Require new compatibility restrictions to be justified by the original admission or real safety requirements before implementation, and recheck them before accepting implementation or QA. Observed sample versions and hashes must not become support boundaries merely because their rejection tests pass; genuine compatibility and operation-integrity requirements remain intact. The existing handoff and QA contracts carry this comparison without another stage or validator.
+
+- Remove the source installer's exact Markdown parser version-label refusal while retaining its private package-origin checks and document-ownership rules. Bundled versions and license/provenance records still identify the supplied artifacts; any future implementation change requires source-offset and ownership qualification, rather than treating a version label as compatibility evidence. No bundled dependency is upgraded.
+
+## 2026-11-01
+
+- Read historically admitted flat backlog records with a single legacy `status: backlog` without rewriting their bytes or inventing activation. The existing audit and generated view label the bounded legacy case explicitly; ambiguous/current-schema records and canonical creation/start checks remain strict, so an old record no longer blocks unrelated valid work merely because its status vocabulary predates the current writer.
+
+- Clarify the existing repository-orientation owner for work across additional directories and repositories, including parallel assignments: read each target's applicable local instruction chain instead of assuming the original working-directory context applies. Keep the rule generic, retain permission boundaries and avoid repeating unchanged guidance or embedding machine-specific paths.
+
+
+- Make post-work artifact cleanup trash-first: move confirmed unnecessary material promptly, without trying deletion first. Trash must contain no required evidence or recovery dependency and be safe for complete manual emptying; permanent deletion remains a separately authorized action from trash. Preserve existing owner, host-denial, lifecycle and read-only watchdog boundaries.
+
+- Review-loop recovery now receives verified later scout dispositions and existing owner-qualified same-artifact review closures without rewriting original results, fabricating execution failures, or changing the candidate to force another round. Effective closure preserves other obligations, source identity and the existing retry budget; terminal receiving rechecks the canonical ledger relation. The pre-SDK hotfix does not migrate installations to the SDK branch.
+
 ## 2026-10-28
 
 - The Codex installer preserves unrelated user native-role files while continuing to validate managed roles.

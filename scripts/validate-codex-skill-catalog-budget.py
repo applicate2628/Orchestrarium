@@ -1,119 +1,24 @@
 #!/usr/bin/env python3
-"""Growth gate for the Codex skill catalog's rendered-prompt character budget.
+"""Report historical estimates and observed Codex skill-catalog visibility.
 
-Why this check exists
-----------------------
-Codex CLI renders a ``## Skills`` catalog
-fragment into the model-visible prompt for every entry discovered under
-``$CODEX_HOME/skills`` (including the runtime's own auto-created
-``.system`` built-ins) plus the cross-tool ``~/.agents/skills`` alias root.
-When that fragment would exceed the runtime's own budget, the documented
-behavior is to shorten descriptions and then omit entries -- and to *show a
-warning* when it does. Runtime string-extraction evidence
-(``work-items/bugs/2026-07-26-codex-skill-catalog-overflow-is-silent.md``)
-proved the warning never reaches the model-visible prompt or stderr on the
-exec path: a capability can silently disappear from what the model is ever
-told exists, with no observable signal pointing back at the cause.
+The static calculation uses a historical calibration: approximately 22,100
+rendered characters at a 272,000-token context and about 14 characters of
+overhead per entry, observed with older Codex clients. The 2% string was
+observed in a 0.145.0 executable; the ceiling and per-entry overhead came from
+older experiments and catalog measurements. These are historical observations,
+not version gates or evidence of the current session's effective limits.
+Estimates are diagnostic only: a high estimate warns but
+does not require changing skill descriptions or establish actual omission.
 
-Codex 0.147.0 also exposes ``codex debug prompt-input``, a provider-free direct
-render of the model-visible input.  The installed-runtime path now treats that
-output as authoritative: a missing pack identity fails, description shortening
-warns with exact counts, and unavailable or malformed authority fails closed.
-The older character estimate remains a portable diagnostic and synthetic
-falsification surface; it no longer overrides a successful direct observation.
+When explicitly authorized, the default installed-runtime path can inspect
+the selected client's prompt-input output. A successfully parsed observation
+reports actual missing pack identities as failure and description shortening
+as a warning. Unavailable or malformed observation is unverified and fails
+closed; it is not evidence of omission. Selecting an executable does not prove
+its identity or authorize launching it.
 
-Where the numbers come from
-----------------------------
-1. Budget fraction (2%): confirmed by extracting printable strings from the
-   installed ``codex.exe`` (win32-x64, codex-cli 0.145.0). The binary embeds
-   the literal user-facing strings ``"Exceeded skills context budget of
-   2%."`` and ``"Skill descriptions were shortened to fit the 2% skills
-   context budget."`` under the ``codex_core_skills::render`` /
-   ``codex_skills_extension::render`` symbols. This is an
-   installed-dependency surface check, not an inference.
-2. Reference ceiling (~22,100 rendered chars at a 272,000-token context
-   window): taken from the bug report's causal experiment (overriding the
-   context window and observing the ceiling scale linearly). The same
-   272,000-token figure is independently confirmed as the *actual* context
-   window baked into every current model profile in the installed binary
-   (GPT-5.6-Sol/Terra/Luna, GPT-5.5, GPT-5.4, GPT-5.4-Mini all report
-   ``"context_window": 272000``) -- so 272,000 is a real production default,
-   not a probe-only artifact.
-3. Per-entry render cost (name + description + absolute SKILL.md path +
-   ``PER_ENTRY_OVERHEAD_CHARS``): calibrated this session by summing
-   name+description+absolute-path length across the real, live
-   ``~/.codex/skills`` (52 entries) and ``~/.agents/skills`` (11 entries)
-   roots and comparing against the bug's independently reported totals
-   (8,890 and 5,630 chars respectively). The residual gap was a *constant*
-   13.9-14.0 chars/entry on both independently-sized roots -- strong
-   evidence of a fixed per-entry template overhead, which is what
-   ``PER_ENTRY_OVERHEAD_CHARS`` encodes. This is a smoke-test-calibrated
-   estimate, not a byte-exact simulation of the closed-source renderer;
-   the resolving step for exact parity is reading
-   ``core-skills/src/render.rs`` from the upstream ``openai/codex`` source
-   at the pinned tag, which was not locatable via public code search in
-   this session.
-
-What the gate keys on (ownership tension, resolved)
-----------------------------------------------------
-The catalog draws from three groups, only one of which the pack owns:
-
-- ``pack``: entries under ``$CODEX_HOME/skills`` whose name matches a skill
-  this repository ships (``src.codex/skills/<name>``). The pack can shrink
-  these.
-- ``other-codex-home``: entries under ``$CODEX_HOME/skills`` that are NOT
-  ``.system`` and do NOT match a pack-shipped name (personal/marketplace
-  skills the user installed). Not pack-owned.
-- ``system-builtin``: entries under ``$CODEX_HOME/skills/.system``, created
-  by the Codex runtime itself. Not pack-owned.
-- ``cross-tool``: entries under ``~/.agents/skills``, a cross-tool alias
-  root shared with other agent runtimes. Not pack-owned.
-
-All four groups consume the *same* shared rendered-character budget, so the
-static estimate reports all four with separate attribution. The pack cannot
-always compensate for external growth without destroying its own routing
-descriptions; therefore the installed verdict comes from the direct runtime
-observation, while the total-fraction estimate remains a loud diagnostic. A
-pack-only estimate would still be blind to real degradation risk (the runtime
-does not care who owns the bytes it shortens or drops).
-
-Static-estimate bands (portable fallback diagnostics)
-------------------------------------------------------
-- < 80%: PASS.
-- [80%, 90%): WARN (non-failing). 80% is deliberately set at production's
-  own long-observed watermark (~79%) so the very next bit of organic growth
-  starts raising visibility, long before anything is actually at risk.
-- >= 90%: FAIL when no successful authoritative runtime observation owns the
-  installed result. A gate at 80% would fire immediately against the original
-  calibrated catalog and train maintainers to ignore it. With a successful
-  runtime observation, this band remains visible as ``ESTIMATE`` while pack
-  identity omission or malformed/unavailable runtime evidence owns failure.
-  The 90% estimate retains the original 10-point diagnostic buffer instead of
-  being retuned merely to make one installed catalog green.
-
-Operator action when this fires
---------------------------------
-WARN: no action required to keep shipping, but budget is closing -- avoid
-adding more skill entries without also trimming or splitting existing pack
-descriptions.
-FAIL from the portable estimate: trim, shorten, split, or deduplicate the pack's OWN skill
-descriptions (the ``pack`` group below) until the total fraction drops back
-under the WARN band. The ``other-codex-home``/``system-builtin``/
-``cross-tool`` groups are reported for attribution but cannot be shrunk by
-this pack; if they dominate the growth, that is real information for the
-operator (the shared budget shrank for reasons outside pack control), not a
-reason to ignore the estimate. Runtime ``CATALOG-PACK-IDENTITY-OMITTED`` and
-``CATALOG-RUNTIME-*`` failures require restoring authoritative evidence or the
-missing pack identities. ``CATALOG-DESCRIPTION-SHORTENED`` is a loud warning,
-not a claim that every shortened routing description remains semantically
-equivalent.
-
-Where this runs
-----------------
-Invoked via ``python -m pytest tests/`` (``tests/test_codex_skill_catalog_
-budget.py``) -- the maintainer-run verification surface already named as
-this repository's baseline gate, requiring no new CI surface. It also runs
-standalone: ``python scripts/validate-codex-skill-catalog-budget.py``.
+Synthetic/offline estimates return RESULT: ESTIMATE. Missing inputs remain
+errors or skips. The optional live test must not be run without authorization.
 """
 
 from __future__ import annotations
@@ -141,7 +46,7 @@ CEILING_RATIO = REFERENCE_CEILING_CHARS / REFERENCE_CONTEXT_WINDOW_TOKENS
 PER_ENTRY_OVERHEAD_CHARS = 14
 
 WARN_FRACTION = 0.80
-FAIL_FRACTION = 0.90
+HIGH_WARNING_FRACTION = 0.90
 
 FRONTMATTER_RE = re.compile(r"^---\r?\n(.*?)\r?\n---", re.DOTALL)
 KEY_RE = re.compile(r"^([A-Za-z0-9_-]+):\s*(.*)$")
@@ -483,14 +388,12 @@ def discover_entries(
     return entries
 
 
-def validate(
+def estimate_catalog(
     entries: list[CatalogEntry],
     context_window: int = REFERENCE_CONTEXT_WINDOW_TOKENS,
     warn_fraction: float = WARN_FRACTION,
-    fail_fraction: float = FAIL_FRACTION,
-    *,
-    enforce: bool = True,
-) -> tuple[bool, list[str]]:
+    high_fraction: float = HIGH_WARNING_FRACTION,
+) -> list[str]:
     ceiling_chars = round(context_window * CEILING_RATIO)
     totals = {group: 0 for group in ALL_GROUPS}
     counts = {group: 0 for group in ALL_GROUPS}
@@ -505,8 +408,9 @@ def validate(
     fraction = (total_chars / ceiling_chars) if ceiling_chars else float("inf")
 
     messages = [
-        f"Context window: {context_window} tokens (reference: {REFERENCE_CONTEXT_WINDOW_TOKENS})",
-        f"Ceiling: {ceiling_chars} rendered chars (ratio {CEILING_RATIO:.5f} of context window)",
+        f"Context window: {context_window} tokens (historical reference: {REFERENCE_CONTEXT_WINDOW_TOKENS})",
+        f"Estimated ceiling: {ceiling_chars} rendered chars (historical ratio {CEILING_RATIO:.5f})",
+        "Runtime visibility is not verified by this estimate.",
         "",
         f"pack             : {counts['pack']:4d} entries, {totals['pack']:7d} chars (pack-owned, can shrink)",
         f"other-codex-home : {counts['other-codex-home']:4d} entries, {totals['other-codex-home']:7d} chars (not pack-owned)",
@@ -515,42 +419,26 @@ def validate(
         f"external (sum)   : {external_count:4d} entries, {external_chars:7d} chars",
         "",
         f"Total: {total_count} entries, {total_chars} rendered chars",
-        f"Fraction of ceiling: {fraction * 100:.2f}%  (warn >= {warn_fraction * 100:.0f}%, fail >= {fail_fraction * 100:.0f}%)",
+        f"Fraction of ceiling: {fraction * 100:.2f}%  (warning >= {warn_fraction * 100:.0f}%, high warning >= {high_fraction * 100:.0f}%)",
     ]
 
-    ok = True
-    if fraction >= fail_fraction and enforce:
-        ok = False
+    if fraction >= high_fraction:
         messages.append(
-            f"FAIL: rendered catalog is {fraction * 100:.2f}% of ceiling "
-            f"({total_chars}/{ceiling_chars} chars) >= fail threshold {fail_fraction * 100:.0f}%. "
-            "Trim, shorten, split, or deduplicate the pack's OWN skill descriptions "
-            "(the 'pack' group above) until the total fraction drops back under the warn band. "
-            "The other-codex-home/system-builtin/cross-tool groups cannot be shrunk by this "
-            "pack, but they consume the same shared budget -- if they dominate the growth, "
-            "the pack must still claw back headroom on its own side of the ledger."
-        )
-    elif fraction >= fail_fraction:
-        messages.append(
-            f"ESTIMATE: rendered catalog is {fraction * 100:.2f}% of ceiling "
-            f"({total_chars}/{ceiling_chars} chars); the direct runtime observation "
-            "owns the final verdict for this installed catalog."
+            f"WARNING: historical estimate is {fraction * 100:.2f}% of the estimated ceiling "
+            f"({total_chars}/{ceiling_chars} chars); runtime visibility is not verified. "
+            "Check the actual client and catalog before deciding whether changes are needed."
         )
     elif fraction >= warn_fraction:
         messages.append(
-            f"WARNING: rendered catalog is {fraction * 100:.2f}% of ceiling "
-            f"({total_chars}/{ceiling_chars} chars), in the warn band "
-            f"[{warn_fraction * 100:.0f}%, {fail_fraction * 100:.0f}%). No action required to keep "
-            "shipping, but avoid adding more skill entries without also trimming existing "
-            "descriptions."
+            f"WARNING: historical estimate is {fraction * 100:.2f}% of the estimated ceiling "
+            f"({total_chars}/{ceiling_chars} chars); runtime visibility is not verified."
         )
     else:
         messages.append(
-            f"PASS: rendered catalog is {fraction * 100:.2f}% of ceiling, below warn threshold "
-            f"{warn_fraction * 100:.0f}%."
+            f"ESTIMATE: {fraction * 100:.2f}% of the historical estimated ceiling; "
+            "runtime visibility is not verified."
         )
-
-    return ok, messages
+    return messages
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -580,10 +468,14 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=REFERENCE_CONTEXT_WINDOW_TOKENS,
         help=f"Model context window in tokens (default: {REFERENCE_CONTEXT_WINDOW_TOKENS}, "
-        "the observed default across every current model profile in the installed runtime).",
+        "a historical calibration, not necessarily the current runtime value).",
     )
     parser.add_argument("--warn-fraction", type=float, default=WARN_FRACTION)
-    parser.add_argument("--fail-fraction", type=float, default=FAIL_FRACTION)
+    parser.add_argument(
+        "--high-fraction", "--fail-fraction", dest="high_fraction", type=float,
+        default=HIGH_WARNING_FRACTION,
+        help="Historical high-warning threshold; the legacy --fail-fraction alias does not impose a failure.",
+    )
     args = parser.parse_args(argv)
 
     print(f"=== Codex skill catalog budget validation ===")
@@ -613,15 +505,15 @@ def main(argv: list[str] | None = None) -> int:
         and args.repo_skills.resolve() == DEFAULT_REPO_SKILLS.resolve()
         and args.context_window == REFERENCE_CONTEXT_WINDOW_TOKENS
         and args.warn_fraction == WARN_FRACTION
-        and args.fail_fraction == FAIL_FRACTION
+        and args.high_fraction == HIGH_WARNING_FRACTION
     )
-    ok, messages = validate(
+    messages = estimate_catalog(
         entries,
         context_window=args.context_window,
         warn_fraction=args.warn_fraction,
-        fail_fraction=args.fail_fraction,
-        enforce=not runtime_target,
+        high_fraction=args.high_fraction,
     )
+    ok = True
     if runtime_target:
         executable = shutil.which("codex")
         observation = (
@@ -667,7 +559,7 @@ def main(argv: list[str] | None = None) -> int:
             )
     for message in messages:
         print(message)
-    print("RESULT:", "PASS" if ok else "FAIL")
+    print("RESULT:", ("PASS" if ok else "FAIL") if runtime_target else "ESTIMATE")
     return 0 if ok else 1
 
 
