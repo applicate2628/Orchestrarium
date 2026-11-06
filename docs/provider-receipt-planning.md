@@ -26,6 +26,16 @@ Before any live integration, one owner must bind receipt and target inputs, rece
 
 This module is intentionally not enabled in default installation yet. It is the reusable semantic core for the coupled integration, not a fix claimed complete or a reason to archive the existing ownership tickets.
 
+## Exact document outcomes (not wired into installation)
+
+The pure document_outcomes.render_documents adapter accepts the complete provider document preimage set and the existing producer as a caller-supplied pure callback. It retains original UTF-8 bytes separately from renderer input, returns immutable proposed outputs, and never reads or writes a target. Codex receives exact text; Claude receives its current universal-newline view. That normalization is disclosed, not misrepresented as preservation of the raw preimage.
+
+All document inputs are validated and decoded before rendering. Both Claude documents must render successfully before a result tuple is returned. This is an all-or-error in-memory result, not atomic storage publication; callback purity remains a caller obligation. The callbacks must use the existing producer owners, not a competing renderer.
+
+Conversion to the existing planner always uses update intent. Neither an absent preimage, familiar markers, nor successful rendering is a positively received creation or adoption event. The adapter does not select adoption spans or grant permission. Exact bytes remain available for the planner to reject an outside-text change, including current Claude newline normalization. Public result dataclasses are not trusted capabilities.
+
+This adapter is intentionally unwired. Tests exercise AST-isolated existing producer functions with memory-only readers/writers and the real bundled Markdown parser; no installer module or physical lifecycle is executed. Real input acquisition, direct pure-renderer extraction/caller wiring, physical creation receiving, coupled writes, and repeat lifecycle acceptance remain future work under the existing restrictions.
+
 ## Terms and Abbreviations
 
 - Provider receipt: the version-one Orchestrarium record of claimed artifact paths and content digests.
