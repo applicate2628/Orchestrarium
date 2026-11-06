@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-06
 
+- Prepare the common provider-receipt semantic planner using the existing ownership codecs. Per-artifact outcomes keep unrecorded legacy updates separate from conditional creation/adoption and verified-digest changes, preserve unrelated records and exact input fingerprints, and never publish a receipt or claim storage authority. This source-only foundation does not change default installation or complete migration, rollback or uninstall qualification.
+
 - Preserve original line endings in Codex instruction text outside the existing selected replacement extent. The reader and bundled Markdown source-offset adapter now handle CRLF, lone CR and mixed inputs together, keeping user prefixes, suffixes and examples byte-identical while newly rendered managed text remains LF. Other document producers retain their existing normalization; ownership, legacy boundaries and live installer qualification remain separate.
 
 - Do not mistake fenced, indented or inline-code examples for the start of Codex installed instructions. The bundled parser selects starts at their original positions while the previous raw ending rules remain intact, preventing the correction from widening replacement across user text or another block. Missing required markers refuse before writing. This bounded correction preserves ordinary update behavior; it is not complete Markdown-frame parsing, receipt ownership or safe migration of unowned active blocks and legacy headings.

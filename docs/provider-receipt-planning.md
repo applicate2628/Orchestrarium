@@ -1,0 +1,37 @@
+# Provider receipt planning contract
+
+This is the source contract for `scripts/installation/receipt_plan.py`, the first pure part of the existing document/managed-instruction ownership work. It reuses the SDK `ownership.py` and `configuration.py` contracts and the same provider receipt identity. It is not a second installer, a durable binding protocol, or a live migration command. Current installer entry points do not import or call it; legacy updates are unchanged.
+
+## Inputs and results
+
+`plan_changes(receipt, provider, scope, outcomes, document_context)` accepts exact prior receipt bytes or explicit absence, artifact byte preimages, proposed rendered outcomes, and the existing bundled Markdown context function. File payloads and document blocks share one plan. Each immutable artifact result contains its route, exact before/after SHA-256 fingerprints and outstanding acquisition requirements. Changes contain only validated file/config entry deltas, not a serialized receipt.
+
+- An unrecorded ordinary update stays on the legacy route and acquires nothing, even if its resulting content contains familiar markers.
+- A claimed artifact must match its recorded semantic digest. Missing, changed or ambiguous content is preserved without changing its entry or falling back to legacy overwrite.
+- A positive creation outcome may propose ownership only for a new file or a newly inserted block that leaves all original text intact.
+- Adoption must select the exact current artifact bytes. Marked blocks retain exact outside slices; unmarked Codex adoption additionally selects a reviewed, line-bounded span under the existing SDK boundary contract. The digest and span are not user consent.
+- Update and removal of a claimed document preserve exact outside text. File payload digests remain byte-exact. Other legacy artifacts are not blocked merely because a receipt exists or a different artifact is preserved.
+
+`apply_delta(receipt, plan)` produces only an in-memory validated record projection. It rechecks the exact input receipt fingerprint, including JSON whitespace, and preserves unrelated files, directories, configuration entries and the presence/value of `layout`. A previously absent record has no layout injected. The function performs no filesystem write, serialization or publication and grants no authority to perform them. Public dataclasses are constructible: this projection validates schema/currentness, not provenance that `plan_changes` produced the supplied plan. Future integration must retain the original `Outcome`, exact adoption boundaries and separate approval evidence, rather than authorize using plan fingerprints or requirement strings alone.
+
+`serialize_delta(receipt, plan)` validates the projection and returns candidate bytes using the common codec's `serialize_record`, which preserves layout presence/value and enforces the existing 4 MiB encoded limit. A no-op retains the exact original bytes or absence. The original `encode_record` still constructs its existing copy-layout record; both entry points share one serializer. Candidate bytes are neither persisted ownership nor permission to write.
+
+## Compatibility and integration boundaries
+
+The common SDK encoder currently asserts `provider-owned-copies-v1`. This hotfix has not established that layout, so the planner deliberately does not call it. No v1 field extension, new receipt schema, installation UUID or claimed persistent identity is invented here. The reused client metadata differs only in the pre-SDK Claude source/reference paths; it does not activate another host or provider.
+
+A matching v1 digest proves only a semantic match at its logical name. It does not prove historical physical-root continuity. Every recorded proposal retains that outstanding requirement. Fresh/adoption proposals retain acquisition and exact user-approval requirements. All changes still need current artifact and receipt inputs and one atomic commit/rollback through the existing transaction owner. The plan is not a capability, and callers must not clear those requirements by trusting flags, labels or the plan itself.
+
+Before any live integration, one owner must bind receipt and target inputs, receive actual production outcomes, preserve currentness through content-plus-receipt commit, and share the resulting record with repeat install, update and uninstall. Serialization and truthful layout are covered only as pure byte operations here. The existing transaction's commit flag and exception recovery do not establish crash-atomic multi-file publication. Link retargeting, identity reuse and filesystem-chain safety remain separate unresolved gates. Pure tests do not qualify those operations or waive their restrictions.
+
+This module is intentionally not enabled in default installation yet. It is the reusable semantic core for the coupled integration, not a fix claimed complete or a reason to archive the existing ownership tickets.
+
+## Terms and Abbreviations
+
+- Provider receipt: the version-one Orchestrarium record of claimed artifact paths and content digests.
+- SDK: Software Development Kit; here, the existing SDK integration branch supplying the shared source contracts.
+- SHA-256: Secure Hash Algorithm with a 256-bit digest; a content fingerprint, not proof of consent or storage identity.
+- Legacy route: the existing update path for an artifact without a claimed receipt entry.
+- Projection: an in-memory record after applying validated entry changes, without filesystem mutation.
+- Layout: the receipt's claim about the installation arrangement; its absence must not be converted into a claim.
+- Storage authority: independently established permission and identity continuity for the actual target, beyond its logical path or matching bytes.
