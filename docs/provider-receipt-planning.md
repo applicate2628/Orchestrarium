@@ -68,6 +68,16 @@ All selections, source bytes, target beforeimages and receipt input are validate
 
 The finalizer receives every selected outcome, rechecks sources and actual target bytes, combines eligible fresh creations through the same planner, and writes one receipt before commit. Every combined outcome must have its expected proposal route. A conflicting old claim for a freshly recreated unselected file therefore fails the explicit selected batch before receipt publication and enters existing transaction recovery; it is never silently retained with a stale digest or treated as historical authority. This does not alter the default preservation route. An absent receipt still requires a positively received new creation; an existing receipt is replaced only against its exact bound preimage. Payload and receipt readback are rechecked after publication. Existing recovery remains the sole inverse owner. Neither this source integration nor its pure/static checks qualify physical replacement, directory-chain safety, race behavior, exception recovery, crash atomicity or later automatic update/uninstall.
 
+## Shared selected-document rendering
+
+The pure configuration component now shares one exact-current document selection validator between the selected renderer and the receipt planner's legacy-span check. The digest is SHA-256 of the complete original UTF-8 document, without newline normalization. The span uses Python string character offsets into that exact decoded text, not UTF-8 byte offsets. These caller-supplied values are preconditions, not consent or historical storage authority.
+
+For a marked document, the selected span must equal the single parser-visible managed frame. Literal end markers inside closed Markdown examples do not truncate that frame. Incomplete, ambiguous or code-hidden framing refuses without falling back to a raw end marker. An unmarked selection is allowed only for Codex, using the existing SDK line-boundary, code-span and legacy-heading contract. Boolean or non-integer offsets and a boundary splitting CRLF are invalid.
+
+The selected renderer builds a fresh frame through the existing shared merger, replaces only the validated span, preserves the exact outside prefix and suffix, and revalidates the resulting frame in its surrounding document context. Marked replacement retains the old outside newline bytes; unmarked legacy replacement includes the fresh frame's terminal LF. Invalid source payloads or a frame swallowed by surrounding code refuse.
+
+This helper is not yet an installation entrypoint. The ordinary Codex renderer retains its compatible raw-END behavior, and document adapters still produce update-only outcomes. An explicit caller must separately provide an adoption outcome, acquire the selected storage, and couple content with receipt publication. Existing claims still refuse adoption; selected block replacement, historical authority and physical lifecycle qualification remain separate work.
+
 ## Terms and Abbreviations
 
 - Provider receipt: the version-one Orchestrarium record of claimed artifact paths and content digests.

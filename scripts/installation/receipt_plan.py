@@ -9,7 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
-import re
 
 from .clients import get_client
 from . import configuration, ownership
@@ -94,24 +93,11 @@ def _same_outside(before, after, old, new):
         raise ValueError("outside text changed")
 
 
-def _legacy_selection(before, after, bounds, span, context):
-    # Reuse the SDK's reviewed legacy-span boundary contract, without claiming
-    # that the supplied digest or selection is evidence of human permission.
-    if type(span) is not tuple or len(span) != 2 or any(type(x) is not int for x in span):
-        raise ValueError("invalid legacy selection")
-    start, end = span
-    def line_boundary(index):
-        return (index == 0 or index == len(before)
-                or (before[index - 1] in "\r\n"
-                    and before[index - 1:index + 1] != "\r\n"))
-    if not 0 <= start < end <= len(before) or not line_boundary(start) or not line_boundary(end):
-        raise ValueError("invalid legacy selection")
-    visible, spans = context(before)
-    if any(left < boundary < right for left, right in spans for boundary in (start, end)):
-        raise ValueError("selection crosses code")
-    if not re.match(r"# (?:Shared Governance|Codex Platform Rules)[ \t]*(?:\r\n|\r|\n|$)",
-                    visible[start:end]):
-        raise ValueError("invalid legacy selection")
+def _legacy_selection(before, after, bounds, span, context, document_digest):
+    # Renderer and planner use one exact-current boundary contract. The digest
+    # is still only a precondition, never evidence of permission or acquisition.
+    start, end = configuration.validate_selected_document(
+        before, "codex", context, document_digest=document_digest, span=span)
     suffix = before[end:]
     replacement_end = len(after) - len(suffix)
     if (replacement_end < bounds[1] or after[:start] != before[:start]
@@ -154,7 +140,8 @@ def _proposed_spec(outcome, claim, block_kind, context):
                 raise ValueError("adoption selection differs from marked block")
             _same_outside(before, after, old, new)
         elif block_kind == "codex":
-            _legacy_selection(before, after, new, outcome.adoption_span, context)
+            _legacy_selection(before, after, new, outcome.adoption_span, context,
+                              outcome.adoption_sha256)
         else:
             raise ValueError("unmarked adoption is not qualified for this document")
     else:

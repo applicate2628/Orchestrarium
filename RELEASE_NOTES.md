@@ -4,6 +4,9 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-06
 
+- Share exact-current Markdown selection validation between receipt planning and a pure selected-document renderer. The renderer reuses the SDK managed-frame rules and preserves surrounding user text when examples contain literal end markers; ambiguous frames refuse. This internal seam does not change default Codex merging or enable document adoption in the installer. Physical ownership and coupled content/receipt receiving remain open.
+
+
 - Add explicit exact-current Claude instruction replacement through repeatable provider-relative PATH=SHA256 selections. Only selected existing source-listed agents/commands use the existing exact-file transaction writer; unselected instructions retain legacy preservation. The shared receipt planner receives actual selected outcomes and fresh creations in one pre-commit projection, preserving unrelated claims and layout without assuming historical ownership from V1 hashes. Pure/static qualification covers this source integration; physical replacement, races and recovery acceptance remain open.
 
 

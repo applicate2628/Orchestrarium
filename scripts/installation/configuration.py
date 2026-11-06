@@ -87,6 +87,61 @@ def merge_owned_block(text: str | None, kind: str, payload: str, document_contex
     return result
 
 
+def validate_selected_document(text: str, kind: str, document_context, *,
+                               document_digest: str, span: tuple[int, int]) -> tuple[int, int]:
+    """Validate an explicitly selected interval against exact UTF-8 preimage bytes.
+
+    Selection and storage authority belong to the caller. A matching digest or
+    recognizable frame supplies neither consent nor permission to write.
+    """
+    if (type(text) is not str or type(kind) is not str or kind not in MARKERS
+            or type(document_digest) is not str
+            or type(span) is not tuple or len(span) != 2
+            or any(type(index) is not int for index in span)):
+        raise ValueError("Invalid selected document")
+    start, end = span
+    if (not 0 <= start < end <= len(text)
+            or hashlib.sha256(text.encode("utf-8")).hexdigest() != document_digest):
+        raise ValueError("Invalid selected document")
+    # Parsing errors are final; malformed marked documents are never legacy.
+    bounds = owned_block(text, kind, document_context)
+    visible, code_spans = document_context(text)
+    count = 0 if bounds is None else 1
+    if any(visible.count(marker.removesuffix(" -->")) != count for marker in MARKERS[kind]):
+        raise ValueError("Ambiguous managed document block")
+    if bounds is not None:
+        if bounds != span:
+            raise ValueError("Selected span differs from managed document block")
+        return bounds
+
+    def line_boundary(index):
+        return (index == 0 or index == len(text)
+                or (text[index - 1] in "\r\n" and text[index - 1:index + 1] != "\r\n"))
+
+    if (kind != "codex" or not line_boundary(start) or not line_boundary(end)
+            or any(begin < boundary < finish
+                   for begin, finish in code_spans for boundary in (start, end))
+            or not re.match(r"# (?:Shared Governance|Codex Platform Rules)[ \t]*(?:\r\n|\r|\n|$)",
+                            visible[start:end])):
+        raise ValueError("Invalid selected legacy document")
+    return start, end
+
+
+def render_selected_document(existing: str, kind: str, payload: str, document_context, *,
+                             document_digest: str, span: tuple[int, int]) -> str:
+    """Replace only a caller-selected interval; perform no storage operation."""
+    start, end = validate_selected_document(
+        existing, kind, document_context, document_digest=document_digest, span=span)
+    replacement = merge_owned_block(None, kind, payload, document_context)
+    marked = owned_block(existing, kind, document_context) is not None
+    # A marked interval excludes its trailing newline, which remains user text.
+    inserted = replacement[:-1] if marked else replacement
+    result = existing[:start] + inserted + existing[end:]
+    if owned_block(result, kind, document_context) != (start, start + len(replacement) - 1):
+        raise ValueError("Invalid selected managed document frame")
+    return result
+
+
 def remove_native_roles(payload: bytes, registrations: dict[str, dict[str, str]]) -> bytes:
     """Remove exact generated tables; preserve other TOML bytes verbatim."""
     text = payload.decode("utf-8")
