@@ -133,6 +133,20 @@ def _proposed_spec(outcome, claim, block_kind, context):
                 raise ValueError("creation would adopt existing block")
             if new[0] != 0 or after[new[1]:] not in {"\n\n" + before, "\n" + before}:
                 raise ValueError("creation changed original document")
+    elif outcome.intent == "replace":
+        selected = configuration.validate_selected_document(
+            before, block_kind, context, document_digest=outcome.adoption_sha256,
+            span=outcome.adoption_span)
+        # The new frame must be strict too; malformed marker prefixes outside
+        # an otherwise valid pair are not a valid rendered replacement.
+        configuration.validate_selected_document(
+            after, block_kind, context, document_digest=_digest(outcome.after), span=new)
+        old = configuration.owned_block(before, block_kind, context)
+        if old is not None:
+            _same_outside(before, after, selected, new)
+        else:
+            _legacy_selection(before, after, new, selected, context,
+                              outcome.adoption_sha256)
     elif outcome.intent == "adopt":
         old = configuration.owned_block(before, block_kind, context)
         if old is not None:
@@ -191,8 +205,10 @@ def plan_changes(receipt: bytes | None, provider: str, scope: str,
             if item.intent == "replace":
                 # Exact-current selection is separate from historical ownership.
                 # Its digest is a precondition, never approval or a capability.
-                if item.kind != "file" or item.adoption_span is not None:
+                if item.kind == "file" and item.adoption_span is not None:
                     raise ValueError("selected replacement requires a complete file")
+                if item.kind == "block" and (provider != "codex" or block_kind != "codex"):
+                    raise ValueError("selected replacement requires a Codex document")
                 if item.before is None or item.adoption_sha256 != _digest(item.before):
                     raise ValueError("selected replacement preimage changed")
             elif claim is not None:

@@ -62,3 +62,41 @@ def parse_claude_instruction_grants(
         selected_keys.add(key)
         result[name] = digest
     return result
+
+
+
+_CODEX_DOCUMENT_ERROR = "E_CODEX_DOCUMENT_SELECTION_INVALID"
+
+
+def parse_codex_document_grant(
+    values: tuple[str, ...]
+) -> tuple[str, tuple[int, int]] | None:
+    """Parse one exact SHA256:START:END selection without acquiring authority.
+
+    Offsets are canonical nonnegative ASCII character indices with END > START.
+    Current-document length and digest validation belong to the common validator.
+    Empty selections return None; all invalid inputs share one stable error code.
+    """
+    if type(values) is not tuple or len(values) > 1:
+        raise ValueError(_CODEX_DOCUMENT_ERROR)
+    if not values:
+        return None
+    value = values[0]
+    if type(value) is not str or value.count(":") != 2:
+        raise ValueError(_CODEX_DOCUMENT_ERROR)
+    digest, start_text, end_text = value.split(":")
+    if (len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest)):
+        raise ValueError(_CODEX_DOCUMENT_ERROR)
+    for offset in (start_text, end_text):
+        if (not offset
+                or any(char not in "0123456789" for char in offset)
+                or len(offset) > 1 and offset[0] == "0"):
+            raise ValueError(_CODEX_DOCUMENT_ERROR)
+    try:
+        start, end = int(start_text), int(end_text)
+    except ValueError as exc:
+        raise ValueError(_CODEX_DOCUMENT_ERROR) from exc
+    if end <= start:
+        raise ValueError(_CODEX_DOCUMENT_ERROR)
+    return digest, (start, end)

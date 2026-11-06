@@ -60,14 +60,20 @@ except ModuleNotFoundError as error:
         serialize_fresh_payloads as _serialize_fresh_payloads)
 
 try:
-    from installation.instruction_selection import parse_claude_instruction_grants as _parse_claude_instruction_grants
+    from installation.configuration import render_selected_document as _render_selected_document
+    from installation.instruction_selection import (
+        parse_claude_instruction_grants as _parse_claude_instruction_grants,
+        parse_codex_document_grant as _parse_codex_document_grant)
     from installation.receipt_plan import (
         Outcome as _ReceiptOutcome, plan_changes as _plan_receipt_changes,
         serialize_delta as _serialize_receipt_delta)
 except ModuleNotFoundError as error:
-    if error.name not in {"installation", "installation.instruction_selection", "installation.receipt_plan"}:
+    if error.name not in {"installation", "installation.configuration", "installation.instruction_selection", "installation.receipt_plan"}:
         raise
-    from scripts.installation.instruction_selection import parse_claude_instruction_grants as _parse_claude_instruction_grants
+    from scripts.installation.configuration import render_selected_document as _render_selected_document
+    from scripts.installation.instruction_selection import (
+        parse_claude_instruction_grants as _parse_claude_instruction_grants,
+        parse_codex_document_grant as _parse_codex_document_grant)
     from scripts.installation.receipt_plan import (
         Outcome as _ReceiptOutcome, plan_changes as _plan_receipt_changes,
         serialize_delta as _serialize_receipt_delta)
@@ -668,6 +674,10 @@ def _parser(provider: str) -> argparse.ArgumentParser:
     parser.add_argument(
         "--replace-claude-instruction", action="append", default=[], metavar="PATH=SHA256",
         help="Claude only: replace explicitly reviewed current agents/NAME.md or commands/...md bytes; not historical ownership",
+    )
+    parser.add_argument(
+        "--replace-codex-document", action="append", default=[], metavar="SHA256:START:END",
+        help="Codex only: replace one explicitly selected current document span; offsets are Unicode characters, not bytes",
     )
     parser.add_argument(
         "--migrate-legacy-skill",
@@ -7374,7 +7384,7 @@ def _sync_tree(
     excluded_files: frozenset[Path] = frozenset(),
     mutable_owner: _CreateOnlyMutablePath | None = None,
     instruction_scope: str | None = None,
-    instruction_updates: "_ClaudeInstructionUpdates | None" = None,
+    instruction_updates: "_SelectedProviderUpdates | None" = None,
 ) -> None:
     if instruction_scope not in (None, "agents", "commands"):
         raise ValueError("invalid Claude instruction scope")
@@ -7392,8 +7402,8 @@ def _sync_tree(
             if instruction:
                 key = instruction_scope + "/" + relative.as_posix()
                 if instruction_updates is not None and key in instruction_updates.items:
-                    _apply_selected_claude_instruction(
-                        instruction_updates, key, item, destination, mutable_owner, dry_run)
+                    _apply_selected_replacement(
+                        instruction_updates, key, (item,), destination, mutable_owner, dry_run)
                     continue
                 if mutable_owner is not None and mutable_owner.transaction.enabled:
                     transaction = mutable_owner.transaction
@@ -10306,20 +10316,17 @@ def _render_codex_document(existing: str | None, pack: str) -> str:
     return content
 
 
+def _codex_document_payload(shared_text: str, codex_text: str) -> str:
+    return shared_text.rstrip() + "\n\n" + codex_text.rstrip() + "\n"
+
+
 def _prepare_codex_agents(root: Path, source: Path, target: Path, *,
                          mutable_owner: _CreateOnlyMutablePath | None = None,
                          project_scope: bool = False) -> _DocumentResult:
     """Read exact inputs and propose Codex text without writing or claiming ownership."""
-    pack = (
-        CODEX_BEGIN
-        + "\n"
-        + (root / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8").rstrip()
-        + "\n\n"
-        + (source / "AGENTS.codex.md").read_text(encoding="utf-8").rstrip()
-        + "\n"
-        + CODEX_END
-        + "\n"
-    )
+    pack = (CODEX_BEGIN + "\n" + _codex_document_payload(
+        (root / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8"),
+        (source / "AGENTS.codex.md").read_text(encoding="utf-8")) + CODEX_END + "\n")
     existing = _read_owned_text(target, mutable_owner, preserve_newlines=True)
     scope = "project" if project_scope else "global"
     logical_path = "AGENTS.md" if project_scope else ".codex/AGENTS.md"
@@ -10330,6 +10337,13 @@ def _prepare_codex_agents(root: Path, source: Path, target: Path, *,
     return result
 
 
+def _warn_codex_project_budget(content: str) -> None:
+    print(f"  WARNING: standalone project instruction budget may be exceeded "
+          f"(rendered document: {len(content.encode('utf-8'))} UTF-8 bytes). "
+          "The effective client budget and other project instructions are not verified; "
+          "some rules may not be loaded.")
+
+
 def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *,
                        mutable_owner: _CreateOnlyMutablePath | None = None,
                        project_scope: bool = False) -> None:
@@ -10337,10 +10351,7 @@ def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *
         root, source, target, mutable_owner=mutable_owner, project_scope=project_scope)
     content = proposed.after.decode("utf-8")
     if project_scope:
-        print(f"  WARNING: standalone project instruction budget may be exceeded "
-              f"(rendered document: {len(content.encode('utf-8'))} UTF-8 bytes). "
-              "The effective client budget and other project instructions are not verified; "
-              "some rules may not be loaded.")
+        _warn_codex_project_budget(content)
     if dry_run:
         print(f"    [dry-run] would merge {target}")
     else:
@@ -11754,9 +11765,15 @@ def _record_fresh_provider_receipt(
 
 
 @dataclass(frozen=True)
-class _SelectedClaudeInstruction:
-    source: Path
-    source_node: _PhysicalNode
+class _SelectedSource:
+    path: Path
+    node: _PhysicalNode
+    raw: bytes
+
+
+@dataclass(frozen=True)
+class _SelectedReplacement:
+    sources: tuple[_SelectedSource, ...]
     path: Path
     before_node: _PhysicalNode
     before: bytes
@@ -11766,17 +11783,25 @@ class _SelectedClaudeInstruction:
 
 
 @dataclass(frozen=True)
-class _ClaudeInstructionUpdates:
+class _SelectedProviderUpdates:
+    provider: str
     owner: _CreateOnlyMutablePath
     scope: str
     receipt: Path
     receipt_node: _PhysicalNode | None
     receipt_before: bytes | None
     receipt_parents: tuple[tuple[Path, tuple[int, int, int, int]], ...]
-    items: dict[str, _SelectedClaudeInstruction]
+    receipt_parent_preimage: tuple[tuple[Path, _PhysicalNode | None], ...]
+    items: dict[str, _SelectedReplacement]
     outcomes: tuple[_ReceiptOutcome, ...]
     payload: bytes
     received: dict[str, _PhysicalNode] = field(default_factory=dict)
+
+
+def _selected_error(provider: str, reason: str, *, invalid: bool = False) -> ValueError:
+    subject = "CLAUDE_INSTRUCTION" if provider == "claude" else "CODEX_DOCUMENT"
+    category = "INVALID" if invalid else "DRIFT"
+    return ValueError(f"E_{subject}_SELECTION_{category}: {reason}")
 
 
 def _claude_instruction_source_names(source: Path) -> frozenset[str]:
@@ -11788,18 +11813,59 @@ def _claude_instruction_source_names(source: Path) -> frozenset[str]:
         and (scope == "commands" or len(item.relative_to(source / scope).parts) == 1))
 
 
-def _prepare_selected_claude_instructions(
-    grants: dict[str, str], source: Path, target: Path, scope: str,
-    owner: _CreateOnlyMutablePath,
-) -> _ClaudeInstructionUpdates | None:
-    if not grants:
-        return None
-    transaction, items, outcomes = owner.transaction, {}, []
-    receipt = owner.destination((target / _PROVIDER_RECEIPT_NAME).relative_to(owner.anchor))
+def _capture_selected_source(path: Path, transaction: _InstallTransaction) -> _SelectedSource:
+    path = Path(os.path.abspath(path))
+    node = transaction._capture_node(path)
+    return _SelectedSource(path, node, transaction._image_file_bytes(path, node))
+
+
+def _selected_receipt_parent_preimage(receipt: Path, transaction: _InstallTransaction):
+    # Reuse known snapshot evidence; acquire only outside parents at preflight.
+    # An absent leaf image says nothing about its parents.
+    covered = tuple(transaction._original)
+    parents = dict(transaction._capture_readonly_parents(receipt, covered))
+    for parent in receipt.parents:
+        originals = [image.get(parent) for root, image in transaction._original.items()
+                     if parent == root or root in parent.parents]
+        if originals:
+            if any(node != originals[0] for node in originals[1:]):
+                raise ValueError("E_PROVIDER_RECEIPT_DRIFT: parent evidence conflict")
+            parents[parent] = originals[0]
+    return tuple(sorted(parents.items(), key=lambda row: len(row[0].parts)))
+
+
+def _prepare_selected_provider_updates(
+    provider: str, scope: str, receipt: Path, owner: _CreateOnlyMutablePath,
+    items: dict[str, _SelectedReplacement], outcomes: tuple[_ReceiptOutcome, ...],
+) -> _SelectedProviderUpdates:
+    transaction = owner.transaction
+    receipt = owner.destination(receipt.relative_to(owner.anchor))
     receipt_node = _admitted_mutation_image(transaction, receipt).get(receipt)
     receipt_before = (None if receipt_node is None
                       else transaction._image_file_bytes(receipt, receipt_node))
-    receipt_parents = owner._file_parent_identities(receipt)
+    if receipt_node is None:
+        # Parent-only evidence, not a read-only registration for a mutable leaf.
+        receipt_parent_preimage = _selected_receipt_parent_preimage(receipt, transaction)
+        transaction._assert_readonly_parents(receipt_parent_preimage)
+        receipt_parents = ()
+    else:
+        receipt_parents = owner._file_parent_identities(receipt)
+        receipt_parent_preimage = ()
+    plan = _plan_receipt_changes(receipt_before, provider, scope, outcomes, _markdown_document_context)
+    if any(item.route != "selected-replacement-proposal" for item in plan.artifacts):
+        raise _selected_error(provider, "receipt plan", invalid=True)
+    payload = _serialize_receipt_delta(receipt_before, plan)
+    return _SelectedProviderUpdates(provider, owner, scope, receipt, receipt_node, receipt_before,
+                                    receipt_parents, receipt_parent_preimage, items, outcomes, payload)
+
+
+def _prepare_selected_claude_instructions(
+    grants: dict[str, str], source: Path, target: Path, scope: str,
+    owner: _CreateOnlyMutablePath,
+) -> _SelectedProviderUpdates | None:
+    if not grants:
+        return None
+    transaction, items, outcomes = owner.transaction, {}, []
     for key, digest in grants.items():
         path = owner.destination((target / key).relative_to(owner.anchor))
         before_node = _admitted_mutation_image(transaction, path).get(path)
@@ -11807,81 +11873,113 @@ def _prepare_selected_claude_instructions(
         before = owner._assert_bound_file(path, before_node, parents)
         if hashlib.sha256(before).hexdigest() != digest:
             raise ValueError("E_CLAUDE_INSTRUCTION_SELECTION_DRIFT: " + key)
-        source_path = Path(os.path.abspath(source / key))
-        source_node = transaction._capture_node(source_path)
-        after = transaction._image_file_bytes(source_path, source_node)
-        items[key] = _SelectedClaudeInstruction(
-            source_path, source_node, path, before_node, before, after, digest, parents)
+        selected_source = _capture_selected_source(source / key, transaction)
+        after = selected_source.raw
+        items[key] = _SelectedReplacement(
+            (selected_source,), path, before_node, before, after, digest, parents)
         outcomes.append(_ReceiptOutcome(".claude/" + key, "file", before, after,
                                         intent="replace", adoption_sha256=digest))
-    outcomes = tuple(outcomes)
-    plan = _plan_receipt_changes(receipt_before, "claude", scope, outcomes, _markdown_document_context)
-    if any(item.route != "selected-replacement-proposal" for item in plan.artifacts):
-        raise ValueError("E_CLAUDE_INSTRUCTION_SELECTION_INVALID: receipt plan")
-    payload = _serialize_receipt_delta(receipt_before, plan)
-    return _ClaudeInstructionUpdates(owner, scope, receipt, receipt_node, receipt_before,
-                                    receipt_parents, items, outcomes, payload)
+    return _prepare_selected_provider_updates(
+        "claude", scope, target / _PROVIDER_RECEIPT_NAME, owner, items, tuple(outcomes))
 
 
-def _assert_selected_claude_instruction(
-    selected: _SelectedClaudeInstruction, owner: _CreateOnlyMutablePath, node: _PhysicalNode,
+def _prepare_selected_codex_document(
+    grant: tuple[str, tuple[int, int]], root: Path, source: Path, target: Path,
+    document: Path, scope: str, owner: _CreateOnlyMutablePath,
+) -> _SelectedProviderUpdates:
+    digest, span = grant
+    transaction = owner.transaction
+    path = owner.destination(document.relative_to(owner.anchor))
+    before_node = _admitted_mutation_image(transaction, path).get(path)
+    parents = owner._file_parent_identities(path)
+    before = owner._assert_bound_file(path, before_node, parents)
+    if hashlib.sha256(before).hexdigest() != digest:
+        raise _selected_error("codex", "preimage")
+    sources = tuple(_capture_selected_source(path, transaction) for path in (
+        root / "shared" / "AGENTS.shared.md", source / "AGENTS.codex.md"))
+    # Match the existing source read_text view; witnesses retain exact raw bytes.
+    texts = tuple(item.raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+                  for item in sources)
+    payload = _codex_document_payload(*texts)
+    after = _render_selected_document(
+        before.decode("utf-8"), "codex", payload, _markdown_document_context,
+        document_digest=digest, span=span).encode("utf-8")
+    key = "AGENTS.md" if scope == "project" else ".codex/AGENTS.md"
+    selected = _SelectedReplacement(sources, path, before_node, before, after, digest, parents)
+    outcome = _ReceiptOutcome(key, "block", before, after, intent="replace",
+                              adoption_sha256=digest, adoption_span=span)
+    return _prepare_selected_provider_updates(
+        "codex", scope, target / _PROVIDER_RECEIPT_NAME, owner, {key: selected}, (outcome,))
+
+
+def _assert_selected_sources(selected: _SelectedReplacement, owner: _CreateOnlyMutablePath,
+                             provider: str) -> None:
+    for source in selected.sources:
+        if owner.transaction._image_file_bytes(source.path, source.node) != source.raw:
+            raise _selected_error(provider, "source")
+
+
+def _assert_selected_replacement(
+    selected: _SelectedReplacement, owner: _CreateOnlyMutablePath, node: _PhysicalNode,
+    provider: str,
 ) -> None:
-    if owner.transaction._image_file_bytes(selected.source, selected.source_node) != selected.after:
-        raise ValueError("E_CLAUDE_INSTRUCTION_SELECTION_DRIFT: source")
+    _assert_selected_sources(selected, owner, provider)
     if owner._assert_bound_file(selected.path, node, selected.parents) != selected.after:
-        raise ValueError("E_CLAUDE_INSTRUCTION_SELECTION_DRIFT: outcome")
+        raise _selected_error(provider, "outcome")
 
 
-def _apply_selected_claude_instruction(
-    batch: _ClaudeInstructionUpdates, key: str, source: Path, path: Path,
+def _apply_selected_replacement(
+    batch: _SelectedProviderUpdates, key: str, source_paths: tuple[Path, ...], path: Path,
     owner: _CreateOnlyMutablePath | None, dry_run: bool,
 ) -> None:
     selected = batch.items[key]
     if (owner is not batch.owner or owner.linked_authority is not None
-            or Path(os.path.abspath(source)) != selected.source
+            or tuple(Path(os.path.abspath(source)) for source in source_paths)
+                != tuple(source.path for source in selected.sources)
             or Path(os.path.abspath(path)) != selected.path or key in batch.received):
-        raise ValueError("E_CLAUDE_INSTRUCTION_SELECTION_DRIFT: route")
+        raise _selected_error(batch.provider, "route")
     transaction = owner.transaction
-    if transaction._image_file_bytes(selected.source, selected.source_node) != selected.after:
-        raise ValueError("E_CLAUDE_INSTRUCTION_SELECTION_DRIFT: source")
+    _assert_selected_sources(selected, owner, batch.provider)
     if owner._assert_bound_file(selected.path, selected.before_node, selected.parents) != selected.before:
-        raise ValueError("E_CLAUDE_INSTRUCTION_SELECTION_DRIFT: preimage")
+        raise _selected_error(batch.provider, "preimage")
     if dry_run:
-        print(f"  [dry-run] selected instruction replacement: {key}")
+        kind = "instruction" if batch.provider == "claude" else "document"
+        print(f"  [dry-run] selected {kind} replacement: {key}")
         return
     if selected.before != selected.after:
         owner.replace_exact_file(selected.path.relative_to(owner.anchor), selected.digest, selected.after)
     node = _admitted_mutation_image(transaction, selected.path).get(selected.path)
-    _assert_selected_claude_instruction(selected, owner, node)
+    _assert_selected_replacement(selected, owner, node, batch.provider)
     batch.received[key] = node
 
 
-def _record_selected_claude_receipt(batch: _ClaudeInstructionUpdates) -> None:
+def _record_selected_provider_receipt(batch: _SelectedProviderUpdates) -> None:
     owner, transaction = batch.owner, batch.owner.transaction
     if owner.dry_run:
         return
     if not transaction.enabled or set(batch.received) != set(batch.items):
-        raise ValueError("E_CLAUDE_INSTRUCTION_SELECTION_DRIFT: incomplete outcomes")
+        raise _selected_error(batch.provider, "incomplete outcomes")
     for key, selected in batch.items.items():
-        _assert_selected_claude_instruction(selected, owner, batch.received[key])
-    fresh = _fresh_provider_receipt_files("claude", batch.scope, batch.receipt, owner)
+        _assert_selected_replacement(selected, owner, batch.received[key], batch.provider)
+    fresh = _fresh_provider_receipt_files(batch.provider, batch.scope, batch.receipt, owner)
     selected_keys = {item.path for item in batch.outcomes}
     fresh = {key: value for key, value in fresh.items() if key not in selected_keys}
     outcomes = batch.outcomes + tuple(
         _ReceiptOutcome(key, "file", None, owner._assert_fresh_file(witness), intent="create")
         for key, witness in fresh.items())
     if fresh:
-        plan = _plan_receipt_changes(batch.receipt_before, "claude", batch.scope,
+        plan = _plan_receipt_changes(batch.receipt_before, batch.provider, batch.scope,
                                      outcomes, _markdown_document_context)
         expected_routes = {item.path: ("selected-replacement-proposal" if item.intent == "replace"
                                       else "creation-proposal") for item in outcomes}
         if {item.path: item.route for item in plan.artifacts} != expected_routes:
-            raise ValueError("E_CLAUDE_INSTRUCTION_SELECTION_INVALID: receipt outcome conflict")
+            raise _selected_error(batch.provider, "receipt outcome conflict", invalid=True)
         payload = _serialize_receipt_delta(batch.receipt_before, plan)
     else:
         payload = batch.payload
     owner.destination(batch.receipt.relative_to(owner.anchor))
     if batch.receipt_node is None:
+        transaction._assert_readonly_parents(batch.receipt_parent_preimage)
         if not transaction._image_matches(batch.receipt, {}):
             raise ValueError("E_PROVIDER_RECEIPT_DRIFT: selected receipt absence")
         start = len(transaction._fresh_files)
@@ -11890,7 +11988,9 @@ def _record_selected_claude_receipt(batch: _ClaudeInstructionUpdates) -> None:
                    if witness.owner is owner and witness.path == batch.receipt]
         if len(created) != 1:
             raise ValueError("E_PROVIDER_RECEIPT_DRIFT: selected receipt creation")
-        receipt_after = created[0].node
+        transaction._assert_readonly_parents(batch.receipt_parent_preimage)
+        if owner._assert_fresh_file(created[0]) != payload:
+            raise ValueError("E_PROVIDER_RECEIPT_DRIFT: selected receipt creation readback")
     else:
         if owner._assert_bound_file(batch.receipt, batch.receipt_node,
                                     batch.receipt_parents) != batch.receipt_before:
@@ -11900,12 +12000,16 @@ def _record_selected_claude_receipt(batch: _ClaudeInstructionUpdates) -> None:
                                      hashlib.sha256(batch.receipt_before).hexdigest(), payload)
         receipt_after = _admitted_mutation_image(transaction, batch.receipt).get(batch.receipt)
     for key, selected in batch.items.items():
-        _assert_selected_claude_instruction(selected, owner, batch.received[key])
+        _assert_selected_replacement(selected, owner, batch.received[key], batch.provider)
     for witness in fresh.values():
         owner._assert_fresh_file(witness)
-    if owner._assert_bound_file(batch.receipt, receipt_after, batch.receipt_parents) != payload:
+    if batch.receipt_node is None:
+        transaction._assert_readonly_parents(batch.receipt_parent_preimage)
+        actual = owner._assert_fresh_file(created[0])
+    else:
+        actual = owner._assert_bound_file(batch.receipt, receipt_after, batch.receipt_parents)
+    if actual != payload:
         raise ValueError("E_PROVIDER_RECEIPT_DRIFT: selected receipt readback")
-
 
 def install(provider: str, argv: list[str] | None = None) -> int:
     args = _parser(provider).parse_args(argv)
@@ -11921,6 +12025,9 @@ def install(provider: str, argv: list[str] | None = None) -> int:
         return 1
     if args.replace_claude_instruction and provider != "claude":
         print("FAIL: E_CLAUDE_INSTRUCTION_SELECTION_INVALID: Claude only", file=sys.stderr)
+        return 1
+    if args.replace_codex_document and provider != "codex":
+        print("FAIL: E_CODEX_DOCUMENT_SELECTION_INVALID: Codex only", file=sys.stderr)
         return 1
     if args.replace_unreceipted_skill_sha256 and not args.global_install:
         print("FAIL: E_CANONICAL_SKILL_ADOPTION_MISMATCH", file=sys.stderr)
@@ -11948,6 +12055,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
     source = root / f"src.{provider}"
     try:
         mode, target, project = _target(provider, args)
+        document_grant = _parse_codex_document_grant(tuple(args.replace_codex_document))
         instruction_grants = (_parse_claude_instruction_grants(
             tuple(args.replace_claude_instruction), _claude_instruction_source_names(source))
             if args.replace_claude_instruction else {})
@@ -12265,8 +12373,9 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 source / "agents", target_tree, excluded_files=claude_sync_excluded))
             copy_paths.update(_sync_file_destinations(source / "commands", claude_commands_target))
             copy_paths.update(destination for _source, destination in claude_runtime_destinations)
+        selected_requested = bool(instruction_grants) or document_grant is not None
         fresh_receipt = None if args.dry_run else _fresh_provider_receipt_candidate(target)
-        if instruction_grants:
+        if selected_requested:
             transaction_paths.append(target / _PROVIDER_RECEIPT_NAME)
         elif fresh_receipt is not None:
             transaction_paths.append(fresh_receipt)
@@ -12275,7 +12384,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             enabled=not args.dry_run,
             copy_paths=tuple(sorted(copy_paths)),
             link_object_paths=byte_pointer_objects,
-            track_fresh_files=fresh_receipt is not None or bool(instruction_grants),
+            track_fresh_files=fresh_receipt is not None or selected_requested,
         )
         for authority in claude_link_authorities:
             _assert_global_claude_linked_subroot_authority(root, authority)
@@ -12369,6 +12478,11 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 instruction_grants, source, target, "global" if mode == "global" else "project",
                 create_only,
             )
+            selected_updates = (
+                _prepare_selected_codex_document(
+                    document_grant, root, source, target, docs_target,
+                    "global" if mode == "global" else "project", create_only)
+                if document_grant is not None else instruction_updates)
             # Canonical roles resolve the neutral contract through .agents.
             # Publish that leaf before the canonical skills tree, while the
             # transaction still owns both canonical and provider destinations.
@@ -12515,8 +12629,17 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     manifest=codex_role_manifest,
                     plan=codex_native_role_plan,
                 )
-                _merge_codex_agents(root, source, docs_target, args.dry_run, mutable_owner=create_only,
-                                    project_scope=mode != "global")
+                if document_grant is not None:
+                    key = "AGENTS.md" if mode != "global" else ".codex/AGENTS.md"
+                    if mode != "global":
+                        _warn_codex_project_budget(selected_updates.items[key].after.decode("utf-8"))
+                    _apply_selected_replacement(
+                        selected_updates, key,
+                        (root / "shared" / "AGENTS.shared.md", source / "AGENTS.codex.md"),
+                        docs_target, create_only, args.dry_run)
+                else:
+                    _merge_codex_agents(root, source, docs_target, args.dry_run, mutable_owner=create_only,
+                                        project_scope=mode != "global")
             else:
                 _merge_claude_docs(root, source, docs_target, args.dry_run,
                                    mutable_owner=create_only, project_scope=mode != "global")
@@ -12669,8 +12792,8 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             _finalize_canonical_lead_receipt(
                 canonical_plan, canonical_skills_target, canonical_skills_owner, reclaimed
             )
-            if instruction_updates is not None:
-                _record_selected_claude_receipt(instruction_updates)
+            if selected_updates is not None:
+                _record_selected_provider_receipt(selected_updates)
             else:
                 _record_fresh_provider_receipt(
                     provider, "global" if mode == "global" else "project", fresh_receipt, create_only

@@ -26,7 +26,7 @@ class MemoryPath(PurePosixPath):
 class CodexMarkdownExampleTests(unittest.TestCase):
     def setUp(self):
         tree = ast.parse(SOURCE.read_bytes())
-        names = {"_merge_codex_agents", "_render_codex_document", "_prepare_codex_agents"}
+        names = {"_merge_codex_agents", "_render_codex_document", "_codex_document_payload", "_warn_codex_project_budget", "_prepare_codex_agents"}
         functions = [node for node in tree.body
                      if isinstance(node, ast.FunctionDef) and node.name in names]
         self.assertEqual(len(functions), len(names))

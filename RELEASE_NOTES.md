@@ -4,6 +4,9 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-06
 
+- Connect explicit current Codex document-span replacement through --replace-codex-document SHA256:START:END. The strict shared renderer preserves surrounding user text when closed examples contain END markers; default legacy merging is unchanged. Codex and selected Claude instructions now share one receipt finalizer and the existing exact-file transaction writer, with raw source witnesses, actual afterimages and parent provenance for a newly created receipt. This is per-invocation selected acquisition, not automatic ownership from old hashes. Pure/static source qualification does not establish physical race, chain or recovery acceptance.
+
+
 - Share exact-current Markdown selection validation between receipt planning and a pure selected-document renderer. The renderer reuses the SDK managed-frame rules and preserves surrounding user text when examples contain literal end markers; ambiguous frames refuse. This internal seam does not change default Codex merging or enable document adoption in the installer. Physical ownership and coupled content/receipt receiving remain open.
 
 

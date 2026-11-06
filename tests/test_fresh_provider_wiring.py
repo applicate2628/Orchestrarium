@@ -253,8 +253,9 @@ class FreshProviderWiringTests(unittest.TestCase):
     def test_install_admits_receipt_and_finalizes_same_transaction_before_commit(self):
         install = named(self.tree, "install")
         transaction = self.one_call(install, "_InstallTransaction")
+        self.require(install, "bool(instruction_grants) or document_grant is not None")
         self.assertTrue(any(kw.arg == "track_fresh_files"
-                            and shape(kw.value) == shape(expression("fresh_receipt is not None or bool(instruction_grants)"))
+                            and shape(kw.value) == shape(expression("fresh_receipt is not None or selected_requested"))
                             for kw in transaction.keywords))
         admission = next(node for node in ast.walk(install)
                          if isinstance(node, ast.Assign)
@@ -272,7 +273,7 @@ class FreshProviderWiringTests(unittest.TestCase):
         self.assertEqual(ast.unparse(final.args[-2]), "fresh_receipt")
         branch = scope.body[-2]
         self.assertIsInstance(branch, ast.If)
-        self.require(branch.test, "instruction_updates is not None")
+        self.require(branch.test, "selected_updates is not None")
         self.assertIs(branch.orelse[0].value, final)
         self.assertEqual(len(branch.orelse), 1)
         self.assertEqual(ast.unparse(scope.body[-1]), "transaction.commit()")
