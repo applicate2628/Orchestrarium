@@ -10139,7 +10139,8 @@ def _write_owned_text(target: Path, content: str, owner: _CreateOnlyMutablePath 
 
 
 def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *,
-                       mutable_owner: _CreateOnlyMutablePath | None = None) -> None:
+                       mutable_owner: _CreateOnlyMutablePath | None = None,
+                       project_scope: bool = False) -> None:
     pack = (
         CODEX_BEGIN
         + "\n"
@@ -10169,6 +10170,11 @@ def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *
             content = pack + "\n" + existing
     else:
         content = pack
+    if project_scope:
+        print(f"  WARNING: standalone project instruction budget may be exceeded "
+              f"(rendered document: {len(content.encode('utf-8'))} UTF-8 bytes). "
+              "The effective client budget and other project instructions are not verified; "
+              "some rules may not be loaded.")
     if dry_run:
         print(f"    [dry-run] would merge {target}")
     else:
@@ -12052,7 +12058,8 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     manifest=codex_role_manifest,
                     plan=codex_native_role_plan,
                 )
-                _merge_codex_agents(root, source, docs_target, args.dry_run, mutable_owner=create_only)
+                _merge_codex_agents(root, source, docs_target, args.dry_run, mutable_owner=create_only,
+                                    project_scope=mode != "global")
             else:
                 _merge_claude_docs(root, source, docs_target, args.dry_run, mutable_owner=create_only)
             if provider != "codex":
