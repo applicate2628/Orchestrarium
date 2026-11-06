@@ -10114,9 +10114,14 @@ def _owned_byte_context(target: Path, owner: _CreateOnlyMutablePath):
     return storage, node, selected_owner
 
 
-def _read_owned_text(target: Path, owner: _CreateOnlyMutablePath | None) -> str | None:
+def _read_owned_text(target: Path, owner: _CreateOnlyMutablePath | None, *,
+                     preserve_newlines: bool = False) -> str | None:
+    newline = "" if preserve_newlines else None
     if owner is None or not owner.transaction.enabled:
-        return target.read_text(encoding="utf-8") if target.is_file() else None
+        if not target.is_file():
+            return None
+        with target.open("r", encoding="utf-8", newline=newline) as stream:
+            return stream.read()
     storage, node, _selected_owner = _owned_byte_context(target, owner)
     if node is None:
         return None
@@ -10124,7 +10129,7 @@ def _read_owned_text(target: Path, owner: _CreateOnlyMutablePath | None) -> str 
         payload = owner.transaction._descriptor_bytes(descriptor, path=storage)
         if hashlib.sha256(payload).hexdigest() != node.data:
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: producer input bytes")
-    with io.TextIOWrapper(io.BytesIO(payload), encoding="utf-8") as stream:
+    with io.TextIOWrapper(io.BytesIO(payload), encoding="utf-8", newline=newline) as stream:
         return stream.read()
 
 
@@ -10151,7 +10156,7 @@ def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *
         + CODEX_END
         + "\n"
     )
-    existing = _read_owned_text(target, mutable_owner)
+    existing = _read_owned_text(target, mutable_owner, preserve_newlines=True)
     if existing is not None:
         # Select starts outside code, but retain the old raw ending boundary:
         # filtering an END or policy heading could expand the replaced extent.
