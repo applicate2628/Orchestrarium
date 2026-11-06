@@ -100,3 +100,64 @@ def parse_codex_document_grant(
     if end <= start:
         raise ValueError(_CODEX_DOCUMENT_ERROR)
     return digest, (start, end)
+
+
+_CLAUDE_RECEIPT_ERROR = "E_CLAUDE_RECEIPT_SELECTION_INVALID"
+
+
+def parse_claude_receipt_grant(values: tuple[str, ...]) -> str | None:
+    """Parse an explicit raw-receipt SHA256 pin, never inferred permission."""
+    if type(values) is not tuple or len(values) > 1:
+        raise ValueError(_CLAUDE_RECEIPT_ERROR)
+    if not values:
+        return None
+    digest = values[0]
+    if (type(digest) is not str or len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest)):
+        raise ValueError(_CLAUDE_RECEIPT_ERROR)
+    return digest
+
+
+def claude_instruction_grants_from_receipt(
+    receipt: bytes, digest: str, scope: str, source_names: frozenset[str]
+) -> dict[str, str]:
+    """Expand a pinned receipt into exact source-listed instruction preconditions.
+
+    Only files entries participate, with their recorded (not source) digests.
+    This pure projection proves neither current file state nor historical
+    authority. The installer must independently bind and check every selected
+    current file before writing any selected content.
+    """
+    import hashlib
+
+    try:
+        from installation.ownership import decode_record
+    except ModuleNotFoundError as error:
+        if error.name not in {"installation", "installation.ownership"}:
+            raise
+        from scripts.installation.ownership import decode_record
+
+    try:
+        if (type(receipt) is not bytes or type(scope) is not str
+                or scope not in {"global", "project"}):
+            raise ValueError(_CLAUDE_RECEIPT_ERROR)
+        parse_claude_receipt_grant((digest,))
+        parse_claude_instruction_grants((), source_names)
+        if hashlib.sha256(receipt).hexdigest() != digest:
+            raise ValueError(_CLAUDE_RECEIPT_ERROR)
+        record = decode_record(receipt, "claude", scope)
+        catalog = {(".claude/" + name).casefold(): ".claude/" + name
+                   for name in source_names}
+        selected = []
+        for path, recorded_digest in sorted(record["files"].items()):
+            exact = catalog.get(path.casefold())
+            if exact is None:
+                continue
+            if path != exact:
+                raise ValueError(_CLAUDE_RECEIPT_ERROR)
+            selected.append(path[len(".claude/"):] + "=" + recorded_digest)
+        if not selected:
+            raise ValueError(_CLAUDE_RECEIPT_ERROR)
+        return parse_claude_instruction_grants(tuple(selected), source_names)
+    except (ValueError, TypeError, UnicodeError, RecursionError) as error:
+        raise ValueError(_CLAUDE_RECEIPT_ERROR) from error

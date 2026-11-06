@@ -63,7 +63,9 @@ try:
     from installation.configuration import render_selected_document as _render_selected_document
     from installation.instruction_selection import (
         parse_claude_instruction_grants as _parse_claude_instruction_grants,
-        parse_codex_document_grant as _parse_codex_document_grant)
+        parse_codex_document_grant as _parse_codex_document_grant,
+        parse_claude_receipt_grant as _parse_claude_receipt_grant,
+        claude_instruction_grants_from_receipt as _claude_instruction_grants_from_receipt)
     from installation.receipt_plan import (
         Outcome as _ReceiptOutcome, plan_changes as _plan_receipt_changes,
         serialize_delta as _serialize_receipt_delta)
@@ -73,7 +75,9 @@ except ModuleNotFoundError as error:
     from scripts.installation.configuration import render_selected_document as _render_selected_document
     from scripts.installation.instruction_selection import (
         parse_claude_instruction_grants as _parse_claude_instruction_grants,
-        parse_codex_document_grant as _parse_codex_document_grant)
+        parse_codex_document_grant as _parse_codex_document_grant,
+        parse_claude_receipt_grant as _parse_claude_receipt_grant,
+        claude_instruction_grants_from_receipt as _claude_instruction_grants_from_receipt)
     from scripts.installation.receipt_plan import (
         Outcome as _ReceiptOutcome, plan_changes as _plan_receipt_changes,
         serialize_delta as _serialize_receipt_delta)
@@ -674,6 +678,11 @@ def _parser(provider: str) -> argparse.ArgumentParser:
     parser.add_argument(
         "--replace-claude-instruction", action="append", default=[], metavar="PATH=SHA256",
         help="Claude only: replace explicitly reviewed current agents/NAME.md or commands/...md bytes; not historical ownership",
+    )
+    parser.add_argument(
+        "--replace-claude-receipted-instructions", action="append", default=[],
+        metavar="RECEIPT_SHA256",
+        help="Claude only: explicitly replace current source-listed instructions selected by this exact receipt; every selected file must still match its recorded bytes; not historical ownership",
     )
     parser.add_argument(
         "--replace-codex-document", action="append", default=[], metavar="SHA256:START:END",
@@ -11883,6 +11892,32 @@ def _prepare_selected_claude_instructions(
         "claude", scope, target / _PROVIDER_RECEIPT_NAME, owner, items, tuple(outcomes))
 
 
+def _prepare_receipted_claude_instructions(
+    receipt_digest: str, source: Path, target: Path, scope: str,
+    owner: _CreateOnlyMutablePath, linked_subroots: tuple[str, ...],
+) -> _SelectedProviderUpdates:
+    # The explicit option authorizes this current batch, not the receipt's
+    # authorship or historical storage. Reuse the exact-current owner below.
+    receipt = owner.destination((target / _PROVIDER_RECEIPT_NAME).relative_to(owner.anchor))
+    transaction = owner.transaction
+    node = _admitted_mutation_image(transaction, receipt).get(receipt)
+    parents = owner._file_parent_identities(receipt)
+    before = owner._assert_bound_file(receipt, node, parents)
+    grants = _claude_instruction_grants_from_receipt(
+        before, receipt_digest, scope, _claude_instruction_source_names(source))
+    if any(key.split("/")[0] in linked_subroots for key in grants):
+        raise ValueError("E_CLAUDE_RECEIPT_SELECTION_INVALID: linked subroot")
+    # Every selected current file must match before any content write; a stale,
+    # missing or nonordinary member refuses the entire explicit batch.
+    batch = _prepare_selected_claude_instructions(grants, source, target, scope, owner)
+    if (batch is None or batch.receipt != receipt or batch.receipt_node != node
+            or batch.receipt_before != before or batch.receipt_parents != parents):
+        raise ValueError("E_CLAUDE_RECEIPT_SELECTION_DRIFT: receipt binding")
+    if owner._assert_bound_file(receipt, node, parents) != before:
+        raise ValueError("E_CLAUDE_RECEIPT_SELECTION_DRIFT: receipt preimage")
+    return batch
+
+
 def _prepare_selected_codex_document(
     grant: tuple[str, tuple[int, int]], root: Path, source: Path, target: Path,
     document: Path, scope: str, owner: _CreateOnlyMutablePath,
@@ -12026,6 +12061,11 @@ def install(provider: str, argv: list[str] | None = None) -> int:
     if args.replace_claude_instruction and provider != "claude":
         print("FAIL: E_CLAUDE_INSTRUCTION_SELECTION_INVALID: Claude only", file=sys.stderr)
         return 1
+    if args.replace_claude_receipted_instructions and (
+        provider != "claude" or args.replace_claude_instruction
+    ):
+        print("FAIL: E_CLAUDE_RECEIPT_SELECTION_INVALID: Claude only; choose receipt or individual selections", file=sys.stderr)
+        return 1
     if args.replace_codex_document and provider != "codex":
         print("FAIL: E_CODEX_DOCUMENT_SELECTION_INVALID: Codex only", file=sys.stderr)
         return 1
@@ -12056,6 +12096,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
     try:
         mode, target, project = _target(provider, args)
         document_grant = _parse_codex_document_grant(tuple(args.replace_codex_document))
+        receipt_grant = _parse_claude_receipt_grant(tuple(args.replace_claude_receipted_instructions))
         instruction_grants = (_parse_claude_instruction_grants(
             tuple(args.replace_claude_instruction), _claude_instruction_source_names(source))
             if args.replace_claude_instruction else {})
@@ -12373,7 +12414,8 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 source / "agents", target_tree, excluded_files=claude_sync_excluded))
             copy_paths.update(_sync_file_destinations(source / "commands", claude_commands_target))
             copy_paths.update(destination for _source, destination in claude_runtime_destinations)
-        selected_requested = bool(instruction_grants) or document_grant is not None
+        selected_requested = (bool(instruction_grants) or document_grant is not None
+                              or receipt_grant is not None)
         fresh_receipt = None if args.dry_run else _fresh_provider_receipt_candidate(target)
         if selected_requested:
             transaction_paths.append(target / _PROVIDER_RECEIPT_NAME)
@@ -12478,6 +12520,10 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 instruction_grants, source, target, "global" if mode == "global" else "project",
                 create_only,
             )
+            if receipt_grant is not None:
+                instruction_updates = _prepare_receipted_claude_instructions(
+                    receipt_grant, source, target, "global" if mode == "global" else "project",
+                    create_only, tuple(authority.name for authority in claude_link_authorities))
             selected_updates = (
                 _prepare_selected_codex_document(
                     document_grant, root, source, target, docs_target,

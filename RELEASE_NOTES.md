@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-06
 
+- Add an explicit receipt-pinned current migration for Claude agents and commands. --replace-claude-receipted-instructions RECEIPT_SHA256 selects only current source-listed instruction files from one exact existing receipt and reuses the established selected writer and shared receipt finalizer. This reduces per-file selection work for historical installations while requiring every selected current file to match its recorded bytes before content writes. Modified, missing, nonordinary or linked selected members refuse the explicit batch; default preservation stays unchanged. The receipt pin is a current selection, not recovered historical ownership, and physical replacement/recovery acceptance remains open.
+
 - Connect explicit current Codex document-span replacement through --replace-codex-document SHA256:START:END. The strict shared renderer preserves surrounding user text when closed examples contain END markers; default legacy merging is unchanged. Codex and selected Claude instructions now share one receipt finalizer and the existing exact-file transaction writer, with raw source witnesses, actual afterimages and parent provenance for a newly created receipt. This is per-invocation selected acquisition, not automatic ownership from old hashes. Pure/static source qualification does not establish physical race, chain or recovery acceptance.
 
 

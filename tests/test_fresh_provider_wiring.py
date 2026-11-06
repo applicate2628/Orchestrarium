@@ -253,7 +253,7 @@ class FreshProviderWiringTests(unittest.TestCase):
     def test_install_admits_receipt_and_finalizes_same_transaction_before_commit(self):
         install = named(self.tree, "install")
         transaction = self.one_call(install, "_InstallTransaction")
-        self.require(install, "bool(instruction_grants) or document_grant is not None")
+        self.require(install, "bool(instruction_grants) or document_grant is not None or receipt_grant is not None")
         self.assertTrue(any(kw.arg == "track_fresh_files"
                             and shape(kw.value) == shape(expression("fresh_receipt is not None or selected_requested"))
                             for kw in transaction.keywords))

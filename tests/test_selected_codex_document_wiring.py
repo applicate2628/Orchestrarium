@@ -227,7 +227,7 @@ class SelectedCodexDocumentWiringTests(unittest.TestCase):
 
     def test_one_selected_or_fresh_finalizer_and_receipt_share_transaction(self):
         install = self.definition("install")
-        self.require(install, "bool(instruction_grants) or document_grant is not None")
+        self.require(install, "bool(instruction_grants) or document_grant is not None or receipt_grant is not None")
         selected = self.branch(install, "selected_requested")
         self.require(selected, "transaction_paths.append(target / _PROVIDER_RECEIPT_NAME)")
         transaction = self.one(install, "_InstallTransaction")
