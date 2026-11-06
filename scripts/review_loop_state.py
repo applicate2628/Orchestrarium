@@ -1801,14 +1801,24 @@ def _qualify_ledger_closure(root: Path, metadata: dict[str, Any], revision: str,
         raise StateError("RLSTATE_CLOSURE_UNQUALIFIED", "ledger qualification cardinality differs")
     positions = {}
     for key in ("target_run_id", "closer_run_id"):
-        found = [i for i, row in enumerate(context.rows) if row.event.get("runId") == metadata[key]]
+        found = [i for i, row in enumerate(context.rows) if isinstance(row.event.get("runId"), str)
+                 and row.event["runId"].casefold() == metadata[key].casefold()]
         if len(found) != 1:
             raise StateError("RLSTATE_CLOSURE_UNQUALIFIED", f"unique {key} not found")
         positions[key] = found[0]
     target_pos, closer_pos = positions["target_run_id"], positions["closer_run_id"]
     target, closer = context.rows[target_pos].event, context.rows[closer_pos].event
-    if (errors or target_pos >= closer_pos
+    for event in (target, closer):
+        launch_id = event.get("launchRunId")
+        if isinstance(launch_id, str) and sum(
+                isinstance(row.event.get("runId"), str)
+                and row.event["runId"].casefold() == launch_id.casefold() for row in context.rows) != 1:
+            raise StateError("RLSTATE_CLOSURE_UNQUALIFIED", "selected launch identity is ambiguous")
+    if (target_pos >= closer_pos
             or target.get("gate") != "REVISE" or closer.get("gate") != "PASS"
+            or target.get("runId") != metadata["target_run_id"]
+            or closer.get("runId") != metadata["closer_run_id"]
+            or not validity[target_pos].authority.artifact_evidence_eligible
             or not validity[target_pos].authority.revise_target_eligible
             or not validity[closer_pos].authority.closer_eligible
             or metadata["target_run_id"] not in closer.get("closesRunIds", [])):
@@ -1816,9 +1826,10 @@ def _qualify_ledger_closure(root: Path, metadata: dict[str, Any], revision: str,
     # Restrict existing authority to this closer; a different PASS must not win.
     restricted = tuple(replace(entry, authority=replace(entry.authority, closer_eligible=False))
                        if pos != closer_pos else entry for pos, entry in enumerate(validity))
-    open_revise, _open_launches = owner.validate_closure(
-        context.rows, errors, validity=restricted, context=context)
-    if errors or any(event.get("runId") == metadata["target_run_id"] for event in open_revise):
+    closed_relations = {}
+    owner.validate_closure(context.rows, errors, validity=restricted, context=context,
+                           closed_relations_out=closed_relations)
+    if closed_relations.get(metadata["target_run_id"]) != metadata["closer_run_id"]:
         raise StateError("RLSTATE_CLOSURE_UNQUALIFIED", errors[0] if errors else "original obligation remains open")
     try:
         sources = owner.qualify_review_loop_receiving_sources_v1(
@@ -1827,8 +1838,9 @@ def _qualify_ledger_closure(root: Path, metadata: dict[str, Any], revision: str,
             validity=validity, target_pos=target_pos, reviewer_pos=closer_pos,
             initial_receiving=initial_receiving)
         final_errors = []
-        final_open, _ = owner.validate_closure(context.rows, final_errors, validity=restricted, context=context)
-        if final_errors or any(event.get("runId") == metadata["target_run_id"] for event in final_open):
+        owner.validate_closure(context.rows, final_errors, validity=restricted, context=context,
+                               closed_relations_out=closed_relations)
+        if closed_relations.get(metadata["target_run_id"]) != metadata["closer_run_id"]:
             raise ValueError("selected ledger closure changed during source receiving")
     except (ValueError, TypeError, KeyError, RuntimeError) as exc:
         raise StateError("RLSTATE_CLOSURE_UNQUALIFIED", str(exc)) from exc

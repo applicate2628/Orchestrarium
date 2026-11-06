@@ -932,8 +932,13 @@ permission contract below.
 Legacy directory-shaped backlog records use the same owner. Run
 `mutate-work-item.py convert-legacy-candidate` only for an admitted record and
 supply the current candidate text; the command appends every legacy source text
-with its byte digest, replaces the directory only after the README refresh
-succeeds, and rolls the whole operation back on failure. Run
+with its byte digest and verifies the flat candidate and refreshed README before
+committing the conversion. Pre-commit failures roll back; after commit, cleanup
+failure retains the verified candidate and an exact replay marker instead of
+restoring a partially retired source. Cleanup uses the same native-effect owner
+as successor recovery, so every removed file or directory updates its retained
+observations. Replay binds the remaining source, marker and committed target
+before disposal and refuses foreign or changed material. Run
 `mutate-work-item.py retire-legacy-backlog` only with an explicit product
 disposition and strict UTC instant; it preserves the original source bytes plus
 an incoming-link inventory in the existing monthly archive and deliberately
@@ -1006,6 +1011,22 @@ python -B scripts/mutate-work-item.py recover-transition --root <repo> --operati
 The accepted finalization contract requires complete actual request/action/postimage/history/board proof before cleanup-only recovery can dispense with an already-disposed original hold. Remaining live holds and created parents still require their native ownership checks; foreign substitutions or children must be preserved. Public readers remain pending until cleanup and intent settlement are verified. The independently observed post-hold-disposal recovery correction is not certified by this runbook; do not assume every interrupted finalization state is recoverable from the earlier precommit or board-before-receipt tests. Retain an explicitly indeterminate state when current proof cannot establish safe replay, compensation or finalization, keeping the original failure and secondary recovery cause visible.
 
 Helpers assist the already authorized operation. An unavailable or defective helper alone does not remove the owning guarantees or create a workflow-wide blocker. A lawful manual equivalent must preserve the same evidence, identity, history/obligation, rollback/replay, receipt/link/README and independent readback requirements, with actual `manual-equivalent` provenance; it must not impersonate `public-helper`, forge a native seal or bypass host denial. Live resources and retained evidence are separate: release newly owned handles/processes, while preserving user, foreign, ambiguous and genuinely load-bearing recovery state under its owner.
+
+### Runtime source snapshot refusals
+
+A failed initial file capture retains the same failure identifier and refusal,
+with typed detail naming the first failed guard in its original evaluation order.
+The detail includes read lengths, the admitted size limit and the observed/path
+and descriptor stat samples, labelled by statKeyFields; it never includes file
+contents. Paths outside the selected repository remain lexical digests.
+The runtime-source owner adds only its controlled logical source slot and capture
+stage, so validator and schema failures can be distinguished without exposing an
+installation directory. Existing later-capture diagnostics remain separate.
+
+Use the actual failed call's detail for diagnosis. A later successful probe does
+not reconstruct that call, establish a false positive or authorize guard bypass.
+This diagnostic addition does not weaken identity, authority, parent-chain,
+byte-consistency or resource-release checks and does not retry a real close.
 
 ## Release one archived retained scratch entry
 

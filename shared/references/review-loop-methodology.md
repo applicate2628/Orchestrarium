@@ -68,7 +68,13 @@ unchanged artifact to manufacture another revision, or overwrite a prior REVISE.
 - Root truthfully correlates the original loop obligation with the canonical
   ledger target and actual replacement. The existing work-item closure owner
   qualifies the current PASS relation and reviewer authority; a bare
-  `closesRunIds` link or helper label is insufficient. The version-1
+  `closesRunIds` link or helper label is insufficient. The owner must positively
+  identify this exact discharged target/closer pair after current qualification
+  and invalidation handling. Unrelated historical row diagnostics remain visible
+  to ledger audit but do not veto this selected receiving operation; incomplete
+  ledger parsing/projection, ambiguous selected identities, invalid selected
+  launch bindings, missing authority and stale evidence still refuse receiving.
+  Absence from an open-obligation list is never positive closure evidence. The version-1
   `source_binding` is a current Root receiving record: it binds the exact loop,
   round, lane, attempt and frozen revision; actual reviewed role; original
   result, target summary and reviewer summary source anchors; explicit evidence

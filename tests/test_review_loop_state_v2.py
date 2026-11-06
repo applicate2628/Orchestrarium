@@ -2815,3 +2815,104 @@ def test_receiving_preserves_original_typed_finding_identity(tmp_path: Path, blo
     result = _run(repo, *_verdict_closure_arguments(repo, state, receipt, metadata))
     assert result.returncode == 1 and "RLSTATE_CLOSURE_UNQUALIFIED" in result.stderr
     assert state.read_bytes() == before
+
+
+def test_selected_closure_preserves_unrelated_launch_diagnostic(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, receipt, item, metadata = _completed_revise_with_ledger(repo)
+    ledger = item / "agent-runs.jsonl"
+    base = {"schemaVersion": 2, "workItem": item.name, "role": "analyst",
+            "executionRole": "internal", "gate": "none", "scope": ["old diagnostic"],
+            "startedAt": "2026-09-08T00:00:00Z", "updatedAt": "2026-09-08T00:00:01Z"}
+    historical = [{**base, "runId": "unrelated-launch", "eventKind": "launch", "status": "running"},
+                  {**base, "runId": "unrelated-terminal", "eventKind": "terminal", "status": "cancelled",
+                   "launchRunId": "unrelated-launch", "scope": ["different old diagnostic"]}]
+    ledger.write_bytes(b"".join(json.dumps(row).encode() + b"\n" for row in historical) + ledger.read_bytes())
+    before = ledger.read_bytes()
+    engine = _engine_module()
+    owner = engine._ledger_closure_owner()
+    context = owner.load_effective_ledger_view(repo, item, ledger.relative_to(repo).as_posix())
+    diagnostics = list(context.observation.diagnostics)
+    owner.derive_event_validity(context.rows, item, diagnostics, context=context)
+    assert any("WI-LEDGER-LAUNCH-BINDING" in message and "differs in scope" in message for message in diagnostics)
+    received = _run(repo, *_verdict_closure_arguments(repo, state, receipt, metadata))
+    assert received.returncode == 0, received.stderr
+    assert ledger.read_bytes() == before
+    assert json.loads(state.read_text(encoding="utf-8"))["rounds"][0]["deep"]["verdict"] == "REVISE"
+    close = _run(repo, "close", "--state", state, "--operation-id", "close-selected", "--outcome", "converged")
+    assert close.returncode == 0, close.stderr
+    assert ledger.read_bytes() == before
+
+
+@pytest.mark.parametrize("fault", ["malformed-ledger", "duplicate-target", "casefold-target",
+                                   "casefold-closer", "target-launch", "closer-launch", "casefold-target-launch",
+                                   "casefold-closer-launch", "pending-invalidation"])
+def test_selected_closure_still_rejects_unqualified_authority(tmp_path: Path, fault: str) -> None:
+    repo = _repo(tmp_path)
+    state, receipt, item, metadata = _completed_revise_with_ledger(repo)
+    ledger = item / "agent-runs.jsonl"
+    events = [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()]
+    if fault in {"duplicate-target", "casefold-target", "casefold-closer"}:
+        event = dict(events[1 if fault == "casefold-closer" else 0])
+        if fault != "duplicate-target":
+            event["runId"] = event["runId"].upper()
+        events.append(event)
+    elif fault in {"target-launch", "closer-launch", "casefold-target-launch", "casefold-closer-launch"}:
+        selected = events[0 if "target" in fault else 1]
+        launch = {**selected, "runId": "selected-own-launch", "eventKind": "launch",
+                  "status": "running", "gate": "none",
+                  "scope": selected["scope"] if fault.startswith("casefold") else ["wrong launch scope"]}
+        for field in ("closesRunIds", "findingClass", "evidence"):
+            launch.pop(field, None)
+        selected.update(eventKind="terminal", launchRunId=launch["runId"])
+        metadata = _bind_loop_receiving_sources(item, json.loads(state.read_text(encoding="utf-8")), receipt, events, metadata)
+        events.insert(0, launch)
+        if fault.startswith("casefold"):
+            events.append({**launch, "runId": launch["runId"].upper()})
+    elif fault == "pending-invalidation":
+        digest = hashlib.sha256(json.dumps(events[1]).encode()).hexdigest()
+        events.append({"schemaVersion": 2, "runId": "pending-closer-invalidation", "workItem": item.name,
+                       "role": "lead", "executionRole": "main", "status": "completed", "gate": "none",
+                       "scope": ["ledger-recovery:closure-invalidation"], "eventKind": "closure-invalidation",
+                       "invalidatesRunId": events[1]["runId"], "invalidatesEventSha256": digest,
+                       "evidence": [{"kind": "manual-check", "ref": events[1]["runId"] + " " + digest}],
+                       "startedAt": "2026-10-29T11:00:00Z", "updatedAt": "2026-10-29T11:00:00Z"})
+    ledger.write_text("\n".join(json.dumps(row) for row in events) + "\n" + ("{broken\n" if fault == "malformed-ledger" else ""), encoding="utf-8")
+    before, history = state.read_bytes(), ledger.read_bytes()
+    result = _run(repo, *_verdict_closure_arguments(repo, state, receipt, metadata))
+    assert result.returncode != 0, fault
+    assert state.read_bytes() == before and ledger.read_bytes() == history
+
+
+def test_positive_closure_output_clears_stale_map_on_context_refusal(tmp_path: Path) -> None:
+    from dataclasses import replace
+    repo = _repo(tmp_path)
+    state, receipt, item, metadata = _completed_revise_with_ledger(repo)
+    owner = _engine_module()._ledger_closure_owner()
+    context = owner.load_effective_ledger_view(repo, item, (item / "agent-runs.jsonl").relative_to(repo).as_posix())
+    validity = owner.derive_event_validity(context.rows, item, [], context=context)
+    closed = {metadata["target_run_id"]: metadata["closer_run_id"]}
+    errors = []
+    owner.validate_closure(context.rows, errors, validity=validity,
+                           context=replace(context, invocation_token=object()), closed_relations_out=closed)
+    assert errors and not closed
+
+
+def test_selected_closure_rechecks_source_after_report_receiving(tmp_path: Path, monkeypatch) -> None:
+    repo = _repo(tmp_path)
+    state, receipt, item, metadata = _completed_revise_with_ledger(repo)
+    engine = _engine_module()
+    owner = engine._ledger_closure_owner()
+    receive = owner.qualify_review_loop_receiving_sources_v1
+    ledger = item / "agent-runs.jsonl"
+    before = state.read_bytes()
+    def changed_after_receiving(*args, **kwargs):
+        result = receive(*args, **kwargs)
+        ledger.write_bytes(ledger.read_bytes() + b"{changed-during-receiving\n")
+        return result
+    monkeypatch.setattr(owner, "qualify_review_loop_receiving_sources_v1", changed_after_receiving)
+    with pytest.raises(engine.StateError, match="RLSTATE_CLOSURE_UNQUALIFIED"):
+        engine._qualify_ledger_closure(repo, metadata, receipt["artifact_revision"],
+                                      data=json.loads(before), round_number=1, lane="deep",
+                                      attempt_id=receipt["attempts"]["deep"])
+    assert state.read_bytes() == before

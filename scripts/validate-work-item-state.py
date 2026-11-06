@@ -5905,6 +5905,7 @@ def _reduce_closure_relations(
     _format1_effort: bool = False,
     _definition: Literal["current", "historical"],
     _review_associations=None,
+    _closed_relations_out: dict[str, str] | None = None,
 ) -> tuple[list[Mapping[str, object]], list[Mapping[str, object]]]:
     """Ledger-level REVISE-closure validation (decision 2026-07-16-review-verdict-closure,
     minimal slice). Returns (open_v2_revise_events, open_launch_events) — obligations never discharged/settled events (never discharged by a valid
@@ -6382,12 +6383,15 @@ def _reduce_closure_relations(
         and event["runId"] not in terminals_by_launch
     ]
     tel["open-launches"] = tel.get("open-launches", 0) + len(open_launches)
+    if _closed_relations_out is not None:
+        _closed_relations_out.update(discharged)
     return open_revise, open_launches
 
 
 def _validate_closure_authority(
     rows, errors, telemetry=None, *, validity=None, event_validity=None,
     _archived_preclose_v2_rows=frozenset(), _review_item=None, _review_inputs=None,
+    _closed_relations_out=None,
 ):
     """Current authority, including the same captured owner for new review proofs."""
     associations = _receive_review_associations(rows, validity if validity is not None else event_validity,
@@ -6395,7 +6399,7 @@ def _validate_closure_authority(
     return _reduce_closure_relations(
         rows, errors, telemetry, validity=validity, event_validity=event_validity,
         _archived_preclose_v2_rows=_archived_preclose_v2_rows, _definition="current",
-        _review_associations=associations,
+        _review_associations=associations, _closed_relations_out=_closed_relations_out,
     )
 
 
@@ -6409,6 +6413,7 @@ def _validate_closure_from_inputs(
     context: LedgerValidationContextV1 | None = None,
     _item: Path | None = None,
     _inputs: _CurrentEvidenceV1 | None = None,
+    _closed_relations_out: dict[str, str] | None = None,
 ) -> tuple[list[Mapping[str, object]], list[Mapping[str, object]]]:
     """Reduce authority only from raw rows or their exact receipt-minted context."""
 
@@ -6432,14 +6437,19 @@ def _validate_closure_from_inputs(
             tuple(LedgerEventValidityV1(entry.current_schema_valid, mask)
                   for entry, mask in zip(active_validity, masks)), errors)
     return _validate_closure_authority(active_rows, errors, telemetry, validity=active_validity,
-        _review_item=_item, _review_inputs=_inputs)
+        _review_item=_item, _review_inputs=_inputs, _closed_relations_out=_closed_relations_out)
 
 def validate_closure(
     rows: Sequence[RuntimeLedgerRowV1], errors: list[str], telemetry: dict[str, int] | None = None, *,
     validity: Sequence[LedgerEventValidityV1] | None = None,
     event_validity: Sequence[LedgerEventValidityV1] | Sequence[bool] | None = None,
     context: LedgerValidationContextV1 | None = None,
+    closed_relations_out: dict[str, str] | None = None,
 ) -> tuple[list[Mapping[str, object]], list[Mapping[str, object]]]:
+    # A positive owner-reduced relation, never absence from an open-obligation list.
+    # Clear before all failure paths so reused output cannot retain old authority.
+    if closed_relations_out is not None:
+        closed_relations_out.clear()
     if context is None and rows and isinstance(rows[0], Mapping):
         rows = _runtime_rows_from_events(rows)
     received = _receive_helper_context(rows, context, errors, target=_SOURCE_OWNED_CURRENT_TARGET)
@@ -6453,10 +6463,15 @@ def validate_closure(
     if selected is None:
         return [], []
     owner = _context_evaluation(context)
+    # Parsing/projection admission is prerequisite to positive closure evidence.
+    # Per-event historical diagnostics remain separate and do not erase valid relations.
+    if owner is not None and owner.admission_diagnostics():
+        closed_relations_out = None
     # Caller restrictions narrow returned effects; the received source already owns its full observations.
     return _validate_closure_from_inputs(rows, [] if received_result is not None else errors,
         telemetry, validity=selected, context=context,
-        _item=owner.item if owner is not None else None, _inputs=owner.inputs if owner is not None else None)
+        _item=owner.item if owner is not None else None, _inputs=owner.inputs if owner is not None else None,
+        _closed_relations_out=closed_relations_out)
 
 
 

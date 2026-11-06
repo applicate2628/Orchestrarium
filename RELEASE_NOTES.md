@@ -4,6 +4,12 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-06
 
+- Repair post-commit cleanup of converted legacy candidate directories by reusing the lifecycle native-effect owner. Removed descendants no longer leave stale parent observations that block cleanup; partial cleanup keeps the committed candidate and supports exact replay while refusing changed source, marker or target bytes.
+
+- Lifecycle source-snapshot refusals now identify the controlled validator/schema source, capture stage and first failed invariant, with bounded non-content stat/read context. Operators can distinguish an actual drift observation from an unexplained loader refusal without disabling source guards or inferring the original cause from a later retry.
+
+- Same-artifact review receiving now requires a positive owner-qualified selected closure instead of treating unrelated historical ledger diagnostics as a global veto. Parsing, identity, launch authority, invalidation and evidence-currentness guarantees remain required; original history is never repaired or rewritten by this operation.
+
 - Temporarily refuse pre-SDK Codex and Claude installer operations on POSIX hosts, including ordinary dry-run, before target resolution or staging. This prevents the public installer route from reaching the unresolved deletion race; it does not repair that race. Linux, macOS and Windows Subsystem for Linux installation and update remain unavailable, with a clear diagnostic and no force bypass. Windows dispatch and help remain unchanged; no existing installation or SDK source is updated by this change.
 
 - Warn during current-version Codex project instruction rendering that client-budget coverage is unverified, and report the rendered UTF-8 size. Operators can see this delivery limitation without a new hardcoded cap or changes to instruction content, user configuration, or installation permissions.
