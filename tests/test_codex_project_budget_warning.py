@@ -36,6 +36,7 @@ class CodexProjectBudgetWarningTests(unittest.TestCase):
         self.existing = "# Project\nKeep my rule.\n"
         self.writes = []
         self.scope = dict(constants,
+                          _markdown_document_context=lambda text: (text, []),
                           _read_owned_text=lambda *_args: self.existing,
                           _write_owned_text=lambda *args: self.writes.append(args))
         exec(compile(isolated, str(SOURCE), "exec"), self.scope)

@@ -10153,15 +10153,24 @@ def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *
     )
     existing = _read_owned_text(target, mutable_owner)
     if existing is not None:
-        if CODEX_BEGIN in existing and CODEX_END in existing:
-            start = existing.index(CODEX_BEGIN)
-            end = existing.index(CODEX_END, start) + len(CODEX_END)
+        # Select starts outside code, but retain the old raw ending boundary:
+        # filtering an END or policy heading could expand the replaced extent.
+        # Receipt ownership remains a separate lifecycle gate.
+        visible, _ = _markdown_document_context(existing)
+        if CODEX_BEGIN in visible:
+            start = visible.index(CODEX_BEGIN)
+            end = existing.find(CODEX_END, start)
+            if end < 0:
+                raise ValueError("E_CODEX_DOCUMENT_AMBIGUOUS: missing managed end marker")
+            end += len(CODEX_END)
             content = existing[:start] + pack.rstrip("\n") + existing[end:]
-        elif "# Shared Governance" in existing or "# Codex Platform Rules" in existing:
+        elif CODEX_END in visible:
+            raise ValueError("E_CODEX_DOCUMENT_AMBIGUOUS: missing active managed begin marker")
+        elif "# Shared Governance" in visible or "# Codex Platform Rules" in visible:
             starts = [
                 position
                 for marker in ("# Shared Governance", "# Codex Platform Rules", "# Default Delegation Rule")
-                if (position := existing.find(marker)) >= 0
+                if (position := visible.find(marker)) >= 0
             ]
             start = min(starts)
             policy = existing.find("## Project policies", start)

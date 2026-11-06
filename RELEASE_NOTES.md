@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-06
 
+- Do not mistake fenced, indented or inline-code examples for the start of Codex installed instructions. The bundled parser selects starts at their original positions while the previous raw ending rules remain intact, preventing the correction from widening replacement across user text or another block. Missing required markers refuse before writing. This bounded correction preserves ordinary update behavior; it is not complete Markdown-frame parsing, receipt ownership or safe migration of unowned active blocks and legacy headings.
+
 - Repair post-commit cleanup of converted legacy candidate directories by reusing the lifecycle native-effect owner. Removed descendants no longer leave stale parent observations that block cleanup; partial cleanup keeps the committed candidate and supports exact replay while refusing changed source, marker or target bytes.
 
 - Lifecycle source-snapshot refusals now identify the controlled validator/schema source, capture stage and first failed invariant, with bounded non-content stat/read context. Operators can distinguish an actual drift observation from an unexplained loader refusal without disabling source guards or inferring the original cause from a later retry.
