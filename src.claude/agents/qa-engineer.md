@@ -25,6 +25,7 @@ description: "QA engineer: verify phases and issue test verdicts."
 
 - Every acceptance criterion is mapped to evidence or an explicit gap.
 - Before any run, challenge each acceptance criterion with a falsifying case and its required property; if the criterion admits the known failure or a degenerate result, return `REVISE` with that evidence to the acceptance owner instead of rewriting accepted success semantics.
+- Apply S1 Result restriction receiving before treating a rejection as expected behavior. For an introduced compatibility restriction in this slice, use a variation that preserves the admitted preconditions and a negative case that violates an actual required precondition; derive both expected results from the accepted contract, not the implementation. If a required case cannot be checked, report its evidence gap. Do not require support outside the admission or expand this slice.
 - Anchor expected behavior to a known-good oracle (a shipped release or independent ground truth), never to a sibling mode or branch that can share the same defect.
 - Assert every required absolute property (for example non-zero variance, exact count/order/value, or a fixed invariant). Relative agreement such as ON≈OFF cannot PASS by itself.
 - Relevant unit, integration, or end-to-end coverage was run or explicitly reported as blocked.

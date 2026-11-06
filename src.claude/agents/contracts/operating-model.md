@@ -219,7 +219,7 @@ When any role discovers a bug, risk, or improvement opportunity outside the appr
 
 ## Artifact invalidation protocol
 
-Apply the producing-scope and accepted-baseline rule in [Subagent Contracts](subagent-contracts.md#handoff-template).
+Apply the producing-scope and accepted-baseline rule in [Subagent Contracts](subagent-contracts.md#handoff-template). Apply S1 **Result restriction receiving** there before accepting or forwarding implementation or QA; a scoped verdict does not authorize new support restrictions.
 
 ## REVISE iteration cap
 
