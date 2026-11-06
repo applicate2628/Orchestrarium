@@ -279,5 +279,145 @@ for name, digest in plan.nonlead_expected:
         self.assertEqual(ast.unparse(container.test), "not owner.dry_run")
 
 
+class ManagedMemberStaticWiringTests(unittest.TestCase):
+    """Syntax-only contract: never compile, invoke, or mock the member check."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tree = _source_tree()
+        cls.node = _function(cls.tree, "_assert_canonical_member_state")
+
+    def test_source_and_composed_image_remain_before_after_only_reader(self):
+        expected = ast.parse("""
+assert skill.managed_before is not None and skill.managed_after is not None and skill.selection is not None
+_assert_canonical_member_source_current(skill)
+if any(not _InstallTransaction._point_matches(path, node) for path, node in skill.container_witnesses):
+    raise ValueError("E_CANONICAL_SKILLS_RECEIPT_DRIFT: member container identity")
+original = dict(skill.installed_witnesses)
+expected = dict(skill.managed_after if after else skill.managed_before)
+changed = {installed / relative for relative, value in skill.selection if dict(skill.managed_before).get(relative) != value}
+current_image = dict(original)
+if transaction is not None:
+    for record in transaction._slice_a_migrated:
+        path = record.leaf_path
+        if path not in changed:
+            continue
+        old = original.get(path)
+        if old is None or old.python_identity != record.old_identity or old.data != record.old_digest:
+            raise ValueError("E_CANONICAL_SKILLS_RECEIPT_DRIFT: migration origin")
+        if _InstallTransaction._point_matches(path, record.new_current, check_file_content=True):
+            current_image[path] = record.new_current
+    for effect in transaction._effects:
+        if effect.path not in changed or (effect.published_state is None and effect.retained_state is None):
+            continue
+        old = original.get(effect.path)
+        if effect.before != ({effect.path: old} if old is not None else {}):
+            raise ValueError("E_CANONICAL_SKILLS_RECEIPT_DRIFT: selected effect origin")
+        transaction.assert_effect_current(effect)
+        current_image.pop(effect.path, None)
+        current_image.update(effect.actual)
+    for record in transaction._slice_a_created:
+        if record.leaf_path in changed and not record.consumed:
+            if record.leaf_path in original:
+                raise ValueError("E_CANONICAL_SKILLS_RECEIPT_DRIFT: creator replaced existing member")
+            current_image[record.leaf_path] = record.current_node
+if transaction is not None or not after:
+    if not _InstallTransaction._image_matches(installed, current_image):
+        raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_DRIFT: selected native state {skill.name}")
+if not after:
+    return
+for path, node in original.items():
+    relative = path.relative_to(installed).as_posix()
+    if transaction is None and (path not in changed or node.kind == "directory"):
+        if not _InstallTransaction._point_matches(path, node, check_file_content=True):
+            raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_DRIFT: protected or unselected {skill.name}/{relative}")
+    if path == installed or relative in expected:
+        continue
+    if node.kind != "directory" and path in changed:
+        continue
+    if node.kind == "directory" and path.name == "__pycache__" or _is_ordinary_runtime_cache_file(Path(relative), path.lstat()):
+        continue
+    if node.kind == "directory" or path not in changed:
+        expected[relative] = "directory" if node.kind == "directory" else node.data
+""")
+        body = self.node.body
+        self.assertIsInstance(body[0], ast.Expr)
+        self.assertIsInstance(body[0].value, ast.Constant)
+        self.assertIsInstance(body[0].value.value, str)
+        # This exact prefix pins source/currentness checks, migration/effect/
+        # creator composition, the before-only return, and expected augmentation.
+        self.assertEqual([ast.dump(n) for n in body[1:-4]],
+                         [ast.dump(n) for n in expected.body])
+
+    def test_only_enabled_transaction_binds_composed_image_and_exact_tail(self):
+        expected = ast.parse("""
+read_file = None
+if transaction is not None and transaction.enabled:
+    read_file = lambda member: transaction._image_file_bytes(member, current_image.get(member))
+actual = dict(_stage_tree_manifest(installed, ignore_runtime_cache=True, read_file=read_file))
+if actual != expected:
+    raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_DRIFT: managed postcondition {skill.name}")
+""")
+        # No transaction and disabled transactions both retain None. The
+        # callback uses the composed image, never a fresh admission or original.
+        self.assertEqual([ast.dump(n) for n in self.node.body[-4:]],
+                         [ast.dump(n) for n in expected.body])
+        self.assertEqual(len(_calls(self.node, "_stage_tree_manifest")), 1)
+        self.assertEqual(len(_calls(self.node, "_image_file_bytes")), 1)
+        self.assertEqual(_calls(self.node, "_admitted_tree_manifest"), [])
+        self.assertEqual(_calls(self.node, "_admitted_mutation_image"), [])
+        stores = [n for n in ast.walk(self.node)
+                  if isinstance(n, ast.Name) and n.id == "read_file"
+                  and isinstance(n.ctx, ast.Store)]
+        self.assertEqual(len(stores), 2)
+
+    def test_transaction_default_and_projection_callers_remain_unbound(self):
+        args = self.node.args
+        self.assertEqual([a.arg for a in args.args], ["skill", "installed"])
+        self.assertEqual([a.arg for a in args.kwonlyargs], ["after", "transaction"])
+        self.assertIsNone(args.kw_defaults[0])
+        self.assertEqual(ast.dump(args.kw_defaults[1]),
+                         ast.dump(ast.Constant(value=None)))
+        self.assertEqual(args.defaults, [])
+        self.assertEqual(args.posonlyargs, [])
+        self.assertIsNone(args.vararg)
+        self.assertIsNone(args.kwarg)
+        expected = {
+            "_assert_skill_projection_plan_current":
+                "_assert_canonical_member_state(member, item.canonical_target, after=True)",
+            "_assert_codex_legacy_skill_projection_plan_current":
+                "_assert_canonical_member_state(canonical, item.canonical_target, after=True)",
+        }
+        for name, call in expected.items():
+            with self.subTest(caller=name):
+                calls = _calls(_function(self.tree, name),
+                               "_assert_canonical_member_state")
+                self.assertEqual([ast.unparse(n) for n in calls], [call])
+
+    def test_all_member_callers_preserve_transaction_and_phase(self):
+        callers = [(node.name, ast.unparse(call))
+                   for node in self.tree.body if isinstance(node, ast.FunctionDef)
+                   for call in _calls(node, "_assert_canonical_member_state")]
+        expected = [
+            ("_assert_canonical_skills_plan_current",
+             "_assert_canonical_member_state(skill, target / skill.name, after=False, transaction=transaction)"),
+            ("_apply_canonical_skills_plan",
+             "_assert_canonical_member_state(skill, target / skill.name, after=False, transaction=owner.transaction)"),
+            ("_apply_canonical_skills_plan",
+             "_assert_canonical_member_state(skill, target / skill.name, after=False, transaction=owner.transaction)"),
+            ("_apply_canonical_skills_plan",
+             "_assert_canonical_member_state(skill, target / skill.name, after=True, transaction=owner.transaction)"),
+            ("_apply_canonical_skills_plan",
+             "_assert_canonical_member_state(member, target / name, after=True, transaction=owner.transaction)"),
+            ("_apply_canonical_skills_plan",
+             "_assert_canonical_member_state(skill, target / skill.name, after=True, transaction=owner.transaction)"),
+            ("_assert_skill_projection_plan_current",
+             "_assert_canonical_member_state(member, item.canonical_target, after=True)"),
+            ("_assert_codex_legacy_skill_projection_plan_current",
+             "_assert_canonical_member_state(canonical, item.canonical_target, after=True)"),
+        ]
+        self.assertCountEqual(callers, expected)
+
+
 if __name__ == "__main__":
     unittest.main()

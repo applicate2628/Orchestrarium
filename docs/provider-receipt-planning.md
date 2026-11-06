@@ -44,6 +44,8 @@ The existing Lead finalizer and ordinary non-Lead tuple receipt verification sha
 
 The pure _canonical_lead_expected_manifest helper preserves the prior reclamation calculation. Lead dry-run returns before manifest work; non-Lead tuple verification remains under its existing not-dry-run guard. Disabled direct-operation transactions retain the existing default reader rather than gaining a new full-image census. Receipt format, no-op handling and create/replace writers are unchanged. These are connected improvements to existing receipt producers, not provider-receipt persistence or proof of historical root identity.
 
+The managed-member postcondition also binds included payload reads to its existing composed current image when an enabled transaction is present. This image retains the function's original, migrated, effect and creator witness checks; it is not replaced with the generic transaction snapshot. Calls without a transaction, including both projection validators, and disabled direct-operation transactions retain their existing default reader. The existing before-state return, cache exclusions, expected-manifest construction and final comparison are unchanged. The callback uses the existing file-identity/content refusal behavior; no new exception translation or ownership claim is introduced.
+
 Qualification of this change is limited to pure manifest semantics, static source wiring and independent source review. The shared reader, receipt producers, physical image reader, complete directory/chain custody, cache races, transaction settlement and rollback have not been executed or qualified by those checks. Their existing restrictions remain in force; pure tests must not be represented as live lifecycle acceptance.
 
 ## Terms and Abbreviations

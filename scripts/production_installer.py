@@ -8791,7 +8791,10 @@ def _assert_canonical_member_state(
             continue
         if node.kind == "directory" or path not in changed:
             expected[relative] = "directory" if node.kind == "directory" else node.data
-    actual = dict(_stage_tree_manifest(installed, ignore_runtime_cache=True))
+    read_file = None
+    if transaction is not None and transaction.enabled:
+        read_file = lambda member: transaction._image_file_bytes(member, current_image.get(member))
+    actual = dict(_stage_tree_manifest(installed, ignore_runtime_cache=True, read_file=read_file))
     if actual != expected:
         raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_DRIFT: managed postcondition {skill.name}")
 

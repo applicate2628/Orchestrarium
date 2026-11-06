@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-06
 
+- Managed canonical-member receipt checks now read included payload bytes through the already composed member witnesses for enabled transactions. No-transaction projection checks and disabled direct-operation behavior remain compatible, and runtime-cache filtering is unchanged. This closes another unbound read in the existing receipt path without enabling provider receipts or claiming historical storage ownership. Qualification is pure/static source coverage and independent review only; physical installer, transaction, directory-chain and rollback acceptance remain open.
+
 - Reuse the transaction-bound included-file reader for ordinary non-Lead tuple receipt verification as well as Lead. The shared manifest helper keeps prior traversal/cache exclusions and disabled direct-mode behavior; member-selection branches, legacy-entry handling and receipt writers remain unchanged. Qualification is pure/static source coverage, not physical lifecycle or rollback acceptance.
 
 - Derive the canonical Lead receipt digest from the same compared manifest, binding included payload reads to the enabled transaction's admitted state instead of a second independent pathname census. Existing cache exclusions, dry-run, direct-operation reader and receipt writers are retained. Pure/static source checks do not qualify physical execution, directory-chain custody or rollback.
