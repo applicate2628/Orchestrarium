@@ -49,6 +49,17 @@ except ModuleNotFoundError as error:
         render_documents as _render_document_outcomes)
 
 try:
+    from installation.ownership import (
+        RECEIPT_NAME as _PROVIDER_RECEIPT_NAME,
+        serialize_fresh_payloads as _serialize_fresh_payloads)
+except ModuleNotFoundError as error:
+    if error.name not in {"installation", "installation.ownership"}:
+        raise
+    from scripts.installation.ownership import (
+        RECEIPT_NAME as _PROVIDER_RECEIPT_NAME,
+        serialize_fresh_payloads as _serialize_fresh_payloads)
+
+try:
     from provider_prompt import enroll_kimi_executable, replace_kimi_enrollment
 except ModuleNotFoundError:
     from scripts.provider_prompt import enroll_kimi_executable, replace_kimi_enrollment
@@ -1200,6 +1211,16 @@ class _WindowsBoundNode:
 
 
 @dataclass(frozen=True)
+class _FreshFileWitness:
+    """Successful creator provenance only; the existing transaction owns recovery."""
+
+    owner: "_CreateOnlyMutablePath"
+    path: Path
+    node: _PhysicalNode
+    parents: tuple[tuple[Path, tuple[int, int, int, int]], ...]
+
+
+@dataclass(frozen=True)
 class _SliceACreatedRecord:
     """Immutable proof that a rollback target is still transaction-owned."""
 
@@ -1901,7 +1922,8 @@ class _InstallTransaction:
     def __init__(self, paths: list[Path], *, enabled: bool,
                  copy_paths: tuple[Path, ...] = (),
                  link_object_paths: tuple[Path, ...] = (),
-                 readonly_paths: tuple[Path, ...] = ()) -> None:
+                 readonly_paths: tuple[Path, ...] = (),
+                 track_fresh_files: bool = False) -> None:
         self.paths = tuple(
             sorted(
                 {Path(os.path.abspath(path)) for path in paths},
@@ -1922,6 +1944,8 @@ class _InstallTransaction:
         self._temporary: Path | None = None
         self._entries: list[dict[str, object]] = []
         self._slice_a_created: list[_SliceACreatedRecord] = []
+        self._track_fresh_files = track_fresh_files
+        self._fresh_files: list[_FreshFileWitness] = []
         self._slice_a_migrated: list[_SliceAMigratedFileRecord] = []
         self._migration_retention: dict[Path, tuple[Path, tuple[int, int, int, int], _PhysicalNode, _CreateOnlyMutablePath]] = {}
         # A single transaction may span the ordinary global home plus one or
@@ -5519,6 +5543,46 @@ class _CreateOnlyMutablePath:
         except (OSError, ValueError):
             self._rollback_identity_changed()
 
+    def _fresh_file_parents(self, path: Path):
+        """Capture before a fresh writer branch, never from a later census."""
+        transaction = self.transaction
+        if (self.dry_run or not transaction.enabled or not transaction._track_fresh_files
+                or self.linked_authority is not None
+                or any(path in image for image in transaction._original.values())):
+            return None
+        self.destination(path.relative_to(self.anchor))
+        if not transaction._binding_identity_matches(
+                self._anchor_identity, self._identity(self.anchor)):
+            raise ValueError("E_PROVIDER_RECEIPT_DRIFT: creator anchor")
+        parents = []
+        current = path.parent
+        while True:
+            identity = self._identity(current)
+            if not stat.S_ISDIR(identity[2]):
+                raise ValueError("E_PROVIDER_RECEIPT_DRIFT: creator parent")
+            parents.append((current, identity))
+            if current == self.anchor:
+                return tuple(parents)
+            if current == current.parent or self.anchor not in current.parents:
+                raise ValueError("E_MUTABLE_PATH_ESCAPE: creator parents")
+            current = current.parent
+
+    def _assert_fresh_file(self, witness: _FreshFileWitness) -> bytes:
+        if witness.owner is not self or witness.node.kind != "file":
+            raise ValueError("E_PROVIDER_RECEIPT_DRIFT: creator witness")
+        self.destination(witness.path.relative_to(self.anchor))
+        if any(not self.transaction._binding_identity_matches(identity, self._identity(parent))
+               for parent, identity in witness.parents):
+            raise ValueError("E_PROVIDER_RECEIPT_DRIFT: creator parents")
+        return self.transaction._image_file_bytes(witness.path, witness.node)
+
+    def _record_fresh_file(self, path: Path, node: _PhysicalNode, parents) -> None:
+        if parents is None:
+            return
+        witness = _FreshFileWitness(self, path, node, parents)
+        self._assert_fresh_file(witness)
+        self.transaction._fresh_files.append(witness)
+
     @_InstallTransaction.direct_writer
     def write_file(self, relative: Path, payload: bytes, *, mode: int | None = None,
                    fsync: str = "none") -> Path:
@@ -5527,6 +5591,7 @@ class _CreateOnlyMutablePath:
         if self.dry_run:
             return path
         self._ensure_parent(path)
+        fresh_parents = self._fresh_file_parents(path) if existing is None else None
         with ExitStack() as resources:
             if existing is None:
                 if os.name == "nt":
@@ -5557,6 +5622,7 @@ class _CreateOnlyMutablePath:
                 hashlib.sha256(payload).hexdigest(), initial_state=initial, mode=mode, fsync=fsync)
             if self.transaction._scalar_descriptor_node(path, descriptor, node) != node:
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION: byte completed content")
+        self._record_fresh_file(path, node, fresh_parents)
         return path
 
     def _byte_file_admission(self, relative: Path, payload: bytes, fsync: str):
@@ -5682,7 +5748,11 @@ class _CreateOnlyMutablePath:
         if (not self.transaction._image_matches(path, {} if existing is None else {path: existing})):
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: copy destination currentness")
         self._ensure_parent(path)
+        fresh_parents = self._fresh_file_parents(path) if existing is None else None
+        completed_node = None
         def record(member, node):
+            nonlocal completed_node
+            completed_node = node
             self.transaction._advance(member, {member: node})
         with self.transaction._copy_reference(source, expected) as (incoming, source_bound):
             with ExitStack() as resources:
@@ -5726,6 +5796,7 @@ class _CreateOnlyMutablePath:
                 desired = self.transaction._read_copy_metadata(os.fstat(incoming), incoming, source_bound)
             self.transaction._apply_copy_metadata(path, node, desired,
                 stat.S_IMODE(expected.python_identity[2]), record, participant)
+        self._record_fresh_file(path, completed_node, fresh_parents)
         return path
 
     @_InstallTransaction.direct_writer
@@ -5739,6 +5810,7 @@ class _CreateOnlyMutablePath:
         if self.dry_run:
             return path
         self._ensure_parent(path)
+        fresh_parents = self._fresh_file_parents(path)
         prepared = {}
         temporary = None
         original = None
@@ -5769,6 +5841,7 @@ class _CreateOnlyMutablePath:
         if _file_sha256(path) != digest:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
         self._record_created(path, "file", digest, acquired_node=node)
+        self._record_fresh_file(path, node, fresh_parents)
         return path
 
     @_InstallTransaction.direct_writer
@@ -11578,6 +11651,68 @@ def _verify_files(
     return missing
 
 
+def _fresh_provider_receipt_candidate(target: Path) -> Path | None:
+    """Existing receipts of every type remain on the unchanged legacy route."""
+    candidate = target / _PROVIDER_RECEIPT_NAME
+    try:
+        candidate.lstat()
+    except FileNotFoundError:
+        return candidate
+    except OSError:
+        return None  # Unknown is not an admitted absence.
+    return None
+
+
+def _record_fresh_provider_receipt(
+    provider: str, scope: str, receipt: Path | None, owner: _CreateOnlyMutablePath,
+) -> None:
+    """Bootstrap only successful fresh payload files in the current transaction."""
+    transaction = owner.transaction
+    if receipt is None or owner.dry_run or not transaction.enabled:
+        return
+    receipt = Path(os.path.abspath(receipt))
+    if (not any(receipt == root or root in receipt.parents for root in transaction._original)
+            or any(receipt in image for image in transaction._original.values())):
+        return
+    transient = {path for path in (transaction._temporary, *transaction._migration_retention)
+                 if path is not None}
+    for effect in transaction._effects:
+        transient.update(path for path in (effect.retained, effect.prepared_path, effect.quarantine)
+                         if path is not None)
+    candidates = {}
+    for witness in tuple(transaction._fresh_files):
+        path = witness.path
+        if (witness.owner is not owner or path == receipt or not path.is_relative_to(owner.anchor)
+                or any(path == root or root in path.parents for root in transient)
+                or any(path in image for image in transaction._original.values())):
+            continue
+        key = path.relative_to(owner.anchor).as_posix()
+        candidates.setdefault(key, []).append(witness)
+    # Multiple creation episodes are not silently folded into one ownership claim.
+    selected = {key: rows[0] for key, rows in candidates.items() if len(rows) == 1}
+    payload = _serialize_fresh_payloads(
+        {key: witness.node.data for key, witness in selected.items()}, provider, scope)
+    if payload is None:
+        return
+    files = json.loads(payload)["files"]
+    selected = {key: selected[key] for key in files}
+    for witness in selected.values():
+        owner._assert_fresh_file(witness)
+    # A receipt that appeared after admission remains foreign and is not adopted.
+    if not transaction._image_matches(receipt, {}):
+        return
+    start = len(transaction._fresh_files)
+    owner.create_file(receipt.relative_to(owner.anchor), payload)
+    created = [witness for witness in transaction._fresh_files[start:]
+               if witness.owner is owner and witness.path == receipt]
+    if len(created) != 1:
+        raise ValueError("E_PROVIDER_RECEIPT_DRIFT: receipt creation not received")
+    for witness in selected.values():
+        owner._assert_fresh_file(witness)
+    if owner._assert_fresh_file(created[0]) != payload:
+        raise ValueError("E_PROVIDER_RECEIPT_DRIFT: receipt readback")
+
+
 def install(provider: str, argv: list[str] | None = None) -> int:
     args = _parser(provider).parse_args(argv)
     # Even dry-run builds and disposes staging before entering the transaction.
@@ -11925,11 +12060,15 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 source / "agents", target_tree, excluded_files=claude_sync_excluded))
             copy_paths.update(_sync_file_destinations(source / "commands", claude_commands_target))
             copy_paths.update(destination for _source, destination in claude_runtime_destinations)
+        fresh_receipt = None if args.dry_run else _fresh_provider_receipt_candidate(target)
+        if fresh_receipt is not None:
+            transaction_paths.append(fresh_receipt)
         transaction = _InstallTransaction(
             transaction_paths,
             enabled=not args.dry_run,
             copy_paths=tuple(sorted(copy_paths)),
             link_object_paths=byte_pointer_objects,
+            track_fresh_files=fresh_receipt is not None,
         )
         for authority in claude_link_authorities:
             _assert_global_claude_linked_subroot_authority(root, authority)
@@ -12316,6 +12455,9 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             assert canonical_plan is not None
             _finalize_canonical_lead_receipt(
                 canonical_plan, canonical_skills_target, canonical_skills_owner, reclaimed
+            )
+            _record_fresh_provider_receipt(
+                provider, "global" if mode == "global" else "project", fresh_receipt, create_only
             )
             transaction.commit()
         if provider == "codex" and mode == "global":

@@ -1,6 +1,6 @@
 # Provider receipt planning contract
 
-This is the source contract for `scripts/installation/receipt_plan.py`, the first pure part of the existing document/managed-instruction ownership work. It reuses the SDK `ownership.py` and `configuration.py` contracts and the same provider receipt identity. It is not a second installer, a durable binding protocol, or a live migration command. The installer imports the shared pure contracts for Codex and Claude preparation, but does not call receipt planning or persist provider receipts; legacy updates are unchanged.
+This is the source contract for `scripts/installation/receipt_plan.py`, the first pure part of the existing document/managed-instruction ownership work. It reuses the SDK `ownership.py` and `configuration.py` contracts and the same provider receipt identity. It is not a second installer, a durable binding protocol, or a live migration command. The installer imports the shared pure contracts for Codex and Claude preparation. It now bootstraps an absent provider receipt only from positively received fresh payload-file creations; it does not enable receipt-driven updates, removal, document adoption or existing-receipt replacement.
 
 ## Inputs and results
 
@@ -24,7 +24,7 @@ A matching v1 digest proves only a semantic match at its logical name. It does n
 
 Before any live integration, one owner must bind receipt and target inputs, receive actual production outcomes, preserve currentness through content-plus-receipt commit, and share the resulting record with repeat install, update and uninstall. Serialization and truthful layout are covered only as pure byte operations here. The existing transaction's commit flag and exception recovery do not establish crash-atomic multi-file publication. Link retargeting, identity reuse and filesystem-chain safety remain separate unresolved gates. Pure tests do not qualify those operations or waive their restrictions.
 
-Receipt decisions are intentionally not enabled in default installation yet. It is the reusable semantic core for the coupled integration, not a fix claimed complete or a reason to archive the existing ownership tickets.
+The general receipt planner is not enabled for default updates or removal. Only the fresh-file bootstrap described below is connected. This is not a fix claimed complete or a reason to archive the existing ownership tickets.
 
 ## Exact document outcomes and provider preparation
 
@@ -47,6 +47,16 @@ The pure _canonical_lead_expected_manifest helper preserves the prior reclamatio
 The managed-member postcondition also binds included payload reads to its existing composed current image when an enabled transaction is present. This image retains the function's original, migrated, effect and creator witness checks; it is not replaced with the generic transaction snapshot. Calls without a transaction, including both projection validators, and disabled direct-operation transactions retain their existing default reader. The existing before-state return, cache exclusions, expected-manifest construction and final comparison are unchanged. The callback uses the existing file-identity/content refusal behavior; no new exception translation or ownership claim is introduced.
 
 Qualification of this change is limited to pure manifest semantics, static source wiring and independent source review. The shared reader, receipt producers, physical image reader, complete directory/chain custody, cache races, transaction settlement and rollback have not been executed or qualified by those checks. Their existing restrictions remain in force; pure tests must not be represented as live lifecycle acceptance.
+
+## Fresh payload receipt bootstrap
+
+When the selected provider receipt is absent, the installer admits that leaf to the existing transaction and tracks successful explicit fresh branches of ordinary copy, byte-write and create-file operations. The witness retains the actual completed file node plus the owning anchor and parent identities captured before creation. Failed operations, equal-byte no-ops, preexisting files, replacements, trees and migrations do not become fresh-file claims. Linked owners are excluded rather than assigned an inferred logical mapping.
+
+The finalizer runs after the existing Lead receipt and before transaction.commit. It selects only provider payload paths, excluding documents/configuration, runtime caches, temporary custody and the receipt itself. It reuses serialize_record through serialize_fresh_payloads without adding layout, configurations or directories. Existing receipts, including invalid records or other leaf types, are preserved without decoding or merging. A receipt that appears before or during admission is not adopted.
+
+The receipt is created by the same mutable owner. A successful fresh-creation witness is required even if create_file could otherwise return an equal-byte no-op. Payload witnesses are checked before and after receipt publication, and the receipt is read back through its bound file witness. Failure before commit enters the existing transaction recovery path; no new inverse, deletion participant or rollback owner is added. This is exception-coupled recovery, not crash-atomic multi-file publication or a guarantee of successful recovery under identity drift.
+
+Qualification is pure codec/filter behavior and static wiring review only. Physical writer, receipt publication, directory-chain, race and recovery execution remain unqualified under the existing restrictions. Historical storage continuity, repeat update/removal, existing-receipt refresh and document ownership remain open. An unchanged or matching receipt is not newly granted authority.
 
 ## Terms and Abbreviations
 

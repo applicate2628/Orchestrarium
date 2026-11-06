@@ -4,6 +4,9 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-06
 
+- Bootstrap absent provider receipts from positively received new payload files using the existing transaction owner and recovery path. Existing receipts and user document blocks remain untouched; no layout or historical ownership is inferred. Publication requires fresh writer provenance and bound payload/receipt readback before commit. Pure/static qualification covers the source integration; physical creation, races, directory-chain and recovery acceptance remain open.
+
+
 - Managed canonical-member receipt checks now read included payload bytes through the already composed member witnesses for enabled transactions. No-transaction projection checks and disabled direct-operation behavior remain compatible, and runtime-cache filtering is unchanged. This closes another unbound read in the existing receipt path without enabling provider receipts or claiming historical storage ownership. Qualification is pure/static source coverage and independent review only; physical installer, transaction, directory-chain and rollback acceptance remain open.
 
 - Reuse the transaction-bound included-file reader for ordinary non-Lead tuple receipt verification as well as Lead. The shared manifest helper keeps prior traversal/cache exclusions and disabled direct-mode behavior; member-selection branches, legacy-entry handling and receipt writers remain unchanged. Qualification is pure/static source coverage, not physical lifecycle or rollback acceptance.
