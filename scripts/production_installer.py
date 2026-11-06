@@ -10182,7 +10182,7 @@ _CLAUDE_DOC_MARKER_PREFIXES = tuple(
 
 
 def _claude_document_context(text: str) -> tuple[str, list[tuple[int, int]]]:
-    """Delegate code status and original-offset transport to the pinned parser."""
+    """Delegate code status and original-offset transport to the bundled parser."""
     return _markdown_document_context(text)
 
 

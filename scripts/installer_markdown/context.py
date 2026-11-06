@@ -1,6 +1,6 @@
 """Lift committed stock Markdown code nodes to original LF string offsets.
 
-The pinned paragraph/heading extractors preserve backticks in source order.
+The bundled paragraph/heading extractors preserve backticks in source order.
 Ordinal backtick correspondence therefore lifts parser-chosen endpoints without
 searching normalized token text or implementing Markdown extraction grammar.
 Image labels transport an exact parent slice; link parsing retains its source.
@@ -14,7 +14,7 @@ from markdown_it.rules_inline.backticks import backtick
 
 
 class ContextProvenanceError(RuntimeError):
-    """The pinned parser's source-origin contract was not acquired."""
+    """The bundled parser's source-origin contract was not acquired."""
 
 
 def _require(condition: bool, label: str) -> None:
