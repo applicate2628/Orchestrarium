@@ -125,7 +125,7 @@ class CodexDocumentPreparationTests(unittest.TestCase):
     def test_guarded_import_success_and_intended_missing_module_fallback(self):
         from types import SimpleNamespace
 
-        imported = SimpleNamespace(DocumentResult=object(), render_documents=object())
+        imported = SimpleNamespace(DocumentResult=object(), render_document=object(), render_documents=object())
         direct = "installation.document_outcomes"
         fallback = "scripts.installation.document_outcomes"
         for missing in (None, "installation", direct):
@@ -143,9 +143,10 @@ class CodexDocumentPreparationTests(unittest.TestCase):
                                          "ModuleNotFoundError": ModuleNotFoundError}}
                 exec(self.guarded_import_code(), scope)
                 expected = [direct] if missing is None else [direct, fallback]
-                self.assertEqual(calls, [(name, ("DocumentResult", "render_documents"), 0)
+                self.assertEqual(calls, [(name, ("DocumentResult", "render_document", "render_documents"), 0)
                                          for name in expected])
                 self.assertIs(scope["_DocumentResult"], imported.DocumentResult)
+                self.assertIs(scope["_render_document_outcome"], imported.render_document)
                 self.assertIs(scope["_render_document_outcomes"], imported.render_documents)
 
     def test_guarded_import_reraises_transitive_missing_module_without_fallback(self):
@@ -163,9 +164,10 @@ class CodexDocumentPreparationTests(unittest.TestCase):
             exec(self.guarded_import_code(), scope)
         self.assertIs(caught.exception, failure)
         self.assertEqual(calls, [("installation.document_outcomes",
-                                 ("DocumentResult", "render_documents"), 0)])
+                                 ("DocumentResult", "render_document", "render_documents"), 0)])
         self.assertNotIn("_DocumentResult", scope)
         self.assertNotIn("_render_document_outcomes", scope)
+        self.assertNotIn("_render_document_outcome", scope)
 
     def test_exact_preimage_order_and_read_only_immutable_result(self):
         self.existing = "\ufeffUser 😀 保留\r\nKeep\rTail\n"

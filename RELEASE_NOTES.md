@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-06
 
+- Connect Claude document preparation to the common exact-byte adapter while preserving sequential read/render failures, current newline normalization and both-results-before-write behavior. The existing wrapper retains its writer order, dry-run output and None return. Single-document and batch adapters share one decoding/rendering path; no receipt acquisition, persistence or physical lifecycle authority is enabled.
+
 - Connect Codex document preparation to the common exact-byte outcome adapter before the existing merge writes. The read-only preparation function makes original bytes and proposed content available without acquiring ownership; the wrapper preserves source-read order, warning output, dry-run behavior and its existing writer. Receipt persistence and live ownership migration remain disabled.
 
 - Extract Codex document rendering into the existing producer's pure function so receipt-outcome preparation can call the same selection logic without intercepting a writer. The installer wrapper keeps its previous reads, warning, dry-run and write behavior; raw ending boundaries and user-text preservation are unchanged. This does not enable receipt ownership or live migration.

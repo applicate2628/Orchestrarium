@@ -3630,8 +3630,8 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
 
     original_claude_docs = installer._merge_claude_docs
 
-    def claude_docs(root, source, target, dry_run):
-        original_claude_docs(root, source, target, dry_run)
+    def claude_docs(root, source, target, dry_run, **kwargs):
+        original_claude_docs(root, source, target, dry_run, **kwargs)
         emit("provider-doc", target)
         emit("provider-doc", target.parent / "AGENTS.md")
 

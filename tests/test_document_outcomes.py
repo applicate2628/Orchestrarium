@@ -10,7 +10,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from installation.document_outcomes import render_documents
+from installation.document_outcomes import render_document, render_documents
 from installation.receipt_plan import plan_changes
 from installer_markdown import document_context
 
@@ -229,6 +229,108 @@ class DocumentOutcomesTests(unittest.TestCase):
         self.assertIsNone(outcome.adoption_sha256)
         self.assertIsNone(outcome.adoption_span)
         self.assertEqual(outcome.intent, "update")
+
+    def test_single_matches_batch_for_each_provider_scope_and_kind(self):
+        cases = (("codex", "global", {".codex/AGENTS.md": b"User"}),
+                 ("codex", "project", {"AGENTS.md": b"User"}),
+                 ("claude", "global", {".claude/CLAUDE.md": b"User",
+                                       ".claude/AGENTS.md": b"Other"}),
+                 ("claude", "project", {".claude/CLAUDE.md": b"User",
+                                        ".claude/AGENTS.md": b"Other"}))
+        for provider, scope, inputs in cases:
+            with self.subTest(provider=provider, scope=scope):
+                renderer = self.codex if provider == "codex" else self.claude
+                batch = render_documents(provider, scope, inputs, renderer)
+                single = tuple(render_document(provider, scope, path, raw, renderer)
+                               for path, raw in inputs.items())
+                self.assertEqual(single, batch)
+
+    def test_single_rejects_unknown_or_non_string_paths_before_callback(self):
+        class StringPath(str):
+            pass
+        for path in ("", "CLAUDE.md", "agents.md", "../AGENTS.md",
+                     ".codex/AGENTS.md", None, [], Path("AGENTS.md"),
+                     StringPath("AGENTS.md")):
+            with self.subTest(path=path):
+                with self.assertRaisesRegex(ValueError, "E_DOCUMENT_OUTCOMES_PATH"):
+                    render_document("codex", "project", path, b"User", self.codex)
+        self.assertEqual(self.calls, [])
+
+    def test_single_rejects_provider_scope_and_preimages_without_callback(self):
+        for provider, scope in (("unknown", "project"), ("codex", "other"),
+                                (None, "project")):
+            with self.subTest(provider=provider, scope=scope):
+                with self.assertRaises(ValueError):
+                    render_document(provider, scope, "AGENTS.md", b"User", self.codex)
+        for raw in (b"\xff", bytearray(b"User"), memoryview(b"User"), "User", 0):
+            with self.subTest(raw=raw):
+                with self.assertRaises((ValueError, UnicodeError)):
+                    render_document("codex", "project", "AGENTS.md", raw, self.codex)
+        self.assertEqual(self.calls, [])
+
+    def test_single_callback_contract_and_errors(self):
+        for renderer in (None, "renderer", 1):
+            with self.assertRaisesRegex(ValueError, "E_DOCUMENT_OUTCOMES_RENDERER"):
+                render_document("codex", "project", "AGENTS.md", b"\xff", renderer)
+        for rendered in (None, b"bytes", 1):
+            with self.assertRaisesRegex(ValueError, "E_DOCUMENT_OUTCOMES_RENDERED_TEXT"):
+                render_document("codex", "project", "AGENTS.md", b"User",
+                                lambda *_: rendered)
+        def refuse(*_):
+            raise RuntimeError("producer refused")
+        with self.assertRaisesRegex(RuntimeError, "producer refused"):
+            render_document("codex", "project", "AGENTS.md", None, refuse)
+        with self.assertRaises(UnicodeError):
+            render_document("codex", "project", "AGENTS.md", None, lambda *_: "\ud800")
+
+    def test_single_missing_empty_unchanged_and_update_only(self):
+        for raw, expected in ((None, "missing-preimage"), (b"", "unchanged"),
+                              (b"User", "unchanged")):
+            with self.subTest(raw=raw):
+                result = render_document("codex", "project", "AGENTS.md", raw,
+                                         lambda _kind, text: "" if text is None else text)
+                self.assertEqual(result.change, expected)
+                self.assertEqual(result.before, raw)
+                self.assertEqual(result.renderer_input, None if raw is None else raw.decode())
+                outcome = result.as_outcome()
+                self.assertEqual(outcome.intent, "update")
+                self.assertEqual(outcome.before, raw)
+                self.assertIsNone(outcome.adoption_sha256)
+                self.assertIsNone(outcome.adoption_span)
+                with self.assertRaises(FrozenInstanceError):
+                    result.before = b"Changed"
+
+    def test_single_exact_raw_and_provider_newline_views(self):
+        raw = "User \u2603\r\nKeep\rTail\n".encode()
+        for provider, path, expected, mode in (
+            ("codex", "AGENTS.md", raw.decode(), "exact-newlines"),
+            ("claude", ".claude/AGENTS.md", "User \u2603\nKeep\nTail\n",
+             "universal-newlines"),
+        ):
+            with self.subTest(provider=provider):
+                calls = []
+                def render(kind, text):
+                    calls.append((kind, text))
+                    return text
+                result = render_document(provider, "project", path, raw, render)
+                self.assertEqual(calls, [("codex" if provider == "codex" else "shared", expected)])
+                self.assertIs(result.before, raw)
+                self.assertEqual(result.renderer_input, expected)
+                self.assertEqual(result.after, expected.encode())
+                self.assertEqual(result.read_mode, mode)
+                self.assertEqual(result.change, "unchanged" if provider == "codex"
+                                 else "existing-update")
+                self.assertEqual(result.as_outcome().intent, "update")
+
+    def test_batch_validation_order_remains_complete_map_then_callback_then_decode(self):
+        with self.assertRaisesRegex(ValueError, "E_DOCUMENT_OUTCOMES_INPUT_SET"):
+            render_documents("codex", "project", {}, None)
+        with self.assertRaisesRegex(ValueError, "E_DOCUMENT_OUTCOMES_RENDERER"):
+            render_documents("codex", "project", {"AGENTS.md": b"\xff"}, None)
+        inputs = {".claude/CLAUDE.md": b"\xff", ".claude/AGENTS.md": "bad"}
+        with self.assertRaises(UnicodeDecodeError):
+            render_documents("claude", "project", inputs, self.claude)
+        self.assertEqual(self.calls, [])
 
 
 if __name__ == "__main__":
