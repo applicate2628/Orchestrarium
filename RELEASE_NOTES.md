@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-07
+
+- Align the Claude common manual-repo-transfer skill with the existing Codex clone-first and selective-overlay guidance. The full-inventory helper, ownership safeguards and explicit full-recovery option remain unchanged; this restores cross-pack source parity, not installed transfer qualification. Align the Claude PR-review common skill with the existing native publication owner: Root retains human-consent scope while the hook qualifies actual Git updates; no bot, CI or publication action is triggered by this documentation correction.
+
 ## 2026-11-06
 
 - Reuse governing instructions during handoff only when they are already present and unchanged in the receiving context. The shared rule requires missing instructions through the trusted input path and restores obligations after compaction without resetting permissions. Existing concrete evidence requirements remain intact. This is source guidance, not proof of runtime loading, token savings or a solution to project-instruction budget limits; external governance transport and installation behavior are unchanged.
