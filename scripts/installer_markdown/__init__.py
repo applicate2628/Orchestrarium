@@ -55,8 +55,6 @@ mdurl = _initialize_private("mdurl", _mdurl_spec)
 markdown_it = _initialize_private("markdown_it", _markdown_spec)
 
 _check_package_origins()
-if markdown_it.__version__ != "4.0.0" or mdurl.__version__ != "0.1.2":
-    raise RuntimeError("E_INSTALLER_MARKDOWN_SUPPLY: package version")
 
 from .context import document_context
 

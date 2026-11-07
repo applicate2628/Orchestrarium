@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-06
+
+- Remove the source installer's exact Markdown parser version-label refusal while retaining its private package-origin checks and document-ownership rules. Bundled versions and license/provenance records still identify the supplied artifacts; any future implementation change requires source-offset and ownership qualification, rather than treating a version label as compatibility evidence. No bundled dependency is upgraded.
+
 ## 2026-10-28
 
 - The Codex installer preserves unrelated user native-role files while continuing to validate managed roles.
