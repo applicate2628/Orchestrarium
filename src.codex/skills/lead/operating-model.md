@@ -171,7 +171,7 @@ Resolve the template and evidence triggers first. Each listed role is a candidat
 - After `knowledge-archivist`: canonical docs, plans, reports, references, archive locations, and repository-facing links are consistent or explicitly blocked. If the patch changes role ownership, gate semantics, workflow routing, task-memory policy, publication-safety policy, periodic controls, or template-driven process requirements, route it through `architecture-reviewer` before completion; hygiene-only edits do not require that extra gate.
 - After `planner`: phases, dependencies, file scope, allowed change surface, must-not-break surfaces, checks, and rollback notes are explicit.
 - After `planner`: shared or core module changes, if any, are isolated into explicit enabling phases instead of being hidden inside local feature work.
-- After implementation: the phase stayed within scope, includes required tests, and reports changed files and risks.
+- After implementation: the phase stayed within scope, includes required tests, and reports changed files and risks. Apply S1 **Result restriction receiving** in `subagent-contracts.md` before accepting or forwarding implementation or QA; a scoped verdict does not authorize new support restrictions.
 - Before QA for a multi-phase or multi-specialist change: one explicit integration owner, one integrated artifact, and cross-phase compatibility checks are explicit.
 - After `toolchain-engineer`: build graph behavior, packaging, reproducibility expectations, and local or CI parity are validated or explicitly blocked.
 - After `qa-engineer`: acceptance criteria, regressions, edge cases, and basic performance acceptance are verified or explicitly blocked.
