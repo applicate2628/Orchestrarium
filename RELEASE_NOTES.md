@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-08
 
+- Unsupported no-replace publication of a selected prepared directory now reports a specific atomic-directory capability diagnostic instead of a generic validation failure. Refusal, existing recovery and the POSIX installer hold remain unchanged; this does not qualify DrvFS support or successful rollback.
+
 - Review loops can receive already qualified same-artifact closures and explicit later scout dispositions through the existing ledger authority without rewriting original results or treating unrelated historical diagnostics as a global veto. Main structural type diagnostics remain intact; this source integration neither launches reviewers nor proves fresh project acceptance.
 
 - Lifecycle source-snapshot refusals now identify the controlled validator/schema source, capture stage and first failed invariant, with bounded non-content stat/read context. This brings the diagnostic-only correction to main while preserving all source guards and their evaluation order; it does not identify the historical refusal cause or qualify an actual lifecycle close.

@@ -1605,6 +1605,8 @@ def _installer_failure_text(error: BaseException) -> str:
                 "validation-failed" if isinstance(error, ValueError) else "operation-failed")
             original = "failure-id=unavailable | context=unavailable | cause=" + cause
         additions = []
+        if typed and attributes is not None and identity == "E_ATOMIC_DIRECTORY_PUBLISH_UNSUPPORTED":
+            additions.append("filesystem cannot safely publish a directory without replacing an existing target")
         def render(context):
             try:
                 return _CopySetterDiagnostic.render(context) if type(context) is _CopySetterDiagnostic else "unavailable"
@@ -1775,6 +1777,7 @@ class _InstallFailure(RuntimeError):
 
 SLICE_A_FAILURE_IDS = frozenset(
     {
+        "E_ATOMIC_DIRECTORY_PUBLISH_UNSUPPORTED",
         "E_CREATE_ONLY_COLLISION",
         "E_CREATE_ONLY_TYPE_COLLISION",
         "E_CREATE_ONLY_PROJECTION_COLLISION",
@@ -3535,6 +3538,9 @@ class _InstallTransaction:
                 self._dispose_node(source, before[source])
                 self._moved(source, target, before, effect, migration)
                 return actual
+            if (before[source].kind == "directory" and effect is not None
+                    and source == effect.prepared_path and target == effect.location):
+                raise _InstallFailure("E_ATOMIC_DIRECTORY_PUBLISH_UNSUPPORTED", "transaction")
             if (before[source].kind != "directory" or effect is None
                     or source != effect.retained or not effect.before or effect.actual):
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: unsupported retained type")
