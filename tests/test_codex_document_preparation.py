@@ -36,7 +36,7 @@ class CodexDocumentPreparationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tree = ast.parse(SOURCE.read_bytes())
-        names = {"_prepare_codex_agents", "_merge_codex_agents", "_render_codex_document"}
+        names = {"_prepare_codex_agents", "_merge_codex_agents", "_render_codex_document", "_codex_document_payload", "_warn_codex_project_budget"}
         nodes = [n for n in cls.tree.body if isinstance(n, ast.FunctionDef)
                  and n.name in names]
         if {n.name for n in nodes} != names:

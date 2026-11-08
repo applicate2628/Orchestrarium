@@ -9,7 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
-import re
 
 from .clients import get_client
 from . import configuration, ownership
@@ -21,7 +20,7 @@ class Outcome:
     kind: str  # file or block
     before: bytes | None
     after: bytes | None
-    intent: str = "update"  # update, create, adopt, remove
+    intent: str = "update"  # update, create, adopt, remove, replace
     adoption_sha256: str | None = None
     adoption_span: tuple[int, int] | None = None
 
@@ -94,24 +93,11 @@ def _same_outside(before, after, old, new):
         raise ValueError("outside text changed")
 
 
-def _legacy_selection(before, after, bounds, span, context):
-    # Reuse the SDK's reviewed legacy-span boundary contract, without claiming
-    # that the supplied digest or selection is evidence of human permission.
-    if type(span) is not tuple or len(span) != 2 or any(type(x) is not int for x in span):
-        raise ValueError("invalid legacy selection")
-    start, end = span
-    def line_boundary(index):
-        return (index == 0 or index == len(before)
-                or (before[index - 1] in "\r\n"
-                    and before[index - 1:index + 1] != "\r\n"))
-    if not 0 <= start < end <= len(before) or not line_boundary(start) or not line_boundary(end):
-        raise ValueError("invalid legacy selection")
-    visible, spans = context(before)
-    if any(left < boundary < right for left, right in spans for boundary in (start, end)):
-        raise ValueError("selection crosses code")
-    if not re.match(r"# (?:Shared Governance|Codex Platform Rules)[ \t]*(?:\r\n|\r|\n|$)",
-                    visible[start:end]):
-        raise ValueError("invalid legacy selection")
+def _legacy_selection(before, after, bounds, span, context, document_digest):
+    # Renderer and planner use one exact-current boundary contract. The digest
+    # is still only a precondition, never evidence of permission or acquisition.
+    start, end = configuration.validate_selected_document(
+        before, "codex", context, document_digest=document_digest, span=span)
     suffix = before[end:]
     replacement_end = len(after) - len(suffix)
     if (replacement_end < bounds[1] or after[:start] != before[:start]
@@ -147,6 +133,20 @@ def _proposed_spec(outcome, claim, block_kind, context):
                 raise ValueError("creation would adopt existing block")
             if new[0] != 0 or after[new[1]:] not in {"\n\n" + before, "\n" + before}:
                 raise ValueError("creation changed original document")
+    elif outcome.intent == "replace":
+        selected = configuration.validate_selected_document(
+            before, block_kind, context, document_digest=outcome.adoption_sha256,
+            span=outcome.adoption_span)
+        # The new frame must be strict too; malformed marker prefixes outside
+        # an otherwise valid pair are not a valid rendered replacement.
+        configuration.validate_selected_document(
+            after, block_kind, context, document_digest=_digest(outcome.after), span=new)
+        old = configuration.owned_block(before, block_kind, context)
+        if old is not None:
+            _same_outside(before, after, selected, new)
+        else:
+            _legacy_selection(before, after, new, selected, context,
+                              outcome.adoption_sha256)
     elif outcome.intent == "adopt":
         old = configuration.owned_block(before, block_kind, context)
         if old is not None:
@@ -154,7 +154,8 @@ def _proposed_spec(outcome, claim, block_kind, context):
                 raise ValueError("adoption selection differs from marked block")
             _same_outside(before, after, old, new)
         elif block_kind == "codex":
-            _legacy_selection(before, after, new, outcome.adoption_span, context)
+            _legacy_selection(before, after, new, outcome.adoption_span, context,
+                              outcome.adoption_sha256)
         else:
             raise ValueError("unmarked adoption is not qualified for this document")
     else:
@@ -171,7 +172,7 @@ def plan_changes(receipt: bytes | None, provider: str, scope: str,
     artifacts, changes, seen = [], [], set()
     for item in outcomes:
         if (type(item) is not Outcome or item.kind not in {"file", "block"}
-                or item.intent not in {"update", "create", "adopt", "remove"}
+                or item.intent not in {"update", "create", "adopt", "remove", "replace"}
                 or item.before is not None and type(item.before) is not bytes
                 or item.after is not None and type(item.after) is not bytes):
             raise ValueError("E_RECEIPT_PLAN_OUTCOME")
@@ -189,7 +190,7 @@ def plan_changes(receipt: bytes | None, provider: str, scope: str,
         if existing is not None and (existing[0] != category or existing[1] != item.path):
             raise ValueError("E_RECEIPT_PLAN_ALIAS")
         claim = existing[2] if existing is not None else None
-        if item.intent != "adopt" and (item.adoption_sha256 is not None or item.adoption_span is not None):
+        if item.intent not in {"adopt", "replace"} and (item.adoption_sha256 is not None or item.adoption_span is not None):
             raise ValueError("E_RECEIPT_PLAN_UNUSED_SELECTION")
         def result(route, reason, requirements=()):
             return ArtifactPlan(item.path, route, _digest(item.before), _digest(item.after),
@@ -201,7 +202,16 @@ def plan_changes(receipt: bytes | None, provider: str, scope: str,
             artifacts.append(result("preserve", "Unrecorded removal is not planned."))
             continue
         try:
-            if claim is not None:
+            if item.intent == "replace":
+                # Exact-current selection is separate from historical ownership.
+                # Its digest is a precondition, never approval or a capability.
+                if item.kind == "file" and item.adoption_span is not None:
+                    raise ValueError("selected replacement requires a complete file")
+                if item.kind == "block" and (provider != "codex" or block_kind != "codex"):
+                    raise ValueError("selected replacement requires a Codex document")
+                if item.before is None or item.adoption_sha256 != _digest(item.before):
+                    raise ValueError("selected replacement preimage changed")
+            elif claim is not None:
                 if item.intent != "update" and item.intent != "remove":
                     raise ValueError("creation or adoption cannot override a claim")
                 if item.before is None:
@@ -230,14 +240,17 @@ def plan_changes(receipt: bytes | None, provider: str, scope: str,
             artifacts.append(result("preserve", str(error)))
             continue
         requirements = ["artifact-and-receipt-currentness", "atomic-owner-commit-and-rollback"]
-        if claim is not None:
+        if item.intent == "replace":
+            requirements.extend(("exact-current-replacement-approval", "selected-storage-acquisition"))
+        elif claim is not None:
             requirements.append("historical-storage-authority")
         elif item.intent == "adopt":
             requirements.extend(("exact-user-adoption-approval", "selected-storage-acquisition"))
         else:
             requirements.append("fresh-creation-acquisition")
         route = {"update": "recorded-proposal", "create": "creation-proposal",
-                 "adopt": "adoption-proposal", "remove": "removal-proposal"}[item.intent]
+                 "adopt": "adoption-proposal", "remove": "removal-proposal",
+                 "replace": "selected-replacement-proposal"}[item.intent]
         artifacts.append(result(route, "Semantic proposal only; acquisition is outstanding.", requirements))
         changes.append(Change(category, item.path, None if claim is None else _json(claim),
                               None if proposed is None else _json(proposed)))

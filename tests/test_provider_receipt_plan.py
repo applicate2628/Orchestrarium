@@ -372,13 +372,16 @@ class ReceiptPlanTests(unittest.TestCase):
     def test_selection_validator_never_extends_new_owned_frame_into_suffix(self):
         from installation.receipt_plan import _legacy_selection
         begin, end = config.MARKERS["codex"]
-        legacy, suffix = "# Shared Governance\nOld\n", "USER SUFFIX\n" + end + "\nKEEP"
+        legacy = "# Shared Governance\nOld\n"
+        suffix = "USER SUFFIX\n```markdown\n" + end + "\n```\nKEEP"
         before, after = legacy + suffix, begin + "\nNew\n" + suffix
         bounds = (0, after.index(end) + len(end))
-        # The complete planner rejects this stray old END even earlier.
-        # The shared selection invariant also forbids acquiring its suffix.
-        with self.assertRaises(ValueError):
-            _legacy_selection(before, after, bounds, (0, len(legacy)), document_context)
+        # The old END is a fenced example, so the selected preimage is valid.
+        # Even supplied oversized new bounds cannot acquire its user suffix.
+        # The complete planner also rejects this malformed rendered frame.
+        with self.assertRaisesRegex(ValueError, "outside reviewed span changed"):
+            _legacy_selection(before, after, bounds, (0, len(legacy)),
+                              document_context, sha(before.encode()))
 
     def test_serialization_preserves_layout_presence_and_input(self):
         for layout in (False, True):

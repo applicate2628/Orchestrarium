@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-08
 
+- Connect fresh-file receipt bootstrap and explicit current-selected Claude instruction and Codex document replacement through the existing transaction and shared receipt finalizer. Exact current bytes, source witnesses and receipt inputs are checked; custom/unselected content and default preservation remain. Receipt-selected Claude batches refuse changed or missing members rather than inferring historical ownership. These source integrations do not qualify linked migration, physical writes, races, rollback, unattended updates, uninstall or release acceptance.
+
 - Existing canonical receipt producers now compare and hash transaction-bound payload bytes: Lead and non-Lead verification share the admitted reader, while managed-member checks retain their composed image. Receipt format, writer behavior and selection boundaries remain unchanged. Qualification is pure/static source only, not historical ownership, directory-chain safety, migration or physical recovery acceptance.
 
 - Codex and Claude document preparation now returns exact before/after outcomes before the existing writers run, sharing the compatible renderer with receipt planning. This source integration preserves default boundaries, normalization and refusal ordering; it does not acquire ownership, publish receipts, enable migration or qualify physical installation and recovery.

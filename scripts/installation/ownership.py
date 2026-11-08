@@ -118,6 +118,32 @@ def serialize_record(value: dict, provider: str, scope: str) -> bytes:
     return payload
 
 
+def serialize_fresh_payloads(files: dict[str, str], provider: str, scope: str) -> bytes | None:
+    """Project already confirmed fresh file outcomes into a minimal receipt.
+
+    The caller owns freshness and persistence authority. This pure serializer
+    neither verifies that authority nor reads or merges historical ownership.
+    """
+    client = get_client(provider)
+    value = dict(schema=SCHEMA, provider=provider, scope=scope, files={})
+    validate_record(value, provider, scope)
+    if type(files) is not dict:
+        raise ValueError("Invalid fresh payload map")
+    for path, digest in files.items():
+        if type(path) is not str or type(digest) is not str:
+            raise ValueError("Invalid fresh payload entry")
+        if not any(path.startswith(root + "/") for root in client["payload_roots"]):
+            continue
+        parts = path.split("/")
+        if "__pycache__" in parts or parts[-1] == RECEIPT_NAME:
+            continue
+        validate_path(path, provider, scope)
+        value["files"][path] = digest
+    if not value["files"]:
+        return None
+    return serialize_record(value, provider, scope)
+
+
 def plan_file_removal(record: dict, observed: dict[str, str | None]) -> dict[str, tuple[str, ...]]:
     """Absent is settled; unreadable/changed files are preserved, never adopted."""
     if type(record) is not dict:
