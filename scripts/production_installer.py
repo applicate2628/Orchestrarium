@@ -5326,6 +5326,7 @@ class _CreateOnlyMutablePath:
         self._ensure_directory_path(path.parent)
 
     def _ensure_directory_path(self, parent: Path) -> None:
+        _require_transaction_disposal_backend()
         missing: list[Path] = []
         while not parent.exists():
             missing.append(parent)
@@ -5342,6 +5343,7 @@ class _CreateOnlyMutablePath:
                               admitted_parent: Path, parent_state: _PhysicalNode,
                               dry_run: bool):
         """Create only the admitted missing suffix through original creator rows."""
+        _require_transaction_disposal_backend()
         anchor, admitted_parent = Path(os.path.abspath(anchor)), Path(os.path.abspath(admitted_parent))
         if anchor == admitted_parent or admitted_parent not in anchor.parents:
             raise ValueError("E_MUTABLE_PATH_ESCAPE: anchor parent admission")
@@ -5988,6 +5990,7 @@ class _CreateOnlyMutablePath:
         *, retention_parent: Path | None = None, selection=None,
     ) -> Path:
         """Replace one hash-pinned regular file and retain its inode for rollback."""
+        _require_transaction_disposal_backend()
 
         path = self.destination(relative)
         self._assert_regular(path, existing=True)
@@ -6135,6 +6138,7 @@ class _CreateOnlyMutablePath:
 
     def rollback_migrated(self, record: _SliceAMigratedFileRecord, *, replacement_may_be_absent: bool = False) -> None:
         """Restore the original stock role through its retained inode, never a copy."""
+        _require_transaction_disposal_backend()
 
         record = next((current for current in self.transaction._slice_a_migrated
                        if current.proof_key == record.proof_key), record)
@@ -6331,6 +6335,7 @@ class _CreateOnlyMutablePath:
         return target
 
     def create_projection(self, relative: Path, source: Path) -> Path:
+        _require_transaction_disposal_backend()
         target = self.destination(relative, allow_leaf_reparse=True)
         if target.exists() or target.is_symlink():
             metadata = target.lstat()

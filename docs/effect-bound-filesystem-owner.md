@@ -10,6 +10,8 @@ The same negative gate also runs before enabled transaction snapshot acquisition
 
 The public POSIX installer hold, including dry run, is unchanged. A private caller may have performed earlier operations before reaching this new refusal. Such a refusal does not undo them: preserve recovery material and surface incomplete settlement through the existing caller. Never record a refused deletion as consumed, absent or successfully rolled back. This guard covers these two transaction disposal entry points, not every staging cleanup, legacy tree remover, private writer or uninstall path.
 
+Five additional mutable-path entry points use the same preflight directly: directory preparation, anchor bootstrap, exact-file migration, projection creation and migrated-file rollback. They refuse non-Windows calls before observing inputs, including dry-run or potential no-op requests. Rollback does not enter a fresh writer context: refusal preserves its existing custody and propagates to the established incomplete-settlement owner. This finite entry set does not claim that every internal primitive, staging remover or uninstall route is covered; expansion beyond it requires a complete effect/caller inventory rather than repeated local guards.
+
 ## Required effect contract
 
 For every operation, identify the selected source object, authorized parent and ancestor chain, exact entry name, expected current content/metadata and permitted destination. Separate these guarantees:

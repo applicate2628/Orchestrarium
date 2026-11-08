@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-08
 
+- Extend that negative admission boundary to the remaining selected mutable-path entry points for directory/bootstrap, file migration, projection creation and migrated-file rollback. These private non-Windows routes now refuse before observations or effects, including potential no-ops and dry runs, without creating a new recovery transaction or changing Windows bodies. Full internal-primitive, staging and uninstall coverage remains unqualified.
+
 - Preflight the same disposal requirement before enabled transaction snapshot acquisition and direct writer scopes, preventing those non-Windows private paths from starting work they cannot safely settle. Empty disabled contexts remain no-ops; unwrapped helpers and pre-entry staging are not qualified or protected by this admission boundary.
 
 - Refuse unqualified non-Windows transaction disposal at both node and tree entry points before reads or permission changes, including private callers. Remove the unsafe POSIX name-based deletion branch. Recovery material may remain when earlier private operations already occurred; the public POSIX hold remains unchanged. This is a defensive source mitigation, not a race fix or physical lifecycle qualification.
