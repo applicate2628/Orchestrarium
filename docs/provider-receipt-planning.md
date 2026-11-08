@@ -1,6 +1,6 @@
 # Provider receipt planning contract
 
-This is the source contract for `scripts/installation/receipt_plan.py`, the first pure part of the existing document/managed-instruction ownership work. It reuses the SDK `ownership.py` and `configuration.py` contracts and the same provider receipt identity. It is not a second installer, a durable binding protocol, or a live migration command. Current installer entry points do not import or call it; legacy updates are unchanged.
+This is the source contract for `scripts/installation/receipt_plan.py`, the first pure part of the existing document/managed-instruction ownership work. It reuses the SDK `ownership.py` and `configuration.py` contracts and the same provider receipt identity. It is not a second installer, a durable binding protocol, or a live migration command. The installer imports the shared pure contracts for Codex and Claude preparation, but does not call receipt planning or persist provider receipts; legacy updates are unchanged.
 
 ## Inputs and results
 
@@ -24,7 +24,19 @@ A matching v1 digest proves only a semantic match at its logical name. It does n
 
 Before any live integration, one owner must bind receipt and target inputs, receive actual production outcomes, preserve currentness through content-plus-receipt commit, and share the resulting record with repeat install, update and uninstall. Serialization and truthful layout are covered only as pure byte operations here. The existing transaction's commit flag and exception recovery do not establish crash-atomic multi-file publication. Link retargeting, identity reuse and filesystem-chain safety remain separate unresolved gates. Pure tests do not qualify those operations or waive their restrictions.
 
-This module is intentionally not enabled in default installation yet. It is the reusable semantic core for the coupled integration, not a fix claimed complete or a reason to archive the existing ownership tickets.
+Receipt decisions are intentionally not enabled in default installation yet. It is the reusable semantic core for the coupled integration, not a fix claimed complete or a reason to archive the existing ownership tickets.
+
+## Exact document outcomes and provider preparation
+
+The pure document_outcomes.render_documents adapter accepts the complete provider document preimage set and the existing producer as a caller-supplied pure callback. It retains original UTF-8 bytes separately from renderer input, returns immutable proposed outputs, and never reads or writes a target. Codex receives exact text; Claude receives its current universal-newline view. That normalization is disclosed, not misrepresented as preservation of the raw preimage.
+
+All document inputs are validated and decoded before rendering. Both Claude documents must render successfully before a result tuple is returned. This is an all-or-error in-memory result, not atomic storage publication; callback purity remains a caller obligation. The callbacks must use the existing producer owners, not a competing renderer.
+
+Conversion to the existing planner always uses update intent. Neither an absent preimage, familiar markers, nor successful rendering is a positively received creation or adoption event. The adapter does not select adoption spans or grant permission. Exact bytes remain available for the planner to reject an outside-text change, including current Claude newline normalization. Public result dataclasses are not trusted capabilities.
+
+Codex preparation now uses the common adapter. The read-only _prepare_codex_agents function retains the previous source-read and exact-newline target-read order, and returns a DocumentResult before any write. Its project_scope argument selects logical metadata: project AGENTS.md or global .codex/AGENTS.md; it does not infer authority from the physical path. The existing _merge_codex_agents wrapper calls preparation once and retains its warning, dry-run, writer and None-return contract. The writer still receives the same rendered text through the existing owner. Preparation results are proposals, not observed writes or capabilities.
+
+Claude preparation now uses the single-document render_document adapter. It validates the logical path against the provider/scope map and shares decoding/rendering helpers with the batch API. The batch API still validates and decodes its complete input set before any callback; the single-document API lets _prepare_claude_docs retain the existing sequence: read and validate sources, read/render CLAUDE.md, then read/render AGENTS.md. Both immutable proposals are returned before the wrapper can write either. The wrapper retains its None return, dry-run output and Claude-first writer order. Exact input bytes are retained while the existing universal-newline renderer view remains unchanged. project_scope selects logical scope explicitly; neither an absent input nor a successful render acquires ownership. Receipt planning/persistence, historical storage authority, physical creation receiving, coupled writes and repeat lifecycle acceptance remain future work under the existing restrictions. Tests use AST-isolated source functions and memory-only input transport with the real pure adapter/parser, never a full installer import or physical-chain execution.
 
 ## Terms and Abbreviations
 

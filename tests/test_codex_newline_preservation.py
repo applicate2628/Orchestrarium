@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "scripts" / "production_installer.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 from installer_markdown import document_context
+from installation.document_outcomes import render_documents
 
 
 class MemoryPath(PurePosixPath):
@@ -47,7 +48,7 @@ class MemoryPath(PurePosixPath):
 class NewlinePreservationTests(unittest.TestCase):
     def setUp(self):
         tree = ast.parse(SOURCE.read_bytes())
-        names = {"_read_owned_text", "_write_owned_text", "_merge_codex_agents"}
+        names = {"_read_owned_text", "_write_owned_text", "_merge_codex_agents", "_render_codex_document", "_prepare_codex_agents"}
         functions = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in names]
         self.assertEqual(len(functions), len(names))
         future = ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0)
@@ -59,6 +60,7 @@ class NewlinePreservationTests(unittest.TestCase):
                     if isinstance(target, ast.Name) and target.id in {"CODEX_BEGIN", "CODEX_END"}:
                         constants[target.id] = ast.literal_eval(node.value)
         self.scope = dict(constants, io=io, hashlib=hashlib,
+                          _render_document_outcomes=render_documents,
                           _markdown_document_context=document_context,
                           _owned_byte_context=self.memory_context)
         exec(compile(isolated, str(SOURCE), "exec"), self.scope)

@@ -36,6 +36,19 @@ except ModuleNotFoundError as error:
     from scripts.installer_markdown import document_context as _markdown_document_context
 
 try:
+    from installation.document_outcomes import (
+        DocumentResult as _DocumentResult,
+        render_document as _render_document_outcome,
+        render_documents as _render_document_outcomes)
+except ModuleNotFoundError as error:
+    if error.name not in {"installation", "installation.document_outcomes"}:
+        raise
+    from scripts.installation.document_outcomes import (
+        DocumentResult as _DocumentResult,
+        render_document as _render_document_outcome,
+        render_documents as _render_document_outcomes)
+
+try:
     from provider_prompt import enroll_kimi_executable, replace_kimi_enrollment
 except ModuleNotFoundError:
     from scripts.provider_prompt import enroll_kimi_executable, replace_kimi_enrollment
@@ -10149,20 +10162,8 @@ def _write_owned_text(target: Path, content: str, owner: _CreateOnlyMutablePath 
                               mode=None, fsync="none")
 
 
-def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *,
-                       mutable_owner: _CreateOnlyMutablePath | None = None,
-                       project_scope: bool = False) -> None:
-    pack = (
-        CODEX_BEGIN
-        + "\n"
-        + (root / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8").rstrip()
-        + "\n\n"
-        + (source / "AGENTS.codex.md").read_text(encoding="utf-8").rstrip()
-        + "\n"
-        + CODEX_END
-        + "\n"
-    )
-    existing = _read_owned_text(target, mutable_owner, preserve_newlines=True)
+def _render_codex_document(existing: str | None, pack: str) -> str:
+    """Render proposed Codex text using the existing compatible boundaries."""
     if existing is not None:
         # Select starts outside code, but retain the old raw ending boundary:
         # filtering an END or policy heading could expand the replaced extent.
@@ -10190,6 +10191,39 @@ def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *
             content = pack + "\n" + existing
     else:
         content = pack
+    return content
+
+
+def _prepare_codex_agents(root: Path, source: Path, target: Path, *,
+                         mutable_owner: _CreateOnlyMutablePath | None = None,
+                         project_scope: bool = False) -> _DocumentResult:
+    """Read exact inputs and propose Codex text without writing or claiming ownership."""
+    pack = (
+        CODEX_BEGIN
+        + "\n"
+        + (root / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8").rstrip()
+        + "\n\n"
+        + (source / "AGENTS.codex.md").read_text(encoding="utf-8").rstrip()
+        + "\n"
+        + CODEX_END
+        + "\n"
+    )
+    existing = _read_owned_text(target, mutable_owner, preserve_newlines=True)
+    scope = "project" if project_scope else "global"
+    logical_path = "AGENTS.md" if project_scope else ".codex/AGENTS.md"
+    before = None if existing is None else existing.encode("utf-8")
+    result, = _render_document_outcomes(
+        "codex", scope, {logical_path: before},
+        lambda _kind, text: _render_codex_document(text, pack))
+    return result
+
+
+def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *,
+                       mutable_owner: _CreateOnlyMutablePath | None = None,
+                       project_scope: bool = False) -> None:
+    proposed = _prepare_codex_agents(
+        root, source, target, mutable_owner=mutable_owner, project_scope=project_scope)
+    content = proposed.after.decode("utf-8")
     if project_scope:
         print(f"  WARNING: standalone project instruction budget may be exceeded "
               f"(rendered document: {len(content.encode('utf-8'))} UTF-8 bytes). "
@@ -10266,19 +10300,39 @@ def _render_claude_document(existing: str | None, payload: str, *, claude: bool)
     return owned + "\n" + existing
 
 
-def _merge_claude_docs(root: Path, source: Path, target: Path, dry_run: bool, *,
-                       mutable_owner: _CreateOnlyMutablePath | None = None) -> None:
+def _prepare_claude_docs(root: Path, source: Path, target: Path, *,
+                         mutable_owner: _CreateOnlyMutablePath | None = None,
+                         project_scope: bool = False) -> tuple[_DocumentResult, _DocumentResult]:
     claude_source = (source / "CLAUDE.md").read_text(encoding="utf-8")
     anchor = "@AGENTS.md\n"
     if not claude_source.startswith(anchor):
         raise ValueError("E_CLAUDE_DOC_SOURCE_SHAPE: CLAUDE.md")
     shared = (root / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8")
     agents_target = target.parent / "AGENTS.md"
-    # Classify both documents before publishing either, including on dry-run.
-    content = _render_claude_document(_read_owned_text(target, mutable_owner),
-                                     claude_source[len(anchor):], claude=True)
-    shared_content = _render_claude_document(_read_owned_text(agents_target, mutable_owner),
-                                            shared, claude=False)
+    scope = "project" if project_scope else "global"
+    # Keep the first render before the second read, and both before any write.
+    existing = _read_owned_text(target, mutable_owner, preserve_newlines=True)
+    claude_result = _render_document_outcome(
+        "claude", scope, ".claude/CLAUDE.md",
+        None if existing is None else existing.encode("utf-8"),
+        lambda _kind, text: _render_claude_document(
+            text, claude_source[len(anchor):], claude=True))
+    existing = _read_owned_text(agents_target, mutable_owner, preserve_newlines=True)
+    shared_result = _render_document_outcome(
+        "claude", scope, ".claude/AGENTS.md",
+        None if existing is None else existing.encode("utf-8"),
+        lambda _kind, text: _render_claude_document(text, shared, claude=False))
+    return claude_result, shared_result
+
+
+def _merge_claude_docs(root: Path, source: Path, target: Path, dry_run: bool, *,
+                       mutable_owner: _CreateOnlyMutablePath | None = None,
+                       project_scope: bool = False) -> None:
+    proposed, shared_proposed = _prepare_claude_docs(
+        root, source, target, mutable_owner=mutable_owner, project_scope=project_scope)
+    agents_target = target.parent / "AGENTS.md"
+    content = proposed.after.decode("utf-8")
+    shared_content = shared_proposed.after.decode("utf-8")
     if dry_run:
         print(f"    [dry-run] would merge {target} and {agents_target}")
     else:
@@ -12091,7 +12145,8 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 _merge_codex_agents(root, source, docs_target, args.dry_run, mutable_owner=create_only,
                                     project_scope=mode != "global")
             else:
-                _merge_claude_docs(root, source, docs_target, args.dry_run, mutable_owner=create_only)
+                _merge_claude_docs(root, source, docs_target, args.dry_run,
+                                   mutable_owner=create_only, project_scope=mode != "global")
             if provider != "codex":
                 _normalize_agents_mode(
                     root,

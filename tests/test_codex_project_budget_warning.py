@@ -5,11 +5,14 @@ import ast
 import contextlib
 import inspect
 import io
+import sys
 from pathlib import Path, PurePosixPath
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "scripts" / "production_installer.py"
+sys.path.insert(0, str(ROOT / "scripts"))
+from installation.document_outcomes import render_documents
 
 
 class MemoryPath(PurePosixPath):
@@ -23,10 +26,12 @@ class MemoryPath(PurePosixPath):
 class CodexProjectBudgetWarningTests(unittest.TestCase):
     def setUp(self):
         self.tree = ast.parse(SOURCE.read_bytes())
-        function = next(n for n in self.tree.body
-                        if isinstance(n, ast.FunctionDef) and n.name == "_merge_codex_agents")
+        names = {"_merge_codex_agents", "_render_codex_document", "_prepare_codex_agents"}
+        functions = [n for n in self.tree.body
+                     if isinstance(n, ast.FunctionDef) and n.name in names]
+        self.assertEqual(len(functions), len(names))
         future = ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0)
-        isolated = ast.fix_missing_locations(ast.Module(body=[future, function], type_ignores=[]))
+        isolated = ast.fix_missing_locations(ast.Module(body=[future, *functions], type_ignores=[]))
         constants = {}
         for node in self.tree.body:
             if isinstance(node, ast.Assign):
@@ -36,6 +41,7 @@ class CodexProjectBudgetWarningTests(unittest.TestCase):
         self.existing = "# Project\nKeep my rule.\n"
         self.writes = []
         self.scope = dict(constants,
+                          _render_document_outcomes=render_documents,
                           _markdown_document_context=lambda text: (text, []),
                           _read_owned_text=lambda *_args, preserve_newlines: self.existing,
                           _write_owned_text=lambda *args: self.writes.append(args))

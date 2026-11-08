@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-08
 
+- Codex and Claude document preparation now returns exact before/after outcomes before the existing writers run, sharing the compatible renderer with receipt planning. This source integration preserves default boundaries, normalization and refusal ordering; it does not acquire ownership, publish receipts, enable migration or qualify physical installation and recovery.
+
 - Prepare the common provider-receipt semantic planner using the existing ownership codecs. Per-artifact outcomes keep unrecorded legacy updates separate from conditional creation/adoption and verified-digest changes, preserve unrelated records and exact input fingerprints, and never publish a receipt or claim storage authority. This source-only foundation does not change default installation or complete migration, rollback or uninstall qualification.
 
 - Unsupported no-replace publication of a selected prepared directory now reports a specific atomic-directory capability diagnostic instead of a generic validation failure. Refusal, existing recovery and the POSIX installer hold remain unchanged; this does not qualify DrvFS support or successful rollback.
