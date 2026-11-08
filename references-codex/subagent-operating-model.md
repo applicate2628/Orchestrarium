@@ -37,3 +37,6 @@ Apply the shared **Context handoff economy** owner. Do not assume that an inheri
 - V1: the existing named mechanical execution and facts contract.
 - TOML: the configuration format used by native role definitions.
 - Other governance terms follow the [shared glossary](../shared/references/spine/governance-glossary.md).
+
+
+Review-loop receiving uses the shared review-loop methodology and the existing Python state owner. A completed same-artifact REVISE may receive an owner-qualified recorded-equivalent closure without overwriting the original result; an empty original scout reconciliation may receive explicit later dispositions through version-2 amendment metadata. Keep original provenance and independent acceptance requirements; the helper never launches reviewers or invents PASS.

@@ -31,3 +31,6 @@ This file keeps only Claude-specific runtime and repository concretization for t
 - Main rule, core management rules, delivery loops, routing patterns, role map, prompts, gates, and team composition
 - Shared review/gate semantics, periodic-controls model, rolling lane-ready admission, parallel-work guidance, and generic task-memory expectations
 - The generic lead memo and final wording
+
+
+Review-loop receiving follows the shared review-loop methodology through the existing Python owner: qualified recorded-equivalent closures and later scout dispositions preserve original results and independent acceptance. These operations receive existing evidence; they do not launch reviewers, fabricate PASS or add provider permissions.

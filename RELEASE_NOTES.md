@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-08
 
+- Review loops can receive already qualified same-artifact closures and explicit later scout dispositions through the existing ledger authority without rewriting original results or treating unrelated historical diagnostics as a global veto. Main structural type diagnostics remain intact; this source integration neither launches reviewers nor proves fresh project acceptance.
+
 - Lifecycle source-snapshot refusals now identify the controlled validator/schema source, capture stage and first failed invariant, with bounded non-content stat/read context. This brings the diagnostic-only correction to main while preserving all source guards and their evaluation order; it does not identify the historical refusal cause or qualify an actual lifecycle close.
 
 - Deliver the previously reviewed temporary POSIX installer hold to main: Codex and Claude installation and update, including dry-run and force, refuse after argument parsing and before target resolution or staging. Linux, macOS and Windows Subsystem for Linux remain unavailable through this route until the disposal race is repaired; Windows dispatch and help stay unchanged. This is a mitigation, not physical installation acceptance or a change to existing installations.

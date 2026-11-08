@@ -18,6 +18,7 @@ PURE_FUNCTIONS = {
     '_nonempty', '_fields', '_analyze_lane_retry_chain', '_effective_lane',
     '_scout_reconciled', '_scout_metadata_errors', '_scout_amendment_history',
     'effective_scout_reconciliation', 'verdict_result_errors_v2',
+    '_verdict_closure_history', 'effective_verdict',
     '_unstarted_round_errors', '_unstarted_close_errors', 'validate_v2', 'validate_record',
 }
 
