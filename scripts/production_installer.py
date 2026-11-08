@@ -1955,6 +1955,19 @@ class _DeclaredPathEffect:
         return self.path if self.current_path is None else self.current_path
 
 
+def _require_transaction_disposal_backend() -> None:
+    """Refuse unqualified transaction disposal before reads or effects.
+
+    This negative gate is not a capability or ownership proof. Windows callers
+    must still satisfy the existing native object and transaction checks.
+    """
+    if os.name != "nt":
+        raise ValueError(
+            "E_EFFECT_BOUND_DISPOSAL_UNQUALIFIED: transaction disposal requires "
+            "a qualified effect-bound backend; preserve retained recovery material"
+        )
+
+
 class _InstallTransaction:
     """Snapshot the coherent install surface and restore it unless committed."""
 
@@ -4041,6 +4054,7 @@ class _InstallTransaction:
         return _InstallTransaction._chmod_owned(path, before, before[2] | stat.S_IWRITE)
 
     def _dispose_node(self, path: Path, expected: _PhysicalNode) -> None:
+        _require_transaction_disposal_backend()
         if not isinstance(expected, _PhysicalNode):
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: missing physical witness")
         if os.name == "nt":
@@ -4071,62 +4085,9 @@ class _InstallTransaction:
             except FileNotFoundError:
                 return
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal pending or replaced")
-        if _CreateOnlyMutablePath._identity(path) != expected.python_identity:
-            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal identity")
-        permission_changed = False
-        if expected.kind == "file" and not expected.python_identity[2] & stat.S_IWRITE:
-            changed = self._clear_owned_readonly(path, expected.python_identity)
-            expected = replace(expected, python_identity=changed)
-            self._advance(path, {path: expected})
-            permission_changed = True
-        relative = {os.stat, os.unlink, os.rmdir} <= os.supports_dir_fd and hasattr(os, "O_DIRECTORY")
-        descriptor = None
-        primary = None
-        try:
-            parent_identity = _CreateOnlyMutablePath._identity(path.parent)
-            if relative:
-                descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
-                parent = os.fstat(descriptor)
-                if not self._binding_identity_matches(
-                    parent_identity,
-                    (parent.st_dev, parent.st_ino, parent.st_mode, getattr(parent, "st_file_attributes", 0)),
-                ):
-                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal parent descriptor")
-            actual = self._capture_node(path, kind=expected.kind, data=expected.data)
-            content_matches = self._image_matches(path, {path: expected})
-            if (not content_matches or not self._binding_identity_matches(
-                    parent_identity, _CreateOnlyMutablePath._identity(path.parent))):
-                if (permission_changed and actual.kind == expected.kind == "file"
-                        and actual.python_identity == expected.python_identity
-                        and actual.native_proof == expected.native_proof
-                        and not content_matches):
-                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal permission content drift")
-                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal final currentness")
-            operation = os.rmdir if expected.kind == "directory" else os.unlink
-            if relative:
-                operation(path.name, dir_fd=descriptor)
-            else:
-                operation(path)
-            try:
-                path.lstat()
-            except FileNotFoundError:
-                return
-            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal postcondition")
-        except BaseException as error:
-            primary = error
-            raise
-        finally:
-            if descriptor is not None:
-                try:
-                    os.close(descriptor)
-                except OSError as cleanup:
-                    raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "disposal-close", primary or cleanup,
-                                          members=(_RollbackFailureMember("backup", -1, str(path),
-                                                   "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
-                                                   cause_exception=cleanup),),
-                                          recovery_path=path) from primary
 
     def _dispose_image(self, path: Path, expected: dict[Path, _PhysicalNode]) -> None:
+        _require_transaction_disposal_backend()
         if any(node.evidence_role != "sealed" for node in expected.values()):
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: observed runtime disposal")
         if self._migration_dependencies(path):
@@ -4134,13 +4095,6 @@ class _InstallTransaction:
         if (not self._image_matches(path, expected)):
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal drift")
         current = dict(expected)
-        for member in sorted(current, key=lambda item: len(item.parts)):
-            value = current[member]
-            if os.name != "nt" and value.kind == "directory" and not value.python_identity[2] & stat.S_IWRITE:
-                changed = self._clear_owned_readonly(member, value.python_identity)
-                current[member] = replace(value, python_identity=changed)
-                self._advance(member, {node: entry for node, entry in current.items()
-                                       if node == member or member in node.parents})
         if (not self._image_matches(path, current)):
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal membership drift")
         for member in sorted(current, key=lambda item: len(item.parts), reverse=True):
