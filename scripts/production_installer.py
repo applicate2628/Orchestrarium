@@ -10120,9 +10120,14 @@ def _owned_byte_context(target: Path, owner: _CreateOnlyMutablePath):
     return storage, node, selected_owner
 
 
-def _read_owned_text(target: Path, owner: _CreateOnlyMutablePath | None) -> str | None:
+def _read_owned_text(target: Path, owner: _CreateOnlyMutablePath | None, *,
+                     preserve_newlines: bool = False) -> str | None:
+    newline = "" if preserve_newlines else None
     if owner is None or not owner.transaction.enabled:
-        return target.read_text(encoding="utf-8") if target.is_file() else None
+        if not target.is_file():
+            return None
+        with target.open("r", encoding="utf-8", newline=newline) as stream:
+            return stream.read()
     storage, node, _selected_owner = _owned_byte_context(target, owner)
     if node is None:
         return None
@@ -10130,7 +10135,7 @@ def _read_owned_text(target: Path, owner: _CreateOnlyMutablePath | None) -> str 
         payload = owner.transaction._descriptor_bytes(descriptor, path=storage)
         if hashlib.sha256(payload).hexdigest() != node.data:
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: producer input bytes")
-    with io.TextIOWrapper(io.BytesIO(payload), encoding="utf-8") as stream:
+    with io.TextIOWrapper(io.BytesIO(payload), encoding="utf-8", newline=newline) as stream:
         return stream.read()
 
 
@@ -10157,17 +10162,26 @@ def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *
         + CODEX_END
         + "\n"
     )
-    existing = _read_owned_text(target, mutable_owner)
+    existing = _read_owned_text(target, mutable_owner, preserve_newlines=True)
     if existing is not None:
-        if CODEX_BEGIN in existing and CODEX_END in existing:
-            start = existing.index(CODEX_BEGIN)
-            end = existing.index(CODEX_END, start) + len(CODEX_END)
+        # Select starts outside code, but retain the old raw ending boundary:
+        # filtering an END or policy heading could expand the replaced extent.
+        # Receipt ownership remains a separate lifecycle gate.
+        visible, _ = _markdown_document_context(existing)
+        if CODEX_BEGIN in visible:
+            start = visible.index(CODEX_BEGIN)
+            end = existing.find(CODEX_END, start)
+            if end < 0:
+                raise ValueError("E_CODEX_DOCUMENT_AMBIGUOUS: missing managed end marker")
+            end += len(CODEX_END)
             content = existing[:start] + pack.rstrip("\n") + existing[end:]
-        elif "# Shared Governance" in existing or "# Codex Platform Rules" in existing:
+        elif CODEX_END in visible:
+            raise ValueError("E_CODEX_DOCUMENT_AMBIGUOUS: missing active managed begin marker")
+        elif "# Shared Governance" in visible or "# Codex Platform Rules" in visible:
             starts = [
                 position
                 for marker in ("# Shared Governance", "# Codex Platform Rules", "# Default Delegation Rule")
-                if (position := existing.find(marker)) >= 0
+                if (position := visible.find(marker)) >= 0
             ]
             start = min(starts)
             policy = existing.find("## Project policies", start)

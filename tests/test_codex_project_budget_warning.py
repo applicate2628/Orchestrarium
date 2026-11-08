@@ -36,7 +36,8 @@ class CodexProjectBudgetWarningTests(unittest.TestCase):
         self.existing = "# Project\nKeep my rule.\n"
         self.writes = []
         self.scope = dict(constants,
-                          _read_owned_text=lambda *_args: self.existing,
+                          _markdown_document_context=lambda text: (text, []),
+                          _read_owned_text=lambda *_args, preserve_newlines: self.existing,
                           _write_owned_text=lambda *args: self.writes.append(args))
         exec(compile(isolated, str(SOURCE), "exec"), self.scope)
         self.merge = self.scope["_merge_codex_agents"]
