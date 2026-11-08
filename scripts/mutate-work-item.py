@@ -10799,15 +10799,24 @@ def _capture_runtime_source(relative: Path, *, failure_id: str, authority=None):
         raise LifecycleError(failure_id, "runtime source input is not controlled")
     if transaction is None and authority is None:
         authority = _declared_runtime_source_authority()
+    stage = "authority-before"
     try:
         _assert_runtime_source_authority(authority, failure_id)
+        stage = "source-path"
         path = authority.ordinary_file(relative) if authority is not None else Path(__file__).parent.parent / relative
+        stage = "file-capture"
         snapshot = _capture_file_snapshot(path, failure_id=failure_id)
+        stage = "authority-after"
         _assert_runtime_source_authority(authority, failure_id)
         if transaction is not None:
+            stage = "transaction-after"
             transaction._assert_source_admission()
         return snapshot
     except LifecycleError as exc:
+        exc.detail = LifecycleDiagnosticDetail(
+            "runtime-source", (("source", relative.as_posix()), ("stage", stage)),
+            (exc.detail,) if exc.detail is not None else (),
+        )
         if transaction is not None:
             transaction._retain_source_failure(exc)
         raise
@@ -21745,6 +21754,8 @@ def _captured_failure_detail(
     current_stat: bool = False,
     original_capture: bool = False,
     current_capture: bool = False,
+    stat_samples: tuple[tuple[str, os.stat_result], ...] = (),
+    capture_lengths: tuple[int, int, int] | None = None,
 ) -> LifecycleDiagnosticDetail:
     try:
         if type(path) is not type(Path()):
@@ -21790,6 +21801,12 @@ def _captured_failure_detail(
             if available:
                 observations.append(name)
         fields.append(("observations", tuple(observations)))
+        if stat_samples:
+            fields.append(("statKeyFields", ("device", "inode", "mode", "links", "size", "mtimeNs", "ctimeNs")))
+            for label, sample in stat_samples:
+                fields.append((label, tuple(str(value) for value in _lifecycle_file_snapshot_key(sample))))
+        if capture_lengths is not None:
+            fields.extend(zip(("firstReadBytes", "verifiedReadBytes", "maximumBytes"), capture_lengths))
         return LifecycleDiagnosticDetail(kind, tuple(fields))
     except Exception:
         return LifecycleDiagnosticDetail("unavailable")
@@ -22163,24 +22180,41 @@ def _capture_file_snapshot(
             os.close(descriptor)
     identity = _lifecycle_file_identity(before)
     before_key = _lifecycle_file_snapshot_key(before)
-    if (
-        len(data) > maximum_bytes
-        or len(data) != before.st_size
-        or data != verified
-        or before_key != _lifecycle_file_snapshot_key(middle)
-        or before_key != _lifecycle_file_snapshot_key(after)
-        or _lifecycle_file_snapshot_key(observed)
-        != _lifecycle_file_snapshot_key(current)
-        or _lifecycle_file_identity(current) != identity
-        or stat.S_ISLNK(current.st_mode)
-        or (require_single_link and current.st_nlink != 1)
-        or bool(
-            getattr(current, "st_file_attributes", 0)
-            & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    predicate = None
+    if len(data) > maximum_bytes:
+        predicate = "capture-byte-limit-exceeded"
+    elif len(data) != before.st_size:
+        predicate = "capture-size-differs"
+    elif data != verified:
+        predicate = "read-bytes-differ"
+    elif before_key != _lifecycle_file_snapshot_key(middle):
+        predicate = "descriptor-stat-changed-after-read"
+    elif before_key != _lifecycle_file_snapshot_key(after):
+        predicate = "descriptor-stat-changed-after-verification"
+    elif _lifecycle_file_snapshot_key(observed) != _lifecycle_file_snapshot_key(current):
+        predicate = "path-stat-changed-during-read"
+    elif _lifecycle_file_identity(current) != identity:
+        predicate = "current-path-identity-differs"
+    elif stat.S_ISLNK(current.st_mode):
+        predicate = "current-file-is-symlink"
+    elif require_single_link and current.st_nlink != 1:
+        predicate = "single-link-count-differs"
+    elif bool(getattr(current, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)):
+        predicate = "current-file-is-reparse"
+    elif _lifecycle_path_has_reparse(path):
+        predicate = "captured-path-is-reparse"
+    if predicate is not None:
+        detail = _captured_failure_detail(
+            path, "file-snapshot", predicate, stage="snapshot-verify",
+            observed_stat=True, descriptor_before_stat=True, first_read=True,
+            descriptor_middle_stat=True, verified_read=True,
+            descriptor_after_stat=True, current_stat=True,
+            stat_samples=(("observedStat", observed), ("descriptorBeforeStat", before),
+                          ("descriptorMiddleStat", middle), ("descriptorAfterStat", after),
+                          ("currentStat", current)),
+            capture_lengths=(len(data), len(verified), maximum_bytes),
         )
-        or _lifecycle_path_has_reparse(path)
-    ):
-        raise LifecycleError(failure_id, "file snapshot changed during capture")
+        raise LifecycleError(failure_id, "file snapshot changed during capture", detail=detail)
     _verify_captured_parent_chain(parent_chain, failure_id)
     return CapturedFileSnapshot(
         path, identity, len(data), data, parent_chain, require_single_link

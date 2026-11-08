@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-08
 
+- Lifecycle source-snapshot refusals now identify the controlled validator/schema source, capture stage and first failed invariant, with bounded non-content stat/read context. This brings the diagnostic-only correction to main while preserving all source guards and their evaluation order; it does not identify the historical refusal cause or qualify an actual lifecycle close.
+
 - Deliver the previously reviewed temporary POSIX installer hold to main: Codex and Claude installation and update, including dry-run and force, refuse after argument parsing and before target resolution or staging. Linux, macOS and Windows Subsystem for Linux remain unavailable through this route until the disposal race is repaired; Windows dispatch and help stay unchanged. This is a mitigation, not physical installation acceptance or a change to existing installations.
 
 - Refresh the Codex addendum validation fingerprint after the published context-handoff guidance, so pack validation accepts the current canonical reference while still rejecting changed or missing content. Routing and runtime permissions are unchanged.
