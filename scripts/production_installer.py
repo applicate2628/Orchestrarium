@@ -2030,6 +2030,7 @@ class _InstallTransaction:
 
     @contextmanager
     def direct_operation(self):
+        _require_transaction_disposal_backend()
         if self.enabled or self._direct_operation_depth:
             yield
             return
@@ -4319,6 +4320,7 @@ class _InstallTransaction:
     def __enter__(self) -> "_InstallTransaction":
         if not self.enabled:
             return self
+        _require_transaction_disposal_backend()
         self.paths = _transaction_snapshot_paths(self.paths, link_object_paths=self._link_object_paths)
         backup_root = None
         def record_root(path, node):
