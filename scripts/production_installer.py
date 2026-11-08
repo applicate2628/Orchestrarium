@@ -8797,7 +8797,10 @@ def _assert_canonical_member_state(
             continue
         if node.kind == "directory" or path not in changed:
             expected[relative] = "directory" if node.kind == "directory" else node.data
-    actual = dict(_stage_tree_manifest(installed, ignore_runtime_cache=True))
+    read_file = None
+    if transaction is not None and transaction.enabled:
+        read_file = lambda member: transaction._image_file_bytes(member, current_image.get(member))
+    actual = dict(_stage_tree_manifest(installed, ignore_runtime_cache=True, read_file=read_file))
     if actual != expected:
         raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_DRIFT: managed postcondition {skill.name}")
 
@@ -9365,7 +9368,7 @@ def _apply_canonical_skills_plan(
                 if plan.member_selection is not None:
                     continue  # Other receipt entries retain their exact authenticated meanings.
                 if isinstance(digest, tuple):
-                    if _stage_tree_manifest(target / name, ignore_runtime_cache=True) != digest:
+                    if _admitted_tree_manifest(owner.transaction, target / name, ignore_runtime_cache=True) != digest:
                         raise ValueError(f"E_MUTABLE_PATH_POSTCONDITION: non-Lead {name}")
                 else:
                     # A legacy unselected entry may only be carried unchanged;
@@ -10097,6 +10100,19 @@ def _admitted_mutation_image(transaction: _InstallTransaction, path: Path) -> di
             return {member: value for member, value in image.items()
                     if member == path or path in member.parents}
     raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing admitted mutation image")
+
+
+def _admitted_tree_manifest(
+    transaction: _InstallTransaction, path: Path, *, ignore_runtime_cache: bool = False,
+) -> tuple[tuple[str, str], ...]:
+    """Bind included payload reads; traversal policy is not complete tree custody."""
+    storage_path = Path(os.path.abspath(path))
+    read_file = None
+    if transaction.enabled:
+        image = _admitted_mutation_image(transaction, storage_path)
+        read_file = lambda member: transaction._image_file_bytes(member, image.get(member))
+    return _stage_tree_manifest(
+        storage_path, ignore_runtime_cache=ignore_runtime_cache, read_file=read_file)
 
 
 def _reclaim_claude_namespace(
@@ -11423,6 +11439,24 @@ def _checkpoint(
         raise RuntimeError(f"hook transaction checkpoint failed at {stage}")
 
 
+def _canonical_lead_expected_manifest(
+    manifest: tuple[tuple[str, str], ...],
+    lead: Path,
+    reclaimed: tuple[tuple[Path, str], ...] = (),
+) -> tuple[tuple[str, str], ...]:
+    """Project the admitted stage minus its exact proven reclamations, without I/O."""
+    expected = dict(manifest)
+    for removed, digest in reclaimed:
+        try:
+            relative = removed.relative_to(lead).as_posix()
+        except ValueError:
+            continue
+        if expected.get(relative) != digest:
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: unbound Lead reclamation")
+        del expected[relative]
+    return tuple(sorted(expected.items()))
+
+
 def _finalize_canonical_lead_receipt(
     plan: _CanonicalSkillsPlan,
     target: Path,
@@ -11433,21 +11467,14 @@ def _finalize_canonical_lead_receipt(
     if owner.dry_run:
         return
     lead = target / "lead"
-    expected = dict(plan.stage.manifest)
-    for removed, digest in reclaimed:
-        try:
-            relative = removed.relative_to(lead).as_posix()
-        except ValueError:
-            continue
-        if expected.get(relative) != digest:
-            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: unbound Lead reclamation")
-        del expected[relative]
-    if _stage_tree_manifest(lead, ignore_runtime_cache=True) != tuple(sorted(expected.items())):
+    expected = _canonical_lead_expected_manifest(plan.stage.manifest, lead, reclaimed)
+    actual = _admitted_tree_manifest(
+        owner.transaction, lead, ignore_runtime_cache=True)
+    if actual != expected:
         raise ValueError("E_MUTABLE_PATH_POSTCONDITION: final Lead manifest")
     if plan.lead_receipt is not None:
-        digest = _tree_sha256(lead, ignore_runtime_cache=True)
-        if digest is None:
-            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: final Lead digest")
+        # Hash exactly the compared manifest, never a second pathname census.
+        digest = _tree_manifest_sha256(actual)
         payload = _lead_receipt_bytes(digest)
         current_receipt = _read_lead_receipt(target / _LEAD_RECEIPT_NAME)
         if current_receipt is not None and current_receipt[0] == payload:

@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-08
 
+- Existing canonical receipt producers now compare and hash transaction-bound payload bytes: Lead and non-Lead verification share the admitted reader, while managed-member checks retain their composed image. Receipt format, writer behavior and selection boundaries remain unchanged. Qualification is pure/static source only, not historical ownership, directory-chain safety, migration or physical recovery acceptance.
+
 - Codex and Claude document preparation now returns exact before/after outcomes before the existing writers run, sharing the compatible renderer with receipt planning. This source integration preserves default boundaries, normalization and refusal ordering; it does not acquire ownership, publish receipts, enable migration or qualify physical installation and recovery.
 
 - Prepare the common provider-receipt semantic planner using the existing ownership codecs. Per-artifact outcomes keep unrecorded legacy updates separate from conditional creation/adoption and verified-digest changes, preserve unrelated records and exact input fingerprints, and never publish a receipt or claim storage authority. This source-only foundation does not change default installation or complete migration, rollback or uninstall qualification.
