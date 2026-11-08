@@ -381,7 +381,7 @@ def _scout_amendment_history(data: dict[str, Any]) -> tuple[dict[int, dict[str, 
         if not isinstance(operation, dict) or not isinstance(operation.get("receipt"), dict):
             continue
         receipt = operation["receipt"]
-        if receipt.get("command") in {"begin", "next-round"} and type(receipt.get("round")) is int:
+        if isinstance(receipt.get("command"), str) and receipt["command"] in {"begin", "next-round"} and type(receipt.get("round")) is int:
             admitted_round = max(admitted_round, receipt["round"])
         if receipt.get("command") == "close":
             closed = True
@@ -532,7 +532,7 @@ def _unstarted_round_errors(data: dict[str, Any], rnd: dict[str, Any], operation
     for operation in operations:
         receipt = operation["receipt"]
         if receipt.get("round") == rnd["round"]:
-            if receipt.get("command") not in {"begin", "next-round"}:
+            if not isinstance(receipt.get("command"), str) or receipt["command"] not in {"begin", "next-round"}:
                 errors.append("unstarted close has recorded round execution")
             else:
                 admissions.append(receipt)
@@ -595,7 +595,7 @@ def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: b
         if not _nonempty(data.get(key)):
             errors.append(f"{key}: expected non-empty string")
     status = data.get("status")
-    if status not in {"running", *OUTCOMES}:
+    if not isinstance(status, str) or status not in {"running", *OUTCOMES}:
         errors.append("status: invalid value")
     if require_terminal and status == "running":
         errors.append("status: terminal state required")
@@ -619,6 +619,8 @@ def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: b
                 seen_ops.add(op_id)
             if not _nonempty(operation.get("fingerprint")) or not isinstance(operation.get("receipt"), dict):
                 errors.append(f"{label}: invalid fingerprint or receipt")
+            elif "command" in operation["receipt"] and not isinstance(operation["receipt"]["command"], str):
+                errors.append(f"{label}.receipt.command: expected string")
     rounds = data.get("rounds")
     if not isinstance(rounds, list) or not rounds:
         return errors + ["rounds: expected non-empty list"]
@@ -637,7 +639,7 @@ def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: b
         if rnd.get("round") != index:
             errors.append(f"{label}.round: expected {index}")
         phase = rnd.get("phase")
-        if phase not in {"admitted", "collecting", "complete"}:
+        if not isinstance(phase, str) or phase not in {"admitted", "collecting", "complete"}:
             errors.append(f"{label}.phase: invalid value")
         if not _nonempty(rnd.get("diff")):
             errors.append(f"{label}.diff: expected non-empty string")
@@ -747,7 +749,7 @@ def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: b
             if block.get("artifact_revision") != revision:
                 errors.append(f"{lane_label}.artifact_revision: must equal round revision")
             state = block.get("state")
-            if state not in {"admitted", "running", "complete"}:
+            if not isinstance(state, str) or state not in {"admitted", "running", "complete"}:
                 errors.append(f"{lane_label}.state: invalid value")
             if state == "complete":
                 if lane in VERDICT_LANES:

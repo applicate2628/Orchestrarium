@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-08
+
+- Review-loop structural validation now reports malformed enum values and present non-string receipt commands instead of raising TypeError. Historical omitted, empty, whitespace and unknown string commands remain structurally compatible; no closure authority, mutation or installed owner is changed.
+
 ## 2026-11-07
 
 - Align the Claude common manual-repo-transfer skill with the existing Codex clone-first and selective-overlay guidance. The full-inventory helper, ownership safeguards and explicit full-recovery option remain unchanged; this restores cross-pack source parity, not installed transfer qualification. Align the Claude PR-review common skill with the existing native publication owner: Root retains human-consent scope while the hook qualifies actual Git updates; no bot, CI or publication action is triggered by this documentation correction.
