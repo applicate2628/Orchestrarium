@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-08
 
+- Refresh native-role source manifest digests after the already-published disabled browser/computer feature flags, restoring installation that rejected the changed role files as source drift. Role TOML, instruction bindings and runtime permissions are unchanged; exact source digest admission remains fail-closed.
+
 - Review-loop structural validation now reports malformed enum values and present non-string receipt commands instead of raising TypeError. Historical omitted, empty, whitespace and unknown string commands remain structurally compatible; no closure authority, mutation or installed owner is changed.
 
 ## 2026-11-07

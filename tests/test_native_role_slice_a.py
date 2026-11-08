@@ -1377,7 +1377,11 @@ def test_source_native_roles_match_policy_profiles_and_supported_toml_fields() -
         profile = policy["profiles"][corridor["defaultProfile"]]
         assert set(parsed) <= SUPPORTED_NATIVE_FIELDS, role_name
         assert parsed["name"] == role_name
-        assert parsed["features"] == {"apps": False, "plugins": False}
+        assert parsed["features"] == {
+            "apps": False, "plugins": False, "computer_use": False,
+            "browser_use": False, "browser_use_external": False,
+            "browser_use_full_cdp_access": False, "in_app_browser": False,
+        }
         if role_name == "default":
             assert "model" not in parsed
             assert "model_reasoning_effort" not in parsed
