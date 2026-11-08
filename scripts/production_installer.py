@@ -11485,6 +11485,16 @@ def _verify_files(
 
 def install(provider: str, argv: list[str] | None = None) -> int:
     args = _parser(provider).parse_args(argv)
+    # Even dry-run builds and disposes staging before entering the transaction.
+    # Keep this temporary hold ahead of target resolution and all plan creation.
+    if os.name == "posix":
+        print(
+            "FAIL: E_POSIX_DISPOSAL_UNQUALIFIED: POSIX installer operations are "
+            "temporarily disabled, including --dry-run; the disposal race remains unresolved. "
+            "No target or staging operations were started.",
+            file=sys.stderr,
+        )
+        return 1
     if args.replace_unreceipted_skill_sha256 and not args.global_install:
         print("FAIL: E_CANONICAL_SKILL_ADOPTION_MISMATCH", file=sys.stderr)
         return 1
