@@ -16,7 +16,7 @@ import json
 import unittest
 import re
 from pathlib import Path
-from policy_text_contract import identifier_present, lexical, relationships, selected_unit
+from policy_text_contract import identifier_present, lexical, relationships, selected_section, selected_unit
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -171,7 +171,7 @@ PINS = [
      ["src.codex/AGENTS.codex.md"]),
 
     # P4 — spine stop-rule (Fable probe text) + operational bullet (Sol text)
-    ("P4-spine", "Stop-rule: a SECOND fix in one session that breaks a previously-working neighbor", [SPINE]),
+    ("P4-spine", None, [SPINE]),
     ("P4-op", "**Second-cross-break stop:** If a second fix in the same session breaks a previously working neighbor, STOP all edits.",
      ["src.claude/commands/agents-bugfix.md", "src.codex/skills/bug-hunting/SKILL.md"]),
 
@@ -212,15 +212,16 @@ PINS = [
     ("A2-marker", "# orchestrarium:requested-isolation-worktree",
      ["src.claude/agents/contracts/operating-model.md", "src.codex/skills/lead/operating-model.md"]),
     ("A2-resource-surface", "Parallel lanes are independent only when each lane's mutation set is disjoint from every other lane's read, write, execute, install/copy, and baseline surfaces for the full overlap interval. If a mutation can reach any such surface, serialize the lanes or use explicitly requested, validated isolation.",
-     ["shared/references/subagent-operating-model.md", SPINE,
+     ["shared/references/subagent-operating-model.md",
       "src.claude/agents/contracts/operating-model.md",
       "src.codex/skills/lead/operating-model.md"]),
+    ("A2-resource-spine", None, [SPINE]),
     # A2 — Lead SKILL pointer
     ("A2-pointer", "Apply the installed operating-model parallel-isolation protocol before launch; mutating or Git-using parallel lanes require one requested, cleanup-owned worktree each.",
      ["src.claude/skills/lead/SKILL.md", "src.codex/skills/lead/SKILL.md"]),
-    # A2 — hook doc discriminator sentence (installed provider roots + INSTALL)
+    # A2 — hook audit owner (Codex Lead procedure + INSTALL); the root referral is tested below.
     ("A2-doc", "warns on every confidently parsed `git worktree add` except one add whose command ends with the exact `# orchestrarium:requested-isolation-worktree` marker required by the installed parallel-isolation protocol; missing, near-match, quoted, reused, or batch markers do not suppress the audit.",
-     ["src.codex/AGENTS.codex.md", "INSTALL.md"]),
+     ["src.codex/skills/lead/operating-model.md", "INSTALL.md"]),
     ("A2-doc-claude", "The worktree audit recognizes only an exact trailing `# orchestrarium:requested-isolation-worktree` marker.",
      ["src.claude/CLAUDE.md"]),
     # A2 — hook marker constant present in BOTH hook copies
@@ -300,7 +301,7 @@ PINS = [
     ("fix-class-invariant-loop-to-PASS", "**Loop-to-PASS is the gate, not a preference:**",
      ["src.claude/agents/contracts/review-loop.md",
       "src.codex/skills/review-loop/SKILL.md"]),
-    ("fix-class-invariant-distinct-engine", "**Distinct engine:** this lane runs on an engine distinct from the batch's author/implementer",
+    ("fix-class-invariant-independent-review", None,
      ["src.claude/agents/architecture-reviewer.md",
       "src.codex/skills/architecture-reviewer/SKILL.md"]),
 
@@ -370,14 +371,15 @@ PINS = [
     ("single-writer-root", "Only the root main conversation holding Lead dispatches downstream roles and writes work-item lifecycle state.",
      ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
     ("single-writer-ledger", "Only the root main conversation holding Lead writes `agent-runs.jsonl`:",
-     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+     ["src.claude/agents/contracts/subagent-contracts.md"]),
+    ("root-owned-ledger", None, ["src.codex/skills/lead/subagent-contracts.md"]),
     ("single-writer-specialist", "A specialist completes one profession, artifact, and gate; it returns evidence plus an optional non-binding recommended next role to the root, then stops.",
      ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
     ("single-writer-stop", "A specialist never adopts Lead, launches a peer or downstream stage, advances the pipeline, or writes `agent-runs.jsonl`.",
      ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
     ("single-writer-wrapper", "The root may directly launch a configured external wrapper; no provider or leaf may recursively launch another wrapper.",
      ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md", "shared/references/subagent-operating-model.md"]),
-    ("single-writer-spine", "$lead` is the root main conversation's sole downstream dispatcher and lifecycle writer",
+    ("single-writer-spine", None,
      [SPINE]),
     ("single-writer-shared", "The root main conversation holding Lead alone dispatches downstream roles and writes work-item lifecycle state.",
      ["shared/references/subagent-operating-model.md"]),
@@ -392,7 +394,7 @@ PINS = [
       "src.codex/skills/architecture-reviewer/SKILL.md"]),
 
     # Batch B — route-appropriate handoffs and fixed-value criteria.
-    ("batch-b-hardcoding", "Classify a fixed value before changing it: a true invariant or protocol/schema constant may remain fixed; a policy-owner default must be single-owned and omission-safe; deployment, calibration, and user inputs require variability and omission tests.",
+    ("batch-b-hardcoding", None,
      [SPINE, "shared/external-prompt-governance.md"]),
     ("batch-b-implementation-route", "Implementation and Quality Assurance receive route-appropriate accepted artifacts; a Plan is required only when the selected route admits a Plan stage.",
      ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
@@ -491,14 +493,130 @@ def cleanup_duties(text: str) -> dict[str, bool]:
     })
 
 
+def complete_shared_relationships(unit: str, required: dict[str, str]) -> dict[str, bool]:
+    """Pin complete changed shared clauses; a weakening suffix is not the duty."""
+    normalized = lexical(re.sub(r"^\s*(?:[-*]|\d+[.)]) ", "", unit))
+    return {
+        name: bool(re.search(
+            r"(?:\A|[.;]\s+)" + re.escape(lexical(phrase)) + r"(?=$|[.;](?:\s|$))",
+            normalized,
+        ))
+        for name, phrase in required.items()
+    }
+
+
 def baseline_duties(text: str) -> dict[str, bool]:
-    unit = selected_unit(text, "Core delegation principles", "Keep phase flow;")
-    duties = relationships(unit, {
-        "producing-scope-baseline": "Judge claims/verdicts by producing scope/accepted baseline",
-        "independent-delta-review": "independently owned later deltas get own review, not retroactive falsification",
-        "material-upstream-invalidation": "Material accepted-upstream revision invalidates dependent PASS and triggers re-review",
+    unit = selected_unit(text, "Core delegation principles", "PASS advances;")
+    duties = complete_shared_relationships(unit, {
+        "producing-scope-baseline": "Verdicts bind producing scope/baseline, later independent deltas get own review",
+        "independent-delta-review": "Verdicts bind producing scope/baseline, later independent deltas get own review",
+        "material-upstream-invalidation": "material upstream change invalidates dependent PASS",
     })
-    duties["material-upstream-invalidation"] &= identifier_present(unit, "PASS")
+    economy = selected_unit(text, "Core delegation principles", "Workflow economy (binding):")
+    duties.update(complete_shared_relationships(economy, {
+        "affected-re-review": "Re-review finding/delta only; full only new defect class/material upstream revision",
+    }))
+    material_clauses = [
+        clause for clause in re.split(r"[.;]\s+", unit)
+        if lexical(clause).startswith("material upstream change")
+    ]
+    duties["material-upstream-invalidation"] &= any(
+        identifier_present(clause.rstrip("."), "PASS") for clause in material_clauses
+    )
+    return duties
+
+
+def quick_fix_duties(text: str) -> dict[str, bool]:
+    unit = selected_unit(text, "Core delegation principles", "quick-fix:")
+    admitted = "target/steps/bounds/owner/contracts, no new dependency/risk owner, rollback/backup/oracle"
+    duties = complete_shared_relationships(unit, {
+        "bounded-admission": admitted,
+        "minimal-recovery": "Before mutation only work-items/active/<slug>/status.md with lifecycle+4 recovery facts",
+        "no-heavy-preludes": "no roadmap/brief/Research/Design/Plan/consultant/pre-review",
+        "same-item-reclassification": "Failed/unclear: enrich/reclassify same item",
+        "bounded-delivery": "One preflight, implement/QA, close/archive",
+    })
+    recovery_clauses = [
+        clause for clause in re.split(r"[.;]\s+", unit)
+        if lexical(clause).startswith("before mutation only")
+    ]
+    duties["minimal-recovery"] &= len(recovery_clauses) == 1 and identifier_present(
+        recovery_clauses[0], "work-items/active/<slug>/status.md"
+    )
+    return duties
+
+
+def stop_rule_duties(text: str) -> dict[str, bool]:
+    unit = selected_unit(text, "Scope and ownership discipline", "No logic duplication / no fix layering:")
+    return complete_shared_relationships(unit, {
+        "second-cross-break-stop": "SECOND same-session fix breaking a working neighbor: STOP all edits",
+        "owner-siblings-contract-diagnosis": "diagnose owner/siblings/shared contract",
+    })
+
+
+def isolation_duties(text: str) -> dict[str, bool]:
+    unit = selected_unit(text, "Operational and environment safety", "Parallel resource-surface isolation:")
+    return complete_shared_relationships(unit, {
+        "full-overlap-surfaces": "parallel independence requires each lane's mutations disjoint from others' read/write/execute/install/copy/baseline surfaces throughout overlap",
+        "conflict-serialization-or-isolation": "Otherwise serialize or use explicitly requested validated isolation",
+        "safe-read-only-or-disjoint-work": "Read/read and truly disjoint work are safe",
+        "observed-test-surfaces": "tests declare executed/installed/copied source/helpers as observed surfaces",
+    })
+
+
+def lead_dispatch_duties(text: str) -> dict[str, bool]:
+    unit = selected_unit(text, "Core delegation principles", "$lead:")
+    duties = complete_shared_relationships(unit, {
+        "root-only-dispatch-and-lifecycle": "root main conversation alone dispatches/writes lifecycle",
+        "no-specialist-or-delivery-owner": "never subagent/end-to-end coder/roadmap owner",
+    })
+    owner = selected_unit(text, "Core delegation principles", "$lead")
+    duties["root-only-dispatch-and-lifecycle"] &= identifier_present(owner, "$lead")
+    return duties
+
+
+def fixed_value_duties(text: str, *, projection: bool = False) -> dict[str, bool]:
+    # The generated external-prompt projection is a headingless bullet list.
+    # Select its actual named bullet, not an arbitrary phrase elsewhere in it.
+    section = "Provider projection" if projection else "Scope and ownership discipline"
+    if projection:
+        text = "# Provider projection\n" + text
+    unit = selected_unit(text, section, "Anti-hardcoding and justified limits:")
+    return complete_shared_relationships(unit, {
+        "classify-invariants": "Before changing classify: invariants/protocol/schema may stay fixed",
+        "single-owned-safe-defaults": "policy defaults need one owner/omission safety",
+        "variable-input-tests": "deployment/calibration/user inputs need variability/omission tests",
+    })
+
+
+def independent_review_duties(text: str) -> dict[str, bool]:
+    unit = selected_unit(text, "Anti-layering audit (multi-fix batch)", "Independent review:")
+    clauses = {
+        "nonauthoring-reviewer": "this lane supplies a substantive assessment from a nonauthoring reviewer.",
+        "required-commission": "Apply the shared commission rule when that commission is required;",
+        "qualified-model-preference": "prefer a different supported model selection where admissible, but missing actual identity or unproved model-family diversity alone is not a veto.",
+        "task-and-host-restrictions": "Preserve any explicit task-specific engine requirement and actual host rejection or execution drift.",
+    }
+    duties = relationships(unit, clauses)
+    # Check the complete current owner unit, not prefixes that allow exceptions
+    # or an unchecked contrary sentence. Formatting remains non-semantic.
+    duties["complete-owner-unit"] = lexical(unit) == lexical(" ".join(clauses.values()))
+    return duties
+
+
+def root_ledger_duties(text: str) -> dict[str, bool]:
+    unit = selected_unit(text, "agent-runs.jsonl format", "Only the root main conversation holding Lead owns")
+    clauses = {
+        "root-ownership": "Only the root main conversation holding Lead owns agent-runs.jsonl.",
+        "actual-root-execution": "Root records actual native and already-admitted declared direct external owner-equivalent executions;",
+        "bounded-wrapper-delegation": "an actual supported tracked provider wrapper may write its own pair on Root's behalf.",
+        "specialist-no-append": "Specialists never append.",
+        "direct-external-contract": "Direct external execution remains under [the external-dispatch contract](external-dispatch.md);",
+        "actual-wrapper-evidence": "wrapper-specific envelopes and identifiers apply only when that wrapper actually ran.",
+    }
+    duties = relationships(unit, clauses)
+    duties["root-ownership"] &= identifier_present(unit, "agent-runs.jsonl")
+    duties["complete-owner-unit"] = lexical(unit) == lexical(" ".join(clauses.values()))
     return duties
 
 
@@ -506,6 +624,9 @@ SHARED_DUTY_CHECKS = {
     "A5-spine": evidence_duties,
     "cleanup-spine": cleanup_duties,
     "cross-lane-review-baseline": baseline_duties,
+    "P4-spine": stop_rule_duties,
+    "A2-resource-spine": isolation_duties,
+    "single-writer-spine": lead_dispatch_duties,
 }
 
 
@@ -521,50 +642,63 @@ def _native_contradiction(unit: str) -> bool:
 
 
 def native_route_duties(text: str) -> dict[str, bool]:
+    # Ordinary invocations use a selected explicit tuple, not the historical
+    # fixed named-role route. Keep configuration, policy and runtime truth apart.
     unit = selected_unit(text, "Native Astra task-dependent route", "For ordinary native and skill-only roles,")
     requested = "The caller invokes the native host tool, records requested and resolved controls separately from actual runtime metadata"
     missing = requested + ", treats missing actual metadata as unspecified by runtime"
     duties = relationships(unit, {
         "ordinary-selectors": "For ordinary native and skill-only roles, callers first use describe_ordinary_native_role_options, then resolve_ordinary_native_dispatch",
-        "fixed-role-discovery": "An omitted choice for a fixed native specialist uses its registered role and TOML default only when current host discovery does not report that agent type absent",
-        "generic-unbound": "The generic fallback default.toml binds neither model nor effort",
-        "explicit-selector-tuple": 'The generic fallback default.toml binds neither model nor effort: when the default profession omits its choice, the selector emits the existing policy default tuple explicitly through a generic spawn with fork_turns="none" and no agent_type',
+        "task-profile-membership": "Ordinary admission requires an eligible task-role pair and exact task/role profile membership, followed by host filtering",
+        "conscious-selection": "The caller evaluates task scope, uncertainty, expected cost and rework, then consciously selects and supplies both model and effort when deciding by task, including when choosing the suggestion",
+        "omitted-explicit-default": "An omitted pair remains compatible and resolves to an explicit default pair",
+        "tuple-validation": "Resolution checks the resulting tuple against task, role, host and configured controls",
+        "generic-explicit-route": 'Each admitted ordinary invocation uses a generic spawn with fork_turns="none" and no agent_type and carries the selected profession instructions',
         "bare-default-inheritance": "A direct bare agent_type=default call without a tuple instead inherits provider subagent defaults or parent settings",
-        "policy-tuple-selector": "callers requiring the policy tuple must use the ordinary selector",
-        "skill-only-generic": "A skill-only role has no TOML: its omitted default is still an explicit generic spawn using the policy default, the current installed skill identity",
-        "explicit-unpinned-route": "Any explicit policy-admissible model/effort tuple takes the same generic route, omitting agent_type, and is honored by an unpinned fallback carrier",
+        "policy-tuple-selector": "policy-requiring callers use the ordinary selector",
         "custom-pin-no-bypass": "Omitting the type alone does not bypass higher-precedence model/effort fields in a custom default carrier",
         "custom-pin-local-conflict": "a known conflicting pin is a configuration conflict for that invocation, not universal model unavailability",
-        "named-discovery-denial": "Absent lists mean capability-unknown, while a reported agent-type list that omits the fixed named role required by the selected invocation denies that route with no fallback",
+        "complete-custom-controls": "Genuine custom controls must form a complete configured tuple under existing task/role/profile and individual exact-launch Astra/Max approval",
+        "partial-controls-unresolved": "partial controls remain unresolved rather than being filled from factory defaults",
+        "custom-bytes-preserved": "The user owns compatible configuration bytes and descriptions, which the installer preserves without reserializing TOML",
+        "full-host-discovery": "Reported model, effort, and agent-type lists must reflect the full availability actually enumerated by current host discovery, never a desired-model pre-filter that hides alternatives",
+        "generic-capability-unknown": "Absent lists mean capability-unknown, while generic ordinary invocations name no required agent type",
         "selector-nonexecution": "The selector launches nothing",
         "requested-vs-actual": requested,
         "missing-actual": missing,
         "drift-refusal": missing + ", and treats host rejection or returned model/effort drift as nonauthorizing with no fallback",
     })
     duties["exact-route-identifiers"] = all(identifier_present(unit, atom) for atom in (
-        "describe_ordinary_native_role_options", "resolve_ordinary_native_dispatch", "default.toml", "fork_turns", "agent_type", "unspecified by runtime",
+        "describe_ordinary_native_role_options", "resolve_ordinary_native_dispatch", "fork_turns", "agent_type", "unspecified by runtime",
     ))
     duties["no-contrary-route"] = not _native_contradiction(unit)
     return duties
 
 
-def native_consumer_duties(text: str, section: str, marker: str, *, referral_only: bool = False) -> dict[str, bool]:
+def native_consumer_duties(text: str, section: str, marker: str, *, referral_only: bool = False, reference: bool = False) -> dict[str, bool]:
     unit = selected_unit(text, section, marker)
     duties = relationships(unit, {
         "actual-override-evidence": "Claim an override only when the host explicitly supports it and returned actual runtime metadata confirms the effective model and effort; otherwise record unspecified by runtime",
-        "floors-corridors": "role policy owns every effort floor and corridor" if referral_only else "Role policy still owns every effort floor and corridor",
     })
     if referral_only:
         duties.update(relationships(unit, {
+            "profile-policy-owner": "role policy owns exact profile membership and separate special-corridor/explicit-profile rules",
             "qualified-defaults": "Fixed native defaults are candidates rather than blanket authority when an explicit generic policy-admissible profile is available",
             "authoritative-referral": "For the optional Astra native-host path, apply Native Astra task-dependent route from the installed AGENTS.md; do not restate or widen that owner here",
         }))
     else:
-        generic = "the generic fallback TOML binds no model or effort"
         duties.update(relationships(unit, {
-            "fixed-specialists": "Fixed Codex native specialist TOMLs declare their installed default profiles",
-            "generic-unbound": generic,
-            "selector-tuple": generic + ", and the ordinary selector explicitly emits its omitted-choice tuple from the sole policy default owner",
+            "profile-policy-owner": (
+                "Role policy owns exact profile membership and separate special-corridor/explicit-profile rules"
+                if reference else "Role policy still owns every effort floor and corridor"
+            ),
+            "ordinary-discovery": "Ordinary discovery presents admissible choices and a default suggestion",
+            "conscious-selection": (
+                "The caller evaluates task fit, honors genuine current custom controls, and consciously selects and supplies both model and effort when deciding by task, including when choosing the suggestion"
+                if reference else
+                "Lead evaluates task scope, uncertainty, expected cost and rework and consciously selects and supplies both model and effort when deciding by task, including when choosing the suggestion"
+            ),
+            "omitted-explicit-default": "An omitted pair remains compatible and resolves to an explicit default pair",
             "bare-default-inheritance": "Direct bare default calls inherit provider/parent settings instead; policy-requiring callers use the selector",
             "authoritative-referral": "the installed Native Astra task-dependent route owns explicit-tuple and custom-pin conflict semantics",
         }))
@@ -634,6 +768,47 @@ ARCHIVED_SUCCESSOR_FORWARD_FIXTURE = {
 }
 
 
+def codex_hook_referral_duties(text: str) -> dict[str, bool]:
+    unit = selected_unit(text, "Codex hook requirements and mandatory procedure", "Mandatory read:")
+    clauses = {
+        "mandatory-owner-and-triggers": "Any actor, regardless of profession, who installs, upgrades, removes, or changes Codex hooks; handles hook trust or health; or diagnoses behavior based on hook contracts MUST read the Codex hook procedure in the existing Lead operating-model",
+        "resolved-source-or-installed-path": "Resolve Source or installed Lead paths through existing role-path and installation contracts",
+        "no-guessed-machine-path": "do not guess machine paths",
+        "bounded-trigger": "Unrelated work does not require this procedure",
+    }
+    duties = relationships(unit, clauses)
+    expected = (
+        clauses["mandatory-owner-and-triggers"] + ". "
+        + clauses["resolved-source-or-installed-path"] + "; "
+        + clauses["no-guessed-machine-path"] + ". "
+        + clauses["bounded-trigger"] + "."
+    )
+    # This short normative unit is closed: a correct prefix cannot license an exception.
+    duties["complete-referral"] = lexical(unit) == lexical(expected)
+    return duties
+
+
+def codex_hook_audit_unit(text: str) -> str:
+    procedure = selected_section(text, "Codex hook procedure")
+    return selected_unit(procedure, "Structural enforcement (auto-installed)",
+                         "Four PreToolUse audit hooks (warn-only).")
+
+
+RUNTIME_OWNER_ROWS = (
+    "| `$HOME/.agents/skills/` | Shared canonical installed skill tree for the current monorepo producer; "
+    "`.claude/skills/` is its logical projection where the producer and actual binding establish it. "
+    "Other layouts require their actual materialization owner. |",
+    "| `$HOME/.agents/contracts/` | Live canonical global Codex contract surface. |",
+    "| `$HOME/.codex/` | Codex configuration, hooks, native-role metadata, and retained "
+    "provider-root compatibility outputs; not the canonical skills/contracts tree. |",
+)
+
+
+def runtime_owner_rows_present(text: str) -> dict[str, bool]:
+    lines = selected_section(text, "Runtime Map").splitlines()
+    return {row: lines.count(row) == 1 for row in RUNTIME_OWNER_ROWS}
+
+
 class TestOrchestrationDisciplineContract(unittest.TestCase):
     _cache: dict[str, str] = {}
 
@@ -656,9 +831,12 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
             (cleanup_duties, "Operational and environment safety", "Resource lifecycle hygiene:", "all-exit-release", "/cancellation/timeout", "/cancellation"),
             (cleanup_duties, "Operational and environment safety", "Resource lifecycle hygiene:", "retained-termination-owner", "creator-retained process/Job handles or equivalent stable identity-bound ownership", "a process identifier"),
             (cleanup_duties, "Operational and environment safety", "Resource lifecycle hygiene:", "identifier-only-termination-refused", "never PID/ParentProcessId ancestry alone", "PID/ParentProcessId ancestry alone is sufficient"),
-            (baseline_duties, "Core delegation principles", "Keep phase flow;", "producing-scope-baseline", "producing scope/accepted baseline", "the aggregate worktree"),
-            (baseline_duties, "Core delegation principles", "Keep phase flow;", "independent-delta-review", "get own review, not retroactive falsification", "retroactively falsify earlier work"),
-            (baseline_duties, "Core delegation principles", "Keep phase flow;", "material-upstream-invalidation", "invalidates dependent `PASS`", "preserves dependent `PASS`"),
+            (baseline_duties, "Core delegation principles", "PASS advances;", "producing-scope-baseline", "producing scope/baseline", "the aggregate worktree"),
+            (baseline_duties, "Core delegation principles", "PASS advances;", "independent-delta-review", "later independent deltas get own review", "later independent deltas retroactively falsify earlier work"),
+            (baseline_duties, "Core delegation principles", "PASS advances;", "material-upstream-invalidation", "invalidates dependent PASS", "preserves dependent PASS"),
+            (baseline_duties, "Core delegation principles", "Workflow economy (binding):", "affected-re-review", "Re-review finding/delta only", "Do not re-review findings or deltas"),
+            (baseline_duties, "Core delegation principles", "Workflow economy (binding):", "affected-re-review", "full only new defect class/material upstream revision", "full re-review always required"),
+            (baseline_duties, "Core delegation principles", "PASS advances;", "material-upstream-invalidation", "dependent PASS", "dependent pass"),
         )
         for check, section, marker, duty, old, new in cases:
             with self.subTest(duty=duty, loss=old):
@@ -666,21 +844,214 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
                 self.assertEqual(unit.count(old), 1)
                 self.assertFalse(check(text.replace(unit, unit.replace(old, new, 1), 1))[duty])
 
+    def test_independent_review_guards_reject_weakened_owner_duties(self) -> None:
+        for owner in ("src.codex/skills/architecture-reviewer/SKILL.md",
+                      "src.claude/agents/architecture-reviewer.md"):
+            text = self._read(owner)
+            unit = selected_unit(text, "Anti-layering audit (multi-fix batch)", "Independent review:")
+            for duty, old, new in (
+                ("nonauthoring-reviewer", "nonauthoring reviewer", "authoring reviewer"),
+                ("required-commission", "Apply the shared commission rule", "Ignore the shared commission rule"),
+                ("qualified-model-preference", "alone is not a veto", "alone is a veto"),
+                ("task-and-host-restrictions", "Preserve any explicit task-specific engine requirement", "Ignore any explicit task-specific engine requirement"),
+                ("task-and-host-restrictions", "and actual host rejection or execution drift", "but ignore actual host rejection or execution drift"),
+                ("complete-owner-unit", "nonauthoring reviewer.", "nonauthoring reviewer unless none is available, when the author may review."),
+                ("complete-owner-unit", "execution drift.", "execution drift only when convenient."),
+                ("complete-owner-unit", "execution drift.", "execution drift. The author may substitute for an independent reviewer."),
+            ):
+                with self.subTest(owner=owner, duty=duty, loss=old):
+                    self.assertEqual(unit.count(old), 1)
+                    changed = text.replace(unit, unit.replace(old, new, 1), 1)
+                    self.assertFalse(independent_review_duties(changed)[duty])
+
+    def test_root_ledger_guards_reject_weakened_owner_duties(self) -> None:
+        text = self._read("src.codex/skills/lead/subagent-contracts.md")
+        unit = selected_unit(text, "agent-runs.jsonl format", "Only the root main conversation holding Lead owns")
+        for duty, old, new in (
+            ("root-ownership", "`agent-runs.jsonl`", "`Agent-runs.jsonl`"),
+            ("root-ownership", "owns `agent-runs.jsonl`", "owns all ledger files except `agent-runs.jsonl`"),
+            ("actual-root-execution", "actual native and already-admitted", "guessed native and unadmitted"),
+            ("bounded-wrapper-delegation", "an actual supported tracked provider wrapper", "any helper"),
+            ("bounded-wrapper-delegation", "its own pair", "any pair"),
+            ("specialist-no-append", "Specialists never append", "Specialists may append"),
+            ("direct-external-contract", "remains under [the external-dispatch contract](external-dispatch.md)", "bypasses the external-dispatch contract"),
+            ("actual-wrapper-evidence", "apply only when that wrapper actually ran", "apply even when that wrapper never ran"),
+            ("complete-owner-unit", "Specialists never append.", "Specialists never append unless Root is busy."),
+            ("complete-owner-unit", "that wrapper actually ran.", "that wrapper actually ran. Specialists may append on their own authority."),
+        ):
+            with self.subTest(duty=duty, loss=old):
+                self.assertEqual(unit.count(old), 1)
+                changed = text.replace(unit, unit.replace(old, new, 1), 1)
+                self.assertFalse(root_ledger_duties(changed)[duty])
+
+    def test_ledger_and_review_guards_preserve_scope_and_bounded_formatting(self) -> None:
+        for owner, check, section, marker, old, new in (
+            ("src.codex/skills/lead/subagent-contracts.md", root_ledger_duties,
+             "agent-runs.jsonl format", "Only the root main conversation holding Lead owns",
+             "Specialists never append", "Specialists may append"),
+            ("src.codex/skills/architecture-reviewer/SKILL.md", independent_review_duties,
+             "Anti-layering audit (multi-fix batch)", "Independent review:",
+             "nonauthoring reviewer", "authoring reviewer"),
+            ("src.claude/agents/architecture-reviewer.md", independent_review_duties,
+             "Anti-layering audit (multi-fix batch)", "Independent review:",
+             "nonauthoring reviewer", "authoring reviewer"),
+        ):
+            text = self._read(owner)
+            unit = selected_unit(text, section, marker)
+            with self.subTest(owner=owner, case="formatting"):
+                formatted = unit.replace(old, "**" + old.upper().replace(" ", "  ") + "**")
+                self.assertTrue(all(check(text.replace(unit, formatted, 1)).values()))
+            changed = text.replace(unit, unit.replace(old, new, 1), 1)
+            # Genuine phrases in unrelated sections, code examples, or example
+            # subsections cannot rescue the selected owning policy unit.
+            for decoy in ("\n## Unrelated policy\n", "\n```markdown\n", "\n## Example: historical policy\n"):
+                with self.subTest(owner=owner, case=decoy):
+                    suffix = "\n```\n" if "```" in decoy else "\n"
+                    self.assertFalse(all(check(changed + decoy + unit + suffix).values()))
+            for invalid in ("", text.replace(section, "Unrelated policy", 1),
+                            text + "\n## " + section + "\nDuplicate\n"):
+                with self.subTest(owner=owner, case="missing-or-duplicate-owner"):
+                    with self.assertRaises(AssertionError):
+                        check(invalid)
+
+    def test_compact_shared_guards_reject_distinct_obligation_losses(self) -> None:
+        text = self._read(SPINE)
+        cases = (
+            (quick_fix_duties, "Core delegation principles", "quick-fix:", "bounded-admission", "target/steps/bounds/owner/contracts", "target/steps/bounds/owner"),
+            (quick_fix_duties, "Core delegation principles", "quick-fix:", "bounded-admission", "no new dependency/risk owner", "new dependency/risk owner allowed"),
+            (quick_fix_duties, "Core delegation principles", "quick-fix:", "bounded-admission", "rollback/backup/oracle", "rollback/backup"),
+            (quick_fix_duties, "Core delegation principles", "quick-fix:", "minimal-recovery", "Before mutation only", "After mutation also"),
+            (quick_fix_duties, "Core delegation principles", "quick-fix:", "minimal-recovery", "lifecycle+4 recovery facts", "lifecycle without recovery facts"),
+            (quick_fix_duties, "Core delegation principles", "quick-fix:", "minimal-recovery", "work-items/active/<slug>/status.md", "work-items/Active/<slug>/status.md"),
+            (quick_fix_duties, "Core delegation principles", "quick-fix:", "no-heavy-preludes", "no roadmap/brief", "require roadmap/brief"),
+            (quick_fix_duties, "Core delegation principles", "quick-fix:", "same-item-reclassification", "enrich/reclassify same item", "create a replacement item"),
+            (quick_fix_duties, "Core delegation principles", "quick-fix:", "bounded-delivery", "One preflight, implement/QA, close/archive", "Repeated preflight, implement, leave open"),
+            (stop_rule_duties, "Scope and ownership discipline", "No logic duplication / no fix layering:", "second-cross-break-stop", "SECOND same-session fix", "THIRD same-session fix"),
+            (stop_rule_duties, "Scope and ownership discipline", "No logic duplication / no fix layering:", "second-cross-break-stop", "STOP all edits", "continue editing"),
+            (stop_rule_duties, "Scope and ownership discipline", "No logic duplication / no fix layering:", "owner-siblings-contract-diagnosis", "diagnose owner/siblings/shared contract", "patch only the visible symptom"),
+            (lead_dispatch_duties, "Core delegation principles", "$lead:", "root-only-dispatch-and-lifecycle", "root main conversation alone", "root and every specialist"),
+            (lead_dispatch_duties, "Core delegation principles", "$lead:", "no-specialist-or-delivery-owner", "never subagent/end-to-end coder/roadmap owner", "may be subagent/end-to-end coder/roadmap owner"),
+            (isolation_duties, "Operational and environment safety", "Parallel resource-surface isolation:", "full-overlap-surfaces", "throughout overlap", "only at launch"),
+            (isolation_duties, "Operational and environment safety", "Parallel resource-surface isolation:", "conflict-serialization-or-isolation", "Otherwise serialize or use", "Otherwise run concurrently or use"),
+            (isolation_duties, "Operational and environment safety", "Parallel resource-surface isolation:", "conflict-serialization-or-isolation", "explicitly requested validated isolation", "automatic unvalidated isolation"),
+            (isolation_duties, "Operational and environment safety", "Parallel resource-surface isolation:", "safe-read-only-or-disjoint-work", "Read/read and truly disjoint work are safe", "Read/read work is prohibited"),
+            (isolation_duties, "Operational and environment safety", "Parallel resource-surface isolation:", "observed-test-surfaces", "tests declare executed/installed/copied source/helpers as observed surfaces", "tests ignore executed source and helpers"),
+        )
+        surface_cases = tuple(
+            (isolation_duties, "Operational and environment safety", "Parallel resource-surface isolation:",
+             "full-overlap-surfaces", "read/write/execute/install/copy/baseline", "/".join(
+                 item for item in ("read", "write", "execute", "install", "copy", "baseline") if item != surface
+             ))
+            for surface in ("read", "write", "execute", "install", "copy", "baseline")
+        )
+        for check, section, marker, duty, old, new in cases + surface_cases:
+            with self.subTest(duty=duty, loss=old, replacement=new):
+                unit = selected_unit(text, section, marker)
+                self.assertTrue(check(text)[duty])
+                self.assertEqual(unit.count(old), 1)
+                changed = text.replace(unit, unit.replace(old, new, 1), 1)
+                # The old complete obligation in an example must not repair its live owner.
+                changed += "\n## Examples\n```markdown\n" + unit + "\n```\n"
+                self.assertFalse(check(changed)[duty])
+
+
+    def test_quick_fix_exact_path_cannot_come_from_another_clause(self) -> None:
+        text = self._read(SPINE)
+        unit = selected_unit(text, "Core delegation principles", "quick-fix:")
+        path = "work-items/active/<slug>/status.md"
+        self.assertEqual(unit.count(path), 1)
+        changed = unit.replace(path, "work-items/Active/<slug>/status.md", 1)
+        changed += " Example path: `" + path + "`."
+        self.assertFalse(quick_fix_duties(text.replace(unit, changed, 1))["minimal-recovery"])
+
+
+    def test_compact_shared_guards_reject_attached_weakening_suffixes(self) -> None:
+        text = self._read(SPINE)
+        for check, duty, phrase in (
+            (quick_fix_duties, "bounded-admission", "rollback/backup/oracle"),
+            (quick_fix_duties, "minimal-recovery", "with lifecycle+4 recovery facts"),
+            (quick_fix_duties, "no-heavy-preludes", "no roadmap/brief/Research/Design/Plan/consultant/pre-review"),
+            (baseline_duties, "producing-scope-baseline", "later independent deltas get own review"),
+            (baseline_duties, "material-upstream-invalidation", "material upstream change invalidates dependent PASS"),
+            (baseline_duties, "affected-re-review", "full only new defect class/material upstream revision"),
+            (stop_rule_duties, "second-cross-break-stop", "STOP all edits"),
+            (isolation_duties, "conflict-serialization-or-isolation", "explicitly requested validated isolation"),
+            (lead_dispatch_duties, "root-only-dispatch-and-lifecycle", "root main conversation alone dispatches/writes lifecycle"),
+            (fixed_value_duties, "single-owned-safe-defaults", "policy defaults need one owner/omission safety"),
+        ):
+            with self.subTest(duty=duty):
+                self.assertTrue(check(text)[duty])
+                self.assertEqual(text.count(phrase), 1)
+                changed = text.replace(phrase, phrase + " only when convenient", 1)
+                self.assertFalse(check(changed)[duty])
+
+
+    def test_fixed_value_guards_reject_distinct_losses_in_both_owners(self) -> None:
+        cases = (
+            ("classify-invariants", "Before changing classify", "Change without classification"),
+            ("classify-invariants", "may stay fixed", "must become variable"),
+            ("single-owned-safe-defaults", "one owner/omission safety", "multiple owners/omission safety"),
+            ("single-owned-safe-defaults", "one owner/omission safety", "one owner/no omission safety"),
+            ("variable-input-tests", "variability/omission tests", "variability tests only"),
+        )
+        for owner in (SPINE, "shared/external-prompt-governance.md"):
+            text = self._read(owner)
+            projection = owner != SPINE
+            for duty, old, new in cases:
+                with self.subTest(owner=owner, duty=duty, loss=old, replacement=new):
+                    self.assertTrue(fixed_value_duties(text, projection=projection)[duty])
+                    self.assertEqual(text.count(old), 1)
+                    changed = text.replace(old, new, 1)
+                    self.assertFalse(fixed_value_duties(changed, projection=projection)[duty])
+
+
+    def test_compact_guards_require_the_live_scoped_owner(self) -> None:
+        text = self._read(SPINE)
+        for check, section, marker in (
+            (quick_fix_duties, "Core delegation principles", "quick-fix:"),
+            (baseline_duties, "Core delegation principles", "PASS advances;"),
+            (stop_rule_duties, "Scope and ownership discipline", "No logic duplication / no fix layering:"),
+            (isolation_duties, "Operational and environment safety", "Parallel resource-surface isolation:"),
+            (lead_dispatch_duties, "Core delegation principles", "$lead:"),
+            (fixed_value_duties, "Scope and ownership discipline", "Anti-hardcoding and justified limits:"),
+        ):
+            with self.subTest(owner=marker):
+                self.assertTrue(all(check(text).values()))
+                unit = selected_unit(text, section, marker)
+                # Preserve the label but remove the obligation from its selected unit.
+                missing = text.replace(unit, "Unrelated policy.", 1)
+                for decoy in ("", "\n## Examples\n" + unit,
+                              "\n## Unrelated policy\n" + unit,
+                              "\n```markdown\n" + unit + "\n```\n"):
+                    with self.subTest(decoy=decoy[:24]):
+                        try:
+                            duties = check(missing + decoy)
+                        except AssertionError:
+                            continue
+                        self.assertFalse(all(duties.values()))
+
+
     def test_native_owner_guards_reject_distinct_route_collapses(self) -> None:
         text = self._read("src.codex/AGENTS.codex.md")
         unit = selected_unit(text, "Native Astra task-dependent route", "For ordinary native and skill-only roles,")
         cases = (
             ("ordinary-selectors", "describe_ordinary_native_role_options", "guess_role_options"),
-            ("fixed-role-discovery", "only when current host discovery does not report that agent type absent", "even when current host discovery reports that agent type absent"),
-            ("generic-unbound", "binds neither model nor effort", "binds a model and effort"),
-            ("explicit-selector-tuple", "tuple explicitly through a generic spawn", "tuple implicitly through inherited settings"),
+            ("task-profile-membership", "exact task/role profile membership", "a role label alone"),
+            ("conscious-selection", "consciously selects and supplies both model and effort", "implicitly inherits model and effort"),
+            ("omitted-explicit-default", "resolves to an explicit default pair", "inherits an unspecified pair"),
+            ("tuple-validation", "against task, role, host and configured controls", "against task and role alone"),
+            ("generic-explicit-route", "no `agent_type`", "a fixed `agent_type`"),
+            ("generic-explicit-route", 'fork_turns="none"', 'fork_turns="all"'),
+            ("generic-explicit-route", "carries the selected profession instructions", "omits the selected profession instructions"),
             ("bare-default-inheritance", "instead inherits provider subagent defaults or parent settings", "instead guarantees the policy tuple"),
-            ("policy-tuple-selector", "callers requiring the policy tuple must use the ordinary selector", "callers requiring the policy tuple may omit the selector"),
-            ("skill-only-generic", "A skill-only role has no TOML", "A skill-only role requires a fixed TOML"),
-            ("explicit-unpinned-route", "an unpinned fallback carrier", "a pinned fallback carrier"),
+            ("policy-tuple-selector", "policy-requiring callers use the ordinary selector", "policy-requiring callers omit the ordinary selector"),
             ("custom-pin-no-bypass", "does not bypass higher-precedence", "bypasses higher-precedence"),
             ("custom-pin-local-conflict", "not universal model unavailability", "universal model unavailability"),
-            ("named-discovery-denial", "denies that route with no fallback", "admits that route through fallback"),
+            ("complete-custom-controls", "complete configured tuple", "partial configured tuple"),
+            ("partial-controls-unresolved", "partial controls remain unresolved rather than being filled from factory defaults", "partial controls are filled from factory defaults"),
+            ("custom-bytes-preserved", "preserves without reserializing TOML", "rewrites by reserializing TOML"),
+            ("full-host-discovery", "never a desired-model pre-filter that hides alternatives", "using a desired-model pre-filter that hides alternatives"),
+            ("generic-capability-unknown", "generic ordinary invocations name no required agent type", "ordinary invocations require a fixed named agent type"),
             ("selector-nonexecution", "The selector launches nothing", "The selector launches the worker"),
             ("requested-vs-actual", "requested and resolved controls separately from actual runtime metadata", "requested and resolved controls as actual runtime metadata"),
             ("missing-actual", "treats missing actual metadata as `unspecified by runtime`", "treats missing actual metadata as the requested profile"),
@@ -696,7 +1067,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
         unit = selected_unit(text, "Parallelism rule", "Dispatch economics:")
         for duty, old, new in (
             ("qualified-defaults", "candidates rather than blanket authority", "exclusive blanket authority"),
-            ("floors-corridors", "every effort floor and corridor", "selected effort settings"),
+            ("profile-policy-owner", "exact profile membership and separate special-corridor/explicit-profile rules", "selected effort settings"),
             ("actual-override-evidence", "returned actual runtime metadata confirms", "the requested profile confirms"),
             ("authoritative-referral", "apply `Native Astra task-dependent route` from the installed `AGENTS.md`; do not restate or widen that owner here", "apply the local default profile"),
         ):
@@ -715,23 +1086,31 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
                 duties = native_consumer_duties(changed, "Parallelism rule", "Dispatch economics:", referral_only=True)
                 self.assertTrue(duties["authoritative-referral"])
                 self.assertFalse(duties["no-contrary-route"])
-        projected = self._read("src.codex/skills/lead/operating-model.md")
-        marker = "Resolve the requested route before launch"
-        unit = selected_unit(projected, "External routing order", marker)
-        for duty, old, new in (
-            ("generic-unbound", "generic fallback TOML binds no model or effort", "generic fallback TOML binds a fixed model and effort"),
-            ("selector-tuple", "ordinary selector explicitly emits", "ordinary selector implicitly inherits"),
-            ("bare-default-inheritance", "Direct bare `default` calls inherit provider/parent settings instead", "Direct bare `default` calls guarantee the policy tuple instead"),
-            ("authoritative-referral", "installed `Native Astra task-dependent route` owns explicit-tuple and custom-pin conflict semantics", "the local default profile owns all route semantics"),
+        for owner, section, marker, reference in (
+            ("src.codex/skills/lead/operating-model.md", "External routing order", "Resolve the requested route before launch", False),
+            ("references-codex/subagent-operating-model.md", "Codex-specific runtime notes", "Ordinary discovery presents", True),
         ):
-            with self.subTest(projected_duty=duty):
-                self.assertEqual(unit.count(old), 1)
-                changed = projected.replace(unit, unit.replace(old, new, 1), 1)
-                self.assertFalse(native_consumer_duties(changed, "External routing order", marker)[duty])
+            projected = self._read(owner)
+            unit = selected_unit(projected, section, marker)
+            ownership = ("exact profile membership and separate special-corridor/explicit-profile rules"
+                         if reference else "every effort floor and corridor")
+            for duty, old, new in (
+                ("profile-policy-owner", ownership, "selected effort settings"),
+                ("ordinary-discovery", "admissible choices and a default suggestion", "an obligatory fixed native role"),
+                ("conscious-selection", "consciously selects and supplies both model and effort", "inherits a model and effort"),
+                ("omitted-explicit-default", "resolves to an explicit default pair", "inherits an unspecified pair"),
+                ("bare-default-inheritance", "Direct bare `default` calls inherit provider/parent settings instead", "Direct bare `default` calls guarantee the policy tuple instead"),
+                ("authoritative-referral", "installed `Native Astra task-dependent route` owns explicit-tuple and custom-pin conflict semantics", "the local default profile owns all route semantics"),
+                ("actual-override-evidence", "returned actual runtime metadata confirms", "the requested profile confirms"),
+            ):
+                with self.subTest(owner=owner, projected_duty=duty):
+                    self.assertEqual(unit.count(old), 1)
+                    changed = projected.replace(unit, unit.replace(old, new, 1), 1)
+                    self.assertFalse(native_consumer_duties(changed, section, marker, reference=reference)[duty])
 
     def test_native_scope_and_identifiers_allow_only_bounded_formatting(self) -> None:
         text = self._read("src.codex/AGENTS.codex.md")
-        formatted = text.replace("An omitted choice", "**AN**   OMITTED CHOICE").replace("Claim an override", "CLAIM an override").replace(
+        formatted = text.replace("An omitted pair", "**AN**   OMITTED PAIR").replace("Claim an override", "CLAIM an override").replace(
             "For ordinary native and skill-only roles", "**FOR** ordinary native and skill-only   roles"
         )
         self.assertTrue(all(native_route_duties(formatted).values()))
@@ -761,13 +1140,22 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
         self.assertFalse(identifier_present("", ""))
 
     def test_normative_sentences_present_in_every_owner(self) -> None:
-        """Preserve other pins and independently diagnose the three shared duty families."""
+        """Preserve exact owner pins and diagnose each selected structural duty."""
         for gap_id, substring, owners in PINS:
             for owner in owners:
                 with self.subTest(gap=gap_id, owner=owner):
                     text = self._read(owner)
-                    if owner == SPINE and gap_id in SHARED_DUTY_CHECKS:
-                        for duty, present in SHARED_DUTY_CHECKS[gap_id](text).items():
+                    check = (
+                        SHARED_DUTY_CHECKS.get(gap_id) if owner == SPINE else None
+                    )
+                    if gap_id == "batch-b-hardcoding":
+                        check = lambda value: fixed_value_duties(value, projection=owner != SPINE)
+                    elif gap_id == "fix-class-invariant-independent-review":
+                        check = independent_review_duties
+                    elif gap_id == "root-owned-ledger":
+                        check = root_ledger_duties
+                    if check is not None:
+                        for duty, present in check(text).items():
                             with self.subTest(gap=gap_id, owner=owner, duty=duty):
                                 self.assertTrue(present, f"[{gap_id}] {owner}: missing or inverted duty {duty}")
                     else:
@@ -867,19 +1255,19 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
         self.assertNotIn("Native role definitions supply fixed installed profiles", shared)
 
     def test_codex_model_and_effort_truth_is_toml_and_policy_backed(self) -> None:
-        """Keep fixed, generic-selector, bare-default and actual-metadata routes distinct."""
+        """Keep explicit selection, configured controls and observed runtime truth distinct."""
         authoritative = "src.codex/AGENTS.codex.md"
         for duty, present in native_route_duties(self._read(authoritative)).items():
             with self.subTest(owner=authoritative, duty=duty):
                 self.assertTrue(present, f"{authoritative}: missing or contradicted native route {duty}")
         consumers = (
-            ("src.codex/skills/lead/SKILL.md", "Parallelism rule", "Dispatch economics:", True),
-            ("src.codex/skills/lead/operating-model.md", "External routing order", "Resolve the requested route before launch", False),
-            ("references-codex/subagent-operating-model.md", "Codex-specific runtime notes", "Fixed Codex native specialist TOMLs", False),
+            ("src.codex/skills/lead/SKILL.md", "Parallelism rule", "Dispatch economics:", True, False),
+            ("src.codex/skills/lead/operating-model.md", "External routing order", "Resolve the requested route before launch", False, False),
+            ("references-codex/subagent-operating-model.md", "Codex-specific runtime notes", "Ordinary discovery presents", False, True),
         )
-        for owner, section, marker, referral_only in consumers:
+        for owner, section, marker, referral_only, reference in consumers:
             for duty, present in native_consumer_duties(
-                self._read(owner), section, marker, referral_only=referral_only
+                self._read(owner), section, marker, referral_only=referral_only, reference=reference
             ).items():
                 with self.subTest(owner=owner, duty=duty):
                     self.assertTrue(present, f"{owner}: missing or contradicted native consumer duty {duty}")
@@ -1086,15 +1474,9 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
 
     def test_quick_fix_handles_the_exact_tool_update_incident(self) -> None:
         spine = self._read(SPINE)
-        for clause in (
-            "target+steps",
-            "bounds",
-            "ownership/contracts",
-            "no new dependency/risk owner",
-            "rollback/backup",
-            "oracle",
-        ):
-            self.assertIn(clause, spine)
+        for duty, present in quick_fix_duties(spine).items():
+            with self.subTest(duty=duty):
+                self.assertTrue(present)
 
         claude_template = json.loads(self._read(CLAUDE_QUICK_FIX_TEMPLATE))
         self.assertFalse(claude_template["requiresLead"])
@@ -1114,14 +1496,10 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
 
     def test_quick_fix_has_minimal_pre_mutation_recovery_without_heavy_preludes(self) -> None:
         spine = self._read(SPINE)
-        self.assertIn(
-            "Before mutation create only `work-items/active/<slug>/status.md`",
-            spine,
-        )
-        self.assertIn(
-            "Failed/unclear => re-classify/enrich same item",
-            spine,
-        )
+        duties = quick_fix_duties(spine)
+        for duty in ("minimal-recovery", "no-heavy-preludes", "same-item-reclassification"):
+            with self.subTest(duty=duty):
+                self.assertTrue(duties[duty])
 
         installed_mirrors = (
             "AGENTS.md",
@@ -1202,8 +1580,9 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
 
     def test_quick_fix_rejects_a_contract_change(self) -> None:
         spine = self._read(SPINE)
-        self.assertIn("ownership/contracts", spine)
-        self.assertIn("Failed/unclear => re-classify/enrich same item", spine)
+        duties = quick_fix_duties(spine)
+        self.assertTrue(duties["bounded-admission"])
+        self.assertTrue(duties["same-item-reclassification"])
 
     def test_fact_lookup_routes_by_decision_need_and_preserves_active_task_continuity(self) -> None:
         direct_role_priority = {
@@ -1440,18 +1819,85 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
             "agent-run-ledger still recommends retired orchestration metadata",
         )
 
+    def test_codex_hook_audit_has_a_mandatory_current_owner_path(self) -> None:
+        root = self._read("src.codex/AGENTS.codex.md")
+        for duty, present in codex_hook_referral_duties(root).items():
+            with self.subTest(duty=duty):
+                self.assertTrue(present, f"Codex hook referral missing {duty}")
+        audit = codex_hook_audit_unit(self._read("src.codex/skills/lead/operating-model.md"))
+        pin = next(pin for gap, pin, _ in PINS if gap == "A2-doc")
+        self.assertIn(pin, audit)
+
+    def test_codex_hook_referral_rejects_lost_or_misplaced_duties(self) -> None:
+        root = self._read("src.codex/AGENTS.codex.md")
+        unit = selected_unit(root, "Codex hook requirements and mandatory procedure", "Mandatory read:")
+        self.assertTrue(all(codex_hook_referral_duties(root).values()))
+        for before, after in (
+            ("Any actor, regardless of profession", "Only Lead"),
+            ("or diagnoses behavior based on hook contracts ", ""),
+            ("MUST read", "may optionally read"),
+            ("existing Lead operating-model", "old provider guide"),
+            ("existing role-path and installation contracts", "current directory"),
+            ("do not guess machine paths", "guess machine paths"),
+            ("Unrelated work does not require this procedure", "All work requires this procedure"),
+        ):
+            with self.subTest(loss=before):
+                self.assertIn(before, unit)
+                mutant = root.replace(unit, unit.replace(before, after, 1), 1)
+                self.assertFalse(all(codex_hook_referral_duties(mutant).values()))
+        required_read = "MUST read the Codex hook procedure in the existing Lead operating-model"
+        for changed in (
+            unit.replace(required_read, required_read + " unless the current actor is busy", 1),
+            unit + " Actors may ignore this procedure.",
+            unit + " Source or installed Lead paths may instead be guessed.",
+            unit.replace("does not require this procedure", "does not require this procedure unless requested by Lead", 1),
+        ):
+            with self.subTest(case="weakening-or-contrary-addition", changed=changed):
+                self.assertNotEqual(changed, unit)
+                mutant = root.replace(unit, changed, 1)
+                self.assertFalse(codex_hook_referral_duties(mutant)["complete-referral"])
+        formatted = root.replace(unit, unit.replace(" ", "  \n"), 1)
+        self.assertTrue(all(codex_hook_referral_duties(formatted).values()))
+        for decoy in ("", "\n## Unrelated policy\n**Mandatory read:** " + unit,
+                      "\n```markdown\n**Mandatory read:** " + unit + "\n```"):
+            with self.subTest(case="missing-live-referral", decoy=decoy):
+                with self.assertRaises(AssertionError):
+                    codex_hook_referral_duties(root.replace("**Mandatory read:** " + unit, "", 1) + decoy)
+        owner = self._read("src.codex/skills/lead/operating-model.md")
+        pin = next(pin for gap, pin, _ in PINS if gap == "A2-doc")
+        self.assertIn(pin, codex_hook_audit_unit(owner))
+        mutant = owner.replace(pin, "audit disabled", 1) + "\n## Historical copy\n" + pin
+        self.assertNotIn(pin, codex_hook_audit_unit(mutant))
+
+    def test_runtime_owner_map_rejects_lost_boundaries_and_decoy_rows(self) -> None:
+        guide = self._read("docs/new-session-guide.md")
+        self.assertTrue(all(runtime_owner_rows_present(guide).values()))
+        for row in RUNTIME_OWNER_ROWS:
+            for decoy in ("", "\n## Historical copy\n" + row,
+                          "\n```markdown\n" + row + "\n```"):
+                with self.subTest(row=row, decoy=decoy):
+                    mutant = guide.replace(row, "", 1) + decoy
+                    self.assertFalse(runtime_owner_rows_present(mutant)[row])
+        skill_row = RUNTIME_OWNER_ROWS[0]
+        for before, after in (
+            ("for the current monorepo producer", "for all producers"),
+            ("where the producer and actual binding establish it", "unconditionally"),
+            ("Other layouts require their actual materialization owner.", ""),
+            ("$HOME/.agents/skills/", "$HOME/.codex/skills/"),
+            (".claude/skills/", ".claude/contracts/"),
+        ):
+            with self.subTest(loss=before):
+                self.assertIn(before, skill_row)
+                mutant = guide.replace(skill_row, skill_row.replace(before, after, 1), 1)
+                self.assertFalse(runtime_owner_rows_present(mutant)[skill_row])
+
     def test_runtime_and_tracking_docs_name_current_owners(self) -> None:
         guide = self._read("docs/new-session-guide.md")
-        for runtime_row in (
-            "| `$HOME/.agents/skills/` | Live canonical global Codex skill surface. |",
-            "| `$HOME/.agents/contracts/` | Live canonical global Codex contract surface. |",
-            "| `$HOME/.codex/` | Codex configuration, hooks, native-role metadata, and retained "
-            "provider-root compatibility outputs; not the canonical skills/contracts tree. |",
-        ):
+        for runtime_row, present in runtime_owner_rows_present(guide).items():
             with self.subTest(runtime_row=runtime_row):
                 self.assertTrue(
-                    runtime_row in guide,
-                    f"new-session runtime map missing row {runtime_row!r}",
+                    present,
+                    f"new-session runtime map missing or duplicate row {runtime_row!r}",
                 )
         retired_runtime_claim = "| `~/.agents` | Legacy or stale personal skill surface."
         self.assertTrue(

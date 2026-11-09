@@ -4,6 +4,10 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-09
 
+- Workflow regression checks now follow the published shared-rule wording, Root-owned execution ledger and Codex hook-procedure owner instead of obsolete duplicate text. Scoped negative checks retain quick-fix recovery, review baselines, wrapper provenance, nonauthoring review, mandatory hook navigation and qualified runtime-tree ownership. This updates verification only; production policy, routing and installation behavior are unchanged.
+
+- Native routing regression checks now follow the published task-first ordinary route instead of requiring retired fixed named-role dispatch. The checks preserve explicit model/effort selection, current configuration controls, policy membership and observed runtime evidence, with negative cases for lost safeguards in the Codex owner and its references. This repairs stale verification failures without changing dispatch behavior or launching providers.
+
 - Make ordinary artifact disposition trash-first: promptly move confirmed unnecessary, quiescent material to trash without trying deletion first. Trash must be safe for complete manual emptying and hold no required evidence or recovery dependency; permanent deletion remains separately authorized. Current owner, host-denial, lifecycle and read-only cleanup-coordinator safeguards remain in force. The canonical shared cleanup skill changes while the historical Claude migration source remains unchanged. The installer accepts only the exact previous stock canonical cleanup tree for upgrade; edited or structurally different trees still refuse.
 
 - Committed legacy-candidate cleanup now uses the held lifecycle owner for file and directory retirement, keeping retained observations current after each effect. Partial cleanup preserves the committed candidate and exact replay marker; changed source, marker or target material refuses disposal. Source-snapshot diagnostics are now documented. This source correction does not lift the existing POSIX installer holds or qualify native race behavior.
