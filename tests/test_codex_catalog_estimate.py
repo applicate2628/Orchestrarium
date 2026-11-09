@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 from pathlib import Path
 import runpy
@@ -92,6 +93,29 @@ class CatalogEstimateTests(unittest.TestCase):
                     self.assertEqual(code, 0)
                     self.assertIn("RESULT: ESTIMATE", output)
                     self.assertNotIn("Runtime catalog:", output)
+
+    def observe_description(self, description):
+        block = ("<skills_instructions>\n- `r0` = `" + (self.home / "skills").as_posix()
+                 + "`\n- alpha: " + description + " (file: r0/alpha/SKILL.md)\n</skills_instructions>")
+        payload = json.dumps([{"content": [{"type": "input_text", "text": block}]}])
+        return self.module["parse_runtime_prompt_input"](payload, self.repo, self.home / "skills")
+
+    def test_equal_or_longer_replacement_is_not_shortening(self):
+        for description in ("y" * 80, "y" * 81, "x" * 80 + "extra"):
+            with self.subTest(description=description):
+                observation = self.observe_description(description)
+                self.assertEqual(observation.status, "description-mismatch")
+                self.assertEqual(observation.diagnostic, "CATALOG-DESCRIPTION-MISMATCH")
+                code, output = self.invoke([], observation)
+                self.assertEqual(code, 1)
+                self.assertIn("RESULT: FAIL", output)
+                self.assertNotIn("WARNING: CATALOG-DESCRIPTION-SHORTENED", output)
+
+    def test_matching_and_shorter_description_contract_unchanged(self):
+        self.assertEqual(self.observe_description("x" * 80).status, "complete")
+        short = self.observe_description("short alpha")
+        self.assertEqual(short.status, "shortened")
+        self.assertEqual(short.shortened_chars, 69)
 
     def test_zero_context_is_still_only_an_estimate(self):
         code, output = self.invoke(self.custom_args() + ["--context-window", "0"])

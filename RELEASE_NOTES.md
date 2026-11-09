@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-09
 
+- Runtime catalog validation now rejects differing descriptions that are equal in length or longer than the bound local description instead of reporting successful shortening with zero characters removed. Exact matches and the existing shorter-description warning contract remain unchanged; this diagnostic does not establish why the observed content differs or prove semantic equivalence of shorter text.
+
 - Explicit catalog-budget calibration flags now stay in offline estimate mode even when their values equal the defaults, including the legacy high-threshold alias. This prevents an explicitly parameterized estimate from unexpectedly reaching Codex runtime discovery; the no-argument runtime mode remains unchanged.
 
 - Provider ownership records now reject case variants of the reserved receipt filename, matching the existing case-insensitive alias policy. Fresh payload filtering also excludes these variants. This closes a validation gap for Windows-style name aliases without adding ownership authority or changing filesystem operations.

@@ -270,6 +270,8 @@ def parse_runtime_prompt_input(
                 return _runtime_failure("binding-failure", "CATALOG-RUNTIME-BINDING")
             rendered_pack.add(skill_directory)
         if prompt_description != source_description:
+            if len(prompt_description) >= len(source_description):
+                return _runtime_failure("description-mismatch", "CATALOG-DESCRIPTION-MISMATCH")
             shortened_count += 1
             shortened_chars += max(0, len(source_description) - len(prompt_description))
 
