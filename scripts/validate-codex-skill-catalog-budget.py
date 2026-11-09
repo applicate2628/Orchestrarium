@@ -53,7 +53,9 @@ KEY_RE = re.compile(r"^([A-Za-z0-9_-]+):\s*(.*)$")
 BLOCK_INDICATORS = (">", ">-", ">+", "|", "|-", "|+")
 
 
-def _parse_frontmatter_scalars(fm_text: str) -> dict[str, str]:
+def _parse_frontmatter_scalars(
+    fm_text: str, *, runtime_metadata: bool = False
+) -> dict[str, str]:
     """Minimal YAML frontmatter scalar parser.
 
     Handles plain/quoted single-line values and ``>``/``>-``/``>+``/``|``/
@@ -77,6 +79,17 @@ def _parse_frontmatter_scalars(fm_text: str) -> dict[str, str]:
             continue
         key, rest = m.group(1), m.group(2).rstrip("\r")
         rest_stripped = rest.strip()
+        if runtime_metadata:
+            # Keep quoted # characters, but do not count a YAML comment as
+            # evidence that an optional string field has a value.
+            quoted = re.fullmatch(
+                r'''("(?:[^"\\]|\\.)*"|'(?:[^']|'')*')(?:\s+\#.*)?''',
+                rest_stripped,
+            )
+            if quoted:
+                rest_stripped = quoted.group(1)
+            elif not rest_stripped.startswith(("'", '"')):
+                rest_stripped = re.split(r"(?:^|\s+)#", rest_stripped, maxsplit=1)[0]
         if rest_stripped in BLOCK_INDICATORS:
             style, chomp = rest_stripped[0], rest_stripped[1:]
             block_lines: list[str] = []
@@ -89,6 +102,8 @@ def _parse_frontmatter_scalars(fm_text: str) -> dict[str, str]:
                     i += 1
                     continue
                 cur_indent = len(bl) - len(bl.lstrip(" "))
+                if runtime_metadata and cur_indent == 0:
+                    break
                 if indent is None:
                     indent = cur_indent
                 if cur_indent < indent:
@@ -121,13 +136,22 @@ def _parse_frontmatter_scalars(fm_text: str) -> dict[str, str]:
         val = rest_stripped
         if len(val) >= 2 and val[0] == val[-1] and val[0] in ("'", '"'):
             val = val[1:-1]
+        elif runtime_metadata and val in ("~", "null", "Null", "NULL"):
+            val = ""
         result[key] = val
         i += 1
     return result
 
 
 def _read_name_description(skill_md: Path, *, strict: bool = False) -> tuple[str, str]:
-    """Read metadata; strict mode rejects read and decoding failures."""
+    """Read metadata; runtime evidence needs readable frontmatter/description.
+
+    Strict mode is not a general YAML validator. It prevents the historical
+    estimator's absent-description defaults from becoming runtime evidence.
+    Codex 0.167 permits missing/blank names and uses the directory name:
+    openai/codex@086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a,
+    codex-rs/skills/src/parser.rs and codex-rs/ext/skills/src/loader/host.rs.
+    """
     try:
         text = skill_md.read_text(
             encoding="utf-8", errors="strict" if strict else "replace"
@@ -136,10 +160,28 @@ def _read_name_description(skill_md: Path, *, strict: bool = False) -> tuple[str
         if strict:
             raise
         return skill_md.parent.name, ""
-    m = FRONTMATTER_RE.search(text)
-    if not m:
-        return skill_md.parent.name, ""
-    fm = _parse_frontmatter_scalars(m.group(1))
+    if strict:
+        # The provider trims each fence line; an exact-prefix regular
+        # expression would reject otherwise valid whitespace-padded fences.
+        lines = text.split("\n")
+        closing = next((i for i, line in enumerate(lines[1:], 1)
+                        if line.strip() == "---"), None)
+        if lines[0].strip() != "---" or closing is None:
+            raise ValueError("Skill metadata frontmatter is unavailable")
+        frontmatter = "\n".join(lines[1:closing])
+    else:
+        match = FRONTMATTER_RE.search(text)
+        if not match:
+            return skill_md.parent.name, ""
+        frontmatter = match.group(1)
+    fm = _parse_frontmatter_scalars(frontmatter, runtime_metadata=strict)
+    if strict:
+        name = " ".join(fm.get("name", "").split())
+        name = name or " ".join(skill_md.parent.name.split()) or "skill"
+        description = " ".join(fm.get("description", "").split())
+        if not description:
+            raise ValueError("Skill description is unavailable or empty")
+        return name, description
     name = fm.get("name", skill_md.parent.name)
     description = fm.get("description", "")
     return name, description

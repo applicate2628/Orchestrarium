@@ -78,6 +78,13 @@ def test_validator_script_exists() -> None:
     assert VALIDATOR.is_file(), f"validator missing: {VALIDATOR}"
 
 
+def test_shipped_pack_has_required_runtime_metadata() -> None:
+    module = _module()
+    identities = module["_pack_identities"](REPO_SKILLS)
+    assert identities
+    assert identities == {name: name for name in module["_pack_names"](REPO_SKILLS)}
+
+
 def test_runtime_observation_distinguishes_shortening_from_identity_omission(
     tmp_path: Path,
 ) -> None:
@@ -298,6 +305,103 @@ def test_runtime_observation_rejects_invalid_utf8_skill_evidence(
     assert observed.diagnostic == "CATALOG-RUNTIME-BINDING"
 
 
+@pytest.mark.parametrize("invalid_surface", ("source", "installed"))
+@pytest.mark.parametrize(
+    ("metadata", "fallback_description"),
+    (
+        ("# No frontmatter\n", ""),
+        ("---\nname: alpha\n---\n", ""),
+        ('---\nname: alpha\ndescription: ""\n---\n', ""),
+        ('---\nname: alpha\ndescription: null\n---\n', "null"),
+        ('---\nname: alpha\ndescription: # comment\n---\n', "# comment"),
+        ('---\nname: alpha\ndescription: "" # comment\n---\n', '"" # comment'),
+        ('---\nname: alpha\ndescription: >-\nmetadata: abc\n---\n', "metadata: abc"),
+    ),
+    ids=("no-frontmatter", "no-description", "empty-description", "null-description",
+         "comment-only", "quoted-empty-with-comment", "empty-block"),
+)
+def test_runtime_observation_requires_actual_skill_metadata(
+    tmp_path: Path,
+    invalid_surface: str,
+    metadata: str,
+    fallback_description: str,
+) -> None:
+    repo_skills = tmp_path / "repo-skills"
+    installed = tmp_path / "installed"
+    source = _write_skill(repo_skills, "alpha", "alpha description")
+    runtime = _write_skill(installed, "alpha", "alpha description")
+    invalid = source if invalid_surface == "source" else runtime
+    invalid.write_text(metadata, encoding="utf-8")
+    description = "alpha description" if invalid_surface == "source" else fallback_description
+    observed = _module()["parse_runtime_prompt_input"](
+        _prompt_input(_skills_text(installed, [("alpha", description)])),
+        repo_skills,
+        installed,
+    )
+
+    assert observed.status == "binding-failure"
+    assert observed.diagnostic == "CATALOG-RUNTIME-BINDING"
+
+
+@pytest.mark.parametrize(
+    "name_field",
+    ("", "name: null\n", "name: ~\n", 'name: ""\n', 'name: "  "\n',
+     "name: # comment\n"),
+    ids=("absent", "null", "tilde", "empty", "blank", "comment-only"),
+)
+def test_runtime_observation_accepts_provider_default_skill_name(
+    tmp_path: Path, name_field: str
+) -> None:
+    # Pinned Codex parser_tests.rs uses_default_name_and_requires_description;
+    # the host loader supplies the sanitized parent directory as default_name.
+    repo_skills = tmp_path / "repo-skills"
+    installed = tmp_path / "installed"
+    for root in (repo_skills, installed):
+        path = _write_skill(root, "alpha", "alpha description")
+        path.write_text(
+            f'---\n{name_field}description: "alpha description"\n---\n',
+            encoding="utf-8",
+        )
+    observed = _module()["parse_runtime_prompt_input"](
+        _prompt_input(_skills_text(installed, [("alpha", "alpha description")])),
+        repo_skills,
+        installed,
+    )
+
+    assert observed.status == "complete"
+    assert observed.diagnostic == "CATALOG-COMPLETE"
+
+
+def test_runtime_metadata_preserves_quoted_null_and_sanitizes_whitespace(
+    tmp_path: Path,
+) -> None:
+    path = _write_skill(tmp_path, "alpha", "alpha description")
+    path.write_text('---\nname: "null"\ndescription: "  alpha   description  "\n---\n', encoding="utf-8")
+    read_metadata = _module()["_read_name_description"]
+    assert read_metadata(path, strict=True) == ("null", "alpha description")
+    assert read_metadata(path) == ("null", "  alpha   description  ")
+    path.write_text('---\nname: alpha\ndescription: "null"\n---\n', encoding="utf-8")
+    assert read_metadata(path, strict=True) == ("alpha", "null")
+    path.write_text('---\nname: alpha\ndescription: "keep # content" # comment\n---\n', encoding="utf-8")
+    assert read_metadata(path, strict=True) == ("alpha", "keep # content")
+    path.write_text('---\nname: alpha\ndescription: >- # comment\n  alpha\n  description\nmetadata: abc\n---\n', encoding="utf-8")
+    assert read_metadata(path, strict=True) == ("alpha", "alpha description")
+
+
+def test_runtime_observation_accepts_provider_whitespace_fences(tmp_path: Path) -> None:
+    repo_skills = tmp_path / "repo-skills"
+    installed = tmp_path / "installed"
+    for root in (repo_skills, installed):
+        path = _write_skill(root, "alpha", "alpha description")
+        path.write_text('  --- \t\nname: alpha\ndescription: alpha description\n\t---  \n', encoding="utf-8")
+    observed = _module()["parse_runtime_prompt_input"](
+        _prompt_input(_skills_text(installed, [("alpha", "alpha description")])),
+        repo_skills,
+        installed,
+    )
+    assert observed.status == "complete"
+
+
 @pytest.mark.parametrize(
     ("observation", "expected_code", "expected_marker"),
     (
@@ -315,6 +419,11 @@ def test_runtime_observation_rejects_invalid_utf8_skill_evidence(
             ("unavailable", "CATALOG-RUNTIME-UNAVAILABLE"),
             1,
             "FAIL: CATALOG-RUNTIME-UNAVAILABLE",
+        ),
+        (
+            ("binding-failure", "CATALOG-RUNTIME-BINDING"),
+            1,
+            "FAIL: CATALOG-RUNTIME-BINDING",
         ),
     ),
 )
@@ -373,6 +482,28 @@ def test_historical_estimate_metadata_keeps_lossy_read_fallbacks(tmp_path: Path)
     invalid = _write_skill(tmp_path, "beta", "beta description")
     invalid.write_bytes(b"---\nname: beta\ndescription: beta\xff\n---\n")
     assert module["_read_name_description"](invalid) == ("beta", "beta\ufffd")
+
+
+@pytest.mark.parametrize(
+    ("metadata", "estimate"),
+    (
+        ("# No frontmatter\n", ("alpha", "")),
+        ("---\nname: alpha\n---\n", ("alpha", "")),
+        ('---\nname: alpha\ndescription: "  "\n---\n', ("alpha", "  ")),
+        ('---\nname: alpha\ndescription: null\n---\n', ("alpha", "null")),
+    ),
+    ids=("no-frontmatter", "no-description", "blank-description", "null-description"),
+)
+def test_required_metadata_is_strict_only_for_runtime_evidence(
+    tmp_path: Path, metadata: str, estimate: tuple[str, str]
+) -> None:
+    skill_md = _write_skill(tmp_path, "alpha", "alpha description")
+    skill_md.write_text(metadata, encoding="utf-8")
+    read_metadata = _module()["_read_name_description"]
+
+    assert read_metadata(skill_md) == estimate
+    with pytest.raises(ValueError):
+        read_metadata(skill_md, strict=True)
 
 
 def test_large_estimate_warns_without_runtime_failure(tmp_path: Path) -> None:
