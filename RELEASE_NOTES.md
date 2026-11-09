@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-09
+
+- Resume the admitted task under a user-enabled Goal, including a newly created Goal after no-Goal work, after a fulfilled one-off no-Goal, parking or stop-after-current-run request instead of reviving that old hold from recovery notes. Shared guidance, live Lead recovery and both clients' reminders now reconcile current authority, keep real later stops and separate safety/publication/spending approvals, and require evidence before stopping all remaining work. Deterministic source-contract and negative-mutation regressions cover the reported sequence; no live model or native Goal state transition is claimed.
+
 ## 2026-11-08
 
 - Extend that negative admission boundary to the remaining selected mutable-path entry points for directory/bootstrap, file migration, projection creation and migrated-file rollback. These private non-Windows routes now refuse before observations or effects, including potential no-ops and dry runs, without creating a new recovery transaction or changing Windows bodies. Full internal-primitive, staging and uninstall coverage remains unqualified.
