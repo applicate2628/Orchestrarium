@@ -47,11 +47,13 @@ Agent-owned residue includes temporary/generated artifacts, half-finished altern
 
 ### Ephemeral volume hysteresis
 
-Only owner/config-identified disposable material on an ephemeral temp volume may use disposition `ephemeral-volume-exempt`. Let `freeRatio = freeCapacityBytes / volumeCapacityBytes`.
+Trash-first placement is independent of free space. This exemption concerns retention of already-trashed disposable bytes, not leaving obsolete working artifacts in place or granting automatic deletion.
+
+Only owner/config-identified disposable material already in trash on an ephemeral temp volume may use disposition `ephemeral-volume-exempt`. Let `freeRatio = freeCapacityBytes / volumeCapacityBytes`.
 
 - Require readable `volumeCapacityBytes > 0` and `freeCapacityBytes` within `[0, volumeCapacityBytes]`.
 - When `freeRatio >= 0.20`, classified disposable material may remain exempt. Exactly `0.20` does not trigger cleanup.
-- When `freeRatio < 0.20`, route action to the existing owner. The owner may delete only classified disposable material until `freeRatio >= 0.30` or candidates are exhausted. Exactly `0.30` satisfies the preferred target.
+- When `freeRatio < 0.20`, route action to the existing owner. The owner first moves eligible material to trash. When permanent deletion is required and separately authorized, it deletes only from trash until `freeRatio >= 0.30` or candidates are exhausted. Exactly `0.30` satisfies the preferred target.
 - `cleanupCandidateBytes` is accounting and deletion-bound evidence, never a trigger. There is no urgent tier or local threshold override.
 - Invalid or unknown capacity, identity, or classification preserves data and yields `REVISE`.
 - Sensitive data, live handles/processes, correctness or lifecycle errors, and explicit user requests override exemption.
@@ -80,9 +82,9 @@ Independent non-overlapping work continues. Deferral never settles cleanup: the 
 
 ### Shared artifact-disposition receiving
 
-Consume the shared Engineering hygiene **Artifact disposition and project hygiene** rule in `AGENTS.md`; it owns ordinary disposal, attempted-deletion fallback and separately user-selected manual quarantine across every role/workflow. `$repo-cleanup` remains read-only and projects existing owner proof. No cleanup engine, helper, schema, registry, receipt or mandatory stage is introduced.
+Consume the shared Engineering hygiene **Artifact disposition and project hygiene** rule in `AGENTS.md`; it owns ordinary trash-first disposition and separately authorized permanent deletion from trash across every role/workflow. `$repo-cleanup` remains read-only and projects existing owner proof. No cleanup engine, helper, schema, registry, receipt or mandatory stage is introduced.
 
-A proved accepted manual-deletion handoff fulfills the selected agent disposition even when physical entries remain. Report `quarantine prepared; manual deletion pending`, never `deleted` or physical zero. Reuse the existing `ResourceRowV1` identity, creator/adopter, settlement probe/result and disposition fields; a label alone grants no authority. Keep physical retained entries accounted for separately from unsettled agent obligations. Missing proof, collision/lost data, active/foreign/valuable material, denied action or an unmet explicit physical-deletion outcome still holds its dependent predicate. Manual trash cannot close unfinished work or settle live processes; lifecycle scratch/receipt contracts remain unchanged.
+A proved accepted manual-deletion handoff fulfills the selected agent disposition even when physical entries remain. Report `moved to trash; not deleted`, never `deleted` or physical zero. Reuse the existing `ResourceRowV1` identity, creator/adopter, settlement probe/result and disposition fields; a label alone grants no authority. Keep physical retained entries accounted for separately from unsettled agent obligations. Missing proof, collision/lost data, active/foreign/valuable material, denied action or an unmet explicit physical-deletion outcome still holds its dependent predicate. Manual trash cannot close unfinished work or settle live processes; lifecycle scratch/receipt contracts remain unchanged.
 
 ## Recheck from scratch
 

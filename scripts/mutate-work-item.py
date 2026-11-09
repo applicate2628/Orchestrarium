@@ -9894,9 +9894,24 @@ def _relative_link(work_items: Path, path: Path) -> str:
     return Path(os.path.relpath(path, work_items)).as_posix()
 
 
-def _current_readme_status_error(fields: dict[str, str], location: str, source: Path) -> LifecycleError | None:
+def _current_readme_status_error(
+    fields: dict[str, str], location: str, source: Path, *, existing_record: bytes | None = None,
+) -> LifecycleError | None:
     status = fields.get("status", "")
     if location == "backlog":
+        if existing_record is not None:
+            statuses = [value for _line, name, value, _raw in
+                        _authoritative_field_occurrences(existing_record.decode("utf-8"))
+                        if name == "status"]
+            if "backlog" in statuses:
+                # Only read callers supply historical bytes; canonical write admission stays strict.
+                if (statuses == ["backlog"] and "lifecycle-schema" not in fields
+                        and not _schema_marker_occurrences(existing_record, source.name)):
+                    return None
+                return LifecycleError(
+                    "WI-CATEGORY-STATUS-INVALID",
+                    f"ambiguous or current-schema legacy backlog status: {source.stem}",
+                )
         if not status or status == "candidate":
             return None
         failure = (
@@ -9922,7 +9937,7 @@ def _project_current_readme_status(
     entry: ReadmeEntry, fields: dict[str, str], data: bytes, location: str,
     *, diagnostic: bool,
 ) -> ReadmeEntry:
-    failure = _current_readme_status_error(fields, location, entry.link)
+    failure = _current_readme_status_error(fields, location, entry.link, existing_record=data)
     if failure is not None:
         if not diagnostic:
             raise failure
@@ -9930,6 +9945,11 @@ def _project_current_readme_status(
         entry.checked = False
         entry.classification = (
             f"{failure.failure_id}: status={json.dumps(fields.get('status'), ensure_ascii=False)}"
+            f"; source sha256:{_sha256_bytes(data)}"
+        )
+    elif location == "backlog" and fields.get("status") == "backlog":
+        entry.classification = (
+            f"{LEGACY_READ_CLASSIFICATION}: status=backlog; read-only"
             f"; source sha256:{_sha256_bytes(data)}"
         )
     return entry
@@ -11333,21 +11353,38 @@ def _validated_legacy_cleanup_residue(
 
 
 def _finish_committed_legacy_cleanup(
-    backlog: Path,
+    target: Path,
     residue: Path | None,
     marker: Path,
     transaction_id: str,
 ) -> None:
+    backlog = target.parent
+    held = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    failure = "WI-LEGACY-CLEANUP-AFTER-COMMIT"
+    if not isinstance(held, LifecycleTransaction) or not held._locked:
+        raise LifecycleError(failure, "committed cleanup requires its held lifecycle owner")
+    held.verify()
+    observations = held._capture_effect_tree(residue) if residue is not None else ()
+    if residue is None or marker.parent != residue:
+        observations = (*observations, _capture_file_snapshot(marker, failure_id=failure))
+    held.observe_retained_inputs((*observations, _capture_file_snapshot(target, failure_id=failure)))
+    # Bind domain admission to the captured bytes before the first retirement.
+    if _validated_legacy_cleanup_residue(backlog, target.stem, target) != (residue, marker, transaction_id):
+        raise LifecycleError(failure, "committed cleanup selection changed")
+    held.verify()
     if residue is not None:
         source = residue / "source"
         if source.exists():
-            shutil.rmtree(source)
+            _retire_owned_lifecycle_tree(source,
+                tuple(snapshot for snapshot in observations if snapshot.path.is_relative_to(source)),
+                held, failure_id=failure)
         sidecar = _legacy_cleanup_sidecar(backlog, transaction_id)
         if marker.parent == residue:
             _replace_lifecycle_directory(marker, sidecar, directory=False)
             marker = sidecar
-        residue.rmdir()
-    marker.unlink()
+        LifecycleWriteTarget._remove_empty_directory_snapshot(
+            held._retained_observations.get(residue), held, failure_id=failure)
+    _remove_lifecycle_file(marker, failure_id=failure)
 
 
 def _committed_cleanup_failure(target: Path, residue: Path, cause: BaseException) -> LifecycleError:
@@ -11384,7 +11421,7 @@ def _replay_legacy_candidate_cleanup(root: Path, slug: str, candidate_data: byte
     readme = work_items / "README.md"
     readme_before = readme.read_bytes()
     try:
-        _finish_committed_legacy_cleanup(backlog, residue, marker, transaction_id)
+        _finish_committed_legacy_cleanup(target, residue, marker, transaction_id)
     except OSError as exc:
         raise _committed_cleanup_failure(target, residue, exc) from exc
     if (residue is not None and residue.exists()) or marker.exists() or target.read_bytes() != target_before or readme.read_bytes() != readme_before:
@@ -11443,7 +11480,7 @@ def convert_legacy_candidate(
         # cannot roll this committed transition back.
         committed = True
         try:
-            _finish_committed_legacy_cleanup(target.parent, transaction, cleanup_marker, transaction.name)
+            _finish_committed_legacy_cleanup(target, transaction, cleanup_marker, transaction.name)
         except OSError as exc:
             raise _committed_cleanup_failure(target, transaction, exc) from exc
     except BaseException as primary:
@@ -14972,9 +15009,13 @@ def audit_categories(root: Path, *, ledger_resource_budget=None) -> tuple[str, .
                 continue
             if category.current_kind == "work-item" and locations and locations[0].parent == work_items / "backlog":
                 source = locations[0]
-                failure = _current_readme_status_error(_parse_fields(source.read_text(encoding="utf-8")), "backlog", source)
+                data = source.read_bytes()
+                fields = _parse_fields(data.decode("utf-8"))
+                failure = _current_readme_status_error(fields, "backlog", source, existing_record=data)
                 if failure is not None:
                     raise failure
+                if fields.get("status") == "backlog":
+                    legacy_read_compatible.append(source.relative_to(work_items).as_posix())
             if category.current_kind == "flat" and locations:
                 path = locations[0]
                 archived = "archive" in path.parts
@@ -30809,11 +30850,13 @@ def _successor_import_check_stage_root(path: Path) -> tuple[CapturedDirectorySna
     return (snapshot,)
 
 
-def _successor_import_retire_tree(
+def _retire_owned_lifecycle_tree(
     path: Path, observations: tuple[CapturedFileSnapshot | CapturedDirectorySnapshotV1, ...],
     transaction: LifecycleTransaction,
+    *, failure_id: str,
 ) -> None:
-    failure = "WI-SUCCESSOR-IMPORT-RECOVERY"
+    """Retire an admitted tree through the shared native-effect owner."""
+    failure = failure_id
     path = _lifecycle_unresolved_absolute(path)
     if (not isinstance(transaction, LifecycleTransaction) or not transaction._locked
             or _CURRENT_LIFECYCLE_TRANSACTION.get() is not transaction):
@@ -31059,9 +31102,9 @@ def _recover_successor_import(
             expected_successor = _successor_import_successor_files(plan, status_data, original)
             hold_observations = _successor_import_check_stage(hold, original, complete=False)
             stage_observations = _successor_import_check_stage(stage, expected_successor, complete=False)
-            _successor_import_retire_tree(hold, hold_observations, transaction)
-            _successor_import_retire_tree(stage, stage_observations, transaction)
-            _successor_import_retire_tree(stage_root, stage_root_observations, transaction)
+            _retire_owned_lifecycle_tree(hold, hold_observations, transaction, failure_id="WI-SUCCESSOR-IMPORT-RECOVERY")
+            _retire_owned_lifecycle_tree(stage, stage_observations, transaction, failure_id="WI-SUCCESSOR-IMPORT-RECOVERY")
+            _retire_owned_lifecycle_tree(stage_root, stage_root_observations, transaction, failure_id="WI-SUCCESSOR-IMPORT-RECOVERY")
             _successor_import_release_stage_parent(stage_root, transaction, stage_parent_creations)
             intent_retired = _remove_lifecycle_file(
                 intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
@@ -31106,12 +31149,12 @@ def _recover_successor_import(
             if current != before:
                 _atomic_write(path, before)
         if successor_observations:
-            _successor_import_retire_tree(successor, successor_observations, transaction)
-        _successor_import_retire_tree(stage, stage_observations, transaction)
+            _retire_owned_lifecycle_tree(successor, successor_observations, transaction, failure_id="WI-SUCCESSOR-IMPORT-RECOVERY")
+        _retire_owned_lifecycle_tree(stage, stage_observations, transaction, failure_id="WI-SUCCESSOR-IMPORT-RECOVERY")
         if hold_here:
             source.parent.mkdir(parents=True, exist_ok=True)
             _replace_lifecycle_directory(hold, source)
-        _successor_import_retire_tree(stage_root, stage_root_observations, transaction)
+        _retire_owned_lifecycle_tree(stage_root, stage_root_observations, transaction, failure_id="WI-SUCCESSOR-IMPORT-RECOVERY")
         _successor_import_release_stage_parent(stage_root, transaction, stage_parent_creations)
         intent_retired = _remove_lifecycle_file(
             intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repository Cleanup"
+  short_description: "Classify and coordinate repository cleanup"
+  default_prompt: "Use $repo-cleanup to classify this repository, route any separately authorized cleanup to its existing owner, and return a fresh transient report."

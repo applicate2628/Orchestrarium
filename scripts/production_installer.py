@@ -452,6 +452,11 @@ ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
         'cdc90d427cc593ee7b7212dd0ddeacbb13dc7474525b493bd8950318bbc3d92f': None,
         '03c0c2fd12a8273f8325fb145dc2b8e9e97502e497649fc2d474988a9f95070b': '5131cc4d18265cba6d7abf10225d717e3d8ac2a8b0f683efc803ca610dc95674',
     },
+    # Exact stock repo-cleanup tree from commit 8bd58995; the fixture carries
+    # the complete historical member witness, not a legacy digest-only grant.
+    "repo-cleanup": {
+        "36ca45866892cab034addd9eb69a849fc1dcd82e473846093bd4e38107736b24": "8f56fb527cb1d92527b1fc1f4976508dbf1115d85a340bdd57322da6e1985e57",
+    },
     "second-opinion": {
         'fe989a918e11ff8066a0c8af54f73ba7bbf763719ea3b604ed147b79bec684d6': None,
         'f9a2114c8baead9ec8a259288ff74e157af60864c9f3d70ba0bcc52154b2b4b6': '7be172e27fac00bd7bfde542d7bd87b9a1dd874caee15b90c06d0b292201fc60',
