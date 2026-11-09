@@ -10366,6 +10366,23 @@ def _render_claude_document(existing: str | None, payload: str, *, claude: bool)
     if existing is None:
         return owned
 
+    # Use the established normalized selection view, then splice original slices.
+    # This transports offsets only; it establishes no additional ownership.
+    original = existing
+    offsets = [0]
+    index = 0
+    while index < len(original):
+        index += 2 if original.startswith("\r\n", index) else 1
+        offsets.append(index)
+    existing = original.replace("\r\n", "\n").replace("\r", "\n")
+
+    def splice(start: int, stop: int, replacement: str) -> str:
+        prefix = original[:offsets[start]]
+        # Prevent a preserved lone CR from absorbing an inserted blank line.
+        if prefix.endswith("\r") and replacement.startswith("\n"):
+            replacement = "\r" + replacement
+        return prefix + replacement + original[offsets[stop]:]
+
     visible, code = _claude_document_context(existing)
     anchors = list(re.finditer(r"(?m)^@AGENTS\.md$", visible)) if claude else []
 
@@ -10380,7 +10397,9 @@ def _render_claude_document(existing: str | None, payload: str, *, claude: bool)
                     or match.start() >= markers[1].start() + len(end) for match in anchors))):
             raise ValueError(f"E_CLAUDE_DOC_MARKERS_INVALID: {name}")
         start = markers[0].start() + len(begin)
-        return existing[:start] + payload + existing[markers[1].start():]
+        if existing[start:markers[1].start()] == payload:
+            return original
+        return splice(start, markers[1].start(), payload)
 
     signatures = r"(?m)^(?:# Claude Code Pack|# Claudestrator)$" if claude else r"(?m)^# Shared Governance$"
     active_signatures = {match.start() for match in re.finditer(signatures, visible)}
@@ -10399,11 +10418,11 @@ def _render_claude_document(existing: str | None, payload: str, *, claude: bool)
                 or match.start() >= matches[0].start() + len(payload) for match in anchors))):
             raise ValueError(f"E_CLAUDE_DOC_LEGACY_AMBIGUOUS: {name}")
         start = matches[0].start()
-        return existing[:start] + begin + payload + end + existing[start + len(payload):]
+        return splice(start, start + len(payload), begin + payload + end)
     if anchors:
         offset = anchors[0].start()
-        return existing[:offset] + begin + payload + end + existing[offset:]
-    return owned + "\n" + existing
+        return splice(offset, offset, begin + payload + end)
+    return owned + "\n" + original
 
 
 def _prepare_claude_docs(root: Path, source: Path, target: Path, *,

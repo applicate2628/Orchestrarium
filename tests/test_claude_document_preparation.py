@@ -132,7 +132,7 @@ class ClaudeDocumentPreparationTests(unittest.TestCase):
     def test_imports_single_document_adapter(self):
         self.assertIn("render_document", [a.name for a in self.adapter_imports])
 
-    def test_exact_preimages_and_normalized_rendering_preserve_bom_unicode(self):
+    def test_exact_preimages_and_rendering_preserve_bom_unicode(self):
         for target in self.existing:
             self.existing[target] = "\ufeffUser 😀 保留\r\nKeep\rTail\n"
         results = self.prepare_result()
@@ -142,14 +142,13 @@ class ClaudeDocumentPreparationTests(unittest.TestCase):
         for result, target, kind in zip(results, self.existing, ("claude", "shared")):
             with self.subTest(kind=kind):
                 raw = self.existing[target]
-                normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
                 expected = self.actual_renderer(
-                    normalized, self.payloads[kind], claude=kind == "claude")
+                    raw, self.payloads[kind], claude=kind == "claude")
                 self.assertIsInstance(result, DocumentResult)
                 self.assertEqual(result.before, raw.encode("utf-8"))
-                self.assertEqual(result.renderer_input, normalized)
+                self.assertEqual(result.renderer_input, raw)
                 self.assertEqual(result.after, expected.encode("utf-8"))
-                self.assertEqual(result.read_mode, "universal-newlines")
+                self.assertEqual(result.read_mode, "exact-newlines")
                 self.assertEqual(result.kind, kind)
                 with self.assertRaises(FrozenInstanceError):
                     result.after = b"changed"
@@ -243,9 +242,9 @@ class ClaudeDocumentPreparationTests(unittest.TestCase):
         self.assertEqual(self.events, self.expected_events() +
                          [("write", str(self.target)), ("write", str(self.shared_target))])
         for (target, content, owner), kind in zip(self.writes, ("claude", "shared")):
-            normalized = self.existing[target].replace("\r\n", "\n").replace("\r", "\n")
+            raw = self.existing[target]
             self.assertEqual(content, self.actual_renderer(
-                normalized, self.payloads[kind], claude=kind == "claude"))
+                raw, self.payloads[kind], claude=kind == "claude"))
             self.assertIs(owner, self.owner)
 
     def test_dry_run_prepares_once_and_keeps_legacy_message_without_writes(self):

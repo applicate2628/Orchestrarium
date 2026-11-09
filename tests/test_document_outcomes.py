@@ -83,20 +83,67 @@ class DocumentOutcomesTests(unittest.TestCase):
         self.assertTrue(result.after.endswith(suffix.encode()))
         self.assertEqual(result.as_outcome().before, raw)
 
-    def test_claude_retains_raw_before_and_exposes_normalization(self):
+    def test_claude_retains_raw_before_and_after(self):
         raw = "User 😀\r\nKeep\rTail\n".encode()
         inputs = {".claude/CLAUDE.md": raw, ".claude/AGENTS.md": b"Other\r"}
         results = render_documents("claude", "global", inputs, self.claude)
         self.assertEqual(tuple(r.path for r in results), tuple(inputs))
         for result in results:
             self.assertEqual(result.before, inputs[result.path])
-            self.assertNotIn("\r", result.renderer_input)
-            self.assertEqual(result.read_mode, "universal-newlines")
+            self.assertEqual(result.renderer_input, inputs[result.path].decode())
+            self.assertEqual(result.read_mode, "exact-newlines")
             self.assertEqual(result.as_outcome().intent, "update")
-        self.assertTrue(results[0].after.endswith(b"User \xf0\x9f\x98\x80\nKeep\nTail\n"))
+        self.assertTrue(results[0].after.endswith(raw))
         self.assertEqual([x.route for x in plan_changes(None, "claude", "global",
                          tuple(r.as_outcome() for r in results), document_context).artifacts],
                          ["legacy", "legacy"])
+
+    def test_claude_marked_updates_preserve_exact_outside_newlines(self):
+        for kind, path in (("claude", ".claude/CLAUDE.md"), ("shared", ".claude/AGENTS.md")):
+            for newline in ("\n", "\r\n", "\r"):
+                with self.subTest(kind=kind, newline=repr(newline)):
+                    prefix = "\ufeffUser 😀\r\nMixed\r" + ("@AGENTS.md" + newline if kind == "claude" else "")
+                    begin = f"<!-- BEGIN ORCHESTRARIUM {kind.upper()} MANAGED -->" + newline
+                    end = f"<!-- END ORCHESTRARIUM {kind.upper()} MANAGED -->" + newline
+                    suffix = "Tail\r\nKeep\rLast without newline"
+                    raw = (prefix + begin + "Old body" + newline + end + suffix).encode()
+                    result = render_document("claude", "project", path, raw, self.claude)
+                    payload = "# Claude Code Pack\nClaude rule.\n" if kind == "claude" else "# Shared Governance\nShared rule.\n"
+                    self.assertEqual(result.after, (prefix + begin + payload + end + suffix).encode())
+                    self.assertEqual(result.before, raw)
+
+    def test_claude_lone_cr_boundary_does_not_absorb_new_blank_line(self):
+        prefix = "User\r<!-- BEGIN ORCHESTRARIUM SHARED MANAGED -->\r"
+        suffix = "<!-- END ORCHESTRARIUM SHARED MANAGED -->\rTail"
+        raw = prefix + "Old\r" + suffix
+        payload = "\nNew rule.\n"
+        after = self.scope["_render_claude_document"](raw, payload, claude=False)
+        self.assertEqual(after, prefix + "\r\nNew rule.\n" + suffix)
+        normalize = lambda value: value.replace("\r\n", "\n").replace("\r", "\n")
+        self.assertEqual(normalize(after), normalize(prefix) + payload + normalize(suffix))
+
+    def test_claude_noop_keeps_every_existing_newline(self):
+        for kind, path in (("claude", ".claude/CLAUDE.md"), ("shared", ".claude/AGENTS.md")):
+            for newline in ("\r\n", "\r"):
+                with self.subTest(kind=kind, newline=repr(newline)):
+                    raw = ("User\r\n" + self.claude(kind, None).replace("\n", newline) + "Tail\r").encode()
+                    result = render_document("claude", "global", path, raw, self.claude)
+                    self.assertEqual(result.after, raw)
+                    self.assertEqual(result.change, "unchanged")
+
+    def test_claude_legacy_and_import_insertion_preserve_outside_bytes(self):
+        prefix, suffix = "User 😀\r\n", "Tail\rNo newline"
+        for kind, path in (("claude", ".claude/CLAUDE.md"), ("shared", ".claude/AGENTS.md")):
+            payload = "# Claude Code Pack\nClaude rule.\n" if kind == "claude" else "# Shared Governance\nShared rule.\n"
+            anchor = "@AGENTS.md\r\n" if kind == "claude" else ""
+            raw = (prefix + anchor + payload.replace("\n", "\r\n") + suffix).encode()
+            result = render_document("claude", "global", path, raw, self.claude)
+            self.assertTrue(result.after.startswith((prefix + anchor).encode()))
+            self.assertTrue(result.after.endswith(suffix.encode()))
+        raw = (prefix + "@AGENTS.md\r" + suffix).encode()
+        result = render_document("claude", "global", ".claude/CLAUDE.md", raw, self.claude)
+        self.assertTrue(result.after.startswith(prefix.encode()))
+        self.assertTrue(result.after.endswith(("@AGENTS.md\r" + suffix).encode()))
 
     def test_claude_second_refusal_returns_no_partial_batch(self):
         inputs = {".claude/CLAUDE.md": None,
@@ -162,7 +209,7 @@ class DocumentOutcomesTests(unittest.TestCase):
         with self.assertRaises(FrozenInstanceError):
             result.after = b"Changed"
 
-    def test_recorded_claude_normalization_is_not_hidden_from_planner(self):
+    def test_recorded_claude_noop_preserves_raw_preimage(self):
         import json
         from installation import configuration, ownership
         text = self.claude("claude", None)
@@ -176,8 +223,8 @@ class DocumentOutcomesTests(unittest.TestCase):
                                    {".claude/CLAUDE.md": raw, ".claude/AGENTS.md": shared}, self.claude)
         plan = plan_changes(json.dumps(record).encode(), "claude", "project",
                             tuple(r.as_outcome() for r in results), document_context)
-        self.assertEqual([a.route for a in plan.artifacts], ["preserve", "legacy"])
-        self.assertEqual(plan.changes, ())
+        self.assertEqual([a.route for a in plan.artifacts], ["recorded-proposal", "legacy"])
+        self.assertEqual(results[0].after, raw)
         self.assertEqual(results[0].before, raw)
 
     def test_adapter_keeps_raw_inline_end_boundary(self):
@@ -304,8 +351,8 @@ class DocumentOutcomesTests(unittest.TestCase):
         raw = "User \u2603\r\nKeep\rTail\n".encode()
         for provider, path, expected, mode in (
             ("codex", "AGENTS.md", raw.decode(), "exact-newlines"),
-            ("claude", ".claude/AGENTS.md", "User \u2603\nKeep\nTail\n",
-             "universal-newlines"),
+            ("claude", ".claude/AGENTS.md", raw.decode(),
+             "exact-newlines"),
         ):
             with self.subTest(provider=provider):
                 calls = []
@@ -318,8 +365,7 @@ class DocumentOutcomesTests(unittest.TestCase):
                 self.assertEqual(result.renderer_input, expected)
                 self.assertEqual(result.after, expected.encode())
                 self.assertEqual(result.read_mode, mode)
-                self.assertEqual(result.change, "unchanged" if provider == "codex"
-                                 else "existing-update")
+                self.assertEqual(result.change, "unchanged")
                 self.assertEqual(result.as_outcome().intent, "update")
 
     def test_batch_validation_order_remains_complete_map_then_callback_then_decode(self):

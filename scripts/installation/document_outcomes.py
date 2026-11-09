@@ -45,10 +45,7 @@ def _decode_preimage(provider: str, raw: bytes | None) -> tuple[str | None, str]
     if raw is not None and type(raw) is not bytes:
         raise ValueError("E_DOCUMENT_OUTCOMES_BYTES")
     text = None if raw is None else raw.decode("utf-8")
-    mode = "exact-newlines" if provider == "codex" else "universal-newlines"
-    if text is not None and mode == "universal-newlines":
-        text = text.replace("\r\n", "\n").replace("\r", "\n")
-    return text, mode
+    return text, "exact-newlines"
 
 
 def _render_prepared(
