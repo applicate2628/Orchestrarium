@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-09
 
+- The shorter-description catalog warning now reports a length difference with content and provenance unverified, rather than asserting that the client removed characters. The existing removed-chars output key remains as a deprecated numeric alias alongside description-length-difference; it is not evidence of removal. Existing status identifiers and verdicts are unchanged. A version-pinned runtime and bound render source are still required to establish the cause; this wording is not installed-runtime or semantic-equivalence acceptance.
+
 - Runtime catalog validation now rejects differing descriptions that are equal in length or longer than the bound local description instead of reporting successful shortening with zero characters removed. Exact matches and the existing shorter-description warning contract remain unchanged; this diagnostic does not establish why the observed content differs or prove semantic equivalence of shorter text.
 
 - Explicit catalog-budget calibration flags now stay in offline estimate mode even when their values equal the defaults, including the legacy high-threshold alias. This prevents an explicitly parameterized estimate from unexpectedly reaching Codex runtime discovery; the no-argument runtime mode remains unchanged.

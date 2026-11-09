@@ -541,7 +541,9 @@ def main(argv: list[str] | None = None) -> int:
                 f"entries={observation.total_entries}, "
                 f"pack={observation.pack_rendered}/{observation.pack_expected}, "
                 f"shortened={observation.shortened_count}, "
-                f"removed-chars={observation.shortened_chars}",
+                f"removed-chars={observation.shortened_chars}, "
+                f"description-length-difference={observation.shortened_chars} "
+                "(removed-chars is a deprecated length-difference alias, not removal evidence)",
             )
         )
         if observation.status == "complete":
@@ -555,8 +557,11 @@ def main(argv: list[str] | None = None) -> int:
             messages.append(
                 "WARNING: CATALOG-DESCRIPTION-SHORTENED; the authoritative "
                 "model-visible catalog retains every expected pack identity but "
-                f"shortens {observation.shortened_count} descriptions by "
-                f"{observation.shortened_chars} characters."
+                f"{observation.shortened_count} descriptions are shorter by "
+                f"{observation.shortened_chars} characters in total; "
+                "description content and provenance are unverified. "
+                "Without version-pinned runtime and render-source binding, "
+                "the cause of the difference cannot be established."
             )
         elif observation.status == "omitted-pack":
             ok = False

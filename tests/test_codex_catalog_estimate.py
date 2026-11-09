@@ -117,6 +117,23 @@ class CatalogEstimateTests(unittest.TestCase):
         self.assertEqual(short.status, "shortened")
         self.assertEqual(short.shortened_chars, 69)
 
+    def test_shorter_warning_does_not_claim_truncation_provenance(self):
+        for description in ("x" * 10, "unrelated"):
+            with self.subTest(description=description):
+                observation = self.observe_description(description)
+                code, output = self.invoke([], observation)
+                self.assertEqual(observation.status, "shortened")
+                self.assertEqual(code, 0)
+                self.assertIn("RESULT: PASS", output)
+                self.assertIn("descriptions are shorter", output)
+                self.assertIn("description content and provenance are unverified", output)
+                self.assertIn("Without version-pinned runtime and render-source binding", output)
+                self.assertIn("description-length-difference=", output)
+                self.assertIn(f"removed-chars={observation.shortened_chars}", output)
+                self.assertIn(f"description-length-difference={observation.shortened_chars}", output)
+                self.assertIn("deprecated length-difference alias, not removal evidence", output)
+                self.assertNotIn("shortens 1 descriptions", output)
+
     def test_zero_context_is_still_only_an_estimate(self):
         code, output = self.invoke(self.custom_args() + ["--context-window", "0"])
         self.assertEqual(code, 0)
