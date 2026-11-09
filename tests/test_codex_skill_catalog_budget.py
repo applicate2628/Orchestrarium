@@ -306,6 +306,55 @@ def test_runtime_observation_rejects_invalid_utf8_skill_evidence(
 
 
 @pytest.mark.parametrize("invalid_surface", ("source", "installed"))
+@pytest.mark.parametrize("field", ("name", "description"))
+def test_runtime_observation_rejects_duplicate_metadata_fields(
+    tmp_path: Path, invalid_surface: str, field: str,
+) -> None:
+    module = _module()
+    repo_skills = tmp_path / "repo-skills"
+    installed = tmp_path / "installed"
+    source = _write_skill(repo_skills, "alpha", "alpha description")
+    runtime = _write_skill(installed, "alpha", "alpha description")
+    invalid = source if invalid_surface == "source" else runtime
+    # Both the final value and rendered row are valid: last-value-wins must
+    # not turn ambiguous metadata into evidence of provider loading.
+    invalid.write_text(
+        f"---\n{field}: first value\nname: alpha\n"
+        "description: alpha description\n---\n",
+        encoding="utf-8",
+    )
+    observed = module["parse_runtime_prompt_input"](
+        _prompt_input(_skills_text(installed, [("alpha", "alpha description")])),
+        repo_skills,
+        installed,
+    )
+    assert observed.status == "binding-failure"
+    assert observed.diagnostic == "CATALOG-RUNTIME-BINDING"
+
+
+def test_runtime_metadata_duplicate_guard_preserves_scalar_bodies_and_estimates(
+    tmp_path: Path,
+) -> None:
+    path = _write_skill(tmp_path, "alpha", "alpha description")
+    read_metadata = _module()["_read_name_description"]
+    path.write_text(
+        "---\nname: alpha\ndescription: |-\n"
+        "  name: literal body\n  description: literal body\n---\n",
+        encoding="utf-8",
+    )
+    assert read_metadata(path, strict=True) == (
+        "alpha", "name: literal body description: literal body",
+    )
+    path.write_text(
+        "---\nname: first\nname: alpha\n"
+        "description: first\ndescription: alpha description\n---\n",
+        encoding="utf-8",
+    )
+    # Historical estimates keep their non-binding tolerant behavior.
+    assert read_metadata(path) == ("alpha", "alpha description")
+
+
+@pytest.mark.parametrize("invalid_surface", ("source", "installed"))
 @pytest.mark.parametrize(
     ("metadata", "fallback_description"),
     (

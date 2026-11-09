@@ -78,6 +78,10 @@ def _parse_frontmatter_scalars(
             i += 1
             continue
         key, rest = m.group(1), m.group(2).rstrip("\r")
+        if runtime_metadata and key in ("name", "description") and key in result:
+            # Codex deserializes these singular fields, not a last-value-wins
+            # mapping. Ambiguous metadata cannot bind runtime evidence.
+            raise ValueError(f"Duplicate skill metadata field: {key}")
         rest_stripped = rest.strip()
         if runtime_metadata:
             # Keep quoted # characters, but do not count a YAML comment as
