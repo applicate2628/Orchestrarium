@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-09
 
+- Runtime catalog validation now refuses unreadable or invalid UTF-8 skill metadata in both the repository identity reference and installed catalog. Read-error fallback names and empty descriptions, or decoding replacement characters, can no longer produce a false complete verdict from those failures. Historical offline estimates retain their tolerant reads; this does not prove client identity, actual instruction loading or project-budget acceptance.
+
 - Directory-move capability-probe settlement now preserves an existing primary exception without evaluating its truth value when cleanup also fails. False-valued or truthiness-raising exceptions no longer replace the original cause or interrupt the established typed failure path. Cleanup context and recovery location remain available; no filesystem operations or POSIX/WSL admission rules change. Focused checks use inert paths, not native effects.
 
 - Stop automatic Codex legacy replacement from inferring ownership from an unmarked exact H1 title. Such documents now refuse with E_CODEX_DOCUMENT_LEGACY_OWNERSHIP_REQUIRED, preserving text at the document writer boundary; marked updates and absent/nonmatching documents retain their routes. This intentionally changes automatic legacy migration. Keep the original file and manually review an explicit replacement interval under the existing selection contract, whose supported shapes are narrower than heading recognition. This is not a whole-installer no-effects or recovery qualification.

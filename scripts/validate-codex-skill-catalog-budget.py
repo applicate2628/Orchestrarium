@@ -126,10 +126,15 @@ def _parse_frontmatter_scalars(fm_text: str) -> dict[str, str]:
     return result
 
 
-def _read_name_description(skill_md: Path) -> tuple[str, str]:
+def _read_name_description(skill_md: Path, *, strict: bool = False) -> tuple[str, str]:
+    """Read metadata; strict mode rejects read and decoding failures."""
     try:
-        text = skill_md.read_text(encoding="utf-8", errors="replace")
+        text = skill_md.read_text(
+            encoding="utf-8", errors="strict" if strict else "replace"
+        )
     except OSError:
+        if strict:
+            raise
         return skill_md.parent.name, ""
     m = FRONTMATTER_RE.search(text)
     if not m:
@@ -263,7 +268,7 @@ def parse_runtime_prompt_input(
             return _runtime_failure("binding-failure", "CATALOG-RUNTIME-BINDING")
         seen_paths.add(path)
         try:
-            name, source_description = _read_name_description(path)
+            name, source_description = _read_name_description(path, strict=True)
         except (OSError, UnicodeError, ValueError):
             return _runtime_failure("binding-failure", "CATALOG-RUNTIME-BINDING")
         header = match.group("header")
@@ -365,7 +370,7 @@ def _pack_identities(repo_skills: Path) -> dict[str, str]:
     for directory in sorted(repo_skills.iterdir()):
         skill_md = directory / "SKILL.md"
         if directory.is_dir() and skill_md.is_file():
-            name, _description = _read_name_description(skill_md)
+            name, _description = _read_name_description(skill_md, strict=True)
             identities[directory.name] = name
     return identities
 

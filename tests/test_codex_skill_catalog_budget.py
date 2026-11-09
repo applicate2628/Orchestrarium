@@ -244,6 +244,60 @@ def test_runtime_observer_timeout_is_typed_and_fail_closed(tmp_path: Path) -> No
     assert observed.diagnostic == "CATALOG-RUNTIME-EXECUTION"
 
 
+@pytest.mark.parametrize("unreadable_surface", ("source", "installed"))
+def test_runtime_observation_rejects_unreadable_skill_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    unreadable_surface: str,
+) -> None:
+    repo_skills = tmp_path / "repo-skills"
+    installed = tmp_path / "installed"
+    source = _write_skill(repo_skills, "alpha", "alpha description")
+    runtime = _write_skill(installed, "alpha", "alpha description")
+    unreadable = source if unreadable_surface == "source" else runtime
+    original_read = Path.read_text
+
+    def read_text(path, *args, **kwargs):
+        if path == unreadable:
+            raise PermissionError("injected unreadable skill")
+        return original_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+    # An empty rendered description must not match invented empty metadata
+    # when the installed file cannot actually be read.
+    description = "alpha description" if unreadable_surface == "source" else ""
+    observed = _module()["parse_runtime_prompt_input"](
+        _prompt_input(_skills_text(installed, [("alpha", description)])),
+        repo_skills,
+        installed,
+    )
+
+    assert observed.status == "binding-failure"
+    assert observed.diagnostic == "CATALOG-RUNTIME-BINDING"
+
+
+@pytest.mark.parametrize("invalid_surface", ("source", "installed"))
+def test_runtime_observation_rejects_invalid_utf8_skill_evidence(
+    tmp_path: Path,
+    invalid_surface: str,
+) -> None:
+    repo_skills = tmp_path / "repo-skills"
+    installed = tmp_path / "installed"
+    source = _write_skill(repo_skills, "alpha", "alpha description")
+    runtime = _write_skill(installed, "alpha", "alpha description")
+    invalid = source if invalid_surface == "source" else runtime
+    invalid.write_bytes(b"---\nname: alpha\ndescription: alpha\xff\n---\n")
+    description = "alpha description" if invalid_surface == "source" else "alpha\ufffd"
+    observed = _module()["parse_runtime_prompt_input"](
+        _prompt_input(_skills_text(installed, [("alpha", description)])),
+        repo_skills,
+        installed,
+    )
+
+    assert observed.status == "binding-failure"
+    assert observed.diagnostic == "CATALOG-RUNTIME-BINDING"
+
+
 @pytest.mark.parametrize(
     ("observation", "expected_code", "expected_marker"),
     (
@@ -309,6 +363,16 @@ def test_main_runtime_policy_warns_on_shortening_and_fails_closed(
 
 
 # --- Historical estimate diagnostics ---------------------------------------
+
+
+def test_historical_estimate_metadata_keeps_lossy_read_fallbacks(tmp_path: Path) -> None:
+    module = _module()
+    missing = tmp_path / "alpha" / "SKILL.md"
+    assert module["_read_name_description"](missing) == ("alpha", "")
+
+    invalid = _write_skill(tmp_path, "beta", "beta description")
+    invalid.write_bytes(b"---\nname: beta\ndescription: beta\xff\n---\n")
+    assert module["_read_name_description"](invalid) == ("beta", "beta\ufffd")
 
 
 def test_large_estimate_warns_without_runtime_failure(tmp_path: Path) -> None:
