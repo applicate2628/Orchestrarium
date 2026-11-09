@@ -7117,6 +7117,7 @@ _POST_MATERIALIZATION_WRITER_CALLS = {
     "_reconcile_codex_native_config": ("native-config",),
     "_install_codex_native_roles": ("native-role",),
     "_merge_codex_agents": ("provider-doc",),
+    "_apply_selected_replacement": ("provider-doc",),
     "_merge_claude_docs": ("provider-doc",),
     "_normalize_agents_mode": ("agents-mode",),
     "_merge_claude_main_agent_settings": ("claude-main-settings",),
@@ -7126,6 +7127,7 @@ _POST_MATERIALIZATION_WRITER_CALLS = {
 _POST_MATERIALIZATION_NONWRITER_CALLS = frozenset(
     {
         "_resolve_claude_delegation_mode",
+        "_warn_codex_project_budget",
         "_discard_canonical_skills_plan",
         "_assert_global_claude_linked_subroot_authority",
     }

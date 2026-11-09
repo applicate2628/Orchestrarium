@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-09
 
+- Installer preflight now classifies the existing selected-document replacement as a provider-document writer and the project-instruction budget warning as a nonwriter. This removes a source-inventory mismatch that blocked ordinary pack installation while preserving rejection of unknown writers and writes into the canonical Lead tree. Pure source regression checks cover the repaired classifications and both refusal boundaries.
+
 - Workflow regression checks now follow the published shared-rule wording, Root-owned execution ledger and Codex hook-procedure owner instead of obsolete duplicate text. Scoped negative checks retain quick-fix recovery, review baselines, wrapper provenance, nonauthoring review, mandatory hook navigation and qualified runtime-tree ownership. This updates verification only; production policy, routing and installation behavior are unchanged.
 
 - Native routing regression checks now follow the published task-first ordinary route instead of requiring retired fixed named-role dispatch. The checks preserve explicit model/effort selection, current configuration controls, policy membership and observed runtime evidence, with negative cases for lost safeguards in the Codex owner and its references. This repairs stale verification failures without changing dispatch behavior or launching providers.
