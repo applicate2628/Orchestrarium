@@ -42,7 +42,7 @@ def validate_path(value: object, provider: str, scope: str) -> str:
     allowed = len(parts) > 1 and parts[0] in roots
     if value in client["documents"][scope]:
         allowed = True
-    if not allowed or parts[-1] == RECEIPT_NAME:
+    if not allowed or parts[-1].casefold() == RECEIPT_NAME:
         raise ValueError("Owned path outside selected provider")
     return value
 
@@ -135,7 +135,7 @@ def serialize_fresh_payloads(files: dict[str, str], provider: str, scope: str) -
         if not any(path.startswith(root + "/") for root in client["payload_roots"]):
             continue
         parts = path.split("/")
-        if "__pycache__" in parts or parts[-1] == RECEIPT_NAME:
+        if "__pycache__" in parts or parts[-1].casefold() == RECEIPT_NAME:
             continue
         validate_path(path, provider, scope)
         value["files"][path] = digest

@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-09
 
+- Provider ownership records now reject case variants of the reserved receipt filename, matching the existing case-insensitive alias policy. Fresh payload filtering also excludes these variants. This closes a validation gap for Windows-style name aliases without adding ownership authority or changing filesystem operations.
+
 - Preserve original Claude document newline bytes outside the selected managed body and return byte-identical text for an unchanged normalized payload. The preparation wrapper still invokes its writers; this is not a physical no-write guarantee. Preparation now passes exact text; the existing renderer maps its established normalized selection to original offsets, including lone-CR insertion boundaries. This fixes user prefix/suffix normalization without adding ownership authority or physical rollback guarantees.
 
 - Codex legacy updates now recognize complete top-level headings with the existing Markdown parser instead of heading-like substrings in user prose or nested headings. Ordinary generated legacy updates and original outside bytes remain supported; raw ending boundaries and ambiguous genuine-heading ownership are unchanged. This source correction does not qualify historical migration or installed-profile behavior.
