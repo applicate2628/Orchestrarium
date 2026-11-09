@@ -915,7 +915,9 @@ def test_native_disposal_rejects_same_id_same_target_changed_reparse_metadata(tm
     raw = bytearray(original.reparse_data)
     print_offset, print_size = struct.unpack_from("<HH", raw, 12)
     assert print_size >= 2
-    raw[20 + print_offset] ^= 1  # PrintName changes; SubstituteName/target does not.
+    tag = struct.unpack_from("<I", raw)[0]
+    assert tag == stat.IO_REPARSE_TAG_MOUNT_POINT
+    raw[16 + print_offset] ^= 1  # Junction PrintName changes; SubstituteName does not.
     C, _W, K, *_rest = installer._WindowsBoundNode._api()
     handle = K.CreateFileW(str(link), 0x13019F, 7, None, 3, 0x2200000, None)
     assert handle != C.c_void_p(-1).value, C.get_last_error()
@@ -923,9 +925,10 @@ def test_native_disposal_rejects_same_id_same_target_changed_reparse_metadata(tm
     actor.handle = handle
     with actor:
         assert actor.proof == original.native_proof
+        original_logical_target = actor.logical_target()
         actor.set_reparse_data(bytes(raw))
         assert actor.proof == original.native_proof
-        assert actor.logical_target() == original.data
+        assert actor.logical_target() == original_logical_target
     changed = transaction._observe(link)
     assert changed[link].native_proof == original.native_proof
     assert changed[link].data == original.data

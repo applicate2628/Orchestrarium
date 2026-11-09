@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-09
 
+- New Windows installer directory projections use native junctions through the held creator object instead of implicitly requesting privileged symbolic links. Ordinary local installs no longer select the symbolic-link reparse tag that caused WinError 1314. Existing symbolic-link projections remain valid; exact mount-point recognition supports Python 3.11 in projection and snapshot checks. Native failures are not retried with pathname commands or elevated privileges, and unsupported network-share junction targets remain failures. Creator, raw-reparse and target identity checks are retained; this is not full Windows lifecycle or crash-recovery qualification.
+
 - Runtime catalog validation now refuses unreadable or invalid UTF-8 skill metadata in both the repository identity reference and installed catalog. Read-error fallback names and empty descriptions, or decoding replacement characters, can no longer produce a false complete verdict from those failures. Historical offline estimates retain their tolerant reads; this does not prove client identity, actual instruction loading or project-budget acceptance.
 
 - Directory-move capability-probe settlement now preserves an existing primary exception without evaluating its truth value when cleanup also fails. False-valued or truthiness-raising exceptions no longer replace the original cause or interrupt the established typed failure path. Cleanup context and recovery location remain available; no filesystem operations or POSIX/WSL admission rules change. Focused checks use inert paths, not native effects.

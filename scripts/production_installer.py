@@ -3718,7 +3718,10 @@ class _InstallTransaction:
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: source link copy drift")
 
     def _create_owned_projection(self, source: Path, target: Path, record,
-                                  *, junction: bool = False) -> _PhysicalNode:
+                                  *, junction: bool = True) -> _PhysicalNode:
+        # New Windows directory projections use a mount-point reparse tag.
+        # This preserves creator-handle custody without requiring the symbolic
+        # link privilege. A native failure is not retried through a pathname API.
         if os.name != "nt":
             target.symlink_to(source, target_is_directory=True)
             node = self._capture_node(target)
@@ -4373,7 +4376,7 @@ class _InstallTransaction:
                             "target_is_directory": path.is_dir(),
                         }
                     )
-                elif getattr(os.path, "isjunction", lambda _path: False)(path):
+                elif _is_directory_junction(path):
                     self._entries.append(
                         {
                             "path": path,
@@ -7706,7 +7709,7 @@ def _legacy_tree_sha256(path: Path, *, ignore_runtime_cache: bool = False, read_
         not stat.S_ISDIR(root_metadata.st_mode)
         or stat.S_ISLNK(root_metadata.st_mode)
         or _is_reparse_metadata(root_metadata)
-        or getattr(os.path, "isjunction", lambda _path: False)(path)
+        or _is_directory_junction(path)
     ):
         return None
     digest = hashlib.sha256()
@@ -7718,7 +7721,7 @@ def _legacy_tree_sha256(path: Path, *, ignore_runtime_cache: bool = False, read_
         if (
             stat.S_ISLNK(metadata.st_mode)
             or _is_reparse_metadata(metadata)
-            or getattr(os.path, "isjunction", lambda _path: False)(item)
+            or _is_directory_junction(item)
         ):
             return None
         relative_path = item.relative_to(path)
@@ -7794,8 +7797,16 @@ def _adoption_identity_v2(name: str, target: Path, token: str, *, factory: Path 
     raise ValueError("E_CANONICAL_SKILL_ADOPTION_MISMATCH")
 
 
+def _is_directory_junction(path: Path) -> bool:
+    """Recognize only mount-point reparses, including on supported Python 3.11."""
+    try:
+        return getattr(path.lstat(), "st_reparse_tag", None) == 0xA0000003  # IO_REPARSE_TAG_MOUNT_POINT
+    except OSError:
+        return False
+
+
 def _projection_resolves_to(path: Path, expected: Path) -> bool:
-    if not (path.is_symlink() or getattr(os.path, "isjunction", lambda _path: False)(path)):
+    if not (path.is_symlink() or _is_directory_junction(path)):
         return False
     try:
         return os.path.samefile(path.resolve(strict=True), expected.resolve(strict=True))
