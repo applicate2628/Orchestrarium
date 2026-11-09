@@ -17,7 +17,7 @@ ROOT=Path(__file__).resolve().parents[1]
 SOURCE=Path(os.environ.get('TERMINAL_TEST_SOURCE',ROOT/'scripts/production_installer.py'))
 
 class TerminalTests(unittest.TestCase):
-    def run_tail(self, *, primary=None, cleanup=None, compatibility=None, dry=False, global_install=False, exit_error=None, real_formatter=False):
+    def run_tail(self, *, primary=None, cleanup=None, compatibility=None, dry=False, global_install=False, exit_error=None, real_formatter=False, stderr=None):
         tree=ast.parse(SOURCE.read_bytes())
         install=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='install')
         outer=next(n for n in install.body if isinstance(n,ast.Try))
@@ -81,7 +81,7 @@ class TerminalTests(unittest.TestCase):
             finally:
                 del sys.modules[module.__name__]
         exec(compile(ast.fix_missing_locations(ast.Module(body=helpers+[fn],type_ignores=[])),'public-tail','exec'),scope)
-        self.out=io.StringIO();self.err=io.StringIO()
+        self.out=io.StringIO();self.err=stderr if stderr is not None else io.StringIO()
         with contextlib.redirect_stdout(self.out),contextlib.redirect_stderr(self.err):return scope['tail']()
     def test_real_sanitizer_primary_cleanup_private_text(self):
         primary=ValueError('PRIVATE_PRIMARY_SENTINEL');cleanup=OSError(13,'PRIVATE_CLEANUP_SENTINEL')
@@ -91,11 +91,68 @@ class TerminalTests(unittest.TestCase):
         self.assertIn('installation applied',text)
         self.assertIn('failure-id=',text)
         self.assertIn('staging cleanup:',text)
-    def test_zero_systemexit_preserved_without_status_guarantee(self):
+    def test_zero_systemexit_preserved_with_postcommit_warning(self):
         error=SystemExit(0)
         with self.assertRaises(SystemExit) as got:self.run_tail(cleanup=error,real_formatter=True)
         self.assertIs(got.exception,error);self.assertEqual(got.exception.code,0)
-        self.assertEqual(self.out.getvalue(),'');self.assertEqual(self.err.getvalue(),'')
+        self.assertEqual(self.out.getvalue(),'')
+        self.assertIn('installation applied',self.err.getvalue())
+        self.assertIn('Do not retry blindly.',self.err.getvalue())
+    def test_primary_postcommit_interrupt_reports_applied_without_private_text(self):
+        for factory in (KeyboardInterrupt, SystemExit, AssertionError):
+            with self.subTest(exception=factory.__name__):
+                primary=factory('PRIVATE_INTERRUPT_SENTINEL')
+                with self.assertRaises(factory) as got:
+                    self.run_tail(global_install=True,compatibility=primary,real_formatter=True)
+                self.assertIs(got.exception,primary)
+                self.assertIn('installation applied',self.err.getvalue())
+                self.assertIn('Do not retry blindly.',self.err.getvalue())
+                self.assertNotIn('PRIVATE_',self.out.getvalue()+self.err.getvalue())
+                self.assertEqual(self.out.getvalue(),'')
+    def test_committed_exit_interrupt_reports_potentially_applied(self):
+        primary=KeyboardInterrupt()
+        with self.assertRaises(KeyboardInterrupt) as got:self.run_tail(exit_error=primary)
+        self.assertIs(got.exception,primary)
+        self.assertIn('transaction commit requested',self.err.getvalue())
+        self.assertIn('Installation may be applied',self.err.getvalue())
+        self.assertNotIn('installation applied;',self.err.getvalue())
+        self.assertEqual(self.out.getvalue(),'')
+    def test_precommit_and_dry_run_interrupt_do_not_claim_applied(self):
+        for kwargs in ({'primary':SystemExit(0)}, {'dry':True,'cleanup':SystemExit(0)}):
+            with self.subTest(kwargs=tuple(kwargs)):
+                with self.assertRaises(SystemExit):self.run_tail(**kwargs)
+                self.assertEqual(self.out.getvalue(),'')
+                self.assertEqual(self.err.getvalue(),'')
+    def test_postcommit_warning_failure_retains_original_interrupt_and_errors(self):
+        class BrokenStderr:
+            def __init__(self,error):self.error=error;self.calls=0
+            def write(self,text):self.calls+=1;raise self.error
+        for write_error in (OSError('PRIVATE_WRITE'),KeyboardInterrupt(),SystemExit(0)):
+            with self.subTest(write_error=type(write_error).__name__):
+                original=RuntimeError('PRIVATE_CAUSE')
+                primary=KeyboardInterrupt();primary.__cause__=original
+                secondary=ValueError('PRIVATE_SECONDARY')
+                stream=BrokenStderr(write_error)
+                with self.assertRaises(KeyboardInterrupt) as got:
+                    self.run_tail(global_install=True,compatibility=primary,cleanup=secondary,stderr=stream)
+                self.assertIs(got.exception,primary)
+                self.assertIs(primary.__cause__,original)
+                self.assertEqual(primary._installer_terminal_errors,(secondary,write_error))
+                self.assertEqual(stream.calls,1)
+                self.assertEqual(self.out.getvalue(),'')
+    def test_cleanup_interrupt_warning_failure_does_not_expose_handled_primary(self):
+        primary=ValueError('PRIVATE_PRIMARY')
+        interruption=SystemExit(0)
+        write_error=OSError('PRIVATE_WRITE')
+        class BrokenStderr:
+            def write(self,text):raise write_error
+        with self.assertRaises(SystemExit) as got:
+            self.run_tail(global_install=True,compatibility=primary,cleanup=interruption,stderr=BrokenStderr())
+        self.assertIs(got.exception,interruption)
+        self.assertEqual(interruption.code,0)
+        self.assertEqual(interruption._installer_terminal_errors,(primary,write_error))
+        self.assertNotIn('PRIVATE_', ''.join(traceback.format_exception(interruption)))
+        self.assertEqual(self.out.getvalue(),'')
     def test_cleanup_failure_has_no_false_success(self):
         self.assertEqual(self.run_tail(cleanup=OSError('secret')),1)
         self.assertEqual(self.out.getvalue(),'');self.assertIn('installation applied',self.err.getvalue())

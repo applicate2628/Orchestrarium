@@ -12080,22 +12080,34 @@ def _finish_install_result(provider, target, dry_run, applied, primary, cleanup_
     raised = (primary if primary is not None and not isinstance(primary, handled)
               else cleanup_error if cleanup_error is not None and not isinstance(cleanup_error, handled)
               else None)
+    postcommit_notice = None
+    if primary is not None or cleanup_error is not None:
+        if applied == "commit-requested":
+            postcommit_notice = (
+                "FAIL: E_INSTALL_POSTCOMMIT_UNRESOLVED: transaction commit requested; "
+                "commit settlement incomplete. Installation may be applied. Do not retry blindly.")
+        elif applied:
+            postcommit_notice = (
+                "FAIL: E_INSTALL_POSTCOMMIT_UNRESOLVED: installation applied; "
+                "postcommit compatibility or staging settlement failed. Do not retry blindly.")
     if raised is not None:
+        reporting_error = None
+        if postcommit_notice is not None:
+            try:
+                print(postcommit_notice, file=sys.stderr)
+            except BaseException as exc:
+                reporting_error = exc
         storage = _passive_owner_storage(BaseException, raised)
         if storage is not None:
             dict.__setitem__(storage, "_installer_terminal_errors",
-                             tuple(error for error in (primary, cleanup_error)
+                             tuple(error for error in (primary, cleanup_error, reporting_error)
                                    if error is not None and error is not raised))
         # Do not synthesize a traceback chain that could disclose handled text.
         BaseException.__suppress_context__.__set__(raised, True)
         raise raised
     if primary is not None or cleanup_error is not None:
-        if applied == "commit-requested":
-            print("FAIL: E_INSTALL_POSTCOMMIT_UNRESOLVED: transaction commit requested; "
-                  "commit settlement incomplete. Installation may be applied. Do not retry blindly.", file=sys.stderr)
-        elif applied:
-            print("FAIL: E_INSTALL_POSTCOMMIT_UNRESOLVED: installation applied; "
-                  "postcommit compatibility or staging settlement failed. Do not retry blindly.", file=sys.stderr)
+        if postcommit_notice is not None:
+            print(postcommit_notice, file=sys.stderr)
         if primary is not None:
             print(f"FAIL: {_installer_failure_text(primary)}", file=sys.stderr)
         if cleanup_error is not None:
