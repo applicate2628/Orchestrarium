@@ -108,6 +108,39 @@ class CodexMarkdownExampleTests(unittest.TestCase):
         self.assertEqual(self.render(example + old + tail),
                          example + self.pack.rstrip("\n") + tail)
 
+    def test_managed_begin_with_user_text_on_same_line_refuses(self):
+        for tail in (" USER TEXT KEEP", "\tUSER TEXT KEEP", "<!-- user note -->", "\u2028USER TEXT KEEP"):
+            with self.subTest(tail=tail):
+                original = self.begin + tail + "\nOld body\n" + self.end + "\nUSER FOOTER\n"
+                with self.assertRaisesRegex(ValueError, "E_CODEX_DOCUMENT_AMBIGUOUS"):
+                    self.render(original)
+                self.assertEqual(self.writes, [])
+
+    def test_empty_compact_frame_preserves_same_line_suffix(self):
+        for newline in ("\n", "\r\n", "\r"):
+            for whitespace in ("", " ", "\t"):
+                with self.subTest(newline=newline, whitespace=whitespace):
+                    suffix = " USER SUFFIX" + newline + "USER FOOTER"
+                    original = self.begin + whitespace + self.end + suffix
+                    self.assertEqual(self.render(original), self.pack.rstrip("\n") + suffix)
+
+    def test_compact_frame_with_text_refuses_without_write(self):
+        for newline in ("\n", "\r\n", "\r"):
+            for text in ("body", " body ", "<!-- user note -->"):
+                with self.subTest(newline=newline, text=text):
+                    original = self.begin + text + self.end + newline + "USER FOOTER"
+                    with self.assertRaisesRegex(ValueError, "E_CODEX_DOCUMENT_AMBIGUOUS"):
+                        self.render(original)
+                    self.assertEqual(self.writes, [])
+
+    def test_managed_begin_line_whitespace_and_newlines_remain_compatible(self):
+        for newline in ("\n", "\r\n", "\r"):
+            for whitespace in ("", " ", "\t"):
+                with self.subTest(newline=newline, whitespace=whitespace):
+                    suffix = newline + "USER FOOTER"
+                    original = self.begin + whitespace + newline + "Old" + newline + self.end + suffix
+                    self.assertEqual(self.render(original), self.pack.rstrip("\n") + suffix)
+
     def test_ordinary_marked_update_remains_compatible(self):
         prefix = "# User header\nKeep the header.\n"
         old = self.begin + "\nOld managed rule.\n" + self.end

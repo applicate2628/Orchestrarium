@@ -10272,6 +10272,12 @@ def _render_codex_document(existing: str | None, pack: str) -> str:
             end = existing.find(CODEX_END, start)
             if end < 0:
                 raise ValueError("E_CODEX_DOCUMENT_AMBIGUOUS: missing managed end marker")
+            marker_stop = start + len(CODEX_BEGIN)
+            line_stop = min((position for newline in ("\r", "\n")
+                             if (position := existing.find(newline, marker_stop)) >= 0),
+                            default=len(existing))
+            if existing[marker_stop:min(line_stop, end)].strip(" \t"):
+                raise ValueError("E_CODEX_DOCUMENT_AMBIGUOUS: text after managed begin marker")
             end += len(CODEX_END)
             content = existing[:start] + pack.rstrip("\n") + existing[end:]
         elif CODEX_END in visible:

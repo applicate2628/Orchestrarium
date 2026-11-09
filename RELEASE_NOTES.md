@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-09
 
+- Codex document preparation now refuses a managed BEGIN marker followed by non-whitespace text on the same line, instead of silently replacing that text. Ordinary generated frames, empty or space/tab-only compact frames, line endings and the existing raw END boundary remain unchanged. Compact frames containing text now refuse; no automatic reconciliation or selected-API bypass is implied.
+
 - Refresh the Codex reference-addendum validation pin after the published Goal recovery guidance change. Clean source validation now accepts that canonical guidance while retaining exact normalized-content drift detection; governance and validator behavior are otherwise unchanged.
 
 - Preserve Markdown examples at the start of BOM-prefixed instruction documents. The parser treats exactly one leading byte-order mark as an envelope and restores original code-span offsets, so fenced managed-marker examples are no longer mistaken for replaceable content. Pure parser and in-memory renderer regressions cover LF, CRLF, lone CR, indentation and outside-byte preservation; historical ownership and physical installer qualification remain separate.
