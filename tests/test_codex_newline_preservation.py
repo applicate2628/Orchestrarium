@@ -248,15 +248,17 @@ class NewlinePreservationTests(unittest.TestCase):
                                      (self.pack + "\n" + original).encode("utf-8"))
 
 
-    def test_html_block_interruption_keeps_existing_commonmark_semantics(self):
-        # A line-start HTML block interrupts the paragraph, so these ticks do
-        # not form a committed multiline code span in the bundled dialect.
+    def test_html_interruption_does_not_authorize_inline_begin(self):
+        # The HTML block interrupts the paragraph, so the parser does not mask
+        # these unmatched ticks. The physical-line prefix still refuses.
         for nl in ("\n", "\r\n", "\r"):
             prefix = "USER PREFIX" + nl + nl + "`"
             suffix = "`" + nl + "USER TAIL"
             original = prefix + self.begin + nl + self.end + suffix
-            self.assertEqual(self.render(original)[0],
-                             (prefix + self.pack.rstrip("\n") + suffix).encode("utf-8"))
+            with self.assertRaisesRegex(ValueError, "E_CODEX_DOCUMENT_AMBIGUOUS: text before"):
+                self.render(original)
+            self.assertEqual(MemoryPath.writes, [])
+            self.assertEqual(MemoryPath.files[str(self.target)], original.encode("utf-8"))
 
     def test_inline_raw_end_retains_old_termination_semantics(self):
         suffix = "`\r\nOld\r" + self.end + "\r\nUSER TAIL"

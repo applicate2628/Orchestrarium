@@ -260,7 +260,7 @@ def test_posix_launcher_forwards_stdin_argv_and_exit_code(entrypoint: str) -> No
     reason="POSIX bash installer dry-run is unavailable on this host",
 )
 @pytest.mark.parametrize("entrypoint", ("scripts/install-codex.sh", "scripts/install-claude.sh"))
-def test_posix_global_dry_run_uses_home_without_userprofile(entrypoint: str) -> None:
+def test_posix_global_dry_run_refuses_before_home_selection(entrypoint: str) -> None:
     with tempfile.TemporaryDirectory() as td:
         home = Path(td) / "home"
         home.mkdir()
@@ -276,9 +276,18 @@ def test_posix_global_dry_run_uses_home_without_userprofile(entrypoint: str) -> 
             encoding="utf-8",
         )
 
-    assert result.returncode == 0, result.stdout + result.stderr
-    provider = "codex" if "codex" in entrypoint else "claude"
-    assert f"Target: {home / f'.{provider}'}" in result.stdout
+        _assert_posix_installation_hold(result)
+        assert tuple(home.iterdir()) == ()
+
+
+def _assert_posix_installation_hold(result: subprocess.CompletedProcess[str]) -> None:
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout == ""
+    assert result.stderr == (
+        "FAIL: E_POSIX_DISPOSAL_UNQUALIFIED: POSIX installer operations are "
+        "temporarily disabled, including --dry-run; the disposal race remains "
+        "unresolved. No target or staging operations were started.\n"
+    )
 
 
 def test_publication_scanner_python_mirrors_match_canon() -> None:
@@ -373,10 +382,10 @@ def test_retired_cleanup_preserves_retained_custom_reference_and_unknown_target(
     assert not target.exists()
 
 
-def test_codex_production_entrypoint_creates_only_source_manifest_roles(
+def test_codex_production_entrypoint_respects_platform_contract(
     tmp_path: Path,
 ) -> None:
-    """The source manifest validates payload bytes but is never an installed receipt."""
+    """POSIX refuses; Windows uses the manifest as a payload oracle, not a receipt."""
 
     project = tmp_path / "project"
     project.mkdir()
@@ -395,6 +404,10 @@ def test_codex_production_entrypoint_creates_only_source_manifest_roles(
         encoding="utf-8",
         env=codex_hook_host_env(os.environ, ROOT),
     )
+    if os.name == "posix":
+        _assert_posix_installation_hold(result)
+        assert tuple(project.iterdir()) == ()
+        return
     assert result.returncode == 0, result.stdout + result.stderr
     assert "RESULT: OK - Codex pack installed" in result.stdout
 

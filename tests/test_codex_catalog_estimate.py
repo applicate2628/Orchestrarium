@@ -134,6 +134,93 @@ class CatalogEstimateTests(unittest.TestCase):
                 self.assertIn("deprecated length-difference alias, not removal evidence", output)
                 self.assertNotIn("shortens 1 descriptions", output)
 
+    def test_duplicate_runtime_json_fields_are_malformed(self):
+        root = (self.home / "skills").as_posix()
+        text = ("<skills_instructions>\n- `r0` = `" + root + "`\n- alpha: "
+                + "x" * 80 + " (file: r0/alpha/SKILL.md)\n</skills_instructions>")
+        item = '{"type":"input_text","text":' + json.dumps(text) + '}'
+        samples = [
+            '[{"content":[],"content":[' + item + ']}]',
+            '[{"content":[' + item + '],"content":[' + item + ']}]',
+            '[{"content":[{"type":"other","type":"input_text","text":' + json.dumps(text) + '}]}]',
+            '[{"content":[{"type":"input_text","text":"ignored","text":' + json.dumps(text) + '}]}]',
+            # Escaped JSON spelling is the same decoded field name.
+            '[{"content":[],"con\\u0074ent":[' + item + ']}]',
+        ]
+        for encoded in samples:
+            with self.subTest(encoded=encoded):
+                observation = self.module["parse_runtime_prompt_input"](
+                    encoded, self.repo, self.home / "skills")
+                self.assertEqual(observation.status, "malformed")
+                self.assertEqual(observation.diagnostic, "CATALOG-RUNTIME-MALFORMED")
+                code, output = self.invoke([], observation)
+                self.assertEqual(code, 1)
+                self.assertIn("RESULT: FAIL", output)
+
+    def test_runtime_json_recursion_failure_is_malformed(self):
+        # Deterministic decoder-failure seam; no recursion-limit changes or huge allocation.
+        with patch.object(self.globals["json"], "loads", side_effect=RecursionError("PRIVATE")):
+            observation = self.module["parse_runtime_prompt_input"]("[]", self.repo, self.home / "skills")
+        self.assertEqual(observation.status, "malformed")
+        self.assertEqual(observation.diagnostic, "CATALOG-RUNTIME-MALFORMED")
+        self.assertNotIn("PRIVATE", str(observation))
+
+    def test_runtime_catalog_requires_one_complete_frame(self):
+        root = (self.home / "skills").as_posix()
+        start, end = "<skills_instructions>", "</skills_instructions>"
+        body = ("\n- `r0` = `" + root + "`\n- alpha: " + "x" * 80
+                + " (file: r0/alpha/SKILL.md)\n")
+        for text in (start + body, end + body + start,
+                     start + "\n" + start + body + end + "\n" + end,
+                     start + body + end + "\n" + start + "\n" + end):
+            with self.subTest(text=text):
+                payload = json.dumps([{"content": [{"type": "input_text", "text": text}]}])
+                observed = self.module["parse_runtime_prompt_input"](
+                    payload, self.repo, self.home / "skills")
+                self.assertEqual(observed.status, "malformed")
+                self.assertEqual(observed.diagnostic, "CATALOG-RUNTIME-MALFORMED")
+                code, output = self.invoke([], observed)
+                self.assertEqual(code, 1)
+                self.assertIn("RESULT: FAIL", output)
+
+    def test_runtime_catalog_does_not_credit_outside_frame_rows(self):
+        root = (self.home / "skills").as_posix()
+        start, end = "<skills_instructions>\n", "</skills_instructions>\n"
+        root_row = "- `r0` = `" + root + "`\n"
+        entry_row = "- alpha: " + "x" * 80 + " (file: r0/alpha/SKILL.md)\n"
+        cases = (
+            (root_row + start + entry_row + end, "malformed"),
+            (start + root_row + end + entry_row, "malformed"),
+            # Unrelated surrounding text must not introduce roots or entries.
+            (root_row + start + root_row + entry_row + end + entry_row, "complete"),
+        )
+        for text, expected in cases:
+            with self.subTest(expected=expected, text=text):
+                payload = json.dumps([{"content": [{"type": "input_text", "text": text}]}])
+                observed = self.module["parse_runtime_prompt_input"](
+                    payload, self.repo, self.home / "skills")
+                self.assertEqual(observed.status, expected)
+                self.assertEqual(observed.total_entries, 1 if expected == "complete" else 0)
+
+    def test_runtime_description_can_mention_frame_tags(self):
+        description = "Inspect <skills_instructions> and </skills_instructions> framing."
+        skill = self.home / "skills" / "alpha" / "SKILL.md"
+        skill.write_text('---\nname: alpha\ndescription: "' + description + '"\n---\n',
+                         encoding="utf-8")
+        observed = self.observe_description(description)
+        self.assertEqual(observed.status, "complete")
+        self.assertEqual(observed.total_entries, 1)
+
+    def test_runtime_frame_delimiters_allow_line_whitespace(self):
+        root = (self.home / "skills").as_posix()
+        text = (" \t<skills_instructions>\t \r\n- `r0` = `" + root
+                + "`\n- alpha: " + "x" * 80 + " (file: r0/alpha/SKILL.md)\n"
+                + " \t</skills_instructions>\t \r\n")
+        payload = json.dumps([{"content": [{"type": "input_text", "text": text}]}])
+        observed = self.module["parse_runtime_prompt_input"](
+            payload, self.repo, self.home / "skills")
+        self.assertEqual(observed.status, "complete")
+
     def test_zero_context_is_still_only_an_estimate(self):
         code, output = self.invoke(self.custom_args() + ["--context-window", "0"])
         self.assertEqual(code, 0)

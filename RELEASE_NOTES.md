@@ -4,6 +4,14 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-09
 
+- Codex document preparation now refuses a managed BEGIN marker preceded by prose, quotation/list syntax or other content on the same physical line, preserving user text that an inline example could otherwise cause the updater to replace. Normal standalone frames, one document-start byte-order mark and surrounding line endings remain supported. This bounded refusal also covers unmatched inline ticks; it does not establish ownership of standalone markers or change raw END and legacy-heading boundaries.
+
+- Production-entrypoint regression expectations now require the existing early POSIX refusal for global dry runs and the Codex project smoke path, instead of requiring installation success. They check the complete refusal output and an unchanged empty target; the Windows manifest assertions remain intact. This test-contract correction does not enable POSIX installation or establish native lifecycle qualification.
+
+- Runtime catalog validation now binds roots and entries to one complete skills-instructions block. Missing, reversed or repeated delimiter lines fail as malformed evidence, while literal tags in single-line descriptions remain valid. Surrounding text cannot supply catalog entries or create false duplicate-root errors. This closes false-complete observations without claiming client identity, actual instruction loading or project-budget acceptance.
+
+- Catalog runtime evidence now rejects duplicate JSON fields instead of silently accepting the last value, and reports decoder recursion failures as malformed evidence. This prevents ambiguous observations from being accepted as complete while keeping valid unique-field input and existing diagnostic verdicts unchanged; no client launch is required for these checks.
+
 - The shorter-description catalog warning now reports a length difference with content and provenance unverified, rather than asserting that the client removed characters. The existing removed-chars output key remains as a deprecated numeric alias alongside description-length-difference; it is not evidence of removal. Existing status identifiers and verdicts are unchanged. A version-pinned runtime and bound render source are still required to establish the cause; this wording is not installed-runtime or semantic-equivalence acceptance.
 
 - Runtime catalog validation now rejects differing descriptions that are equal in length or longer than the bound local description instead of reporting successful shortening with zero characters removed. Exact matches and the existing shorter-description warning contract remain unchanged; this diagnostic does not establish why the observed content differs or prove semantic equivalence of shorter text.

@@ -10271,6 +10271,12 @@ def _render_codex_document(existing: str | None, pack: str) -> str:
         visible, _ = _markdown_document_context(existing)
         if CODEX_BEGIN in visible:
             start = visible.index(CODEX_BEGIN)
+            line_start = max(existing.rfind("\r", 0, start), existing.rfind("\n", 0, start)) + 1
+            prefix = existing[line_start:start]
+            if line_start == 0 and prefix.startswith("\ufeff"):
+                prefix = prefix[1:]
+            if prefix.strip(" \t"):
+                raise ValueError("E_CODEX_DOCUMENT_AMBIGUOUS: text before managed begin marker")
             end = existing.find(CODEX_END, start)
             if end < 0:
                 raise ValueError("E_CODEX_DOCUMENT_AMBIGUOUS: missing managed end marker")

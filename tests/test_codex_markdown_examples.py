@@ -109,6 +109,41 @@ class CodexMarkdownExampleTests(unittest.TestCase):
         self.assertEqual(self.render(example + old + tail),
                          example + self.pack.rstrip("\n") + tail)
 
+    def test_managed_begin_with_prefix_content_refuses_before_writing(self):
+        for newline in ("\n", "\r\n", "\r"):
+            for prefix in ("> ", "- ", "1. ", "User example: ", "`example` ", "\\", "\u2028"):
+                with self.subTest(newline=newline, prefix=prefix):
+                    original = (prefix + self.begin + newline + "USER KEEP" + newline
+                                + self.end + newline + "USER FOOTER")
+                    with self.assertRaisesRegex(ValueError, "E_CODEX_DOCUMENT_AMBIGUOUS: text before"):
+                        self.render(original)
+                    self.assertEqual(self.writes, [])
+                    self.assertEqual(self.existing, original)
+
+    def test_begin_prefix_refusal_also_prevents_dry_run_proposal(self):
+        original = "User example: " + self.begin + "\nUSER KEEP\n" + self.end
+        with self.assertRaisesRegex(ValueError, "E_CODEX_DOCUMENT_AMBIGUOUS: text before"):
+            self.render(original, dry_run=True)
+        self.assertEqual(self.writes, [])
+
+    def test_document_start_bom_and_marker_indentation_remain_compatible(self):
+        for newline in ("\n", "\r\n", "\r"):
+            for bom in ("", "\ufeff"):
+                for indentation in ("", " ", "  ", "   "):
+                    with self.subTest(newline=newline, bom=bom, indentation=indentation):
+                        prefix = bom + indentation
+                        suffix = newline + "USER FOOTER"
+                        original = prefix + self.begin + newline + "Old" + newline + self.end + suffix
+                        self.assertEqual(self.render(original), prefix + self.pack.rstrip("\n") + suffix)
+
+    def test_only_one_document_start_bom_is_an_envelope(self):
+        for prefix in ("\ufeff\ufeff", "Header\n\ufeff", "Header\r\n\ufeff", "Header\r\ufeff"):
+            with self.subTest(prefix=prefix):
+                original = prefix + self.begin + "\nUSER KEEP\n" + self.end
+                with self.assertRaisesRegex(ValueError, "E_CODEX_DOCUMENT_AMBIGUOUS: text before"):
+                    self.render(original)
+                self.assertEqual(self.writes, [])
+
     def test_managed_begin_with_user_text_on_same_line_refuses(self):
         for tail in (" USER TEXT KEEP", "\tUSER TEXT KEEP", "<!-- user note -->", "\u2028USER TEXT KEEP"):
             with self.subTest(tail=tail):

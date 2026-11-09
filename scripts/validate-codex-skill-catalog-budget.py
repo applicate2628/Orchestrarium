@@ -179,9 +179,17 @@ def _runtime_failure(status: str, diagnostic: str) -> RuntimeCatalogObservation:
 def parse_runtime_prompt_input(
     encoded: str, repo_skills: Path, pack_runtime_root: Path
 ) -> RuntimeCatalogObservation:
+    def unique_fields(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("Duplicate runtime evidence field")
+            value[key] = item
+        return value
+
     try:
-        payload = json.loads(encoded)
-    except (TypeError, ValueError):
+        payload = json.loads(encoded, object_pairs_hook=unique_fields)
+    except (TypeError, ValueError, RecursionError):
         return _runtime_failure("malformed", "CATALOG-RUNTIME-MALFORMED")
     if not isinstance(payload, list):
         return _runtime_failure("malformed", "CATALOG-RUNTIME-MALFORMED")
@@ -202,6 +210,14 @@ def parse_runtime_prompt_input(
         return _runtime_failure("malformed", "CATALOG-RUNTIME-MALFORMED")
 
     skills_text = skill_blocks[0]
+    frame_markers = list(re.finditer(
+        r"^[ \t]*(?P<tag></?skills_instructions>)[ \t]*\r?$",
+        skills_text, re.MULTILINE))
+    if [match.group("tag") for match in frame_markers] != [
+        "<skills_instructions>", "</skills_instructions>"
+    ]:
+        return _runtime_failure("malformed", "CATALOG-RUNTIME-MALFORMED")
+    skills_text = skills_text[frame_markers[0].end():frame_markers[1].start()]
     root_matches = list(ROOT_LINE_RE.finditer(skills_text))
     roots = {
         match.group("alias"): Path(match.group("path"))
