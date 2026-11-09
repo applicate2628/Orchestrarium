@@ -13,7 +13,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "scripts" / "production_installer.py"
 sys.path.insert(0, str(ROOT / "scripts"))
-from installer_markdown import document_context
+from installer_markdown import document_context, document_h1_starts
 from installation.document_outcomes import render_documents
 
 
@@ -62,6 +62,7 @@ class NewlinePreservationTests(unittest.TestCase):
         self.scope = dict(constants, io=io, hashlib=hashlib,
                           _render_document_outcomes=render_documents,
                           _markdown_document_context=document_context,
+                          _markdown_document_h1_starts=document_h1_starts,
                           _owned_byte_context=self.memory_context)
         exec(compile(isolated, str(SOURCE), "exec"), self.scope)
         self.root = MemoryPath("/source")

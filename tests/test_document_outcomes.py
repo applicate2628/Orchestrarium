@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from installation.document_outcomes import render_document, render_documents
 from installation.receipt_plan import plan_changes
-from installer_markdown import document_context
+from installer_markdown import document_context, document_h1_starts
 
 
 class DocumentOutcomesTests(unittest.TestCase):
@@ -30,7 +30,7 @@ class DocumentOutcomesTests(unittest.TestCase):
             + constants + nodes, type_ignores=[]))
 
     def setUp(self):
-        self.scope = {"re": re, "_markdown_document_context": document_context}
+        self.scope = {"re": re, "_markdown_document_h1_starts": document_h1_starts, "_markdown_document_context": document_context}
         exec(compile(self.module, "isolated-existing-producers", "exec"), self.scope)
         self.calls = []
 

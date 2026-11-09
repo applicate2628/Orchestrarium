@@ -19,7 +19,7 @@ SOURCE = ROOT / "scripts" / "production_installer.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 from installation.document_outcomes import DocumentResult, render_documents
 from installation.receipt_plan import plan_changes
-from installer_markdown import document_context
+from installer_markdown import document_context, document_h1_starts
 
 
 class MemorySource(PurePosixPath):
@@ -70,7 +70,7 @@ class CodexDocumentPreparationTests(unittest.TestCase):
         }
         self.adapter = Mock(wraps=render_documents)
         self.scope = {
-            "_markdown_document_context": document_context,
+            "_markdown_document_h1_starts": document_h1_starts, "_markdown_document_context": document_context,
             "_read_owned_text": self.read_owned,
             "_write_owned_text": self.write_owned,
         }

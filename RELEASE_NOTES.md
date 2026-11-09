@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-09
 
+- Codex legacy updates now recognize complete top-level headings with the existing Markdown parser instead of heading-like substrings in user prose or nested headings. Ordinary generated legacy updates and original outside bytes remain supported; raw ending boundaries and ambiguous genuine-heading ownership are unchanged. This source correction does not qualify historical migration or installed-profile behavior.
+
 - Codex document preparation now refuses a managed BEGIN marker followed by non-whitespace text on the same line, instead of silently replacing that text. Ordinary generated frames, empty or space/tab-only compact frames, line endings and the existing raw END boundary remain unchanged. Compact frames containing text now refuse; no automatic reconciliation or selected-API bypass is implied.
 
 - Refresh the Codex reference-addendum validation pin after the published Goal recovery guidance change. Clean source validation now accepts that canonical guidance while retaining exact normalized-content drift detection; governance and validator behavior are otherwise unchanged.

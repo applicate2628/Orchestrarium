@@ -56,6 +56,6 @@ markdown_it = _initialize_private("markdown_it", _markdown_spec)
 
 _check_package_origins()
 
-from .context import document_context
+from .context import document_context, document_h1_starts
 
-__all__ = ("document_context",)
+__all__ = ("document_context", "document_h1_starts")

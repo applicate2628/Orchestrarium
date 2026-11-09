@@ -30,10 +30,12 @@ from typing import Any
 
 try:
     from installer_markdown import document_context as _markdown_document_context
+    from installer_markdown import document_h1_starts as _markdown_document_h1_starts
 except ModuleNotFoundError as error:
     if error.name != "installer_markdown":
         raise
     from scripts.installer_markdown import document_context as _markdown_document_context
+    from scripts.installer_markdown import document_h1_starts as _markdown_document_h1_starts
 
 try:
     from installation.document_outcomes import (
@@ -10282,17 +10284,16 @@ def _render_codex_document(existing: str | None, pack: str) -> str:
             content = existing[:start] + pack.rstrip("\n") + existing[end:]
         elif CODEX_END in visible:
             raise ValueError("E_CODEX_DOCUMENT_AMBIGUOUS: missing active managed begin marker")
-        elif "# Shared Governance" in visible or "# Codex Platform Rules" in visible:
-            starts = [
-                position
-                for marker in ("# Shared Governance", "# Codex Platform Rules", "# Default Delegation Rule")
-                if (position := visible.find(marker)) >= 0
-            ]
-            start = min(starts)
-            policy = existing.find("## Project policies", start)
-            content = existing[:start] + pack + (existing[policy:] if policy >= 0 else "")
         else:
-            content = pack + "\n" + existing
+            headings = _markdown_document_h1_starts(existing, (
+                "Shared Governance", "Codex Platform Rules", "Default Delegation Rule"))
+            if any(title in ("Shared Governance", "Codex Platform Rules")
+                   for title, _position in headings):
+                start = min(position for _title, position in headings)
+                policy = existing.find("## Project policies", start)
+                content = existing[:start] + pack + (existing[policy:] if policy >= 0 else "")
+            else:
+                content = pack + "\n" + existing
     else:
         content = pack
     return content

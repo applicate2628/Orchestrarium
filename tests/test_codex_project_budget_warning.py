@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "scripts" / "production_installer.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 from installation.document_outcomes import render_documents
+from installer_markdown import document_h1_starts
 
 
 class MemoryPath(PurePosixPath):
@@ -42,6 +43,7 @@ class CodexProjectBudgetWarningTests(unittest.TestCase):
         self.writes = []
         self.scope = dict(constants,
                           _render_document_outcomes=render_documents,
+                          _markdown_document_h1_starts=document_h1_starts,
                           _markdown_document_context=lambda text: (text, []),
                           _read_owned_text=lambda *_args, preserve_newlines: self.existing,
                           _write_owned_text=lambda *args: self.writes.append(args))

@@ -11,7 +11,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "scripts" / "production_installer.py"
 sys.path.insert(0, str(ROOT / "scripts"))
-from installer_markdown import document_context
+from installer_markdown import document_context, document_h1_starts
 from installation.document_outcomes import render_documents
 
 
@@ -43,6 +43,7 @@ class CodexMarkdownExampleTests(unittest.TestCase):
         self.scope = dict(constants,
                           _render_document_outcomes=render_documents,
                           _markdown_document_context=document_context,
+                          _markdown_document_h1_starts=document_h1_starts,
                           _read_owned_text=lambda *_args, preserve_newlines: self.existing,
                           _write_owned_text=lambda *args: self.writes.append(args))
         exec(compile(isolated, str(SOURCE), "exec"), self.scope)
