@@ -12,6 +12,24 @@ The public POSIX installer hold, including dry run, is unchanged. A private call
 
 Five additional mutable-path entry points use the same preflight directly: directory preparation, anchor bootstrap, exact-file migration, projection creation and migrated-file rollback. They refuse non-Windows calls before observing inputs, including dry-run or potential no-op requests. Rollback does not enter a fresh writer context: refusal preserves its existing custody and propagates to the established incomplete-settlement owner. This finite entry set does not claim that every internal primitive, staging remover or uninstall route is covered; expansion beyond it requires a complete effect/caller inventory rather than repeated local guards.
 
+## Capability-probe failure receiving
+
+The existing directory-move capability probe chooses its primary exception by
+presence (`is None`), never truthiness. If both its body and disposal fail, the
+existing typed settlement failure retains the original body cause, cleanup
+exception context and recovery locator. A false-valued exception must not replace
+the original cause, and an exception's `__bool__` must not run during this choice.
+When only disposal fails, disposal remains the selected cause. The probe still
+performs exactly the previous operations; this diagnostic correction adds no
+backend admission and does not change the public or private POSIX holds.
+
+The focused tests execute the extracted probe control flow and real diagnostic
+declarations against inert paths and a synthetic transaction. They include the
+actual POSIX refusal helper but no installer import or filesystem effects. This
+is not native probe, creation, move, cleanup or recovery qualification. Acquisition
+and initial observation before the probe's existing try boundary remain open
+lifetime issues; this correction does not claim to settle them.
+
 ## Required effect contract
 
 For every operation, identify the selected source object, authorized parent and ancestor chain, exact entry name, expected current content/metadata and permitted destination. Separate these guarantees:

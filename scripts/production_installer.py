@@ -8945,7 +8945,8 @@ def _preflight_directory_move_capabilities(plan: _CanonicalSkillsPlan, target: P
             try:
                 transaction._dispose_image(probe, state)
             except BaseException as cleanup:
-                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "capability", original or cleanup,
+                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "capability",
+                                      cleanup if original is None else original,
                                       recovery_path=probe) from original
         if not _InstallTransaction._binding_identity_matches(
             parent_identity, _CreateOnlyMutablePath._identity(parent)
