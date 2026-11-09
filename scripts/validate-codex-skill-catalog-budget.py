@@ -466,17 +466,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--context-window",
         type=int,
-        default=REFERENCE_CONTEXT_WINDOW_TOKENS,
+        default=None,
         help=f"Model context window in tokens (default: {REFERENCE_CONTEXT_WINDOW_TOKENS}, "
         "a historical calibration, not necessarily the current runtime value).",
     )
-    parser.add_argument("--warn-fraction", type=float, default=WARN_FRACTION)
+    parser.add_argument("--warn-fraction", type=float, default=None)
     parser.add_argument(
         "--high-fraction", "--fail-fraction", dest="high_fraction", type=float,
-        default=HIGH_WARNING_FRACTION,
+        default=None,
         help="Historical high-warning threshold; the legacy --fail-fraction alias does not impose a failure.",
     )
     args = parser.parse_args(argv)
+    # Explicit calibration requests are offline estimates even when their
+    # numeric values equal defaults. Let argparse own aliases/equals syntax.
+    explicit_estimate = any(value is not None for value in (
+        args.context_window, args.warn_fraction, args.high_fraction))
+    if args.context_window is None:
+        args.context_window = REFERENCE_CONTEXT_WINDOW_TOKENS
+    if args.warn_fraction is None:
+        args.warn_fraction = WARN_FRACTION
+    if args.high_fraction is None:
+        args.high_fraction = HIGH_WARNING_FRACTION
 
     print(f"=== Codex skill catalog budget validation ===")
     print(f"CODEX_HOME: {args.codex_home}")
@@ -500,7 +510,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     default_agents_home = Path.home() / ".agents" / "skills"
     runtime_target = (
-        args.codex_home.resolve() == default_codex_home.resolve()
+        not explicit_estimate
+        and args.codex_home.resolve() == default_codex_home.resolve()
         and args.agents_skills_home.resolve() == default_agents_home.resolve()
         and args.repo_skills.resolve() == DEFAULT_REPO_SKILLS.resolve()
         and args.context_window == REFERENCE_CONTEXT_WINDOW_TOKENS

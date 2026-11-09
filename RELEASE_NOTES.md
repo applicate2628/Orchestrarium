@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-09
 
+- Explicit catalog-budget calibration flags now stay in offline estimate mode even when their values equal the defaults, including the legacy high-threshold alias. This prevents an explicitly parameterized estimate from unexpectedly reaching Codex runtime discovery; the no-argument runtime mode remains unchanged.
+
 - Provider ownership records now reject case variants of the reserved receipt filename, matching the existing case-insensitive alias policy. Fresh payload filtering also excludes these variants. This closes a validation gap for Windows-style name aliases without adding ownership authority or changing filesystem operations.
 
 - Preserve original Claude document newline bytes outside the selected managed body and return byte-identical text for an unchanged normalized payload. The preparation wrapper still invokes its writers; this is not a physical no-write guarantee. Preparation now passes exact text; the existing renderer maps its established normalized selection to original offsets, including lone-CR insertion boundaries. This fixes user prefix/suffix normalization without adding ownership authority or physical rollback guarantees.

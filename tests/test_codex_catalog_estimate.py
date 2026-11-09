@@ -80,6 +80,19 @@ class CatalogEstimateTests(unittest.TestCase):
                 self.assertEqual(code, 0)
                 self.assertIn("RESULT: ESTIMATE", output)
 
+    def test_explicit_default_calibration_remains_offline(self):
+        self.globals["DEFAULT_REPO_SKILLS"] = self.repo
+        for option, value in (("--context-window", "272000"),
+                              ("--warn-fraction", "0.8"),
+                              ("--high-fraction", "0.9"),
+                              ("--fail-fraction", "0.9")):
+            for args in ([option, value], [option + "=" + value]):
+                with self.subTest(args=args):
+                    code, output = self.invoke(args)
+                    self.assertEqual(code, 0)
+                    self.assertIn("RESULT: ESTIMATE", output)
+                    self.assertNotIn("Runtime catalog:", output)
+
     def test_zero_context_is_still_only_an_estimate(self):
         code, output = self.invoke(self.custom_args() + ["--context-window", "0"])
         self.assertEqual(code, 0)
