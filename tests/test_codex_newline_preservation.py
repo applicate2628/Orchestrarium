@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 import sys
 import unittest
+from installer_diagnostic_test_support import DIAGNOSTICS
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "scripts" / "production_installer.py"
@@ -59,7 +60,7 @@ class NewlinePreservationTests(unittest.TestCase):
                 for target in node.targets:
                     if isinstance(target, ast.Name) and target.id in {"CODEX_BEGIN", "CODEX_END"}:
                         constants[target.id] = ast.literal_eval(node.value)
-        self.scope = dict(constants, io=io, hashlib=hashlib,
+        self.scope = dict(constants, _InstallFailure=DIAGNOSTICS._InstallFailure, io=io, hashlib=hashlib,
                           _render_document_outcomes=render_documents,
                           _markdown_document_context=document_context,
                           _markdown_document_h1_starts=document_h1_starts,
@@ -166,8 +167,10 @@ class NewlinePreservationTests(unittest.TestCase):
         original = prefix + "# Shared Governance\rOld\r\n" + suffix
         for kind in ("direct", "transaction"):
             with self.subTest(kind=kind):
-                self.assertEqual(self.render(original, kind=kind)[0],
-                                 (prefix + self.pack + suffix).encode("utf-8"))
+                with self.assertRaisesRegex(DIAGNOSTICS._InstallFailure, "E_CODEX_DOCUMENT_LEGACY_OWNERSHIP_REQUIRED"):
+                    self.render(original, kind=kind)
+                self.assertEqual(MemoryPath.files[str(self.target)], original.encode("utf-8"))
+                self.assertEqual(MemoryPath.writes, [])
 
     def test_example_prefix_does_not_shift_real_start(self):
         for nl in ("\r\n", "\r"):
@@ -187,7 +190,10 @@ class NewlinePreservationTests(unittest.TestCase):
     def test_raw_legacy_policy_is_not_hidden_by_unclosed_fence(self):
         suffix = "## Project policies\r\nUSER TAIL\r"
         original = "# Shared Governance\rOld\r\n```markdown\rExample\n" + suffix
-        self.assertEqual(self.render(original)[0], (self.pack + suffix).encode("utf-8"))
+        with self.assertRaisesRegex(DIAGNOSTICS._InstallFailure, "E_CODEX_DOCUMENT_LEGACY_OWNERSHIP_REQUIRED"):
+            self.render(original)
+        self.assertEqual(MemoryPath.files[str(self.target)], original.encode("utf-8"))
+        self.assertEqual(MemoryPath.writes, [])
 
     def test_missing_end_does_not_write_or_change_original_bytes(self):
         original = "User\r\n" + self.begin + "\rOld\nUSER TAIL"

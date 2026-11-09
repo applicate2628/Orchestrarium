@@ -7,6 +7,7 @@ import io
 from pathlib import Path, PurePosixPath
 import sys
 import unittest
+from installer_diagnostic_test_support import DIAGNOSTICS
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "scripts" / "production_installer.py"
@@ -40,7 +41,7 @@ class CodexMarkdownExampleTests(unittest.TestCase):
                         constants[target.id] = ast.literal_eval(node.value)
         self.existing = None
         self.writes = []
-        self.scope = dict(constants,
+        self.scope = dict(constants, _InstallFailure=DIAGNOSTICS._InstallFailure,
                           _render_document_outcomes=render_documents,
                           _markdown_document_context=document_context,
                           _markdown_document_h1_starts=document_h1_starts,
@@ -184,13 +185,14 @@ class CodexMarkdownExampleTests(unittest.TestCase):
         self.assertEqual(self.render(prefix + old + tail),
                          prefix + self.pack.rstrip("\n") + tail)
 
-    def test_ordinary_legacy_update_remains_compatible(self):
+    def test_ordinary_legacy_update_requires_explicit_ownership(self):
         for heading in ("# Shared Governance", "# Codex Platform Rules"):
             with self.subTest(heading=heading):
                 prefix = "# User preface\nKeep this preface.\n"
                 tail = "## Project policies\nKeep mine.\n"
-                self.assertEqual(self.render(prefix + heading + "\nOld factory rule.\n" + tail),
-                                 prefix + self.pack + tail)
+                with self.assertRaisesRegex(DIAGNOSTICS._InstallFailure, "E_CODEX_DOCUMENT_LEGACY_OWNERSHIP_REQUIRED"):
+                    self.render(prefix + heading + "\nOld factory rule.\n" + tail)
+                self.assertEqual(self.writes, [])
 
     def test_legacy_start_ignores_examples_without_expanding_raw_end(self):
         prefix = "```markdown\n# Shared Governance\nExample only.\n```\n"
@@ -199,7 +201,9 @@ class CodexMarkdownExampleTests(unittest.TestCase):
         # and expand the replaced extent, even when that boundary is code.
         tail = ("## Project policies\nExample only.\n```\nOld factory tail.\n"
                 "## Project policies\nKeep mine.\n")
-        self.assertEqual(self.render(prefix + old + tail), prefix + self.pack + tail)
+        with self.assertRaisesRegex(DIAGNOSTICS._InstallFailure, "E_CODEX_DOCUMENT_LEGACY_OWNERSHIP_REQUIRED"):
+            self.render(prefix + old + tail)
+        self.assertEqual(self.writes, [])
 
     def test_unclosed_fence_in_active_block_preserves_user_tail(self):
         original = (self.begin + "\n# Shared Governance\nOld managed rule.\n"
@@ -229,8 +233,9 @@ class CodexMarkdownExampleTests(unittest.TestCase):
     def test_unclosed_legacy_fence_does_not_hide_raw_policy_boundary(self):
         original = ("# Shared Governance\nOld body\n```markdown\nExample\n"
                     "## Project policies\nUSER TAIL KEEP\n")
-        self.assertEqual(self.render(original), self.pack
-                         + "## Project policies\nUSER TAIL KEEP\n")
+        with self.assertRaisesRegex(DIAGNOSTICS._InstallFailure, "E_CODEX_DOCUMENT_LEGACY_OWNERSHIP_REQUIRED"):
+            self.render(original)
+        self.assertEqual(self.writes, [])
 
     def test_inline_end_keeps_the_existing_termination_limit(self):
         # This proves compatibility, not correct ownership or a complete

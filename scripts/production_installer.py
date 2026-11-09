@@ -1157,7 +1157,8 @@ class _WindowsBoundNode:
         buffer, returned = ctypes.create_string_buffer(data), wintypes.DWORD()
         if not kernel.DeviceIoControl(self.live_handle, 0x900A4, buffer, len(data), None,
                                       0, ctypes.byref(returned), None):
-            raise ctypes.WinError(ctypes.get_last_error())
+            error = ctypes.WinError(ctypes.get_last_error())
+            raise _InstallFailure("E_NATIVE_PROJECTION_SET_FAILED", "projection-set", error) from error
 
     def logical_target(self, raw: bytes | None = None) -> str:
         """Project the documented CPython SubstituteName view, retaining raw bytes."""
@@ -1601,7 +1602,7 @@ def _installer_failure_text(error: BaseException) -> str:
                     "native-acquisition", "native-security-release", "native-close", "creator-capture", "borrowed-content",
                     "copy-close", "scalar-parent-close", "descriptor-read-reset", "scalar-close", "scalar-acquisition",
                     "file-copy", "file-acquisition", "file-close", "construction", "disposal-close", "snapshot-acquisition",
-                    "residual-creator", "retention-acquisition", "migration-stage", "capability", "prepared"}
+                    "residual-creator", "retention-acquisition", "migration-stage", "capability", "prepared", "projection-set"}
         def safe_context(value):
             return value if type(value) is str and value in contexts else "unavailable"
         filesystem_types = (
@@ -1645,6 +1646,13 @@ def _installer_failure_text(error: BaseException) -> str:
                     if cause_storage is not None:
                         identity = stable(dict.get(cause_storage, "stable_id"))
                         cause_context = safe_context(dict.get(cause_storage, "context"))
+                        # One known operation wrapper only: no arbitrary chain traversal,
+                        # exception string rendering, or user-defined attribute access.
+                        if identity == "E_NATIVE_PROJECTION_SET_FAILED" and cause_context == "projection-set":
+                            native = dict.get(cause_storage, "cause")
+                            if any(type(native) is item for item in filesystem_types):
+                                native_errno = native_code(native, "errno")
+                                native_winerror = native_code(native, "winerror")
                 except BaseException:
                     pass
             else:
@@ -1855,6 +1863,8 @@ class _InstallFailure(RuntimeError):
 SLICE_A_FAILURE_IDS = frozenset(
     {
         "E_ATOMIC_DIRECTORY_PUBLISH_UNSUPPORTED",
+        "E_CODEX_DOCUMENT_LEGACY_OWNERSHIP_REQUIRED",
+        "E_NATIVE_PROJECTION_SET_FAILED",
         "E_CREATE_ONLY_COLLISION",
         "E_CREATE_ONLY_TYPE_COLLISION",
         "E_CREATE_ONLY_PROJECTION_COLLISION",
@@ -9233,8 +9243,8 @@ def _preflight_canonical_skills(
         raise
 
 
-def _discard_canonical_skills_plan(plan: _CanonicalSkillsPlan) -> None:
-    shutil.rmtree(plan.stage.path, ignore_errors=True)
+def _discard_canonical_skills_plan(plan: _CanonicalSkillsPlan, *, strict: bool = False) -> None:
+    shutil.rmtree(plan.stage.path, ignore_errors=not strict)
 
 
 def _assert_canonical_skills_plan_current(
@@ -10302,9 +10312,7 @@ def _render_codex_document(existing: str | None, pack: str) -> str:
                 "Shared Governance", "Codex Platform Rules", "Default Delegation Rule"))
             if any(title in ("Shared Governance", "Codex Platform Rules")
                    for title, _position in headings):
-                start = min(position for _title, position in headings)
-                policy = existing.find("## Project policies", start)
-                content = existing[:start] + pack + (existing[policy:] if policy >= 0 else "")
+                raise _InstallFailure("E_CODEX_DOCUMENT_LEGACY_OWNERSHIP_REQUIRED", "prepared")
             else:
                 content = pack + "\n" + existing
     else:
@@ -12052,6 +12060,42 @@ def _record_selected_provider_receipt(batch: _SelectedProviderUpdates) -> None:
     if actual != payload:
         raise ValueError("E_PROVIDER_RECEIPT_DRIFT: selected receipt readback")
 
+def _finish_install_result(provider, target, dry_run, applied, primary, cleanup_error) -> int:
+    """Receive terminal status after cleanup; no storage or rollback operation."""
+    # Unhandled/interrupt outcomes retain their type, original explicit cause,
+    # and private secondary references. Never chain a handled sensitive error.
+    handled = (OSError, RuntimeError, ValueError)
+    raised = (primary if primary is not None and not isinstance(primary, handled)
+              else cleanup_error if cleanup_error is not None and not isinstance(cleanup_error, handled)
+              else None)
+    if raised is not None:
+        storage = _passive_owner_storage(BaseException, raised)
+        if storage is not None:
+            dict.__setitem__(storage, "_installer_terminal_errors",
+                             tuple(error for error in (primary, cleanup_error)
+                                   if error is not None and error is not raised))
+        # Do not synthesize a traceback chain that could disclose handled text.
+        BaseException.__suppress_context__.__set__(raised, True)
+        raise raised
+    if primary is not None or cleanup_error is not None:
+        if applied == "commit-requested":
+            print("FAIL: E_INSTALL_POSTCOMMIT_UNRESOLVED: transaction commit requested; "
+                  "commit settlement incomplete. Installation may be applied. Do not retry blindly.", file=sys.stderr)
+        elif applied:
+            print("FAIL: E_INSTALL_POSTCOMMIT_UNRESOLVED: installation applied; "
+                  "postcommit compatibility or staging settlement failed. Do not retry blindly.", file=sys.stderr)
+        if primary is not None:
+            print(f"FAIL: {_installer_failure_text(primary)}", file=sys.stderr)
+        if cleanup_error is not None:
+            print(f"FAIL: staging cleanup: {_installer_failure_text(cleanup_error)}", file=sys.stderr)
+        return 1
+    if dry_run:
+        print("RESULT: DRY-RUN complete (no files modified).")
+    else:
+        print(f"RESULT: OK - {provider.capitalize()} pack installed to {target}")
+    return 0
+
+
 def install(provider: str, argv: list[str] | None = None) -> int:
     args = _parser(provider).parse_args(argv)
     # Even dry-run builds and disposes staging before entering the transaction.
@@ -12098,6 +12142,10 @@ def install(provider: str, argv: list[str] | None = None) -> int:
     script = Path(__file__)
     root = _repo_root(script)
     canonical_plan: _CanonicalSkillsPlan | None = None
+    primary = cleanup_error = None
+    applied = False
+    transaction = None
+    target = None
     source = root / f"src.{provider}"
     try:
         mode, target, project = _target(provider, args)
@@ -12851,20 +12899,21 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     provider, "global" if mode == "global" else "project", fresh_receipt, create_only
                 )
             transaction.commit()
+        applied = not args.dry_run
         if provider == "codex" and mode == "global":
             assert home is not None
             assert canonical_plan is not None
             _install_codex_legacy_skill_compatibility(
                 root, home, target, canonical_plan, canonical_skills_target,
                 legacy_codex_skill_migrations, dry_run=args.dry_run)
-        if args.dry_run:
-            print("RESULT: DRY-RUN complete (no files modified).")
-            return 0
-        print(f"RESULT: OK - {provider.capitalize()} pack installed to {target}")
-        return 0
-    except (OSError, RuntimeError, ValueError) as exc:
-        print(f"FAIL: {_installer_failure_text(exc)}", file=sys.stderr)
-        return 1
+    except BaseException as exc:
+        primary = exc
+        if not applied and not args.dry_run and transaction is not None and transaction.committed:
+            applied = "commit-requested"
     finally:
         if canonical_plan is not None:
-            _discard_canonical_skills_plan(canonical_plan)
+            try:
+                _discard_canonical_skills_plan(canonical_plan, strict=True)
+            except BaseException as exc:
+                cleanup_error = exc
+    return _finish_install_result(provider, target, args.dry_run, applied, primary, cleanup_error)

@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import sys
 import unittest
+from installer_diagnostic_test_support import DIAGNOSTICS
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -30,7 +31,7 @@ class DocumentOutcomesTests(unittest.TestCase):
             + constants + nodes, type_ignores=[]))
 
     def setUp(self):
-        self.scope = {"re": re, "_markdown_document_h1_starts": document_h1_starts, "_markdown_document_context": document_context}
+        self.scope = {"_InstallFailure": DIAGNOSTICS._InstallFailure, "re": re, "_markdown_document_h1_starts": document_h1_starts, "_markdown_document_context": document_context}
         exec(compile(self.module, "isolated-existing-producers", "exec"), self.scope)
         self.calls = []
 
@@ -249,10 +250,8 @@ class DocumentOutcomesTests(unittest.TestCase):
     def test_adapter_legacy_unclosed_fence_keeps_raw_policy(self):
         tail = "## Project policies\nUSER TAIL KEEP\n"
         raw = ("# Shared Governance\nOld\n```markdown\nExample\n" + tail).encode()
-        pack = self.codex("codex", None)
-        result, = render_documents("codex", "project", {"AGENTS.md": raw}, self.codex)
-        self.assertEqual(result.after, (pack + tail).encode())
-        self.assertEqual(result.as_outcome().intent, "update")
+        with self.assertRaisesRegex(DIAGNOSTICS._InstallFailure, "E_CODEX_DOCUMENT_LEGACY_OWNERSHIP_REQUIRED"):
+            render_documents("codex", "project", {"AGENTS.md": raw}, self.codex)
 
     def test_adapter_missing_end_propagates_exact_error_without_writer(self):
         raw = (self.scope["CODEX_BEGIN"] + "\n# Shared Governance\nUSER TAIL KEEP\n").encode()

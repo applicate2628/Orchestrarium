@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import unittest
+from installer_diagnostic_test_support import DIAGNOSTICS
 
 import test_codex_markdown_examples as examples
 
@@ -40,6 +41,28 @@ class CodexLegacyHeadingRecognitionTests(unittest.TestCase):
         self.harness = examples.CodexMarkdownExampleTests(methodName="runTest")
         self.harness.setUp()
 
+    def test_exact_user_heading_refuses_before_document_writer_even_in_dry_run(self):
+        for newline in ("\n", "\r\n", "\r"):
+            for dry_run in (False, True):
+                original = newline.join(("# Shared Governance", "USER AUTHORED RULE KEEP", ""))
+                with self.subTest(newline=newline, dry_run=dry_run):
+                    with self.assertRaisesRegex(DIAGNOSTICS._InstallFailure, "E_CODEX_DOCUMENT_LEGACY_OWNERSHIP_REQUIRED"):
+                        self.harness.render(original, dry_run=dry_run)
+                    self.assertEqual(self.harness.existing, original)
+                    self.assertEqual(self.harness.writes, [])
+
+    def test_real_cli_formatter_keeps_only_allowlisted_failure(self):
+        with self.assertRaises(DIAGNOSTICS._InstallFailure) as caught:
+            self.harness.render("# Shared Governance\nPRIVATE USER DATA\n")
+        text = DIAGNOSTICS._installer_failure_text(caught.exception)
+        self.assertIn("E_CODEX_DOCUMENT_LEGACY_OWNERSHIP_REQUIRED | context=prepared", text)
+        self.assertNotIn("PRIVATE", text)
+        self.assertNotIn("diagnostic=unavailable", text)
+        forged = ValueError("E_CODEX_DOCUMENT_LEGACY_OWNERSHIP_REQUIRED PRIVATE")
+        sanitized = DIAGNOSTICS._installer_failure_text(forged)
+        self.assertNotIn("E_CODEX_DOCUMENT_LEGACY_OWNERSHIP_REQUIRED", sanitized)
+        self.assertNotIn("PRIVATE", sanitized)
+
     def test_marked_path_does_not_parse_legacy_headings(self):
         def unexpected(*_args):
             self.fail("Marked replacement must not call the legacy heading parser")
@@ -52,10 +75,13 @@ class CodexLegacyHeadingRecognitionTests(unittest.TestCase):
 
 def _case_test(existing, prefix, tail):
     def test(self):
-        expected = (self.harness.pack + "\n" + existing if prefix is None
-                    else prefix + self.harness.pack + tail)
-        self.assertEqual(self.harness.render(existing).encode("utf-8"),
-                         expected.encode("utf-8"))
+        if prefix is not None:
+            with self.assertRaisesRegex(DIAGNOSTICS._InstallFailure, "E_CODEX_DOCUMENT_LEGACY_OWNERSHIP_REQUIRED"):
+                self.harness.render(existing)
+            self.assertEqual(self.harness.writes, [])
+        else:
+            self.assertEqual(self.harness.render(existing).encode("utf-8"),
+                             (self.harness.pack + "\n" + existing).encode("utf-8"))
     return test
 
 
