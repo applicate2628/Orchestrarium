@@ -192,10 +192,18 @@ class _CodeContext:
 def document_context(source: str) -> tuple[str, list[tuple[int, int]]]:
     """Return same-offset visibility and original-character code spans.
 
-    Keep the bundled parser's LF contract. Lift CRLF boundaries back to the
-    original string; lone CR is visible as LF at the same character offset.
+    Treat one leading BOM as an envelope. Keep it visible and lift code spans
+    back to the original character offsets.
     The caller's source bytes are never normalized or rewritten.
     """
+    if source.startswith("\ufeff"):
+        visible, spans = _document_text_context(source[1:])
+        return "\ufeff" + visible, [(start + 1, stop + 1) for start, stop in spans]
+    return _document_text_context(source)
+
+
+def _document_text_context(source: str) -> tuple[str, list[tuple[int, int]]]:
+    """Lift the bundled parser's LF contract to original CRLF/lone-CR offsets."""
     if "\r" not in source:
         return _CodeContext(source).run()
     normalized = source.replace("\r\n", "\n").replace("\r", "\n")
