@@ -17,6 +17,7 @@ import unittest
 import re
 from pathlib import Path
 from policy_text_contract import identifier_present, lexical, relationships, selected_section, selected_unit
+from test_codex_routing_instruction_kernel import codex_duties as routing_duties, shared_duties as routing_shared_duties
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -129,21 +130,6 @@ IMPLEMENTATION_PROFESSION_FILES = tuple(
     )
 )
 
-FACT_ROUTING_FRAGMENTS = (
-    "Standalone bounded fact lookup is answered inline with no artifact.",
-    "defaults to one `$analyst`",
-    "recovery only when continuation is needed",
-    "explicitly user-named role or narrower factual domain specialist remains valid",
-    "Architecture Decision Record (ADR)",
-    "add `$planner` only when the user explicitly requests an execution plan",
-)
-SIDE_QUESTION_CONTINUITY_FRAGMENTS = (
-    "answer brief questions in commentary",
-    "promptly delegate eligible substantive admitted side work",
-    "continue the next ready primary action in the same turn without waiting for its result",
-    "existing authority, capacity, full resource surfaces, gates",
-    "explicit user/manual/native holds",
-)
 HANDOFF_ACCEPTANCE_ECHO_FRAGMENTS = (
     "same accepted `Acceptance criteria` and `Named regression guard`",
     "guard's expected and observed result",
@@ -1391,8 +1377,14 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
         for owner in owners:
             with self.subTest(owner=owner):
                 text = " ".join(self._read(owner).split())
-                for fragment in required:
-                    self.assertIn(fragment, text)
+                if owner == "src.codex/AGENTS.codex.md":
+                    duties = routing_duties(self._read(owner))
+                    self.assertTrue(duties["closure-fields"])
+                    self.assertTrue(duties["closure-owner"])
+                    self.assertTrue(routing_shared_duties(self._read(SPINE))["lifecycle-owner"])
+                else:
+                    for fragment in required:
+                        self.assertIn(fragment, text)
 
         codex = self._read("src.codex/AGENTS.codex.md")
         self.assertIn("versioned Lead/lifecycle-owner contract", codex)
@@ -1521,7 +1513,11 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
         for owner in installed_mirrors:
             with self.subTest(owner=owner):
                 text = self._read(owner)
-                self.assertIn("work-items/active/<slug>/status.md", text)
+                if owner == "src.codex/AGENTS.codex.md":
+                    self.assertTrue(routing_duties(text)["quick-fix-referral"])
+                    self.assertTrue(routing_shared_duties(spine)["quick-fix-owner"])
+                else:
+                    self.assertIn("work-items/active/<slug>/status.md", text)
                 for legacy in legacy_no_memory_wording:
                     self.assertNotIn(legacy, text)
 
@@ -1573,12 +1569,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
 
         for entrypoint in ("src.codex/AGENTS.codex.md",):
             with self.subTest(entrypoint=entrypoint):
-                text = self._read(entrypoint)
-                self.assertIn(
-                    "no recovery file is needed unless that invocation is itself admitted as `quick-fix`",
-                    text,
-                )
-                self.assertIn("this exception does not broaden recovery to trivial questions", text)
+                self.assertTrue(routing_duties(self._read(entrypoint))["direct-exception"])
 
     def test_quick_fix_rejects_a_contract_change(self) -> None:
         spine = self._read(SPINE)
@@ -1587,21 +1578,12 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
         self.assertTrue(duties["same-item-reclassification"])
 
     def test_fact_lookup_routes_by_decision_need_and_preserves_active_task_continuity(self) -> None:
-        direct_role_priority = {
-            "src.codex/AGENTS.codex.md": "1. User explicitly names a role: invoke it directly.",
-        }
         for entrypoint in ("src.codex/AGENTS.codex.md",):
             with self.subTest(entrypoint=entrypoint):
-                text = self._read(entrypoint)
-                for fragment in FACT_ROUTING_FRAGMENTS + SIDE_QUESTION_CONTINUITY_FRAGMENTS:
-                    self.assertTrue(
-                        fragment in text,
-                        f"{entrypoint}: missing routing fragment {fragment!r}",
-                    )
-                self.assertTrue(
-                    direct_role_priority[entrypoint] in text,
-                        f"{entrypoint}: explicit user role must precede default factual routing",
-                    )
+                duties = routing_duties(self._read(entrypoint))
+                for name in ("ordered-routes", "factual-additive", "stage-recovery", "continuity-referral"):
+                    self.assertTrue(duties[name], f"{entrypoint}: missing scoped duty {name}")
+                self.assertTrue(routing_shared_duties(self._read(SPINE))["continuity-owner"])
 
         claude = self._read("src.claude/CLAUDE.md")
         self.assertIn("1. Did the user explicitly name a role? → invoke that role directly.", claude)

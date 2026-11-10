@@ -56,71 +56,53 @@ If approved delivery work needs delegation and no narrower delegated role is alr
 
 ## Template routing
 
-Classify the task, choose the narrowest matching workflow shape, and re-classify if scope widens. This pack's own routing keeps every chain owned by the main session: simple chains use light orchestration, heavier chains run with the full `$lead` skill active — the owner never changes, and `$lead` is never spawned as a subagent. That is a pack ROUTING POLICY choice, not a runtime limit. Hook authors must expect a `SubagentStart` / `SubagentStop` fire and an `agent_id`-bearing envelope exactly as on Claude Code's, and the `agent_id`-present skip this pack's `PreToolUse` blocking hooks implement (see the Codex hook procedure in the existing Lead operating-model) is load-bearing, not defensive — the two `Stop` guards register only on `Stop` (not `SubagentStop`), where the skip remains belt-and-suspenders. Independent external adapters may still run in parallel when the routing contract and provider runtimes allow it.
+The main session owns every chain, invokes its specialists in order and passes accepted artifacts downstream. Light routes do not require the full `$lead` skill; heavy routes activate it for work-items, risk owners, integration and gates. Never spawn `$lead`. This is pack routing policy, not a runtime limit. Explicit `$lead` use and `delegationMode: auto|force` change coordination, not template admission or artifact requirements.
 
-**Factual routing.** Standalone bounded fact lookup is answered inline with no artifact. A non-trivial factual investigation defaults to one `$analyst` and adds recovery only when continuation is needed; an explicitly user-named role or narrower factual domain specialist remains valid. A decision, Architecture Decision Record (ADR), or material alternatives adds `$architect`; add `$planner` only when the user explicitly requests an execution plan.
-
-**Active-task side work.** Follow the shared **Primary-task continuity and side work** rule: answer brief questions in commentary; promptly delegate eligible substantive admitted side work and continue the next ready primary action in the same turn without waiting for its result. Preserve existing authority, capacity, full resource surfaces, gates and explicit user/manual/native holds. This projects Orchestrarium's governance; it does not claim a new provider runtime guarantee.
-
-**Decision tree:**
+Classify the task, choose the narrowest matching workflow shape, and re-classify immediately if scope widens. Decision tree:
 1. User explicitly names a role: invoke it directly.
-2. Roadmap, prioritization, or milestone shaping: route to `$product-manager`.
-3. Standalone bounded fact lookup: answer inline with no artifact.
-4. Non-trivial factual investigation with no decision: use one `$analyst` by default.
-5. Decision, Architecture Decision Record, or material alternatives with no implementation: use **research** and add `$architect`; add `$planner` only for an explicitly requested execution plan.
-6. PR review, quality gate, or post-implementation validation with no new code: use **review**.
-7. Task satisfies the shared **quick-fix** predicate: use **quick-fix**.
-8. Auth, trust boundaries, credentials, or vulnerability work: use **security-sensitive**.
-9. Hard performance budgets, service-level agreements, or latency targets: use **performance-sensitive**.
-10. Spatial computation, transforms, meshing, or geometry: use **geometry-review**.
-11. Multiple risk domains at once: use **combined-critical**.
-12. Otherwise: use **full-delivery**.
+2. Roadmap, prioritization or milestone shaping: `$product-manager`.
+3. Standalone bounded fact lookup: answer inline, no artifact.
+4. Non-trivial factual investigation without a decision: one `$analyst` by default; an explicitly named role or narrower factual domain specialist remains valid.
+5. Decision, Architecture Decision Record (ADR), or material alternatives without implementation: light `research`, `$analyst` then `$architect`; add `$planner` only for an explicitly requested execution plan.
+6. PR review, quality gate or post-implementation validation without new code: light `review`, objective-named reviewer plus only evidence-triggered helpers; order present helpers as research → QA → review.
+7. Task satisfies the shared `quick-fix` predicate: light `quick-fix`, implementer then `$qa-engineer`.
+8. Auth, trust boundaries, credentials or vulnerabilities: heavy `security-sensitive`, with `$security-engineer` and `$security-reviewer` mandatory.
+9. Hard performance budgets, service-level agreements or latency targets: heavy `performance-sensitive`, with `$performance-engineer` and `$performance-reviewer` mandatory.
+10. Spatial computation, transforms, meshing or geometry: heavy `geometry-review`, with `$computational-scientist` and `$architecture-reviewer` mandatory.
+11. Multiple risk domains: heavy `combined-critical`, with all risk owners and reviewers.
+12. Otherwise: heavy `full-delivery`, full pipeline coordinated with `$lead` active.
 
-| Template | Full lead pipeline? | Chain |
-|---|---|---|
-| `quick-fix` | No | Main conv picks implementer, then `$qa-engineer` |
-| `research` | No | Main conv starts with `$analyst`; adds `$architect` for a decision/ADR/material alternatives and `$planner` only for a requested execution plan |
-| `review` | No | Main conv selects the objective-named reviewer and only evidence-triggered helpers; when present, order helpers as research → QA → review |
-| `full-delivery` | Yes | `$lead` coordinates full pipeline |
-| `security-sensitive` | Yes | `$lead` coordinates; `$security-engineer` and `$security-reviewer` mandatory |
-| `performance-sensitive` | Yes | `$lead` coordinates; `$performance-engineer` and `$performance-reviewer` mandatory |
-| `geometry-review` | Yes | `$lead` coordinates; `$computational-scientist` and `$architecture-reviewer` mandatory |
-| `combined-critical` | Yes | `$lead` coordinates all risk owners and reviewers |
+In factual work, a decision, ADR or material alternatives adds `$architect`; add `$planner` only when the user explicitly requests an execution plan.
 
-For BOTH "No" and "Yes", the main conversation runs the chain directly — it invokes the listed specialists in order and passes each accepted artifact downstream. "Yes" means it does so with the fuller `$lead` skill active (heavier orchestration: work-items, risk owners, integration, gates); it never spawns a separate `$lead`. `Quick-fix` follows the shared predicate; explicit `$lead` use and `delegationMode: auto|force` change coordination, not template admission or artifact requirements. Re-classify immediately if scope widens beyond the current template.
+Apply shared **Primary-task continuity and side work**, including same-turn primary progress and all authority, capacity, resource and hold constraints. This is governance, not a new provider runtime guarantee.
 
-For a direct full repository impact review of recent changes, use `$review-changes`. It starts from the current local diff or a specified review target, but checks the wider affected surface, including unchanged dependents and adjacent logic. A bugfix with a known file or function stays on `quick-fix` by default; log adjacent issues in the configured bug registry instead of widening the current plan.
+Hook authors must expect a `SubagentStart` / `SubagentStop` fire and an `agent_id`-bearing envelope exactly as on Claude Code's, and the `agent_id`-present skip this pack's `PreToolUse` blocking hooks implement (see the Codex hook procedure in the existing Lead operating-model) is load-bearing, not defensive — the two `Stop` guards register only on `Stop` (not `SubagentStop`), where the skip remains belt-and-suspenders. Independent external adapters may still run in parallel when the routing contract and provider runtimes allow it.
+
+Use `$review-changes` for a direct full repository impact review of recent changes: current local diff or specified target plus wider affected surfaces, unchanged dependents and adjacent logic. A bugfix with a known file or function stays on `quick-fix` by default; log adjacent issues in the configured bug registry instead of widening the plan.
 
 ## Recovery rule
 
-- Every admitted `quick-fix` creates a minimal `work-items/active/<slug>/status.md` before its first repository mutation. That file contains only ordinary lifecycle fields plus task, current step, last result, and next action; no `roadmap.md`, `brief.md`, Research, Design, Plan, consultant, pre-implementation review, or report is required before that mutation. Re-classification enriches the same work-item instead of creating a late unrelated item, and delivery applies the normal immediate closure/archive rule.
-- Recovery for heavier or multi-stage templates remains owned by the main session through the configured task-memory directory; for lead-managed chains (`full-delivery`, `security-sensitive`, `performance-sensitive`, `geometry-review`, `combined-critical`) it runs the full lead pipeline with `$lead` active.
-- For main-conversation-managed routes that need continuation, save recovery state after each accepted stage as `status.md` (template name, current stage, next role) plus the accepted artifact. A one-Analyst factual investigation creates recovery only when continuation is needed; a decision/ADR route records the accepted Analyst artifact before Architect, and records Planner only when an execution plan was requested.
-- Closing a main-conversation-managed item is mandatory when it is delivered, parked, cancelled, or reprioritized; a delivered item left active is an orphan. Lead writes `closure.md` with nonempty `Closed`, `Outcome`, `Evidence`, and `Residual risk` fields. `Closed` MUST exactly equal the requested `--terminal-instant` and use strict UTC `YYYY-MM-DDTHH:MM:SSZ`; the close may also include a proportionate optional retrospective. Lead also writes `bug-dispositions.json` under the versioned Lead/lifecycle-owner contract, which defines bug selection, recontextualization, transition, and receipt semantics. The lifecycle owner applies that contract, archives the item, writes `bug-dispositions-receipt.json`, and refreshes `work-items/README.md` as one rollback-safe operation; an active manifest is pending close. Routine single-item mechanics may be applied inline; multi-item or drifted state routes to `$knowledge-archivist`. `work-items/index.md` remains compatibility-only. Keep-worthy lessons go to `work-items/lessons/`; full rules are in the lead skill.
-- Epics: when several work-items serve one initiative, group them as an epic. An active epic is the flat file `work-items/epics/<date>-<slug>.md`; after all children close and the goal is met, the lifecycle owner moves its terminal record to `work-items/epics/archive/<YYYY-MM>/<slug>.md`, reconciles physical lifecycle roots, and regenerates `work-items/README.md`. Each child work-item declares one bare `Epic: <slug>` line in `status.md`; child progress is derived only from archive location. Epic lookup distinguishes unique active, unique archived, missing, and duplicate state; duplicates fail closed. `$product-manager` admits the epic; `$lead` links, rolls up, and decides closure; `$knowledge-archivist` owns location mechanics.
-- Dependencies & decisions: a work-item that needs prior work declares `Depends-on: <slug>, <slug>` (work-item slugs) in its `status.md` — a standing, planned inter-work-item dependency edge (distinct from the runtime `BLOCKED:*` gate verdicts); the lead derives blocked-by/ready from these. Durable cross-cutting architecture decisions go in a `work-items/decisions/` registry (flat `<date>-<slug>.md`, `status: proposed|accepted|dropped|superseded|reverted`), referenced from a work-item's `design.md`, not buried in it. Full rules in the lead skill `## Dependencies` + `## Decisions` + the architect skill.
-- For a direct single-specialist invocation, no recovery file is needed unless that invocation is itself admitted as `quick-fix`; this exception does not broaden recovery to trivial questions.
+- Apply the shared `quick-fix` rule. Its four minimal recovery facts are task, current step, last result and next action. Re-classification enriches the same work-item; delivery closes and archives immediately under the normal rule.
+- The main session owns heavier or multi-stage recovery in the configured task-memory directory; heavy routes above run the full pipeline with `$lead` active.
+- Main-conversation routes needing continuation save recovery after each accepted stage: `status.md` (template, current stage, next role) plus the accepted artifact. One-Analyst factual work needs recovery only for continuation. A decision/ADR route records Analyst's accepted artifact before Architect, and Planner only for a requested execution plan.
+- Close a main-conversation-managed item when delivered, parked, cancelled or reprioritized; delivered-but-active is an orphan. Lead writes `closure.md` with nonempty `Closed`, `Outcome`, `Evidence` and `Residual risk`; `Closed` exactly matches `--terminal-instant` in strict UTC `YYYY-MM-DDTHH:MM:SSZ`. A proportionate retrospective is optional. Lead writes `bug-dispositions.json` under the versioned Lead/lifecycle-owner contract for bug selection, recontextualization, transition and receipts; apply shared **Physical lifecycle V1** for the rollback-safe disposition/archive/receipt/README transaction and pending-close rules. Routine single-item mechanics may run inline; multi-item or drifted state routes to `$knowledge-archivist`. `work-items/index.md` remains compatibility-only. Keep-worthy lessons go to `work-items/lessons/`; full rules are in the lead skill.
+- Epics: when several work-items serve one initiative, group them as an epic. active `work-items/epics/<date>-<slug>.md`; after all children close and the goal is met, the lifecycle owner archives it at `work-items/epics/archive/<YYYY-MM>/<slug>.md`, reconciles physical roots and regenerates `work-items/README.md`. Each child's `status.md` has one bare `Epic: <slug>` line; progress derives only from archive location. Distinguish unique active, unique archived, missing and duplicate lookup; duplicates fail closed. `$product-manager` admits; `$lead` links, rolls up and decides closure; `$knowledge-archivist` owns location mechanics.
+- A work-item needing prior work declares `Depends-on: <slug>, <slug>` (work-item slugs) in `status.md`, a standing planned dependency edge distinct from runtime `BLOCKED:*` verdicts; Lead derives blocked-by/ready. Durable cross-cutting architecture decisions go in flat `work-items/decisions/<date>-<slug>.md`, `status: proposed|accepted|dropped|superseded|reverted`, referenced from `design.md` rather than buried there. Full rules: Lead `## Dependencies`, `## Decisions`, and Architect skill.
+- A direct single-specialist invocation needs no recovery file unless itself admitted as `quick-fix`; this does not broaden recovery to trivial questions.
 
 ## Role resolution paths
 
-Role definitions live in the installed skills tree: `.agents/skills/<role>/SKILL.md` for repo-local installs or `$HOME/.agents/skills/<role>/SKILL.md` for global installs.
+Roles and utilities live in `.agents/skills/<name>/SKILL.md` for repo-local installs or `$HOME/.agents/skills/<name>/SKILL.md` globally. Use the skill/custom-agent overlay matching the assigned role. For other work, use the narrowest matching installed specialist, including non-core or repo-local specialists. Utility skills may be invoked directly when their workflow fits. The shared role index lists the core team, not an exhaustive catalog.
 
-Use the skill or custom-agent overlay that matches the assigned role. Utility skills live in the same installed skills tree and may be invoked directly when their workflow fits. In particular, use `$init-project` to initialize project policies in the root `AGENTS.md` and bootstrap `.agents/.agents-mode.yaml` for a new Codex project, and use `$external-brigade` when a bounded set of independent external helpers should launch together instead of being orchestrated ad hoc.
+Use `$init-project` to initialize root `AGENTS.md` project policies and `.agents/.agents-mode.yaml` for a new Codex project. Use `$external-brigade` to launch a bounded set of independent external helpers together instead of ad hoc orchestration.
 
-Use these global anchor roles:
+Global anchors are `$lead` for approved delivery coordination, routing, artifact acceptance and gates; `$product-manager` for roadmap ownership, prioritization and admission; and `$consultant` for optional non-blocking independent advice, with usage rules, toggle check and execution paths in `$HOME/.agents/skills/consultant/SKILL.md`.
 
-- `$lead`: default delivery coordination, routing, artifact acceptance, and gate decisions for approved work
-- `$product-manager`: roadmap ownership, initiative prioritization, and admission into discovery or delivery
-- `$consultant`: optional non-blocking independent advisor; usage rules, toggle check, and execution paths are in `$HOME/.agents/skills/consultant/SKILL.md`
+`$external-worker` and `$external-reviewer` are bidirectional adapters, not Consultant aliases. Both use `auto | codex | claude | kimi | grok`; production `auto` uses only Codex/Claude, Kimi is explicit-only through fixed `kimi-code/k3`, results stay independently verified and nonauthorizing, and Grok is unavailable in 1.x.
+- Worker: eligible non-owner, non-review roles. Kimi uses the canonical file-prompt wrapper; validated capability files may select scoped worker tools only for `engineering` and a taxonomy-mapped `external-worker` profession.
+- Reviewer: eligible review/QA roles. Explicit Kimi supports policy-admitted read-only exploration, research, planning or review. Omitted capability files leave tools, Model Context Protocol servers and subagents empty with permission `reject`; validated files may select read tools/servers.
 
-External dispatch roles also exist in the installed skills tree as bidirectional adapters:
-
-- `$external-worker`: external worker-side adapter for eligible non-owner, non-review roles; dispatches through the shared provider universe `auto | codex | claude | kimi | grok`, where shipped production `auto` profiles use the Codex/Claude pair only; Kimi is explicit-only through the canonical fixed `kimi-code/k3` file-prompt wrapper, and a validated capability file may select scoped worker tools only for `engineering` plus a taxonomy-mapped `external-worker` profession; the result remains independently verified and nonauthorizing, and Grok remains unavailable in 1.x
-- `$external-reviewer`: external review/QA adapter for eligible review-side roles; dispatches through the shared provider universe `auto | codex | claude | kimi | grok`, where shipped production `auto` profiles use the Codex/Claude pair only; Kimi may be selected explicitly for policy-admitted read-only exploration, research, planning, or review through fixed `kimi-code/k3`; an omitted capability file keeps tools, Model Context Protocol servers, and subagents empty with permission `reject`, while a validated file may select read tools/servers; the result remains independently verified and nonauthorizing, while Grok remains unavailable in 1.x
-
-These roles are adapters, not aliases for `$consultant`.
-
-For all other work, use the narrowest matching installed specialist. The shared role index names the canonical core team, but installed specialists outside that core team and repo-local specialists may still be the better fit. Repository-specific `AGENTS.md` files should add local priorities, canonical paths, build/test rules, and source-of-truth references instead of restating the full global role catalog.
+Repository-specific `AGENTS.md` files should add local priorities, canonical paths, build/test rules and source-of-truth references instead of restating the full global role catalog.
 
 ## Project bootstrap
 
