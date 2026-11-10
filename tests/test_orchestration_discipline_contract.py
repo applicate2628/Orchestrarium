@@ -166,8 +166,10 @@ PINS = [
     ("orientation-step0", "0. **Repository orientation.**",
      ["src.codex/AGENTS.codex.md"]),
     ("orientation-record", "REPOSITORY ORIENTATION: scope=<repo-relative path>; status=<live|mutable|frozen|archived|deprecated|superseded|conflict>; workflow=<repo-relative entry point(s)>; protected=<repo-relative path(s)|none>; evidence=<path:line[,path:line...]>",
-     [SPINE, "src.codex/AGENTS.codex.md"]),
-    ("orientation-violation", "Treating missing or conflicting orientation as permission to proceed.",
+     [SPINE]),
+    ("orientation-referral", "Apply shared **Repository orientation; Mechanism inventory before new paths**, including its exact `REPOSITORY ORIENTATION:` record and `file:line` evidence.",
+     ["src.codex/AGENTS.codex.md"]),
+    ("orientation-violation", "Missing/conflicting authority is `status=conflict`: no run/build/edit until the owner or user resolves it.",
      ["src.codex/AGENTS.codex.md"]),
 
     # P4 — spine stop-rule (Fable probe text) + operational bullet (Sol text)

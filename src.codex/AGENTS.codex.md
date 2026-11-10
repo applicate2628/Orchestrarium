@@ -8,66 +8,23 @@ Treat `AGENTS.md` as the universal minimum contract for Codex work in a reposito
 
 ## Bootstrap — verified premises plus edit/commit checkpoints
 
-> **STOP. Universal premise rule first; three stricter trigger moments below.**
->
-> Every decision, plan, review verdict, root-cause claim, fix, implementation action, or behavior-changing commit must rest on verified premises. The trigger moments below add mandatory edit/commit checkpoints; they do not limit the universal rule. Run the checklist at each trigger moment.
->
-> **(a0) Pre-action orientation trigger** — before the first repository-local runner/build invocation or mutating tool call in an unfamiliar repo/subtree, complete step 0. This trigger is independent of whether the task is a bug fix; bug-fix steps 1-3 still apply at their existing trigger.
->
-> **(a) Pre-fix trigger** — before the first code-mutating tool call (file write, patch, `apply_patch`, or equivalent) in response to a bug report, runtime failure, error trace, regression, "does not work" claim, "не работает" claim, "broken" claim, or any user message naming a defect in behavior — or before changing behavior that already works, for speed, cleanup, or refactor with no defect reported (there, runtime diagnosis or profiling before the edit is mandatory) — **steps 1-3 must complete before the first edit lands**. The trigger fires regardless of whether the session invoked the bugfix flow or any other routing — the discipline binds the session independent of the routing wrapper. Step 5 (Recovery readiness) does not apply at this moment; step 4 (Scope proportionality) and 4.5 (No-kostyl check) apply when you draft the planned edit.
->
-> **(b) Pre-commit trigger** — before committing any change that fixes a bug, alters behavior, modifies a contract, or implements a feature, run **all 5 steps**. Step 5 is pre-commit-specific.
->
-> This Bootstrap is the operational form of the shared `Hypothesis disclosure discipline` and `Pre-fix diagnostic gate` rules (above in this merged `AGENTS.md`). It binds the main Codex session and any installed skill that authors code mutations or commits.
->
-> 0. **Repository orientation.** Before the first repository-local run, build, or mutation in an unfamiliar repo/subtree, state `scope`, `status`, `workflow`, `protected`, and `evidence` from applicable governing docs; `evidence` carries `file:line` citations. Names, counts, recency, and layout do not prove liveness. Missing or conflicting authority means `status=conflict`: do not run/build/edit until the owning source or user resolves it.
->
->    ```text
->    REPOSITORY ORIENTATION: scope=<repo-relative path>; status=<live|mutable|frozen|archived|deprecated|superseded|conflict>; workflow=<repo-relative entry point(s)>; protected=<repo-relative path(s)|none>; evidence=<path:line[,path:line...]>
->    ```
->
-> 1. **Diagnostic data.** Name the concrete observed data points that drive this decision or change: `file:line` citation, shell command output captured this session, log line, user statement quoted verbatim, reproduction transcript. If you cannot name any — go investigate first; do not commit yet.
->
-> 2. **Hypothesis inventory.** List every interpretive leap the fix depends on. Examples:
->    - "Word X in the user's message means Y."
->    - "Mechanism A is what is hiding behind label B in the user's vocabulary."
->    - "Flag `--foo` produces behavior C."
->    - "This fix touches three files because the contract spans them."
->    Each item is a HYPOTHESIS until verified. The chain typically has more than one node — list each one separately rather than collapsing them.
->
-> 3. **For each hypothesis, decide one of two paths:**
->    - **Verify now** — run the empirical test via the shell (`command -v`, `which`, smoke run, file read), check the authoritative documentation source, or ask the user directly. Do not commit until verified.
->    - **Label `ASSUMPTION (UNVERIFIED)`** in the commit message body alongside the verification step that would resolve it. Only allowed when the cost of asking/verifying is genuinely higher than the cost of being wrong, AND the assumption is disclosed in the commit message — never silent. An unlabelled unverified claim driving a commit is a violation.
->
-> 4. **Scope proportionality.** Is the change scope what the verified hypothesis actually requires? Minimal is the default — if the verified bug is a one-character typo, the fix is one character. Wider scope (refactor, multi-file edit, contract change, abstraction extraction) is allowed when the verified hypothesis itself names the wider scope (for example "wire-shape mismatch between producer and consumer requires updating both sides"); state that explicitly in the commit message. "While I'm here let me also..." additions and opportunistic cleanups without their own verified hypothesis are forbidden.
->
-> **4.5. Fix means correct logic, not workaround (no kostyl check).** Before committing, ask: does this implement the right behavior, or just hide the symptom? A fix names the root cause (a specific function, contract, invariant, or boundary that produced the wrong behavior) and corrects it; a workaround silences a visible failure mode without changing the underlying logic. Catch-and-swallow error handling, defensive checks without root-cause understanding, type assertions that silence the type contract, fallback values that mask missing-data bugs, hardcoding to dodge a configuration-resolution bug, `try/except: pass` around recurring failures, log filtering to hide real errors — all count as *kostyl*, not fix. Kostyl is allowed only as an explicit `WORKAROUND` commit that names the root cause separately, states scope/lifetime, and discloses that the underlying defect is unfixed. See the shared `Hypothesis disclosure discipline` rule clause "Fix means correct logic" for the full definition.
->
-> 5. **Recovery readiness.** If a hypothesis later turns out wrong, what is the rollback path? Before a destructive history rewrite, require explicit user authority, a fresh dirty/index census, and preservation of every unrelated working-tree byte and staged change. Only then, when the commits are local and no other work depends on them, prefer `git reset --hard HEAD~N` over `git revert` because the hypothesis-bearing commit then disappears from history rather than being preserved as a partial truth; otherwise use a nondestructive, reversible route and re-verify from the contradicted node. Do not `git push` hypothesis-bearing commits before user review; user review is the final hypothesis verification step. **Clean self-introduced churn before the first push:** the same logic extends beyond hypothesis failures — a broke-it-then-fixed-it sequence you authored (a bug introduced in one local commit, corrected in a later one) should not reach pushed history. Under the same preconditions, while the commits are still local, squash or `git reset` the churn so the published history shows the correct fix directly, not your intermediate self-made error and its correction. Clean it BEFORE the first push; do not `git push --force` already-published history to hide it after the fact.
->
-> **Violation triggers** — if you find yourself writing or thinking any of these as load-bearing reasoning for a fix *or* a fix-attempt code edit, that IS the trigger to invoke this Bootstrap:
->
-> **Pre-action orientation triggers** (fire before the first repository-local run, build, or mutation in an unfamiliar repo/subtree):
->
-> - "This has the most files, so it is the live/current suite," or any target choice based on name, count, recency, or layout without governing-doc evidence.
-> - "I will fork/copy this runner/scorer" without first proving its status and inventorying the current owner/mechanism.
-> - Running, building, or editing an archived/deprecated/superseded/frozen target without explicit user-approved historical scope.
-> - Treating missing or conflicting orientation as permission to proceed.
->
-> **Pre-fix triggers** (fire before the first file-write / patch / `apply_patch` tool call):
->
-> - "I see the bug, let me edit X" without a captured `file:line` symptom citation or verbatim error output
-> - "the fix is to add Y" or "let me just patch Z" without a verified hypothesis about what is broken and where
-> - starting a file-write or `apply_patch` tool call in a bug-report context with no diagnostic data captured in this session's conversation (user's wording verbatim, error output verbatim, return code, log line, reproduction step, or `file:line` symptom anchor)
-> - "I didn't touch that component's code, so my change can't have broken it" as a regression dismissal — behavior couples indirectly (timing, ordering, lifecycle, render/layout passes, shared state, viewport), so your change is the prime suspect until you revert it and reproduce the REAL symptom (the actual broken interaction, not a convenient proxy state); see `Indirect-regression discipline`
->
-> **Pre-commit triggers** (fire before authoring the commit):
->
-> - `most likely means`, `presumably`, `I believe it refers to`, `this should map to`, `based on training data`, `extrapolating from`, `in general X means Y`
-> - `while I'm here let me also`, `since we're touching this anyway`
-> - `I'll just commit this and we can fix it if wrong`
->
-> These phrases and patterns are not banned in open exploration or hypothesis formation. They are banned **only** as the justification for a code edit (pre-fix triggers) or a commit (pre-commit triggers). When one appears in that position, name it, treat the underlying claim as a HYPOTHESIS, and apply the relevant steps (1-3 at pre-fix; 1-5 at pre-commit).
+**STOP. Universal premise rule first; three stricter trigger moments below.** Every decision, plan, verdict, root-cause claim, fix, implementation action or behavior-changing commit requires verified premises under the shared **Verification-and-evidence core**, **Evidence-citation discipline** and **Hypothesis disclosure discipline**. Checkpoints supplement, never limit, that rule. This binds the main Codex session and every mutation/commit author, including direct, nested, non-Lead and skill-only callers, at the applicable triggers; another routing flow does not waive it.
+
+- **(a0) Pre-action orientation trigger**: before the first repository-local runner/build or mutation in an unfamiliar repo/subtree, complete step 0, even outside a bug fix.
+- **(a) Pre-fix trigger**: before the first code mutation for a bug report, runtime failure, error trace, regression, "does not work", "не работает", "broken" or any reported behavioral defect, **steps 1-3 must complete before the first edit lands**. The same applies before changing working behavior for speed, cleanup or refactoring: runtime diagnosis or profiling before editing is mandatory. Steps 4 and 4.5 apply while drafting the edit; step 5 does not apply at this moment.
+- **(b) Pre-commit trigger**: before a bug-fix, behavior, contract or feature commit, run **all 5 steps** (1-5), including the 4.5 no-kostyl check; step 0 retains its (a0) trigger. Step 5 is pre-commit-specific.
+
+0. **Repository orientation.** Apply shared **Repository orientation; Mechanism inventory before new paths**, including its exact `REPOSITORY ORIENTATION:` record and `file:line` evidence. Missing/conflicting authority is `status=conflict`: no run/build/edit until the owner or user resolves it. Names/counts/recency/layout prove no liveness; archived/deprecated/superseded/frozen targets need explicit user-approved historical scope. Prove status and inventory the existing owner before copying/forking a runner or scorer.
+1. **Diagnostic data.** Name concrete observed decision-driving data captured in this session's conversation: `file:line`, this-session command output, log, verbatim user statement or reproduction. If none, investigate before editing/committing. Apply the shared **Pre-fix diagnostic gate** independently of `/agents-bugfix`.
+2. **Hypothesis inventory.** List every interpretive leap separately, including user-intent interpretation, mechanism/flag behavior and the reason for the affected scope. Each remains a hypothesis until verified; do not collapse the chain.
+3. **Verify or disclose.** Apply shared evidence/availability rules and verify every hypothesis empirically, from authoritative documentation, or directly with the user before committing. Only when asking/verifying genuinely costs more than being wrong may the commit instead disclose `ASSUMPTION (UNVERIFIED)` plus its resolving verification step. No silent unverified premise.
+4. **Scope proportionality.** Limit the change to what the verified hypothesis requires. A wider refactor, multi-file/contract change or extraction must be justified by that hypothesis and stated in the commit; unrelated opportunistic cleanup is forbidden.
+4.5. **No-kostyl check.** Apply shared **Fix means correct logic, not workaround or hiding (no kostyl)**: name/correct the producing root cause, not symptom suppression. Only an explicit `WORKAROUND` commit may retain a workaround, with separate root cause, scope/lifetime and disclosure that the defect remains unfixed.
+5. **Recovery readiness.** State the rollback path. Shared **Hypothesis disclosure discipline** governs destructive history rewrite: explicit user authority, fresh dirty/index census, preservation of every unrelated working-tree byte and staged change, local commits and no other work depends on them; otherwise use a nondestructive reversible route and re-verify from the contradicted node. Under those preconditions prefer `git reset --hard HEAD~N` to `git revert`. Before first push, also clean your own introduced-then-fixed local commit churn under the same conditions, by squash/reset; never `git push --force` already-published history to hide it. Do not push hypothesis-bearing commits before user review; it is the final hypothesis verification step, separate from required publication/leak gates.
+
+**Violation triggers.** Load-bearing fix/edit/commit reasoning that violates the shared orientation, pre-fix, evidence, scope or no-kostyl rules invokes these checkpoints before the dependent action. This includes editing from "I see the bug"/"add Y" without captured diagnostic evidence and a verified causal hypothesis; dismissing indirect regression because the component was untouched; every banned reasoning phrase in shared **Hypothesis disclosure discipline**; and "I'll just commit this and we can fix it if wrong". Shared **Indirect-regression discipline** requires reverting and reproducing the REAL symptom before clearing non-involvement. These phrases are allowed in open exploration/hypothesis formation, never as the load-bearing justification for an edit or commit; name the hypothesis and apply steps 1-3 before the fix and all steps before the commit.
+
+Apply shared **Context handoff economy** at handoff/interruption/compaction/resume: restore missing applicable obligations and current authority before the next dependent decision or action, including interpreting/accepting outstanding results; reuse unchanged actual context. A catalog entry, path, prior-read marker or summary alone is not proof that the required rules are present; a trusted handoff may carry their actual content. Named shared rules mean the governing text in the already selected Source/project/global context, not an uninstalled reference or a guessed global substitute for missing project rules. Restore missing selected content before reliance; no new lookup when it is already present and no permission reset. These checkpoints neither activate Lead nor admit a new workflow, Goal, scope or authority.
 
 ### Codex hook requirements and mandatory procedure
 
