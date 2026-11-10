@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-10
+
+- Add an explicit global modified-Lead replacement selection bound to the exact existing v2 receipt bytes, current authored tree and intended composed source. Operators can reconcile a reviewed local hotfix without deleting or rewriting its old receipt to bypass protection. Normal drift still refuses and reports a nonauthorizing candidate; selected updates reuse currentness checks, the existing paired transaction and source-verified finalizer. Unreceipted adoption, other skills/settings, peer ownership and platform holds remain independent, and source admission does not establish live rollout or client loading.
+
 ## 2026-11-09
 
 - Runtime catalog validation now rejects repeated top-level name or description fields in its supported scalar metadata forms instead of silently taking the last value. Ambiguous repository or installed skill metadata no longer produces a false complete catalog verdict. Historical offline estimates and field-like text inside scalar bodies are unchanged; this remains bounded metadata validation, not full YAML or client-loading qualification.

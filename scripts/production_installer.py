@@ -29,6 +29,15 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from installation.lead_selection import (
+        parse_modified_lead_selection as _parse_modified_lead_selection)
+except ModuleNotFoundError as error:
+    if error.name not in {"installation", "installation.lead_selection"}:
+        raise
+    from scripts.installation.lead_selection import (
+        parse_modified_lead_selection as _parse_modified_lead_selection)
+
+try:
     from installer_markdown import document_context as _markdown_document_context
     from installer_markdown import document_h1_starts as _markdown_document_h1_starts
 except ModuleNotFoundError as error:
@@ -674,6 +683,12 @@ def _parser(provider: str) -> argparse.ArgumentParser:
         "--replace-unreceipted-lead-sha256",
         metavar="SHA256",
         help="Global Codex/Claude only: adopt one unreceipted Lead tree with this exact observed SHA-256 digest",
+    )
+    parser.add_argument(
+        "--replace-modified-lead", action="append", default=[],
+        metavar="v1:RECEIPT_SHA256:CURRENT_TREE_V2:STAGED_TREE_V2",
+        help="Global Codex/Claude only: explicitly replace one modified v2-receipted Lead; "
+             "bind current receipt bytes, current authored tree and intended staged source",
     )
     parser.add_argument(
         "--replace-unreceipted-skill-sha256",
@@ -8749,6 +8764,7 @@ class _LeadReceiptPlan:
     observed: tuple[bytes, tuple[int, int, int, int], str, str] | None
     source_digest: str
     source_lead: Path
+    selection: tuple[str, str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -9006,6 +9022,32 @@ def _exact_stock_native_role_contract_prior_pair(
                 unresolved_paths=(Path(temporary.name),)) from primary
 
 
+def _describe_modified_lead_candidate(
+    receipt, installed: Path, observed: str, stage: _CanonicalLeadStage,
+) -> None:
+    """Report bounded selection data; this never admits replacement or history."""
+    manifest = _stage_tree_manifest(installed, ignore_runtime_cache=True)
+    if (_tree_manifest_sha256(manifest) != observed
+        or _read_lead_receipt(installed.parent / _LEAD_RECEIPT_NAME) != receipt):
+        raise ValueError("E_CANONICAL_LEAD_RECEIPT_DRIFT: diagnostic observation drift")
+    before, after = dict(manifest), dict(stage.manifest)
+    changes = {
+        "added": sorted(after.keys() - before.keys()),
+        "removed": sorted(before.keys() - after.keys()),
+        "modified": sorted(key for key in before.keys() & after.keys()
+                           if before[key] != after[key]),
+    }
+    summary = {kind: {"count": len(paths), "paths": paths[:20]}
+               for kind, paths in changes.items()}
+    token = "v1:" + ":".join((hashlib.sha256(receipt[0]).hexdigest(),
+                             observed, stage.digest))
+    print("  Modified Lead candidate only, not approval: --replace-modified-lead " + token)
+    print("  Entire authored Lead selection; staged member changes: "
+          + json.dumps(summary, ensure_ascii=True, separators=(",", ":")))
+    print("  Final manifest is this stage minus separately proven retirements; "
+          "other installer ownership and platform checks still apply.")
+
+
 def _preflight_canonical_skills(
     source: Path,
     target: Path,
@@ -9014,12 +9056,19 @@ def _preflight_canonical_skills(
     claude_transport_root: Path | None = None,
     global_install: bool = False,
     replace_unreceipted_lead_sha256: str | None = None,
+    replace_modified_lead: tuple[str, ...] = (),
     replace_unreceipted_skill_sha256: tuple[str, ...] = (),
     claude_transport_optional: bool = False,
     member_selection: tuple[tuple[str, tuple[str, ...]], ...] | None = None,
 ) -> _CanonicalSkillsPlan:
     """Bind the complete affected set before the transaction applies any member."""
 
+    lead_selection = _parse_modified_lead_selection(replace_modified_lead)
+    if lead_selection is not None and (
+        not global_install or replace_unreceipted_lead_sha256 is not None
+        or member_selection is not None
+    ):
+        raise ValueError("E_CANONICAL_LEAD_SELECTION_INVALID: scope or conflicting selection")
     selected_names = None
     if member_selection is not None:
         if (not global_install or not isinstance(member_selection, tuple) or not member_selection
@@ -9047,6 +9096,8 @@ def _preflight_canonical_skills(
         if replace_unreceipted_lead_sha256 is not None and not global_install:
             raise ValueError("E_CANONICAL_LEAD_ADOPTION_MISMATCH")
         receipt = _read_lead_receipt(target / _LEAD_RECEIPT_NAME)
+        if lead_selection is not None and (receipt is None or receipt[3] != _LEAD_RECEIPT_SCHEMA):
+            raise ValueError("E_CANONICAL_LEAD_SELECTION_INVALID: ordinary v2 receipt required")
         if replace_unreceipted_lead_sha256 is not None and receipt is not None:
             raise ValueError("E_CANONICAL_LEAD_ADOPTION_MISMATCH")
         nonlead_names = frozenset(skill.name for skill in skills if skill.name != "lead")
@@ -9084,7 +9135,15 @@ def _preflight_canonical_skills(
                 raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {skill.name}")
             if skill.name == "lead" and receipt is not None:
                 expected_receipt = _lead_receipt_identity_v2(receipt, installed, factory=materialized)
-                if observed is None or observed != expected_receipt:
+                if lead_selection is not None:
+                    if (observed is None or observed == expected_receipt
+                        or lead_selection != (hashlib.sha256(receipt[0]).hexdigest(),
+                                              observed, stage.digest)):
+                        raise ValueError("E_CANONICAL_LEAD_SELECTION_INVALID: exact modified state required")
+                    _describe_modified_lead_candidate(receipt, installed, observed, stage)
+                elif observed is None or observed != expected_receipt:
+                    if global_install and receipt[3] == _LEAD_RECEIPT_SCHEMA and observed is not None:
+                        _describe_modified_lead_candidate(receipt, installed, observed, stage)
                     raise ValueError("E_CANONICAL_LEAD_RECEIPT_DRIFT")
             nonlead_receipted = False
             nonlead_adopted = False
@@ -9243,7 +9302,7 @@ def _preflight_canonical_skills(
                                    and nonlead_receipt.schema == _NONLEAD_MEMBER_RECEIPT_SCHEMA else None)
         plan = _CanonicalSkillsPlan(
             stage, tuple(planned), transport_stage,
-            _LeadReceiptPlan(receipt, stage.digest, lead_source) if member_selection is None else None,
+            _LeadReceiptPlan(receipt, stage.digest, lead_source, lead_selection) if member_selection is None else None,
             nonlead_receipt,
             tuple(sorted(nonlead_expected.items())) if global_install else None,
             source if global_install else None,
@@ -9269,6 +9328,16 @@ def _assert_canonical_skills_plan_current(
 ) -> None:
     """Reject any post-preflight drift before the transaction writes its first path."""
 
+    if plan.lead_receipt is not None and plan.lead_receipt.selection is not None:
+        selection = plan.lead_receipt.selection
+        receipt = plan.lead_receipt.observed
+        leads = tuple(skill for skill in plan.skills if skill.name == "lead")
+        if (receipt is None or receipt[3] != _LEAD_RECEIPT_SCHEMA or len(leads) != 1
+            or leads[0].installed_digest is None or leads[0].installed_digest == receipt[2]
+            or selection != (hashlib.sha256(receipt[0]).hexdigest(),
+                             leads[0].installed_digest, plan.stage.digest)
+            or plan.lead_receipt.source_digest != selection[2]):
+            raise ValueError("E_CANONICAL_LEAD_SELECTION_INVALID: bound plan drift")
     required_parents = {(target / skill.name).parent for skill in plan.skills
                         if skill.accepted_prior is not None and skill.managed_before is None}
     if required_parents != {parent for parent, _identity in plan.directory_move_parents}:
@@ -11617,6 +11686,9 @@ def _finalize_canonical_lead_receipt(
     if plan.lead_receipt is not None:
         # Hash exactly the compared manifest, never a second pathname census.
         digest = _tree_manifest_sha256(actual)
+        if plan.lead_receipt.selection is not None:
+            print(f"  Selected Lead manifests: staged-tree-v2={plan.stage.digest}; "
+                  f"final-tree-v2={digest}")
         payload = _lead_receipt_bytes(digest)
         current_receipt = _read_lead_receipt(target / _LEAD_RECEIPT_NAME)
         if current_receipt is not None and current_receipt[0] == payload:
@@ -12149,6 +12221,12 @@ def install(provider: str, argv: list[str] | None = None) -> int:
     if args.replace_unreceipted_lead_sha256 is not None and not args.global_install:
         print("FAIL: E_CANONICAL_LEAD_ADOPTION_MISMATCH", file=sys.stderr)
         return 1
+    if args.replace_modified_lead and (
+        not args.global_install or args.replace_unreceipted_lead_sha256 is not None
+    ):
+        print("FAIL: E_CANONICAL_LEAD_SELECTION_INVALID: global only; choose one Lead selection",
+              file=sys.stderr)
+        return 1
     if args.migrate_legacy_skill and (
         provider != "codex" or not args.global_install
     ):
@@ -12333,6 +12411,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 claude_transport_root=target_tree / "scripts",
                 global_install=mode == "global",
                 replace_unreceipted_lead_sha256=args.replace_unreceipted_lead_sha256,
+                replace_modified_lead=tuple(args.replace_modified_lead),
                 replace_unreceipted_skill_sha256=tuple(args.replace_unreceipted_skill_sha256),
             )
             claude_skill_projection_plan = _preflight_claude_skill_projections(
@@ -12374,6 +12453,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 root=root,
                 global_install=mode == "global",
                 replace_unreceipted_lead_sha256=args.replace_unreceipted_lead_sha256,
+                replace_modified_lead=tuple(args.replace_modified_lead),
                 replace_unreceipted_skill_sha256=tuple(args.replace_unreceipted_skill_sha256),
                 claude_transport_root=owned_peer_transport_root,
                 claude_transport_optional=True,
@@ -12410,6 +12490,10 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 prior_factory_pair=prior_factory_pair,
             )
         assert canonical_plan is not None
+        if args.dry_run and args.replace_modified_lead:
+            print("  [dry-run] explicit modified Lead full-tree selection: "
+                  + args.replace_modified_lead[0]
+                  + "; final manifest excludes only separately proven retirements")
         if args.dry_run and args.replace_unreceipted_lead_sha256 is not None:
             print("  [dry-run] unreceipted Lead prior "
                   f"{args.replace_unreceipted_lead_sha256}: 2 replacements")
