@@ -45,6 +45,14 @@ Root confirms the genuine human review and consent for the selected publication 
 - Only `$security-reviewer` may approve a publication-safety exception to a scan finding. Any publication proceeding without that approval is `BLOCKED`.
 - Exact publication-safety commands live in the root repository docs and the corresponding pack runtime docs. This reference intentionally keeps the policy generic so all current and future packs can share one design-level source of truth.
 
+## Remote command observation
+
+The exact tool name `mcp__codex_apps__remote_desktop_commander_start_process` supplies one `command` field to the shared observer. Its optional `shell` selects only an explicitly supported shell dialect; missing or unsupported selections do not borrow the controller's operating system. The original tool identity stays intact. `deviceId`, `link_id` and caller-supplied path or verification fields cannot bind the evaluator to the actual target host.
+
+Observed remote publication or bypass candidates refuse with `PGG-REMOTE-EXECUTION-UNBOUND` before dry-run credit, repository selection or native callback qualification. This includes an observed remote `git push --dry-run`; recognition is not execution support. With no observed candidate, exact nonpublication retains its ordinary allow result and incomplete analysis abstains without publication authority. Existing subagent envelope handling remains unchanged. Remote source-navigation commands also cannot borrow the controller's cwd.
+
+This source change neither installs an RDC hook matcher nor establishes that a host delivers these tool events. Actual publication remains unavailable until a qualified target-local transport preserves the original envelope and binds the evaluator, repository, Git and native callback to the real execution host. Do not relabel the call as a local shell, invent a verification token, reuse another host's receipts or treat abstention as approval.
+
 ## Reviewed exception receiving
 
 The existing exception authority remains the actual `security-reviewer` decision received by Root. A report, role or ledger label, content hash, pull-request grant, or generic publication approval is evidence or consent in its own scope; none authenticates a content exception. The trusted caller uses the single `publication_review_policy.py` owner to provision only that received decision at `$HOME/.agents/publication/reviewed-exceptions.json`, outside the selected repository, worktree and Git-input roots. The existing linked-runtime owner handles supported global directory links; no repository flag or report selects a different policy origin. An absent policy supplies no exception credit and leaves ordinary complete scanning available.

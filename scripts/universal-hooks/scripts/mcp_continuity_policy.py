@@ -387,6 +387,9 @@ def classify_tool_choice(
     """Classify one admitted PreToolUse choice as code navigation or not."""
     if not isinstance(tool_input, Mapping):
         return False
+    acquired = acquire_tool_input(tool_name, tool_input)
+    if acquired.operation == "rdc_start_process":
+        return False  # Remote paths must not borrow the controller cwd.
     coordinate = _ScopeCoordinate.from_cwd(raw_cwd)
     if tool_name == "Grep":
         pattern = str(tool_input.get("pattern") or "")
@@ -403,7 +406,6 @@ def classify_tool_choice(
             return False
         return bool(CODE_PATTERN_RE.search(pattern) or (path and _scope_is_source_like(path)))
 
-    acquired = acquire_tool_input(tool_name, tool_input)
     if not acquired.resolved or acquired.command is None:
         return False
     command = acquired.command

@@ -92,6 +92,13 @@ monthly archive without inventing candidate, active, or closure history.
 
 Use the root router installers for the common path:
 
+**Current platform limit:** Linux, macOS and Windows Subsystem for Linux
+installer operations are temporarily unavailable, including `--dry-run`.
+The POSIX commands below document the interface, not an available install route.
+See the [temporary POSIX installation hold](INSTALL.md#temporary-posix-installation-hold).
+The Windows route remains available subject to its existing installation gates;
+this does not claim that every Windows lifecycle scenario is qualified.
+
 ```bash
 bash install.sh --global
 ```
@@ -111,6 +118,14 @@ Production installs:
 ```
 
 Pressing Enter selects the default production install, `Codex + Claude`. The router then forwards the same arguments to the selected provider-specific installer in `scripts/`. Use `scripts/install-codex.*` or `scripts/install-claude.*` directly when you want deterministic automation on one line.
+
+The root router runs selected packs sequentially and prints each call's outcome.
+`completed (exit 0)` describes the installer call, not proof of installed or
+loaded content: a successful help or dry-run call also returns zero. If a later
+call fails, earlier completed calls are not rolled back by the router, and
+remaining packs are not started. An interrupted call has an unavailable outcome.
+Review provider output and recovery state before retrying; the router adds no
+automatic retry or cross-pack rollback.
 
 Windows Kimi execution uses the canonical thin wrapper, not executable enrollment. For each run the wrapper resolves the fixed per-user executable; `ProcessRunnerV1` binds the executable it opens, accepts an absent optional caller binding, and supports a junction or file symlink whose final ordinary executable has a different name. Normal launch does not consult an enrollment receipt, version/hash allowlist, live manifest, high-water record, or offline admission state. The enrollment-named maintenance entrypoints are optional non-writing version/help diagnostics; a supplied offline-policy value is obsolete and fails explicitly. The wrapper alone owns the fixed `kimi-code/k3` file prompt, optional validated capability file, ordinary failure reporting, and resource cleanup. Without that file, tools, Model Context Protocol servers, and subagents remain empty and permission is `reject`; selected capabilities remain caller-scoped and independently verified. The configured model identifier is not independent server-side model attestation, and this contract does not promise compatibility with an arbitrary future breaking Kimi command-line interface change. No vendor binary is downloaded or replaced.
 

@@ -244,6 +244,36 @@ class CodexMarkdownExampleTests(unittest.TestCase):
         original = self.begin + "\nExample `" + self.end + tail
         self.assertEqual(self.render(original), self.pack.rstrip("\n") + tail)
 
+    def test_second_active_begin_before_raw_end_refuses_without_write(self):
+        for newline in ("\n", "\r\n", "\r"):
+            for prefix in ("", "> ", "- ", "1. ", "User example: "):
+                for trailing_end in (False, True):
+                    with self.subTest(newline=newline, prefix=prefix, trailing_end=trailing_end):
+                        original = ("\ufeff# User header" + newline + self.begin + newline
+                                    + "USER BETWEEN KEEP" + newline + prefix + self.begin
+                                    + newline + "Nested body" + newline + self.end
+                                    + (newline + self.end if trailing_end else "")
+                                    + newline + "USER FOOTER KEEP")
+                        with self.assertRaisesRegex(ValueError, "E_CODEX_DOCUMENT_AMBIGUOUS: nested managed begin marker"):
+                            self.render(original)
+                        self.assertEqual(self.writes, [])
+                        self.assertEqual(self.existing, original)
+
+    def test_nested_begin_refuses_dry_run_proposal(self):
+        original = self.begin + "\nUSER KEEP\n" + self.begin + "\nOld\n" + self.end
+        with self.assertRaisesRegex(ValueError, "E_CODEX_DOCUMENT_AMBIGUOUS: nested managed begin marker"):
+            self.render(original, dry_run=True)
+        self.assertEqual(self.writes, [])
+        self.assertEqual(self.existing, original)
+
+    def test_nested_begin_examples_remain_compatible(self):
+        for example in ("`" + self.begin + "`", "```markdown\n" + self.begin + "\n```",
+                        "~~~~markdown\n" + self.begin + "\n~~~~", "\n    " + self.begin + "\n"):
+            with self.subTest(example=example):
+                prefix, suffix = "USER HEADER\r\n", "\rUSER FOOTER"
+                original = prefix + self.begin + "\nOld\n" + example + "\n" + self.end + suffix
+                self.assertEqual(self.render(original), prefix + self.pack.rstrip("\n") + suffix)
+
     def test_two_complete_blocks_keep_second_block(self):
         tail = ("\nUSER BETWEEN KEEP\n" + self.begin
                 + "\nSecond body\n" + self.end + "\nUSER LAST KEEP\n")

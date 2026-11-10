@@ -3511,6 +3511,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
         "PGG-LEXICAL-NORMALIZATION": "Use one literal unnormalized push command.",
         "PGG-OPTION-ARITY": "Use complete documented push options.",
         "PGG-PARSE-UNCERTAIN": "Provide an unambiguous command in the actual tool dialect.",
+        "PGG-REMOTE-EXECUTION-UNBOUND": "This remote carrier does not bind preflight evaluation to its actual target host. Preserve the original tool identity; publication remains blocked until a target-local transport is qualified. Device/account fields alone are not proof.",
         "PGG-REPOSITORY-REDIRECT": "Use the selected repository without unsupported command-local redirection.",
         "PGG-ENV-PREFIX": "Run the push without an environment-assignment prefix.",
         "PGG-GIT-GLOBAL-OPTION": "Use the supported direct push command form.",

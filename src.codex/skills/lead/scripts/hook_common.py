@@ -366,6 +366,8 @@ def normalize_tool_operation(name: object) -> str | None:
         return None
     if any(not part or part != part.strip() for part in name.split(".")):
         return None
+    if name == "mcp__codex_apps__remote_desktop_commander_start_process":
+        return "rdc_start_process"
     operation = name.rsplit(".", 1)[-1].lower()
     return operation if operation in _DIRECT_FILE_TOOLS | _SHELL_TOOLS | {"apply_patch"} else None
 
@@ -396,7 +398,7 @@ def acquire_tool_input(name: object, payload: object) -> AcquiredToolInput:
             return AcquiredToolInput(name, operation, (), None, False)
         targets = _patch_targets(payload[keys[0]])
         return AcquiredToolInput(name, operation, targets or (), None, targets is not None)
-    if operation in _SHELL_TOOLS:
+    if operation in _SHELL_TOOLS or operation == "rdc_start_process":
         command = _acquire_shell_command(operation, payload)
         if command is None:
             return AcquiredToolInput(name, operation, (), None, False)

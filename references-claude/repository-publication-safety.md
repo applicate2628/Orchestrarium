@@ -5,3 +5,5 @@ The canonical shared design reference now lives at [shared/references/repository
 This pack-local path remains only as a compatibility pointer for existing notes, reports, and historical links.
 
 Human publication consent remains with Root; the hook follows the shared [technical publication and scan contract](../shared/references/repository-publication-safety.md#review-and-publication).
+
+Remote carrier recognition is observation only; see the shared [target-host binding limitation](../shared/references/repository-publication-safety.md#remote-command-observation).

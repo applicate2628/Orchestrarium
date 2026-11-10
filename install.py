@@ -43,11 +43,46 @@ def main(argv: list[str] | None = None) -> int:
     if choice not in actions:
         print(f"Invalid selection: {choice}", file=sys.stderr)
         return 1
-    for name in actions[choice]:
-        status = _run_production(name, forwarded)
-        if status:
-            return status
-    return 0
+    selected = actions[choice]
+    outcomes = dict.fromkeys(selected, "not started")
+    complete = False
+    exceptional_exit = False
+    try:
+        for name in selected:
+            print(f"Starting {name} installer...", flush=True)
+            outcomes[name] = "outcome unavailable"
+            status = _run_production(name, forwarded)
+            outcomes[name] = (
+                "completed (exit 0)" if status == 0 else f"failed (exit {status})"
+            )
+            if status:
+                return status
+        complete = True
+        return 0
+    except BaseException:
+        exceptional_exit = True
+        raise
+    finally:
+        try:
+            stream = sys.stdout if complete else sys.stderr
+            print(
+                "Installer summary: "
+                + "; ".join(f"{name}: {outcomes[name]}" for name in selected),
+                file=stream,
+                flush=True,
+            )
+            if not complete:
+                if "completed (exit 0)" in outcomes.values():
+                    print("Earlier completed calls were not rolled back by this router.", file=stream)
+                print(
+                    "Review provider output and recovery state before retrying; "
+                    "a failed or interrupted installer may have made changes.",
+                    file=stream,
+                    flush=True,
+                )
+        except BaseException:
+            if not exceptional_exit:
+                raise
 
 
 if __name__ == "__main__":
