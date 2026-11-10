@@ -19,7 +19,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 RESOLVER = ROOT / "scripts" / "resolve-agents-mode.py"
 POLICY_PATH = ROOT / "shared" / "role-routing-policy.v1.json"
-AGENTS_PATH = ROOT / "src.codex" / "AGENTS.codex.md"
+AGENTS_PATH = ROOT / "src.codex" / "skills" / "lead" / "operating-model.md"
 AGENTS_SOURCE = ROOT / "src.codex" / "agents"
 sys.path.insert(0, str(ROOT / "scripts"))
 import production_installer as installer  # noqa: E402

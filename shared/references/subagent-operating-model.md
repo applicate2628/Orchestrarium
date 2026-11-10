@@ -4,6 +4,8 @@ This file is the canonical shared core for the repository's subagent operating m
 
 Visual companion remains pack-local: use the corresponding `operating-model-diagram.md` next to the pack-local addendum.
 
+Provider instruction kernels may route action-specific procedures to their existing installed responsibility owner while retaining universal safeguards, exact caller triggers, priority and permission boundaries. This is not an eager multi-file import, new policy framework, role activation or grant of delegation authority. Each already-authorized caller needs applicable current procedure content before the dependent decision/action, including receiving an outstanding result. Restore missing obligations after handoff or compaction; reuse unchanged content actually present under shared Context handoff economy. Missing, stale or conflicting selected-layout inputs hold only that action, without cross-layout fallback or installation authority. Source coverage and smaller entrypoint bytes do not establish native selection, effective budget, runtime reading or compliance. Codex native dispatch uses its existing Lead operating-model, as identified by the Codex addendum; shared universal engineering rules remain in the shared spine. Claude Agent and external-adapter routing keep their own contracts.
+
 ## 1. Main rule for the lead
 
 > **Split subagents by the stages selected for the task and by triggered risk type.**

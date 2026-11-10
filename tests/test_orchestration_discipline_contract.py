@@ -684,7 +684,7 @@ def native_consumer_duties(text: str, section: str, marker: str, *, referral_onl
         duties.update(relationships(unit, {
             "profile-policy-owner": "role policy owns exact profile membership and separate special-corridor/explicit-profile rules",
             "qualified-defaults": "Fixed native defaults are candidates rather than blanket authority when an explicit generic policy-admissible profile is available",
-            "authoritative-referral": "For the optional Astra native-host path, apply Native Astra task-dependent route from the installed AGENTS.md; do not restate or widen that owner here",
+            "authoritative-referral": "For the Codex native-host path, apply Native Astra task-dependent route in the sibling operating-model.md under the installed AGENTS native-dispatch kernel; do not restate or widen that owner here",
         }))
     else:
         duties.update(relationships(unit, {
@@ -1032,7 +1032,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
 
 
     def test_native_owner_guards_reject_distinct_route_collapses(self) -> None:
-        text = self._read("src.codex/AGENTS.codex.md")
+        text = self._read("src.codex/skills/lead/operating-model.md")
         unit = selected_unit(text, "Native Astra task-dependent route", "For ordinary native and skill-only roles,")
         cases = (
             ("ordinary-selectors", "describe_ordinary_native_role_options", "guess_role_options"),
@@ -1069,7 +1069,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
             ("qualified-defaults", "candidates rather than blanket authority", "exclusive blanket authority"),
             ("profile-policy-owner", "exact profile membership and separate special-corridor/explicit-profile rules", "selected effort settings"),
             ("actual-override-evidence", "returned actual runtime metadata confirms", "the requested profile confirms"),
-            ("authoritative-referral", "apply `Native Astra task-dependent route` from the installed `AGENTS.md`; do not restate or widen that owner here", "apply the local default profile"),
+            ("authoritative-referral", "apply `Native Astra task-dependent route` in the sibling `operating-model.md` under the installed AGENTS native-dispatch kernel; do not restate or widen that owner here", "apply the local default profile"),
         ):
             with self.subTest(duty=duty):
                 self.assertEqual(unit.count(old), 1)
@@ -1109,7 +1109,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
                     self.assertFalse(native_consumer_duties(changed, section, marker, reference=reference)[duty])
 
     def test_native_scope_and_identifiers_allow_only_bounded_formatting(self) -> None:
-        text = self._read("src.codex/AGENTS.codex.md")
+        text = self._read("src.codex/skills/lead/operating-model.md")
         formatted = text.replace("An omitted pair", "**AN**   OMITTED PAIR").replace("Claim an override", "CLAIM an override").replace(
             "For ordinary native and skill-only roles", "**FOR** ordinary native and skill-only   roles"
         )
@@ -1256,7 +1256,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
 
     def test_codex_model_and_effort_truth_is_toml_and_policy_backed(self) -> None:
         """Keep explicit selection, configured controls and observed runtime truth distinct."""
-        authoritative = "src.codex/AGENTS.codex.md"
+        authoritative = "src.codex/skills/lead/operating-model.md"
         for duty, present in native_route_duties(self._read(authoritative)).items():
             with self.subTest(owner=authoritative, duty=duty):
                 self.assertTrue(present, f"{authoritative}: missing or contradicted native route {duty}")

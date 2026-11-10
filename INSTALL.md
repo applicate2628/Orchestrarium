@@ -371,6 +371,12 @@ When both packs are installed, keep shared project policies aligned across both 
 
 Managed adapters supply actual assigned-role provenance and consume `--user-approved-launch` locally before `--`; that flag is only the caller projection of one genuine exact-attempt Astra/Max agreement. `provider_prompt.launch` and the native selector share the pure `model_routing/launch_policy.py` rule. A complete selected logical package includes that nested module, including relocated transports; a FILE link on R/P does not move its companion namespace to the referent directory. Missing/broken mandatory support fails truthfully before effects. Prefer completing the qualified package; declared same-owner Assistance with all canonical rule, scope, genuine permission where needed, resources and readback guarantees may be selected by Root without a new ordinary permission loop. There is no catch-and-allow, raw-flag authority or automatic retry. Roleless direct-user compatibility does not permit managed callers to omit their assigned profession.
 
+## Codex native instruction ownership
+
+The always-composed Codex `AGENTS.md` keeps the universal native-dispatch kernel. Detailed ordinary and named-mechanical procedures live in the already installed Lead `operating-model.md`; callers read its applicable named sections at the kernel's selection, submission, receiving and native configuration/install diagnostic triggers. This does not activate Lead or eagerly import the full operating-model. Resolve Source/project/global paths only within the already selected layout; a missing selected project procedure is not permission to use global content with project controls. Restore missing applicable content after handoff/compaction, reusing unchanged instructions actually present.
+
+The existing Lead package/receipt update carries these sections for Codex and the common skill tree; they remain Codex-specific and do not alter Claude Agent or external dispatch. No installer mechanism, user-owned document handling, ordering or client limit changes. This reduces the eager payload but does not establish complete effective-budget coverage, runtime loading or post-compaction compliance; the standalone instruction-budget issue remains open.
+
 ## Terms and Abbreviations
 
 - `AGENTS.md`: agent governance file installed for Codex and materialized as a shared-governance module for example providers.
