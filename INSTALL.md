@@ -65,6 +65,8 @@ Copied metadata is checked at each operation boundary. Timestamp assignment must
 
 Forward extended-attribute copying is best effort only for an accounted record of an explicitly permitted error from that extended-attribute operation itself. A similar error from acquisition, identity checks, timestamps, mode or recording is not optional. Inverse metadata restoration errors remain mandatory failures. Unknown effects, foreign changes or missing operation proof preserve the primary cause and guarded recovery instead of continuing or reporting a clean rollback. A successful bounded metadata check does not establish installed pack delivery, global rollout success or settlement of earlier recovery.
 
+On Windows, an admitted exact-tree replacement preserves owner, group and the discretionary access-control list (DACL), including its protection and inheritance flags, for ordinary files and directories present at the same relative path in both trees. It captures the destination policy through bound handles and supplies it when creating each replacement, before payload writes; it does not reset permissions on the installed tree or enable privileges. New members inherit their replacement parent, while removed members remain with the retained original until transaction settlement. An unsupported owner/group, capture, creation or readback failure refuses publication rather than accepting broader access. Rollback uses the retained original objects. Staging has the intended final access policy from creation, not a promise of secrecy until publication. These checks detect observed security drift but do not freeze concurrent permission changes. Full security descriptors, system access-control lists (SACLs), integrity labels, security preservation through scalar/copy writers inside an already replaced tree, reparse members and crash recovery are outside this bounded qualification. Existing platform and live-installation holds still apply.
+
 Maintainer note for this monorepo: `Orchestrarium/` is the installer/source tree, not automatically a repo-local installed Codex runtime. When you are editing this repository itself, a missing local `.agents/` tree can be perfectly valid if you are using the global install under `~/.codex/`. If you want this repository to behave as a repo-local install target, create that state intentionally through `scripts/install-codex.*` or the root router instead of hand-writing `.agents/` files.
 
 ## Init-time preset shortcuts
@@ -386,6 +388,8 @@ The existing Lead package/receipt update carries these sections for Codex and th
 - `check-work-items-state.*`: helper script family that checks every active work item under a repository root.
 - `Claude Code`: Anthropic's Claude runtime and production provider line.
 - `Codex`: OpenAI Codex runtime and production provider line.
+- `DACL`: discretionary access-control list, the ordered Windows permissions controlling access to an object.
+- `SACL`: system access-control list, including Windows auditing policy; not copied by the bounded tree-replacement policy.
 - `externalProvider: auto`: production routing mode that stays on the Codex/Claude pair in shipped defaults.
 - `evidence`: concrete verification data such as a command result, artifact path, review result, log summary, or observed output supporting a gate.
 - `errno`: integer filesystem error-number field validated against Python's standard-library error-code map; only known nonzero values are reported.
