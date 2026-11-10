@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-10
 
+- Explicit global Codex legacy-skill migration now also retains a selected absolute directory symlink or junction before replacing it with the canonical skill projection. The existing transaction preserves the exact original link object, keeps the legacy root and unrelated data unchanged, and uses identity-bound rollback without walking the linked directory. Concurrent namespace drift may leave preserved recovery requiring inspection; this does not qualify every race or crash outcome. Relative or invalid links and occupied backup locations still refuse. Link classification and backup naming use the same captured raw link image, with identity and currentness checks before mutation. This repairs explicitly selected misdirected compatibility links within the existing same-volume retention contract; the main installation and post-commit compatibility pass remain separate, and live rollout still needs its own current-state and backup checks.
+
 - Add an explicit global modified-Lead replacement selection bound to the exact existing v2 receipt bytes, current authored tree and intended composed source. Operators can reconcile a reviewed local hotfix without deleting or rewriting its old receipt to bypass protection. Normal drift still refuses and reports a nonauthorizing candidate; selected updates reuse currentness checks, the existing paired transaction and source-verified finalizer. Unreceipted adoption, other skills/settings, peer ownership and platform holds remain independent, and source admission does not establish live rollout or client loading.
 
 ## 2026-11-09

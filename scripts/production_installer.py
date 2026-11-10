@@ -717,7 +717,7 @@ def _parser(provider: str) -> argparse.ArgumentParser:
         metavar="NAME",
         help=(
             "Global Codex only: preserve and project one exact legacy "
-            ".codex/skills/NAME tree"
+            ".codex/skills/NAME tree or absolute directory link"
         ),
     )
     parser.add_argument("--dry-run", "-DryRun", action="store_true")
@@ -9628,6 +9628,7 @@ class _SkillProjectionPlan:
     target_identity: tuple[int, int, int, int] | None = None
     backup_digest: str | None = None
     canonical_skill: _CanonicalSkillPlan | None = None
+    historical_link: _PhysicalNode | None = None
 
 
 _ClaudeSkillProjectionPlan = _SkillProjectionPlan
@@ -9802,6 +9803,7 @@ def _preflight_codex_legacy_skill_projections(
         installed = projection_root / skill.name
         backup_target: Path | None = None
         backup_digest: str | None = None
+        historical_link: _PhysicalNode | None = None
         try:
             metadata = installed.lstat()
         except FileNotFoundError:
@@ -9817,6 +9819,36 @@ def _preflight_codex_legacy_skill_projections(
                     else "collision"
                 )
                 installed_digest = None
+                if (action == "collision" and skill.name in authorized_migrations
+                    and (stat.S_ISLNK(metadata.st_mode) or _is_directory_junction(installed))):
+                    # Admission and backup naming consume the same sealed link
+                    # image. A separate readlink could admit a swapped relative
+                    # link, which would rebind when moved to the backup namespace.
+                    if os.name == "nt":
+                        with _WindowsBoundNode(installed, purpose="observe") as bound:
+                            captured = _InstallTransaction._capture_node(installed, bound_node=bound)
+                            if captured.kind not in {"link", "reparse"} or captured.reparse_data is None:
+                                raise ValueError(f"E_LEGACY_CODEX_SKILL_COLLISION:{skill.name}")
+                            raw_target = bound.logical_target(captured.reparse_data)
+                            if (int.from_bytes(captured.reparse_data[:4], "little") == 0xA000000C
+                                and int.from_bytes(captured.reparse_data[16:20], "little") != 0):
+                                raw_target = None  # Relative or unknown symlink flags cannot move.
+                    else:
+                        captured = _InstallTransaction._capture_node(installed)
+                        raw_target = captured.data
+                    if captured.python_identity != target_identity:
+                        raise ValueError(f"E_LEGACY_CODEX_SKILL_COLLISION:{skill.name}")
+                    if (captured.kind in {"link", "reparse"} and isinstance(raw_target, str)
+                        and Path(raw_target).is_absolute() and Path(raw_target).is_dir()):
+                        historical_link = captured
+                        link_wire = json.dumps(
+                            [historical_link.kind, raw_target,
+                             historical_link.reparse_data.hex() if historical_link.reparse_data else None],
+                            ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+                        link_digest = hashlib.sha256(link_wire).hexdigest()
+                        backup_target = backup_root / skill.name / ("link-v1-" + link_digest)
+                        if not os.path.lexists(backup_target):
+                            action = "migrate-link"
             elif stat.S_ISDIR(metadata.st_mode):
                 installed_digest = _tree_sha256(
                     installed, ignore_runtime_cache=skill.ignore_runtime_cache
@@ -9857,6 +9889,7 @@ def _preflight_codex_legacy_skill_projections(
                 backup_target,
                 target_identity,
                 backup_digest,
+                historical_link=historical_link,
             )
         )
     return tuple(plans), root_identity
@@ -9914,6 +9947,9 @@ def _assert_codex_legacy_skill_projection_plan_current(
         installed = projection_root / item.name
         if item.action == "create":
             current = not (installed.exists() or installed.is_symlink())
+        elif item.action == "migrate-link":
+            current = (_InstallTransaction._observe(installed)
+                       == {installed: item.historical_link})
         elif item.action == "current":
             current = (
                 _CreateOnlyMutablePath._identity(installed)
@@ -9936,6 +9972,10 @@ def _assert_codex_legacy_skill_projection_plan_current(
             raise ValueError(
                 f"E_LEGACY_CODEX_SKILL_COLLISION:{item.name}"
             )
+        if item.action == "migrate-link":
+            if item.backup_target is None or os.path.lexists(item.backup_target):
+                raise ValueError(f"E_LEGACY_CODEX_SKILL_COLLISION:{item.name}")
+            continue
         if item.backup_target is not None:
             observed_backup = (backup_digest_reader(item.backup_target, canonical.ignore_runtime_cache)
                 if backup_digest_reader is not None and item.action == "migrate" else (
@@ -9992,6 +10032,25 @@ def _apply_codex_legacy_skill_projection_plan(
             projection_owner.create_projection(relative, item.canonical_target)
             continue
         if item.action == "current":
+            continue
+        if item.action == "migrate-link":
+            assert item.historical_link is not None and item.backup_target is not None
+            target = projection_root / item.name
+            backup = home_owner.destination(item.backup_target.relative_to(home_owner.anchor))
+            if projection_owner.dry_run:
+                print(f"  [dry-run] would preserve legacy Codex link {target} -> {backup}")
+                continue
+            admitted = _admitted_mutation_image(transaction, target)
+            if admitted != {target: item.historical_link}:
+                raise ValueError(f"E_LEGACY_CODEX_SKILL_COLLISION:{item.name}")
+            home_owner._ensure_parent(backup)
+            home_owner._final_absence(backup)
+            projection_owner.retain_path(relative, admitted,
+                retained_destination=backup, preserve_on_commit=True, retained_owner=home_owner)
+            if not transaction._image_matches(backup, {backup: item.historical_link}):
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: retained legacy link")
+            projection_owner.create_projection(relative, item.canonical_target)
+            print(f"  Preserved legacy Codex link object: {backup}")
             continue
         assert item.action == "migrate"
         assert item.historical_digest is not None
@@ -11238,7 +11297,7 @@ def _install_codex_legacy_skill_compatibility(
     mutation_paths = [
         path
         for item in plan
-        if item.action in {"create", "migrate"}
+        if item.action in {"create", "migrate", "migrate-link"}
         for path in (
             projection_root / item.name,
             *(
@@ -11249,6 +11308,8 @@ def _install_codex_legacy_skill_compatibility(
         )
     ]
     transaction = _InstallTransaction(mutation_paths, enabled=not dry_run,
+        link_object_paths=tuple(projection_root / item.name for item in plan
+                                if item.action == "migrate-link"),
         readonly_paths=tuple(item.backup_target for item in plan
                              if item.action == "migrate" and item.backup_target is not None))
     collisions: tuple[str, ...] = ()
