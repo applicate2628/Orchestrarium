@@ -1312,7 +1312,7 @@ class _WindowsBoundNode:
         if self.descriptor is not None:
             try:
                 os.close(self.descriptor)
-            except OSError as cleanup:
+            except BaseException as cleanup:
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "native-close",
                                       primary if primary is not None else cleanup,
                                       members=(_RollbackFailureMember("backup", 0, str(self.path),
