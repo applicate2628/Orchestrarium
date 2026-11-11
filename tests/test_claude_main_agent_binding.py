@@ -113,7 +113,10 @@ def test_synthetic_claude_install_and_reinstall_preserve_settings(
     claude_path = settings_path.parent / "CLAUDE.md"
     user_preamble = "# User preamble\n\nKeep this operator-owned text.\n\n"
     claude_path.write_text(
-        user_preamble + "@AGENTS.md\n\n# Claude Code Pack\n\nold managed bytes\n",
+        user_preamble + "@AGENTS.md\n"
+        "<!-- BEGIN ORCHESTRARIUM CLAUDE MANAGED -->\n"
+        "# Claude Code Pack\n\nold managed bytes\n"
+        "<!-- END ORCHESTRARIUM CLAUDE MANAGED -->\n",
         encoding="utf-8",
     )
     settings = {
@@ -149,13 +152,19 @@ def test_synthetic_claude_install_and_reinstall_preserve_settings(
     assert (project / ".claude" / "skills" / "lead" / "SKILL.md").is_file()
     installed_claude = claude_path.read_text(encoding="utf-8")
     assert installed_claude.startswith(user_preamble)
+    payload = (ROOT / "src.claude" / "CLAUDE.md").read_text(encoding="utf-8")
+    assert payload.startswith("@AGENTS.md\n")
     assert installed_claude[len(user_preamble):] == (
-        ROOT / "src.claude" / "CLAUDE.md"
-    ).read_text(encoding="utf-8")
+        "@AGENTS.md\n<!-- BEGIN ORCHESTRARIUM CLAUDE MANAGED -->\n"
+        + payload[len("@AGENTS.md\n"):]
+        + "<!-- END ORCHESTRARIUM CLAUDE MANAGED -->\n"
+    )
     assert installed_claude.splitlines().count("@AGENTS.md") == 1
-    assert (settings_path.parent / "AGENTS.md").read_bytes() == (
-        ROOT / "shared" / "AGENTS.shared.md"
-    ).read_bytes()
+    assert (settings_path.parent / "AGENTS.md").read_text(encoding="utf-8") == (
+        "<!-- BEGIN ORCHESTRARIUM SHARED MANAGED -->\n"
+        + (ROOT / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8")
+        + "<!-- END ORCHESTRARIUM SHARED MANAGED -->\n"
+    )
     composed = subprocess.run(
         [
             sys.executable,
@@ -164,6 +173,14 @@ def test_synthetic_claude_install_and_reinstall_preserve_settings(
             str(claude_path),
             "--agents-md",
             str(settings_path.parent / "AGENTS.md"),
+            # The source delta still has its independent 8192-byte cap. This
+            # installed fixture additionally preserves user-owned preamble and
+            # the exact ownership framing, neither part of that source delta.
+            "--size-cap",
+            str(8192 + len(user_preamble.encode("utf-8")) + len(
+                "<!-- BEGIN ORCHESTRARIUM CLAUDE MANAGED -->\n"
+                "<!-- END ORCHESTRARIUM CLAUDE MANAGED -->\n"
+            )),
         ],
         cwd=ROOT,
         capture_output=True,

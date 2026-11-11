@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-11
 
+- Integrate independently verified installer and catalog correctness fixes after the receiver-scoped guard release: reject duplicate Claude settings and ambiguous documents before mutation; settle owned projection rollback after referent removal; preserve sibling metadata in empty-scalar estimates; return binding diagnostics for inaccessible observed paths; reject non-JSON numeric constants. Existing V5 receiver qualification and current reference pins remain unchanged.
+
 - Native publication can now verify only unpublished objects against the actual qualified HTTPS receiver, with a one-use Version 5 receipt bound to the same Git helper and exact transfer. Existing hooks retain their veto; unsupported routes keep conservative checks. This lets the target-local command publish a new branch without treating already-published history as new data. The identifier-prefix scan also keeps identical detection without its former long-line stall.
 
 - Bound full-history blob payload memory with hash-verified reacquisition instead of retaining all historical blob bytes. Full graph, per-object limits, path-specific review checks and coverage remain unchanged. Explicit full-history runs may select a validated per-process scan budget of 240 to 3600 seconds; default remains 240 seconds with 60 seconds of supervisor grace. Timeout or incomplete proof still refuses publication. Native scanner test fixtures restore the module registry for independent combined gate checks.

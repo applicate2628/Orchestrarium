@@ -4280,8 +4280,8 @@ class _InstallTransaction:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal bytes")
                 if expected.kind == "link" and bound.logical_target() != expected.data:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal link")
-                if expected.kind == "reparse" and str(Path(bound.logical_target()).resolve(strict=True)) != expected.data:
-                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal reparse")
+                # Reparse ownership is the creator handle identity plus exact raw
+                # reparse payload below, not the continued existence of its referent.
                 if attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
                     if expected.reparse_data is None or bound.reparse_data() != expected.reparse_data:
                         raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal reparse metadata")
@@ -5703,12 +5703,11 @@ class _CreateOnlyMutablePath:
                     self._rollback_identity_changed()
                 self.transaction._dispose_node(record.leaf_path, current)
             elif record.kind == "projection":
+                # The referent may already be rolled back. The disposal owner
+                # verifies creator identity and exact link/reparse bytes itself.
                 if (
                     record.projection_target is None
                     or not (stat.S_ISLNK(metadata.st_mode) or _is_reparse_metadata(metadata))
-                    or not _projection_resolves_to(
-                        record.leaf_path, record.projection_target
-                    )
                 ):
                     self._rollback_identity_changed()
                 self.transaction._dispose_node(record.leaf_path,
@@ -10817,11 +10816,19 @@ def _merge_claude_docs(root: Path, source: Path, target: Path, dry_run: bool, *,
 def _load_claude_settings(settings_path: Path, *,
                           mutable_owner: _CreateOnlyMutablePath | None = None) -> dict[str, Any]:
     """Load the user-owned Claude settings object without repairing its shape."""
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Claude settings contain duplicate JSON keys")
+            result[key] = value
+        return result
+
     try:
         text = _read_owned_text(settings_path, mutable_owner)
         if text is None:
             return {}
-        data = json.loads(text)
+        data = json.loads(text, object_pairs_hook=unique_object)
     except json.JSONDecodeError as exc:
         raise ValueError(f"Claude settings are not valid JSON: {exc}") from exc
     except OSError as exc:
@@ -12597,6 +12604,11 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             # Invalid JSON or an invalid agent shape is a user-settings error,
             # not something a pack sync is allowed to repair after mutation.
             _load_claude_settings(registration)
+            # Reject unowned or ambiguous instruction documents before skills
+            # or projections are materialized. The transactional merge still
+            # reads and validates current documents again before writing.
+            _prepare_claude_docs(root, source, docs_target,
+                                 project_scope=mode != "global")
 
         hooks_enabled = (
             not args.no_hypothesis_hook

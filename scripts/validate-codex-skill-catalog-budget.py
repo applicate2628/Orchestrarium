@@ -106,7 +106,8 @@ def _parse_frontmatter_scalars(
                     i += 1
                     continue
                 cur_indent = len(bl) - len(bl.lstrip(" "))
-                if runtime_metadata and cur_indent == 0:
+                # Sibling keys never belong to an empty block, including estimates.
+                if cur_indent == 0:
                     break
                 if indent is None:
                     indent = cur_indent
@@ -238,8 +239,13 @@ def parse_runtime_prompt_input(
             value[key] = item
         return value
 
+    def reject_constant(value):
+        raise ValueError("Non-JSON constant in runtime evidence")
+
     try:
-        payload = json.loads(encoded, object_pairs_hook=unique_fields)
+        payload = json.loads(
+            encoded, object_pairs_hook=unique_fields, parse_constant=reject_constant
+        )
     except (TypeError, ValueError, RecursionError):
         return _runtime_failure("malformed", "CATALOG-RUNTIME-MALFORMED")
     if not isinstance(payload, list):
@@ -280,9 +286,10 @@ def parse_runtime_prompt_input(
     try:
         expected_pack = _pack_identities(repo_skills)
         pack_runtime_resolved = pack_runtime_root.resolve()
+        pack_runtime_exists = pack_runtime_resolved.is_dir()
     except (OSError, UnicodeError, ValueError):
         return _runtime_failure("binding-failure", "CATALOG-RUNTIME-BINDING")
-    if not expected_pack or not pack_runtime_resolved.is_dir():
+    if not expected_pack or not pack_runtime_exists:
         return _runtime_failure("binding-failure", "CATALOG-RUNTIME-BINDING")
     rendered_pack: set[str] = set()
     seen_paths: set[Path] = set()
@@ -304,13 +311,14 @@ def parse_runtime_prompt_input(
         relative = Path(match.group("relative"))
         if relative.is_absolute() or ".." in relative.parts:
             return _runtime_failure("binding-failure", "CATALOG-RUNTIME-BINDING")
-        root_resolved = root.resolve()
-        path = (root_resolved / relative).resolve()
         try:
+            root_resolved = root.resolve()
+            path = (root_resolved / relative).resolve()
             path.relative_to(root_resolved)
-        except ValueError:
+            path_exists = path.is_file()
+        except (OSError, UnicodeError, ValueError):
             return _runtime_failure("binding-failure", "CATALOG-RUNTIME-BINDING")
-        if path in seen_paths or not path.is_file():
+        if path in seen_paths or not path_exists:
             return _runtime_failure("binding-failure", "CATALOG-RUNTIME-BINDING")
         seen_paths.add(path)
         try:
