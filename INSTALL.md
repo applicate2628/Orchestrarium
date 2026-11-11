@@ -1,6 +1,6 @@
 # Installation
 
-The source Lead tree contains the [read-only native Goal chronology diagnostic](src.codex/skills/lead/goal_authority/README.md) and its sibling check.py. Public installer delivery and import from an installed tree remain unqualified: isolated Windows receiving was blocked by interpreter-path serialization and then hook-health refusal, with no accepted installed helper. This adds no hook registration or automatic invocation; source compatibility is explicit, and no native replay prevention is claimed.
+The source Lead tree contains the [read-only native Goal chronology diagnostic](src.codex/skills/lead/goal_authority/README.md) and its sibling check.py. An isolated Windows project install with Python 3.15.2 and the repository fake hooks-inventory host verified exact helper/README delivery and import of the installed sibling hook_common. This qualifies offline materialization only, not native host acceptance, bundled-runtime path compatibility or replay prevention. This adds no hook registration or automatic invocation; source compatibility is explicit, and no native replay prevention is claimed.
 
 This monorepo ships a Python-owned root installer (`install.py`) plus the thin POSIX launcher `install.sh`. They require Python 3.13 or newer, offer the supported Codex and Claude Code packs, then forward arguments to the matching pack-specific installers in the `scripts/` directory.
 
