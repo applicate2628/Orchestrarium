@@ -1,5 +1,7 @@
 # Installation
 
+Lead materialization includes the [read-only native Goal chronology diagnostic](src.codex/skills/lead/goal_authority/README.md) and its sibling check.py. This adds no hook registration or automatic invocation; source compatibility is explicit, and no native replay prevention is claimed.
+
 This monorepo ships a Python-owned root installer (`install.py`) plus the thin POSIX launcher `install.sh`. They require Python 3.13 or newer, offer the supported Codex and Claude Code packs, then forward arguments to the matching pack-specific installers in the `scripts/` directory.
 
 ## Temporary POSIX installation hold

@@ -1,5 +1,7 @@
 # Orchestrarium
 
+Lead includes a [read-only native Goal chronology diagnostic](src.codex/skills/lead/goal_authority/README.md) for caller-selected, qualified historical evidence. It does not authorize pause/resume or intercept native Goal mutations.
+
 A cross-provider agent orchestration monorepo that keeps the production Codex and Claude Code lines aligned on one shared governance and reference core.
 
 Codex native roles use the task and role selector, with Terra for suitable ordinary work and Sol for science. Named Luna mechanical roles have a separate supervised corridor; ordinary eligible producer roles can use `luna-high` or `luna-xhigh`. Explicit user controls, host restrictions, independent reviews and per-attempt Astra or Max consent remain binding. See [Codex platform rules](src.codex/AGENTS.codex.md) and [installation details](INSTALL.md) for role, migration and runtime contracts.
