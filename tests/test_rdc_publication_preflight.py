@@ -33,9 +33,12 @@ def owner(request):
     directory = request.param
     sys.path.insert(0, str(directory))
     try:
-        common = load(directory / 'hook_common.py', 'hook_common')
-        preflight = load(directory / 'git_push_gate_preflight.py', 'git_push_gate_preflight')
-        yield common, preflight, directory
+        # Other gate tests retain classes from their original module instance.
+        # Restore the import registry instead of leaking the last pack mirror.
+        with mock.patch.dict(sys.modules):
+            common = load(directory / 'hook_common.py', 'hook_common')
+            preflight = load(directory / 'git_push_gate_preflight.py', 'git_push_gate_preflight')
+            yield common, preflight, directory
     finally:
         sys.path.pop(0)
 

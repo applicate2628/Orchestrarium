@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-11
 
+- Record isolated Windows receiving for the target-local publication gate with both full and candidate bundled Python: clean native transfers produce fresh V3/V4 evidence, and detected private-path findings leave the receiver unchanged. This does not claim live hook activation or deployment. Remote-preflight tests restore their module registry so combined gate regressions do not mix independently loaded parser types.
+
 - Add an explicit target-local publication command to the existing gate. It accepts only repository, named remote, immutable source and branch destination, qualifies and launches one native Git invocation, and preserves fresh V3/V4 callback checks. This improves local command ownership without admitting blocked remote carriers; operator docs state the Git capability requirement and observed local verification limits.
 
 - Installer regression now uses an explicit fixture-only Codex host and isolated profile/configuration paths, requires Python 3.13+, and retains outer test fixtures in .scratch/trash. The result verifies offline installation behavior, not real host admission; production transaction cleanup is unchanged.
