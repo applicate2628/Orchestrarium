@@ -238,6 +238,41 @@ _BINARY_ASCII_RUN = re.compile(rb"[\x09\x20-\x7e]+")
 _IDENTIFIER_PREFIX = re.compile(
     r"[A-Za-z_][A-Za-z0-9_]*(?:(?:::|[-._:/\\])[A-Za-z_][A-Za-z0-9_]*)*(?:::|[-._:/\\])?$"
 )
+def _identifier_prefix_match(prefix: str) -> re.Match[str] | None:
+    """Find the anchored identifier suffix without retrying every start offset.
+
+    The suffix grammar is identifier (separator identifier)* separator?, with
+    ASCII identifier starts and one-character separators or a double colon.
+    Walk that grammar backwards once, then use the original regex at the one
+    proved start to preserve its Match object and offsets. Python's dollar
+    anchor also accepts the position immediately before one final newline.
+    """
+    end = len(prefix) - int(prefix.endswith("\n"))
+    separators = "-.:/\\"
+    if end and prefix[end - 1] in separators:
+        end -= 1
+        if prefix[end] == ":" and end and prefix[end - 1] == ":":
+            end -= 1
+    candidate = None
+    while end:
+        component_end = end
+        while end and (prefix[end - 1] == "_" or "a" <= prefix[end - 1] <= "z"
+                       or "A" <= prefix[end - 1] <= "Z" or "0" <= prefix[end - 1] <= "9"):
+            end -= 1
+        start = end
+        while start < component_end and "0" <= prefix[start] <= "9":
+            start += 1
+        if start == component_end:
+            break
+        candidate = start
+        if start != end or not end or prefix[end - 1] not in separators:
+            break
+        end -= 1
+        if prefix[end] == ":" and end and prefix[end - 1] == ":":
+            end -= 1
+    return _IDENTIFIER_PREFIX.match(prefix, candidate) if candidate is not None else None
+
+
 _VALUE = r"[A-Za-z0-9_./+=-]"
 _DIGIT_SHAPE = rf"(?:{_VALUE}{{5,}}[0-9]{_VALUE}*|{_VALUE}*[0-9]{_VALUE}{{5,}})"
 _QUOTED = rf"""["'`!@#$%^&*?|](?:{_VALUE}{{12,}}|{_DIGIT_SHAPE})["'`!@#$%^&*?|]"""
@@ -441,6 +476,7 @@ class NativePushRequest:
     selection_sha256: str
     repository_observation_sha256: str
     updates: tuple[NativePushUpdate, ...]
+    receiver_scope: object | None = None
 
 
 @dataclass(frozen=True)
@@ -1497,7 +1533,7 @@ def _assignment_coordinates(observation: _TextObservation) -> tuple[int, ...] | 
     identifier_end = separator_start
     while identifier_end > match.start() and line[identifier_end - 1].isspace():
         identifier_end -= 1
-    prefix = _IDENTIFIER_PREFIX.search(line[:match.start()])
+    prefix = _identifier_prefix_match(line[:match.start()])
     identifier_start = prefix.start() if prefix is not None else match.start()
     if identifier_end <= identifier_start:
         return None
@@ -2074,7 +2110,7 @@ def _is_callable_rhs(line: str, match: re.Match[str]) -> bool:
 
 def _is_public_token_credential_identifier(line: str, match: re.Match[str]) -> bool:
     credential_identifier = match.groupdict().get("credential_token_identifier")
-    prefix = _IDENTIFIER_PREFIX.search(line[:match.start()])
+    prefix = _identifier_prefix_match(line[:match.start()])
     identifier_suffix = (
         credential_identifier
         if credential_identifier is not None
@@ -2137,7 +2173,7 @@ def _is_annotated_public_token_match(
 def _is_public_key_token_match(line: str, family: str, match: re.Match[str]) -> bool:
     if family != "token":
         return False
-    prefix = _IDENTIFIER_PREFIX.search(line[:match.start()])
+    prefix = _identifier_prefix_match(line[:match.start()])
     identifier = (prefix.group(0) if prefix is not None else "") + line[
         match.start():match.start() + len("Token")
     ]
@@ -3368,6 +3404,10 @@ async def _native_push_selection(request: NativePushRequest, deadline: float) ->
     loop = asyncio.get_running_loop()
     loop_deadline = loop.time() + _remaining_seconds(deadline)
     native_old = tuple(RemoteRefTip(row.remote_ref, row.remote_oid) for row in request.updates if row.remote_oid != zero)
+    if request.receiver_scope is not None:
+        # Names are unused by this existing object classifier. Scope authority is
+        # supplied by the owner, never reconstructed from local tracking refs.
+        native_old += tuple(RemoteRefTip(b"", oid) for oid in request.receiver_scope.excluded_roots)
     exclusions = await _local_remote_commit_tip_oids(
         native_old, deadline=loop_deadline,
         object_format=request.object_format, include_object_roots=True,
@@ -4737,10 +4777,19 @@ async def _scan_native_push_async(
     coverage_fault: CoverageFaultPort | None = None,
     scan_timeout: float = _SCAN_DEADLINE_SECONDS,
     review_evaluation: "ReviewEvaluation | None" = None,
+    receiver_scope=None,
 ) -> ScanOutcome:
     request = _native_push_request(payload)
     if isinstance(request, Refusal):
         return ScanOutcome("refusal", "native-push", refusal=request)
+    if receiver_scope is not None:
+        from transfer_binding import ScopeBinding
+        if (type(receiver_scope) is not ScopeBinding
+            or receiver_scope.endpoint_identity != request.endpoint_identity
+            or receiver_scope.object_format != request.object_format.name):
+            return ScanOutcome("refusal", "native-push", refusal=_refusal("PS-INPUT-REFUSAL", "receiver-scope"))
+        request = replace(request, receiver_scope=receiver_scope,
+                          selection_sha256=receiver_scope.selection_digest(payload))
     deadline = time.monotonic() + scan_timeout
     try:
         root = _repo_root()
@@ -4768,10 +4817,12 @@ async def _scan_native_push_async(
 
 def _scan_native_push(payload: object, find_machine_paths, *,
                       review_evaluation: "ReviewEvaluation | None" = None,
-                      scan_timeout: float = _SCAN_DEADLINE_SECONDS) -> ScanOutcome:
+                      scan_timeout: float = _SCAN_DEADLINE_SECONDS,
+                      receiver_scope=None) -> ScanOutcome:
     try:
         return asyncio.run(_scan_native_push_async(payload, find_machine_paths,
-                           review_evaluation=review_evaluation, scan_timeout=scan_timeout))
+                           review_evaluation=review_evaluation, scan_timeout=scan_timeout,
+                           receiver_scope=receiver_scope))
     except KeyboardInterrupt:
         return ScanOutcome("refusal", "native-push", refusal=_refusal("PS-MSG-READ", "cancelled"))
     except Exception:
@@ -4779,6 +4830,23 @@ def _scan_native_push(payload: object, find_machine_paths, *,
 
 
 def _serialize_native_receipt_v4(outcome: ScanOutcome) -> str:
+    if outcome.native_selection is not None and outcome.native_selection.request.receiver_scope is not None:
+        raise ValueError("scoped selection requires V5")
+    return _serialize_native_receipt_common(outcome)
+
+
+def _serialize_receiver_scoped_receipt_v5(outcome: ScanOutcome) -> str:
+    if outcome.native_selection is None or outcome.native_selection.request.receiver_scope is None:
+        raise ValueError("missing receiver scope")
+    if outcome.review is not None:
+        raise ValueError("V5 review correlation not implemented")
+    result = json.loads(_serialize_native_receipt_common(outcome))
+    result["version"] = 5
+    result["receiverScopeSha256"] = outcome.native_selection.request.receiver_scope.digest()
+    return _native_json_bytes(result).decode("ascii")
+
+
+def _serialize_native_receipt_common(outcome: ScanOutcome) -> str:
     selection, history, coverage = outcome.native_selection, outcome.history, outcome.coverage
     if outcome.kind != "clean" or selection is None or history is None or coverage is None:
         raise ValueError("native receipt")
@@ -5081,7 +5149,8 @@ def _format_outcome(outcome: ScanOutcome) -> tuple[str, str, int]:
         )
     if outcome.mode == "native-push":
         try:
-            return _serialize_native_receipt_v4(outcome), "", 0
+            scoped = outcome.native_selection is not None and outcome.native_selection.request.receiver_scope is not None
+            return (_serialize_receiver_scoped_receipt_v5(outcome) if scoped else _serialize_native_receipt_v4(outcome)), "", 0
         except (ValueError, TypeError, UnicodeError):
             return "", "publication-safety: refusing id=PS-INPUT-REFUSAL reason=native-receipt phase=input", 2
     if outcome.mode == "range":
@@ -5165,7 +5234,8 @@ def main(argv: list[str] | None = None) -> int:
             payload = globals().get("__injected_native_push__")
             outcome = _scan_native_push(payload, find_machine_paths,
                                        review_evaluation=evaluation if evaluation.read.usable_records else None,
-                                       scan_timeout=_remaining_seconds(deadline))
+                                       scan_timeout=_remaining_seconds(deadline),
+                                       receiver_scope=globals().get("__injected_receiver_scope__"))
 
             def recheck_native() -> bool:
                 request = _native_push_request(payload)

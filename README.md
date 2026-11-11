@@ -183,7 +183,7 @@ If a repo-local lane policy explicitly asks for consultant input at closeout, it
 
 See [INSTALL.md](INSTALL.md) for quick install, pack-specific install details, dual-platform setup, and post-install customization.
 
-Publication scan-derived push credit requires the actual native Git callback to receive one fresh bounded, reaped, non-empty Version 3 union of actual update commit/tree/blob graphs relative to each old object ID and a separate Version 4 result covering actual transferred roots, including noncommit objects. Version 2 and manual/default/path scan output remain diagnostic only and cannot authorize a push.
+Ordinary publication scan-derived push credit requires the actual native Git callback to receive one fresh bounded, reaped, non-empty Version 3 union of actual update commit/tree/blob graphs relative to each old object ID and a separate Version 4 result covering actual transferred roots, including noncommit objects. Version 2 and manual/default/path scan output remain diagnostic only and cannot authorize a push. The separate trusted-owner `--target-local-push` route may use a fresh captured Version 5 receiver-scoped receipt only for its qualified Windows GitHub HTTPS profile: the complete advertisement, native callback, immutable OID/ref batch and transfer remain bound to the same held helper lifecycle. It consumes the receipt once; missing, changed or unsupported scope never grants empty-scan credit. Unsupported routes retain complete full-graph checks or refuse. See `docs/receiver-scoped-publication.md` for the supported boundary; ordinary Version 3/4 checks and human authority remain unchanged.
 
 ## Orchestration utilities
 

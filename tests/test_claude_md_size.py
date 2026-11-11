@@ -34,8 +34,8 @@ EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
         "1f2ab534399851a99b5f39caadec703b8ddf5118c73ea60bd27a3023c0a5209d",
     ),
     "hook-behavior-contracts": (
-        19_387,
-        "49304999e8668edbf3d697ec6a66c01faea27cb46905e02136e4efa434a55c37",
+        15_732,
+        "118238c9c7b0beba9a617ce0675c7dec89e49f0884fb7ffc99d02f7039c2a410",
     ),
     # Payload pins force deliberate review of current hook behavior, placement,
     # and installer truth before a canonical-reference edit can pass.
@@ -90,7 +90,10 @@ EXPECTED_CLAUDE_MANIFEST: dict[str, tuple[str | re.Pattern[str], ...]] = {
         "Stop hooks do not replace the main conversation's current-turn status checks or work-item close/archive ownership",
         "Passive verdicts and the leaf/re-entry skips remain unchanged",
         "[skip-bugfix-discipline]",
-        "[approve-publication]",
+        "Root receives genuine publication review and consent for the actual source, repository and destination.",
+        "target qualification and a fresh complete range scan",
+        "it does not reconstruct consent from chat history or require an approval marker.",
+        "actual revocation, another target or an unreviewed delta stops the affected submission.",
         "MCP control.",
         "discovery reminders are advisory in `auto` and subagent contexts.",
         "Root `force` still requires runtime discovery, the relevant tool schema, fitting MCP use",
@@ -378,14 +381,12 @@ def test_stop_ownership_preserves_current_clauses_within_concise_budget() -> Non
         assert required in stop
 
 
-def test_live_and_created_tracked_text_files_are_lf_only() -> None:
+def test_pinned_claude_sources_are_lf_only() -> None:
     candidates = (
         CLAUDE_MD,
-        Path(__file__),
         VALIDATOR,
         REFERENCE,
-        REPO_ROOT / "references-claude" / "README.md",
-        REPO_ROOT / "RELEASE_NOTES.md",
+        REPO_ROOT / "references-claude" / "ru" / "claude-md-structural-enforcement.md",
     )
     for path in candidates:
         if not path.is_file():

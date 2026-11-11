@@ -177,6 +177,7 @@ class NativePushScanBinding:
     input_sha256: str
     selection_sha256: str
     repository_observation_sha256: str
+    receiver_scope_sha256: str | None = None
     route: str = field(init=False, default="generic")
 
 
@@ -219,7 +220,7 @@ class SourceLayout:
 
 SOURCE_ROLE_ORDER = (
     "gate", "hook_common", "classifier", "posix_helper", "windows_job",
-    "scanner", "publication_review_policy", "linked_runtime_subroots",
+    "scanner", "publication_review_policy", "linked_runtime_subroots", "receiver_scope",
 )
 
 
@@ -235,6 +236,7 @@ SOURCE_LAYOUTS = (
             ("scanner", "universal-hooks/scripts/check-publication-safety.py"),
             ("publication_review_policy", "universal-hooks/scripts/publication_review_policy.py"),
             ("linked_runtime_subroots", "linked_runtime_subroots.py"),
+            ("receiver_scope", "universal-hooks/scripts/transfer_binding.py"),
         ),
     ),
     SourceLayout(
@@ -248,6 +250,7 @@ SOURCE_LAYOUTS = (
             ("scanner", "src.codex/skills/lead/scripts/check-publication-safety.py"),
             ("publication_review_policy", "src.codex/skills/lead/scripts/publication_review_policy.py"),
             ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
+            ("receiver_scope", "src.codex/skills/lead/scripts/transfer_binding.py"),
         ),
     ),
     SourceLayout(
@@ -261,6 +264,7 @@ SOURCE_LAYOUTS = (
             ("scanner", "src.claude/agents/scripts/check-publication-safety.py"),
             ("publication_review_policy", "src.claude/agents/scripts/publication_review_policy.py"),
             ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
+            ("receiver_scope", "src.claude/agents/scripts/transfer_binding.py"),
         ),
     ),
     SourceLayout(
@@ -274,6 +278,7 @@ SOURCE_LAYOUTS = (
             ("scanner", "scripts/check-publication-safety.py"),
             ("publication_review_policy", "scripts/publication_review_policy.py"),
             ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
+            ("receiver_scope", "scripts/transfer_binding.py"),
         ),
     ),
 )
@@ -477,7 +482,11 @@ class PendingScanInvocation:
                     text = combined.decode("utf-8", errors="strict")
                 except UnicodeDecodeError:
                     raise PrRouteDenied(prefix + "-SCAN-EXECUTION") from None
-                parsed = parse_publication_safety_observation(text)
+                if isinstance(self.binding, NativePushScanBinding) and self.binding.receiver_scope_sha256 is not None:
+                    scoped = _parse_receiver_scoped_receipt_v5(text)
+                    parsed = PublicationSafetyObservation("valid-v5" if scoped is not None else "malformed", scoped)
+                else:
+                    parsed = parse_publication_safety_observation(text)
                 if execution.exit_code == 1:
                     raise PrRouteDenied(prefix + "-SCAN-FINDING")
                 if execution.exit_code == 2:
@@ -486,9 +495,14 @@ class PendingScanInvocation:
                     raise PrRouteDenied(prefix + "-SCAN-EXECUTION")
                 receipt = parsed.receipt
                 if isinstance(self.binding, NativePushScanBinding):
-                    if parsed.kind not in {"valid-v4", "qualified-v4"} or not isinstance(receipt, NativePushReceiptV4):
-                        raise PrRouteDenied("PGG-NATIVE-RECEIPT-VERSION")
-                    _verify_native_receipt_binding(receipt, self.binding)
+                    if self.binding.receiver_scope_sha256 is not None:
+                        if parsed.kind != "valid-v5" or not isinstance(receipt, ReceiverScopedReceiptV5):
+                            raise PrRouteDenied("PGG-NATIVE-RECEIPT-VERSION")
+                        _verify_receiver_scoped_receipt_v5(receipt, self.binding, self.binding.receiver_scope_sha256)
+                    else:
+                        if parsed.kind not in {"valid-v4", "qualified-v4"} or not isinstance(receipt, NativePushReceiptV4):
+                            raise PrRouteDenied("PGG-NATIVE-RECEIPT-VERSION")
+                        _verify_native_receipt_binding(receipt, self.binding)
                 else:
                     if parsed.kind not in {"valid-v3", "qualified-v3"} or not isinstance(receipt, RangeReceiptV3):
                         mismatch = "PGG-RANGE-RECEIPT-VERSION" if prefix == "PGG" else "PRG-RECEIPT-MISMATCH"
@@ -1321,11 +1335,12 @@ def exact_object(value, keys, label):
         raise ValueError(label)
     return value
 bundle=json.loads(sys.stdin.buffer.read().decode("ascii"),object_pairs_hook=no_duplicates)
-if type(bundle) is not dict or type(bundle.get("payloadVersion")) is not int or bundle["payloadVersion"] not in (1,2):
+if type(bundle) is not dict or type(bundle.get("payloadVersion")) is not int or bundle["payloadVersion"] not in (1,2,3):
     raise ValueError("payload version")
-native_mode=bundle["payloadVersion"]==2
-exact_object(bundle,("payloadVersion","sources","review","nativePush") if native_mode else ("payloadVersion","sources","review"),"payload shape")
-roles=("hook_common","classifier","posix_helper","windows_job","scanner","publication_review_policy","linked_runtime_subroots")
+native_mode=bundle["payloadVersion"] in (2,3)
+scoped_mode=bundle["payloadVersion"]==3
+exact_object(bundle,(("payloadVersion","sources","review","nativePush","receiverScope") if scoped_mode else ("payloadVersion","sources","review","nativePush")) if native_mode else ("payloadVersion","sources","review"),"payload shape")
+roles=("hook_common","classifier","posix_helper","windows_job","scanner","publication_review_policy","linked_runtime_subroots","receiver_scope")
 encoded_sources=exact_object(bundle["sources"],roles,"source roles")
 sources={}
 for key,value in encoded_sources.items():
@@ -1374,13 +1389,18 @@ if native_mode:
     wire=base64.b64decode(native["wireBase64"],validate=True)
     if base64.b64encode(wire).decode("ascii")!=native["wireBase64"] or hashlib.sha256(wire).hexdigest()!=native["inputSha256"]:
         raise ValueError("native wire binding")
-allowed=set(sys.stdlib_module_names)|{"hook_common","_orchestrarium_publication_review_policy_v1","_orchestrarium_linked_runtime_subroots_v1"}
+allowed=set(sys.stdlib_module_names)|{"hook_common","_orchestrarium_publication_review_policy_v1","_orchestrarium_linked_runtime_subroots_v1","transfer_binding"}
 original_import=builtins.__import__
 def guarded_import(name,globals=None,locals=None,fromlist=(),level=0):
     if not level and name.split(".",1)[0] not in allowed:
         raise ImportError("non-standard import denied")
     return original_import(name,globals,locals,fromlist,level)
 builtins.__import__=guarded_import
+scope_module=types.ModuleType("transfer_binding")
+scope_module.__file__="<closure>/transfer_binding.py"
+sys.modules["transfer_binding"]=scope_module
+exec(compile(sources["receiver_scope"],scope_module.__file__,"exec"),scope_module.__dict__,scope_module.__dict__)
+receiver_scope=scope_module.ScopeBinding.from_document(bundle["receiverScope"]) if scoped_mode else None
 common=types.ModuleType("hook_common")
 common.__file__="<closure>/hook_common.py"
 sys.modules["hook_common"]=common
@@ -1427,6 +1447,7 @@ scanner_path="<closure>/check-publication-safety.py"
 scanner={"__name__":"__main__","__file__":scanner_path,"__package__":None,"__cached__":None,"__injected_find_machine_paths__":finder,"__injected_git_executable__":git_executable,"__injected_posix_process_group_module__":posix_helper,"__injected_windows_job_module__":windows_job,"__injected_review_policy_snapshot__":snapshot,"__injected_review_repository_observation__":observation,"__injected_review_execution__":"gate-captured-v1"}
 scanner[policy.POLICY_INJECTION_KEY]=policy
 if native_mode: scanner["__injected_native_push__"]=native
+if scoped_mode: scanner["__injected_receiver_scope__"]=receiver_scope
 sys.argv=[scanner_path,*sys.argv[3:]]
 exec(compile(sources["scanner"],scanner_path,"exec"),scanner,scanner)
 '''
@@ -1970,6 +1991,7 @@ def _closure_payload(
     canonical_bytes: object,
     *,
     native_push: dict | None = None,
+    receiver_scope=None,
 ) -> bytes:
     if tuple(node.role for node in closure.nodes) != SOURCE_ROLE_ORDER:
         raise ValueError("source-role-closure")
@@ -1995,13 +2017,13 @@ def _closure_payload(
         node.role: base64.b64encode(node.source).decode("ascii")
         for node in closure.nodes if node.role != "gate"
     }
-    if len(sources) != 7 or tuple(sources) != SOURCE_ROLE_ORDER[1:]:
+    if len(sources) != 8 or tuple(sources) != SOURCE_ROLE_ORDER[1:]:
         raise ValueError("source-role-cardinality")
     encoder = canonical_bytes
     if not callable(encoder):
         raise ValueError("policy-canonical-encoder")
     bundle = {
-        "payloadVersion": 1 if native_push is None else 2,
+        "payloadVersion": 3 if receiver_scope is not None else (1 if native_push is None else 2),
         "sources": sources,
         "review": review_document,
     }
@@ -2013,6 +2035,10 @@ def _closure_payload(
         ):
             raise ValueError("native-review-repository-binding")
         bundle["nativePush"] = native_push
+    if receiver_scope is not None:
+        if native_push is None:
+            raise ValueError("scope requires native input")
+        bundle["receiverScope"] = receiver_scope.document()
     payload = encoder(bundle) if native_push is None else _native_canonical_bytes(bundle)
     if type(payload) is not bytes or not payload.isascii():
         raise ValueError("canonical-payload-bytes")
@@ -2887,6 +2913,7 @@ def _refresh_scan_binding(
 
 def _native_push_selection(
     native: NativePushInput, observation: dict, canonical_bytes: Callable[[object], bytes],
+    *, receiver_scope=None,
 ) -> tuple[dict, NativePushScanBinding]:
     """Bind opaque actual bytes; the captured scanner is the sole wire decoder."""
     if (
@@ -2908,19 +2935,25 @@ def _native_push_selection(
         "inputSha256": hashlib.sha256(native.wire).hexdigest(),
         "wireBase64": base64.b64encode(native.wire).decode("ascii"),
     }
+    if receiver_scope is not None:
+        if receiver_scope.endpoint_identity != request["endpointIdentity"] or receiver_scope.object_format != object_format.name:
+            raise PrRouteDenied("PGG-RECEIVER-SCOPE-BINDING")
     binding = NativePushScanBinding(
         object_format.name, request["endpointIdentity"], request["inputSha256"],
-        hashlib.sha256(_native_canonical_bytes(request)).hexdigest(),
+        receiver_scope.selection_digest(request) if receiver_scope is not None else hashlib.sha256(_native_canonical_bytes(request)).hexdigest(),
         hashlib.sha256(canonical_bytes(observation)).hexdigest(),
+        receiver_scope.digest() if receiver_scope is not None else None,
     )
     return request, binding
 
 
 def _run_authoritative_scan(
     binding: PushScanBinding | NativePushInput, repository_workdir: str, git_exe: str,
-    *, native_input: NativePushInput | None = None,
+    *, native_input: NativePushInput | None = None, receiver_scope=None,
 ) -> ConsumedAuthoritativeEvidence:
     native_objects = isinstance(binding, NativePushInput)
+    if receiver_scope is not None and not native_objects:
+        raise PrRouteDenied("PGG-RECEIVER-SCOPE-BINDING")
     native = binding if native_objects else native_input
     prefix = "PGG" if native is not None or binding.route == "generic" else "PRG"
     fds: tuple[int, ...] = ()
@@ -2939,12 +2972,12 @@ def _run_authoritative_scan(
             )
             if native is not None:
                 request, native_binding = _native_push_selection(
-                    native, captured_review.repository_observation, modules.policy_module.C,
+                    native, captured_review.repository_observation, modules.policy_module.C, receiver_scope=receiver_scope,
                 )
                 if native_objects:
                     binding = native_binding
                 document = _strict_json(captured_review.payload_bytes.decode("ascii"), dict, "PGG-SCAN-PROVENANCE")["review"]
-                payload = _closure_payload(closure_before, document, modules.policy_module.C, native_push=request)
+                payload = _closure_payload(closure_before, document, modules.policy_module.C, native_push=request, receiver_scope=receiver_scope)
                 captured_review = replace(captured_review, payload_bytes=payload, payload_sha256=hashlib.sha256(payload).hexdigest())
         except PrRouteDenied:
             raise
@@ -2988,7 +3021,7 @@ def _run_authoritative_scan(
                 )
                 if observation_after != captured_review.repository_observation:
                     raise PrRouteDenied("PGG-TARGET-CURRENTNESS")
-                _request_after, native_binding_after = _native_push_selection(native, observation_after, modules.policy_module.C)
+                _request_after, native_binding_after = _native_push_selection(native, observation_after, modules.policy_module.C, receiver_scope=receiver_scope)
                 if _request_after != request:
                     raise PrRouteDenied("PGG-TARGET-CURRENTNESS")
                 binding_after = native_binding_after if native_objects else _refresh_scan_binding(binding, repository_workdir, git_exe)
@@ -3707,6 +3740,9 @@ def _target_local_push_main(arguments: list[str]) -> int:
     full branch ref. No caller configuration, shell, executable or receipt.
     """
     try:
+        dry_run = bool(arguments and arguments[0] == "--dry-run")
+        if dry_run:
+            arguments = arguments[1:]
         if len(arguments) != 4 or any(type(value) is not str or "\0" in value for value in arguments):
             raise PrRouteDenied("PGG-NATIVE-INPUT")
         repository, remote, source, destination = arguments
@@ -3721,8 +3757,13 @@ def _target_local_push_main(arguments: list[str]) -> int:
         root = _prove_repository_root(selected, git_exe, source="native-git")
         # Git is the owner of ref grammar; do not maintain a second validator.
         _native_configuration_query(git_exe, (), root, ("check-ref-format", destination))
+        if os.name == "nt":
+            from receiver_transport import run_target
+            outcome = run_target(sys.modules[__name__], root, remote, source, destination, dry_run=dry_run)
+            if outcome is not None:
+                return outcome
         argv = (git_exe, "-C", root, *native_git_config_arguments(),
-                "push", "--verify", "--", remote, source + ":" + destination)
+                "push", "--verify", *(("--dry-run",) if dry_run else ()), "--", remote, source + ":" + destination)
         parsed = parse_native_argument_vector(argv, "target-local-push", 0)
         # Snapshot both selection and executable identity. The callback resolves
         # Git through the same inherited PATH; any prelaunch drift is fatal.
@@ -3758,6 +3799,43 @@ def main(preflight: PreflightResult | None = None) -> int:
     except Exception:
         result = PreflightResult("DEFER", "PFP-DENY-INTERNAL", "RENDER_DENY")
     return compose_gate_result(result)
+
+
+
+# V5 is admitted only through the qualified target-local transport owner.
+class ReceiverScopedReceiptV5(NamedTuple):
+    native: NativePushReceiptV4
+    receiver_scope_sha256: str
+
+
+def _parse_receiver_scoped_receipt_v5(text: str) -> ReceiverScopedReceiptV5 | None:
+    """Reuse all native coverage syntax checks, require explicit V5 scope."""
+    try:
+        value = _strict_json(text, dict, "PGG-SCAN-CORRELATION")
+    except (PrRouteDenied, ValueError, TypeError):
+        return None
+    if type(value.get("version")) is not int or value["version"] != 5:
+        return None
+    digest = value.pop("receiverScopeSha256", None)
+    if type(digest) is not str or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        return None
+    value["version"] = 4
+    observed = _parse_native_publication_observation(_native_canonical_bytes(value).decode("ascii"))
+    # Qualified review evidence needs its own V5 correlation. Do not drop it.
+    if observed.kind != "valid-v4" or observed.qualification is not None:
+        return None
+    return ReceiverScopedReceiptV5(observed.receipt, digest)
+
+
+def _verify_receiver_scoped_receipt_v5(receipt: ReceiverScopedReceiptV5,
+                                     binding: NativePushScanBinding,
+                                     expected_scope_sha256: str) -> None:
+    """Expected values must originate in pending owner state, not this frame."""
+    if (type(expected_scope_sha256) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", expected_scope_sha256) is None
+        or receipt.receiver_scope_sha256 != expected_scope_sha256):
+        raise PrRouteDenied("PGG-RECEIVER-SCOPE-BINDING")
+    _verify_native_receipt_binding(receipt.native, binding)
 
 
 if __name__ == "__main__":

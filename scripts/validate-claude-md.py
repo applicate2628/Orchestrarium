@@ -24,8 +24,8 @@ USER_CONTROL_MARKER = re.compile(
     r"\[(?:approve|skip|acknowledge|revoke)[^\]\r\n]*\]"
 )
 RU_HOOK_BEHAVIOR_PAYLOAD_PIN = (
-    24839,
-    "008292739a33903385a29373771b8fe2743407415151ecb5d4ea3d1865782868",
+    20290,
+    "90c30977f3b416f0eb87c8634d8093ae0315bf429a852e94cb23b675ee4694ac",
 )
 
 SHARED_MANIFEST: dict[str, tuple[str | re.Pattern[str], ...]] = {
@@ -69,7 +69,10 @@ CLAUDE_MANIFEST: dict[str, tuple[str, ...]] = {
         "Stop hooks do not replace the main conversation's current-turn status checks or work-item close/archive ownership",
         "Passive verdicts and the leaf/re-entry skips remain unchanged",
         "[skip-bugfix-discipline]",
-        "[approve-publication]",
+        "Root receives genuine publication review and consent for the actual source, repository and destination.",
+        "target qualification and a fresh complete range scan",
+        "it does not reconstruct consent from chat history or require an approval marker.",
+        "actual revocation, another target or an unreviewed delta stops the affected submission.",
         "MCP control.",
         "discovery reminders are advisory in `auto` and subagent contexts.",
         "Root `force` still requires runtime discovery, the relevant tool schema, fitting MCP use",

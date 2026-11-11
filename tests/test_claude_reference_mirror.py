@@ -43,8 +43,8 @@ def test_current_claude_reference_mirror_is_contract_complete() -> None:
     assert ok, "\n".join(messages)
     assert "PASS: Claude reference mirror payloads 4/4" in messages
     assert "PASS: Claude reference mirror hooks 11/11" in messages
-    assert "PASS: Claude reference mirror status IDs 1/1" in messages
-    assert "PASS: Claude reference mirror user markers 3/3" in messages
+    assert "PASS: Claude reference mirror status IDs 0/0" in messages
+    assert "PASS: Claude reference mirror user markers 2/2" in messages
     assert "PASS: Russian hook-behavior-contracts payload pin" in messages
 
 
@@ -71,11 +71,11 @@ def test_russian_typed_routing_documents_nonblocking_delivery() -> None:
         ),
         ("check-typed-routing.py", "check-typed-routing-drift.py", "CRM-HOOK-NAME-SET"),
         (
-            "ORACLE-AUTHORITY-UNAVAILABLE",
-            "ORACLE-AUTHORITY-DRIFT",
+            "**Хук PreToolUse bugfix-discipline.**",
+            "**Хук PreToolUse bugfix-discipline.** TEST-STATUS-DRIFT",
             "CRM-STATUS-ID-SET",
         ),
-        ("[approve-publication]", "[approve-publication-drift]", "CRM-USER-MARKER-SET"),
+        ("[skip-bugfix-discipline]", "[skip-bugfix-discipline-drift]", "CRM-USER-MARKER-SET"),
     ),
 )
 def test_reference_mirror_refuses_contract_inventory_drift(
