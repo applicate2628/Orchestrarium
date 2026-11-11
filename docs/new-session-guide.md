@@ -42,7 +42,7 @@ Use this guide at the start of a new Orchestrarium maintenance session. Its purp
 | Claude common-skill projections | Claude installed skill projections consume the canonical skill tree through the production installer; historical Source comparison trees stay protected unless compatibility migration is explicitly admitted. |
 | Provider-specific addenda | `references-codex/`, `references-claude/` |
 | Agents-mode schema and defaults | `shared/agents-mode.schema.json`, `shared/agents-mode.presets.json`, `shared/agents-mode.defaults.yaml` |
-| Installers | root `install.*`, `scripts/install-*.{sh,ps1}` |
+| Installers | canonical Python entrypoints: `install.py`, `scripts/install-codex.py`, `scripts/install-claude.py`; thin POSIX launchers: corresponding `.sh` files |
 | Release log | `RELEASE_NOTES.md` |
 
 ## Runtime Map

@@ -6,8 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
-import stat
 import subprocess
 import sys
 import uuid
@@ -168,7 +166,51 @@ def parse_provider_list(value: str) -> list[str]:
     return [provider.strip() for provider in value.split(",") if provider.strip()]
 
 
+def fixture_environment(home: Path) -> dict[str, str]:
+    """Redirect fixture-owned state; this is not a process/network sandbox."""
+    if sys.version_info < (3, 13):
+        raise InstallerRegressionError("validator requires Python 3.13 or newer")
+    home = home.resolve()
+    # Keep only executable lookup and OS runtime inputs, never provider credentials
+    # or caller overrides of Python/configuration locations.
+    allowed = {"PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT"}
+    env = {key.upper(): value for key, value in os.environ.items()
+           if key.upper() in allowed}
+    locations = {
+        "HOME": home, "USERPROFILE": home,
+        "APPDATA": home / "AppData" / "Roaming",
+        "LOCALAPPDATA": home / "AppData" / "Local",
+        "XDG_CONFIG_HOME": home / ".config",
+        "XDG_CACHE_HOME": home / ".cache",
+        "XDG_DATA_HOME": home / ".local" / "share",
+        "XDG_STATE_HOME": home / ".local" / "state",
+        "CODEX_HOME": home / ".codex",
+        "CLAUDE_CONFIG_DIR": home / ".claude",
+        "TMP": home / "tmp", "TEMP": home / "tmp", "TMPDIR": home / "tmp",
+    }
+    for key, path in locations.items():
+        path.mkdir(parents=True, exist_ok=True)
+        env[key] = str(path)
+    env.update(PYTHONNOUSERSITE="1", PYTHONDONTWRITEBYTECODE="1",
+               PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+    return env
+
+
+def offline_installer_environment(root: Path, home: Path) -> dict[str, str]:
+    """Bind installer regression to the repository fixture, never the real host.
+
+    This checks installer wiring only, not real host admission or isolation.
+    """
+    host = root.resolve() / "tests" / "fixtures" / "fake_codex_hooks_host.py"
+    if host.is_symlink() or not host.is_file():
+        raise InstallerRegressionError("offline Codex fixture is missing or linked")
+    env = fixture_environment(home)
+    env["CODEX_BIN"] = str(host)
+    return env
+
+
 def run_installer(root: Path, case: InstallerCase, target_rel: Path) -> None:
+    env = offline_installer_environment(root, (root / target_rel).parent / (target_rel.name + "-home"))
     command = [
         sys.executable if case.name in {"codex", "claude"} else "bash",
         case.script,
@@ -182,6 +224,7 @@ def run_installer(root: Path, case: InstallerCase, target_rel: Path) -> None:
         cwd=root,
         text=True,
         capture_output=True,
+        env=env,
     )
     if result.returncode != 0:
         raise InstallerRegressionError(
@@ -190,9 +233,7 @@ def run_installer(root: Path, case: InstallerCase, target_rel: Path) -> None:
 
 
 def run_python_codex_global_installer(root: Path, userprofile: Path) -> None:
-    env = os.environ.copy()
-    env["USERPROFILE"] = str(userprofile)
-    env["HOME"] = str(userprofile)
+    env = offline_installer_environment(root, userprofile)
     command = [
         sys.executable,
         str(root / "scripts" / "install-codex.py"),
@@ -344,116 +385,74 @@ def validate_overlay(
 def run_regression(root: Path) -> None:
     validate_production_provider_partition()
     schema_data = load_json(root / "shared" / "agents-mode.schema.json")
-    scratch = root / ".scratch" / "agents-mode-installer-regression" / uuid.uuid4().hex
+    scratch = root / ".scratch" / "trash" / "agents-mode-installer-regression" / uuid.uuid4().hex
     scratch.mkdir(parents=True, exist_ok=True)
-    validation_error: BaseException | None = None
-    try:
-        for case in INSTALLER_CASES:
-            project_root = scratch / f"{case.name}-project"
-            project_root.mkdir(parents=True, exist_ok=True)
-            overlay = seed_stale_overlay(project_root, case)
-            run_installer(
-                root,
-                case,
-                Path(".scratch")
-                / "agents-mode-installer-regression"
-                / scratch.name
-                / f"{case.name}-project",
-            )
-            validate_overlay(case, overlay, schema_data)
-            if case.codex_line:
-                validate_codex_native_role_install(project_root, root)
-
-        codex_fresh_project = scratch / "codex-fresh-project"
-        codex_fresh_project.mkdir(parents=True, exist_ok=True)
-        codex_case = next(case for case in INSTALLER_CASES if case.name == "codex")
+    # Keep each fixture in trash from creation; never delete test evidence.
+    print(f"RETAINED FIXTURE: {scratch}", file=sys.stderr)
+    for case in INSTALLER_CASES:
+        project_root = scratch / f"{case.name}-project"
+        project_root.mkdir(parents=True, exist_ok=True)
+        overlay = seed_stale_overlay(project_root, case)
         run_installer(
             root,
-            codex_case,
-            Path(".scratch")
-            / "agents-mode-installer-regression"
-            / scratch.name
-            / "codex-fresh-project",
+            case,
+            scratch.relative_to(root)
+            / f"{case.name}-project",
         )
-        validate_codex_native_role_install(codex_fresh_project, root)
+        validate_overlay(case, overlay, schema_data)
+        if case.codex_line:
+            validate_codex_native_role_install(project_root, root)
 
-        codex_explicit_old_project = scratch / "codex-explicit-old-profile-project"
-        codex_explicit_old_project.mkdir(parents=True, exist_ok=True)
-        explicit_old_overlay = codex_explicit_old_project / codex_case.overlay
-        explicit_old_overlay.parent.mkdir(parents=True, exist_ok=True)
-        explicit_old_overlay.write_text(
-            STALE_OVERLAY + "externalCodexProfile: gpt-5.6-sol-max\n",
-            encoding="utf-8",
-        )
-        run_installer(
-            root,
-            codex_case,
-            Path(".scratch")
-            / "agents-mode-installer-regression"
-            / scratch.name
-            / "codex-explicit-old-profile-project",
-        )
-        validate_overlay(
-            codex_case,
-            explicit_old_overlay,
-            schema_data,
-            expected_codex_profile="gpt-5.6-sol-max",
-        )
-        validate_codex_native_role_install(codex_explicit_old_project, root)
+    codex_fresh_project = scratch / "codex-fresh-project"
+    codex_fresh_project.mkdir(parents=True, exist_ok=True)
+    codex_case = next(case for case in INSTALLER_CASES if case.name == "codex")
+    run_installer(
+        root,
+        codex_case,
+        scratch.relative_to(root)
+        / "codex-fresh-project",
+    )
+    validate_codex_native_role_install(codex_fresh_project, root)
 
-        codex_global_home = scratch / "codex-python-global-home"
-        codex_global_home.mkdir(parents=True, exist_ok=True)
-        codex_global_case = InstallerCase(
-            name="codex-python-global",
-            script="scripts/install-codex.py",
-            overlay=".codex/.agents-mode.yaml",
-            codex_line=True,
-        )
-        overlay = seed_stale_overlay(codex_global_home, codex_global_case)
-        run_python_codex_global_installer(root, codex_global_home)
-        validate_overlay(codex_global_case, overlay, schema_data)
-        validate_codex_native_role_install(codex_global_home, root)
+    codex_explicit_old_project = scratch / "codex-explicit-old-profile-project"
+    codex_explicit_old_project.mkdir(parents=True, exist_ok=True)
+    explicit_old_overlay = codex_explicit_old_project / codex_case.overlay
+    explicit_old_overlay.parent.mkdir(parents=True, exist_ok=True)
+    explicit_old_overlay.write_text(
+        STALE_OVERLAY + "externalCodexProfile: gpt-5.6-sol-max\n",
+        encoding="utf-8",
+    )
+    run_installer(
+        root,
+        codex_case,
+        scratch.relative_to(root)
+        / "codex-explicit-old-profile-project",
+    )
+    validate_overlay(
+        codex_case,
+        explicit_old_overlay,
+        schema_data,
+        expected_codex_profile="gpt-5.6-sol-max",
+    )
+    validate_codex_native_role_install(codex_explicit_old_project, root)
 
-        codex_global_fresh_home = scratch / "codex-python-global-fresh-home"
-        codex_global_fresh_home.mkdir(parents=True, exist_ok=True)
-        run_python_codex_global_installer(root, codex_global_fresh_home)
-        validate_codex_native_role_install(codex_global_fresh_home, root)
-    except BaseException as exc:
-        validation_error = exc
-        raise
-    finally:
-        try:
-            def retry_owned_readonly_unlink(func, path, error):
-                candidate = Path(os.path.abspath(path))
-                try:
-                    relative = candidate.relative_to(scratch)
-                    metadata = candidate.lstat()
-                except (OSError, ValueError):
-                    raise error
-                attributes = getattr(metadata, "st_file_attributes", 0)
-                if (
-                    os.name != "nt"
-                    or func is not os.unlink
-                    or not isinstance(error, PermissionError)
-                    or not relative.parts
-                    or not stat.S_ISREG(metadata.st_mode)
-                    or not attributes & stat.FILE_ATTRIBUTE_READONLY
-                    or attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT
-                ):
-                    raise error
-                os.chmod(candidate, metadata.st_mode | stat.S_IWRITE)
-                func(candidate)
+    codex_global_home = scratch / "codex-python-global-home"
+    codex_global_home.mkdir(parents=True, exist_ok=True)
+    codex_global_case = InstallerCase(
+        name="codex-python-global",
+        script="scripts/install-codex.py",
+        overlay=".codex/.agents-mode.yaml",
+        codex_line=True,
+    )
+    overlay = seed_stale_overlay(codex_global_home, codex_global_case)
+    run_python_codex_global_installer(root, codex_global_home)
+    validate_overlay(codex_global_case, overlay, schema_data)
+    validate_codex_native_role_install(codex_global_home, root)
 
-            shutil.rmtree(scratch, onexc=retry_owned_readonly_unlink)
-            if scratch.exists() or scratch.is_symlink():
-                raise OSError("owned UUID fixture remains after cleanup")
-        except OSError as cleanup_error:
-            cleanup_detail = f"owned UUID fixture cleanup failed at {scratch}: {cleanup_error}"
-            if validation_error is not None:
-                raise InstallerRegressionError(
-                    f"{type(validation_error).__name__}: {validation_error}; {cleanup_detail}"
-                ) from validation_error
-            raise InstallerRegressionError(cleanup_detail) from cleanup_error
+    codex_global_fresh_home = scratch / "codex-python-global-fresh-home"
+    codex_global_fresh_home.mkdir(parents=True, exist_ok=True)
+    run_python_codex_global_installer(root, codex_global_fresh_home)
+    validate_codex_native_role_install(codex_global_fresh_home, root)
 
 
 def main() -> int:
@@ -468,7 +467,7 @@ def main() -> int:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
 
-    print("PASS: agents-mode installer regression validated")
+    print("PASS: offline agents-mode installer regression validated (fixture host; not real host admission)")
     return 0
 
 

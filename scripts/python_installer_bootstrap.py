@@ -8,10 +8,10 @@ import sys
 
 
 VERSION_FAILURE = (
-    "FAIL: Python 3.11 or newer is required to run the Orchestrarium installer."
+    "FAIL: Python 3.13 or newer is required to run the Orchestrarium installer."
 )
 _VERSION_PROBE = (
-    "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"
+    "import sys; raise SystemExit(0 if sys.version_info >= (3, 13) else 1)"
 )
 
 
@@ -25,8 +25,8 @@ def _is_current_executable(candidate: str) -> bool:
 
 
 def ensure_supported_python(entrypoint: str) -> None:
-    """Continue in-place under the first Python 3.11+ candidate."""
-    if sys.version_info >= (3, 11):
+    """Continue in-place under the first Python 3.13+ candidate."""
+    if sys.version_info >= (3, 13):
         return
 
     for command in ("python3", "python"):

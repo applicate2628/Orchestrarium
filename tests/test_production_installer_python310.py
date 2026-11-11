@@ -24,7 +24,7 @@ LAUNCHERS = (
     ROOT / "scripts" / "install-codex.sh",
     ROOT / "scripts" / "install-claude.sh",
 )
-VERSION_FAILURE = "FAIL: Python 3.11 or newer is required to run the Orchestrarium installer."
+VERSION_FAILURE = "FAIL: Python 3.13 or newer is required to run the Orchestrarium installer."
 
 
 class _ExecCalled(Exception):
@@ -80,7 +80,7 @@ def test_old_python_skips_unsupported_python3_and_reexecs_valid_python(
 def test_supported_python_does_not_probe_or_exec(monkeypatch: pytest.MonkeyPatch) -> None:
     bootstrap = _bootstrap_module()
 
-    monkeypatch.setattr(bootstrap.sys, "version_info", (3, 11, 0))
+    monkeypatch.setattr(bootstrap.sys, "version_info", (3, 13, 0))
     monkeypatch.setattr(
         bootstrap.shutil,
         "which",

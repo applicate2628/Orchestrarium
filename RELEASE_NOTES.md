@@ -2,6 +2,12 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-11
+
+- Installer regression now uses an explicit fixture-only Codex host and isolated profile/configuration paths, requires Python 3.13+, and retains outer test fixtures in .scratch/trash. The result verifies offline installation behavior, not real host admission; production transaction cleanup is unchanged.
+
+- Installer entrypoints now require Python 3.13 or newer, matching the supported compatibility floor. Older interpreters may re-execute a supported PATH candidate; launcher diagnostics and install guidance use the same floor.
+
 ## 2026-11-10
 
 
