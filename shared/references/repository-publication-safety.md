@@ -77,3 +77,7 @@ The push hook does not acquire transcript data or read/write old consent sidecar
 
 - **HEAD** — the current local Git commit; it may differ from the separately approved publication source.
 - **PR** — pull request.
+
+## Target-local command owner
+
+The existing gate exposes `--target-local-push` for an already admitted local context. It accepts an absolute repository, named remote, immutable source object ID and full branch reference; it generates its own native callback registration, qualifies a direct argument vector and executes that same vector without a shell. Existing V3/V4 scan, target/currentness and failure rules remain binding. DIRECT_ARGV is explicit provenance, not a fabricated local-tool envelope. This entry does not admit remote carriers or change `PGG-REMOTE-EXECUTION-UNBOUND`; see [operator requirements](../../docs/target-local-publication.md).

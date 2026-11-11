@@ -315,3 +315,7 @@ The existing Lead package/receipt update carries these sections for Codex and th
 - `runtime`: installed provider-facing files and directories used by an agent tool outside the source tree.
 - `schema`: structured contract describing allowed keys, values, defaults, provider sets, and routing shapes.
 - `status.md`: human-readable recovery summary for the active work item.
+
+### Target-local publication
+
+An explicit native publication entry is available for an already admitted local execution context. See [requirements, usage and transport limitations](docs/target-local-publication.md). It does not admit previously blocked remote carriers.

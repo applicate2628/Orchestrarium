@@ -64,6 +64,7 @@ from git_push_gate_preflight import (
     git_prefix_configuration,
     native_push_invocation,
     native_push_refspecs,
+    parse_native_argument_vector,
 )
 
 
@@ -3351,15 +3352,21 @@ def _native_entry_hint(interpreter_before, entry: Path, entry_before, expected: 
 
 
 def _qualify_native_push_command(preflight: PreflightResult) -> bool:
-    push = native_push_invocation(preflight.parsed) if preflight.parsed is not None else None
+    return _qualify_native_parsed_push(preflight.parsed, preflight.repository_workdir,
+                                       preflight.repository_workdir_source)
+
+
+def _qualify_native_parsed_push(parsed, repository_workdir: str, workdir_source: str) -> bool:
+    """Shared native qualification; no synthetic tool envelope or host claim."""
+    push = native_push_invocation(parsed) if parsed is not None else None
     if push is None:
         raise _NativeEntryDenied("invocation-unqualified")
     verification = [row.spelling for row in push.push_option_occurrences if row.spelling in {"--verify", "--no-verify"}]
     if verification and verification[-1] == "--no-verify":
         raise PrRouteDenied("PGG-NATIVE-DISABLED")
-    literal_context = absolute_literal_root_context(preflight.parsed)
+    literal_context = absolute_literal_root_context(parsed)
     selected = _prepare_selected_repository_workdir(
-        literal_context, preflight.repository_workdir, preflight.repository_workdir_source,
+        literal_context, repository_workdir, workdir_source,
     )
     cwd = selected or (literal_context[1] if literal_context is not None else None)
     if cwd is None:
@@ -3683,7 +3690,53 @@ def _native_pre_push_main(arguments: list[str]) -> int:
         return 2
 
 
+def _target_local_push_main(arguments: list[str]) -> int:
+    """Own one literal push locally; this is not remote-carrier admission.
+
+    Positional inputs: absolute repository, named remote, full source OID,
+    full branch ref. No caller configuration, shell, executable or receipt.
+    """
+    try:
+        if len(arguments) != 4 or any(type(value) is not str or "\0" in value for value in arguments):
+            raise PrRouteDenied("PGG-NATIVE-INPUT")
+        repository, remote, source, destination = arguments
+        if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", remote)
+            or not re.fullmatch(_LOWERCASE_OID_PATTERN, source)
+            or not destination.startswith("refs/heads/")):
+            raise PrRouteDenied("PGG-NATIVE-INPUT")
+        selected = _normalize_repository_workdir(repository, source="native-git")
+        git_exe = _resolve_executable("git", selected)
+        if git_exe is None:
+            raise PrRouteDenied("PGG-NATIVE-CONFIGURATION")
+        root = _prove_repository_root(selected, git_exe, source="native-git")
+        # Git is the owner of ref grammar; do not maintain a second validator.
+        _native_configuration_query(git_exe, (), root, ("check-ref-format", destination))
+        argv = (git_exe, "-C", root, *native_git_config_arguments(),
+                "push", "--verify", "--", remote, source + ":" + destination)
+        parsed = parse_native_argument_vector(argv, "target-local-push", 0)
+        # Snapshot both selection and executable identity. The callback resolves
+        # Git through the same inherited PATH; any prelaunch drift is fatal.
+        identity = _regular_identity(Path(git_exe), single_link=False)
+        if not _qualify_native_parsed_push(parsed, "", ""):
+            raise PrRouteDenied("PGG-NATIVE-CONFIGURATION")
+        if (_resolve_executable("git", root) != git_exe
+            or _regular_identity(Path(git_exe), single_link=False) != identity):
+            raise PrRouteDenied("PGG-EXECUTABLE-MISMATCH")
+        # Inherit native stdin/stdout/stderr and wait for Git. No captured-output
+        # timeout can leave an unobserved publication child running. The native
+        # callback retains its own bounded scan and failure/currentness checks.
+        return subprocess.run(argv, cwd=root, shell=False, check=False).returncode
+    except PrRouteDenied as exc:
+        print(f"{exc.failure_id}: Target-local publication did not qualify.", file=sys.stderr)
+        return 2
+    except Exception:
+        print("PGG-SCAN-EXECUTION: Target-local publication did not complete.", file=sys.stderr)
+        return 2
+
+
 def main(preflight: PreflightResult | None = None) -> int:
+    if preflight is None and len(sys.argv) > 1 and sys.argv[1] == "--target-local-push":
+        return _target_local_push_main(sys.argv[2:])
     if preflight is None and len(sys.argv) > 1 and sys.argv[1] == "--git-pre-push":
         return _native_pre_push_main(sys.argv[2:])
     try:

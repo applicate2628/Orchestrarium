@@ -2193,6 +2193,36 @@ def literal_direct_command(parsed: ShellParseResult) -> ExecutableCommand | None
     """
     if type(parsed) is not ShellParseResult:
         return None
+    if parsed.identity.input_kind == "DIRECT_ARGV":
+        if (parsed.identity.dialect != parsed.dialect
+            or parsed.identity.depth != 0 or parsed.identity.parent is not None
+            or parsed.identity.parent_source_span is not None
+            or parsed.identity.wrapper_id is not None
+            or parsed.identity.payload_composition is not None
+            or parsed.identity.contributing_spans
+            or parsed.raw_command or parsed.data_regions
+            or parsed.lexical.atoms or parsed.lexical.operations
+            or parsed.lexical.removed_spans or parsed.lexical.data_regions
+            or parsed.status != "SCG-PARSED" or parsed.candidates
+            or parsed.children or parsed.wrapper_projections or parsed.normalizations
+            or len(parsed.commands) != 1 or not parsed.effective_publications.exact_complete):
+            return None
+        command = parsed.commands[0]
+        if (command.environment_assignments or command.control_keywords
+            or command.dialect != parsed.dialect or command.ordinal != 0
+            or command.command_count != 1 or command.nesting_context != "top-level"
+            or command.boundary_before != "start" or command.boundary_after != "end"
+            or command.normalization_state != "literal"
+            or command.source_span != (0, len(command.tokens))
+            or not command.tokens or not command.tokens[0]
+            or command.executable != command.tokens[0]
+            or command.arguments != command.tokens[1:]
+            or command.confidence != "exact"
+            or tuple(token.value for token in command.token_records) != command.tokens
+            or any(token.states != ("ARGV",) or token.source_spans != ((index, index + 1),)
+                   for index, token in enumerate(command.token_records))):
+            return None
+        return command
     if (
         parsed.dialect not in {"posix", "powershell"}
         or parsed.identity.dialect != parsed.dialect

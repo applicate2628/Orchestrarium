@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-11
 
+- Add an explicit target-local publication command to the existing gate. It accepts only repository, named remote, immutable source and branch destination, qualifies and launches one native Git invocation, and preserves fresh V3/V4 callback checks. This improves local command ownership without admitting blocked remote carriers; operator docs state the Git capability requirement and observed local verification limits.
+
 - Installer regression now uses an explicit fixture-only Codex host and isolated profile/configuration paths, requires Python 3.13+, and retains outer test fixtures in .scratch/trash. The result verifies offline installation behavior, not real host admission; production transaction cleanup is unchanged.
 
 - Installer entrypoints now require Python 3.13 or newer, matching the supported compatibility floor. Older interpreters may re-execute a supported PATH candidate; launcher diagnostics and install guidance use the same floor.

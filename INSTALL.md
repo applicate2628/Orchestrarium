@@ -414,3 +414,7 @@ The existing Lead package/receipt update carries these sections for Codex and th
 - `stdin`: standard input stream used by CLIs and wrappers.
 - `status.md`: human-readable recovery summary for the active work item.
 - `winerror`: native Windows error code; the installer reports only an exact integer in the unsigned 32-bit range.
+
+### Target-local publication entry
+
+The normal pack install carries `check-git-push-gate.py --target-local-push`; maintainers first sync universal-hook projections. See [supported execution requirements and boundaries](docs/target-local-publication.md). Installation is not remote-transport admission, and unsupported Git must fail closed.
