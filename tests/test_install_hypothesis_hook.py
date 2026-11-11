@@ -353,7 +353,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertNotIn(".ps1", hook["command"].casefold())
 
     def test_codex_windows_rejects_unsupported_unquoted_python_path(self) -> None:
-        quoted_dir = self.tmpdir / "O'Brien"
+        quoted_dir = self.tmpdir / "name$variable"
         quoted_dir.mkdir()
         python_path = quoted_dir / "check-bugfix-discipline.py"
         python_path.write_text("", encoding="utf-8")
@@ -1025,13 +1025,11 @@ class TestInstallHypothesisHook(unittest.TestCase):
         spaced_dir.mkdir()
         spaced_target = spaced_dir / "check-bugfix-discipline.py"
         spaced_target.write_text("", encoding="utf-8")
-        with self.assertRaisesRegex(ValueError, "unsupported Windows"):
-            HOOK_MODULE.resolve_hook_target(
-                str(spaced_target),
-                "windows",
-                "codex",
-                python_executable=sys.executable,
-            )
+        spaced = HOOK_MODULE.resolve_hook_target(
+            str(spaced_target), "windows", "codex", python_executable=sys.executable)
+        rendered = HOOK_MODULE.build_codex_entry(spaced, "windows")["hooks"][0]
+        self.assertEqual(HOOK_MODULE._hook_health_owner()._command_argv(
+            rendered, "codex", "windows"), [spaced.executable, *spaced.args])
 
     def test_hook_target_layers_are_separable(self) -> None:
         synthetic = HOOK_MODULE.HookTarget(

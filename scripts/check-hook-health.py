@@ -1061,7 +1061,45 @@ def _load(path: Path) -> dict[str, Any]:
     return data
 
 
+def serialize_windows_hook_command(tokens: Iterable[str]) -> str:
+    """Literal paths for cmd and PowerShell; keep accepted simple bytes stable."""
+    rendered = []
+    for token in tokens:
+        if type(token) is not str or not token:
+            raise ValueError("unsupported Windows hook command token")
+        if re.fullmatch(r"[A-Za-z0-9_:\\./-]+", token):
+            rendered.append(token)
+            continue
+        normalized = token.replace("\\", "/")
+        prefix = (normalized[:3] if re.match(r"^[A-Za-z]:/", normalized)
+                  else "//" if normalized.startswith("//") else None)
+        # No shell expansion, wildcard interpretation, quotes or line controls.
+        # Unicode code points are retained exactly; there is no language filter.
+        if (prefix is None or any(c in normalized for c in '"%$!&|<>^?*' + chr(96) + "\u201c\u201d\u201e")
+                or any(ord(c) < 32 or 127 <= ord(c) <= 159
+                       or 0xD800 <= ord(c) <= 0xDFFF or c in "\u2028\u2029"
+                       for c in normalized)
+                or ":" in normalized[len(prefix):]):
+            raise ValueError(f"unsupported Windows hook command token: {token!r}")
+        # A bare path prefix keeps PowerShell in invocation mode. Quoting the
+        # whole executable would instead create a string expression.
+        rendered.append(prefix + '"' + normalized[len(prefix):] + '"')
+    if not rendered:
+        raise ValueError("unsupported Windows hook command token")
+    return " ".join(rendered)
+
+
 def _split_windows_command(command: str) -> list[str]:
+    if re.search(r'(?:^|\s)(?:[A-Za-z]:/|//)"', command):
+        lexer = shlex.shlex(command, posix=True)
+        lexer.whitespace_split = True
+        lexer.quotes = '"'
+        lexer.escape = ""
+        lexer.commenters = ""
+        tokens = list(lexer)
+        if serialize_windows_hook_command(tokens) != command:
+            raise ValueError("noncanonical Windows literal hook command")
+        return tokens
     return [
         token[1:-1].replace("''", "'")
         if len(token) >= 2 and token[0] == token[-1] and token[0] in {"'", '"'}

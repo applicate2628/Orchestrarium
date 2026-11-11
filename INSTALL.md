@@ -418,3 +418,7 @@ The existing Lead package/receipt update carries these sections for Codex and th
 ### Target-local publication entry
 
 The normal pack install carries `check-git-push-gate.py --target-local-push`; maintainers first sync universal-hook projections. See [supported execution requirements and boundaries](docs/target-local-publication.md). Installation is not remote-transport admission, and unsupported Git must fail closed.
+
+### Windows interpreter paths
+
+Supported literal Windows interpreter and hook paths may contain spaces or Unicode. The installer preserves existing simple command bytes and rejects shell-expanding characters rather than evaluating them. See [Windows hook path rendering](docs/windows-hook-path-rendering.md) for the verified shell boundary and the distinction between installation-time project registrations and portable plugin-relative bundles.

@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-11
 
+- Windows Codex registration accepts supported literal interpreter and hook paths containing spaces or Unicode, including supplied Python in a bundle folder with spaces. Simple command bytes stay stable; shell expansions and ambiguous commands remain refused. Real-shell and isolated install checks do not replace native trust or portable plugin activation.
+
 - Integrate independently verified installer and catalog correctness fixes after the receiver-scoped guard release: reject duplicate Claude settings and ambiguous documents before mutation; settle owned projection rollback after referent removal; preserve sibling metadata in empty-scalar estimates; return binding diagnostics for inaccessible observed paths; reject non-JSON numeric constants. Existing V5 receiver qualification and current reference pins remain unchanged.
 
 - Native publication can now verify only unpublished objects against the actual qualified HTTPS receiver, with a one-use Version 5 receipt bound to the same Git helper and exact transfer. Existing hooks retain their veto; unsupported routes keep conservative checks. This lets the target-local command publish a new branch without treating already-published history as new data. The identifier-prefix scan also keeps identical detection without its former long-line stall.

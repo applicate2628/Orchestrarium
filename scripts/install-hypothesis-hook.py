@@ -192,17 +192,10 @@ def _validate_spawnable_executable(path_value: str, host_os: str) -> Path:
 
 
 def _codex_windows_command_tokens(target: HookTarget) -> HookTarget:
-    """Render the operator-verified Codex Windows token spelling.
+    """Keep forward-separator spelling; the health owner renders literal paths.
 
-    The verified unquoted Windows grammar spells absolute paths with forward
-    separators. Both cmd.exe and PowerShell resolve either separator for an
-    absolute command token, so this is not a correctness fix -- it is a byte
-    fidelity one. Codex derives each hook's trust hash from the entry content,
-    so emitting exactly the spelling the operator already trusted lets a
-    reinstall reproduce the stored `trusted_hash` instead of re-keying all 12
-    entries and raising a blocking review modal.
-
-    The direct-Python registration is the only supported hook command shape.
+    Existing safe command bytes remain unchanged. Spaces use a bare absolute
+    prefix plus a quoted tail, valid under both cmd and PowerShell.
     """
     return HookTarget(
         PureWindowsPath(target.executable).as_posix(),
@@ -210,13 +203,8 @@ def _codex_windows_command_tokens(target: HookTarget) -> HookTarget:
     )
 
 
-def _validate_windows_unquoted_tokens(target: HookTarget) -> None:
-    for token in (target.executable, *target.args):
-        if not WINDOWS_UNQUOTED_PATH_RE.fullmatch(token):
-            raise ValueError(
-                "unsupported Windows hook command token for the verified unquoted "
-                f"serialization: {token!r}"
-            )
+def _validate_windows_command_tokens(target: HookTarget) -> None:
+    _hook_health_owner().serialize_windows_hook_command((target.executable, *target.args))
 
 
 def resolve_hook_target(
@@ -246,7 +234,7 @@ def resolve_hook_target(
     target = HookTarget(str(executable), (str(script),))
     if platform == "codex" and host_os == "windows":
         target = _codex_windows_command_tokens(target)
-        _validate_windows_unquoted_tokens(target)
+        _validate_windows_command_tokens(target)
     return target
 
 
@@ -304,7 +292,7 @@ def build_codex_entry(
     """Build the Codex shell-form entry for a resolved HookTarget."""
     tokens = (target.executable, *target.args)
     command_str = (
-        " ".join(tokens)
+        _hook_health_owner().serialize_windows_hook_command(tokens)
         if host_os == "windows"
         else " ".join(shlex.quote(token) for token in tokens)
     )
