@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-11
 
+- Scalar rollback now composes a descriptor-close interruption or unexpected exception with an earlier restore failure instead of losing its typed recovery diagnostics. Close is still attempted once; this bounded diagnostic correction does not establish native close completion, filesystem race safety or POSIX installer support.
+
 - Windows Codex registration accepts supported literal interpreter and hook paths containing spaces or Unicode, including supplied Python in a bundle folder with spaces. Simple command bytes stay stable; shell expansions and ambiguous commands remain refused. Real-shell and isolated install checks do not replace native trust or portable plugin activation.
 
 - Integrate independently verified installer and catalog correctness fixes after the receiver-scoped guard release: reject duplicate Claude settings and ambiguous documents before mutation; settle owned projection rollback after referent removal; preserve sibling metadata in empty-scalar estimates; return binding diagnostics for inaccessible observed paths; reject non-JSON numeric constants. Existing V5 receiver qualification and current reference pins remain unchanged.

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 
-def run_regression(m):
+def run_regression(m, cleanup_type=OSError):
     """No filesystem writes or real descriptors; run only after review/notice.
 
     Required real closure: _InstallTransaction._settle_scalars,
@@ -19,7 +19,7 @@ def run_regression(m):
     count = 0
     for case in ('typed-both', 'ordinary-both', 'primary-only', 'close-only', 'success'):
         operation = OSError('inverse write failed')
-        cleanup = OSError('descriptor close failed')
+        cleanup = cleanup_type('descriptor close failed')
         member = m._RollbackFailureMember('snapshot', 77, str(target),
             'E_ROLLBACK_RESTORE_FAILED', 'existing failure', participant='scalar',
             cause_exception=operation)
@@ -200,6 +200,12 @@ def load_source(source_path):
 def test_scalar_restore_close():
     source = Path(__file__).resolve().parents[1] / 'scripts' / 'production_installer.py'
     assert run_regression(load_source(source)) == 5
+
+
+def test_scalar_restore_close_interruptions():
+    source = Path(__file__).resolve().parents[1] / 'scripts' / 'production_installer.py'
+    for cleanup_type in (KeyboardInterrupt, SystemExit, RuntimeError):
+        assert run_regression(load_source(source), cleanup_type) == 5
 
 
 if __name__ == '__main__':

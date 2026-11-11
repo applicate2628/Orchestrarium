@@ -3313,7 +3313,7 @@ class _InstallTransaction:
                     finally:
                         try:
                             os.close(descriptor)
-                        except OSError as cleanup:
+                        except BaseException as cleanup:
                             paths, members, errors = self._settlement_failure(
                                 cleanup, "snapshot", ordinal, path, "E_ROLLBACK_RESTORE_FAILED",
                                 (path,), participant="scalar")
