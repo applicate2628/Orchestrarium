@@ -362,7 +362,7 @@ def _validate_candidate(value: Any, blob_size: int, review_region: Mapping[str, 
         "candidate",
     )
     normal_form = _require_id(obj["normalFormId"], "candidate-normal-form")
-    if normal_form not in ("nf-simple-match-v1", "nf-value-assignment-v1"):
+    if normal_form not in ("nf-simple-match-v1", "nf-value-assignment-v1", "nf-machine-path-match-v1"):
         raise PolicyInputError("candidate-normal-form")
     span = {
         "startByte": obj["startByte"],
@@ -373,7 +373,7 @@ def _validate_candidate(value: Any, blob_size: int, review_region: Mapping[str, 
     if not _inside(span, review_region):
         raise PolicyInputError("candidate-review-region")
     assignment_value = obj["assignment"]
-    if normal_form == "nf-simple-match-v1":
+    if normal_form in ("nf-simple-match-v1", "nf-machine-path-match-v1"):
         if assignment_value is not None:
             raise PolicyInputError("candidate-simple-assignment")
     else:
@@ -412,7 +412,7 @@ def _validate_candidate(value: Any, blob_size: int, review_region: Mapping[str, 
         contributor_keys.append((leaf, *_region_key(item["fullMatch"])))
     if contributor_keys != sorted(set(contributor_keys)):
         raise PolicyInputError("candidate-contributor-order")
-    if normal_form == "nf-simple-match-v1":
+    if normal_form in ("nf-simple-match-v1", "nf-machine-path-match-v1"):
         if len(contributors) != 1 or _region_key(span) != _region_key(contributors[0]["fullMatch"]):
             raise PolicyInputError("candidate-simple-witness")
 

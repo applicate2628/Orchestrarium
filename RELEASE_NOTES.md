@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-11
 
+- General machine-path findings now support exact reviewed occurrences through the existing trusted policy and revocation owner; qualified V5 preserves review finalization. Other occurrences, changed blobs or contexts, and secret findings remain blocked. No repository-specific exemptions or automatic reviewer grants are added.
+
 - Windows installer descriptor settlement now retains the original failure when descriptor closure raises an interruption or non-OS exception; the existing typed failure reports both causes without retrying closure or asserting it completed.
 
 - Scalar rollback now composes a descriptor-close interruption or unexpected exception with an earlier restore failure instead of losing its typed recovery diagnostics. Close is still attempted once; this bounded diagnostic correction does not establish native close completion, filesystem race safety or POSIX installer support.

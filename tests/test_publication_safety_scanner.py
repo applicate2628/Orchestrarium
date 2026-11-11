@@ -5521,6 +5521,11 @@ class TestPublicationSafetyScannerEarlyRefusalCleanup(unittest.TestCase):
 class TestReviewedCandidateProjection(unittest.TestCase):
     """Detector identity and projection checks; no reviewer authority is minted."""
 
+    def setUp(self):
+        # Restore fixture imports before subsequent real captured-loader tests.
+        self.enterContext(mock.patch.dict(sys.modules))
+        self.enterContext(mock.patch.object(sys, "path", [*sys.path]))
+
     def _owners(self):
         scanner = _load_canonical_scanner("_reviewed_candidate_projection")
         return scanner, scanner._load_review_policy_module()

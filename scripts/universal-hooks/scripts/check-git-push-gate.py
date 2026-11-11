@@ -484,7 +484,9 @@ class PendingScanInvocation:
                     raise PrRouteDenied(prefix + "-SCAN-EXECUTION") from None
                 if isinstance(self.binding, NativePushScanBinding) and self.binding.receiver_scope_sha256 is not None:
                     scoped = _parse_receiver_scoped_receipt_v5(text)
-                    parsed = PublicationSafetyObservation("valid-v5" if scoped is not None else "malformed", scoped)
+                    parsed = PublicationSafetyObservation(
+                        ("qualified-v5" if scoped.qualification is not None else "valid-v5") if scoped is not None else "malformed",
+                        scoped, scoped.qualification if scoped is not None else None)
                 else:
                     parsed = parse_publication_safety_observation(text)
                 if execution.exit_code == 1:
@@ -496,7 +498,7 @@ class PendingScanInvocation:
                 receipt = parsed.receipt
                 if isinstance(self.binding, NativePushScanBinding):
                     if self.binding.receiver_scope_sha256 is not None:
-                        if parsed.kind != "valid-v5" or not isinstance(receipt, ReceiverScopedReceiptV5):
+                        if parsed.kind not in {"valid-v5", "qualified-v5"} or not isinstance(receipt, ReceiverScopedReceiptV5):
                             raise PrRouteDenied("PGG-NATIVE-RECEIPT-VERSION")
                         _verify_receiver_scoped_receipt_v5(receipt, self.binding, self.binding.receiver_scope_sha256)
                     else:
@@ -519,7 +521,7 @@ class PendingScanInvocation:
                     ):
                         mismatch = "PGG-RANGE-TIP-BINDING" if prefix == "PGG" else "PRG-RECEIPT-MISMATCH"
                         raise PrRouteDenied(mismatch)
-                if parsed.kind in {"qualified-v3", "qualified-v4"}:
+                if parsed.kind in {"qualified-v3", "qualified-v4", "qualified-v5"}:
                     qualification = parsed.qualification
                     captured_review = self.captured_review
                     if (
@@ -1410,6 +1412,8 @@ exec(compile(sources["classifier"],classifier["__file__"],"exec"),classifier,cla
 finder=classifier.get("find_machine_paths")
 if not callable(finder):
     raise RuntimeError("classifier contract")
+finder._review_occurrences=classifier.get("find_machine_path_occurrences")
+finder._review_source_sha256=hashlib.sha256(sources["classifier"]).hexdigest()
 posix_helper_name="_orchestrarium_posix_process_group_v1"
 posix_helper=types.ModuleType(posix_helper_name)
 posix_helper.__file__="<closure>/process_supervision/posix_process_group.py"
@@ -3806,6 +3810,7 @@ def main(preflight: PreflightResult | None = None) -> int:
 class ReceiverScopedReceiptV5(NamedTuple):
     native: NativePushReceiptV4
     receiver_scope_sha256: str
+    qualification: QualifiedPublicationEvidence | None = None
 
 
 def _parse_receiver_scoped_receipt_v5(text: str) -> ReceiverScopedReceiptV5 | None:
@@ -3821,10 +3826,10 @@ def _parse_receiver_scoped_receipt_v5(text: str) -> ReceiverScopedReceiptV5 | No
         return None
     value["version"] = 4
     observed = _parse_native_publication_observation(_native_canonical_bytes(value).decode("ascii"))
-    # Qualified review evidence needs its own V5 correlation. Do not drop it.
-    if observed.kind != "valid-v4" or observed.qualification is not None:
+    # Preserve qualification for the same pending capture/finalization boundary.
+    if observed.kind not in {"valid-v4", "qualified-v4"}:
         return None
-    return ReceiverScopedReceiptV5(observed.receipt, digest)
+    return ReceiverScopedReceiptV5(observed.receipt, digest, observed.qualification)
 
 
 def _verify_receiver_scoped_receipt_v5(receipt: ReceiverScopedReceiptV5,

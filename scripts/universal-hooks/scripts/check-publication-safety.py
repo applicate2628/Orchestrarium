@@ -1420,6 +1420,8 @@ def _manual_path_finder(script: Path):
         raise RuntimeError("cannot compose path owner") from exc
     if not callable(finder):
         raise RuntimeError("cannot compose path owner")
+    finder._review_occurrences = namespace.get("find_machine_path_occurrences")
+    finder._review_source_sha256 = hashlib.sha256(source).hexdigest()
     return finder
 
 
@@ -1743,15 +1745,76 @@ def _load_review_policy_module():
     return module
 
 
-def detector_definitions(policy_module) -> dict[str, dict]:
+def _machine_path_review_definition(finder, policy_module) -> dict | None:
+    """Meaning comes from the captured classifier, never from a policy record."""
+    source_sha = getattr(finder, "_review_source_sha256", None)
+    if (not callable(getattr(finder, "_review_occurrences", None))
+        or type(source_sha) is not str or re.fullmatch(r"[0-9a-f]{64}", source_sha) is None):
+        return None
+    definition = {
+        "schemaVersion": 1, "ruleId": "machine-path-prefix-v1",
+        "normalFormId": "nf-machine-path-match-v1", "domain": "blob-text-v1",
+        "coordinate": "utf8-original-bytes-v1", "equivalence": "exact-occurrence-v1",
+        "classifierSourceSha256": source_sha,
+        "engine": "canonical-path-owner-occurrences-v1",
+    }
+    return {"definition": definition, "detector": {
+        "ruleId": definition["ruleId"],
+        "meaningSha256": policy_module.H("orchestrarium.publication-review.detector.v1", definition),
+    }}
+
+
+def _machine_path_review_rows(raw: bytes, path: str, subject_kind: str, finder, policy_module,
+                              machine_path_lines: frozenset[int] | None = None) -> tuple[dict, ...] | None:
+    owner = _machine_path_review_definition(finder, policy_module)
+    if owner is None:
+        return None
+    text, boundaries = _original_byte_boundaries(raw)
+    rows = []
+    for number, offset, line in _selected_text_lines(text, path, subject_kind):
+        if machine_path_lines is not None and number not in machine_path_lines:
+            continue
+        spans = finder._review_occurrences(line)
+        if type(spans) is not tuple or spans != tuple(sorted(set(spans))):
+            raise RuntimeError("review-path-witness")
+        for span in spans:
+            if (type(span) is not tuple or len(span) != 2 or any(type(x) is not int for x in span)
+                or not 0 <= span[0] < span[1] <= len(line)):
+                raise RuntimeError("review-path-witness")
+        # Classifier stays the coverage owner. A disagreement cannot grant credit.
+        if set(finder(line)) != {line[a:b] for a,b in spans}:
+            raise RuntimeError("review-path-witness")
+        for start, end in spans:
+            region = _byte_region(raw, boundaries[offset+start], boundaries[offset+end])
+            candidate = {"normalFormId": "nf-machine-path-match-v1", **region,
+                         "assignment": None,
+                         "contributors": [{"leafId": "machine-path-prefix-v1", "fullMatch": region}]}
+            candidate["occurrenceSha256"] = policy_module.H(
+                "orchestrarium.publication-review.occurrence.v1", {"detector": owner["detector"], **candidate})
+            rows.append({"detector": owner["detector"], "candidate": candidate,
+                         "line": number, "detectorClass": "machine-path"})
+    return tuple(rows)
+
+
+def detector_definitions(policy_module, *, find_machine_paths=None) -> dict[str, dict]:
     definitions, _leaves = _build_detector_catalog(policy_module.H)
-    return {definition["ruleId"]: {
+    result = {definition["ruleId"]: {
         "detector": {"ruleId": definition["ruleId"], "meaningSha256": policy_module.H("orchestrarium.publication-review.detector.v1", definition)},
         "definition": definition,
     } for definition in definitions}
+    finder = find_machine_paths if find_machine_paths is not None else _path_finder(Path(__file__))
+    path_owner = _machine_path_review_definition(finder, policy_module)
+    if path_owner is not None:
+        result[path_owner["detector"]["ruleId"]] = path_owner
+    return result
 
 
 def resolve_review_detector(diagnostic_class: str, *, policy_module) -> dict:
+    if diagnostic_class == "machine-path":
+        owner = detector_definitions(policy_module).get("machine-path-prefix-v1")
+        if owner is None:
+            raise ValueError("unknown-detector")
+        return owner["detector"]
     _definitions, leaves = _build_detector_catalog(policy_module.H)
     for index in range(len(_SIMPLE_RULES)):
         if diagnostic_class == f"simple-{index + 1}":
@@ -1762,7 +1825,7 @@ def resolve_review_detector(diagnostic_class: str, *, policy_module) -> dict:
     raise ValueError("unknown-detector")
 
 
-def analyze_review_candidates(raw: bytes, path: bytes, *, subject_kind: str, policy_module) -> dict:
+def analyze_review_candidates(raw: bytes, path: bytes, *, subject_kind: str, policy_module, find_machine_paths=None, machine_path_lines=None) -> dict:
     if not isinstance(raw, bytes) or not isinstance(path, bytes) or not path or b"\0" in path:
         return {"complete": False, "candidates": (), "unresolved": (),
                 "refusal": _refusal("PS-INPUT-REFUSAL", "review-evaluation")}
@@ -1770,6 +1833,10 @@ def analyze_review_candidates(raw: bytes, path: bytes, *, subject_kind: str, pol
     try:
         rows = _analyze_review_candidates(raw, decoded_path, subject_kind=subject_kind,
             digest=policy_module.H, canonical=policy_module.C)
+        finder = find_machine_paths if find_machine_paths is not None else _path_finder(Path(__file__))
+        path_rows = _machine_path_review_rows(raw, decoded_path, subject_kind, finder, policy_module, machine_path_lines)
+        if path_rows is not None:
+            rows = (*rows, *path_rows)
     except UnicodeError:
         return {"complete": True, "candidates": (), "unresolved": tuple(_content_hits(
             raw.decode("utf-8", "replace"), decoded_path, lambda _line: (), subject_kind=subject_kind,
@@ -1782,7 +1849,7 @@ def analyze_review_candidates(raw: bytes, path: bytes, *, subject_kind: str, pol
         "PS-FINDING-COMMIT-MESSAGE" if subject_kind == "commit-message" else "PS-FINDING-CONTENT",
         subject_kind, _safe_locator(decoded_path, subject_kind), row["line"], row["detectorClass"],
     ) for row in rows if row["candidate"] is None)
-    return {"complete": True, "candidates": candidates, "unresolved": unresolved, "refusal": None}
+    return {"complete": True, "candidates": candidates, "unresolved": unresolved, "refusal": None, "pathsRepresented": path_rows is not None}
 
 
 def project_review_candidate(raw: bytes, path: bytes, detector: dict, review_region: dict, *, policy_module) -> dict:
@@ -1934,10 +2001,10 @@ class ReviewEvaluation:
                 display_locator=display_locator, staged_index=staged_index)
             self.unresolved += len(findings)
             return findings
-        key = (raw_path, blob_oid, git_mode, subject_kind, hashlib.sha256(raw).digest())
+        key = (raw_path, blob_oid, git_mode, subject_kind, hashlib.sha256(raw).digest(), machine_path_lines, id(find_machine_paths))
         analysis = self._analysis.get(key)
         if analysis is None:
-            analysis = analyze_review_candidates(raw, raw_path, subject_kind=subject_kind, policy_module=self.policy)
+            analysis = analyze_review_candidates(raw, raw_path, subject_kind=subject_kind, policy_module=self.policy, find_machine_paths=find_machine_paths, machine_path_lines=machine_path_lines)
             self._analysis[key] = analysis
         if not analysis["complete"] or analysis["refusal"] is not None:
             raise RuntimeError("review-evaluation")
@@ -1970,9 +2037,10 @@ class ReviewEvaluation:
                 raise RuntimeError("review-evaluation-duplicate")
             self._applied_keys.add(applied_key)
             self._applications.append((subject, row["candidate"], row["detector"], application))
-        for number, _offset, line in _selected_text_lines(raw.decode("utf-8", "replace"), path, subject_kind):
-            if (machine_path_lines is None or number in machine_path_lines) and find_machine_paths(line):
-                findings.append(Finding("PS-FINDING-CONTENT", subject_kind, locator, number, "machine-path", display_locator, staged_index))
+        if not analysis.get("pathsRepresented", False):
+            for number, _offset, line in _selected_text_lines(raw.decode("utf-8", "replace"), path, subject_kind):
+                if (machine_path_lines is None or number in machine_path_lines) and find_machine_paths(line):
+                    findings.append(Finding("PS-FINDING-CONTENT", subject_kind, locator, number, "machine-path", display_locator, staged_index))
         self.unresolved += len(findings)
         return findings
 
@@ -4838,8 +4906,6 @@ def _serialize_native_receipt_v4(outcome: ScanOutcome) -> str:
 def _serialize_receiver_scoped_receipt_v5(outcome: ScanOutcome) -> str:
     if outcome.native_selection is None or outcome.native_selection.request.receiver_scope is None:
         raise ValueError("missing receiver scope")
-    if outcome.review is not None:
-        raise ValueError("V5 review correlation not implemented")
     result = json.loads(_serialize_native_receipt_common(outcome))
     result["version"] = 5
     result["receiverScopeSha256"] = outcome.native_selection.request.receiver_scope.digest()

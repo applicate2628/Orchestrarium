@@ -37,6 +37,8 @@ class ReceiptTests(unittest.TestCase):
    review={'snapshotId':'8'*64,'usedDecisions':used,'applied':1,'appliedSet':'9'*64,'usedToken':base64.b64encode(gate._native_canonical_bytes(used)).decode()})
   native=dict(self.frame);native.pop('receiverScopeSha256');native['version']=4
   self.assertEqual(gate._parse_native_publication_observation(json.dumps(native)).kind,'qualified-v4')
-  self.assertIsNone(self.parse())
+  observed=self.parse()
+  self.assertIsNotNone(observed)
+  self.assertEqual(observed.qualification,gate._parse_native_publication_observation(json.dumps(native)).qualification)
 
 if __name__=='__main__':unittest.main()

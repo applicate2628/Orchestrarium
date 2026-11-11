@@ -159,7 +159,7 @@ finally:
      native=gate.NativePushInput(remote,endpoint,request['wire'].encode())
      current=gate._native_callback_currentness(native,str(source),GIT)
      evidence=gate._run_authoritative_scan(native,str(source),GIT,receiver_scope=scope)
-     ok=evidence.parsed_outcome.kind=='valid-v5' and evidence.execution is not None
+     ok=evidence.parsed_outcome.kind in {'valid-v5','qualified-v5'} and evidence.execution is not None
      if gate._native_callback_currentness(native,str(source),GIT)!=current:raise ValueError('native currentness drift')
      scanned={'allowed':ok,'kind':'consumed-v5','commits':evidence.parsed_outcome.receipt.native.commits,'pending_state':evidence.execution.pending.state.value}
      if ok:binding.bind_hook(request['wire'].encode(),channel=channel,scope_digest=scope.digest())

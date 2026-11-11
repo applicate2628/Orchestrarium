@@ -109,6 +109,30 @@ def _is_placeholder_or_allowed(segment: str) -> bool:
     return False
 
 
+def find_machine_path_occurrences(text: str) -> tuple[tuple[int, int], ...]:
+    """Exact character spans of accepted prefixes, without value deduplication.
+
+    The audit detector's spelling trims delimiters from each regex match. Keep
+    that spelling and filtering unchanged, but preserve each physical occurrence.
+    Overlapping patterns that identify the identical span produce one occurrence.
+    """
+    spans: set[tuple[int, int]] = set()
+    for pattern in _PATTERNS:
+        for match in pattern.finditer(text):
+            if _is_placeholder_or_allowed(match.group(1)):
+                continue
+            matched = match.group(0)
+            left = len(matched) - len(matched.lstrip())
+            right = len(matched.rstrip())
+            while left < right and matched[left] in "\"'`(=":
+                left += 1
+            while right > left and matched[right - 1] in "\"'`(=":
+                right -= 1
+            if left < right:
+                spans.add((match.start() + left, match.start() + right))
+    return tuple(sorted(spans))
+
+
 def find_machine_paths(text: str) -> list[str]:
     """Return concrete machine-local path prefixes found in text (deduped)."""
     hits: list[str] = []
