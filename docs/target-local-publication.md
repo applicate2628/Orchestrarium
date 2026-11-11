@@ -26,3 +26,9 @@ Unit coverage includes exact argv dispatch, malformed arguments, native qualific
 - argv: process argument vector, not shell text.
 - DIRECT_ARGV: parser-owned direct argument-vector provenance.
 - V3/V4: existing range and native-object scan receipt versions.
+
+## Large full-history checks
+
+New native branches may require a conservative full-history scan. Blob payloads are reacquired and hash-verified per path instead of retained for the entire history. Every selected object is still checked, with existing per-object, count, tree, coverage and cleanup constraints.
+
+For an explicitly initiated full-history run, set `ORCHE_PUBLICATION_SCAN_SECONDS` before launching the gate process, for that invocation only (for example, `900`). Do not mutate it inside an already-loaded gate process. Canonical decimal integers from `240` to `3600` are accepted; absent means `240`. Invalid values fail closed. The supervising gate permits 60 additional seconds for settlement. Do not persist this as a live client setting. The budget never supplies scan credit, changes graph selection, suppresses findings or skips currentness checks. Both fresh V3 and V4 evidence remain mandatory before Git transfers.

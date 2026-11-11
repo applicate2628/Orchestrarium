@@ -35,6 +35,7 @@ class TestNativePublicationEffects(unittest.TestCase):
     object_format = "sha1"
 
     def setUp(self):
+        self.enterContext(mock.patch.dict(sys.modules))
         self.temp = tempfile.TemporaryDirectory(prefix="publication-native-")
         temporary_root = Path(self.temp.name)
         def cleanup():
@@ -91,6 +92,65 @@ class TestNativePublicationEffects(unittest.TestCase):
 
     def zero(self):
         return "0" * len(self.commit)
+
+    def test_full_blob_history_has_bounded_payload_memory(self):
+        import tracemalloc
+        rows = []
+        total = 0
+        for index in range(16):
+            raw = b"\0" * (512 * 1024) + str(index).encode()
+            total += len(raw)
+            oid = self.git("hash-object", "-w", "--stdin", raw=raw).strip().decode()
+            rows.append((oid.encode(), oid, f"refs/tags/blob-{index}".encode(), self.zero()))
+        payload = self.payload(rows)
+        del raw
+        tracemalloc.start()
+        try:
+            outcome = self.scan(payload)
+            _current, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertEqual(outcome.kind, "clean", outcome)
+        self.assertEqual(outcome.history.blob_bytes, total)
+        self.assertEqual(len(outcome.history.blob_ids), 16)
+        self.assertLess(peak, 5 * 1024 * 1024, f"resident payload peak={peak}")
+
+    def test_range_initial_blob_read_is_hash_bound_before_metadata(self):
+        from dataclasses import replace
+        (self.root / "next.txt").write_bytes(b"next public content\n")
+        self.git("add", "next.txt")
+        self.git("commit", "-qm", "next fixture")
+        tip = self.git("rev-parse", "HEAD").strip().decode()
+        oid = self.git("rev-parse", "HEAD:next.txt").strip().decode()
+        original = self.module._AsyncGitObjectReader.read
+        async def mutate_first(reader, requested_oid, *args, **kwargs):
+            result = await original(reader, requested_oid, *args, **kwargs)
+            if requested_oid == oid:
+                return replace(result, raw=b"\0changed classification and length")
+            return result
+        with self.in_root(), mock.patch.object(self.module._AsyncGitObjectReader, "read", mutate_first):
+            outcome = self.module._scan_range("origin", "refs/heads/main", lambda _line: (), source_revision=tip)
+        self.assertEqual(outcome.kind, "refusal")
+        self.assertEqual(outcome.refusal.reason, "object-content-identity")
+
+    def test_reacquired_blob_content_is_bound_to_selected_oid(self):
+        from dataclasses import replace
+        oid = self.git("rev-parse", "HEAD:safe.txt").strip().decode()
+        payload = self.payload([(b"refs/heads/main", self.commit, b"refs/heads/new", self.zero())])
+        original = self.module._AsyncGitObjectReader.read
+        reads = []
+        async def mutate_second(reader, requested_oid, *args, **kwargs):
+            result = await original(reader, requested_oid, *args, **kwargs)
+            if requested_oid == oid:
+                reads.append(requested_oid)
+                if len(reads) == 2:
+                    return replace(result, raw=b"changed second read\n")
+            return result
+        with mock.patch.object(self.module._AsyncGitObjectReader, "read", mutate_second):
+            outcome = self.scan(payload)
+        self.assertEqual(len(reads), 2)
+        self.assertEqual(outcome.kind, "refusal")
+        self.assertEqual(outcome.refusal.reason, "object-content-identity")
 
     def test_tag_annotation_is_scanned_even_when_target_commit_is_remote(self):
         annotation = "TOKEN=" + "aB9" * 16
@@ -349,6 +409,9 @@ class TestNativePublicationEffectsSHA256(TestNativePublicationEffects):
 
 
 class TestSourceAnnotationBoundary(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(mock.patch.dict(sys.modules))
+
     def test_inline_source_annotation_has_no_authority_for_metadata(self):
         module = load_scanner()
         text = 'TOKEN="' + "aB9" * 16 + '" # orchestrarium:public-token'
@@ -373,6 +436,9 @@ class TestSourceAnnotationBoundary(unittest.TestCase):
 
 @unittest.skipUnless(os.name == "nt", "native Windows owned-pipe lifecycle")
 class TestNativeSelectionInputLifecycle(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(mock.patch.dict(sys.modules))
+
     def test_backpressure_timeout_settles_owned_job_before_joining_input(self):
         module = load_scanner()
         inner = '''import asyncio,importlib.util,json,sys

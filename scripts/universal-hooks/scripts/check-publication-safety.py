@@ -316,12 +316,23 @@ _MAX_AGGREGATE_MESSAGE_BYTES = 16_777_216
 _MAX_COMMIT_TREE_BYTES = 1_048_576
 _MAX_TREE_CACHE_BYTES = 64 * 1_048_576
 _MAX_BLOB_BYTES = 64 * 1_048_576
-_MAX_AGGREGATE_BLOB_BYTES = 512 * 1_048_576
+# Blob payloads are not retained across acquisition: the per-object reader
+# bound limits resident payload memory, while aggregate_bytes remains evidence.
 _MAX_LINE_BYTES = 8 * 1_048_576
 _MAX_PARENT_GRAPH_BYTES = 16 * 1_048_576
 _MAX_FINDINGS = 32
 _READ_CHUNK_BYTES = 64 * 1_024
-_SCAN_DEADLINE_SECONDS = 240.0
+def _publication_scan_budget_seconds() -> float:
+    """Explicit, bounded per-process budget; never changes scan coverage."""
+    value = os.environ.get("ORCHE_PUBLICATION_SCAN_SECONDS")
+    if value is None:
+        return 240.0
+    if not re.fullmatch(r"[1-9][0-9]{2,3}", value) or not 240 <= int(value) <= 3600:
+        raise ValueError("invalid publication scan budget (expected 240..3600 seconds)")
+    return float(value)
+
+
+_SCAN_DEADLINE_SECONDS = _publication_scan_budget_seconds()
 _MAX_TREE_VISITS = _MAX_SUBJECTS
 _MAX_TREE_FRONTIER = _MAX_OBJECTS
 _MAX_TREE_CACHE_ENTRIES = _MAX_OBJECTS
@@ -4158,7 +4169,8 @@ async def _acquire_history(
     commit_records: dict[str, CommitRecord] = {}
     tag_targets: dict[str, tuple[str, str]] = {}
     tree_cache: dict[str, bytes] = {}
-    blob_contents: dict[str, bytes] = {}
+    blob_oids: set[str] = set()
+    binary_blobs: set[str] = set()
     findings: list[Finding] = []
     aggregate_messages = 0
     aggregate_blobs = 0
@@ -4235,12 +4247,15 @@ async def _acquire_history(
                 return _refusal("PS-MSG-LIMIT", "tree-cache-bytes")
             tree_cache[oid] = result.raw
         elif result.object_type == "blob":
-            if len(blob_contents) >= _MAX_BLOBS:
+            if not native and hashlib.new(selection.object_format.name,
+                                          f"blob {len(result.raw)}\0".encode("ascii") + result.raw).hexdigest() != oid:
+                return _refusal("PS-MSG-COVERAGE", "object-content-identity")
+            if len(blob_oids) >= _MAX_BLOBS:
                 return _refusal("PS-MSG-LIMIT", "blob-count")
             aggregate_blobs += len(result.raw)
-            if aggregate_blobs > _MAX_AGGREGATE_BLOB_BYTES:
-                return _refusal("PS-MSG-LIMIT", "aggregate-blob-bytes")
-            blob_contents[oid] = result.raw
+            blob_oids.add(oid)
+            if _is_binary(result.raw):
+                binary_blobs.add(oid)
         else:
             return _refusal("PS-MSG-FRAME", "object-type")
 
@@ -4317,7 +4332,7 @@ async def _acquire_history(
     unpublished_trees = {
         oid for oid, object_type in object_types.items() if object_type == "tree"
     }
-    unpublished_blobs = set(blob_contents)
+    unpublished_blobs = set(blob_oids)
     reached_unpublished_trees: set[str] = set()
     visited_tree_ids: set[str] = set()
     tree_visits = 0
@@ -4430,8 +4445,7 @@ async def _acquire_history(
     if len(blob_paths) > _MAX_BLOB_PATHS:
         return _refusal("PS-MSG-LIMIT", "blob-path-count")
 
-    binary_blobs = {oid for oid, raw in blob_contents.items() if _is_binary(raw)}
-    text_blobs = set(blob_contents) - binary_blobs
+    text_blobs = set(blob_oids) - binary_blobs
     subjects_by_path: dict[tuple[bytes, str], list[tuple[str, str]]] = {}
     if review_evaluation is not None:
         for commit_oid, raw_path, blob_oid in sorted(subjects):
@@ -4442,7 +4456,18 @@ async def _acquire_history(
         decoded_path = path.decode("utf-8", "surrogateescape")
         if not native:
             _append_findings(findings, _filename_findings(decoded_path, "history-blob"))
-        raw = blob_contents[blob_oid]
+        # Reacquire one bounded payload instead of retaining the entire history.
+        # Bind this second read to the selected object even in the V3 path:
+        # metadata/exception decisions must never consume changed content.
+        blob_result = await reader.read(blob_oid, "blob", scan_deadline=scan_deadline)
+        if isinstance(blob_result, Refusal):
+            return blob_result
+        raw = blob_result.raw
+        if (blob_result.returned_oid != blob_oid
+                or blob_result.object_type != "blob"
+                or hashlib.new(selection.object_format.name,
+                               f"blob {len(raw)}\0".encode("ascii") + raw).hexdigest() != blob_oid):
+            return _refusal("PS-MSG-COVERAGE", "object-content-identity")
         line_refusal = _line_limit_refusal(raw)
         if line_refusal is not None:
             return line_refusal
@@ -4490,7 +4515,7 @@ async def _acquire_history(
     canonical_subjects = tuple(sorted(subjects))
     canonical_paths = tuple(sorted((blob, path) for path, blob in blob_paths))
     canonical_objects = tuple(sorted(selection.object_oids))
-    canonical_blobs = tuple(sorted(blob_contents))
+    canonical_blobs = tuple(sorted(blob_oids))
     proof = HistoryProof(
         selection.expected_oids,
         canonical_objects,

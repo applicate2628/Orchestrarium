@@ -73,7 +73,17 @@ PROCESS_TIMEOUT_SECONDS = 8.0
 ORACLE_TIMEOUT_SECONDS = 45.0
 SCAN_SNAPSHOT_BYTE_CAP = 1024 * 1024
 SCAN_OUTPUT_BYTE_CAP = 256 * 1024
-SCAN_TIMEOUT_SECONDS = 300.0
+def _publication_scan_budget_seconds() -> float:
+    """Explicit, bounded per-process budget; never changes scan coverage."""
+    value = os.environ.get("ORCHE_PUBLICATION_SCAN_SECONDS")
+    if value is None:
+        return 240.0
+    if not re.fullmatch(r"[1-9][0-9]{2,3}", value) or not 240 <= int(value) <= 3600:
+        raise ValueError("invalid publication scan budget (expected 240..3600 seconds)")
+    return float(value)
+
+
+SCAN_TIMEOUT_SECONDS = _publication_scan_budget_seconds() + 60.0
 SCAN_SETTLEMENT_ATTEMPT_SECONDS = 3.0
 SCAN_SETTLEMENT_MAX_ENTRIES = 2
 
