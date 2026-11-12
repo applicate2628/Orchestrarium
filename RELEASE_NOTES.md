@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-12
 
+- Installer failures now report the line of the installer-owned call when available, without exposing exception text, filesystem paths or frame locals. This makes otherwise generic refusals actionable while retaining redaction and all refusal behavior.
+
 - Installer snapshot refusals now distinguish source and backup root/image changes, so support can identify which guarantee failed without weakening checks or retrying an installation blindly.
 
 - Windows installer snapshots now recognize filename-derived executable bits as a metadata projection rather than a replaced file. Existing command/executable files no longer block a global update solely because handle and path metadata differ; file identity, attributes, write bits, reparse checks and non-Windows semantics remain enforced.

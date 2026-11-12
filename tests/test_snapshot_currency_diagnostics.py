@@ -69,3 +69,24 @@ def test_diagnostic_does_not_render_paths_or_exception_payload():
     assert secret not in rendered
     assert 'token-secret' not in rendered
     assert 'context=construction-source-image' in rendered
+
+
+@pytest.mark.parametrize('failure', ['target-root', 'source-root', 'target-image', 'source-image'])
+def test_public_terminal_preserves_typed_context(failure, capsys):
+    check, _calls = current_check(failure)
+    with pytest.raises(installer._InstallFailure) as caught:
+        check(complete=True)
+    assert installer._finish_install_result('codex', Path('unused'), False, False,
+                                            caught.value, None) == 1
+    output = capsys.readouterr().err
+    assert 'context=construction-' + failure in output
+    assert 'failure-id=unavailable' not in output
+
+
+def test_public_terminal_does_not_guess_plain_validation_context(capsys):
+    error = ValueError('E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: private-secret')
+    assert installer._finish_install_result('codex', Path('unused'), False, False, error, None) == 1
+    output = capsys.readouterr().err
+    assert 'context=unavailable' in output
+    assert 'cause=validation-failed' in output
+    assert 'private-secret' not in output

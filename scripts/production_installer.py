@@ -1772,6 +1772,18 @@ def _installer_failure_text(error: BaseException) -> str:
                 "validation-failed" if isinstance(error, ValueError) else "operation-failed")
             original = "failure-id=unavailable | context=unavailable | cause=" + cause
         additions = []
+        # A code-object match identifies our owning call, not a filename supplied
+        # by an exception/plugin. Never print traceback paths, locals or text.
+        owner = globals().get("install")
+        if type(owner) is type(_installer_failure_text):
+            trace = BaseException.__traceback__.__get__(error, BaseException)
+            for _ in range(64):
+                if trace is None:
+                    break
+                if trace.tb_frame.f_code is owner.__code__:
+                    additions.append(f"site=install-line:{trace.tb_lineno}")
+                    break
+                trace = trace.tb_next
         if typed and attributes is not None and identity == "E_ATOMIC_DIRECTORY_PUBLISH_UNSUPPORTED":
             additions.append("filesystem cannot safely publish a directory without replacing an existing target")
         def render(context):
