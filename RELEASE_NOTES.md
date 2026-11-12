@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-12
 
+- Claude main-agent settings admission now refuses non-JSON NaN/Infinity constants before rewriting user settings, including nested values; valid finite numeric values and quoted strings remain accepted.
+
 - Codex catalogue runtime diagnostics now reject malformed quoted metadata and unsupported structured scalar shapes instead of reporting them as complete. Offline estimates stay unchanged; this bounded check does not claim full YAML validation.
 
 - Range/native review capture now collects private verified bytes inside the existing traversal and builds exact-commit packets without manual fields. Unsupported metadata/direct-root coverage and capture limits remain explicit; failed settlement or currentness returns no partial evidence. This does not grant reviewer authority or publication.

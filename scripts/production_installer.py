@@ -10824,11 +10824,15 @@ def _load_claude_settings(settings_path: Path, *,
             result[key] = value
         return result
 
+    def reject_constant(value):
+        raise ValueError("Claude settings are not valid JSON: non-JSON numeric constant")
+
     try:
         text = _read_owned_text(settings_path, mutable_owner)
         if text is None:
             return {}
-        data = json.loads(text, object_pairs_hook=unique_object)
+        data = json.loads(text, object_pairs_hook=unique_object,
+                          parse_constant=reject_constant)
     except json.JSONDecodeError as exc:
         raise ValueError(f"Claude settings are not valid JSON: {exc}") from exc
     except OSError as exc:
