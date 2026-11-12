@@ -53,3 +53,7 @@ unit-test result.
 - ID: identifier of an original native user message, not its text or replay.
 - CLI: command-line interface.
 - Goal: the native persistent task state owned by the selected Codex thread.
+
+Duplicate JSON object fields, including nested provenance or Goal fields, are
+ambiguous input and produce UNVERIFIED. This is diagnostic validation only; it
+does not intercept native Goal updates or establish command authority.

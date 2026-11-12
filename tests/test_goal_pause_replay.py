@@ -214,6 +214,26 @@ def test_conflicting_nested_goal_thread_is_sticky_invalid(tmp_path):
         assert result["authority"] is False
 
 
+
+def test_duplicate_json_keys_never_establish_chronology(tmp_path):
+    events = [meta(), message("stop-1", "Park"), resume(), updated()]
+    lines = [json.dumps(event) for event in events]
+    cases = [(0, '"id": "thread-a"', '"id": "foreign", "id": "thread-a"'),
+             (1, '"id": "stop-1"', '"id": "different", "id": "stop-1"'),
+             (2, '"role": "user"', '"role": "assistant", "role": "user"'),
+             (3, '"status": "active"', '"status": "paused", "status": "active"')]
+    for index, old, replacement in cases:
+        raw = list(lines)
+        assert old in raw[index]
+        raw[index] = raw[index].replace(old, replacement, 1)
+        path = tmp_path / "duplicate.jsonl"
+        before = ("\n".join(raw) + "\n").encode()
+        path.write_bytes(before)
+        result = module().check(str(path), "thread-a", "stop-1")
+        assert result["result"] == "UNVERIFIED", (index, result)
+        assert result["authority"] is False
+        assert path.read_bytes() == before
+
 def load_tests(loader, tests, pattern):
     """Use the repository's unittest route; no third-party dependency required."""
     suite = unittest.TestSuite()

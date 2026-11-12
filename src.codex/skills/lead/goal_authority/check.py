@@ -26,6 +26,13 @@ SUPPORTED_VERSIONS = frozenset({"0.166.0-alpha.5.1"})
 ACTIVE_INTENT = '<codex_internal_context source="user_goal">\nUser set goal status: "active".\n</codex_internal_context>'
 
 
+def _unique_record_pairs(pairs: list[tuple[str, object]]) -> dict:
+    result = dict(pairs)
+    if len(result) != len(pairs):
+        raise ValueError("Duplicate native chronology field")
+    return result
+
+
 def _text(payload: dict) -> str | None:
     content = payload.get("content")
     if not isinstance(content, list) or len(content) != 1:
@@ -72,6 +79,9 @@ def check(transcript: str, thread_id: str, command_id: str) -> dict:
     digest = hashlib.sha256()
 
     def consume(entry: dict, raw: bytes) -> None:
+        # Shared acquisition owns source stability, but its JSON decoder is permissive.
+        # Reject duplicate keys at every depth before deriving chronology evidence.
+        entry = json.loads(raw, object_pairs_hook=_unique_record_pairs)
         digest.update(raw)
         state["position"] += 1
         position = state["position"]
