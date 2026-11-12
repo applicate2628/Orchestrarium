@@ -8790,6 +8790,13 @@ def _lead_receipt_bytes(digest: str, *, schema: str = _LEAD_RECEIPT_SCHEMA) -> b
                        separators=(",", ":")) + "\n").encode("utf-8")
 
 
+def _unique_receipt_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result = dict(pairs)
+    if len(result) != len(pairs):
+        raise ValueError("duplicate receipt key")
+    return result
+
+
 def _read_lead_receipt(path: Path) -> tuple[bytes, tuple[int, int, int, int], str, str] | None:
     try:
         metadata = path.lstat()
@@ -8801,12 +8808,7 @@ def _read_lead_receipt(path: Path) -> tuple[bytes, tuple[int, int, int, int], st
         payload = path.read_bytes()
         if len(payload) > 256:
             raise ValueError("oversized receipt")
-        def unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-            result = dict(pairs)
-            if len(result) != len(pairs):
-                raise ValueError("duplicate receipt key")
-            return result
-        record = json.loads(payload.decode("utf-8"), object_pairs_hook=unique_pairs)
+        record = json.loads(payload.decode("utf-8"), object_pairs_hook=_unique_receipt_pairs)
         if (not isinstance(record, dict)
             or set(record) != {"schema", "treeSha256"}
             or record["schema"] not in {_LEAD_LEGACY_RECEIPT_SCHEMA, _LEAD_RECEIPT_SCHEMA}
@@ -8889,12 +8891,7 @@ def _read_nonlead_receipt(path: Path) -> _NonLeadReceiptObservation | None:
         payload = path.read_bytes()
         if len(payload) > _NONLEAD_RECEIPT_MAX_BYTES:
             raise ValueError("oversized receipt")
-        def unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-            result = dict(pairs)
-            if len(result) != len(pairs):
-                raise ValueError("duplicate receipt key")
-            return result
-        record = json.loads(payload.decode("utf-8"), object_pairs_hook=unique_pairs)
+        record = json.loads(payload.decode("utf-8"), object_pairs_hook=_unique_receipt_pairs)
         if (not isinstance(record, dict) or set(record) != {"schema", "skills"}
             or not isinstance(record["schema"], str)
             or record["schema"] not in {_NONLEAD_RECEIPT_SCHEMA, _NONLEAD_MEMBER_RECEIPT_SCHEMA}

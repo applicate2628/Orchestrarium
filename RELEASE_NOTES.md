@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-12
+
+- Simplified installer receipt parsing by sharing the identical duplicate-key check; Lead and other skill receipts retain their separate validation and error contracts.
+
 ## 2026-11-11
 
 - General machine-path findings now support exact reviewed occurrences through the existing trusted policy and revocation owner; qualified V5 preserves review finalization. Other occurrences, changed blobs or contexts, and secret findings remain blocked. No repository-specific exemptions or automatic reviewer grants are added.
