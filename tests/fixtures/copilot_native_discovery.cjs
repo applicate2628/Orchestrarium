@@ -23,14 +23,16 @@ async function load(directory) {
     }
 }
 (async () => {
-    const expected = JSON.parse(fs.readFileSync(expectedFile, 'utf8'));
+    const expected = expectedFile === '-' ? null : JSON.parse(fs.readFileSync(expectedFile, 'utf8'));
     const positive = await load(project);
-    assert.equal(positive.snapshot.hookCount, 1);
-    assert.equal(positive.resources.length, 1);
-    assert.equal(positive.resources[0].event, 'preToolUse');
-    assert.equal(positive.snapshot.hooks[0].isPolicy, false);
-    assert.deepEqual(JSON.parse(positive.snapshot.hooks[0].specJson).config,
-                     expected.hooks.preToolUse[0]);
+    assert.equal(positive.snapshot.hookCount, expected ? 1 : 0);
+    assert.equal(positive.resources.length, expected ? 1 : 0);
+    if (expected) {
+        assert.equal(positive.resources[0].event, 'preToolUse');
+        assert.equal(positive.snapshot.hooks[0].isPolicy, false);
+        assert.deepEqual(JSON.parse(positive.snapshot.hooks[0].specJson).config,
+                         expected.hooks.preToolUse[0]);
+    }
     assert.deepEqual(positive.load.errors, []);
     assert.deepEqual(positive.load.warnings, []);
     const negative = await load(invalidProject);

@@ -48,6 +48,22 @@ applied hook; use isolated projects until native acceptance is separately qualif
 The installed shared runtime now has separate [native parser acceptance](copilot-native-discovery.md).
 That result does not qualify editor activation or change the advisory scope.
 
+## Updating or removing this registration
+
+Keep the previous registration bytes outside `.github/hooks` and explicitly select
+that snapshot with `--previous`. This is the operator's selected beforeimage, not
+a separate permission token or inferred ownership. For an update, run the same
+root entry with the new `--bundled-advisory-relative` value and `--previous`.
+For removal, use `--copilot-registration --project . --remove --previous <snapshot>`.
+Both operations preview by default; add `--apply` only to perform the selected
+change. A modified current registration refuses rather than overwriting user edits.
+
+The existing installer saves replaced/removed registration bytes under project
+`trash` and reports the recovery path. It leaves other hook files and the runtime
+bundle alone. Do not delete or independently move the old bundle while any
+registration still references it. Runtime installation ownership and hook-file
+ownership are separate; registration removal is not a runtime uninstaller.
+
 ## Shared command policy boundary
 
 The adapter invokes only the fixed `check-no-trash-in-repo.py` canonical Python

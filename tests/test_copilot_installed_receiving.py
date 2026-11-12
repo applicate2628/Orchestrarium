@@ -121,7 +121,60 @@ def test_actual_bundled_root_registration_discovery_execution_and_relocation(tmp
         assert missing.returncode != 0
     finally:
         retained.rename(executable)
+    # Update via the real portable root entry, never by patching the hook.
+    config = relocated / ".github/hooks/orchestrarium.json"
+    previous = tmp_path / "selected-previous.json"
+    previous.write_bytes(registration)
+    replacement = relocated / "updated runtime bundle"
+    (relocated / "runtime bundle").rename(replacement)
+    root_command = [replacement / "python/python.exe", "-I", "-B", replacement / "launch.py",
+                    "--permanent-runtime", "--copilot-registration", "--project", "."]
+    update = [*root_command, "--bundled-advisory-relative", "updated runtime bundle"]
+    refused = run([*update, "--apply"], relocated)
+    assert refused.returncode == 2
+    assert config.read_bytes() == registration
+    assert not (relocated / "trash").exists()
+    preview = run([*update, "--previous", previous], relocated)
+    assert preview.returncode == 0, preview.stderr
+    assert json.loads(preview.stdout)["action"] == "update"
+    assert config.read_bytes() == registration
+    assert not (relocated / "trash").exists()
+    # A user edit after selection must not be overwritten or saved as ours.
+    edited = registration + b"\n"
+    config.write_bytes(edited)
+    stale = run([*update, "--previous", previous, "--apply"], relocated)
+    assert stale.returncode == 2
+    assert config.read_bytes() == edited
+    assert not (relocated / "trash").exists()
+    config.write_bytes(registration)  # Fixture restores its own edit only.
+    updated = run([*update, "--previous", previous, "--apply"], relocated)
+    assert updated.returncode == 0, updated.stderr
+    update_report = json.loads(updated.stdout)
+    assert update_report["action"] == "update"
+    assert Path(update_report["trash"]).read_bytes() == registration
+    registration = config.read_bytes()
+    receive(relocated)
+    previous.write_bytes(registration)
+    remove = [*root_command, "--remove", "--previous", previous]
+    preview = run(remove, relocated)
+    assert preview.returncode == 0 and config.read_bytes() == registration
+    removed = run([*remove, "--apply"], relocated)
+    assert removed.returncode == 0, removed.stderr
+    remove_report = json.loads(removed.stdout)
+    assert remove_report["action"] == "remove"
+    assert Path(remove_report["trash"]).read_bytes() == registration
+    assert not config.exists()
+    parsed = run([node, ROOT / "tests/fixtures/copilot_native_discovery.cjs",
+                  native, relocated, home, "-", invalid], relocated)
+    assert parsed.returncode == 0, parsed.stderr
+    assert json.loads(parsed.stdout)["positive"]["snapshot"]["hookCount"] == 0
+    absent = run([*root_command, "--remove", "--apply"], relocated)
+    assert absent.returncode == 0
+    assert json.loads(absent.stdout)["action"] == "unchanged"
+    assert (relocated / ".github/hooks/foreign.json").read_bytes() == foreign
+    assert (replacement / "python/python.exe").is_file()
     (tmp_path / "receiving-result.json").write_text(json.dumps({
         "source_pins":pins, "registration_sha256":hashlib.sha256(registration).hexdigest(),
         "locations":results, "missing_runtime_exit":missing.returncode,
+        "updateAndRemovalQualified":True, "priorBytesPreserved":True,
         "modelSessionCreated":False,"editorActivationQualified":False},indent=2))

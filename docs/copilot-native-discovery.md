@@ -82,6 +82,16 @@ folders, the Windows system root and `PATHEXT=.EXE`. Windows PowerShell needs
 PATHEXT to classify a native executable even when its path is explicit; omitting
 it initially broke this overly stripped fixture, not the real adapter.
 
+The same composed test also verifies a portable runtime-path change through the
+root update entry: no prior selection refuses without mutation; preview leaves
+bytes intact; a user edit after selection refuses as stale; exact selected update
+retains the previous registration in project trash and the native parser discovers
+the replacement. The exact replacement command executes the advisory cases.
+Selected removal retains its previous bytes in trash, native discovery then finds
+zero hooks, and repeated removal is unchanged. The foreign hook file remains
+byte-identical and the bundled interpreter remains present. These results qualify the existing selected-file
+lifecycle, not automatic ownership adoption or whole-runtime uninstall.
+
 This composed test passed on the inspected installed runtime. It still does not
 exercise the editor session target, trust UI, enterprise controls or model/tool
 lifecycle. No production code change was needed to make the existing owners
