@@ -51,4 +51,15 @@ class Tests(unittest.TestCase):
  def test_matching_unknown_auth(self):
   self.config('credential.https://github.com.helper','!unknown executable')
   self.assertFalse(self.check().eligible)
+ def test_gcm_requires_existing_returned_pin_without_execution(self):
+  self.config('credential.helper','manager')
+  config=self.root/'.git/config';before=config.read_bytes()
+  exe=self.root/'git-credential-manager.exe'
+  def inspect():return qualify(self.git,self.root,'origin',env=self.env,config_args=('-c','http.followRedirects=false'),approved_gcm=str(exe))
+  self.assertFalse(inspect().eligible)
+  exe.write_bytes(b'fixture-not-executable')
+  result=inspect();self.assertTrue(result.eligible,result);self.assertEqual(result.executables,(str(exe),))
+  self.assertEqual(config.read_bytes(),before)
+  self.config('credential.helper','unknown-manager')
+  self.assertFalse(inspect().eligible)
 if __name__=='__main__':unittest.main()
