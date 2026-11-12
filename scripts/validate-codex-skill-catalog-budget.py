@@ -90,6 +90,17 @@ def _parse_frontmatter_scalars(
                 r'''("(?:[^"\\]|\\.)*"|'(?:[^']|'')*')(?:\s+\#.*)?''',
                 rest_stripped,
             )
+            if key in ("name", "description") and not quoted:
+                # Admit only the supported scalar shapes, not YAML collections,
+                # tags/aliases, malformed quoted values or nested mappings.
+                # This is bounded admission, not full YAML/escape validation.
+                plain = re.split(r"(?:^|\s+)#", rest_stripped, maxsplit=1)[0]
+                if plain and plain not in BLOCK_INDICATORS and (
+                    plain[0] in "[]{},&*!|>'\"%@`"
+                    or re.match(r"[-?:](?:\s|$)", plain)
+                    or re.search(r":(?:\s|$)", plain)
+                ):
+                    raise ValueError(f"Unsupported skill metadata scalar: {key}")
             if quoted:
                 rest_stripped = quoted.group(1)
             elif not rest_stripped.startswith(("'", '"')):
