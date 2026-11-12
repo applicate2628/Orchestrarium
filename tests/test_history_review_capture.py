@@ -74,10 +74,13 @@ class HistoryReviewCaptureTests(unittest.TestCase):
         self.assertEqual(result['status'],'refused');self.assertEqual(result['content'],{});self.assertIsNone(result['packet'])
 
     def test_native_path_content_findings_are_explicitly_unsupported(self):
-        path=self.root/('C:/Users/'+'Synthetic/file.txt')
-        path.parent.mkdir(parents=True);path.write_text('safe content\n')
-        self.git('add','.');self.git('commit','-qm','synthetic metadata')
-        tip=self.git('rev-parse','HEAD').strip().decode()
+        # Git object names can model foreign absolute paths without asking the
+        # host filesystem to create them (Windows Path would escape self.root).
+        blob=self.git('hash-object','-w','--stdin',raw=b'safe content\n').strip()
+        name=b'C:'+b'\\Users\\Synthetic\\file.txt'
+        tree=self.git('mktree',raw=b'100644 blob '+blob+b'\t'+name+b'\n').strip().decode()
+        tip=self.git('commit-tree',tree,'-p',self.commit,'-m','synthetic metadata').strip().decode()
+        self.git('update-ref','refs/heads/main',tip)
         payload=self.payload([(b'refs/heads/main',tip,b'refs/heads/main',self.commit)])
         with self.in_root():result=self.module.capture_history_review(native_payload=payload)
         self.assertEqual(result['status'],'unsupported')
