@@ -114,17 +114,48 @@ def change(project: Path, desired: bytes | None, *, previous: bytes | None = Non
             "trash": str(anchor / trash) if current is not None and apply else None}
 
 
+def bundled_advisory(project: Path, relative: Path) -> bytes:
+    """Explicit project-relative Windows bundle; never search PATH or copy runtime."""
+    if relative.is_absolute() or relative.drive or ".." in relative.parts:
+        raise ValueError("COPILOT-BUNDLE-RELATIVE")
+    bundle = project.absolute() / relative
+    members = ("python/python.exe", "app/scripts/copilot-pre-tool-use.py",
+               "app/scripts/installation/copilot_transport.py",
+               "app/scripts/universal-hooks/hooks/check-machine-local-path.py",
+               "app/scripts/universal-hooks/scripts/hook_common.py")
+    root = bundle.resolve(strict=True)
+    for name in members:
+        member = bundle / name
+        if not member.is_file() or not member.resolve(strict=True).is_relative_to(root):
+            raise ValueError("COPILOT-BUNDLE-PAYLOAD")
+    # Explicit PowerShell native invocation: literal single-quoted tokens, no
+    # expansion or system fallback. Relative paths require host cwd=project.
+    def literal(value):
+        if any(ord(c) < 32 or 127 <= ord(c) <= 159 or c in "\u2018\u2019\u201a\u201b\u201c\u201d\u201e\u201f\u2028\u2029" for c in value):
+            raise ValueError("COPILOT-BUNDLE-PATH")
+        return "'" + value.replace("'", "''") + "'"
+    tokens = ["./" + (relative / members[0]).as_posix(), "-I", "-B",
+              "./" + (relative / members[1]).as_posix()]
+    command = "$LASTEXITCODE = 1; Set-Location -LiteralPath ([Environment]::CurrentDirectory) -ErrorAction Stop; & " + " ".join(map(literal, tokens)) + "; exit $LASTEXITCODE"
+    from installation.copilot_transport import render_registration
+    return json.dumps(render_registration(command, shell="powershell")).encode("utf-8")
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--project", type=Path, required=True)
     operation = parser.add_mutually_exclusive_group(required=True)
     operation.add_argument("--desired", type=Path)
     operation.add_argument("--remove", action="store_true")
+    operation.add_argument("--bundled-advisory-relative", type=Path, help="Project-relative Windows bundle; machine-path advisory only")
     parser.add_argument("--previous", type=Path, help="Explicitly selected exact prior single-handler JSON")
     parser.add_argument("--apply", action="store_true", help="Without this flag, only preview")
     args = parser.parse_args(argv)
     try:
-        result = change(args.project, read_candidate(args.desired) if args.desired else None,
+        desired = (bundled_advisory(args.project, args.bundled_advisory_relative)
+                   if args.bundled_advisory_relative is not None else
+                   read_candidate(args.desired) if args.desired else None)
+        result = change(args.project, desired,
                         previous=read_candidate(args.previous) if args.previous else None,
                         apply=args.apply)
         print(json.dumps(result, sort_keys=True))

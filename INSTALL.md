@@ -450,3 +450,7 @@ A [selected workspace registration helper](docs/copilot-registration-lifecycle.m
 Copilot workspace registration preview is available through
 `python install.py --copilot-registration --project PROJECT --desired NEW.json`.
 See [the selected-file lifecycle](docs/copilot-registration-lifecycle.md) before applying.
+
+The optional [bundled Copilot advisory](docs/copilot-advisory-entry.md) generates
+a project-relative registration for the supplied machine-path advisory entry.
+It is not full Copilot runtime or publication protection.
