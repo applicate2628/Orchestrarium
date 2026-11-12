@@ -1853,7 +1853,8 @@ def analyze_review_candidates(raw: bytes, path: bytes, *, subject_kind: str, pol
 
 
 def build_review_occurrences(raw: bytes, path: bytes, *, object_format: str,
-                             git_mode: str, policy_module) -> tuple[dict, ...]:
+                             git_mode: str, policy_module,
+                             machine_path_lines=None) -> tuple[dict, ...]:
     """Generate review input from captured blob bytes, never grant exceptions.
 
     The owner supplies bytes from its captured Git object. Identity and byte
@@ -1863,7 +1864,8 @@ def build_review_occurrences(raw: bytes, path: bytes, *, object_format: str,
     if object_format not in ("sha1", "sha256") or git_mode not in ("100644", "100755"):
         raise ValueError("unsupported-review-subject")
     analysis = analyze_review_candidates(raw, path, subject_kind="tracked-blob",
-                                         policy_module=policy_module)
+                                         policy_module=policy_module,
+                                         machine_path_lines=machine_path_lines)
     if not analysis["complete"] or analysis["refusal"] is not None or analysis["unresolved"]:
         raise ValueError("incomplete-review-candidates")
     header = b"blob " + str(len(raw)).encode("ascii") + b"\0"
@@ -1889,6 +1891,17 @@ def build_review_occurrences(raw: bytes, path: bytes, *, object_format: str,
     return tuple(sorted(occurrences, key=lambda row: row["id"]))
 
 
+def _review_packet(occurrences, repository, modes, range_scope, policy_module):
+    occurrences = sorted(occurrences, key=lambda row: row["id"])
+    ids = [row["id"] for row in occurrences]
+    if not ids or len(ids) != len(set(ids)):
+        raise ValueError("empty-or-duplicate-review-candidates")
+    body = {"repository": repository, "modes": modes, "rangeScope": range_scope,
+            "occurrences": occurrences}
+    body = json.loads(policy_module.C(body))
+    return dict(body, packetId=policy_module.candidate_packet_id(body))
+
+
 def build_review_packet(subjects, *, repository: dict, modes: list[str],
                         range_scope: dict | None, policy_module) -> dict:
     """Build one review assignment from the scan owner's captured blob inputs.
@@ -1902,15 +1915,59 @@ def build_review_packet(subjects, *, repository: dict, modes: list[str],
         occurrences.extend(build_review_occurrences(raw, path,
             object_format=repository["objectFormat"], git_mode=git_mode,
             policy_module=policy_module))
-    occurrences.sort(key=lambda row: row["id"])
-    ids = [row["id"] for row in occurrences]
-    if not ids or len(ids) != len(set(ids)):
-        raise ValueError("empty-or-duplicate-review-candidates")
-    body = {"repository": repository, "modes": modes, "rangeScope": range_scope,
-            "occurrences": occurrences}
-    # Copy through canonical JSON so later caller mutations do not change scope.
-    body = json.loads(policy_module.C(body))
-    return dict(body, packetId=policy_module.candidate_packet_id(body))
+    return _review_packet(occurrences, repository, modes, range_scope, policy_module)
+
+
+def capture_staged_review() -> dict:
+    """Capture a private reviewer assignment from the current repository index.
+
+    Root must deliver this evidence privately to the real commissioned reviewer.
+    This read-only API neither approves findings nor prints potentially secret
+    content. It is staged-only, not a native-push/range capture or clean receipt.
+    """
+    root = _repo_root()
+    if Path.cwd().resolve() != root.resolve():
+        raise ValueError("staged-review-requires-repository-root")
+    policy = _load_review_policy_module()
+    deadline = time.monotonic() + _SCAN_DEADLINE_SECONDS
+    observed, _ = _capture_review_repository(policy, root, deadline)
+    if observed["status"] != "captured":
+        raise ValueError("staged-review-repository-unavailable")
+    bindings = {}
+    paths, blobs, lines = _tracked_files(review_bindings=bindings)
+    occurrences, unsupported, content = [], [], {}
+    for path in paths:
+        git_mode, blob_oid, raw_path = bindings[path]
+        raw = blobs[path]
+        locator = base64.b64encode(raw_path).decode("ascii")
+        if _filename_findings(path, "tracked-blob"):
+            unsupported.append({"rawPathBase64": locator, "reason": "filename-finding"})
+        if git_mode not in ("100644", "100755") or _is_binary(raw):
+            unsupported.append({"rawPathBase64": locator, "reason": "unsupported-review-subject"})
+            continue
+        try:
+            rows = build_review_occurrences(raw, raw_path,
+                object_format=observed["repository"]["objectFormat"], git_mode=git_mode,
+                policy_module=policy, machine_path_lines=lines[path])
+        except ValueError:
+            unsupported.append({"rawPathBase64": locator, "reason": "incomplete-review-candidates"})
+            continue
+        if any(row["blobOid"] != blob_oid for row in rows):
+            raise ValueError("staged-review-object-mismatch")
+        occurrences.extend(rows)
+        if rows:
+            content[blob_oid] = {"rawBase64": base64.b64encode(raw).decode("ascii"),
+                                "sha256": hashlib.sha256(raw).hexdigest()}
+    current = {}
+    current_paths, current_blobs, current_lines = _tracked_files(review_bindings=current)
+    again, _ = _capture_review_repository(policy, root, deadline)
+    if (current_paths != paths or current_blobs != blobs or current_lines != lines
+            or current != bindings or again != observed):
+        raise ValueError("staged-review-drift")
+    packet = (_review_packet(occurrences, observed["repository"],
+              ["staged-blob-text"], None, policy) if occurrences else None)
+    return {"status": "unsupported" if unsupported else "reviewable" if packet else "no-candidates",
+            "packet": packet, "content": content, "unsupported": unsupported}
 
 
 def project_review_candidate(raw: bytes, path: bytes, detector: dict, review_region: dict, *, policy_module) -> dict:
@@ -5410,7 +5467,8 @@ def main(argv: list[str] | None = None) -> int:
             review_deadline = time.monotonic() + _SCAN_DEADLINE_SECONDS
             need_repository = any(
                 not _is_binary(blobs[path]) and _content_hits(
-                    blobs[path].decode("utf-8", "replace"), path, lambda _line: (), max_findings=1,
+                    blobs[path].decode("utf-8", "replace"), path, find_machine_paths,
+                    machine_path_lines=machine_path_lines_by_path[path], max_findings=1,
                 ) for path in paths
             )
             review_evaluation, exchanges = _prepare_review_evaluation(

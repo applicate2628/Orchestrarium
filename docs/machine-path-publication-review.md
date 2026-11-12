@@ -24,6 +24,14 @@ This uses the existing Root trust boundary, not new authentication of a JSON doc
 
 Offline tests generate 1, 6 and 1000 distinct occurrences, use actual scanner partial-credit evaluation, reject edited occurrence fields and invalid verdicts, and verify that revocation restores findings. Synthetic test authority does not establish authority for a user's repository.
 
+## Staged capture for Root dispatch
+
+From the selected repository root, the scanner owner calls `capture_staged_review()` before commissioning the native reviewer. This read-only operation captures the Git index postimage (not working-tree substitutions), repository identity and the existing added-line selection, and rechecks all captured inputs before returning. The result contains `packet`, `content` indexed by blob object ID, and explicit `unsupported` entries. `content` carries base64-encoded exact bytes and SHA-256 once per blob; occurrence paths and byte regions remain in the generated packet. Never transcribe these fields.
+
+Root delivers the generated packet together with its private content evidence to the actual commissioned security reviewer. Content may contain secrets: do not print it to ordinary logs, public reports or a publication payload. The helper does not emit stdout, write policy or dispatch a model. `no-candidates` is not a clean scan; unsupported filename, binary, nonordinary or unrepresented subjects are retained as unresolved review coverage. A reviewable packet does not authorize those subjects.
+
+After genuine host delivery, Root passes the retained packet and exact received result bytes to `finalize_received_review`, with actual host/artifact references and existing apply authority. Then run the existing fresh staged scanner. Its path-only findings now request repository observation just as secret findings do, allowing exact approved path decisions to be evaluated without relaxing detection. Changed and revoked findings still block. This is the staged increment only: range and native-push selection must be captured by their respective traversal owners; do not reuse this staged packet as their complete capture or publication receipt.
+
 ## Terms and Abbreviations
 
 - API: application programming interface; these helpers are callable library functions, not new terminal commands.

@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-12
 
+- Staged review now captures its own index packet and private byte evidence for Root dispatch, with drift checks and explicit unsupported coverage. Fresh staged scans also evaluate approved path-only findings against their repository identity instead of incorrectly retaining them after review.
+
 - Portable review preparation now resolves the actual Git common-directory configuration for linked worktrees and holds their indirection files during preview. This removes a plain-checkout path assumption without expanding executable trust, configuration support or native-transfer scope.
 
 - Root can now finalize a scanner-generated review packet using the actual delivered reviewer decisions, without hand-building occurrence records or policy hashes. The existing owner computes identities and current preimages and reuses atomic promotion/readback; packet drift and revoked replays refuse. This preserves Root authority, fresh scanning and publication controls rather than trusting report labels or adding a new permission stage.

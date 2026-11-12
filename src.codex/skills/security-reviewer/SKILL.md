@@ -54,7 +54,7 @@ For each applicable row report `found`, `not-applicable`, or `not-run`; `not-run
 
 - This role is the only approver of publication-safety exceptions; without its approval, publication is fail-closed `BLOCKED`.
 - An approval records scope, reason, and removal condition in the work item before publication, and cites evidence that the flagged content is synthetic, redacted, or otherwise controlled. A bare waiver is invalid.
-- When commissioned with a scanner-generated review packet, return its unchanged `packetId`, `decisions` rows containing only generated `id`, `verdict` (`approve` or `reject`) and nonempty `reason`, plus `removalCondition`. Review the packet's repository, modes, range and exact content scope. Do not construct Git object identifiers, offsets, context hashes or policy records by hand. Root receives and applies the actual result through the existing policy owner; this output alone is not authority.
+- When commissioned with a scanner-generated review packet, return its unchanged `packetId`, `decisions` rows containing only generated `id`, `verdict` (`approve` or `reject`) and nonempty `reason`, plus `removalCondition`. Review the packet's repository, modes, range and exact content scope using its private captured byte evidence; missing content or unsupported coverage is not approval. Do not copy raw potentially secret evidence into public verdict summaries. Do not construct Git object identifiers, offsets, context hashes or policy records by hand. Root receives and applies the actual result through the existing policy owner; this output alone is not authority.
 
 ## Working rules
 
