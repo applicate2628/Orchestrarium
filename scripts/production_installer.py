@@ -2304,8 +2304,9 @@ class _InstallTransaction:
     def _binding_identity_matches(
         expected_identity: tuple[int, int, int, int],
         observed_identity: tuple[int, int, int, int],
+        *, exact_permissions: bool = False,
     ) -> bool:
-        """Compare Windows ordinary directories by object identity, not raw metadata."""
+        """Compare object bindings without Windows-only metadata projection noise."""
         identities = (expected_identity, observed_identity)
         if any(
             type(identity) is not tuple
@@ -2327,8 +2328,17 @@ class _InstallTransaction:
                 and (expected_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT) == 0
                 and (observed_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT) == 0
             )
-            if ordinary:
+            if ordinary and not exact_permissions:
                 return (expected_device, expected_file_id) == (observed_device, observed_file_id)
+        if (stat.S_ISREG(expected_mode) and stat.S_ISREG(observed_mode)
+                and not (expected_attributes | observed_attributes) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+            # Windows lstat synthesizes execute bits from the filename (.exe,
+            # .cmd, etc.); fstat on the same held object does not. These bits
+            # are not Windows access authority. Keep every other mode bit,
+            # attribute and the full device/file identity exact.
+            execute_bits = stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+            return (expected_device, expected_file_id, expected_mode & ~execute_bits, expected_attributes) == (
+                observed_device, observed_file_id, observed_mode & ~execute_bits, observed_attributes)
         return expected_identity == observed_identity
 
     @staticmethod
@@ -4225,7 +4235,8 @@ class _InstallTransaction:
                      native_proof: _NativeNodeProof | None = None) -> tuple[int, int, int, int]:
         """Project this platform's chmod producer result before accepting readback."""
         expected = _InstallTransaction._chmod_identity(before, requested)
-        if _CreateOnlyMutablePath._identity(path) != before:
+        if not _InstallTransaction._binding_identity_matches(
+                before, _CreateOnlyMutablePath._identity(path), exact_permissions=True):
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal permission beforeimage")
         if os.name == "nt":
             if native_proof is None:
@@ -4241,7 +4252,8 @@ class _InstallTransaction:
                 metadata = bound.python_metadata()
                 identity = (metadata.st_dev, metadata.st_ino, metadata.st_mode,
                             getattr(metadata, "st_file_attributes", 0))
-                if identity != before or bound.proof != native_proof:
+                if (not _InstallTransaction._binding_identity_matches(
+                        before, identity, exact_permissions=True) or bound.proof != native_proof):
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: permission native identity")
                 bound.set_readonly(not bool(requested & stat.S_IWRITE))
                 if bound.proof != native_proof:
@@ -4251,9 +4263,11 @@ class _InstallTransaction:
         else:
             os.fchmod(descriptor, stat.S_IMODE(requested))
         actual = _CreateOnlyMutablePath._identity(path)
-        if actual != expected:
+        if not _InstallTransaction._binding_identity_matches(expected, actual, exact_permissions=True):
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal permission transition")
-        return actual
+        # Preserve the caller's handle/path metadata representation after the
+        # native mutation and exact permission readback have proved it current.
+        return expected
 
     @staticmethod
     def _clear_owned_readonly(path: Path, before: tuple[int, int, int, int]) -> tuple[int, int, int, int]:

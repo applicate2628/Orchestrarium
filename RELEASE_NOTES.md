@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-12
 
+- Windows installer snapshots now recognize filename-derived executable bits as a metadata projection rather than a replaced file. Existing command/executable files no longer block a global update solely because handle and path metadata differ; file identity, attributes, write bits, reparse checks and non-Windows semantics remain enforced.
+
 - Codex installation now explicitly reports when an unselected Claude transport generation is preserved rather than updated. Independent canonical updates continue through the existing owner without overwriting incompatible peer files, manifests or receipts.
 
 - Range/native review capture now collects private verified bytes inside the existing traversal and builds exact-commit packets without manual fields. Unsupported metadata/direct-root coverage and capture limits remain explicit; failed settlement or currentness returns no partial evidence. This does not grant reviewer authority or publication.
