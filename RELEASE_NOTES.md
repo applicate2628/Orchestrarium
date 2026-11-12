@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-12
 
+- Shared hook/settings serialization now refuses non-finite numeric values instead of emitting invalid JSON. This also preserves existing Claude settings when a valid large exponent overflows the runtime float during a Lead-default merge. Finite values and the existing UTF-8 wire format remain unchanged.
+
 - Claude main-agent settings admission now refuses non-JSON NaN/Infinity constants before rewriting user settings, including nested values; valid finite numeric values and quoted strings remain accepted.
 
 - Codex catalogue runtime diagnostics now reject malformed quoted metadata and unsupported structured scalar shapes instead of reporting them as complete. Offline estimates stay unchanged; this bounded check does not claim full YAML validation.

@@ -405,7 +405,7 @@ def encode_hook_config(data: dict[str, Any]) -> bytes:
     Planning has no filesystem effect. The standalone writer and an admitted
     parent writer consume these same bytes; neither owns a second serializer.
     """
-    text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    text = json.dumps(data, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
     return text.replace("\n", os.linesep).encode("utf-8")
 
 
