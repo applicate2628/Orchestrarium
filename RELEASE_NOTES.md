@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-12
 
+- Claude main-agent settings admission now refuses non-JSON NaN/Infinity constants before rewriting user settings, including nested values; valid finite numeric values and quoted strings remain accepted.
+
 - Windows replacement staging preserves inherited ACLs even when a file retains permissions from a different parent. A documented security-only backup stream restores the exact captured policy on the held new-object handle; it does not recompute inherited ACEs, enable privileges, or change existing-object ACLs.
 
 - Windows replacement staging now restores the native auto-inheritance model on newly created, transaction-owned objects before copying payloads. Owner, group, ordered ACL and all policy flags must read back exactly; existing-object permissions and drift checks are unchanged.
