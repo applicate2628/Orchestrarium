@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "package": "cryptography",
+  "packageVersion": "50.0.2",
+  "component": "OpenSSL",
+  "componentVersion": "4.0.3",
+  "componentSource": {
+    "url": "https://github.com/openssl/openssl/releases/download/openssl-4.0.3/openssl-4.0.3.tar.gz",
+    "sha256": "325b5c806167c13b40b1ffeadfe0248197c00eccc4cf123ec1e28d2d2fd216d9",
+    "versionMember": "openssl-4.0.3/VERSION.dat",
+    "versionMemberSha256": "10a0068332a55a6621fe7f2a8b6f6c775cb6b30b5530a91f8513b347da4d9d6e"
+  },
+  "upstreamLicense": {
+    "path": "openssl-4.0.3/LICENSE.txt",
+    "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",
+    "bytes": 10175,
+    "declaredLicense": "Apache-2.0"
+  },
+  "upstreamRootNotice": null,
+  "copyrightSource": {
+    "path": "openssl-4.0.3/README.md",
+    "sha256": "ae4d7773db05353b31ce1a022bac002df03506d818e94ea087b23a80c8e4084f",
+    "lines": [
+      "Copyright (c) 1998-2026 The OpenSSL Project Authors",
+      "Copyright (c) 1995-1998 Eric A. Young, Tim J. Hudson",
+      "All rights reserved."
+    ]
+  },
+  "platforms": {
+    "windows-x64": {
+      "wheel": "cryptography-50.0.2-cp315-abi3.abi3t-win_amd64.whl",
+      "wheelSha256": "c423ab384a46c4dff7217b2ea5ba2e11cffdeab6441acd04cf65a369caf0366c",
+      "sbomPath": "cryptography-50.0.2.dist-info/sboms/sbom.json",
+      "sbomSha256": "5b5eea08dd952a16eef188f7a85ad439a4409efa0e2bce9ca339a4de9c8db3f0",
+      "shippedLicensePath": "cryptography-50.0.2.dist-info/licenses/LICENSE.APACHE",
+      "shippedLicenseSha256": "aac73b3148f6d1d7111dbca32099f68d26c644c6813ae1e4f05f6579aa2663fe",
+      "upstreamLicenseIsExactPrefix": true
+    },
+    "linux-x64": {
+      "wheel": "cryptography-50.0.2-cp315-abi3.abi3t-manylinux_2_34_x86_64.whl",
+      "wheelSha256": "e105ab60406787da31fccc883fc0f733af1efd78f0136a4599692c4083a73d0c",
+      "sbomPath": "cryptography-50.0.2.dist-info/sboms/sbom.json",
+      "sbomSha256": "90a9c8d03d95672422f4e7c611fb6d35d1a7c5fed98d032d9dc57d8965e239e6",
+      "shippedLicensePath": "cryptography-50.0.2.dist-info/licenses/LICENSE.APACHE",
+      "shippedLicenseSha256": "aac73b3148f6d1d7111dbca32099f68d26c644c6813ae1e4f05f6579aa2663fe",
+      "upstreamLicenseIsExactPrefix": true
+    }
+  },
+  "scope": "Technical attribution mapping from retained wheel SBOMs to exact downloaded source archive and already shipped Apache license text. Not independent publisher authentication, complete native-dependency attribution or legal clearance."
+}

@@ -319,3 +319,7 @@ The existing Lead package/receipt update carries these sections for Codex and th
 ### Target-local publication
 
 An explicit native publication entry is available for an already admitted local execution context. See [requirements, usage and transport limitations](docs/target-local-publication.md). It does not admit previously blocked remote carriers.
+
+## Portable bundled Python
+
+Local distribution assembly and bundle-relative launch are described in [scripts/distribution/README.md](scripts/distribution/README.md). This preserves the existing provider installation layout; it does not enable experimental SDK adapters.

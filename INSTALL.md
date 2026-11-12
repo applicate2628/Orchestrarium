@@ -424,3 +424,7 @@ The normal pack install carries `check-git-push-gate.py --target-local-push`; ma
 ### Windows interpreter paths
 
 Supported literal Windows interpreter and hook paths may contain spaces or Unicode. The installer preserves existing simple command bytes and rejects shell-expanding characters rather than evaluating them. See [Windows hook path rendering](docs/windows-hook-path-rendering.md) for the verified shell boundary and the distinction between installation-time project registrations and portable plugin-relative bundles.
+
+## Portable bundled Python
+
+Local distribution assembly and bundle-relative launch are described in [scripts/distribution/README.md](scripts/distribution/README.md). This preserves the existing provider installation layout; it does not enable experimental SDK adapters.

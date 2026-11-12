@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-12
 
+- Add qualified local bundled-Python assembly on the current provider layout, with relative launch paths, no system-Python fallback and pre/post-copy parity checks. Experimental SDK adapter migration remains separate.
+
 - Root installation now preserves the invoking project directory when dispatching Codex or Claude, so relative targets and default project discovery do not silently select the Orchestrarium checkout.
 
 - Simplified installer receipt parsing by sharing the identical duplicate-key check; Lead and other skill receipts retain their separate validation and error contracts.

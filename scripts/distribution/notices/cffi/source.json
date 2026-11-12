@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "package": "cffi",
+  "packageVersion": "2.1.1",
+  "target": "windows-x64",
+  "sourceUrl": "https://files.pythonhosted.org/packages/9e/ef/008a1939e372c06329a3fce4279c02f328488f3526744906eeec3da7ad5f/cffi-2.1.1.tar.gz",
+  "sourceSha256": "dd31f52ea1086513bb9df30f8fcee9b8918323ae067a3d5b78bc826a000712be",
+  "releaseMetadataUrl": "https://pypi.org/pypi/cffi/2.1.1/json",
+  "wheelSha256": "e6e8cff14d6fb0be70a09c0bdc58096f501952d04624ebf867e0e56da2df8960",
+  "selectionEvidence": "setup.py lines 132-151; retained Windows binary diagnostic references src/c/libffi_x86_x64/ffi.c",
+  "noticeSources": {
+    "cffi-2.1.1/src/c/libffi_x86_x64/ffi.c": {
+      "sourceSha256": "1abda6df884d78f33be1ee8abf99c6dc1c8b60b6f72ac41ac27b42a98329334a",
+      "headerSha256": "108731d17591067d0392bcd1fad6554b0f77fb2c60e265b6775e20de4f901bea"
+    },
+    "cffi-2.1.1/src/c/libffi_x86_x64/ffi.h": {
+      "sourceSha256": "96cc1f0392c280471c86164b31a5d5fbbce3141376c352ddc187d531cc740d0f",
+      "headerSha256": "9a09f772e1b95b2eb12af72ea6ba091bc856f5b94af6cb0d25eb087ccb1cd8e6"
+    },
+    "cffi-2.1.1/src/c/libffi_x86_x64/ffi_common.h": {
+      "sourceSha256": "70fc6e9f815ba8c6320c0b8a00d6c06ed763a58847708eb694123c687ddd5a65",
+      "headerSha256": "6d4f3926199e26dc8e8d53db6885c1ccfbe2eb929c0017f73a57e94c99563a73"
+    },
+    "cffi-2.1.1/src/c/libffi_x86_x64/ffitarget.h": {
+      "sourceSha256": "f4fb7eaffbe13a11035174284eba68934f3cf41eb16d044f157d8bdd966b14da",
+      "headerSha256": "f6e1b2b3945d8ef608d7428baaed8664f976d69e9d2b115ff1aa640eb3deda18"
+    },
+    "cffi-2.1.1/src/c/libffi_x86_x64/prep_cif.c": {
+      "sourceSha256": "e04a2106e3f14333d5f79515d65fbb7b177de59b520b6860e95d5869202bf6af",
+      "headerSha256": "f45f79a1d249632c1d7318810a93d439f50e7c8676272af749393b5699867aa3"
+    },
+    "cffi-2.1.1/src/c/libffi_x86_x64/types.c": {
+      "sourceSha256": "f398aad1c87cb8168d29f9ad1222e6e250b83847272b3caad21db3319a5ec2a5",
+      "headerSha256": "6a96bc0004cfb2d1f379b843cf16f53e8ec1b539b9beb56d5a8486ecfc7c2856"
+    }
+  },
+  "prebuiltObject": {
+    "sha256": "fa75a54e8ec34f6c4bd67edcfd4d484a75a7c23a0ffc8952ccf9a3fd14d8a3f3",
+    "bytes": 1176,
+    "binary": true
+  },
+  "scope": "Supplemental attribution from exact published source; not exact-build authentication, Linux libffi-version evidence or legal clearance."
+}
