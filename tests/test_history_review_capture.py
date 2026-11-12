@@ -83,3 +83,22 @@ class HistoryReviewCaptureTests(unittest.TestCase):
         self.assertEqual(result['status'],'unsupported')
         self.assertIn('tree-path',result['unsupported'])
         self.assertIsNone(result['packet'])
+
+    def test_settlement_refusal_discards_private_evidence(self):
+        self.history_case();original=self.module._finalize_reader
+        async def settle_then_refuse(reader):
+            await original(reader)
+            return self.module._refusal('PS-MSG-REAP','synthetic-fault')
+        with self.in_root(),patch.object(self.module,'_finalize_reader',side_effect=settle_then_refuse):
+            result=self.module.capture_history_review('origin','refs/heads/main')
+        self.assertEqual(result['status'],'refused')
+        self.assertIsNone(result['packet']);self.assertEqual(result['content'],{})
+
+    def test_direct_native_blob_is_not_a_commit_grant(self):
+        path=self.root/'direct.txt';path.write_bytes(b'C:/Users/'+b'Synthetic/direct\n')
+        oid=self.git('hash-object','-w',str(path)).strip().decode()
+        payload=self.payload([(b'refs/tags/blob',oid,b'refs/tags/blob','0'*40)])
+        with self.in_root():result=self.module.capture_history_review(native_payload=payload)
+        self.assertEqual(result['status'],'unsupported')
+        self.assertIn('non-commit-or-nonordinary-subject',result['unsupported'])
+        self.assertIsNone(result['packet'])
