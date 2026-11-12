@@ -2,6 +2,8 @@
 
 This monorepo ships a Python-owned root installer (`install.py`) plus the thin POSIX launcher `install.sh`. They require Python 3.13 or newer, offer the supported Codex and Claude Code packs, then forward arguments to the matching pack-specific installers in the `scripts/` directory.
 
+The root installer keeps the calling directory: relative `--target` paths are resolved there, just as with the provider-specific entrypoints. Invoke it by an absolute path when installing from another project.
+
 ## Temporary POSIX installation hold
 
 This pre-SDK source refuses Codex and Claude installer operations on POSIX hosts (Linux, macOS and Windows Subsystem for Linux) with `E_POSIX_DISPOSAL_UNQUALIFIED` and exit status 1. The hold covers default, global and project installation, updates and `--dry-run`; `--force` does not bypass it. Rejection follows argument parsing, before target resolution, staging or transaction creation. `--help` and argument-error reporting remain available.
