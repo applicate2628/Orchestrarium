@@ -1058,7 +1058,7 @@ class _WindowsBoundNode:
                 attributes = ObjectAttributes(ctypes.sizeof(ObjectAttributes), parent.live_handle,
                                                ctypes.pointer(unicode), 0x40, security if security.value else None, None)
                 status_block, handle = IoStatus(), wintypes.HANDLE()
-                access = 0x13019F | (0x40000 if security_image is not None
+                access = 0x13019F | (0xC0000 if security_image is not None
                                      and security_image.policy[3] & 0x400 else 0)
                 status = function(ctypes.byref(handle), access, ctypes.byref(attributes),
                                   ctypes.byref(status_block), None, 0x80, 7, 2,
@@ -1165,7 +1165,7 @@ class _WindowsBoundNode:
         """Restore native auto-inheritance only on an already-recorded empty birth.
 
         NtCreateFile can omit AUTO_INHERITED despite preserving the exact ACL.
-        SetSecurityInfo establishes that inheritance model before payload writes.
+        BackupWrite restores that policy without recomputing parent inheritance.
         No other creation mismatch is repair authority; normal drift stays exact.
         """
         if observed == expected:
@@ -1177,25 +1177,47 @@ class _WindowsBoundNode:
                 or not expected.policy[3] & auto_inherited
                 or observed.policy[3] != expected.policy[3] & ~auto_inherited):
             return observed  # The existing strict readback rejects this mismatch.
-        ctypes, wintypes, _kernel, *_rest = self._api()
+        ctypes, wintypes, kernel, *_rest = self._api()
         import struct
-        descriptor = ctypes.create_string_buffer(expected.descriptor)
-        dacl = struct.unpack_from("<I", expected.descriptor, 16)[0]
         # Missing/NULL DACL is not an inherited policy repair recipe.
-        if not dacl:
+        if not struct.unpack_from("<I", expected.descriptor, 16)[0]:
             return observed
-        setter = ctypes.WinDLL("advapi32", use_last_error=True).SetSecurityInfo
-        setter.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
-                           ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
-        setter.restype = wintypes.DWORD
-        inheritance = 0x80000000 if expected.policy[3] & 0x1000 else 0x20000000
-        error = setter(self.live_handle, 1, 4 | inheritance, None, None,
-                       ctypes.c_void_p(ctypes.addressof(descriptor) + dacl), None)
-        if error:
-            raise ctypes.WinError(error)
-        if self.proof != self.creator_proof:
-            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: security creator identity")
-        return self.security_image()
+        # Documented file-security restore API: synchronous held creator handle,
+        # WRITE_OWNER|WRITE_DAC, no SACL access or token privilege changes.
+        write = kernel.BackupWrite
+        write.argtypes = (wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD,
+                          ctypes.POINTER(wintypes.DWORD), wintypes.BOOL, wintypes.BOOL,
+                          ctypes.POINTER(ctypes.c_void_p))
+        write.restype = wintypes.BOOL
+        payload = struct.pack("<IIqI", 3, 2, len(expected.descriptor), 0) + expected.descriptor
+        buffer = ctypes.create_string_buffer(payload)
+        context, written = ctypes.c_void_p(), wintypes.DWORD()
+        primary = None
+        try:
+            if not write(self.live_handle, buffer, len(payload), ctypes.byref(written),
+                         False, True, ctypes.byref(context)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if written.value != len(payload):
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: incomplete security stream")
+            if self.proof != self.creator_proof:
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: security creator identity")
+            return self.security_image()
+        except BaseException as error:
+            primary = error
+            raise
+        finally:
+            if not write(self.live_handle, None, 0, ctypes.byref(written),
+                         True, False, ctypes.byref(context)):
+                cleanup = ctypes.WinError(ctypes.get_last_error())
+                if primary is None:
+                    raise cleanup
+                raise _InstallFailure(
+                    "E_ROLLBACK_SETTLEMENT_FAILED", "native-security-release", primary,
+                    members=(_RollbackFailureMember(
+                        "backup", -1, str(self.path), "E_ROLLBACK_BACKUP_CLEANUP_FAILED",
+                        str(cleanup), participant="backup", cause_exception=cleanup),),
+                    recovery_path=self.born_path,
+                ) from primary
 
     @property
     def proof(self) -> _NativeNodeProof:

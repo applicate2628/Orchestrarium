@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from test_windows_tree_security_preservation import installer, _apis, _security
+from test_windows_tree_security_preservation import installer, _apis, _security, _create_protected
 
 
 def initialize_fixture_auto_inheritance(path):
@@ -56,6 +56,33 @@ class AutoInheritedSecurityTests(unittest.TestCase):
         owner.replace_exact_tree(Path('installed'), self.digest, self.source)
 
     def test_native_replacement_preserves_auto_inheritance(self):
+        with installer._InstallTransaction([self.target], enabled=True) as transaction:
+            self.replace(transaction)
+            self.assertEqual((self.target / 'leaf.txt').read_bytes(), b'new')
+            self.assertEqual({p: _security(self.target / p) for p in self.previous}, self.previous)
+            transaction.commit()
+
+    def test_moved_file_keeps_its_own_inherited_acl_not_current_parent_acl(self):
+        restricted = self.root / 'different-original-parent'
+        common = '(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;OW)'
+        _create_protected(restricted, directory=True, sddl='D:P' + common + '(A;OICI;FR;;;WD)')
+        original = restricted / 'leaf.txt'
+        original.write_bytes(b'old')
+        initialize_fixture_auto_inheritance(original)
+        self.target.rename(self.root / 'retained-base-fixture')
+        _create_protected(self.target, directory=True, sddl='D:P' + common + '(A;OICI;FR;;;AU)')
+        original.rename(self.target / 'leaf.txt')
+        reference = self.target / 'parent-policy-reference.txt'
+        reference.write_bytes(b'parent-policy reference')
+        initialize_fixture_auto_inheritance(reference)
+        with installer._WindowsBoundNode(self.target / 'leaf.txt', security=True) as moved, \
+             installer._WindowsBoundNode(reference, security=True) as inherited:
+            moved_policy, parent_policy = moved.security_image(), inherited.security_image()
+        self.assertTrue(moved_policy.policy[3] & 0x400)
+        self.assertNotEqual(moved_policy.policy[2], parent_policy.policy[2])
+        reference.rename(self.root / 'retained-parent-policy-reference.txt')
+        self.previous = {p: _security(self.target / p) for p in (Path('.'), Path('leaf.txt'))}
+        self.digest = installer._tree_sha256(self.target)
         with installer._InstallTransaction([self.target], enabled=True) as transaction:
             self.replace(transaction)
             self.assertEqual((self.target / 'leaf.txt').read_bytes(), b'new')

@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-12
 
+- Windows replacement staging preserves inherited ACLs even when a file retains permissions from a different parent. A documented security-only backup stream restores the exact captured policy on the held new-object handle; it does not recompute inherited ACEs, enable privileges, or change existing-object ACLs.
+
 - Windows replacement staging now restores the native auto-inheritance model on newly created, transaction-owned objects before copying payloads. Owner, group, ordered ACL and all policy flags must read back exactly; existing-object permissions and drift checks are unchanged.
 
 - Installer failures now report the line of the installer-owned call when available, without exposing exception text, filesystem paths or frame locals. This makes otherwise generic refusals actionable while retaining redaction and all refusal behavior.
