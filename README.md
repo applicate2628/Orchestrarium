@@ -323,3 +323,5 @@ An explicit native publication entry is available for an already admitted local 
 ## Portable bundled Python
 
 Local distribution assembly and bundle-relative launch are described in [scripts/distribution/README.md](scripts/distribution/README.md). This preserves the existing provider installation layout; it does not enable experimental SDK adapters.
+
+For noninteractive provider selection, use `scripts/install-client.py --client codex` with the existing installer flags; see [INSTALL.md](INSTALL.md). This selects installation, not a model launch.

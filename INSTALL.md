@@ -428,3 +428,11 @@ Supported literal Windows interpreter and hook paths may contain spaces or Unico
 ## Portable bundled Python
 
 Local distribution assembly and bundle-relative launch are described in [scripts/distribution/README.md](scripts/distribution/README.md). This preserves the existing provider installation layout; it does not enable experimental SDK adapters.
+
+## Noninteractive client selection
+
+Use the same production installer without the root menu:
+`python scripts/install-client.py --client codex --target path/to/project --allow-unsafe-target`
+or `python scripts/install-client.py --client claude --global`.
+For supported lifecycle flags, run `python scripts/install-client.py --client codex --help`.
+The client selector uses the current main catalog and forwards remaining arguments to its existing installer. It does not migrate the source layout, add uninstall operations or enable an SDK model adapter. Existing provider-specific entrypoints remain supported.
