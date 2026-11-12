@@ -1,12 +1,16 @@
 # Release Notes
 
-- Added a supplied Copilot machine-path advisory entry and explicit project-relative Windows bundle registration; native host activation and publication enforcement remain unqualified.
-
 - Added an explicit root installer route for the existing Copilot selected-file registration lifecycle; preview remains the default, with no client/runtime activation claim.
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
 ## 2026-11-12
+
+- Added opt-in acceptance against an explicitly selected installed Copilot native hook parser, so maintainers can verify generated registration discovery without starting models or editor windows; execution, trust and editor activation remain separate checks.
+
+- Added a supplied Copilot machine-path advisory entry and explicit project-relative Windows bundle registration; native host activation and publication enforcement remain unqualified.
+
+- Added an explicit root installer route for the existing Copilot selected-file registration lifecycle; preview remains the default, with no client/runtime activation claim.
 
 - Added exact-selected workspace hook create/update/removal with default preview, foreign-handler refusal and trash retention through the existing physical transaction owner. This registration-only lifecycle does not qualify native Copilot activation.
 

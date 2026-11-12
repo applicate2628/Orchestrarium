@@ -41,3 +41,6 @@ not VS Code discovery, workspace trust, actual model delivery or enforcement.
 No Copilot client catalog admission, publication protection, subagent lifecycle,
 or arbitrary tool schemas are claimed. The running editor could discover an
 applied hook; use isolated projects until native acceptance is separately qualified.
+
+The installed shared runtime now has separate [native parser acceptance](copilot-native-discovery.md).
+That result does not qualify editor activation or change the advisory scope.
