@@ -185,6 +185,29 @@ finally:
   for pin in reversed(pins):pin.close()
 
 
+def _repository_config_paths(git, source, env):
+ """Observe local config and indirection files; caller pins then rechecks.
+
+ Git resolves the common directory for ordinary and linked worktrees. This
+ does not authorize an executable or relax the existing config qualifier.
+ """
+ source=pathlib.Path(source).resolve()
+ result=subprocess.run([str(git),'-C',str(source),'rev-parse','--path-format=absolute','--git-dir','--git-common-dir'],env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=10,check=False)
+ if result.returncode or len(result.stdout)>65536:raise ValueError('repository config discovery failed')
+ rows=result.stdout.decode('utf-8','strict').splitlines()
+ if len(rows)!=2 or any(not pathlib.Path(row).is_absolute() for row in rows):raise ValueError('repository config discovery framing')
+ gitdir,common=(pathlib.Path(row) for row in rows)
+ pointers=[]
+ marker=source/'.git'
+ if marker.is_file():pointers.append(marker)
+ elif not marker.is_dir():raise ValueError('unsupported repository root')
+ common_pointer=gitdir/'commondir'
+ if common_pointer.exists() or canonical(gitdir)!=canonical(common):pointers.append(common_pointer)
+ paths=(common/'config',*pointers)
+ if any(not path.is_file() for path in paths):raise ValueError('repository config path unavailable')
+ return tuple(str(path) for path in paths)
+
+
 def prepare_portable_batch(gate, source, remote, decision, received_decision_sha256):
  """Qualified GitHub owner preview only; never promotes or launches a push.
 
@@ -201,11 +224,13 @@ def prepare_portable_batch(gate, source, remote, decision, received_decision_sha
   raise ValueError('unsupported provider environment')
  initial=qualify(GIT,source,remote,env=env,config_args=cfg,approved_gh=gh,approved_gcm=gcm)
  if not initial.eligible:raise ValueError('unqualified portable publication route: '+initial.reason)
- expected={canonical(source/'.git/config'),canonical(pathlib.Path.home()/'.gitconfig'),canonical(r'C:\Program Files\Git\etc\gitconfig')}
+ local_paths=_repository_config_paths(GIT,source,env)
+ expected={canonical(local_paths[0]),canonical(pathlib.Path.home()/'.gitconfig'),canonical(r'C:\Program Files\Git\etc\gitconfig')}
  if {canonical(p) for p in initial.origins}!=expected:raise ValueError('unsupported config origin namespace')
  pins=[];fds=();modules=None
  try:
-  for name in (GIT,gh,*initial.origins,*initial.executables):pins.append(PinnedFile(name))
+  for name in dict.fromkeys((GIT,gh,*local_paths,*initial.origins,*initial.executables)):pins.append(PinnedFile(name))
+  if _repository_config_paths(GIT,source,env)!=local_paths:raise ValueError('repository config paths changed')
   env.update(GIT_CONFIG_GLOBAL=str(pathlib.Path.home()/'.gitconfig'),GIT_CONFIG_SYSTEM=r'C:\Program Files\Git\etc\gitconfig')
   if qualify(GIT,source,remote,env=env,config_args=cfg,approved_gh=gh,approved_gcm=gcm)!=initial:raise ValueError('configuration drift')
   endpoints=subprocess.check_output([GIT,'-C',str(source),*cfg,'remote','get-url','--push','--all',remote],env=env,timeout=10).decode('utf-8').splitlines()

@@ -34,6 +34,17 @@ GitHub HTTPS dry-run on the publication repository, and native hooks producing
 large stdout/stderr output and vetoing transfer. A dry-run is not evidence of
 remote ref creation; successful real publication requires exact ref readback.
 
+## Portable review preparation repository layout
+
+The separate portable-review preview resolves the local configuration through
+Git's actual common directory. Linked worktrees retain pins on both the `.git`
+file and the common-directory pointer, then recheck the resolved paths before
+continuing. Regular repositories keep their existing local configuration.
+This is a repository-layout correction, not a new executable or provider trust
+route: the admitted Windows/GitHub binaries and plain global/system origins
+remain restricted. Includes and per-worktree configuration remain unsupported.
+The native transfer owner retains its existing narrower layout profile.
+
 ## Terms and Abbreviations
 
 - OID: immutable Git object identifier.
