@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-12
+
+- Generate exact review candidates directly from captured blob content and project accepted reviewer decisions by finding ID, verdict and reason. This removes manual transcription of Git identities, byte coordinates and contexts without introducing repository-specific exemptions. Candidate IDs are rechecked against every occurrence field; partial review leaves the remainder blocked. These are data-preparation APIs, not an authenticated receiving adapter, automatic policy promotion or publication permission.
+
 ## 2026-11-11
 
 - General machine-path findings now support exact reviewed occurrences through the existing trusted policy and revocation owner; qualified V5 preserves review finalization. Other occurrences, changed blobs or contexts, and secret findings remain blocked. No repository-specific exemptions or automatic reviewer grants are added.

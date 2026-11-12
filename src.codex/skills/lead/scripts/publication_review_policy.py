@@ -2964,3 +2964,63 @@ def materialize_portable_review(
             raise PolicyInputError("portable-existing-record-conflict")
         return existing
     return prepared
+
+
+def review_candidate_id(occurrence_body: Mapping[str, Any]) -> str:
+    """Stable identity of every generated occurrence field, excluding only ID.
+
+    This is content correlation, not reviewer authentication or policy credit.
+    Both the scanner producer and receiving projection use this single owner.
+    """
+    body = _thaw(occurrence_body)
+    _exact_object(body, ("rawPathBase64", "blobOid", "blobSha256", "blobByteCount",
+                         "gitMode", "detector", "candidate", "reviewRegion", "contexts"),
+                  "review-candidate")
+    return "finding-" + hashlib.sha256(
+        b"orchestrarium.review-candidate.v1\0" + C(body)
+    ).hexdigest()
+
+
+def prepare_candidate_review(record_body: Mapping[str, Any],
+                             verdicts: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """Pure projection for the existing trusted receiving owner; no authority.
+
+    record_body contains scanner-produced occurrences plus the owner's existing
+    repository/scope/provenance fields. Verdict rows are the accepted reviewer's
+    id/verdict/reason decisions, not replacement occurrences. This function does
+    not authenticate an input file, receive a review, or change trusted policy.
+    Only the existing receiving owner may subsequently call promote_decision.
+    """
+    body = _thaw(record_body)
+    if "recordSha256" in body:
+        raise PolicyInputError("candidate-review-unsealed-input-required")
+    # Validate the complete scanner/owner projection before selecting findings.
+    seal_record(body)
+    by_id = {}
+    for occurrence in body["occurrences"]:
+        finding_id = occurrence["id"]
+        occurrence_body = {key: value for key, value in occurrence.items() if key != "id"}
+        if finding_id != review_candidate_id(occurrence_body):
+            raise PolicyInputError("candidate-review-content-id-mismatch")
+        by_id[finding_id] = occurrence
+    selected = []
+    seen = set()
+    reasons = []
+    for value in verdicts:
+        row = _exact_object(_thaw(value), ("id", "verdict", "reason"), "candidate-verdict")
+        finding_id = _require_id(row["id"])
+        reason = _require_text(row["reason"], "candidate-verdict-reason")
+        if finding_id not in by_id or finding_id in seen:
+            raise PolicyInputError("candidate-verdict-unknown-or-duplicate")
+        seen.add(finding_id)
+        if row["verdict"] not in ("approve", "reject"):
+            raise PolicyInputError("candidate-verdict-invalid")
+        if row["verdict"] == "approve":
+            selected.append(by_id[finding_id])
+            reasons.append(finding_id + ": " + reason)
+    if not selected:
+        raise PolicyInputError("candidate-review-no-approved-findings")
+    # Omitted and explicitly rejected findings receive no credit.
+    body["occurrences"] = sorted(selected, key=lambda row: row["id"])
+    body["reason"] = "\n".join(reasons)
+    return seal_record(body)

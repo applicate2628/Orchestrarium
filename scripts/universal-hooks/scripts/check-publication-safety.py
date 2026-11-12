@@ -1852,6 +1852,43 @@ def analyze_review_candidates(raw: bytes, path: bytes, *, subject_kind: str, pol
     return {"complete": True, "candidates": candidates, "unresolved": unresolved, "refusal": None, "pathsRepresented": path_rows is not None}
 
 
+def build_review_occurrences(raw: bytes, path: bytes, *, object_format: str,
+                             git_mode: str, policy_module) -> tuple[dict, ...]:
+    """Generate review input from captured blob bytes, never grant exceptions.
+
+    The owner supplies bytes from its captured Git object. Identity and byte
+    coordinates are generated here, not transcribed by the reviewer. Full-blob
+    context deliberately makes this an exact-content decision.
+    """
+    if object_format not in ("sha1", "sha256") or git_mode not in ("100644", "100755"):
+        raise ValueError("unsupported-review-subject")
+    analysis = analyze_review_candidates(raw, path, subject_kind="tracked-blob",
+                                         policy_module=policy_module)
+    if not analysis["complete"] or analysis["refusal"] is not None or analysis["unresolved"]:
+        raise ValueError("incomplete-review-candidates")
+    header = b"blob " + str(len(raw)).encode("ascii") + b"\0"
+    blob_oid = hashlib.new(object_format, header + raw).hexdigest()
+    occurrences = []
+    for row in analysis["candidates"]:
+        candidate = row["candidate"]
+        body = {
+            "rawPathBase64": base64.b64encode(path).decode("ascii"),
+            "blobOid": blob_oid,
+            "blobSha256": hashlib.sha256(raw).hexdigest(),
+            "blobByteCount": len(raw),
+            "gitMode": git_mode,
+            "detector": row["detector"],
+            "candidate": candidate,
+            "reviewRegion": _byte_region(raw,
+                min(item["fullMatch"]["startByte"] for item in candidate["contributors"]),
+                max(item["fullMatch"]["endByteExclusive"] for item in candidate["contributors"])),
+            "contexts": [{"id": "complete-blob", "region": _byte_region(raw, 0, len(raw))}],
+        }
+        occurrence_id = policy_module.review_candidate_id(body)
+        occurrences.append(dict(body, id=occurrence_id))
+    return tuple(sorted(occurrences, key=lambda row: row["id"]))
+
+
 def project_review_candidate(raw: bytes, path: bytes, detector: dict, review_region: dict, *, policy_module) -> dict:
     definitions = detector_definitions(policy_module)
     if not isinstance(detector, dict) or definitions.get(detector.get("ruleId"), {}).get("detector") != detector:
