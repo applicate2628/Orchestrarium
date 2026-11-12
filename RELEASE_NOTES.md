@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-12
 
+- Copilot registration preparation now supports explicit platform command fields and preserves Windows child exit status using the existing literal serializer. Isolated JSON/stdin/exit receiving is verified; host discovery and activation remain unqualified.
+
 - Integrated the SDK Copilot pre-tool transport codec with the current shared target-acquisition owner, preserving malformed-input refusal and neutral/deny-only responses. This offline foundation does not register or qualify a native Copilot installation.
 
 - Interactive installation now previews the selected packs before explicit apply confirmation; empty selection cancels instead of installing both. Noninteractive --clients automation retains its existing behavior and provider policy.

@@ -172,7 +172,8 @@ def test_dedicated_registration_command_runs_literal_unicode_path(tmp_path):
                   json.loads(json.dumps(transport.render_registration(command)))["hooks"]["preToolUse"][0]["command"]]
     env = {k: v for k, v in os.environ.items() if k not in {"BASH_ENV", "ENV"}}
     result = subprocess.run(launch, cwd=directory, env=env, capture_output=True,
-                            text=True, encoding="utf-8", timeout=20, check=True)
+                            text=True, encoding="utf-8", timeout=20, check=True,
+                            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
     received = json.loads(result.stdout)
     assert Path(received["script"]) == probe.resolve()
     assert received["args"] == ["fixture"]

@@ -442,3 +442,5 @@ For supported lifecycle flags, run `python scripts/install-client.py --client co
 The client selector uses the current main catalog and forwards remaining arguments to its existing installer. It does not migrate the source layout, add uninstall operations or enable an SDK model adapter. Existing provider-specific entrypoints remain supported.
 
 The offline SDK Copilot transport bridge is integrated without registering a Copilot installer client; see [its qualification boundary](docs/copilot-transport-boundary.md). It does not activate VS Code hooks or models.
+
+Copilot registration formatting can select the documented Windows PowerShell field and preserve child exit status. This is isolated command receiving, not host activation; see the [registration contract](docs/copilot-transport-boundary.md#official-registration-contract-and-isolated-receiving).

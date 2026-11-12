@@ -1089,6 +1089,11 @@ def serialize_windows_hook_command(tokens: Iterable[str]) -> str:
     return " ".join(rendered)
 
 
+def serialize_powershell_hook_command(tokens: Iterable[str]) -> str:
+    """Preserve the child exit code in PowerShell, including invocation failure."""
+    return "$LASTEXITCODE = 1; " + serialize_windows_hook_command(tokens) + "; exit $LASTEXITCODE"
+
+
 def _split_windows_command(command: str) -> list[str]:
     if re.search(r'(?:^|\s)(?:[A-Za-z]:/|//)"', command):
         lexer = shlex.shlex(command, posix=True)

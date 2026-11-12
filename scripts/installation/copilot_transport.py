@@ -167,14 +167,15 @@ def render_pre_tool_use(call: PreToolCall, *, denial_reason: str | None = None,
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", **output}}
 
 
-def render_registration(command: str) -> dict:
+def render_registration(command: str, *, shell: str | None = None) -> dict:
     """Format one dedicated owned file; caller supplies a qualified command.
 
     Command serialization and target identity remain with existing owners.
     This does not install a hook, admit a tool or guarantee native enforcement.
     """
-    if not isinstance(command, str) or not command.strip() or "\0" in command:
+    if (not isinstance(command, str) or not command.strip() or "\0" in command
+            or shell not in (None, "powershell", "bash")):
         raise ValueError("COPILOT-HOOK-REGISTRATION")
     return {"version": 1, "hooks": {"preToolUse": [
-        {"type": "command", "command": command}
+        {"type": "command", shell or "command": command}
     ]}}

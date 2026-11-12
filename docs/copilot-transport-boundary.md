@@ -28,6 +28,40 @@ ownership consistent with shared Lead, host-version dispatch qualification,
 failure/exit behavior, and native receiving evidence under separately authorized
 host runs. Do not enable a new CLIENTS entry merely because these codec tests pass.
 
+## Official registration contract and isolated receiving
+
+Checked on 2026-11-12:
+- [VS Code hook configuration](https://code.visualstudio.com/docs/copilot/customization/hooks)
+  distinguishes the current Copilot harness from the deprecated Local harness.
+  Workspace configuration is `.github/hooks/*.json`; `version: 1` and the
+  `preToolUse` event select the camel-case carrier.
+- [GitHub hook reference](https://docs.github.com/en/copilot/reference/hooks-reference)
+  documents `powershell` on Windows, `bash` on Unix and `command` as a
+  fallback. Applicable hook sources are combined, not replaced.
+  Timeouts fall through to normal permission checks even for preToolUse.
+
+The formatter now accepts an explicit shell selector. Its default output remains
+unchanged; selecting powershell emits only that key, not a Unix fallback.
+The existing literal-path serializer is reused by a PowerShell-specific wrapper
+that initializes LASTEXITCODE to failure and returns the native executable child status exactly; arbitrary PowerShell functions or scripts are not qualified by this wrapper.
+It is not substituted into existing Codex command registrations.
+
+The official pages differ in how they scope shell-free exec/args: the VS Code
+page mentions that form while GitHub labels it CLI-only. This slice therefore
+uses the explicitly documented PowerShell field instead of assuming editor
+support for shell-free execution.
+
+Tests write actual registration JSON in an isolated project, read the configured
+command, feed synthetic event JSON on stdin, and check stdout plus exit 0/2/7.
+A missing executable must not inherit a previous successful LASTEXITCODE.
+User-sibling configuration bytes remain unchanged. These tests run the command
+directly, without a VS Code window, Copilot session, model or live configuration.
+They do not prove discovery, trust, dispatch, host timeout handling or activation.
+
+No installation command is added by this slice: managed registration still needs
+shared-ownership integration and duplicate-source checks. Do not manually enable
+this formatter's output as if it installed Orchestrarium policy enforcement.
+
 ## Terms and Abbreviations
 
 - SDK: software development kit.

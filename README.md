@@ -331,3 +331,5 @@ Local distribution assembly and bundle-relative launch are described in [scripts
 For noninteractive provider selection, use `scripts/install-client.py --client codex` with the existing installer flags; see [INSTALL.md](INSTALL.md). This selects installation, not a model launch.
 
 The offline SDK Copilot transport bridge is integrated without registering a Copilot installer client; see [its qualification boundary](docs/copilot-transport-boundary.md). It does not activate VS Code hooks or models.
+
+Copilot registration formatting can select the documented Windows PowerShell field and preserve child exit status. This is isolated command receiving, not host activation; see the [registration contract](docs/copilot-transport-boundary.md#official-registration-contract-and-isolated-receiving).
