@@ -90,7 +90,7 @@ monthly archive without inventing candidate, active, or closure history.
 
 ## Installation
 
-Explicit selection without a menu: `python install.py --clients codex claude --dry-run`. List supported host integrations with `python install.py --list-clients` (no installation). The portable launcher accepts the same options, for example `.\orche.ps1 --clients codex --dry-run`. Client calls retain the existing installer policy, run once in catalog order, and stop at the first failure; earlier successful calls are not rolled back. The menu remains unchanged when no selection is supplied.
+Explicit selection without a menu: `python install.py --clients codex claude --dry-run`. List supported host integrations with `python install.py --list-clients` (no installation). The portable launcher accepts the same options, for example `.\orche.ps1 --clients codex --dry-run`. Client calls retain the existing installer policy, run once in catalog order, and stop at the first failure; earlier successful calls are not rolled back. Without --clients, the menu previews the selection using the existing installer and asks for explicit y/yes before applying.
 
 
 Use the root router installers for the common path:
@@ -117,10 +117,11 @@ What to install?
 Production installs:
   1) Codex pack
   2) Claude Code
-  3) Codex + Claude (default production install)
+  3) Codex + Claude
+  q/empty) Cancel
 ```
 
-Pressing Enter selects the default production install, `Codex + Claude`. The router then forwards the same arguments to the selected provider-specific installer in `scripts/`. Use `scripts/install-codex.*` or `scripts/install-claude.*` directly when you want deterministic automation on one line.
+Pressing Enter or choosing q cancels. A selection first runs the existing provider --dry-run; only successful previews are followed by an Apply prompt. Empty/no, EOF or interruption at that prompt does not begin apply. --dry-run and --help never prompt for apply. Explicit --clients remains noninteractive and forwards the requested operation unchanged. The router then forwards the same arguments to the selected provider-specific installer in `scripts/`. Use `scripts/install-codex.*` or `scripts/install-claude.*` directly when you want deterministic automation on one line.
 
 The root router runs selected packs sequentially and prints each call's outcome.
 `completed (exit 0)` describes the installer call, not proof of installed or

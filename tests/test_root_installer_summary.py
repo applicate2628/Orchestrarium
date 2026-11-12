@@ -22,7 +22,7 @@ class RootInstallerSummaryTests(unittest.TestCase):
         runner = Mock(side_effect=exits)
         reader = Mock(side_effect=choice) if isinstance(choice, BaseException) else Mock(return_value=choice)
         scope = {"sys": sys, "argparse": argparse, "CLIENTS": {"codex": {"label": "Codex"}, "claude": {"label": "Claude Code"}}, "input": reader, "_run_production": runner}
-        exec(compile(ast.Module(body=[main], type_ignores=[]), "install.py", "exec"), scope)
+        exec(compile(ast.Module(body=[next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_run_selected"), main], type_ignores=[]), "install.py", "exec"), scope)
         class CapturedOutput(io.StringIO):
             def write(self, text):
                 if summary_error is not None and text.startswith("Installer summary:"):
@@ -32,7 +32,10 @@ class RootInstallerSummaryTests(unittest.TestCase):
         out, err = CapturedOutput(), CapturedOutput()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             try:
-                result = scope["main"](list(argv))
+                args = list(argv)
+                if choice in ("1", "2", "3"):
+                    args = ["--clients", *({"1": ["codex"], "2": ["claude"], "3": ["codex", "claude"]}[choice]), *args]
+                result = scope["main"](args)
             except BaseException as caught:
                 result = caught
         return result, runner.call_args_list, out.getvalue(), err.getvalue()
@@ -72,11 +75,11 @@ class RootInstallerSummaryTests(unittest.TestCase):
                 self.assertNotIn("installed", out.lower())
                 self.assertEqual(err, "")
 
-    def test_default_selection_remains_both(self):
+    def test_empty_interactive_selection_cancels(self):
         result, calls, out, err = self.invoke(choice="")
         self.assertEqual(result, 0)
-        self.assertEqual([c.args[0] for c in calls], ["codex", "claude"])
-        self.assertIn("Installer summary:", out)
+        self.assertEqual(calls, [])
+        self.assertIn("Cancelled before preview.", out)
         self.assertEqual(err, "")
 
     def test_arguments_are_forwarded_without_reinterpretation(self):

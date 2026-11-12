@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-12
 
+- Interactive installation now previews the selected packs before explicit apply confirmation; empty selection cancels instead of installing both. Noninteractive --clients automation retains its existing behavior and provider policy.
+
 - Root and portable installers accept explicit --clients selection and read-only --list-clients, avoiding interactive stdin while preserving provider policy and partial-failure summaries.
 
 - Integrate the SDK's noninteractive client entrypoint with the current production installer, preserving its target, ownership and verification rules without adopting the experimental adapter layout.

@@ -18,7 +18,7 @@ class RootClientSelectionTests(unittest.TestCase):
         run = Mock(side_effect=exits)
         reader = Mock(side_effect=AssertionError("explicit selection must not prompt"))
         scope = {"sys": sys, "argparse": argparse, "CLIENTS": {"codex": {"label": "Codex"}, "claude": {"label": "Claude Code"}}, "input": reader, "_run_production": run}
-        exec(compile(ast.Module(body=[main], type_ignores=[]), "install.py", "exec"), scope)
+        exec(compile(ast.Module(body=[next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_run_selected"), main], type_ignores=[]), "install.py", "exec"), scope)
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             try:
