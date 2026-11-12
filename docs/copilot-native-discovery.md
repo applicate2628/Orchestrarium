@@ -59,6 +59,34 @@ to the explicitly supplied runtime. The version above was separately inspected
 for this run. The report execution flag describes the harness call surface, not
 an independent trace of every internal native instruction.
 
+## Composed installed receiving
+
+A separate opt-in test, `tests/test_copilot_installed_receiving.py`, requires
+`ORCHE_COPILOT_BUNDLE` in addition to the explicit native parser and Node paths.
+Supply a freshly assembled Windows bundle from this source. The test compares
+six selected installed source files byte-for-byte with the checkout; this is not
+full release authentication.
+
+The verified chain uses the supplied interpreter and bundle `launch.py` with
+`--permanent-runtime`, then the normal root registration entry. It checks preview,
+apply and unchanged reapply without creating another installation owner. A foreign
+hook file remains intact. The actual native parser loads that installed registration,
+and a standalone PowerShell process executes the exact command returned in its
+parsed configuration, not a reconstructed command.
+
+Positive machine-path advisory, neutral input and malformed-input refusal pass
+before and after moving the project and nested runtime together. Registration
+bytes remain unchanged; a missing bundled executable fails without a system
+Python fallback. The command environment has empty PATH, isolated user/config
+folders, the Windows system root and `PATHEXT=.EXE`. Windows PowerShell needs
+PATHEXT to classify a native executable even when its path is explicit; omitting
+it initially broke this overly stripped fixture, not the real adapter.
+
+This composed test passed on the inspected installed runtime. It still does not
+exercise the editor session target, trust UI, enterprise controls or model/tool
+lifecycle. No production code change was needed to make the existing owners
+compose correctly.
+
 ## Terms and Abbreviations
 
 - SDK: software development kit.

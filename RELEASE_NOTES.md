@@ -6,6 +6,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-12
 
+- Added a composed offline Copilot acceptance scenario using the real bundled root installer, native parser and parsed shell command before and after relocation, verifying the existing ownership chain without models or editor activation claims.
+
 - Added opt-in acceptance against an explicitly selected installed Copilot native hook parser, so maintainers can verify generated registration discovery without starting models or editor windows; execution, trust and editor activation remain separate checks.
 
 - Added a supplied Copilot machine-path advisory entry and explicit project-relative Windows bundle registration; native host activation and publication enforcement remain unqualified.
