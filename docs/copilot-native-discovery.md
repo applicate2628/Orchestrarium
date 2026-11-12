@@ -97,6 +97,32 @@ exercise the editor session target, trust UI, enterprise controls or model/tool
 lifecycle. No production code change was needed to make the existing owners
 compose correctly.
 
+## Actual native hook execution without a model
+
+The composed receiving test additionally invokes the installed native hook processor
+itself, not only the command extracted from its parser. The harness mirrors the
+installed SDK wrapper's `hookProcessorConfigure`, `hookProcessorPreToolUse`, and
+`hookProcessorCompletePreToolUseLifecycle` calls on a hook-only session. It loads
+only the selected native module, never creates an SDK client or chat/model session,
+and executes no proposed tool. The environment contains only isolated test paths
+and Windows shell support, not ambient credentials or user configuration.
+
+Four cases run before relocation, after relocation, and after selected update:
+canonical command advisory, machine-path advisory, neutral content, and unknown
+tool. The native processor delivers the expected additional context without a
+permission allow, ask or denial. Proposed output files and worktrees do not appear.
+Each lifecycle is completed and asynchronous end callbacks are awaited before
+session disposal. The five-second callback deadline is a test failure bound, not
+a production timeout or permission policy. The parent process also has a bounded
+execution timeout.
+
+This is observed installed native execution for the previously identified runtime,
+not a stable public native API contract. Editor workspace trust, session activation,
+model delivery, enterprise policy and publication enforcement remain unqualified.
+The provider shell runner needs PowerShell discovery, so this native test supplies
+only its Windows directory in PATH; the hook itself still addresses bundled Python
+by a relative literal path and has no system-Python fallback.
+
 ## Terms and Abbreviations
 
 - SDK: software development kit.

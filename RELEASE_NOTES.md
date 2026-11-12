@@ -6,6 +6,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-12
 
+- Verified actual installed Copilot native hook execution without a model, including advisory delivery across relocation/update and completed hook lifecycles; editor trust, activation and publication enforcement remain separate qualifications.
+
 - Qualified portable Copilot registration updates and removal through the real bundled root installer and installed native parser, including stale-selection refusal and recoverable previous bytes; documented the operator workflow without claiming editor activation or whole-runtime uninstall.
 
 - Connected Copilot command advisories to the existing shared stray-artifact hook without duplicating command rules or executing proposed commands; publication protection remains unconnected and advisory failures remain nonblocking.

@@ -106,6 +106,15 @@ def test_actual_bundled_root_registration_discovery_execution_and_relocation(tmp
         assert (directory / ".github/hooks/foreign.json").read_bytes() == foreign
         results.append({"hookCount":report["positive"]["snapshot"]["hookCount"],
                         "positive":True,"command_advisory":True,"neutral":True,"malformed_exit":2})
+        native_env = dict(env)
+        native_env["PATH"] = str(powershell.parent)
+        executed = subprocess.run([str(node), str(ROOT / "tests/fixtures/copilot_native_execution.cjs"),
+                                   str(native), str(directory), str(home)], cwd=directory,
+                                  env=native_env, capture_output=True, timeout=60,
+                                  creationflags=subprocess.CREATE_NO_WINDOW)
+        assert executed.returncode == 0, executed.stderr
+        assert json.loads(executed.stdout) == {"cases":4,"nativeHookExecution":True,
+            "modelSessionCreated":False,"toolExecutionRequested":False,"lifecycleCompleted":True}
         return selected_command
     receive(project)
     relocated = tmp_path / "relocated O'Brien [project] 测试"
