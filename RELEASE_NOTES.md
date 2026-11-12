@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-12
 
+- Codex installation now explicitly reports when an unselected Claude transport generation is preserved rather than updated. Independent canonical updates continue through the existing owner without overwriting incompatible peer files, manifests or receipts.
+
 - Range/native review capture now collects private verified bytes inside the existing traversal and builds exact-commit packets without manual fields. Unsupported metadata/direct-root coverage and capture limits remain explicit; failed settlement or currentness returns no partial evidence. This does not grant reviewer authority or publication.
 
 - Staged review now captures its own index packet and private byte evidence for Root dispatch, with drift checks and explicit unsupported coverage. Fresh staged scans also evaluate approved path-only findings against their repository identity instead of incorrectly retaining them after review.

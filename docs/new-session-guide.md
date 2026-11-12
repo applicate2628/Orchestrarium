@@ -96,6 +96,18 @@ Run the smallest useful check first, then the affected pack checks.
 - Do not skip `RELEASE_NOTES.md` for tracked changes that affect installed behavior, governance, routing, role contracts, install surface, or operator workflow.
 - Do not close a semantic control-plane change without the required independent reviewer gate; if the runtime cannot launch that reviewer, record the gate as open.
 
+## Independent provider updates and preserved peers
+
+A Codex installation may update its canonical runtime while retaining a
+separate Claude transport generation. The existing optional-peer route updates
+that projection only when its complete matching predecessor is established;
+otherwise it preserves the entire peer and reports that it was not updated.
+This does not establish cross-provider parity or successful Claude migration.
+Do not replace overlapping transport files while retaining incompatible extra
+members. A required Claude update still needs a compatible complete target and
+the existing ownership/transaction checks; receipt hashes alone do not prove
+that an incoming generation is newer or safe to mix.
+
 ## Terms and Abbreviations
 
 - `AGENTS.md`: Codex-readable governance entrypoint assembled from shared and Codex-specific source.

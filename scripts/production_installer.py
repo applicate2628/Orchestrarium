@@ -12720,6 +12720,9 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 claude_transport_optional=True,
             )
             if canonical_plan.transport_stage is None:
+                if owned_peer_transport_root is not None:
+                    print("  Claude peer transport preserved, not updated: "
+                          "no complete matching predecessor for this unselected provider.")
                 owned_peer_transport_root = None
                 owned_peer_transport_authority = None
             legacy_codex_skill_migrations = (
