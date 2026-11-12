@@ -110,6 +110,53 @@ class CodexDocumentPreparationTests(unittest.TestCase):
         self.assertIsNone(result)
         return output.getvalue()
 
+    def use_canonical_rule_sources(self):
+        shared = (ROOT / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8")
+        provider = (ROOT / "src.codex" / "AGENTS.codex.md").read_text(encoding="utf-8")
+        MemorySource.texts = {
+            str(self.root / "shared" / "AGENTS.shared.md"): shared,
+            str(self.source / "AGENTS.codex.md"): provider,
+        }
+        # Independently spell the existing normalization/ordering contract;
+        # never use the producer under test to compute its expected body.
+        return (self.begin + "\n" + shared.rstrip() + "\n\n"
+                + provider.rstrip() + "\n" + self.end + "\n")
+
+    def test_canonical_owners_remain_complete_inline_in_both_scopes(self):
+        expected = self.use_canonical_rule_sources().encode("utf-8")
+        for project_scope in (False, True):
+            with self.subTest(project_scope=project_scope):
+                self.existing = None
+                result = self.prepare_result(project_scope=project_scope)
+                self.assertEqual(result.after, expected)
+                self.assertEqual(self.writes, [])
+
+    def test_canonical_upgrade_preserves_user_boundaries_and_is_idempotent(self):
+        canonical = self.use_canonical_rule_sources()
+        prefix = "# User rules\r\nСохрани порядок.\r\n"
+        suffix = "\r\n# User suffix\r\n不改变优先级。\r\n"
+        original = prefix + self.begin + "\nOld owned body.\n" + self.end + suffix
+        expected = (prefix + canonical.rstrip("\n") + suffix).encode("utf-8")
+        for project_scope in (False, True):
+            with self.subTest(project_scope=project_scope):
+                self.existing = original
+                upgraded = self.prepare_result(project_scope=project_scope)
+                self.assertEqual(upgraded.after, expected)
+                self.existing = upgraded.after.decode("utf-8")
+                repeated = self.prepare_result(project_scope=project_scope)
+                self.assertEqual(repeated.after, expected)
+        self.assertEqual(self.writes, [])
+
+    def test_canonical_budget_warning_counts_complete_render_not_managed_body(self):
+        canonical = self.use_canonical_rule_sources()
+        self.existing = "# User instructions\r\n" + "规则я\r\n" * 257
+        expected = (canonical + "\n" + self.existing).encode("utf-8")
+        output = self.merge_result(dry_run=True, project_scope=True)
+        self.assertIn(f"rendered document: {len(expected)} UTF-8 bytes", output)
+        self.assertNotEqual(len(expected), len(canonical.encode("utf-8")))
+        self.assertIn("not verified", output)
+        self.assertEqual(self.writes, [])
+
     def test_installer_imports_common_adapter_without_importing_installer(self):
         self.assertIn("render_documents", [a.name for a in self.adapter_imports])
 
