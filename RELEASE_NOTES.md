@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-12
 
+- Preserve existing marked Codex documents on the default installation route instead of treating markers as replacement authority. Changed documents are reported as preserved, exact no-ops are not rewritten, and explicitly selected updates retain their existing transaction and receipt owner.
+
 - Codex installation now explicitly reports when an unselected Claude transport generation is preserved rather than updated. Independent canonical updates continue through the existing owner without overwriting incompatible peer files, manifests or receipts.
 
 - Range/native review capture now collects private verified bytes inside the existing traversal and builds exact-commit packets without manual fields. Unsupported metadata/direct-root coverage and capture limits remain explicit; failed settlement or currentness returns no partial evidence. This does not grant reviewer authority or publication.

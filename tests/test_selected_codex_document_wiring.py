@@ -222,7 +222,9 @@ class SelectedCodexDocumentWiringTests(unittest.TestCase):
         self.require(apply, '(root / "shared" / "AGENTS.shared.md", source / "AGENTS.codex.md")')
         self.require(branch, '_warn_codex_project_budget(selected_updates.items[key].after.decode("utf-8"))')
         self.assertFalse(any(isinstance(node, ast.Try) for node in ast.walk(branch)))
-        self.one(self.definition("_merge_codex_agents"), "_warn_codex_project_budget")
+        warnings = calls(self.definition("_merge_codex_agents"), "_warn_codex_project_budget")
+        self.assertEqual({ast.unparse(call.args[0]) for call in warnings}, {"existing", "content"})
+        self.assertEqual(len(warnings), 2)
         self.require(self.definition("_warn_codex_project_budget"), "len(content.encode('utf-8'))")
 
     def test_one_selected_or_fresh_finalizer_and_receipt_share_transaction(self):

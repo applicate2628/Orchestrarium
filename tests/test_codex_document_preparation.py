@@ -229,7 +229,7 @@ class CodexDocumentPreparationTests(unittest.TestCase):
         self.assertEqual(plan.changes, ())
         self.assertEqual(self.writes, [])
 
-    def test_wrapper_prepares_once_returns_none_and_preserves_written_bytes(self):
+    def test_wrapper_prepares_once_preserves_noop_without_write(self):
         self.existing = "\ufeffPrefix 😀\r\n" + self.pack.rstrip("\n") + "\rTail\n"
         spy = Mock(wraps=self.prepare)
         self.scope["_prepare_codex_agents"] = spy
@@ -237,13 +237,9 @@ class CodexDocumentPreparationTests(unittest.TestCase):
         spy.assert_called_once_with(self.root, self.source, self.target,
                                     mutable_owner=self.owner, project_scope=True)
         self.adapter.assert_called_once()
-        self.assertEqual(len(self.writes), 1)
-        target, content, owner = self.writes[0]
-        self.assertEqual(target, self.target)
-        self.assertIs(owner, self.owner)
-        self.assertEqual(content.encode("utf-8"), self.existing.encode("utf-8"))
-        self.assertEqual(self.events[-1], ("write", str(self.target)))
-        self.assertIn(str(len(content.encode("utf-8"))) + " UTF-8 bytes", output)
+        self.assertEqual(self.writes, [])
+        self.assertNotIn(("write", str(self.target)), self.events)
+        self.assertIn(str(len(self.existing.encode("utf-8"))) + " UTF-8 bytes", output)
         self.assertIn("WARNING: standalone project instruction budget", output)
 
     def test_dry_run_still_prepares_once_but_never_writes(self):

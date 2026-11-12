@@ -70,7 +70,7 @@ class CodexLegacyHeadingRecognitionTests(unittest.TestCase):
         prefix, tail = "USER PREFIX\r\n", "\rUSER TAIL"
         existing = prefix + self.harness.begin + "\nOld\n" + self.harness.end + tail
         self.assertEqual(self.harness.render(existing),
-                         prefix + self.harness.pack.rstrip("\n") + tail)
+                         existing)
 
 
 def _case_test(existing, prefix, tail):

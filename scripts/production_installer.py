@@ -10680,6 +10680,20 @@ def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *
                        project_scope: bool = False) -> None:
     proposed = _prepare_codex_agents(
         root, source, target, mutable_owner=mutable_owner, project_scope=project_scope)
+    if proposed.before is not None:
+        existing = proposed.before.decode("utf-8")
+        visible, _ = _markdown_document_context(existing)
+        if CODEX_BEGIN in visible:
+            if project_scope:
+                _warn_codex_project_budget(existing)
+            # This default route has no received document-ownership claim.
+            # Rendering establishes syntax, not permission to replace a frame.
+            # The explicit current-document transaction owns admitted updates.
+            if proposed.before != proposed.after:
+                print("  WARNING: existing Codex document preserved; managed markers "
+                      "do not establish ownership. Review the document and use "
+                      "--replace-codex-document for an explicitly selected update.")
+            return
     content = proposed.after.decode("utf-8")
     if project_scope:
         _warn_codex_project_budget(content)

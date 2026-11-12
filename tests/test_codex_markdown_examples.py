@@ -67,6 +67,8 @@ class CodexMarkdownExampleTests(unittest.TestCase):
         if dry_run:
             self.assertEqual(self.writes, [])
             return None
+        if not self.writes:
+            return self.existing
         self.assertEqual(len(self.writes), 1)
         target, content, owner = self.writes[0]
         self.assertEqual(target, self.target)
@@ -103,12 +105,12 @@ class CodexMarkdownExampleTests(unittest.TestCase):
     def test_inline_legacy_heading_is_preserved(self):
         self.assert_example_preserved("The heading `# Shared Governance` is only an example.\n")
 
-    def test_real_marked_block_after_fenced_example_is_updated(self):
+    def test_real_marked_block_after_fenced_example_is_preserved(self):
         example = "```markdown\n" + self.begin + "\nExample.\n" + self.end + "\n```\n"
         old = self.begin + "\nOld managed rule.\n" + self.end
         tail = "\n## Project policies\nKeep mine.\n"
         self.assertEqual(self.render(example + old + tail),
-                         example + self.pack.rstrip("\n") + tail)
+                         example + old + tail)
 
     def test_managed_begin_with_prefix_content_refuses_before_writing(self):
         for newline in ("\n", "\r\n", "\r"):
@@ -135,7 +137,7 @@ class CodexMarkdownExampleTests(unittest.TestCase):
                         prefix = bom + indentation
                         suffix = newline + "USER FOOTER"
                         original = prefix + self.begin + newline + "Old" + newline + self.end + suffix
-                        self.assertEqual(self.render(original), prefix + self.pack.rstrip("\n") + suffix)
+                        self.assertEqual(self.render(original), original)
 
     def test_only_one_document_start_bom_is_an_envelope(self):
         for prefix in ("\ufeff\ufeff", "Header\n\ufeff", "Header\r\n\ufeff", "Header\r\ufeff"):
@@ -159,7 +161,7 @@ class CodexMarkdownExampleTests(unittest.TestCase):
                 with self.subTest(newline=newline, whitespace=whitespace):
                     suffix = " USER SUFFIX" + newline + "USER FOOTER"
                     original = self.begin + whitespace + self.end + suffix
-                    self.assertEqual(self.render(original), self.pack.rstrip("\n") + suffix)
+                    self.assertEqual(self.render(original), original)
 
     def test_compact_frame_with_text_refuses_without_write(self):
         for newline in ("\n", "\r\n", "\r"):
@@ -176,14 +178,14 @@ class CodexMarkdownExampleTests(unittest.TestCase):
                 with self.subTest(newline=newline, whitespace=whitespace):
                     suffix = newline + "USER FOOTER"
                     original = self.begin + whitespace + newline + "Old" + newline + self.end + suffix
-                    self.assertEqual(self.render(original), self.pack.rstrip("\n") + suffix)
+                    self.assertEqual(self.render(original), original)
 
-    def test_ordinary_marked_update_remains_compatible(self):
+    def test_ordinary_unclaimed_marked_frame_is_preserved(self):
         prefix = "# User header\nKeep the header.\n"
         old = self.begin + "\nOld managed rule.\n" + self.end
         tail = "\n## Project policies\nKeep mine.\n"
         self.assertEqual(self.render(prefix + old + tail),
-                         prefix + self.pack.rstrip("\n") + tail)
+                         prefix + old + tail)
 
     def test_ordinary_legacy_update_requires_explicit_ownership(self):
         for heading in ("# Shared Governance", "# Codex Platform Rules"):
@@ -209,8 +211,7 @@ class CodexMarkdownExampleTests(unittest.TestCase):
         original = (self.begin + "\n# Shared Governance\nOld managed rule.\n"
                     + "```markdown\nUnclosed example.\n" + self.end
                     + "\n## Project policies\nUSER TAIL KEEP\n")
-        self.assertEqual(self.render(original), self.pack.rstrip("\n")
-                         + "\n## Project policies\nUSER TAIL KEEP\n")
+        self.assertEqual(self.render(original), original)
 
     def test_incomplete_active_marker_never_enters_legacy_replacement(self):
         for marker in (self.begin, self.end):
@@ -228,7 +229,7 @@ class CodexMarkdownExampleTests(unittest.TestCase):
                 + "\nSecond body\n" + self.end + "\nUSER LAST KEEP\n")
         original = (self.begin + "\n# Shared Governance\n```markdown\nExample\n"
                     + self.end + tail)
-        self.assertEqual(self.render(original), self.pack.rstrip("\n") + tail)
+        self.assertEqual(self.render(original), original)
 
     def test_unclosed_legacy_fence_does_not_hide_raw_policy_boundary(self):
         original = ("# Shared Governance\nOld body\n```markdown\nExample\n"
@@ -238,11 +239,11 @@ class CodexMarkdownExampleTests(unittest.TestCase):
         self.assertEqual(self.writes, [])
 
     def test_inline_end_keeps_the_existing_termination_limit(self):
-        # This proves compatibility, not correct ownership or a complete
-        # Markdown-aware frame. The old raw END still limits replacement.
+        # An unclaimed frame stays exact even when the pure renderer has a
+        # raw-END limitation. No rendered replacement reaches the writer.
         tail = "`\nOld\n" + self.end + "\nUSER TAIL KEEP\n"
         original = self.begin + "\nExample `" + self.end + tail
-        self.assertEqual(self.render(original), self.pack.rstrip("\n") + tail)
+        self.assertEqual(self.render(original), original)
 
     def test_second_active_begin_before_raw_end_refuses_without_write(self):
         for newline in ("\n", "\r\n", "\r"):
@@ -272,13 +273,13 @@ class CodexMarkdownExampleTests(unittest.TestCase):
             with self.subTest(example=example):
                 prefix, suffix = "USER HEADER\r\n", "\rUSER FOOTER"
                 original = prefix + self.begin + "\nOld\n" + example + "\n" + self.end + suffix
-                self.assertEqual(self.render(original), prefix + self.pack.rstrip("\n") + suffix)
+                self.assertEqual(self.render(original), original)
 
     def test_two_complete_blocks_keep_second_block(self):
         tail = ("\nUSER BETWEEN KEEP\n" + self.begin
                 + "\nSecond body\n" + self.end + "\nUSER LAST KEEP\n")
         original = self.begin + "\nFirst body\n" + self.end + tail
-        self.assertEqual(self.render(original), self.pack.rstrip("\n") + tail)
+        self.assertEqual(self.render(original), original)
 
     def test_end_only_before_selected_begin_refuses_without_write(self):
         original = self.end + "\nKeep this.\n" + self.begin + "\nUSER TAIL KEEP\n"

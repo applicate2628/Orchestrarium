@@ -151,7 +151,7 @@ class NewlinePreservationTests(unittest.TestCase):
                     result, _ = self.render(text, kind=kind)
                     self.assertEqual(result, (self.pack + "\n" + text).encode("utf-8"))
 
-    def test_marked_update_preserves_both_outside_slices(self):
+    def test_unclaimed_marked_frame_preserves_all_bytes(self):
         for kind in ("direct", "disabled", "transaction"):
             for nl in ("\n", "\r\n", "\r"):
                 with self.subTest(kind=kind, nl=nl):
@@ -159,7 +159,7 @@ class NewlinePreservationTests(unittest.TestCase):
                     suffix = nl + "USER TAIL" + nl + "No final newline"
                     original = prefix + self.begin + nl + "Old" + nl + self.end + suffix
                     result, _ = self.render(original, kind=kind)
-                    self.assertEqual(result, (prefix + self.pack.rstrip("\n") + suffix).encode("utf-8"))
+                    self.assertEqual(result, original.encode("utf-8"))
 
     def test_legacy_update_preserves_exact_raw_policy_suffix(self):
         prefix = "USER PREFIX\r\nРусский\r"
@@ -179,13 +179,13 @@ class NewlinePreservationTests(unittest.TestCase):
             suffix = nl + "USER TAIL" + nl
             original = prefix + self.begin + nl + "Old" + nl + self.end + suffix
             self.assertEqual(self.render(original)[0],
-                             (prefix + self.pack.rstrip("\n") + suffix).encode("utf-8"))
+                             original.encode("utf-8"))
 
     def test_raw_end_does_not_expand_across_hidden_end_or_second_block(self):
         suffix = "\r\n```\rUSER BETWEEN\n" + self.begin + "\rSecond\r\n" + self.end + "\rUSER LAST"
         original = self.begin + "\r\n# Shared Governance\r```markdown\nExample\r" + self.end + suffix
         self.assertEqual(self.render(original)[0],
-                         (self.pack.rstrip("\n") + suffix).encode("utf-8"))
+                         original.encode("utf-8"))
 
     def test_raw_legacy_policy_is_not_hidden_by_unclosed_fence(self):
         suffix = "## Project policies\r\nUSER TAIL\r"
@@ -266,11 +266,11 @@ class NewlinePreservationTests(unittest.TestCase):
             self.assertEqual(MemoryPath.writes, [])
             self.assertEqual(MemoryPath.files[str(self.target)], original.encode("utf-8"))
 
-    def test_inline_raw_end_retains_old_termination_semantics(self):
+    def test_inline_raw_end_does_not_authorize_replacement(self):
         suffix = "`\r\nOld\r" + self.end + "\r\nUSER TAIL"
         original = self.begin + "\r\nExample `" + self.end + suffix
         self.assertEqual(self.render(original)[0],
-                         (self.pack.rstrip("\n") + suffix).encode("utf-8"))
+                         original.encode("utf-8"))
 
     def test_invalid_utf8_still_refuses_before_writing(self):
         for kind in ("direct", "transaction"):
