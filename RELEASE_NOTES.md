@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-12
 
+- Integrated the SDK Copilot pre-tool transport codec with the current shared target-acquisition owner, preserving malformed-input refusal and neutral/deny-only responses. This offline foundation does not register or qualify a native Copilot installation.
+
 - Interactive installation now previews the selected packs before explicit apply confirmation; empty selection cancels instead of installing both. Noninteractive --clients automation retains its existing behavior and provider policy.
 
 - Root and portable installers accept explicit --clients selection and read-only --list-clients, avoiding interactive stdin while preserving provider policy and partial-failure summaries.
