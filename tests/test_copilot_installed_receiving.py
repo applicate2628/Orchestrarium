@@ -25,6 +25,8 @@ def test_actual_bundled_root_registration_discovery_execution_and_relocation(tmp
                "scripts/installation/copilot_registration.py",
                "scripts/installation/copilot_transport.py",
                "scripts/universal-hooks/hooks/check-machine-local-path.py",
+               "scripts/universal-hooks/hooks/check-no-trash-in-repo.py",
+               "scripts/universal-hooks/scripts/git_push_gate_preflight.py",
                "scripts/universal-hooks/scripts/hook_common.py")
     pins = {}
     for name in members:
@@ -80,9 +82,11 @@ def test_actual_bundled_root_registration_discovery_execution_and_relocation(tmp
         synthetic_path = "/".join(("C:", "Users", "alice", "fixture"))
         cases = [
             ({"cwd":str(directory), "toolName":"create_file",
-              "toolArgs":{"filePath":"src/a","content":synthetic_path}}, 0, True),
+              "toolArgs":{"filePath":"src/a","content":synthetic_path}}, 0, "[machine-local-path AUDIT]"),
             ({"cwd":str(directory), "toolName":"create",
               "toolArgs":'{"path":"src/a","content":"ordinary"}'}, 0, False),
+            ({"cwd":str(directory), "toolName":"bash",
+              "toolArgs":{"command":"git worktree add must-not-exist"}}, 0, "[stray-artifact AUDIT]"),
             ({}, 2, False),
         ]
         for payload, status, advisory in cases:
@@ -92,15 +96,16 @@ def test_actual_bundled_root_registration_discovery_execution_and_relocation(tmp
             if status == 0:
                 output = json.loads(result.stdout)
                 if advisory:
-                    assert "[machine-local-path AUDIT]" in output["additionalContext"]
+                    assert advisory in output["additionalContext"]
                 else:
                     assert output == {}
                 assert "permissionDecision" not in output
             else:
                 assert result.stdout == b""
+        assert not (directory / "must-not-exist").exists()
         assert (directory / ".github/hooks/foreign.json").read_bytes() == foreign
         results.append({"hookCount":report["positive"]["snapshot"]["hookCount"],
-                        "positive":True,"neutral":True,"malformed_exit":2})
+                        "positive":True,"command_advisory":True,"neutral":True,"malformed_exit":2})
         return selected_command
     receive(project)
     relocated = tmp_path / "relocated O'Brien [project] 测试"

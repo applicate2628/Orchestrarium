@@ -71,6 +71,8 @@ def test_generator_shell_quote_boundaries(tmp_path,label):
     for name in ("python/python.exe", "app/scripts/copilot-pre-tool-use.py",
                  "app/scripts/installation/copilot_transport.py",
                  "app/scripts/universal-hooks/hooks/check-machine-local-path.py",
+                 "app/scripts/universal-hooks/hooks/check-no-trash-in-repo.py",
+                 "app/scripts/universal-hooks/scripts/git_push_gate_preflight.py",
                  "app/scripts/universal-hooks/scripts/hook_common.py"):
         path=bundle/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b"fixture")
     with pytest.raises(ValueError,match="COPILOT-BUNDLE-PATH"):
@@ -82,6 +84,8 @@ def test_generator_literal_relative_command(tmp_path):
     for name in ("python/python.exe", "app/scripts/copilot-pre-tool-use.py",
                  "app/scripts/installation/copilot_transport.py",
                  "app/scripts/universal-hooks/hooks/check-machine-local-path.py",
+                 "app/scripts/universal-hooks/hooks/check-no-trash-in-repo.py",
+                 "app/scripts/universal-hooks/scripts/git_push_gate_preflight.py",
                  "app/scripts/universal-hooks/scripts/hook_common.py"):
         path=tmp_path/label/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b"fixture")
     result = json.loads(REG.bundled_advisory(tmp_path,Path(label)))

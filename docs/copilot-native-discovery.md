@@ -64,7 +64,7 @@ an independent trace of every internal native instruction.
 A separate opt-in test, `tests/test_copilot_installed_receiving.py`, requires
 `ORCHE_COPILOT_BUNDLE` in addition to the explicit native parser and Node paths.
 Supply a freshly assembled Windows bundle from this source. The test compares
-six selected installed source files byte-for-byte with the checkout; this is not
+eight selected installed source files byte-for-byte with the checkout; this is not
 full release authentication.
 
 The verified chain uses the supplied interpreter and bundle `launch.py` with

@@ -20,6 +20,8 @@ def test_installed_runtime_discovers_generated_registration(tmp_path):
     for name in ("python/python.exe", "app/scripts/copilot-pre-tool-use.py",
                  "app/scripts/installation/copilot_transport.py",
                  "app/scripts/universal-hooks/hooks/check-machine-local-path.py",
+                 "app/scripts/universal-hooks/hooks/check-no-trash-in-repo.py",
+                 "app/scripts/universal-hooks/scripts/git_push_gate_preflight.py",
                  "app/scripts/universal-hooks/scripts/hook_common.py"):
         path = bundle / name
         path.parent.mkdir(parents=True, exist_ok=True)

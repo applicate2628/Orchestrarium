@@ -122,6 +122,8 @@ def bundled_advisory(project: Path, relative: Path) -> bytes:
     members = ("python/python.exe", "app/scripts/copilot-pre-tool-use.py",
                "app/scripts/installation/copilot_transport.py",
                "app/scripts/universal-hooks/hooks/check-machine-local-path.py",
+               "app/scripts/universal-hooks/hooks/check-no-trash-in-repo.py",
+               "app/scripts/universal-hooks/scripts/git_push_gate_preflight.py",
                "app/scripts/universal-hooks/scripts/hook_common.py")
     root = bundle.resolve(strict=True)
     for name in members:
@@ -147,7 +149,7 @@ def main(argv=None) -> int:
     operation = parser.add_mutually_exclusive_group(required=True)
     operation.add_argument("--desired", type=Path)
     operation.add_argument("--remove", action="store_true")
-    operation.add_argument("--bundled-advisory-relative", type=Path, help="Project-relative Windows bundle; machine-path advisory only")
+    operation.add_argument("--bundled-advisory-relative", type=Path, help="Project-relative Windows bundle; shared advisories only")
     parser.add_argument("--previous", type=Path, help="Explicitly selected exact prior single-handler JSON")
     parser.add_argument("--apply", action="store_true", help="Without this flag, only preview")
     args = parser.parse_args(argv)
