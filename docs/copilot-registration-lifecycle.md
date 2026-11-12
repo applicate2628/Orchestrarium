@@ -53,3 +53,12 @@ Review command and source duplication before using --apply in a real project.
 No model, host session or live configuration was used for isolated acceptance.
 The official timeout, trust and dispatch limitations in
 [the transport boundary](copilot-transport-boundary.md) still apply.
+
+## Root installer entry
+
+Use `python install.py --copilot-registration --project PROJECT --desired NEW.json`
+for the same preview. Add `--apply` only to apply; `--previous` and `--remove`
+have exactly the standalone lifecycle meaning. Paths remain relative to caller cwd.
+Do not combine this route with `--clients` or `--list-clients`. Copilot is not
+a production client choice: this entry installs only the explicitly supplied
+registration, not its executable or shared runtime. It does not prove host activation.

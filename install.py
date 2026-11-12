@@ -72,7 +72,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     parser.add_argument("--clients", nargs="+", choices=tuple(CLIENTS))
     parser.add_argument("--list-clients", action="store_true")
+    parser.add_argument("--copilot-registration", action="store_true")
     options, forwarded = parser.parse_known_args(forwarded)
+    if options.copilot_registration:
+        if options.clients is not None or options.list_clients:
+            parser.error("--copilot-registration cannot be combined with client selection")
+        # Registration only: keep the existing lifecycle as the sole effect owner.
+        from installation.copilot_registration import main as registration_main
+        return registration_main(forwarded)
     if options.list_clients:
         if options.clients is not None or forwarded:
             parser.error("--list-clients cannot be combined with installation options")

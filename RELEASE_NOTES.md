@@ -1,5 +1,7 @@
 # Release Notes
 
+- Added an explicit root installer route for the existing Copilot selected-file registration lifecycle; preview remains the default, with no client/runtime activation claim.
+
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
 ## 2026-11-12
