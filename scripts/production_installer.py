@@ -1682,7 +1682,9 @@ def _installer_failure_text(error: BaseException) -> str:
                     "native-acquisition", "native-security-release", "native-close", "creator-capture", "borrowed-content",
                     "copy-close", "scalar-parent-close", "descriptor-read-reset", "scalar-close", "scalar-acquisition",
                     "file-copy", "file-acquisition", "file-close", "construction", "disposal-close", "snapshot-acquisition",
-                    "residual-creator", "retention-acquisition", "migration-stage", "capability", "prepared", "projection-set"}
+                    "residual-creator", "retention-acquisition", "migration-stage", "capability", "prepared", "projection-set",
+                    "construction-target-root", "construction-source-root",
+                    "construction-target-image", "construction-source-image"}
         def safe_context(value):
             return value if type(value) is str and value in contexts else "unavailable"
         filesystem_types = (
@@ -4116,12 +4118,16 @@ class _InstallTransaction:
         def current(*, complete=False):
             if effect is not None:
                 effect.owner.destination(target.relative_to(effect.owner.anchor))
-            if (not self._binding_identity_matches(
-                        actual[target].python_identity, _CreateOnlyMutablePath._identity(target))
-                    or not self._binding_identity_matches(
-                        before[source].python_identity, _CreateOnlyMutablePath._identity(source))
-                    or (complete and ((not self._image_matches(target, actual)) or (not self._image_matches(source, source_witness))))):
-                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: construction currency")
+            if not self._binding_identity_matches(
+                    actual[target].python_identity, _CreateOnlyMutablePath._identity(target)):
+                raise _InstallFailure("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY", "construction-target-root")
+            if not self._binding_identity_matches(
+                    before[source].python_identity, _CreateOnlyMutablePath._identity(source)):
+                raise _InstallFailure("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY", "construction-source-root")
+            if complete and not self._image_matches(target, actual):
+                raise _InstallFailure("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY", "construction-target-image")
+            if complete and not self._image_matches(source, source_witness):
+                raise _InstallFailure("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY", "construction-source-image")
         def construct(source_directory, source_descriptor, destination_directory, destination_descriptor):
             children = sorted(path for path in before if path.parent == source_directory)
             for old in children:

@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-12
 
+- Installer snapshot refusals now distinguish source and backup root/image changes, so support can identify which guarantee failed without weakening checks or retrying an installation blindly.
+
 - Windows installer snapshots now recognize filename-derived executable bits as a metadata projection rather than a replaced file. Existing command/executable files no longer block a global update solely because handle and path metadata differ; file identity, attributes, write bits, reparse checks and non-Windows semantics remain enforced.
 
 - Codex installation now explicitly reports when an unselected Claude transport generation is preserved rather than updated. Independent canonical updates continue through the existing owner without overwriting incompatible peer files, manifests or receipts.
