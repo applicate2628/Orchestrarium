@@ -1058,7 +1058,9 @@ class _WindowsBoundNode:
                 attributes = ObjectAttributes(ctypes.sizeof(ObjectAttributes), parent.live_handle,
                                                ctypes.pointer(unicode), 0x40, security if security.value else None, None)
                 status_block, handle = IoStatus(), wintypes.HANDLE()
-                status = function(ctypes.byref(handle), 0x13019F, ctypes.byref(attributes),
+                access = 0x13019F | (0x40000 if security_image is not None
+                                     and security_image.policy[3] & 0x400 else 0)
+                status = function(ctypes.byref(handle), access, ctypes.byref(attributes),
                                   ctypes.byref(status_block), None, 0x80, 7, 2,
                                   0x21 if directory else 0x60, None, 0)
                 if status < 0:
@@ -1157,6 +1159,43 @@ class _WindowsBoundNode:
         if not get(self.live_handle, 7, buffer, len(buffer), ctypes.byref(needed)):
             raise ctypes.WinError(ctypes.get_last_error())
         return _WindowsSecurityImage.from_descriptor(bytes(buffer.raw[:needed.value]))
+
+    def finalize_created_security(self, expected: _WindowsSecurityImage,
+                                  observed: _WindowsSecurityImage) -> _WindowsSecurityImage:
+        """Restore native auto-inheritance only on an already-recorded empty birth.
+
+        NtCreateFile can omit AUTO_INHERITED despite preserving the exact ACL.
+        SetSecurityInfo establishes that inheritance model before payload writes.
+        No other creation mismatch is repair authority; normal drift stays exact.
+        """
+        if observed == expected:
+            return observed
+        auto_inherited = 0x400
+        if (self.purpose != "creator" or self.born_path != self.path
+                or self.creator_proof is None or self.proof != self.creator_proof
+                or observed.policy[:3] != expected.policy[:3]
+                or not expected.policy[3] & auto_inherited
+                or observed.policy[3] != expected.policy[3] & ~auto_inherited):
+            return observed  # The existing strict readback rejects this mismatch.
+        ctypes, wintypes, _kernel, *_rest = self._api()
+        import struct
+        descriptor = ctypes.create_string_buffer(expected.descriptor)
+        dacl = struct.unpack_from("<I", expected.descriptor, 16)[0]
+        # Missing/NULL DACL is not an inherited policy repair recipe.
+        if not dacl:
+            return observed
+        setter = ctypes.WinDLL("advapi32", use_last_error=True).SetSecurityInfo
+        setter.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
+                           ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
+        setter.restype = wintypes.DWORD
+        inheritance = 0x80000000 if expected.policy[3] & 0x1000 else 0x20000000
+        error = setter(self.live_handle, 1, 4 | inheritance, None, None,
+                       ctypes.c_void_p(ctypes.addressof(descriptor) + dacl), None)
+        if error:
+            raise ctypes.WinError(error)
+        if self.proof != self.creator_proof:
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: security creator identity")
+        return self.security_image()
 
     @property
     def proof(self) -> _NativeNodeProof:
@@ -3826,8 +3865,11 @@ class _InstallTransaction:
                 if capture_security or security_image is not None:
                     node = replace(node, security=created.security_image())
                     record(path, node)
-                    if security_image is not None and node.security != security_image:
-                        raise ValueError("E_MUTABLE_PATH_POSTCONDITION: directory security creation")
+                    if security_image is not None:
+                        node = replace(node, security=created.finalize_created_security(security_image, node.security))
+                        record(path, node)
+                        if node.security != security_image:
+                            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: directory security creation")
                 return node
         if parent_descriptor is None:
             os.mkdir(path, mode)
@@ -3983,8 +4025,11 @@ class _InstallTransaction:
                     if capture_security or security_image is not None:
                         node = replace(node, security=created.security_image())
                         record(target, node)
-                        if security_image is not None and node.security != security_image:
-                            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: file security creation")
+                        if security_image is not None:
+                            node = replace(node, security=created.finalize_created_security(security_image, node.security))
+                            record(target, node)
+                            if node.security != security_image:
+                                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: file security creation")
                     fill(incoming, created.descriptor, node.security)
             else:
                 outgoing = (os.open(target.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
