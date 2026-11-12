@@ -333,3 +333,5 @@ For noninteractive provider selection, use `scripts/install-client.py --client c
 The offline SDK Copilot transport bridge is integrated without registering a Copilot installer client; see [its qualification boundary](docs/copilot-transport-boundary.md). It does not activate VS Code hooks or models.
 
 Copilot registration formatting can select the documented Windows PowerShell field and preserve child exit status. This is isolated command receiving, not host activation; see the [registration contract](docs/copilot-transport-boundary.md#official-registration-contract-and-isolated-receiving).
+
+A [selected workspace registration helper](docs/copilot-registration-lifecycle.md) previews and applies exact dedicated Copilot hook files through the existing transaction owner, preserving previous bytes in project/trash. It does not install or activate a complete Copilot adapter.

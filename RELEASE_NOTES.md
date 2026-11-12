@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-12
 
+- Added exact-selected workspace hook create/update/removal with default preview, foreign-handler refusal and trash retention through the existing physical transaction owner. This registration-only lifecycle does not qualify native Copilot activation.
+
 - Copilot registration preparation now supports explicit platform command fields and preserves Windows child exit status using the existing literal serializer. Isolated JSON/stdin/exit receiving is verified; host discovery and activation remain unqualified.
 
 - Integrated the SDK Copilot pre-tool transport codec with the current shared target-acquisition owner, preserving malformed-input refusal and neutral/deny-only responses. This offline foundation does not register or qualify a native Copilot installation.

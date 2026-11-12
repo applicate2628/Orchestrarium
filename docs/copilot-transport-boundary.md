@@ -58,8 +58,7 @@ User-sibling configuration bytes remain unchanged. These tests run the command
 directly, without a VS Code window, Copilot session, model or live configuration.
 They do not prove discovery, trust, dispatch, host timeout handling or activation.
 
-No installation command is added by this slice: managed registration still needs
-shared-ownership integration and duplicate-source checks. Do not manually enable
+A separate [selected-file lifecycle helper](copilot-registration-lifecycle.md) now manages the dedicated workspace registration without changing shared ownership. Full adapter installation and duplicate-source checks remain unqualified. Do not manually enable
 this formatter's output as if it installed Orchestrarium policy enforcement.
 
 ## Terms and Abbreviations
