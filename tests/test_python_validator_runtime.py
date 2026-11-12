@@ -1481,8 +1481,9 @@ def test_shared_blueprint_checks_contract_without_whole_file_snapshot(
     assert result.errors == (1 if mutation == "required-heading" else 0)
 
 
+@pytest.mark.parametrize("newline", (b"\n", b"\r\n"), ids=("lf", "crlf"))
 def test_codex_addendum_h2_inventory_accepts_terms_and_rejects_shape_drift(
-    tmp_path: Path,
+    tmp_path: Path, newline: bytes,
 ) -> None:
     adapter = _load(VALIDATORS[0], "codex_addendum_h2_inventory")
     runtime = adapter._ENGINE
@@ -1522,9 +1523,14 @@ def test_codex_addendum_h2_inventory_accepts_terms_and_rejects_shape_drift(
         assert result.checks == 1
         return result.errors
 
+    source = source.replace(b"\r\n", b"\n").replace(b"\n", newline)
+    heading = newline + b"## Terms and Abbreviations" + newline
+    assert source.count(heading) == 1
+    without_terms = source.replace(heading, newline, 1)
+    assert without_terms != source
     assert check(source) == 0
-    assert check(source.replace(b"\n## Terms and Abbreviations\n", b"\n", 1)) == 1
-    assert check(source + b"\n## 1. Main rule for the lead\n") == 1
+    assert check(without_terms) == 1
+    assert check(source + newline + b"## 1. Main rule for the lead" + newline) == 1
 
 
 @pytest.mark.parametrize("provider,validator", zip(("codex", "claude"), VALIDATORS))

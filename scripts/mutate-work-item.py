@@ -9894,9 +9894,24 @@ def _relative_link(work_items: Path, path: Path) -> str:
     return Path(os.path.relpath(path, work_items)).as_posix()
 
 
-def _current_readme_status_error(fields: dict[str, str], location: str, source: Path) -> LifecycleError | None:
+def _current_readme_status_error(
+    fields: dict[str, str], location: str, source: Path, *, existing_record: bytes | None = None,
+) -> LifecycleError | None:
     status = fields.get("status", "")
     if location == "backlog":
+        if existing_record is not None:
+            statuses = [value for _line, name, value, _raw in
+                        _authoritative_field_occurrences(existing_record.decode("utf-8"))
+                        if name == "status"]
+            if "backlog" in statuses:
+                # Only read callers supply historical bytes; canonical write admission stays strict.
+                if (statuses == ["backlog"] and "lifecycle-schema" not in fields
+                        and not _schema_marker_occurrences(existing_record, source.name)):
+                    return None
+                return LifecycleError(
+                    "WI-CATEGORY-STATUS-INVALID",
+                    f"ambiguous or current-schema legacy backlog status: {source.stem}",
+                )
         if not status or status == "candidate":
             return None
         failure = (
@@ -9922,7 +9937,7 @@ def _project_current_readme_status(
     entry: ReadmeEntry, fields: dict[str, str], data: bytes, location: str,
     *, diagnostic: bool,
 ) -> ReadmeEntry:
-    failure = _current_readme_status_error(fields, location, entry.link)
+    failure = _current_readme_status_error(fields, location, entry.link, existing_record=data)
     if failure is not None:
         if not diagnostic:
             raise failure
@@ -9930,6 +9945,11 @@ def _project_current_readme_status(
         entry.checked = False
         entry.classification = (
             f"{failure.failure_id}: status={json.dumps(fields.get('status'), ensure_ascii=False)}"
+            f"; source sha256:{_sha256_bytes(data)}"
+        )
+    elif location == "backlog" and fields.get("status") == "backlog":
+        entry.classification = (
+            f"{LEGACY_READ_CLASSIFICATION}: status=backlog; read-only"
             f"; source sha256:{_sha256_bytes(data)}"
         )
     return entry
@@ -10036,8 +10056,10 @@ def _status_entry(root: Path, item: Path, *, diagnostic_status: bool = False, pr
 
 def _legacy_retirement_entry(item: Path, metadata: Path,
     *,
-    acquired_input=None, ledger_resource_budget=None,
+    acquired_input=None, ledger_resource_budget=None, input_role: str = "strict",
 ) -> ReadmeEntry:
+    if input_role not in ("strict", "historical-catalogue"):
+        raise ValueError("unsupported archived work-item input role")
     try:
         payload = json.loads(_input_text(metadata, acquired_input, encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
@@ -10138,33 +10160,34 @@ def _legacy_retirement_entry(item: Path, metadata: Path,
             "WI-LEGACY-RETIREMENT-INVALID",
             f"source inventory does not cover the retirement payload: {item}",
         )
-    # Retirement is immutable, but its former backlog paths must not remain in
-    # mutable records.  The stored inventory is evidence from the transition;
-    # this fresh owner-level scan catches a later plain-text citation that the
-    # original Markdown/link scanner could not see.  Archived consumers are
-    # historical evidence and intentionally do not participate.
-    work_items = item.parents[2]
-    current_incoming = _incoming_link_result(
-        work_items.parent,
-        sources,
-        f"work-item:{item.name}",
-        literal_path_references=(
-            f"{work_items.name}/backlog/{item.name}/{relative}"
-            for relative in seen
-        ),
-        mutable_consumers_only=True,
-        scan_markdown_links=False,
-        acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget
-    )
-    try:
-        _validate_incoming_link_snapshot(
-            f"work-item:{item.name}", current_incoming, label="current"
+    if input_role == "strict":
+        # Retirement is immutable, but its former backlog paths must not remain in
+        # mutable records.  The stored inventory is evidence from the transition;
+        # this fresh owner-level scan catches a later plain-text citation that the
+        # original Markdown/link scanner could not see.  Archived consumers are
+        # historical evidence and intentionally do not participate.
+        work_items = item.parents[2]
+        current_incoming = _incoming_link_result(
+            work_items.parent,
+            sources,
+            f"work-item:{item.name}",
+            literal_path_references=(
+                f"{work_items.name}/backlog/{item.name}/{relative}"
+                for relative in seen
+            ),
+            mutable_consumers_only=True,
+            scan_markdown_links=False,
+            acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget
         )
-    except LifecycleError as exc:
-        raise LifecycleError(
-            "WI-LEGACY-RETIREMENT-INVALID",
-            f"mutable record retains a retired backlog path: {item}",
-        ) from exc
+        try:
+            _validate_incoming_link_snapshot(
+                f"work-item:{item.name}", current_incoming, label="current"
+            )
+        except LifecycleError as exc:
+            raise LifecycleError(
+                "WI-LEGACY-RETIREMENT-INVALID",
+                f"mutable record retains a retired backlog path: {item}",
+            ) from exc
     return ReadmeEntry(
         "Recently completed",
         f"work-item:{item.name}",
@@ -10201,7 +10224,7 @@ def _archived_work_item_entry(item: Path,
                 "WI-LEGACY-RETIREMENT-INVALID",
                 f"direct legacy retirement must not carry active/closure history: {item}",
             )
-        return _legacy_retirement_entry(item, retirement, acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget)
+        return _legacy_retirement_entry(item, retirement, acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget, input_role=input_role)
     closure = item / "closure.md"
     if not _readme_input_is_file(closure, prepared_terminal, acquired_input):
         raise LifecycleError(
@@ -10796,15 +10819,24 @@ def _capture_runtime_source(relative: Path, *, failure_id: str, authority=None):
         raise LifecycleError(failure_id, "runtime source input is not controlled")
     if transaction is None and authority is None:
         authority = _declared_runtime_source_authority()
+    stage = "authority-before"
     try:
         _assert_runtime_source_authority(authority, failure_id)
+        stage = "source-path"
         path = authority.ordinary_file(relative) if authority is not None else Path(__file__).parent.parent / relative
+        stage = "file-capture"
         snapshot = _capture_file_snapshot(path, failure_id=failure_id)
+        stage = "authority-after"
         _assert_runtime_source_authority(authority, failure_id)
         if transaction is not None:
+            stage = "transaction-after"
             transaction._assert_source_admission()
         return snapshot
     except LifecycleError as exc:
+        exc.detail = LifecycleDiagnosticDetail(
+            "runtime-source", (("source", relative.as_posix()), ("stage", stage)),
+            (exc.detail,) if exc.detail is not None else (),
+        )
         if transaction is not None:
             transaction._retain_source_failure(exc)
         raise
@@ -11321,21 +11353,38 @@ def _validated_legacy_cleanup_residue(
 
 
 def _finish_committed_legacy_cleanup(
-    backlog: Path,
+    target: Path,
     residue: Path | None,
     marker: Path,
     transaction_id: str,
 ) -> None:
+    backlog = target.parent
+    held = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    failure = "WI-LEGACY-CLEANUP-AFTER-COMMIT"
+    if not isinstance(held, LifecycleTransaction) or not held._locked:
+        raise LifecycleError(failure, "committed cleanup requires its held lifecycle owner")
+    held.verify()
+    observations = held._capture_effect_tree(residue) if residue is not None else ()
+    if residue is None or marker.parent != residue:
+        observations = (*observations, _capture_file_snapshot(marker, failure_id=failure))
+    held.observe_retained_inputs((*observations, _capture_file_snapshot(target, failure_id=failure)))
+    # Bind domain admission to the captured bytes before the first retirement.
+    if _validated_legacy_cleanup_residue(backlog, target.stem, target) != (residue, marker, transaction_id):
+        raise LifecycleError(failure, "committed cleanup selection changed")
+    held.verify()
     if residue is not None:
         source = residue / "source"
         if source.exists():
-            shutil.rmtree(source)
+            _retire_owned_lifecycle_tree(source,
+                tuple(snapshot for snapshot in observations if snapshot.path.is_relative_to(source)),
+                held, failure_id=failure)
         sidecar = _legacy_cleanup_sidecar(backlog, transaction_id)
         if marker.parent == residue:
             _replace_lifecycle_directory(marker, sidecar, directory=False)
             marker = sidecar
-        residue.rmdir()
-    marker.unlink()
+        LifecycleWriteTarget._remove_empty_directory_snapshot(
+            held._retained_observations.get(residue), held, failure_id=failure)
+    _remove_lifecycle_file(marker, failure_id=failure)
 
 
 def _committed_cleanup_failure(target: Path, residue: Path, cause: BaseException) -> LifecycleError:
@@ -11372,7 +11421,7 @@ def _replay_legacy_candidate_cleanup(root: Path, slug: str, candidate_data: byte
     readme = work_items / "README.md"
     readme_before = readme.read_bytes()
     try:
-        _finish_committed_legacy_cleanup(backlog, residue, marker, transaction_id)
+        _finish_committed_legacy_cleanup(target, residue, marker, transaction_id)
     except OSError as exc:
         raise _committed_cleanup_failure(target, residue, exc) from exc
     if (residue is not None and residue.exists()) or marker.exists() or target.read_bytes() != target_before or readme.read_bytes() != readme_before:
@@ -11431,7 +11480,7 @@ def convert_legacy_candidate(
         # cannot roll this committed transition back.
         committed = True
         try:
-            _finish_committed_legacy_cleanup(target.parent, transaction, cleanup_marker, transaction.name)
+            _finish_committed_legacy_cleanup(target, transaction, cleanup_marker, transaction.name)
         except OSError as exc:
             raise _committed_cleanup_failure(target, transaction, exc) from exc
     except BaseException as primary:
@@ -12365,25 +12414,65 @@ def _release_rows_match(actual: tuple[dict, ...], expected: tuple[dict, ...], *,
     return True
 
 
-def _scratch_ledger_entries(item: Path, *, ledger_resource_budget=None) -> list[tuple[str, dict]]:
+def _scratch_entries_from_events(item: Path, events: list[dict]) -> list[tuple[str, dict]]:
     validator = _validator_module()
     errors: list[str] = []
-    raw_metadata: list[dict[str, object]] = []
-    events = validator.load_jsonl(item / "agent-runs.jsonl", errors, raw_metadata, ledger_resource_budget=ledger_resource_budget)
-    effective_events, _migration_counts, projection_errors = validator.project_legacy_obligation_migrations(
-        events, raw_metadata, item
-    )
-    errors.extend(projection_errors)
-    for event in effective_events:
+    for event in events:
         entries = event.get("scratchEvidence")
         if entries is not None and (
             not isinstance(entries, list) or any(not isinstance(entry, dict) for entry in entries)
         ):
             errors.append(f"{event.get('runId')}: scratchEvidence must be a list of objects")
-    validator.validate_scratch_ownership(effective_events, item, errors)
+    validator.validate_scratch_ownership(events, item, errors)
     if errors:
         raise LifecycleError("WI-LEDGER-UNSETTLED", "; ".join(errors))
-    return [(event["runId"], entry) for event in effective_events for entry in event.get("scratchEvidence", [])]
+    return [(event["runId"], entry) for event in events for entry in event.get("scratchEvidence", [])]
+
+
+def _scratch_receipt_entries(item: Path, selection: object) -> list[tuple[str, dict]]:
+    validator = _validator_module()
+    if not isinstance(selection, list):
+        raise LifecycleError("WI-IMMUTABLE-ARCHIVE", "scratch selection must be a list")
+    events = []
+    for row in selection:
+        if not isinstance(row, dict) or set(row) != {"runId", "entry"}:
+            raise LifecycleError("WI-IMMUTABLE-ARCHIVE", "invalid scratch selection row")
+        run_id, entry = row["runId"], row["entry"]
+        if (not isinstance(run_id, str) or not validator.SCRATCH_IDENTIFIER_RE.fullmatch(run_id)
+                or not isinstance(entry, dict)
+                or not validator.SCRATCH_EVIDENCE_REQUIRED_FIELDS <= set(entry)
+                or not set(entry) <= validator.SCRATCH_EVIDENCE_ALLOWED_FIELDS
+                or not isinstance(entry.get("entryId"), str)
+                or not validator.SCRATCH_IDENTIFIER_RE.fullmatch(entry["entryId"])
+                or entry.get("path") != f".scratch/work-items/{item.name}/{run_id}/{entry['entryId']}"
+                or not isinstance(entry.get("disposition"), str)
+                or entry["disposition"] not in {"retain", "delete"}
+                or not isinstance(entry.get("canonicalPointer"), str)
+                or not isinstance(entry.get("reason"), str)
+                or (entry.get("disposition") == "retain" and "proof" in entry)
+                or (entry.get("disposition") == "delete" and not isinstance(entry.get("proof"), dict))):
+            raise LifecycleError("WI-IMMUTABLE-ARCHIVE", "invalid scratch selection declaration")
+        events.append({"runId": run_id, "scratchEvidence": [entry]})
+        if entry["disposition"] == "delete":
+            proof = entry["proof"]
+            kind = proof.get("kind")
+            if (not isinstance(kind, str) or kind not in validator.SCRATCH_PROOF_FIELDS
+                    or set(proof) != validator.SCRATCH_PROOF_FIELDS[kind]
+                    or (kind == "accepted-artifact" and not isinstance(proof.get("artifactSha256"), str))):
+                raise LifecycleError("WI-IMMUTABLE-ARCHIVE", "invalid scratch selection proof")
+    return _scratch_entries_from_events(item, events)
+
+
+def _scratch_ledger_entries(item: Path, *, ledger_resource_budget=None) -> list[tuple[str, dict]]:
+    validator = _validator_module()
+    errors: list[str] = []
+    raw_metadata: list[dict[str, object]] = []
+    events = validator.load_jsonl(item / "agent-runs.jsonl", errors, raw_metadata, ledger_resource_budget=ledger_resource_budget)
+    effective_events, _migration_counts, projection_errors = validator.project_legacy_obligation_migrations(events, raw_metadata, item)
+    errors.extend(projection_errors)
+    if errors:
+        raise LifecycleError("WI-LEDGER-UNSETTLED", "; ".join(errors))
+    return _scratch_entries_from_events(item, effective_events)
 
 
 def _scratch_disposition_plan(
@@ -12392,6 +12481,7 @@ def _scratch_disposition_plan(
     *,
     archived: bool,
     retention_paths: frozenset[Path] = frozenset(), ledger_resource_budget=None,
+    selected_entries=None, selection_out=None,
 ) -> tuple[ScratchDisposition, ...]:
     root = Path(os.path.abspath(root))
     ledger = item / "agent-runs.jsonl"
@@ -12401,10 +12491,12 @@ def _scratch_disposition_plan(
         owner_inspection = classifier.inspect_root_no_follow(owner_root)
     except classifier.OwnedTreeClassificationError as exc:
         raise LifecycleError("WI-SCRATCH-UNSAFE-ENTRY", str(exc)) from exc
-    if not ledger.exists():
+    originals, tombstones = _scratch_namespace_entries(owner_root)
+    if not originals and not tombstones and not retention_paths and (not archived or selected_entries == []):
+        return ()
+    if selected_entries is None and not ledger.exists():
         if archived and retention_paths:
             return ()
-        originals, tombstones = _scratch_namespace_entries(owner_root)
         if owner_inspection.exists and (set(originals) != set(retention_paths) or tombstones):
             raise LifecycleError(
                 "WI-SCRATCH-OWNERSHIP-INCOMPLETE",
@@ -12413,7 +12505,10 @@ def _scratch_disposition_plan(
         return ()
 
     validator = _validator_module()
-    recorded = _scratch_ledger_entries(item, ledger_resource_budget=ledger_resource_budget)
+    recorded = (_scratch_ledger_entries(item, ledger_resource_budget=ledger_resource_budget)
+                if selected_entries is None else selected_entries)
+    if selection_out is not None:
+        selection_out.extend({"runId": run_id, "entry": entry} for run_id, entry in recorded)
     if not recorded:
         originals, tombstones = _scratch_namespace_entries(owner_root)
         if owner_inspection.exists and (set(originals) != set(retention_paths) or tombstones):
@@ -13134,32 +13229,13 @@ def _release_retained_scratch_transaction(
 
 def _validate_item_before_close(item: Path, *, ledger_resource_budget=None) -> None:
     validator = _validator_module()
-    ledger = item / "agent-runs.jsonl"
     status_text = (item / "status.md").read_text(encoding="utf-8")
     v1_staged = _parse_fields(status_text).get("template") == "staged"
-    if ledger.exists():
-        states, acquired = [], []
-        errors = validator.validate_work_item(
-            item,
-            validate_status_file=not v1_staged, ledger_resource_budget=ledger_resource_budget,
-            obligation_state_out=states, ledger_acquisition_complete_out=acquired
-        , transition_resource_budget=_transition_resource_budget())
-        if (acquired != [True] or len(states) != 1 or type(states[0]) is not validator.WorkItemObligationStateV1
-            or type(states[0]._current_result) is not validator._CurrentReductionV1):
-            raise LifecycleError("WI-LEDGER-UNSETTLED", "; ".join((*errors,
-                "WI-LEDGER-OPERATION-RESULT: complete current result unavailable")))
-        received_errors = []
-        result = states[0]._current_result.receive(item, received_errors, observed_diagnostics=errors, strict=True)
-        errors = ([*errors, *received_errors] if result is None else
-                  list(result.operation_diagnostics(requested_positions=(), strict=True)))
-        if v1_staged:
-            _validate_active_status_bytes(status_text.encode("utf-8"))
-    else:
+    errors = []
+    validator.validate_status(item, [], errors)
+    if v1_staged:
         errors = []
-        validator.validate_status(item, [], errors)
-        if v1_staged:
-            errors = []
-            _validate_active_status_bytes(status_text.encode("utf-8"))
+        _validate_active_status_bytes(status_text.encode("utf-8"))
     if errors:
         raise LifecycleError("WI-LEDGER-UNSETTLED", "; ".join(errors))
     failure = _current_readme_status_error(_parse_fields(status_text), "active", item / "status.md")
@@ -13926,7 +14002,7 @@ def _bug_disposition_receipt_bytes(
     readme_sha256: str,
     evidence_retention: tuple[EvidenceRetentionPlan, ...] = (),
     *,
-    link_maintenance: dict | None = None, ledger_resource_budget=None,
+    link_maintenance: dict | None = None, ledger_resource_budget=None, scratch_selection=None,
 ) -> bytes:
     manifest = json.loads(manifest_data.decode("utf-8"))
     schema_version = manifest["schemaVersion"]
@@ -13984,6 +14060,8 @@ def _bug_disposition_receipt_bytes(
     }
     if link_maintenance is not None:
         payload["linkMaintenance"] = link_maintenance
+    if scratch_selection is not None:
+        payload["scratchSelection"] = scratch_selection
     return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
@@ -14011,7 +14089,8 @@ def _verify_archived_bug_dispositions(
             f"archived work-item lacks {BUG_DISPOSITIONS_RECEIPT}: {slug}",
         )
     try:
-        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        receipt_data = receipt_path.read_bytes()
+        receipt = json.loads(receipt_data.decode("utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise _bug_disposition_fail(
             "WI-IMMUTABLE-ARCHIVE", f"invalid bug disposition receipt: {slug}"
@@ -14030,6 +14109,9 @@ def _verify_archived_bug_dispositions(
         expected_keys.add("evidenceRetention")
     if isinstance(receipt, dict) and "linkMaintenance" in receipt:
         expected_keys.add("linkMaintenance")
+    if isinstance(receipt, dict) and "scratchSelection" in receipt:
+        expected_keys.add("scratchSelection")
+        _scratch_receipt_entries(archived, receipt["scratchSelection"])
     if (
         not isinstance(receipt, dict)
         or set(receipt) != expected_keys
@@ -14191,6 +14273,19 @@ def _verify_archived_bug_dispositions(
                 "WI-IMMUTABLE-ARCHIVE",
                 f"preserved bug receipt differs: {decision['id']}",
             )
+    if "scratchSelection" in receipt:
+        settlement = archived / "lifecycle-transition-receipt.json"
+        if os.path.lexists(settlement) and not _legacy_completion_recognized(archived):
+            proof, _raw, _digest = _validate_stable_ledger_settlement(
+                root, root, archived, settlement, slug=slug,
+                ledger_resource_budget=ledger_resource_budget,
+            )
+            if proof["bugDispositionReceiptSha256"] != _sha256_bytes(receipt_data):
+                raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "scratch selection receipt bytes differ")
+        else:
+            # An unbound projection cannot replace the legacy ownership inputs.
+            receipt = {key: value for key, value in receipt.items() if key != "scratchSelection"}
+    return receipt
 
 
 def _mkdir_parents_tracked(path: Path, created: list[Path]) -> None:
@@ -14354,15 +14449,26 @@ def _close_item_directory(
     locations = _category_locations(root, CATEGORIES["work-item"], slug, ledger_resource_budget=ledger_resource_budget)
     if len(locations) > 1:
         raise LifecycleError("WI-CATEGORY-DUAL-LOCATION", f"duplicate slug: {slug}")
-    if ledger_resource_budget is None and len(locations) == 1 and locations[0].is_dir():
+    if len(locations) == 1 and locations[0].is_dir():
         selected_item = locations[0]
         selected_ledger = selected_item / "agent-runs.jsonl"
         if os.path.lexists(selected_ledger):
             snapshot = _capture_file_snapshot(selected_ledger, failure_id="WI-LEDGER-RESOURCE-DRIFT",
-                maximum_bytes=None)
+                maximum_bytes=None, ledger_resource_budget=ledger_resource_budget)
             transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
-            ledger_resource_budget, _snapshot = transaction.admit_ledger_operation(
-                selected_item, selected_snapshot=snapshot)
+            validator = _validator_module()
+            data = snapshot.data
+            lines = data.count(b"\n") + data.count(b"\r") - data.count(b"\r\n")
+            if data and data[-1:] not in (b"\r", b"\n"):
+                lines += 1
+            demand = validator.LedgerResourceDemandV1(
+                str(snapshot.path), _sha256_bytes(data), lines, len(data), lines, len(data))
+            held_budget = transaction.ledger_resource_budget
+            ledger_resource_budget = validator.resolve_ledger_resource_budget(
+                held_budget.max_events if held_budget is not None else None,
+                held_budget.max_ledger_bytes if held_budget is not None else None, demand=demand)
+            transaction.ledger_resource_budget = ledger_resource_budget
+            transaction.observe_retained_inputs((snapshot,))
     if len(locations) == 1 and "archive" in locations[0].parts:
         archived = locations[0]
         _archived_work_item_entry(archived, ledger_resource_budget=ledger_resource_budget)
@@ -14383,8 +14489,9 @@ def _close_item_directory(
             raise LifecycleError("WI-IMMUTABLE-ARCHIVE", f"archived identity differs: {slug}")
         manifest_present = (archived / BUG_DISPOSITIONS_MANIFEST).exists()
         receipt_present = (archived / BUG_DISPOSITIONS_RECEIPT).exists()
+        archived_receipt = None
         if manifest_present or receipt_present:
-            _verify_archived_bug_dispositions(
+            archived_receipt = _verify_archived_bug_dispositions(
                 root, archived, archived_closure_data, terminal_instant, ledger_resource_budget=ledger_resource_budget
             )
         archived_retention_paths = frozenset()
@@ -14399,7 +14506,9 @@ def _close_item_directory(
                     if isinstance(row, dict) and isinstance(row.get("path"), str)
                 )
         scratch_plan = _scratch_disposition_plan(
-            root, archived, archived=True, retention_paths=archived_retention_paths, ledger_resource_budget=ledger_resource_budget
+            root, archived, archived=True, retention_paths=archived_retention_paths, ledger_resource_budget=ledger_resource_budget,
+            selected_entries=(_scratch_receipt_entries(archived, archived_receipt["scratchSelection"])
+                              if archived_receipt is not None and "scratchSelection" in archived_receipt else None)
         )
         if inject_readme_failure:
             raise LifecycleError("WI-README-STALE", "injected failure after canonical success")
@@ -14414,11 +14523,13 @@ def _close_item_directory(
         active, slug, terminal_instant
     )
     evidence_retention = _prepare_evidence_retention(root, active, manifest_preview)
+    scratch_selection = []
     scratch_plan = _scratch_disposition_plan(
         root,
         active,
         archived=False,
-        retention_paths=frozenset(plan.path for plan in evidence_retention), ledger_resource_budget=ledger_resource_budget
+        retention_paths=frozenset(plan.path for plan in evidence_retention), ledger_resource_budget=ledger_resource_budget,
+        selection_out=scratch_selection
     )
     _manifest, manifest_data, bug_plans = _prepare_bug_dispositions(
         root,
@@ -14611,7 +14722,8 @@ def _close_item_directory(
             bug_plans,
             readme_sha256,
             evidence_retention,
-            link_maintenance=link_maintenance, ledger_resource_budget=ledger_resource_budget
+            link_maintenance=link_maintenance, ledger_resource_budget=ledger_resource_budget,
+            scratch_selection=scratch_selection if settlement_request is not None else None
         )
         _atomic_write(receipt_path, receipt_data)
         if link_maintenance is not None:
@@ -14897,9 +15009,13 @@ def audit_categories(root: Path, *, ledger_resource_budget=None) -> tuple[str, .
                 continue
             if category.current_kind == "work-item" and locations and locations[0].parent == work_items / "backlog":
                 source = locations[0]
-                failure = _current_readme_status_error(_parse_fields(source.read_text(encoding="utf-8")), "backlog", source)
+                data = source.read_bytes()
+                fields = _parse_fields(data.decode("utf-8"))
+                failure = _current_readme_status_error(fields, "backlog", source, existing_record=data)
                 if failure is not None:
                     raise failure
+                if fields.get("status") == "backlog":
+                    legacy_read_compatible.append(source.relative_to(work_items).as_posix())
             if category.current_kind == "flat" and locations:
                 path = locations[0]
                 archived = "archive" in path.parts
@@ -21679,6 +21795,8 @@ def _captured_failure_detail(
     current_stat: bool = False,
     original_capture: bool = False,
     current_capture: bool = False,
+    stat_samples: tuple[tuple[str, os.stat_result], ...] = (),
+    capture_lengths: tuple[int, int, int] | None = None,
 ) -> LifecycleDiagnosticDetail:
     try:
         if type(path) is not type(Path()):
@@ -21724,6 +21842,12 @@ def _captured_failure_detail(
             if available:
                 observations.append(name)
         fields.append(("observations", tuple(observations)))
+        if stat_samples:
+            fields.append(("statKeyFields", ("device", "inode", "mode", "links", "size", "mtimeNs", "ctimeNs")))
+            for label, sample in stat_samples:
+                fields.append((label, tuple(str(value) for value in _lifecycle_file_snapshot_key(sample))))
+        if capture_lengths is not None:
+            fields.extend(zip(("firstReadBytes", "verifiedReadBytes", "maximumBytes"), capture_lengths))
         return LifecycleDiagnosticDetail(kind, tuple(fields))
     except Exception:
         return LifecycleDiagnosticDetail("unavailable")
@@ -22097,24 +22221,41 @@ def _capture_file_snapshot(
             os.close(descriptor)
     identity = _lifecycle_file_identity(before)
     before_key = _lifecycle_file_snapshot_key(before)
-    if (
-        len(data) > maximum_bytes
-        or len(data) != before.st_size
-        or data != verified
-        or before_key != _lifecycle_file_snapshot_key(middle)
-        or before_key != _lifecycle_file_snapshot_key(after)
-        or _lifecycle_file_snapshot_key(observed)
-        != _lifecycle_file_snapshot_key(current)
-        or _lifecycle_file_identity(current) != identity
-        or stat.S_ISLNK(current.st_mode)
-        or (require_single_link and current.st_nlink != 1)
-        or bool(
-            getattr(current, "st_file_attributes", 0)
-            & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    predicate = None
+    if len(data) > maximum_bytes:
+        predicate = "capture-byte-limit-exceeded"
+    elif len(data) != before.st_size:
+        predicate = "capture-size-differs"
+    elif data != verified:
+        predicate = "read-bytes-differ"
+    elif before_key != _lifecycle_file_snapshot_key(middle):
+        predicate = "descriptor-stat-changed-after-read"
+    elif before_key != _lifecycle_file_snapshot_key(after):
+        predicate = "descriptor-stat-changed-after-verification"
+    elif _lifecycle_file_snapshot_key(observed) != _lifecycle_file_snapshot_key(current):
+        predicate = "path-stat-changed-during-read"
+    elif _lifecycle_file_identity(current) != identity:
+        predicate = "current-path-identity-differs"
+    elif stat.S_ISLNK(current.st_mode):
+        predicate = "current-file-is-symlink"
+    elif require_single_link and current.st_nlink != 1:
+        predicate = "single-link-count-differs"
+    elif bool(getattr(current, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)):
+        predicate = "current-file-is-reparse"
+    elif _lifecycle_path_has_reparse(path):
+        predicate = "captured-path-is-reparse"
+    if predicate is not None:
+        detail = _captured_failure_detail(
+            path, "file-snapshot", predicate, stage="snapshot-verify",
+            observed_stat=True, descriptor_before_stat=True, first_read=True,
+            descriptor_middle_stat=True, verified_read=True,
+            descriptor_after_stat=True, current_stat=True,
+            stat_samples=(("observedStat", observed), ("descriptorBeforeStat", before),
+                          ("descriptorMiddleStat", middle), ("descriptorAfterStat", after),
+                          ("currentStat", current)),
+            capture_lengths=(len(data), len(verified), maximum_bytes),
         )
-        or _lifecycle_path_has_reparse(path)
-    ):
-        raise LifecycleError(failure_id, "file snapshot changed during capture")
+        raise LifecycleError(failure_id, "file snapshot changed during capture", detail=detail)
     _verify_captured_parent_chain(parent_chain, failure_id)
     return CapturedFileSnapshot(
         path, identity, len(data), data, parent_chain, require_single_link
@@ -30709,11 +30850,13 @@ def _successor_import_check_stage_root(path: Path) -> tuple[CapturedDirectorySna
     return (snapshot,)
 
 
-def _successor_import_retire_tree(
+def _retire_owned_lifecycle_tree(
     path: Path, observations: tuple[CapturedFileSnapshot | CapturedDirectorySnapshotV1, ...],
     transaction: LifecycleTransaction,
+    *, failure_id: str,
 ) -> None:
-    failure = "WI-SUCCESSOR-IMPORT-RECOVERY"
+    """Retire an admitted tree through the shared native-effect owner."""
+    failure = failure_id
     path = _lifecycle_unresolved_absolute(path)
     if (not isinstance(transaction, LifecycleTransaction) or not transaction._locked
             or _CURRENT_LIFECYCLE_TRANSACTION.get() is not transaction):
@@ -30959,9 +31102,9 @@ def _recover_successor_import(
             expected_successor = _successor_import_successor_files(plan, status_data, original)
             hold_observations = _successor_import_check_stage(hold, original, complete=False)
             stage_observations = _successor_import_check_stage(stage, expected_successor, complete=False)
-            _successor_import_retire_tree(hold, hold_observations, transaction)
-            _successor_import_retire_tree(stage, stage_observations, transaction)
-            _successor_import_retire_tree(stage_root, stage_root_observations, transaction)
+            _retire_owned_lifecycle_tree(hold, hold_observations, transaction, failure_id="WI-SUCCESSOR-IMPORT-RECOVERY")
+            _retire_owned_lifecycle_tree(stage, stage_observations, transaction, failure_id="WI-SUCCESSOR-IMPORT-RECOVERY")
+            _retire_owned_lifecycle_tree(stage_root, stage_root_observations, transaction, failure_id="WI-SUCCESSOR-IMPORT-RECOVERY")
             _successor_import_release_stage_parent(stage_root, transaction, stage_parent_creations)
             intent_retired = _remove_lifecycle_file(
                 intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
@@ -31006,12 +31149,12 @@ def _recover_successor_import(
             if current != before:
                 _atomic_write(path, before)
         if successor_observations:
-            _successor_import_retire_tree(successor, successor_observations, transaction)
-        _successor_import_retire_tree(stage, stage_observations, transaction)
+            _retire_owned_lifecycle_tree(successor, successor_observations, transaction, failure_id="WI-SUCCESSOR-IMPORT-RECOVERY")
+        _retire_owned_lifecycle_tree(stage, stage_observations, transaction, failure_id="WI-SUCCESSOR-IMPORT-RECOVERY")
         if hold_here:
             source.parent.mkdir(parents=True, exist_ok=True)
             _replace_lifecycle_directory(hold, source)
-        _successor_import_retire_tree(stage_root, stage_root_observations, transaction)
+        _retire_owned_lifecycle_tree(stage_root, stage_root_observations, transaction, failure_id="WI-SUCCESSOR-IMPORT-RECOVERY")
         _successor_import_release_stage_parent(stage_root, transaction, stage_parent_creations)
         intent_retired = _remove_lifecycle_file(
             intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",

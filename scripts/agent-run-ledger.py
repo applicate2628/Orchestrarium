@@ -167,6 +167,7 @@ def build_event(args: argparse.Namespace, validator: Any | None = None) -> dict[
             getattr(args, "launch_flags_json", None),
             getattr(args, "closer_run_id", None),
             getattr(args, "target_tuple_json", None),
+            getattr(args, "review_closure_proof_json", None),
         )
     )
     event: dict[str, Any] = {
@@ -220,6 +221,10 @@ def build_event(args: argparse.Namespace, validator: Any | None = None) -> dict[
             args.target_tuple_json,
             source="--target-tuple-json",
         )
+    if getattr(args, "review_closure_proof_json", None) is not None:
+        event["reviewClosureProofs"] = [validator.parse_review_closure_proof(
+            validator.decode_json_object(raw, source="--review-closure-proof-json"))
+            for raw in args.review_closure_proof_json]
     if event.get("terminalClass") == "external-nonauthorizing":
         event["closesRunIds"] = []
 
@@ -230,6 +235,7 @@ def build_event(args: argparse.Namespace, validator: Any | None = None) -> dict[
         evidence.append(parse_evidence_json(value, validator))
     if evidence:
         event["evidence"] = evidence
+    validator.prepare_review_source_contract_evidence(event)
 
     scratch_evidence = [
         parse_scratch_evidence_json(value, validator)
@@ -1555,6 +1561,28 @@ def _receive_append_operation(item, validator, states, acquisition, diagnostics,
     return result, tuple(positions)
 
 
+def _review_settlement_event_factory(validator, event, previous):
+    """Use the existing exact replay/no-op path for the new settlement operation."""
+    selected = [validator.decode_json_object(line, source="captured replay row")
+                for line in previous.splitlines() if line.strip()]
+    selected = [row for row in selected if str(row.get("runId", "")).casefold() == event["runId"].casefold()]
+    if not selected:
+        return event
+    if len(selected) != 1 or selected[0] != event:
+        raise ValueError("C3-review-proof: changed-field/ambiguous settlement replay")
+    return None
+
+
+def _review_receiving_predicates(validator, result, events):
+    """Keep the same selected proof input snapshots through placement/replay."""
+    if not any("reviewClosureProofs" in event for event in events):
+        return ()
+    owner = validator._context_evaluation(result.context)
+    if owner is None:
+        raise ValueError("C3-review-proof: native current receiving owner unavailable")
+    return tuple(owner.inputs.predicates[key] for key in owner.inputs.required_keys)
+
+
 def _append_event_transaction(
     item: Path, validator: Any, event_factory: Any, on_abort: Any = None,
     *, candidate_custody_blobs: dict[str, bytes] | None = None, before_replace: Any = None, ledger_resource_budget=None,
@@ -1616,6 +1644,10 @@ def _append_event_transaction(
             known_row_bytes=() if event is None else ((serialize_event(event) + "\n").encode("utf-8"),),
             unknown_terminal_rows=int(event is not None and event.get("eventKind") == "launch"),
             validator=validator, transition_resource_budget=transition_resource_budget)
+        if event is not None and "reviewClosureProofs" in event:
+            # First placement only. Exact replay uses durable support and never
+            # reacquires obsolete historical subject/loop witnesses.
+            resource_inputs = (*resource_inputs, *validator.capture_review_settlement_witnesses(item, event))
         if event is None:
             states, acquisition = [], []
             errors = validator.validate_work_item(
@@ -1630,6 +1662,7 @@ def _append_event_transaction(
                 raise ValueError("WI-LEDGER-OPERATION-RESULT: replay effect identity is absent or repeated")
             result, _positions = _receive_append_operation(item, validator, states, acquisition, errors,
                                       previous_bytes, previous_bytes, requested)
+            resource_inputs = (*resource_inputs, *_review_receiving_predicates(validator, result, requested))
             for observation in result.closure_diagnostics:
                 print(f"OBSERVATION: {observation}")
             if original is not None:
@@ -1648,6 +1681,7 @@ def _append_event_transaction(
                 obligation_state_out=states, ledger_acquisition_complete_out=acquisition)
             result, _positions = _receive_append_operation(item, validator, states, acquisition, errors,
                 previous_bytes, _append_candidate_bytes(previous_bytes, event), (event,))
+            resource_inputs = (*resource_inputs, *_review_receiving_predicates(validator, result, (event,)))
             for observation in result.closure_diagnostics:
                 print(f"OBSERVATION: {observation}")
             if before_replace is not None:
@@ -1915,7 +1949,13 @@ def command_append(args: argparse.Namespace, *, ledger_resource_budget=None, tra
                 transition_resource_budget=transition_resource_budget,
             )
         else:
-            _append_event_transaction(item, validator, lambda _previous: event, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
+            if "reviewClosureProofs" in event:
+                factory = lambda previous: _review_settlement_event_factory(validator, event, previous)
+            else:
+                factory = lambda _previous: event
+            _append_event_transaction(item, validator, factory,
+                ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget,
+                _replay_run_id=event["runId"] if "reviewClosureProofs" in event else None)
     except (ValueError, LedgerWriteLockError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         for note in getattr(exc, "__notes__", ()):
@@ -2398,6 +2438,8 @@ def build_parser() -> argparse.ArgumentParser:
     append.add_argument("--launch-flags-json", help="Exact resolved provider argv flags as a JSON array of strings.")
     append.add_argument("--closer-run-id", help="Distinct internal closer run identity.")
     append.add_argument("--target-tuple-json", help="Exact external target tuple as a JSON object.")
+    append.add_argument("--review-closure-proof-json", action="append",
+                        help="One exact anchored native review settlement proof; repeat per target.")
     append.set_defaults(func=command_append)
 
     settle = subparsers.add_parser(

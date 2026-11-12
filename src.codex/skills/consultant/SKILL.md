@@ -164,11 +164,11 @@ Check the selected provider first:
 - Claude path: `claude` (macOS/Linux) or `claude.exe` / `claude.cmd` (Windows)
 - Kimi path: the approved canonical `invoke-kimi-prompt` wrapper
 
-Before provider-specific transport, classify the advisory as `planning`, `review`, or `critical-design`, call `describe_ordinary_native_role_options`, then call `resolve_ordinary_native_dispatch` with the nonempty approved scope and caller rationale. Disabled mode performs neither call. An omitted model and effort selects the policy-owned `frontier-high` candidate (`gpt-6.1-sol`, `high`); a complete explicit admissible pair wins; a partial pair fails; and `max` still requires explicit user approval. The default candidate is not a minimum effort and does not authorize forcing `xhigh`.
+Before provider-specific transport, classify the advisory as `planning`, `review`, or `critical-design`, call `describe_ordinary_native_role_options`, then choose an admissible model and effort informed by the task, genuine user controls and the default suggestion. When deciding by task, consciously select and pass both to `resolve_ordinary_native_dispatch` with the nonempty approved scope and caller rationale, including when choosing the suggested `frontier-high` candidate (`gpt-6.1-sol`, `high`). An omitted pair remains compatible and resolves to an explicit default pair; a partial pair fails. The selector does not classify rationale. Disabled mode performs neither call; `max` still requires explicit user approval. The default candidate is not a minimum effort and does not authorize forcing `xhigh`.
 
 - `internal` mode consumes the resolved generic skill-only invocation. Exclude the orchestrator's actual model from the usable options; if that leaves no different-model option, return the existing unavailable advisory.
 - External Codex passes `resolvedModel` and `resolvedEffort` to the existing wrapper as complete model/effort flags.
-- External Claude never receives the resolver's Codex model token. A complete explicit admissible `externalClaudeProfile` wins; otherwise the omitted `frontier`/`high` result maps to `sonnet-high`. If the resolved tier/effort has no existing Claude profile mapping, return unavailable with no fallback.
+- External Claude never receives the resolver's Codex model token. A complete explicit admissible `externalClaudeProfile` wins; otherwise a selected `frontier`/`high` result maps to `sonnet-high`. If the resolved tier/effort has no existing Claude profile mapping, return unavailable with no fallback.
 - External Kimi bypasses this effort mapping exactly as before: fixed `kimi-code/k3`, no caller-composed provider flags, independent verification, and nonauthorization. Grok remains unavailable.
 
 When `externalClaudeProfile` is selected, map it as follows:
@@ -177,7 +177,7 @@ When `externalClaudeProfile` is selected, map it as follows:
 - `opus-xhigh` → `--model opus --effort xhigh` (shipped default)
 - `opus-max` → `--model opus --effort max` (max-depth escalation; caller discretion for especially hard tasks)
 - `fable-xhigh` → `--model fable --effort xhigh` (current Claude flagship-family best-effort tier; the `fable` flagship alias as of 2026-07)
-- key missing for the omitted Consultant choice → `sonnet-high`; any other missing Consultant tier/effort mapping is unavailable with no fallback
+- key missing with the selected Consultant `frontier`/`high` result → `sonnet-high`; any other missing Consultant tier/effort mapping is unavailable with no fallback
 
 For non-Consultant callers, continue to honor `externalCodexProfile` and `externalModelMode` before provider-specific transport selection. Consultant callers use the ordinary selector result above:
 

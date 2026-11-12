@@ -4,7 +4,7 @@
 This script merges an Orchestrarium structural hook config into a
 target settings/hooks JSON file while preserving all other user-owned keys and
 other hooks. Running it multiple times produces the same result
-(ownership follows the configured marker in the invoked script's basename,
+(ownership follows the selected managed script target,
 so re-runs update only owned handlers rather than appending duplicates).
 
 Supported targets:
@@ -342,18 +342,20 @@ def _hook_health_owner():
 
 def _hook_contains_marker(
     hook: dict[str, Any], script_marker: str,
-    platform: str = "codex", host_os: str = "posix", *, owner=None,
+    platform: str = "codex", host_os: str = "posix", *, owner=None, managed_targets=None,
 ) -> bool:
     owner = _hook_health_owner() if owner is None else owner
-    invocation = owner.classify_hook_invocation(hook, {script_marker}, platform, host_os)
+    invocation = owner.classify_hook_invocation(hook, {script_marker}, platform, host_os, managed_targets)
     if invocation.kind == "malformed-owned":
         raise ValueError("owned hook could not be parsed: " + script_marker)
-    return invocation.kind != "foreign"
+    if invocation.kind == "unproven":
+        print(f"  Preserving unproven {script_marker} registration")
+    return invocation.kind in {"current-owned", "legacy-owned"}
 
 
 def find_our_entry_indices(
     hook_event_list: list[Any], script_marker: str,
-    platform: str = "codex", host_os: str = "posix", *, owner=None,
+    platform: str = "codex", host_os: str = "posix", *, owner=None, managed_targets=None,
 ) -> list[int]:
     """Return group positions containing an actually invoked owned target."""
     owner = _hook_health_owner() if owner is None else owner
@@ -368,7 +370,7 @@ def find_our_entry_indices(
             # script's job to repair.
             continue
         for hook in hooks_field:
-            if isinstance(hook, dict) and _hook_contains_marker(hook, script_marker, platform, host_os, owner=owner):
+            if isinstance(hook, dict) and _hook_contains_marker(hook, script_marker, platform, host_os, owner=owner, managed_targets=managed_targets):
                 indices.append(idx)
                 break
     return indices
@@ -461,6 +463,7 @@ def install(
     hook_event: str,
     script_marker: str,
     *, platform: str = "claude", host_os: str = "posix",
+    managed_targets: dict[str, set[str]] | None = None,
 ) -> bool:
     """Update only owned handlers, preserving foreign content and Codex slots."""
     owner = _hook_health_owner()
@@ -472,6 +475,11 @@ def install(
     if not isinstance(hook_entries, list):
         sys.stderr.write(f"FAIL: 'hooks.{hook_event}' is not a JSON array\n")
         sys.exit(1)
+    selected_argv = owner._command_argv(new_entry["hooks"][0], "claude" if platform == "generic" else platform, host_os)
+    selected_target, _ = owner._invoked_script(selected_argv)
+    if selected_target is None:
+        raise ValueError("selected managed hook target is invalid")
+    managed_targets = {script_marker: {selected_target} | set((managed_targets or {}).get(script_marker, ()))}
 
     positions = [
         (group_index, handler_index)
@@ -479,7 +487,7 @@ def install(
         if isinstance(group, dict) and isinstance(group.get("hooks"), list)
         for handler_index, handler in enumerate(group["hooks"])
         if isinstance(handler, dict)
-        and _hook_contains_marker(handler, script_marker, platform, host_os, owner=owner)
+        and _hook_contains_marker(handler, script_marker, platform, host_os, owner=owner, managed_targets=managed_targets)
     ]
     compatible = next((position for position in positions
                        if hook_entries[position[0]].get("matcher") == new_entry.get("matcher")), None)
@@ -526,6 +534,7 @@ def remove(
     *,
     expected_entry: dict[str, Any] | None = None,
     platform: str = "claude", host_os: str = "posix",
+    managed_targets: dict[str, set[str]] | None = None,
 ) -> bool:
     """Remove owned entries, or exact handlers when a retirement identity is supplied."""
     hooks = data.get("hooks")
@@ -535,7 +544,12 @@ def remove(
     if not isinstance(hook_entries, list):
         return False
     owner = _hook_health_owner()
-    indices = find_our_entry_indices(hook_entries, script_marker, platform, host_os, owner=owner)
+    if expected_entry is not None:
+        selected_argv = owner._command_argv(expected_entry["hooks"][0], "claude" if platform == "generic" else platform, host_os)
+        selected_target, _ = owner._invoked_script(selected_argv)
+        if selected_target is not None:
+            managed_targets = {script_marker: {selected_target}}
+    indices = find_our_entry_indices(hook_entries, script_marker, platform, host_os, owner=owner, managed_targets=managed_targets)
     if not indices:
         return False
     changed = False
@@ -546,7 +560,7 @@ def remove(
         if expected_entry is None:
             retained = [handler for handler in entry["hooks"]
                         if not (isinstance(handler, dict) and _hook_contains_marker(
-                            handler, script_marker, platform, host_os, owner=owner))]
+                            handler, script_marker, platform, host_os, owner=owner, managed_targets=managed_targets))]
         elif entry.get("matcher") != expected_entry.get("matcher"):
             continue
         else:
@@ -693,28 +707,38 @@ def main() -> int:
         if args.remove:
             data = load_existing(target)
             expected_entry = None
-            if args.tool_matcher is not None:
-                if not args.script_path:
-                    sys.stdout.write(f"  Preserving {args.script_marker} registration: exact retirement identity is incomplete\n")
+            if not args.script_path:
+                owner = _hook_health_owner()
+                package = owner._installed_root_for_target(target, args.platform)
+                artifact = (owner._hook_manifest(Path(owner.__file__).parent.parent)
+                            .hook_artifact_target(args.platform, package, args.script_marker)
+                            if package is not None and args.tool_matcher is None else None)
+                if artifact is None:
+                    sys.stdout.write(f"  Preserving {args.script_marker} registrations: managed identity is unavailable\n")
                     return 0
+                managed_targets = {args.script_marker: {str(artifact)}}
+            else:
                 hook_target = resolve_hook_target(
                     args.script_path, args.host_os, args.platform, require_script=False
                 )
-                expected_entry = (
+                selected_entry = (
                     build_codex_entry(hook_target, args.host_os, args.hook_event, args.tool_matcher)
                     if args.platform == "codex"
                     else build_generic_entry(hook_target, args.hook_event, args.tool_matcher)
                 )
+                expected_entry = selected_entry if args.tool_matcher is not None else None
+                managed_targets = {args.script_marker: {hook_target.args[0]}}
             changed = remove(
                 data, args.hook_event, args.script_marker, expected_entry=expected_entry,
-                platform=args.platform, host_os=args.host_os,
+                platform=args.platform, host_os=args.host_os, managed_targets=managed_targets,
             )
             remaining_hooks = data.get("hooks")
             remaining_entries = (
                 remaining_hooks.get(args.hook_event) if isinstance(remaining_hooks, dict) else None
             )
             if expected_entry is not None and isinstance(remaining_entries, list) and find_our_entry_indices(
-                remaining_entries, args.script_marker, args.platform, args.host_os
+                remaining_entries, args.script_marker, args.platform, args.host_os,
+                managed_targets=managed_targets,
             ):
                 sys.stdout.write(f"  Preserving unmatched {args.script_marker} registration identities\n")
             action = "removed"

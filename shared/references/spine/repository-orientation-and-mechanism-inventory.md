@@ -12,7 +12,7 @@ Read every applicable governing source before side effects: the nearest `AGENTS.
 - `protected`: frozen or otherwise non-mutable surfaces;
 - `evidence`: one or more `file:line` citations from governing documents.
 
-Use the installed Bootstrap format:
+Use the exact record owned by shared **Repository orientation; Mechanism inventory before new paths** in `shared/AGENTS.shared.md`. Codex Bootstrap step 0 in `src.codex/AGENTS.codex.md` applies that already-composed rule and retains its pre-action checkpoint, conflict hold and explicit historical-scope permission:
 
 ```text
 REPOSITORY ORIENTATION: scope=<repo-relative path>; status=<live|mutable|frozen|archived|deprecated|superseded|conflict>; workflow=<repo-relative entry point(s)>; protected=<repo-relative path(s)|none>; evidence=<path:line[,path:line...]>

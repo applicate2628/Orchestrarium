@@ -4,4 +4,4 @@ The canonical shared design reference now lives at [shared/references/repository
 
 This pack-local path remains only as a compatibility pointer for existing notes, reports, and historical links.
 
-Claude follows the shared [stable transcript recovery](../shared/references/repository-publication-safety.md#stable-transcript-recovery) contract; this pointer introduces no separate retry or authorization policy.
+Human publication consent remains with Root; the hook follows the shared [technical publication and scan contract](../shared/references/repository-publication-safety.md#review-and-publication).

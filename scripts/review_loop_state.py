@@ -43,7 +43,7 @@ ROUND_REQUIRED_FIELDS = {
     "round", "phase", "diff", "artifact", "surgical", "deep", "scout",
     "lane_failures", "evidence",
 }
-ROUND_FIELDS = ROUND_REQUIRED_FIELDS | {"coverage", "scout_reconciliation_amendment"}
+ROUND_FIELDS = ROUND_REQUIRED_FIELDS | {"coverage", "scout_reconciliation_amendment", "verdict_closures"}
 ARTIFACT_FIELDS = {"kind", "revision", "snapshot", "source"}
 ATTEMPT_BASE_FIELDS = {"attempt_id", "artifact_revision", "state"}
 VERDICT_RESULT_FIELDS = {
@@ -335,11 +335,15 @@ def _scout_reconciled(block: dict[str, Any] | None) -> bool:
 
 def _scout_metadata_errors(metadata: Any, block: dict[str, Any]) -> list[str]:
     """Validate references into the original result; Root owns their meaning."""
-    if not isinstance(metadata, dict) or set(metadata) != SCOUT_METADATA_FIELDS:
-        return ["metadata: exact required fields are version, scout_result_sha256, expected_head, links, evidence"]
+    if not isinstance(metadata, dict):
+        return ["metadata: expected object"]
+    version = metadata.get("version")
+    expected = SCOUT_METADATA_FIELDS | ({"reconciliation"} if version == 2 else set())
+    if set(metadata) != expected:
+        return ["metadata: exact version-specific fields required"]
     errors: list[str] = []
-    if type(metadata["version"]) is not int or metadata["version"] != 1:
-        errors.append("metadata.version: expected 1")
+    if type(version) is not int or version not in (1, 2):
+        errors.append("metadata.version: expected 1 or 2")
     digest = metadata["scout_result_sha256"]
     if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
         errors.append("metadata.scout_result_sha256: expected canonical SHA-256 digest")
@@ -351,6 +355,12 @@ def _scout_metadata_errors(metadata: Any, block: dict[str, Any]) -> list[str]:
     findings, rows = block.get("findings"), block.get("reconciliation")
     if not isinstance(findings, list) or not isinstance(rows, list):
         return errors + ["metadata: original scout lists are missing"]
+    if version == 2:
+        if rows or not findings:
+            errors.append("metadata: new dispositions require an originally empty reconciliation with findings")
+        rows = metadata["reconciliation"]
+        if not isinstance(rows, list):
+            return errors + ["metadata.reconciliation: expected received disposition list"]
     links = metadata["links"]
     if not isinstance(links, list) or len(links) != len(findings):
         return errors + ["metadata.links: one sorted link per original finding required"]
@@ -381,7 +391,7 @@ def _scout_amendment_history(data: dict[str, Any]) -> tuple[dict[int, dict[str, 
         if not isinstance(operation, dict) or not isinstance(operation.get("receipt"), dict):
             continue
         receipt = operation["receipt"]
-        if receipt.get("command") in {"begin", "next-round"} and type(receipt.get("round")) is int:
+        if isinstance(receipt.get("command"), str) and receipt["command"] in {"begin", "next-round"} and type(receipt.get("round")) is int:
             admitted_round = max(admitted_round, receipt["round"])
         if receipt.get("command") == "close":
             closed = True
@@ -400,7 +410,8 @@ def _scout_amendment_history(data: dict[str, Any]) -> tuple[dict[int, dict[str, 
         if (
             receipt.get("command") != "amend-scout-reconciliation"
             or set(receipt) != {"event", "command", "state", "loop_id", "round", "artifact_revision", "amendment"}
-            or not isinstance(amendment, dict) or set(amendment) != SCOUT_AMENDMENT_FIELDS
+            or not isinstance(amendment, dict)
+            or set(amendment) != SCOUT_AMENDMENT_FIELDS | ({"reconciliation"} if amendment.get("version") == 2 else set())
             or rnd.get("phase") != "complete"
             or not isinstance(block, dict) or block.get("state") != "complete"
         ):
@@ -421,6 +432,8 @@ def _scout_amendment_history(data: dict[str, Any]) -> tuple[dict[int, dict[str, 
             "expected_head": amendment["previous_operation_id"], "links": amendment["links"],
             "evidence": amendment["evidence"],
         }
+        if "reconciliation" in amendment:
+            metadata["reconciliation"] = amendment["reconciliation"]
         errors.extend(f"{label}: {error}" for error in _scout_metadata_errors(metadata, block))
         if amendment["previous_operation_id"] != head_ids.get(number):
             errors.append(f"{label}: disconnected or branched predecessor")
@@ -453,10 +466,134 @@ def effective_scout_reconciliation(data: dict[str, Any], round_index: int, *, he
     amendment = heads.get(origin)
     if amendment is None:
         return block
+    rows = amendment.get("reconciliation", block["reconciliation"])
     return {**block, "reconciliation": [
-        {**link, "disposition": block["reconciliation"][link["reconciliation_index"]]}
+        {**link, "disposition": rows[link["reconciliation_index"]]}
         for link in amendment["links"]
     ]}
+
+
+def verdict_result_errors_v2(result: Any, *, label: str = "result", require_all_fields: bool = False) -> list[str]:
+    """One pure owner for the existing verdict DTO; no value coercion.
+
+    The default minimum is unchanged. Exact six-field presence is requested
+    only by an actually commissioned explicit-six-field receiving profile.
+    """
+    errors: list[str] = []
+    if not isinstance(result, dict):
+        return [f"{label}: expected object"]
+    _fields(result, VERDICT_RESULT_FIELDS, label, errors)
+    if require_all_fields and set(result) != VERDICT_RESULT_FIELDS:
+        errors.append(f"{label}: explicit six-field commission requires exactly its six fields")
+    verdict = result.get("verdict")
+    if not isinstance(verdict, str) or verdict not in {"PASS", "REVISE"}:
+        errors.append(f"{label}.verdict: required")
+    if not (isinstance(result.get("blockers"), list) and result["blockers"]) and not _nonempty(result.get("rationale")):
+        errors.append(f"{label}: bare verdict")
+    for key in ("root_proven", "scope_unchanged", "verification_adequate"):
+        if not _nonempty(result.get(key)):
+            errors.append(f"{label}.{key}: required")
+    return errors
+
+
+def qualify_completed_verdict_result_v2(
+    data: Any, result: Any, *, round_number: int, lane: str, attempt_id: str,
+    artifact_revision: str, require_all_fields: bool = False,
+) -> dict[str, Any]:
+    """Pure receiving of an actual completed admitted L delivery association.
+
+    This qualifies state/result consistency; it does not attest execution or
+    create a result/receipt, and never reopens a controller path.
+    """
+    errors = validate_v2(data)
+    errors.extend(verdict_result_errors_v2(result, require_all_fields=require_all_fields))
+    if errors:
+        raise StateError("RLSTATE_INVALID", errors[0])
+    if type(round_number) is not int or lane not in VERDICT_LANES:
+        raise StateError("RLSTATE_INVALID", "actual verdict round/lane required")
+    rnd = _round(data, round_number)
+    if artifact_revision != rnd["artifact"]["revision"]:
+        raise StateError("RLSTATE_REVISION_MISMATCH", "delivered result revision differs")
+    block = _attempt(rnd, lane, attempt_id)
+    if block.get("state") != "complete" or any(
+            item.get("lane") == lane and item.get("attempt_id") == attempt_id
+            for item in rnd["lane_failures"] if isinstance(item, dict)):
+        raise StateError("RLSTATE_INVALID", "actual admitted completed nonfailed attempt required")
+    recorded = {key: block[key] for key in VERDICT_RESULT_FIELDS if key in block}
+    if recorded != result:
+        raise StateError("RLSTATE_INVALID", "actual delivered result differs from completed attempt")
+    if not any(isinstance(operation, dict) and isinstance(operation.get("receipt"), dict)
+               and operation["receipt"].get("command") == "record-result"
+               and operation["receipt"].get("loop_id") == data["loop_id"]
+               and operation["receipt"].get("round") == round_number
+               and operation["receipt"].get("lane") == lane
+               and operation["receipt"].get("attempt_id") == attempt_id
+               and operation["receipt"].get("artifact_revision") == artifact_revision
+               for operation in data["operations"]):
+        raise StateError("RLSTATE_INVALID", "actual result receiving operation is unavailable")
+    return dict(result)
+
+
+def _unstarted_round_errors(data: dict[str, Any], rnd: dict[str, Any], operations: list[dict[str, Any]]) -> list[str]:
+    """Qualify recorded non-execution without erasing admission or retry history."""
+    errors: list[str] = []
+    if rnd is not data["rounds"][-1] or rnd["phase"] != "admitted":
+        errors.append("unstarted close requires the latest admitted round")
+    attempts = {lane: rnd[lane]["attempt_id"] for lane in LANES if rnd[lane]["state"] != "retained"}
+    if not attempts or any(rnd[lane]["state"] != "admitted" for lane in attempts) or rnd["lane_failures"]:
+        errors.append("unstarted close requires admitted attempts without failures or retries")
+    admissions = []
+    for operation in operations:
+        receipt = operation["receipt"]
+        if receipt.get("round") == rnd["round"]:
+            if not isinstance(receipt.get("command"), str) or receipt["command"] not in {"begin", "next-round"}:
+                errors.append("unstarted close has recorded round execution")
+            else:
+                admissions.append(receipt)
+        elif receipt.get("attempt_id") in attempts.values():
+            errors.append("unstarted close has recorded attempt execution")
+    if len(admissions) != 1 or admissions[0].get("command") != ("begin" if rnd["round"] == 1 else "next-round") or any(
+        admissions[0].get(key) != value for key, value in {
+            "loop_id": data["loop_id"], "artifact_revision": rnd["artifact"]["revision"], "attempts": attempts,
+        }.items()
+    ):
+        errors.append("unstarted close lacks the matching original admission")
+    return errors
+
+
+def _unstarted_close_errors(data: dict[str, Any]) -> list[str]:
+    """Validate explicit new stop evidence without imposing it on legacy records."""
+    operations = data["operations"]
+    selected = [index for index, operation in enumerate(operations) if "unstarted" in operation["receipt"]]
+    latest = data["rounds"][-1]
+    if not selected:
+        return []
+    if selected != [len(operations) - 1]:
+        return ["unstarted close must be the final operation"]
+    operation = operations[-1]
+    receipt = operation["receipt"]
+    stop = receipt.get("unstarted")
+    if not isinstance(stop, dict) or set(stop) != {"reason", "attempts"} or not _nonempty(stop.get("reason")):
+        return ["unstarted close requires a reason and exact admitted attempts"]
+    attempts = {lane: latest[lane]["attempt_id"] for lane in LANES if latest[lane]["state"] != "retained"}
+    if (
+        data["status"] not in {"drift", "deadlock"}
+        or receipt.get("event") not in {RECEIPT_EVENT, MANUAL_RECEIPT_EVENT}
+        or receipt.get("command") != "close"
+        or receipt.get("outcome") != data["status"]
+        or type(receipt.get("round")) is not int
+        or receipt.get("round") != latest["round"]
+        or receipt.get("artifact_revision") != latest["artifact"]["revision"]
+        or receipt.get("loop_id") != data["loop_id"]
+        or stop["attempts"] != attempts
+    ):
+        return ["unstarted close receipt differs from the terminal round"]
+    payload = {"outcome": receipt["outcome"], "round": receipt["round"],
+               "artifact_revision": receipt["artifact_revision"], "reason": stop["reason"]}
+    errors = _unstarted_round_errors(data, latest, operations[:-1])
+    if operation["fingerprint"] != _fingerprint("close", payload):
+        errors.append("unstarted close fingerprint differs from its inputs")
+    return errors
 
 
 def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: bool = False) -> list[str]:
@@ -472,7 +609,7 @@ def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: b
         if not _nonempty(data.get(key)):
             errors.append(f"{key}: expected non-empty string")
     status = data.get("status")
-    if status not in {"running", *OUTCOMES}:
+    if not isinstance(status, str) or status not in {"running", *OUTCOMES}:
         errors.append("status: invalid value")
     if require_terminal and status == "running":
         errors.append("status: terminal state required")
@@ -496,6 +633,8 @@ def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: b
                 seen_ops.add(op_id)
             if not _nonempty(operation.get("fingerprint")) or not isinstance(operation.get("receipt"), dict):
                 errors.append(f"{label}: invalid fingerprint or receipt")
+            elif "command" in operation["receipt"] and not isinstance(operation["receipt"]["command"], str):
+                errors.append(f"{label}.receipt.command: expected string")
     rounds = data.get("rounds")
     if not isinstance(rounds, list) or not rounds:
         return errors + ["rounds: expected non-empty list"]
@@ -503,6 +642,8 @@ def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: b
         errors.append(f"rounds: count exceeds cap {cap}")
     scout_heads, amendment_errors = _scout_amendment_history(data)
     errors.extend(amendment_errors)
+    verdict_heads, closure_errors = _verdict_closure_history(data)
+    errors.extend(closure_errors)
     for index, rnd in enumerate(rounds, 1):
         label = f"rounds[{index - 1}]"
         if not isinstance(rnd, dict):
@@ -514,7 +655,7 @@ def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: b
         if rnd.get("round") != index:
             errors.append(f"{label}.round: expected {index}")
         phase = rnd.get("phase")
-        if phase not in {"admitted", "collecting", "complete"}:
+        if not isinstance(phase, str) or phase not in {"admitted", "collecting", "complete"}:
             errors.append(f"{label}.phase: invalid value")
         if not _nonempty(rnd.get("diff")):
             errors.append(f"{label}.diff: expected non-empty string")
@@ -603,7 +744,7 @@ def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: b
                     if not (
                         isinstance(effective, dict)
                         and effective.get("state") == "complete"
-                        and effective.get("verdict") == "PASS"
+                        and effective_verdict(data, index - 2, lane, heads=verdict_heads) == "PASS"
                     ):
                         errors.append(f"{lane_label}: retained verdict must resolve to PASS")
                 elif not _scout_reconciled(effective_scout_reconciliation(data, index - 2, heads=scout_heads)):
@@ -624,18 +765,12 @@ def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: b
             if block.get("artifact_revision") != revision:
                 errors.append(f"{lane_label}.artifact_revision: must equal round revision")
             state = block.get("state")
-            if state not in {"admitted", "running", "complete"}:
+            if not isinstance(state, str) or state not in {"admitted", "running", "complete"}:
                 errors.append(f"{lane_label}.state: invalid value")
             if state == "complete":
                 if lane in VERDICT_LANES:
-                    verdict = block.get("verdict")
-                    if verdict not in {"PASS", "REVISE"}:
-                        errors.append(f"{lane_label}.verdict: required")
-                    if not (isinstance(block.get("blockers"), list) and block["blockers"]) and not _nonempty(block.get("rationale")):
-                        errors.append(f"{lane_label}: bare verdict")
-                    for key in ("root_proven", "scope_unchanged", "verification_adequate"):
-                        if not _nonempty(block.get(key)):
-                            errors.append(f"{lane_label}.{key}: required")
+                    result = {key: block[key] for key in VERDICT_RESULT_FIELDS if key in block}
+                    errors.extend(verdict_result_errors_v2(result, label=lane_label))
                 else:
                     if not isinstance(block.get("findings"), list) or not isinstance(block.get("reconciliation"), list):
                         errors.append(f"{lane_label}: findings and reconciliation lists required")
@@ -679,6 +814,14 @@ def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: b
         effective = [_effective_lane(rounds, index - 1, lane) for lane in LANES]
         if phase == "complete" and any(not isinstance(block, dict) or block.get("state") != "complete" for block in effective):
             errors.append(f"{label}: complete round has incomplete lane")
+    if not errors:
+        errors.extend(_unstarted_close_errors(data))
+        receiving_extension = bool(verdict_heads) or any(head.get("version") == 2 for head in scout_heads.values())
+        if data.get("status") == "converged" and receiving_extension:
+            if any(effective_verdict(data, len(rounds) - 1, lane, heads=verdict_heads) != "PASS" for lane in VERDICT_LANES):
+                errors.append("converged state lacks effective PASS verdicts")
+            if not _scout_reconciled(effective_scout_reconciliation(data, len(rounds) - 1, heads=scout_heads)):
+                errors.append("converged state has unreconciled scout findings")
     return errors
 
 
@@ -1486,6 +1629,9 @@ def command_next_round(args: argparse.Namespace) -> dict[str, Any]:
             artifact = _freeze_git(args.git_revision, root)
         if artifact["revision"] == prior["artifact"]["revision"]:
             raise StateError("RLSTATE_INVALID", "next round requires a changed artifact revision")
+        if requested:
+            _verify_current_verdict_closures(data, root, prior["round"] - 1,
+                                             tuple(lane for lane in VERDICT_LANES if lane not in requested))
         rnd = _new_round(number, diff, artifact, prior=prior if requested else None, affected_lanes=requested or None)
         data["rounds"].append(rnd)
         errors = validate_v2(data)
@@ -1505,21 +1651,51 @@ def command_next_round(args: argparse.Namespace) -> dict[str, Any]:
 
 def command_close(args: argparse.Namespace) -> dict[str, Any]:
     payload = {"outcome": args.outcome}
+    selected_stop = {key: getattr(args, key, None) for key in ("round", "artifact_revision", "reason")}
+    if any(value is not None for value in selected_stop.values()):
+        if type(selected_stop["round"]) is not int or not _nonempty(selected_stop["artifact_revision"]) or not _nonempty(selected_stop["reason"]):
+            raise StateError("RLSTATE_INVALID", "unstarted close requires round, artifact revision, and reason")
+        payload.update(selected_stop)
     def transition(data: dict[str, Any], root: Path, _reviews: Path, state: Path) -> dict[str, Any]:
         rnd = data["rounds"][-1]
+        if "round" in payload:
+            if args.outcome not in {"drift", "deadlock"}:
+                raise StateError("RLSTATE_INVALID", "unstarted close cannot converge")
+            if selected_stop["round"] != rnd["round"] or selected_stop["artifact_revision"] != rnd["artifact"]["revision"]:
+                raise StateError("RLSTATE_REVISION_MISMATCH", "unstarted close target differs from the latest round")
+            errors = _unstarted_round_errors(data, rnd, data["operations"])
+            if errors:
+                raise StateError("RLSTATE_INVALID", errors[0])
+            data["status"] = args.outcome
+            return _receipt("close", root, state, data, rnd, outcome=args.outcome, unstarted={
+                "reason": selected_stop["reason"],
+                "attempts": {lane: rnd[lane]["attempt_id"] for lane in LANES if rnd[lane]["state"] != "retained"},
+            })
         if rnd["phase"] != "complete":
             raise StateError("RLSTATE_INVALID", "terminal outcome requires a complete round")
         if args.outcome == "converged":
-            if any(_resolved_lane(data, rnd, lane).get("verdict") != "PASS" for lane in VERDICT_LANES):
+            _verify_current_verdict_closures(data, root, rnd["round"] - 1)
+            if any(effective_verdict(data, rnd["round"] - 1, lane) != "PASS" for lane in VERDICT_LANES):
                 raise StateError("RLSTATE_INVALID", "converged requires a complete PASS round")
             scout = effective_scout_reconciliation(data, rnd["round"] - 1)
             if not _scout_reconciled(scout):
                 raise StateError("RLSTATE_INVALID", "scout findings remain unreconciled")
-        elif not any(_resolved_lane(data, rnd, lane).get("verdict") == "REVISE" for lane in VERDICT_LANES):
+        elif not any(effective_verdict(data, rnd["round"] - 1, lane) == "REVISE" for lane in VERDICT_LANES):
             raise StateError("RLSTATE_INVALID", f"{args.outcome} requires a complete REVISE round")
         data["status"] = args.outcome
         return _receipt("close", root, state, data, rnd, outcome=args.outcome)
-    return _mutate(args, "close", payload, transition)
+    receipt = _mutate(args, "close", payload, transition)
+    if "round" in payload:
+        stop = receipt.get("unstarted")
+        if (
+            not isinstance(stop, dict)
+            or stop.get("reason") != selected_stop["reason"]
+            or receipt.get("round") != selected_stop["round"]
+            or receipt.get("artifact_revision") != selected_stop["artifact_revision"]
+            or receipt.get("outcome") != args.outcome
+        ):
+            raise StateError("RLSTATE_INVALID", "unstarted close replay lacks its bound receipt")
+    return receipt
 
 
 def command_amend_scout_reconciliation(args: argparse.Namespace) -> dict[str, Any]:
@@ -1549,9 +1725,283 @@ def command_amend_scout_reconciliation(args: argparse.Namespace) -> dict[str, An
             "links": metadata["links"], "evidence": metadata["evidence"],
             "execution_path": "helper", "source": "review_loop_state.py",
         }
+        if metadata["version"] == 2:
+            amendment["reconciliation"] = metadata["reconciliation"]
         rnd["scout_reconciliation_amendment"] = {"operation_id": args.operation_id}
         return _receipt("amend-scout-reconciliation", root, state, data, rnd, amendment=amendment)
     return _mutate(args, "amend-scout-reconciliation", payload, transition)
+
+
+
+VERDICT_CLOSURE_METADATA_FIELDS = {
+    "version", "original_result_sha256", "expected_head", "work_item",
+    "target_run_id", "closer_run_id", "ledger_lane", "evidence", "source_binding",
+}
+VERDICT_CLOSURE_FIELDS = (VERDICT_CLOSURE_METADATA_FIELDS - {"expected_head"}) | {
+    "attempt_id", "previous_operation_id", "target_line_sha256",
+    "closer_line_sha256", "execution_path", "source", "original_result_source_sha256",
+    "target_report_sha256", "reviewer_report_sha256",
+}
+
+
+def _verdict_closure_metadata_errors(metadata: Any) -> list[str]:
+    if not isinstance(metadata, dict) or set(metadata) != VERDICT_CLOSURE_METADATA_FIELDS:
+        return ["closure metadata: exact required fields differ"]
+    errors = []
+    if type(metadata["version"]) is not int or metadata["version"] != 2:
+        errors.append("closure metadata: version must be 2 with actual source binding")
+    if not isinstance(metadata["original_result_sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", metadata["original_result_sha256"]):
+        errors.append("closure metadata: original result digest required")
+    if metadata["expected_head"] is not None and not _nonempty(metadata["expected_head"]):
+        errors.append("closure metadata: invalid predecessor")
+    for field in ("target_run_id", "closer_run_id", "ledger_lane", "evidence"):
+        if not _nonempty(metadata[field]):
+            errors.append(f"closure metadata: {field} required")
+    path = metadata["work_item"]
+    if (not isinstance(path, str) or "\\" in path or ":" in path
+            or not path.startswith("work-items/")
+            or any(part in ("", ".", "..") for part in path.split("/"))):
+        errors.append("closure metadata: relative canonical work item required")
+    if metadata["target_run_id"] == metadata["closer_run_id"]:
+        errors.append("closure metadata: replacement must be a distinct review")
+    try:
+        binding = _ledger_closure_owner().parse_review_loop_receiving_binding_v1(metadata["source_binding"])
+        if binding["proof"]["bindingEvidence"]["angle"]["value"] != metadata["ledger_lane"]:
+            errors.append("closure metadata: intended angle differs from source-bound receiving")
+    except (ValueError, TypeError, KeyError) as exc:
+        errors.append(str(exc))
+    return errors
+
+
+def _ledger_closure_owner():
+    """Consume the existing closure owner, not an alternate review authority."""
+    import importlib.util
+    name = "_orche_review_loop_ledger_closure"
+    path = Path(__file__).with_name("validate-work-item-state.py")
+    module = sys.modules.get(name)
+    if module is None or Path(module.__file__).resolve() != path.resolve():
+        spec = importlib.util.spec_from_file_location(name, path)
+        if spec is None or spec.loader is None:
+            raise StateError("RLSTATE_CLOSURE_UNQUALIFIED", "existing ledger owner is unavailable")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return module
+
+
+def _qualify_ledger_closure(root: Path, metadata: dict[str, Any], revision: str, *,
+                            data, round_number, lane, attempt_id, initial_receiving=True) -> dict[str, str]:
+    """Require an actual current owner-qualified PASS relation for this frozen target."""
+    from dataclasses import replace
+    owner = _ledger_closure_owner()
+    item = _require_local_path(root / metadata["work_item"], root, root / "work-items")
+    selected = (item / "agent-runs.jsonl").relative_to(root).as_posix()
+    context = owner.load_effective_ledger_view(root, item, selected)
+    errors = list(context.observation.diagnostics)
+    validity = owner.derive_event_validity(context.rows, item, errors, context=context)
+    if len(validity) != len(context.rows):
+        raise StateError("RLSTATE_CLOSURE_UNQUALIFIED", "ledger qualification cardinality differs")
+    positions = {}
+    for key in ("target_run_id", "closer_run_id"):
+        found = [i for i, row in enumerate(context.rows) if isinstance(row.event.get("runId"), str)
+                 and row.event["runId"].casefold() == metadata[key].casefold()]
+        if len(found) != 1:
+            raise StateError("RLSTATE_CLOSURE_UNQUALIFIED", f"unique {key} not found")
+        positions[key] = found[0]
+    target_pos, closer_pos = positions["target_run_id"], positions["closer_run_id"]
+    target, closer = context.rows[target_pos].event, context.rows[closer_pos].event
+    for event in (target, closer):
+        launch_id = event.get("launchRunId")
+        if isinstance(launch_id, str) and sum(
+                isinstance(row.event.get("runId"), str)
+                and row.event["runId"].casefold() == launch_id.casefold() for row in context.rows) != 1:
+            raise StateError("RLSTATE_CLOSURE_UNQUALIFIED", "selected launch identity is ambiguous")
+    if (target_pos >= closer_pos
+            or target.get("gate") != "REVISE" or closer.get("gate") != "PASS"
+            or target.get("runId") != metadata["target_run_id"]
+            or closer.get("runId") != metadata["closer_run_id"]
+            or not validity[target_pos].authority.artifact_evidence_eligible
+            or not validity[target_pos].authority.revise_target_eligible
+            or not validity[closer_pos].authority.closer_eligible
+            or metadata["target_run_id"] not in closer.get("closesRunIds", [])):
+        raise StateError("RLSTATE_CLOSURE_UNQUALIFIED", errors[0] if errors else "target, revision, angle or authority differs")
+    # Restrict existing authority to this closer; a different PASS must not win.
+    restricted = tuple(replace(entry, authority=replace(entry.authority, closer_eligible=False))
+                       if pos != closer_pos else entry for pos, entry in enumerate(validity))
+    closed_relations = {}
+    owner.validate_closure(context.rows, errors, validity=restricted, context=context,
+                           closed_relations_out=closed_relations)
+    if closed_relations.get(metadata["target_run_id"]) != metadata["closer_run_id"]:
+        raise StateError("RLSTATE_CLOSURE_UNQUALIFIED", errors[0] if errors else "original obligation remains open")
+    try:
+        sources = owner.qualify_review_loop_receiving_sources_v1(
+            metadata["source_binding"], state=data, round_number=round_number, lane=lane,
+            attempt_id=attempt_id, artifact_revision=revision, item=item, rows=context.rows,
+            validity=validity, target_pos=target_pos, reviewer_pos=closer_pos,
+            initial_receiving=initial_receiving)
+        final_errors = []
+        owner.validate_closure(context.rows, final_errors, validity=restricted, context=context,
+                               closed_relations_out=closed_relations)
+        if closed_relations.get(metadata["target_run_id"]) != metadata["closer_run_id"]:
+            raise ValueError("selected ledger closure changed during source receiving")
+    except (ValueError, TypeError, KeyError, RuntimeError) as exc:
+        raise StateError("RLSTATE_CLOSURE_UNQUALIFIED", str(exc)) from exc
+    return {
+        "target_line_sha256": context.rows[target_pos].raw_line_sha256,
+        "closer_line_sha256": context.rows[closer_pos].raw_line_sha256,
+        **sources,
+    }
+
+
+def _verdict_closure_history(data: dict[str, Any]):
+    heads, head_ids, seen_closers, errors = {}, {}, {}, []
+    rounds, operations = data.get("rounds"), data.get("operations")
+    if not isinstance(rounds, list) or not isinstance(operations, list):
+        return heads, errors
+    admitted_round, closed = 0, False
+    for operation in operations:
+        if not isinstance(operation, dict) or not isinstance(operation.get("receipt"), dict):
+            continue
+        receipt = operation["receipt"]
+        if isinstance(receipt.get("command"), str) and receipt["command"] in {"begin", "next-round"} and type(receipt.get("round")) is int:
+            admitted_round = max(admitted_round, receipt["round"])
+        if receipt.get("command") == "close":
+            closed = True
+        if receipt.get("command") != "receive-verdict-closure" and "verdict_closure" not in receipt:
+            continue
+        number, lane = receipt.get("round"), receipt.get("lane")
+        label = f"verdict closure {operation.get('id')}"
+        if (type(number) is not int or not 1 <= number <= len(rounds)
+                or lane not in VERDICT_LANES or not isinstance(rounds[number - 1], dict)):
+            errors.append(f"{label}: invalid target")
+            continue
+        rnd, closure = rounds[number - 1], receipt.get("verdict_closure")
+        block = rnd.get(lane)
+        if (receipt.get("command") != "receive-verdict-closure"
+                or set(receipt) != {"event", "command", "state", "loop_id", "round", "artifact_revision", "lane", "verdict_closure"}
+                or not isinstance(closure, dict) or set(closure) != VERDICT_CLOSURE_FIELDS
+                or rnd.get("phase") != "complete" or not isinstance(block, dict)
+                or block.get("state") != "complete" or block.get("verdict") != "REVISE"):
+            errors.append(f"{label}: completed original REVISE and typed closure required")
+            continue
+        key = (number, lane)
+        metadata = {field: closure[field] for field in VERDICT_CLOSURE_METADATA_FIELDS - {"expected_head"}}
+        metadata["expected_head"] = closure["previous_operation_id"]
+        metadata_errors = _verdict_closure_metadata_errors(metadata)
+        if metadata_errors:
+            errors.extend(f"{label}: {e}" for e in metadata_errors)
+            continue
+        if (closed or number < admitted_round or receipt.get("event") != RECEIPT_EVENT
+                or closure["execution_path"] != "helper" or closure["source"] != "review_loop_state.py"
+                or receipt.get("loop_id") != data.get("loop_id")
+                or receipt.get("artifact_revision") != block.get("artifact_revision")
+                or closure["attempt_id"] != block.get("attempt_id")
+                or closure["original_result_sha256"] != _value_sha256(block)
+                or closure["previous_operation_id"] != head_ids.get(key)):
+            errors.append(f"{label}: identity, provenance or predecessor differs")
+        for field in ("target_line_sha256", "closer_line_sha256", "original_result_source_sha256",
+                      "target_report_sha256", "reviewer_report_sha256"):
+            if not isinstance(closure[field], str) or not re.fullmatch(r"[0-9a-f]{64}", closure[field]):
+                errors.append(f"{label}: invalid ledger preimage")
+        previous = heads.get(key)
+        if previous and any(closure[field] != previous[field] for field in
+                            ("work_item", "target_run_id", "ledger_lane", "target_line_sha256")):
+            errors.append(f"{label}: original obligation binding changed")
+        if closure["source_binding"]["loop"] != {
+            "loopId": data.get("loop_id"), "round": number, "lane": lane,
+            "attemptId": block.get("attempt_id"), "artifactRevision": block.get("artifact_revision")
+        }:
+            errors.append(f"{label}: original source-bound loop differs")
+        seen = seen_closers.setdefault(key, set())
+        if closure["closer_run_id"] in seen and previous is not None and (
+            closure["source_binding"] == previous["source_binding"]
+            and closure["evidence"] == previous["evidence"]
+        ):
+            errors.append(f"{label}: duplicate receiving has no new source evidence")
+        seen.add(closure["closer_run_id"])
+        chain_errors, _attempts, retry_edges = _analyze_lane_retry_chain(rnd, lane)
+        if chain_errors or retry_edges + len(seen) > RETRY_EDGE_CAP:
+            errors.append(f"{label}: existing retry/review budget exhausted or invalid")
+        payload = {"round": number, "lane": lane, "attempt_id": closure["attempt_id"],
+                   "artifact_revision": receipt.get("artifact_revision"), "metadata": metadata}
+        if operation.get("fingerprint") != _fingerprint("receive-verdict-closure", payload):
+            errors.append(f"{label}: payload fingerprint mismatch")
+        head_ids[key], heads[key] = operation.get("id"), closure
+    for number, rnd in enumerate(rounds, 1):
+        if not isinstance(rnd, dict):
+            continue
+        refs = rnd.get("verdict_closures", {})
+        if not isinstance(refs, dict) or set(refs) - set(VERDICT_LANES):
+            errors.append(f"round {number}: invalid verdict closure heads")
+            continue
+        for lane in VERDICT_LANES:
+            key = (number, lane)
+            if key in heads or lane in refs:
+                if refs.get(lane) != {"operation_id": head_ids.get(key)} or key not in heads:
+                    errors.append(f"round {number}: dangling or nonlatest verdict closure head")
+    return ({} if errors else heads), errors
+
+
+def effective_verdict(data: dict[str, Any], round_index: int, lane: str, *, heads=None) -> str | None:
+    """Effective structural view; current acceptance still uses the ledger owner."""
+    block = _effective_lane(data["rounds"], round_index, lane)
+    if block is None or lane not in VERDICT_LANES:
+        return None
+    if heads is None:
+        heads, errors = _verdict_closure_history(data)
+        if errors:
+            raise StateError("RLSTATE_CLOSURE_INVALID", errors[0])
+    origin = next((n for n, rnd in enumerate(data["rounds"], 1) if rnd.get(lane) is block), None)
+    return "PASS" if (origin, lane) in heads else block.get("verdict")
+
+
+def _verify_current_verdict_closures(data: dict[str, Any], root: Path, round_index: int, lanes=VERDICT_LANES):
+    heads, errors = _verdict_closure_history(data)
+    if errors:
+        raise StateError("RLSTATE_CLOSURE_INVALID", errors[0])
+    for lane in lanes:
+        block = _effective_lane(data["rounds"], round_index, lane)
+        origin = next((n for n, rnd in enumerate(data["rounds"], 1) if rnd.get(lane) is block), None)
+        closure = heads.get((origin, lane))
+        if closure is not None:
+            observed = _qualify_ledger_closure(
+                root, closure, block["artifact_revision"], data=data, round_number=origin,
+                lane=lane, attempt_id=block["attempt_id"], initial_receiving=False)
+            if any(observed[field] != closure[field] for field in observed):
+                raise StateError("RLSTATE_CLOSURE_UNQUALIFIED", "accepted review source changed")
+
+
+def command_receive_verdict_closure(args: argparse.Namespace) -> dict[str, Any]:
+    metadata, error = _decode_bounded_json(Path(args.metadata_file).read_text(encoding="utf-8"))
+    errors = [error] if error else _verdict_closure_metadata_errors(metadata)
+    if errors:
+        raise StateError("RLSTATE_CLOSURE_INVALID", errors[0])
+    payload = {"round": args.round, "lane": args.lane, "attempt_id": args.attempt_id,
+               "artifact_revision": args.artifact_revision, "metadata": metadata}
+    def transition(data, root, _reviews, state):
+        rnd = _round(data, args.round)
+        block = _attempt(rnd, args.lane, args.attempt_id)
+        if (rnd is not data["rounds"][-1] or rnd["phase"] != "complete"
+                or args.lane not in VERDICT_LANES or block.get("state") != "complete"
+                or block.get("verdict") != "REVISE"):
+            raise StateError("RLSTATE_CLOSURE_INVALID", "latest complete direct REVISE required")
+        if args.artifact_revision != rnd["artifact"]["revision"]:
+            raise StateError("RLSTATE_REVISION_MISMATCH", "closure frozen target differs")
+        if metadata["original_result_sha256"] != _value_sha256(block):
+            raise StateError("RLSTATE_RESULT_PREIMAGE_MISMATCH", "original verdict differs")
+        head = rnd.get("verdict_closures", {}).get(args.lane, {}).get("operation_id")
+        if metadata["expected_head"] != head:
+            raise StateError("RLSTATE_CLOSURE_INVALID", "closure predecessor differs")
+        observed = _qualify_ledger_closure(
+            root, metadata, args.artifact_revision, data=data, round_number=args.round,
+            lane=args.lane, attempt_id=args.attempt_id)
+        closure = {key: value for key, value in metadata.items() if key != "expected_head"}
+        closure.update(attempt_id=args.attempt_id, previous_operation_id=head, **observed,
+                       execution_path="helper", source="review_loop_state.py")
+        rnd.setdefault("verdict_closures", {})[args.lane] = {"operation_id": args.operation_id}
+        return _receipt("receive-verdict-closure", root, state, data, rnd, lane=args.lane,
+                        verdict_closure=closure)
+    return _mutate(args, "receive-verdict-closure", payload, transition)
 
 
 def command_validate(args: argparse.Namespace) -> dict[str, Any]:
@@ -1566,7 +2016,12 @@ def command_validate(args: argparse.Namespace) -> dict[str, Any]:
         raise StateError(failure, errors[0] if failure == "RLSTATE_INVALID" else "")
     if not is_v2:
         print("RLSTATE_V1_READ_ONLY", file=sys.stderr)
-    return {"event": RECEIPT_EVENT if is_v2 else "RLSTATE_V1_READ_ONLY", "command": "validate", "valid": True, "schema_version": 2 if is_v2 else 1}
+    receipt = {"event": RECEIPT_EVENT if is_v2 else "RLSTATE_V1_READ_ONLY", "command": "validate", "valid": True, "schema_version": 2 if is_v2 else 1}
+    if is_v2 and any("verdict_closures" in rnd for rnd in data["rounds"]):
+        if args.require_terminal and data["status"] == "converged":
+            _verify_current_verdict_closures(data, root, len(data["rounds"]) - 1)
+        receipt["effective_verdicts"] = {lane: effective_verdict(data, len(data["rounds"]) - 1, lane) for lane in VERDICT_LANES}
+    return receipt
 
 
 def command_migrate_v1(args: argparse.Namespace) -> dict[str, Any]:
@@ -1781,6 +2236,15 @@ def build_parser() -> argparse.ArgumentParser:
     amend.add_argument("--attempt-id", required=True)
     amend.add_argument("--artifact-revision", required=True)
     amend.add_argument("--metadata-file", required=True)
+    amend.epilog = "Metadata v1 links original rows; v2 adds actually received reconciliation rows only when the original list is empty. Original results remain immutable."
+
+    receive = state_parser("receive-verdict-closure", operation=True)
+    receive.add_argument("--round", type=int, required=True)
+    receive.add_argument("--lane", choices=VERDICT_LANES, required=True)
+    receive.add_argument("--attempt-id", required=True)
+    receive.add_argument("--artifact-revision", required=True)
+    receive.add_argument("--metadata-file", required=True)
+    receive.epilog = "Metadata v2 with actual source-bound current Root receiving: " + ", ".join(sorted(VERDICT_CLOSURE_METADATA_FIELDS)) + ". Uses the existing qualified ledger closure; does not launch or fabricate a review."
 
     next_round = state_parser("next-round", operation=True)
     next_round.add_argument("--diff-file", required=True)
@@ -1793,6 +2257,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     close = state_parser("close", operation=True)
     close.add_argument("--outcome", choices=OUTCOMES, required=True)
+    close.add_argument("--round", type=int, help="Expected latest round for a stop before execution")
+    close.add_argument("--artifact-revision", help="Expected frozen revision for a stop before execution")
+    close.add_argument("--reason", help="Factual reason for stopping an unstarted admitted round")
 
     validate = state_parser("validate")
     validate.add_argument("--cap", type=int, default=REVIEW_LOOP_ROUND_CAP)
@@ -1816,6 +2283,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], dict[str, Any]]] = {
     "admit-retry": command_admit_retry,
     "complete-round": command_complete_round,
     "amend-scout-reconciliation": command_amend_scout_reconciliation,
+    "receive-verdict-closure": command_receive_verdict_closure,
     "next-round": command_next_round,
     "close": command_close,
     "validate": command_validate,

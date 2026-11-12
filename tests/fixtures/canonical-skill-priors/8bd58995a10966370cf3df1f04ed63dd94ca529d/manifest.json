@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "baseline": "8bd58995a10966370cf3df1f04ed63dd94ca529d",
+  "files": {
+    "repo-cleanup/SKILL.md": "06fe776be7a9c75ec5491fdf8a54e16c65e2586ab0f04ec972d3501cae55c060",
+    "repo-cleanup/agents/openai.yaml": "f176678edd9df4f93335d3e90557f84f040b332318bd8296b2c7f87022867185"
+  }
+}

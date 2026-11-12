@@ -421,7 +421,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'Claude addendum stays bounded instead of regrowing into a full blueprint copy'),
  ('check_normalized_sha256',
   '@ROOT/references-claude/subagent-operating-model.md',
-  '0a71aa6143437113672b9cf1c5f9782279007b2936c46fe622a8a837e5dbcb40',
+  'aefb77fe0203fa507a47a7d332076c5fd2c27658772c33e5e3a2630e2a228614',
   'Claude addendum matches the current canonical normalized fingerprint'),
  ('direct', 'role_index_claude', 'role_index_claude'),
  ('check_common_skill_body_pin',
@@ -438,7 +438,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   '@SKILLS/explain-simply/SKILL.md'),
  ('check_common_skill_body_pin',
   'github-pr-review-bot',
-  'aea0d0e4529326d6347368ce6d811e7f398a4cb0ee18df8504444e8d4f621935',
+  'dd81c1dfa8524ecc1d4e9f24cf1946b3e86178542c1c318095cd3fa8679b2961',
   '@SKILLS/github-pr-review-bot/SKILL.md'),
  ('check_contains',
    '@SKILLS/github-pr-review-bot/SKILL.md',
@@ -476,10 +476,10 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'manual-repo-transfer',
   'src.codex/skills/manual-repo-transfer/SKILL.md',
   'src.claude/skills/manual-repo-transfer/SKILL.md'),
- ('check_common_skill_body_parity',
+ ('check_common_skill_body_pin',
   'repo-cleanup',
-  'src.codex/skills/repo-cleanup/SKILL.md',
-  'src.claude/skills/repo-cleanup/SKILL.md'),
+  '80d1a331232eb39aafbc1f328831212b1bb4633a0a7efe8aedaec99c04ad4234',
+  '@SKILLS/repo-cleanup/SKILL.md'),
  ('check_common_skill_body_pin',
   'mathtype-book-page',
   '615499de68dc03fccb23954e8ed94662076a9a744a493b71232ebdcce55357be',
@@ -1440,7 +1440,13 @@ ACTIONS = (
     ),
     (
         "dev_repo_nonstandalone",
-        _DECLARED_ACTIONS[257:270]
+        ((
+            "check_normalized_sha256",
+            "@ROOT/src.claude/skills/repo-cleanup/SKILL.md",
+            "06fe776be7a9c75ec5491fdf8a54e16c65e2586ab0f04ec972d3501cae55c060",
+            "repo-cleanup historical Claude migration source remains frozen",
+        ),)
+        + _DECLARED_ACTIONS[257:270]
         + _DECLARED_ACTIONS[274:275]
         + _DECLARED_ACTIONS[280:281]
         + _DECLARED_ACTIONS[287:294]

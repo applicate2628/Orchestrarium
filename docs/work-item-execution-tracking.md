@@ -81,6 +81,10 @@ The init command creates missing legacy status sections and `agent-runs.jsonl` w
 
 An admitted execution uses one matching launch/terminal pair through its selected recording owner: Root for native and already-admitted direct external owner-equivalent execution, or actual supported tracked wrapper on Root's behalf when it runs. A direct external equivalent follows external-dispatch and uses real manual evidence plus Root's exact canonical pair/readback, never wrapper identity. Append a standalone event only for a genuine separate accepted result or substantive main-session gate action outside the pair. Ordinary calls preserve omission and let the selected owner admit the current transaction; explicit positive ceilings remain unchanged. Polling, progress, readback, or status acknowledgment alone adds no event.
 
+Before acquiring scratch that will be declared through `--scratch-evidence-json`, choose its owner path using the [existing Lead scratch contract](../src.codex/skills/lead/SKILL.md#task-memory-rule): `.scratch/work-items/<work-item-slug>/<terminal-run-id>/<entry-id>`. Typed terminal retention requires the actual completed `PASS` terminal and a `canonicalPointer` to an accepted file inside that same work item; `retain` carries no deletion proof.
+
+A failed, partial, or advisory result keeps its actual verdict and valuable evidence under its current owner; promote required results into canonical recovery without fabricating a Source `PASS` or an execution. The existing Version 3 `evidenceRetention` in the [ordinary-close contract](#close-with-current-bug-dispositions) is a separate close-time route for unmatched canonical scratch roots, with exact tree and same-item pointer hashes. It does not change a terminal verdict, overlap a declared `scratchEvidence` root, or permit closing unfinished work merely to retain evidence.
+
 ```bash
 python scripts/agent-run-ledger.py --work-item work-items/active/<slug> append \
   --role lead \
@@ -116,6 +120,30 @@ Placement receiving determines cleanup. Proved unchanged target and unchanged ow
 Current external provider wrappers record the exact resolved model, effort, and policy-admitted sandbox, input/output, permission, or tool flags in both their `launch` and `terminal` events. The flags use the bounded provider-specific `launchFlags` string array on the wire and `--launch-flags-json` at the append command boundary. Positional prompts, arbitrary configuration, path-bearing, credential-bearing, malformed, or oversized flag bindings are rejected before launch or append. Older Version 2 events without `launchFlags` remain valid compatibility input; `realization` remains unsupported and is not inferred from this field.
 
 `--execution-role` takes one of the canonical values from `shared/schemas/agent-runs.schema.json`: `main` (the one main-conversation identity, which also holds the Lead role), `internal`, `consultant`, `external-worker`, `external-reviewer`, or `external-brigade`. Orchestration weight belongs to the selected template and routing process; current staged status does not require a separate `orchestration: light | full-lead` field. Ledgers written before 2026-07-11 may carry the legacy value `lead`; validators and rollups read it as `main` (same owner), but a new append with `lead` is rejected — write `main`.
+
+
+## Receive an Independent Review at a Corrected Subject
+
+A genuine standalone Lead/main receiving action may append optional `reviewClosureProofs` using repeatable `--review-closure-proof-json` arguments, one proof per target in `--closes`. The event remains `role=lead`, `executionRole=main`, `eventKind=standalone`, `status=completed`, `gate=PASS`. Its PASS records substantive receiving; the earlier eligible independent native reviewer PASS supplies review authority. Root must actually receive the separate nonauthoring assignment, original return, complete findings and corrected-revision claims. Neither a role label nor a Root coverage flag proves those facts.
+
+Optional nested proof version 2 binds the exact target and reviewer raw rows, report hashes, before/after subject identifiers, actual scope/angle/lineage sources and native receiving facts. Its `rootSemanticReceiving` action `receive-independent-review-claims` records one actual Root receiving result per finding: `findingId`, `targetFinding`, one `reviewerClaimUnit`, the corrected `reviewedRevision`, and literal meaning `reviewer-explicitly-reverified-corrected-finding`. Root must genuinely receive the independent positive assertion and complete target coverage; a JSON object resembling that act cannot prove its truth. No raw id, verdict word, revision, scope list, angle, inputPins, tree position or repeated unit establishes an unpromised machine contract. Unknown JSON/prose and the historical unpromised reports use version 1 of this receiving action; existing V1 structured proof behavior remains supported.
+
+A nested `SourceAnchorV1` has `source:{kind,ref}`, one whole-source `sourceSha256`, and either `selector:{kind:"json-value",path:[...]}` or `selector:{kind:"utf8-range",start,end}`. JSON keys/indices are literal; there are no wildcard, substring or case-fold selectors. UTF-8 offsets are bytes and end-exclusive. Strict decoding rejects duplicate JSON keys, nonfinite values, split codepoints, missing selections and changed sources. The schema-owned ledger nesting bound is 9 because the admitted event/proof/finding-result/anchor/selector/path structure requires nine levels; no new per-anchor count or source-size ceiling is introduced.
+
+For V2, valid JSON uses an exact `json-value` path and prose uses the whole captured UTF-8 report. A JSON string containing prose remains JSON at path `[]`; ranges over JSON, partial prose, duplicate/nonfinite JSON, invalid UTF-8 and decoder-resource errors refuse. Unit identity/hash/native currentness bind actual received source, not automatic body interpretation. Root owns unfamiliar meaning, including negative/foreign/malformed contexts: Root must not emit a positive receiving result for those actual sources. Code does not claim a universal JSON-only lie detector or infer finding roles from metadata keys. An overall PASS supplies no per-finding reverification. Opaque V1 semantic prototypes are not automatically upgraded.
+
+An independently acquired **explicit six-field** formal review-loop Version2 commission may supply optional known machine credit through the existing ordinary evidence port. The fixed profile is `review-loop-explicit-six-field-result-v2`. It is never inferred from a filename, report shape, role label, source hash or a similar uncommissioned object. Root must actually acquire the genuine commissioning instruction, eligible producer delivery and corresponding admitted loop attempt. Other actual promised protocols need their fitting owner or a precise unsupported hold; they cannot be silently relabeled as this profile.
+
+The outer evidence stays `{kind, ref, result?: string}`. A known binding uses admitted `artifact` or `review`, `ref` exactly equal to its commissioning source ref, and a **string** result containing canonical JSON. The inner binding has exactly `schemaVersion:1`, `kind:"review-source-contract-binding"`, the fixed `protocol`, `producer:{runId,rawLineSha256}`, `commission` and `delivery` SourceAnchorV1 values, and `loop:{state:SourceAnchorV1,round,lane,attemptId,artifactRevision}`. Canonicalize that inner object with UTF-8 JSON, sorted keys and compact separators; do not put the raw object in `result`. Supply it through `--evidence-json` separately from the per-finding proof. The writer forwards actual source refs and native-receiving evidence; known-aware `rootSemanticReceiving.version:2` is required. Missing forwarding, support or marker cannot downgrade an acquired obligation to unknown semantics.
+
+The existing review-loop result owner (`review_loop_state.py`) validates the actual completed admitted attempt, delivered overall result and exact protocol revision. Only this genuinely commissioned profile requires all six fields: `verdict`, `blockers`, `rationale`, `root_proven`, `scope_unchanged`, `verification_adequate`. Its value predicates remain unchanged: verdict is exactly PASS or REVISE; a nonempty blockers list or nonempty rationale is required; the last three fields are nonempty strings describing claims, not machine proof. The default minimum for other existing callers is unchanged. TARGET REVISE/before remains the original finding source; the later positive REVIEWER must be eligible completed PASS/after. A known failed/malformed/mismatched result cannot be overridden by a positive Root per-finding meaning.
+
+Cold/effective/replay and current-only transfer requalify actual retained commission/delivery/state support through the same captured-source owner. The original scratch controller path need not remain a live locator after authorized retained support is provided. First-placement-only subject drafts may be disposed without erasing genuine historical receiving; required known support may not disappear. No native session/history copy, extra store or new per-finding data transfer object is introduced. Known marker 2 makes strict older receiving-version1 readers refuse, so deploy a compatible writer, validator, canonical schema, review-loop result owner and all selected consumers before any actual known-profile write. No foreign history scan or guessed upgrade is performed.
+
+On first placement the writer acquires the selected subject witnesses and retains all actual source/namespace/native predicates through the existing locked candidate receiving and placement. Later effective, archive and captured-history readers acquire only durable actual reviewer/claim/necessary binding support. Historical subject keys identify what was reviewed; they do not require obsolete scratch paths or original native objects forever. Authorized witness disposition does not reopen the historical discharge or approve today's code. Missing or invalidated durable authority still refuses. C3 supplies no deletion, move, item-close, transfer or publication authority.
+
+Exact replay of an already received identical proof follows the existing no-publication no-op path after durable-result receiving; it does not reacquire disposed first-placement witnesses. Changed-field replay and duplicate discharge refuse. Keep compatible writer, schema and all selected effective/installed readers before the first real typed append; an old reader must refuse unknown history rather than ignore it. Runtime files and schema propagate through the existing installer owner; this feature grants no global deployment or real ledger append by itself.
+
 
 ## Close External Review Findings
 
@@ -363,7 +391,7 @@ First run the exact request without the positive apply marker. This acquires and
 python -B scripts/mutate-work-item.py recover-mixed-current-ledger --root . --request-file <reviewed-request.json>
 ```
 
-Only after the separately required review and gates, apply that same request with `--apply-admitted`. The owner publishes `agent-runs.history.<original-ledger-sha256>.jsonl` create-once from the exact old bytes, validates and atomically appends all typed controls under the existing writer lock, reads back the complete suffix, then creates `agent-runs.mixed.<operation-id>.receipt.json`. A handled pre-append failure reclaims only newly owned unchanged staging/history; pre-existing or changed files are preserved and reported. An interrupted pre-append attempt may replay only exact owned bytes. A committed exact suffix with a missing receipt is reconstructed without appending again. Partial suffix, changed history, drift, or ambiguous residue fail closed without truncation. Normal append remains available afterward; default strict close/audit still reject open `REVISE` and launch obligations.
+Only after the separately required review and gates, apply that same request with `--apply-admitted`. The owner publishes `agent-runs.history.<original-ledger-sha256>.jsonl` create-once from the exact old bytes, validates and atomically appends all typed controls under the existing writer lock, reads back the complete suffix, then creates `agent-runs.mixed.<operation-id>.receipt.json`. A handled pre-append failure reclaims only newly owned unchanged staging/history; pre-existing or changed files are preserved and reported. An interrupted pre-append attempt may replay only exact owned bytes. A committed exact suffix with a missing receipt is reconstructed without appending again. Partial suffix, changed history, drift, or ambiguous residue fail closed without truncation. Normal append and audit retain their own validation contracts; ordinary close assesses the current outcome and obligations separately.
 
 ```powershell
 python -B scripts/mutate-work-item.py recover-mixed-current-ledger --root . --request-file <reviewed-request.json> --apply-admitted
@@ -373,7 +401,7 @@ python -B scripts/mutate-work-item.py recover-mixed-current-ledger --root . --re
 
 The same `recover-mixed-current-ledger` command admits malformed application history without requiring a historical semantic run ID. Version 1 requests and receipts retain their existing migration/disposition behavior. Version 2 targets use `custody-invalid-history` or `dispose-history-custody`; they bind `sourcePrefixSha256`, `sourcePrefixBytes`, `rawLineOrdinal`, and `physicalLineSha256`. The prefix is the exact captured byte stream and the line digest includes its terminator. Missing or invalid old IDs remain opaque. All valid decoded IDs remain reserved, and case-insensitive collisions, forged work-item identities, conflicting valid terminal relations, or damaged owner controls refuse.
 
-Admission appends a nonauthorizing `closure-invalidation` with `invalidationMode="historical-custody"` and `custodyAction="admit"`. It neither invents old timestamps/scope nor turns old output into a successful verdict. The existing evaluator conserves independently valid authority and closure effects, including valid orphan artifact/closer axes. The public obligation state exposes physically bound `unresolved_history` separately from real review/launch obligations. Fresh fully valid launches and terminals remain appendable; invalid fresh input still refuses the whole candidate. Default strict validation, ordinary close, and transfer reject unresolved historical holds with `WI-LEDGER-HISTORY-UNRESOLVED`.
+Admission appends a nonauthorizing `closure-invalidation` with `invalidationMode="historical-custody"` and `custodyAction="admit"`. It neither invents old timestamps/scope nor turns old output into a successful verdict. The existing evaluator conserves independently valid authority and closure effects, including valid orphan artifact/closer axes. The public obligation state exposes physically bound `unresolved_history` separately from real review/launch obligations. Fresh fully valid launches and terminals remain appendable; invalid fresh input still refuses the whole candidate. Strict validation and transfer retain their historical-hold checks; ordinary close assesses the current outcome and obligations separately.
 
 A structurally exact ordinary invalidation whose current effect is unresolved may also enter this existing custody route. Its earlier unique closer, body digest, and every earlier review target must bind exactly. The preserved control cannot execute; the reducer withholds only that referenced closer's closing effect for all its targets, preserving independently proved terminal and artifact axes. Those original obligations remain visible until a different genuine current closer discharges them. Malformed, ambiguous, nested custody/migration, or foreign controls still refuse. Disposition cannot relabel dependent review obligations as bookkeeping, and resolving a hold never revives the old closing effect.
 
@@ -550,6 +578,13 @@ Ordinary directory `close` is the positive operation and omits `--apply`. That
 flag belongs only to the separate `--legacy-evidence-file` close route, not an
 extra confirmation for ordinary close.
 
+The close decision requires evidence of the substantive outcome and actual current
+acceptance, safety, publication and owned-resource obligations. Closure prose alone
+does not establish that a feature works. Historical ledger diagnostics or an old
+review finding without established current relevance do not automatically veto that
+decision; preserve the actual history without inventing a terminal or verdict. Ledger
+append and successor transfer retain their own validation and effect contracts.
+
 When the active item has `agent-runs.jsonl`, ordinary `close` writes a schema
 version 3 `lifecycle-transition-receipt.json` in the archive as part of the
 same rollback-safe lifecycle transaction. The lifecycle owner binds the close
@@ -561,6 +596,17 @@ not transfer successor or review ownership. An archived replay must match the
 recorded closure and terminal instant, and a mismatch refuses. Existing
 archives are not backfilled. This proof does not replace ordinary close's
 current-result, bug-disposition, status, current-obligation, or README checks.
+
+For an ordinary close with a ledger, `bug-dispositions-receipt.json` records
+`scratchSelection` as the actual selected terminal `runId` and `scratchEvidence`
+entry pairs, or an explicit empty array when none were selected. The existing
+lifecycle proof binds the complete receipt bytes. Archived receiving exposes the
+selection only after verifying that proof and matching the parsed-byte SHA-256;
+scratch planning then uses the recorded selection. Without a proof or for a
+recognized legacy receipt, receiving checks its shape but omits the optional field
+from its nonauthorizing view and uses the original ledger planner fallback. The
+physical receipt and history remain unchanged. New closes without a ledger omit
+the field and do not manufacture a proof; absence never means an empty selection.
 
 Incoming-link upkeep changes only captured hrefs that still name the same
 target at its archive location. The lifecycle owner first admits the captured
@@ -679,8 +725,8 @@ admission and receipt contracts.
 ### Archive with a backlog successor
 
 Use this after accepted terminal evidence, exact `bug-dispositions.json`, and
-the first-use gates below. Omit the optional transfer file for the ordinary
-strict-close path; supply it only when every unresolved review obligation is
+the first-use gates below. Omit the optional transfer file for this operation's
+strict non-transfer path; supply it only when every unresolved review obligation is
 being transferred to the one successor created by this command:
 
 ```powershell
@@ -867,15 +913,43 @@ derives the archive month from strict UTC closure evidence, and preserves the
 archived identity. `README.md` and `index.md` are generated compatibility
 views; do not use either to infer, backfill, or execute a state transition.
 
+Existing flat backlog records with exactly one authoritative `status: backlog`
+and no lifecycle-schema marker have a byte-preserving read-compatibility route.
+`audit`, `audit_categories` and the generated README view identify them as
+`WI-LEGACY-READ-COMPAT`, retaining their raw status, source digest, admission,
+priority and history. This is structural reading, not proof of historical approval, new admission or activation.
+Conflicting/duplicate statuses, current-schema records and unrelated invalid
+states remain refused. Canonical `candidate` creation and `start` keep their
+existing strict checks; a read-compatible label is never their authority.
+
+If a previously generated README contains the old diagnostic, use the existing
+`observe_readme` read-only API and separately authorized `refresh` operation before
+expecting its independent stale-view audit to pass. Reading compatibility does
+not silently rewrite the historical record or its generated view. Complete or
+retire a legacy item only through its existing selected-operation evidence and
+permission contract below.
+
 Legacy directory-shaped backlog records use the same owner. Run
 `mutate-work-item.py convert-legacy-candidate` only for an admitted record and
 supply the current candidate text; the command appends every legacy source text
-with its byte digest, replaces the directory only after the README refresh
-succeeds, and rolls the whole operation back on failure. Run
+with its byte digest and verifies the flat candidate and refreshed README before
+committing the conversion. Pre-commit failures roll back; after commit, cleanup
+failure retains the verified candidate and an exact replay marker instead of
+restoring a partially retired source. Cleanup uses the same native-effect owner
+as successor recovery, so every removed file or directory updates its retained
+observations. Replay binds the remaining source, marker and committed target
+before disposal and refuses foreign or changed material. Run
 `mutate-work-item.py retire-legacy-backlog` only with an explicit product
 disposition and strict UTC instant; it preserves the original source bytes plus
 an incoming-link inventory in the existing monthly archive and deliberately
-creates no admission, active, or closure history. `terminalize-v1` applies the
+creates no admission, active, or closure history. The generated historical
+catalogue validates that retirement's stored incoming inventory and actual
+archived source bytes, lengths, hashes and membership. It does not select a new
+current mutable-consumer sweep merely to display the historical row. Strict
+retirement and integrity/audit receiving still require their current-link check;
+a later bad citation remains a real current integrity finding. The derived row,
+source paths, digest and repeated refresh receiving remain unchanged.
+`terminalize-v1` applies the
 same operator-authorized missing-evidence repair to every supported flat
 category, including roadmaps, using that category's own UTC/detail/evidence
 fields.
@@ -938,14 +1012,30 @@ The accepted finalization contract requires complete actual request/action/posti
 
 Helpers assist the already authorized operation. An unavailable or defective helper alone does not remove the owning guarantees or create a workflow-wide blocker. A lawful manual equivalent must preserve the same evidence, identity, history/obligation, rollback/replay, receipt/link/README and independent readback requirements, with actual `manual-equivalent` provenance; it must not impersonate `public-helper`, forge a native seal or bypass host denial. Live resources and retained evidence are separate: release newly owned handles/processes, while preserving user, foreign, ambiguous and genuinely load-bearing recovery state under its owner.
 
+### Runtime source snapshot refusals
+
+A failed initial file capture retains the same failure identifier and refusal,
+with typed detail naming the first failed guard in its original evaluation order.
+The detail includes read lengths, the admitted size limit and the observed/path
+and descriptor stat samples, labelled by statKeyFields; it never includes file
+contents. Paths outside the selected repository remain lexical digests.
+The runtime-source owner adds only its controlled logical source slot and capture
+stage, so validator and schema failures can be distinguished without exposing an
+installation directory. Existing later-capture diagnostics remain separate.
+
+Use the actual failed call's detail for diagnosis. A later successful probe does
+not reconstruct that call, establish a false positive or authorize guard bypass.
+This diagnostic addition does not weaken identity, authority, parent-chain,
+byte-consistency or resource-release checks and does not retry a real close.
+
 ## Release one archived retained scratch entry
 
 This section describes Version 1 live-inventory release. Recording an accepted
 completed disposal uses the separate metadata-only operation below; it cannot
 fabricate this inventory or delete a newly present root.
 
-An archived ledger entry with `scratchEvidence.disposition: retain` remains
-required by ordinary close replay. Release is an opt-in post-close operation
+A selected archived ledger entry with `scratchEvidence.disposition: retain`
+remains required by ordinary close replay. Release is an opt-in post-close operation
 for exactly one terminal `runId` and `entryId`; it does not authorize a batch
 cleanup or change existing archive bytes. First independently accept a
 same-item canonical artifact and a concrete evidence or reproduction rationale.

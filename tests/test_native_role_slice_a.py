@@ -915,7 +915,9 @@ def test_native_disposal_rejects_same_id_same_target_changed_reparse_metadata(tm
     raw = bytearray(original.reparse_data)
     print_offset, print_size = struct.unpack_from("<HH", raw, 12)
     assert print_size >= 2
-    raw[20 + print_offset] ^= 1  # PrintName changes; SubstituteName/target does not.
+    tag = struct.unpack_from("<I", raw)[0]
+    assert tag == stat.IO_REPARSE_TAG_MOUNT_POINT
+    raw[16 + print_offset] ^= 1  # Junction PrintName changes; SubstituteName does not.
     C, _W, K, *_rest = installer._WindowsBoundNode._api()
     handle = K.CreateFileW(str(link), 0x13019F, 7, None, 3, 0x2200000, None)
     assert handle != C.c_void_p(-1).value, C.get_last_error()
@@ -923,9 +925,10 @@ def test_native_disposal_rejects_same_id_same_target_changed_reparse_metadata(tm
     actor.handle = handle
     with actor:
         assert actor.proof == original.native_proof
+        original_logical_target = actor.logical_target()
         actor.set_reparse_data(bytes(raw))
         assert actor.proof == original.native_proof
-        assert actor.logical_target() == original.data
+        assert actor.logical_target() == original_logical_target
     changed = transaction._observe(link)
     assert changed[link].native_proof == original.native_proof
     assert changed[link].data == original.data
@@ -1377,7 +1380,11 @@ def test_source_native_roles_match_policy_profiles_and_supported_toml_fields() -
         profile = policy["profiles"][corridor["defaultProfile"]]
         assert set(parsed) <= SUPPORTED_NATIVE_FIELDS, role_name
         assert parsed["name"] == role_name
-        assert parsed["features"] == {"apps": False, "plugins": False}
+        assert parsed["features"] == {
+            "apps": False, "plugins": False, "computer_use": False,
+            "browser_use": False, "browser_use_external": False,
+            "browser_use_full_cdp_access": False, "in_app_browser": False,
+        }
         if role_name == "default":
             assert "model" not in parsed
             assert "model_reasoning_effort" not in parsed
@@ -3630,8 +3637,8 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
 
     original_claude_docs = installer._merge_claude_docs
 
-    def claude_docs(root, source, target, dry_run):
-        original_claude_docs(root, source, target, dry_run)
+    def claude_docs(root, source, target, dry_run, **kwargs):
+        original_claude_docs(root, source, target, dry_run, **kwargs)
         emit("provider-doc", target)
         emit("provider-doc", target.parent / "AGENTS.md")
 
@@ -4017,7 +4024,7 @@ def test_role_profile_floor_migration_admits_only_stock_prior_role_bytes(
 
 
 @pytest.mark.parametrize("fixture", ("customized", "unknown"))
-def test_role_profile_floor_migration_refuses_customized_and_unknown_roles(
+def test_role_profile_floor_migration_preserves_customized_and_unknown_roles(
     tmp_path: Path, fixture: str
 ) -> None:
     """The exception is not a general native-role update or adoption mechanism."""
@@ -4035,7 +4042,7 @@ def test_role_profile_floor_migration_refuses_customized_and_unknown_roles(
 
     result = _run_codex_installer(project, install_hooks=False)
 
-    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
     assert path.read_bytes() == payload
 
 

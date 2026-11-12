@@ -7,7 +7,11 @@ This is a reference document for the source-tree organization rule `Directory-le
 Two rules govern source-tree hygiene:
 
 1. **Directory-level entity separation** — every source directory has one primary entity type and ownership/lifecycle contract; the directory's purpose must be expressible in one sentence; new files placed by classifying owner/lifecycle + I/O contract.
-2. **Artifact disposition and project hygiene** — settle artifacts and resources during ordinary work under their existing owner; resolve correctable causes and genuinely missing permission through supported, authorized work. Before handoff or retaining an owned disposable remainder as blocked, assess the preserving route and carry out the selected permitted action with current readback, or retain its exact hold and next step. Refusal alone neither selects trash nor creates authority; keep proved manual custody separate from physical deletion, lifecycle completion and live-resource settlement; the full preservation contract remains in `shared/AGENTS.shared.md`.
+2. **Artifact disposition and project hygiene** - producers promptly move confirmed unnecessary, quiescent artifacts to trash under the shared trash-first rule, without a failed-deletion prerequisite. Trash is safe for complete manual emptying, never required evidence or recovery storage. Preserve unknown, valuable and active material outside it; ownership, authority, no-overwrite and current readback remain required. Permanent deletion is a distinct authorized action only from trash; the coordinator stays read-only.
+
+## Instruction scope across work areas
+
+The shared **Repository orientation; Mechanism inventory before new paths** rule owns instruction discovery for every additional directory/repository, including parallel assignments. Resolve that target's applicable local instruction chain before operating there; startup guidance for another working directory is not a substitute, and deeper policies stay scoped to their subtree. Apply **Context handoff economy**: reuse applicable unchanged guidance only when it is already in the receiver's actual context, and supply missing or uncertain target instructions through the existing trusted input path before relying on them. Reading or forwarding instructions does not expand permissions. This is Orchestrarium guidance, not a guarantee of automatic host loading or a registry of machine paths or special-case folders.
 
 ## What counts as an "entity type"
 
@@ -75,7 +79,7 @@ Had the same hook been a warn-only audit instead (stderr warning, always allow),
 A maintainer rewrites `scripts/validate-agents-mode-contract.py` into `scripts/validate-agents-mode-contract-v2.py` because the v2 changes the public CLI surface and adopters need migration time.
 
 - If the v1 file is preserved in `git log` and migration docs reference both versions for ~1 release → keep v1 in place temporarily with a `# DEPRECATED: replaced by validate-agents-mode-contract-v2.py — remove after 2026-Q3` header comment.
-- If v1 has no callers and serves only history → delete it; git history preserves the file.
+- If v1 has no callers and serves only history, move the obsolete working copy to trash under the shared rule; Git history preserves the file. Any required, authorized permanent deletion happens later only from trash.
 - If v1 captures a hard-won bug fix logic that v2 might lose → move to `scripts/archive/validate-agents-mode-contract-v1.py` with a one-line breadcrumb in `scripts/README.md` explaining why archived.
 
 Subject to `Worktree safety`: do not delete or move v1 files that aren't part of the v2-replacement task. Restrict archival to files inside the admitted change surface.

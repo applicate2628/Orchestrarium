@@ -1,7 +1,9 @@
 # Native operations in Rust
 
-Status: independent design task, no native implementation or activation. Baseline
-main `317e1448a020aeaa58f65aaceb180e835741d6de`; source observations do not prove
+[Goal](#goal-quality-attributes-and-architecture) · [Delivery](#delivery-channels-and-native-installer-ownership) · [Ownership](#state-process-and-cutover-ownership) · [First slice](#candidate-first-vertical-slice-mcp-usage-reminder) · [Work plan](#bounded-work-plan-and-audit-receiving-2026-11-12) · [Verification](#acceptance-parity-and-deliberate-improvements) · [Admission](#receiving-and-implementation-admission) · [Terms](#terms-and-abbreviations)
+
+Status: independent design task, no native implementation or activation. Historical
+observation baseline main `317e1448a020aeaa58f65aaceb180e835741d6de`; source observations do not prove
 installed behavior. PowerShell/npm delivery and SDK coordination are independent consumers,
 not blanket prerequisites or mandatory phases of a Rust port.
 
@@ -200,6 +202,68 @@ tests/test_hook_runtime_installers.py, tests/test_hook_runtime_transactions.py
 and tests/test_universal_hook_surfaces.py as behavior/receiving oracles; extend only
 missing native descriptor and lifecycle cases. Source review is not installed proof.
 
+## Bounded work plan and audit receiving (2026-11-12)
+
+This section refines the existing proposal; it does not authorize implementation,
+change the live Python-owner policy, or certify SDK acceptance. Before starting,
+refresh the accepted source and the SDK owner evidence. An open or merged PR alone
+is not the acceptance record. Historical baseline links above identify observations,
+not immutable instructions to implement against an obsolete checkout.
+
+### Work packages
+
+| Step | Work and existing owner | Required evidence / exit condition |
+| --- | --- | --- |
+| O0 | Reconcile current source, SDK acceptance and actual hook consumers; choose one operation with the user under this proposal. | One named operation, preimage revision, supported consumers and effects; no implicit installation or model launch. |
+| O1 | Extend the existing reminder tests on isolated fixtures before native code. | Full-process stdout, stderr, exit, effects and nonblocking open stdin; normal, partial-write, closed-output and shutdown cases distinguished. |
+| O2 | Implement one operation in one Cargo package with a small dispatcher. Reuse an existing native package if one has since been admitted. | Canonical generated payload; no runtime Python for that operation, no state writes, children or network; unknown selectors do not impersonate a successful reminder. |
+| O3 | Extend existing installer/registration/health owners for retained native payloads. | Exact operation/argv/event/source/resource identity, foreign-reference preservation, interrupted-update recovery and installed readback. |
+| O4 | Qualify the source-to-installed path for all affected supported consumers. | Behaviour and platform evidence remain separate; compare complete invocation and delivery cost with the maintained Python alternative. |
+| O5 | Perform one explicitly admitted cutover through the existing owner. | No competing writers or silent fallback; retire only superseded source after checking consumers; keep required rollback material outside trash. |
+| O6 | Select one further justified deterministic operation. | Its own acceptance and removal boundary; installer, process, publication and transfer ports do not inherit the reminder's proof. |
+
+O0--O6 are planned work, not completed native implementation. A first operation
+that produces no useful delivery or maintenance benefit may end this experiment;
+there is no whole-product Python-removal objective. Desktop UI and MPI/HPX
+execution are separate projects, not dependencies of this sequence.
+
+### Output and payload boundary
+
+A function returning zero is not proof that the process exits zero: buffering,
+flush and interpreter teardown must be observed in the O1 subprocess oracle.
+Keep the existing intended fail-open policy, but record any observed discrepancy
+as a separate baseline defect or explicitly admitted semantic correction; do not
+silently normalize it away as migration parity.
+
+The native emitter uses checked byte writes and handles write/flush failures
+under that contract; a panicking convenience print is not error handling.
+Compare required bytes, ordering and newlines at the actual output boundary.
+Open stdin must not be read merely to learn that this event needs no input.
+Unexpected selector errors belong to the dispatcher, not the reminder result.
+
+Generate the embedded projection in an explicit packaging step from the canonical
+policy/emitter at the selected source revision. Record the source and generated
+payload identity with the executable/resource descriptor. Build-time use of the
+existing trusted Python producer is permitted; the delivered reminder has no
+Python runtime dependency. Do not hide arbitrary interpreter discovery, downloads
+or source execution inside a Cargo build script, and do not maintain copied policy
+text in Rust. Toolchain, target, enabled features, lockfile and native dependencies
+are part of receiving, not proof of release authenticity by themselves.
+
+### Focused verification and change boundaries
+
+Reuse the reminder, universal-hook, installer and transaction tests named above.
+Native tests add only missing contract cases. A unit writer that fails is useful,
+but does not replace an actual closed-pipe subprocess or installed-host receiving.
+Record Windows and each other claimed target independently; missing prerequisites
+are unavailable evidence, not passes. No provider inference is needed for parity.
+
+Keep the work in this responsibility line. A bounded implementation PR contains
+its causal tests; a broader installer/process/publication migration is separate,
+not a stack of duplicate proposals. Normal source review, publication safeguards
+and user permissions continue to apply. A document-only audit does not grant a
+production cutover, new dependency installation, reviewer/model launch or merge.
+
 ## Independent subsequent slices
 
 If the reminder is selected first, a possible later order is another simple
@@ -302,6 +366,9 @@ an unavailable route or grants native/provider launch authority.
 - npm: compatible optional distribution channel for the same native release.
 - JSON / UTF-8: structured interchange data / Unicode byte encoding.
 - SDK / ACP: software development kit / Agent Client Protocol.
+- TDD: test-driven development; reproduce or specify a failing case before the fix.
+- Fail-open: failure of this advisory hook does not block the primary operation.
+- MPI / HPX: Message Passing Interface / High Performance ParalleX; outside this plan.
 - MCP: Model Context Protocol; the reminder names no particular server.
 - POSIX / Windows Job Object: Unix-like interface family / Windows process container.
 - Native trust: existing host review/qualification, not a descriptor self-assertion.

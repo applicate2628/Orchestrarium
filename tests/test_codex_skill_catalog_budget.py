@@ -1,22 +1,13 @@
-"""Wire scripts/validate-codex-skill-catalog-budget.py into the standard test gate.
+"""Check skill-catalog estimates and verified runtime observations.
 
-Codex CLI renders the pack's entire Codex skill catalog into the model-visible
-prompt, subject to a runtime-enforced character budget. Runtime string-extraction
-evidence (work-items/bugs/2026-07-26-codex-skill-catalog-overflow-is-silent.md)
-proved the documented overflow warning never reaches the model-visible prompt or
-stderr: growth past the ceiling silently shortens then omits skill entries, with
-no signal pointing back at the cause. The pack has no way to learn it outgrew its
-own budget except by checking for itself -- that is what this validator does, and
-this test file is what makes `pytest tests/` actually run it.
-
-Fail-first discipline: a gate that has never been shown a real overflow proves
-nothing (the exact defect this bug is about). The tests below build a synthetic
-catalog engineered to CROSS the fail threshold and confirm the validator fires,
-before trusting it to stay quiet on anything real.
+Historical estimates are non-binding risk diagnostics. Direct runtime evidence
+may establish omitted identities or shortened descriptions; unavailable runtime
+evidence remains unverified. The live test requires explicit authorization.
 """
 
 from __future__ import annotations
 
+import os
 import runpy
 import subprocess
 import sys
@@ -85,6 +76,13 @@ def _skills_text(root: Path, rows: list[tuple[str, str]]) -> str:
 
 def test_validator_script_exists() -> None:
     assert VALIDATOR.is_file(), f"validator missing: {VALIDATOR}"
+
+
+def test_shipped_pack_has_required_runtime_metadata() -> None:
+    module = _module()
+    identities = module["_pack_identities"](REPO_SKILLS)
+    assert identities
+    assert identities == {name: name for name in module["_pack_names"](REPO_SKILLS)}
 
 
 def test_runtime_observation_distinguishes_shortening_from_identity_omission(
@@ -253,6 +251,206 @@ def test_runtime_observer_timeout_is_typed_and_fail_closed(tmp_path: Path) -> No
     assert observed.diagnostic == "CATALOG-RUNTIME-EXECUTION"
 
 
+@pytest.mark.parametrize("unreadable_surface", ("source", "installed"))
+def test_runtime_observation_rejects_unreadable_skill_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    unreadable_surface: str,
+) -> None:
+    repo_skills = tmp_path / "repo-skills"
+    installed = tmp_path / "installed"
+    source = _write_skill(repo_skills, "alpha", "alpha description")
+    runtime = _write_skill(installed, "alpha", "alpha description")
+    unreadable = source if unreadable_surface == "source" else runtime
+    original_read = Path.read_text
+
+    def read_text(path, *args, **kwargs):
+        if path == unreadable:
+            raise PermissionError("injected unreadable skill")
+        return original_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+    # An empty rendered description must not match invented empty metadata
+    # when the installed file cannot actually be read.
+    description = "alpha description" if unreadable_surface == "source" else ""
+    observed = _module()["parse_runtime_prompt_input"](
+        _prompt_input(_skills_text(installed, [("alpha", description)])),
+        repo_skills,
+        installed,
+    )
+
+    assert observed.status == "binding-failure"
+    assert observed.diagnostic == "CATALOG-RUNTIME-BINDING"
+
+
+@pytest.mark.parametrize("invalid_surface", ("source", "installed"))
+def test_runtime_observation_rejects_invalid_utf8_skill_evidence(
+    tmp_path: Path,
+    invalid_surface: str,
+) -> None:
+    repo_skills = tmp_path / "repo-skills"
+    installed = tmp_path / "installed"
+    source = _write_skill(repo_skills, "alpha", "alpha description")
+    runtime = _write_skill(installed, "alpha", "alpha description")
+    invalid = source if invalid_surface == "source" else runtime
+    invalid.write_bytes(b"---\nname: alpha\ndescription: alpha\xff\n---\n")
+    description = "alpha description" if invalid_surface == "source" else "alpha\ufffd"
+    observed = _module()["parse_runtime_prompt_input"](
+        _prompt_input(_skills_text(installed, [("alpha", description)])),
+        repo_skills,
+        installed,
+    )
+
+    assert observed.status == "binding-failure"
+    assert observed.diagnostic == "CATALOG-RUNTIME-BINDING"
+
+
+@pytest.mark.parametrize("invalid_surface", ("source", "installed"))
+@pytest.mark.parametrize("field", ("name", "description"))
+def test_runtime_observation_rejects_duplicate_metadata_fields(
+    tmp_path: Path, invalid_surface: str, field: str,
+) -> None:
+    module = _module()
+    repo_skills = tmp_path / "repo-skills"
+    installed = tmp_path / "installed"
+    source = _write_skill(repo_skills, "alpha", "alpha description")
+    runtime = _write_skill(installed, "alpha", "alpha description")
+    invalid = source if invalid_surface == "source" else runtime
+    # Both the final value and rendered row are valid: last-value-wins must
+    # not turn ambiguous metadata into evidence of provider loading.
+    invalid.write_text(
+        f"---\n{field}: first value\nname: alpha\n"
+        "description: alpha description\n---\n",
+        encoding="utf-8",
+    )
+    observed = module["parse_runtime_prompt_input"](
+        _prompt_input(_skills_text(installed, [("alpha", "alpha description")])),
+        repo_skills,
+        installed,
+    )
+    assert observed.status == "binding-failure"
+    assert observed.diagnostic == "CATALOG-RUNTIME-BINDING"
+
+
+def test_runtime_metadata_duplicate_guard_preserves_scalar_bodies_and_estimates(
+    tmp_path: Path,
+) -> None:
+    path = _write_skill(tmp_path, "alpha", "alpha description")
+    read_metadata = _module()["_read_name_description"]
+    path.write_text(
+        "---\nname: alpha\ndescription: |-\n"
+        "  name: literal body\n  description: literal body\n---\n",
+        encoding="utf-8",
+    )
+    assert read_metadata(path, strict=True) == (
+        "alpha", "name: literal body description: literal body",
+    )
+    path.write_text(
+        "---\nname: first\nname: alpha\n"
+        "description: first\ndescription: alpha description\n---\n",
+        encoding="utf-8",
+    )
+    # Historical estimates keep their non-binding tolerant behavior.
+    assert read_metadata(path) == ("alpha", "alpha description")
+
+
+@pytest.mark.parametrize("invalid_surface", ("source", "installed"))
+@pytest.mark.parametrize(
+    ("metadata", "fallback_description"),
+    (
+        ("# No frontmatter\n", ""),
+        ("---\nname: alpha\n---\n", ""),
+        ('---\nname: alpha\ndescription: ""\n---\n', ""),
+        ('---\nname: alpha\ndescription: null\n---\n', "null"),
+        ('---\nname: alpha\ndescription: # comment\n---\n', "# comment"),
+        ('---\nname: alpha\ndescription: "" # comment\n---\n', '"" # comment'),
+        ('---\nname: alpha\ndescription: >-\nmetadata: abc\n---\n', "metadata: abc"),
+    ),
+    ids=("no-frontmatter", "no-description", "empty-description", "null-description",
+         "comment-only", "quoted-empty-with-comment", "empty-block"),
+)
+def test_runtime_observation_requires_actual_skill_metadata(
+    tmp_path: Path,
+    invalid_surface: str,
+    metadata: str,
+    fallback_description: str,
+) -> None:
+    repo_skills = tmp_path / "repo-skills"
+    installed = tmp_path / "installed"
+    source = _write_skill(repo_skills, "alpha", "alpha description")
+    runtime = _write_skill(installed, "alpha", "alpha description")
+    invalid = source if invalid_surface == "source" else runtime
+    invalid.write_text(metadata, encoding="utf-8")
+    description = "alpha description" if invalid_surface == "source" else fallback_description
+    observed = _module()["parse_runtime_prompt_input"](
+        _prompt_input(_skills_text(installed, [("alpha", description)])),
+        repo_skills,
+        installed,
+    )
+
+    assert observed.status == "binding-failure"
+    assert observed.diagnostic == "CATALOG-RUNTIME-BINDING"
+
+
+@pytest.mark.parametrize(
+    "name_field",
+    ("", "name: null\n", "name: ~\n", 'name: ""\n', 'name: "  "\n',
+     "name: # comment\n"),
+    ids=("absent", "null", "tilde", "empty", "blank", "comment-only"),
+)
+def test_runtime_observation_accepts_provider_default_skill_name(
+    tmp_path: Path, name_field: str
+) -> None:
+    # Pinned Codex parser_tests.rs uses_default_name_and_requires_description;
+    # the host loader supplies the sanitized parent directory as default_name.
+    repo_skills = tmp_path / "repo-skills"
+    installed = tmp_path / "installed"
+    for root in (repo_skills, installed):
+        path = _write_skill(root, "alpha", "alpha description")
+        path.write_text(
+            f'---\n{name_field}description: "alpha description"\n---\n',
+            encoding="utf-8",
+        )
+    observed = _module()["parse_runtime_prompt_input"](
+        _prompt_input(_skills_text(installed, [("alpha", "alpha description")])),
+        repo_skills,
+        installed,
+    )
+
+    assert observed.status == "complete"
+    assert observed.diagnostic == "CATALOG-COMPLETE"
+
+
+def test_runtime_metadata_preserves_quoted_null_and_sanitizes_whitespace(
+    tmp_path: Path,
+) -> None:
+    path = _write_skill(tmp_path, "alpha", "alpha description")
+    path.write_text('---\nname: "null"\ndescription: "  alpha   description  "\n---\n', encoding="utf-8")
+    read_metadata = _module()["_read_name_description"]
+    assert read_metadata(path, strict=True) == ("null", "alpha description")
+    assert read_metadata(path) == ("null", "  alpha   description  ")
+    path.write_text('---\nname: alpha\ndescription: "null"\n---\n', encoding="utf-8")
+    assert read_metadata(path, strict=True) == ("alpha", "null")
+    path.write_text('---\nname: alpha\ndescription: "keep # content" # comment\n---\n', encoding="utf-8")
+    assert read_metadata(path, strict=True) == ("alpha", "keep # content")
+    path.write_text('---\nname: alpha\ndescription: >- # comment\n  alpha\n  description\nmetadata: abc\n---\n', encoding="utf-8")
+    assert read_metadata(path, strict=True) == ("alpha", "alpha description")
+
+
+def test_runtime_observation_accepts_provider_whitespace_fences(tmp_path: Path) -> None:
+    repo_skills = tmp_path / "repo-skills"
+    installed = tmp_path / "installed"
+    for root in (repo_skills, installed):
+        path = _write_skill(root, "alpha", "alpha description")
+        path.write_text('  --- \t\nname: alpha\ndescription: alpha description\n\t---  \n', encoding="utf-8")
+    observed = _module()["parse_runtime_prompt_input"](
+        _prompt_input(_skills_text(installed, [("alpha", "alpha description")])),
+        repo_skills,
+        installed,
+    )
+    assert observed.status == "complete"
+
+
 @pytest.mark.parametrize(
     ("observation", "expected_code", "expected_marker"),
     (
@@ -270,6 +468,11 @@ def test_runtime_observer_timeout_is_typed_and_fail_closed(tmp_path: Path) -> No
             ("unavailable", "CATALOG-RUNTIME-UNAVAILABLE"),
             1,
             "FAIL: CATALOG-RUNTIME-UNAVAILABLE",
+        ),
+        (
+            ("binding-failure", "CATALOG-RUNTIME-BINDING"),
+            1,
+            "FAIL: CATALOG-RUNTIME-BINDING",
         ),
     ),
 )
@@ -291,7 +494,7 @@ def test_main_runtime_policy_warns_on_shortening_and_fails_closed(
     original_which = runtime_globals["shutil"].which
     runtime_globals["DEFAULT_REPO_SKILLS"] = repo_skills
     runtime_globals["discover_entries"] = lambda *_args: []
-    runtime_globals["validate"] = lambda *_args, **_kwargs: (True, ["STATIC"])
+    runtime_globals["estimate_catalog"] = lambda *_args, **_kwargs: ["STATIC"]
     status, diagnostic = observation
     runtime_globals["observe_runtime_catalog"] = lambda *_args: module[
         "RuntimeCatalogObservation"
@@ -317,13 +520,43 @@ def test_main_runtime_policy_warns_on_shortening_and_fails_closed(
     assert runtime_globals["shutil"].which is original_which
 
 
-# --- Fail-first verification: prove the gate can actually fire -------------
+# --- Historical estimate diagnostics ---------------------------------------
 
 
-def test_forced_overflow_catalog_fails_the_gate(tmp_path: Path) -> None:
-    """Falsify-first: construct a catalog engineered to cross the 90% fail band
-    and confirm the validator actually fires. A gate never shown a real overflow
-    proves nothing -- this is the check for that."""
+def test_historical_estimate_metadata_keeps_lossy_read_fallbacks(tmp_path: Path) -> None:
+    module = _module()
+    missing = tmp_path / "alpha" / "SKILL.md"
+    assert module["_read_name_description"](missing) == ("alpha", "")
+
+    invalid = _write_skill(tmp_path, "beta", "beta description")
+    invalid.write_bytes(b"---\nname: beta\ndescription: beta\xff\n---\n")
+    assert module["_read_name_description"](invalid) == ("beta", "beta\ufffd")
+
+
+@pytest.mark.parametrize(
+    ("metadata", "estimate"),
+    (
+        ("# No frontmatter\n", ("alpha", "")),
+        ("---\nname: alpha\n---\n", ("alpha", "")),
+        ('---\nname: alpha\ndescription: "  "\n---\n', ("alpha", "  ")),
+        ('---\nname: alpha\ndescription: null\n---\n', ("alpha", "null")),
+    ),
+    ids=("no-frontmatter", "no-description", "blank-description", "null-description"),
+)
+def test_required_metadata_is_strict_only_for_runtime_evidence(
+    tmp_path: Path, metadata: str, estimate: tuple[str, str]
+) -> None:
+    skill_md = _write_skill(tmp_path, "alpha", "alpha description")
+    skill_md.write_text(metadata, encoding="utf-8")
+    read_metadata = _module()["_read_name_description"]
+
+    assert read_metadata(skill_md) == estimate
+    with pytest.raises(ValueError):
+        read_metadata(skill_md, strict=True)
+
+
+def test_large_estimate_warns_without_runtime_failure(tmp_path: Path) -> None:
+    """A high historical estimate warns without claiming runtime omission."""
     codex_home = tmp_path / "codex_home"
     skills_root = codex_home / "skills"
     repo_skills = tmp_path / "repo_skills"
@@ -345,15 +578,14 @@ def test_forced_overflow_catalog_fails_the_gate(tmp_path: Path) -> None:
         "--context-window", str(context_window),
     )
 
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "RESULT: FAIL" in result.stdout
-    assert "FAIL: rendered catalog is" in result.stdout
-    assert ">= fail threshold 90%" in result.stdout
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "RESULT: ESTIMATE" in result.stdout
+    assert "WARNING: historical estimate" in result.stdout
+    assert "runtime visibility is not verified" in result.stdout
 
 
 def test_small_synthetic_catalog_stays_quiet(tmp_path: Path) -> None:
-    """The converse of the forced-overflow test: a small catalog against a large
-    context window must PASS, not merely fail to crash."""
+    """A small catalog yields an estimate, not a claim about runtime visibility."""
     codex_home = tmp_path / "codex_home"
     skills_root = codex_home / "skills"
     repo_skills = tmp_path / "repo_skills"
@@ -373,13 +605,11 @@ def test_small_synthetic_catalog_stays_quiet(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "RESULT: PASS" in result.stdout
+    assert "RESULT: ESTIMATE" in result.stdout
 
 
 def test_warn_band_is_inclusive_and_non_failing(tmp_path: Path) -> None:
-    """The warn band (>= warn-fraction, < fail-fraction) must be visible but must
-    NOT fail the gate -- mirrors the WARN/FAIL split already used by
-    validate-claude-md.py for the analogous Claude context-budget check."""
+    """The historical warning band is visible without imposing a product rule."""
     codex_home = tmp_path / "codex_home"
     skills_root = codex_home / "skills"
     repo_skills = tmp_path / "repo_skills"
@@ -413,8 +643,8 @@ def test_warn_band_is_inclusive_and_non_failing(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "RESULT: PASS" in result.stdout
-    assert "WARNING: rendered catalog is" in result.stdout
+    assert "RESULT: ESTIMATE" in result.stdout
+    assert "WARNING: historical estimate" in result.stdout
 
 
 # --- Ownership attribution --------------------------------------------------
@@ -551,21 +781,15 @@ def test_missing_codex_home_skips_rather_than_fails(tmp_path: Path) -> None:
 # --- Real-world checks -------------------------------------------------
 
 
-def test_pack_own_skill_set_alone_stays_well_under_the_fail_band(tmp_path: Path) -> None:
-    """Deterministic, CI-portable sanity check: the pack's OWN shipped skills
-    (this repo's src.codex/skills, with no external roots at all) must not by
-    themselves already be near the fail band. Uses repo-source SKILL.md paths
-    directly, so the absolute path length (and therefore the char-cost
-    estimate) is an approximation of the eventual installed-path cost, not a
-    byte-exact production simulation -- see the script's module docstring for
-    what would make it exact."""
+def test_pack_own_skill_set_produces_estimate(tmp_path: Path) -> None:
+    """Report a non-binding estimate for the source skill set."""
     result = _run(
         "--codex-home", str(REPO_SKILLS.parent),
         "--agents-skills-home", str(tmp_path / "no-agents-skills-here"),
         "--repo-skills", str(REPO_SKILLS),
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "RESULT: PASS" in result.stdout, result.stdout
+    assert "RESULT: ESTIMATE" in result.stdout, result.stdout
 
 
 def test_live_installed_environment_when_present_stays_quiet() -> None:
@@ -575,6 +799,8 @@ def test_live_installed_environment_when_present_stays_quiet() -> None:
     one" half of fail-first verification, using genuine installed data instead
     of a synthetic stand-in. Skips when no live install is present (that is an
     environment fact, not a validator defect)."""
+    if os.environ.get("ORCHE_ALLOW_LIVE_CODEX_DIAGNOSTIC") != "1":
+        pytest.skip("live Codex diagnostic requires explicit authorization and opt-in")
     home = Path.home()
     codex_home = home / ".codex" if (home / ".codex" / "skills").is_dir() else None
     if codex_home is None:

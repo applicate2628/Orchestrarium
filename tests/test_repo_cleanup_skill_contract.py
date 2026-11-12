@@ -1,12 +1,16 @@
 """Frozen coordinator-only repository-cleanup contract."""
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +23,10 @@ CODEX_INTERFACE = (
 )
 TURN_ANCHOR = (
     ROOT / "scripts" / "universal-hooks" / "scripts" / "turn-anchor-reminder.py"
+)
+CANONICAL_PRIOR = (
+    ROOT / "tests/fixtures/canonical-skill-priors"
+    / "8bd58995a10966370cf3df1f04ed63dd94ca529d"
 )
 
 
@@ -36,12 +44,13 @@ def _common_skills() -> tuple[str, ...]:
     return tuple(re.findall(r"`\$([a-z][a-z0-9-]+)`", match.group(1)))
 
 
-def test_repo_cleanup_is_one_common_skill_with_byte_equivalent_provider_semantics() -> None:
+def test_repo_cleanup_has_one_current_body_and_a_frozen_migration_source() -> None:
     assert "repo-cleanup" in _common_skills()
     assert CODEX_SKILL.is_file()
     assert CLAUDE_SKILL.is_file()
     assert CODEX_INTERFACE.is_file()
-    assert _body(CODEX_SKILL) == _body(CLAUDE_SKILL)
+    assert hashlib.sha256(CLAUDE_SKILL.read_bytes()).hexdigest() == "06fe776be7a9c75ec5491fdf8a54e16c65e2586ab0f04ec972d3501cae55c060"
+    assert _body(CODEX_SKILL) != _body(CLAUDE_SKILL)
 
     codex_members = {
         path.relative_to(CODEX_SKILL.parent).as_posix()
@@ -365,3 +374,276 @@ def test_installer_accepts_only_the_exact_immediate_predecessor_skill_trees() ->
     ) not in installer.ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256[
         "manual-repo-transfer"
     ]
+
+
+def test_general_disposition_moves_disposable_artifacts_to_purgable_trash_first() -> None:
+    spine = SPINE.read_text(encoding="utf-8")
+    paragraph = next(line for line in spine.splitlines()
+                     if line.startswith("- **Artifact disposition and project hygiene:**"))
+    for required in (
+        "Trash-first",
+        "as soon as it is confirmed unnecessary",
+        "do not wait for a failed deletion",
+        "safe to empty completely",
+        "no required recovery or acceptance evidence depends on trash",
+        "only from trash",
+        "Agents never automatically purge manual-deletion trash",
+        "Unknown, foreign, ambiguous, valuable, active or prohibited material stays preserved",
+        "Never bypass a denial",
+        "a move grants no purge permission",
+        "does not rewrite internal atomic replacement, transaction rollback or live-resource release contracts",
+        "no-overwrite semantics",
+        "source absence",
+        "exact source/destination authority",
+    ):
+        assert required in paragraph
+    for obsolete in (
+        "First establish the actual deletion outcome",
+        "normal permitted resolution cannot complete deletion",
+        "A first failure or refusal alone does not select trash",
+    ):
+        assert obsolete not in paragraph
+
+
+def test_cleanup_consumers_do_not_restore_delete_first_or_unsafe_trash() -> None:
+    for path in (CODEX_SKILL, REFERENCE):
+        text = path.read_text(encoding="utf-8")
+        assert "trash-first" in text
+        assert "attempted-deletion fallback" not in text
+        assert "manual quarantine" not in text
+        assert "quarantine prepared; manual deletion pending" not in text
+    text = CODEX_SKILL.read_text(encoding="utf-8")
+    assert "only from trash" in text
+    assert "disposable material already in trash" in text
+    assert "owner may delete only classified disposable material" not in text
+
+
+def test_russian_hygiene_mirror_preserves_trash_first_guarantees() -> None:
+    text = (ROOT / "shared/references/ru/repository-source-hygiene.md").read_text(encoding="utf-8")
+    for phrase in ('без предварительной попытки удаления', 'можно полностью очистить вручную', 'не зависят', 'только из trash'):
+        assert phrase in text
+    assert "delete it; git history preserves the file" not in text
+
+
+def _load_source_module(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(name, None)
+    return module
+
+
+@pytest.mark.parametrize("provider", ("codex", "claude"))
+@pytest.mark.parametrize("mutation", (None, "canonical", "historical", "both", "missing"))
+def test_cleanup_validator_binds_current_and_historical_sources(
+    tmp_path: Path, provider: str, mutation: str | None,
+) -> None:
+    """Neither a unilateral edit nor identical tampering restores false parity."""
+    relative = (
+        "src.codex/skills/lead/scripts/validate-skill-pack.py"
+        if provider == "codex" else "src.claude/agents/scripts/validate-skill-pack.py"
+    )
+    adapter = _load_source_module(ROOT / relative, f"cleanup_validator_{provider}")
+    root = tmp_path / "repo"
+    for source in (SPINE, ROOT / "src.codex/AGENTS.codex.md", CODEX_SKILL, CLAUDE_SKILL):
+        target = root / source.relative_to(ROOT)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes())
+    (root / "src.codex/skills/lead/scripts").mkdir(parents=True)
+    (root / "src.claude/agents/scripts").mkdir(parents=True)
+    canonical = root / CODEX_SKILL.relative_to(ROOT)
+    historical = root / CLAUDE_SKILL.relative_to(ROOT)
+    if mutation == "canonical":
+        canonical.write_bytes(canonical.read_bytes() + b"\nfixture body drift\n")
+    elif mutation == "historical":
+        historical.write_bytes(historical.read_bytes() + b"\nfixture body drift\n")
+    elif mutation == "both":
+        canonical.write_bytes(b"---\nname: repo-cleanup\ndescription: fixture\n---\nunapproved\n")
+        historical.write_bytes(canonical.read_bytes())
+    elif mutation == "missing":
+        canonical.rename(canonical.with_suffix(".missing"))
+    actions = tuple(
+        (scope, tuple(action for action in group if any("repo-cleanup" in str(arg) for arg in action)))
+        for scope, group in adapter.ACTIONS
+    )
+    runtime = adapter._ENGINE
+    layout = runtime.detect_layout(root / relative, provider, root)
+    assert layout.skills == root / "src.codex/skills"
+    selected = tuple(runtime._applicable_actions(actions, layout))
+    assert len(selected) == 2
+    result = runtime.validate_pack(
+        script=root / relative, provider=provider, actions=actions, root=root,
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(), curated_role_skills=frozenset(),
+    )
+    assert result.errors == (0 if mutation is None else 2 if mutation == "both" else 1)
+    assert result.warnings == 0
+
+
+@pytest.mark.parametrize("mutation", (None, "installed-history", "canonical-after-plan"))
+def test_cleanup_projection_preserves_historical_migration_binding(
+    tmp_path: Path, mutation: str | None,
+) -> None:
+    """Read-only preflight: no native installation or lifecycle bypass."""
+    installer = _load_source_module(
+        ROOT / "scripts/production_installer.py", "cleanup_projection_installer"
+    )
+    current_source = tmp_path / "current-source"
+    historical_source = tmp_path / "historical-source"
+    target = tmp_path / "target"
+    canonical_target = target / ".agents/skills"
+    projection_root = target / ".claude/skills"
+    shutil.copytree(CODEX_SKILL.parent, current_source / "repo-cleanup")
+    shutil.copytree(CLAUDE_SKILL.parent, historical_source / "repo-cleanup")
+    installed = projection_root / "repo-cleanup"
+    shutil.copytree(CLAUDE_SKILL.parent, installed)
+    if mutation == "installed-history":
+        (installed / "SKILL.md").write_bytes(b"user-owned changed skill\n")
+        with pytest.raises(ValueError, match="E_CREATE_ONLY_PROJECTION_COLLISION: repo-cleanup"):
+            installer._preflight_claude_skill_projections(
+                current_source, historical_source, canonical_target, projection_root,
+            )
+        assert (installed / "SKILL.md").read_bytes() == b"user-owned changed skill\n"
+        return
+    before = (installed / "SKILL.md").read_bytes()
+    plan = installer._preflight_claude_skill_projections(
+        current_source, historical_source, canonical_target, projection_root,
+    )
+    assert len(plan) == 1
+    item = plan[0]
+    assert item.action == "migrate"
+    assert item.canonical_target == canonical_target / "repo-cleanup"
+    assert item.canonical_digest == installer._tree_sha256(current_source / "repo-cleanup")
+    assert item.historical_digest == installer._tree_sha256(historical_source / "repo-cleanup")
+    assert item.historical_digest != item.canonical_digest
+    if mutation == "canonical-after-plan":
+        (current_source / "repo-cleanup/SKILL.md").write_bytes(b"source drift\n")
+        with pytest.raises(ValueError, match="E_CREATE_ONLY_PROJECTION_COLLISION"):
+            installer._assert_claude_skill_projection_plan_current(
+                plan, current_source, projection_root,
+            )
+    else:
+        installer._assert_claude_skill_projection_plan_current(plan, current_source, projection_root)
+    assert (installed / "SKILL.md").read_bytes() == before
+    assert not canonical_target.exists()
+
+
+@pytest.mark.parametrize("provider", ("codex", "claude"))
+@pytest.mark.parametrize("historical_body", (False, True))
+def test_installed_cleanup_validator_requires_current_body_without_source_tree(
+    tmp_path: Path, provider: str, historical_body: bool,
+) -> None:
+    relative = (
+        "src.codex/skills/lead/scripts/validate-skill-pack.py"
+        if provider == "codex" else "src.claude/agents/scripts/validate-skill-pack.py"
+    )
+    adapter = _load_source_module(ROOT / relative, f"installed_cleanup_{provider}")
+    root = tmp_path / "installed"
+    skills = root / (".agents/skills" if provider == "codex" else ".claude/skills")
+    scripts = skills / "lead/scripts" if provider == "codex" else root / ".claude/agents/scripts"
+    scripts.mkdir(parents=True)
+    agents = root / ("AGENTS.md" if provider == "codex" else ".claude/AGENTS.md")
+    agents.write_text("fixture governance\n", encoding="utf-8")
+    skill = skills / "repo-cleanup/SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_bytes((CLAUDE_SKILL if historical_body else CODEX_SKILL).read_bytes())
+    actions = tuple(
+        (scope, tuple(action for action in group if any("repo-cleanup" in str(arg) for arg in action)))
+        for scope, group in adapter.ACTIONS
+    )
+    runtime = adapter._ENGINE
+    layout = runtime.detect_layout(scripts / "validate-skill-pack.py", provider, root)
+    assert not layout.dev_repo
+    assert len(tuple(runtime._applicable_actions(actions, layout))) == 1
+    result = runtime.validate_pack(
+        script=scripts / "validate-skill-pack.py", provider=provider, actions=actions, root=root,
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(), curated_role_skills=frozenset(),
+    )
+    assert result.errors == int(historical_body)
+    assert result.warnings == 0
+
+
+def test_cleanup_stock_upgrade_uses_one_exact_member_manifest_witness() -> None:
+    installer = _load_source_module(
+        ROOT / "scripts/production_installer.py", "cleanup_stock_installer"
+    )
+    prior = CANONICAL_PRIOR / "repo-cleanup"
+    manifest = json.loads((CANONICAL_PRIOR / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["schemaVersion"] == 1
+    assert manifest["baseline"] == CANONICAL_PRIOR.name
+    assert manifest["files"] == {
+        "repo-cleanup/SKILL.md": "06fe776be7a9c75ec5491fdf8a54e16c65e2586ab0f04ec972d3501cae55c060",
+        "repo-cleanup/agents/openai.yaml": "f176678edd9df4f93335d3e90557f84f040b332318bd8296b2c7f87022867185",
+    }
+    assert {
+        path.relative_to(CANONICAL_PRIOR).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in prior.rglob("*") if path.is_file()
+    } == manifest["files"]
+    legacy = installer._legacy_tree_sha256(prior, ignore_runtime_cache=True)
+    strong = installer._tree_sha256(prior, ignore_runtime_cache=True)
+    assert legacy == "36ca45866892cab034addd9eb69a849fc1dcd82e473846093bd4e38107736b24"
+    assert strong == "8f56fb527cb1d92527b1fc1f4976508dbf1115d85a340bdd57322da6e1985e57"
+    assert installer.ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256["repo-cleanup"] == {legacy: strong}
+    assert installer._legacy_factory_identity_v2("repo-cleanup", legacy) == strong
+    assert installer._legacy_factory_identity_v2("repo-cleanup", "0" + legacy[1:]) is None
+
+
+@pytest.mark.parametrize("mutation", (None, "body", "extra-file"))
+def test_cleanup_project_upgrade_planning_only_stops_at_native_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str | None,
+) -> None:
+    """Exercise the real planner without claiming native update qualification."""
+    installer = _load_source_module(
+        ROOT / "scripts/production_installer.py", "cleanup_upgrade_planner"
+    )
+    source = tmp_path / "source"
+    shutil.copytree(ROOT / "src.codex/skills/lead", source / "lead")
+    shutil.copytree(CODEX_SKILL.parent, source / "repo-cleanup")
+    target = tmp_path / "project/.agents/skills"
+    installed = target / "repo-cleanup"
+    shutil.copytree(CANONICAL_PRIOR / "repo-cleanup", installed)
+    if mutation == "body":
+        (installed / "SKILL.md").write_bytes(b"user-owned body\n")
+    elif mutation == "extra-file":
+        (installed / "user.txt").write_bytes(b"user-owned extra\n")
+    def snapshot():
+        return {
+            path.relative_to(installed): (
+                path.stat().st_dev, path.stat().st_ino,
+                path.read_bytes() if path.is_file() else None,
+            )
+            for path in (installed, *installed.rglob("*"))
+        }
+
+    before = snapshot()
+    observed = []
+
+    class NativeQualificationPending(Exception):
+        pass
+
+    def stop_before_native_probe(plan, planned_target):
+        observed.append(plan)
+        assert planned_target == target
+        raise NativeQualificationPending
+
+    monkeypatch.setattr(installer, "_preflight_directory_move_capabilities", stop_before_native_probe)
+    if mutation is None:
+        with pytest.raises(NativeQualificationPending):
+            installer._preflight_canonical_skills(source, target, root=ROOT, global_install=False)
+        assert len(observed) == 1
+        skill = next(item for item in observed[0].skills if item.name == "repo-cleanup")
+        assert skill.accepted_prior == "8f56fb527cb1d92527b1fc1f4976508dbf1115d85a340bdd57322da6e1985e57"
+        assert skill.installed_digest == skill.accepted_prior
+        assert skill.source_digest == installer._tree_sha256(source / "repo-cleanup", ignore_runtime_cache=True)
+        assert skill.source_digest != skill.accepted_prior
+    else:
+        with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: repo-cleanup"):
+            installer._preflight_canonical_skills(source, target, root=ROOT, global_install=False)
+        assert observed == []
+    assert snapshot() == before
+    assert sorted(path.name for path in target.iterdir()) == ["repo-cleanup"]

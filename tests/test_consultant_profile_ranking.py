@@ -68,6 +68,7 @@ def test_omitted_consultant_choice_uses_frontier_high_and_reports_model_tier() -
     assert decision["resolvedEffort"] == "high"
     assert decision["invocation"] == {
         "mode": "generic-explicit-profile",
+        "omitAgentType": True,
         "forkTurns": "none",
         "model": "gpt-6.1-sol",
         "reasoningEffort": "high",
@@ -122,6 +123,8 @@ def test_explicit_consultant_choice_wins_but_partial_and_unapproved_max_deny() -
 def test_consultant_task_intersections_are_policy_owned() -> None:
     expected = {
         "planning": [
+            "terra-6.1-high",
+            "terra-6.1-xhigh",
             "balanced-high",
             "frontier-high",
             "frontier-xhigh",
@@ -130,8 +133,11 @@ def test_consultant_task_intersections_are_policy_owned() -> None:
             "astra-high",
             "astra-xhigh",
             "astra-max",
+            "terra-6.1-max",
         ],
         "review": [
+            "terra-6.1-high",
+            "terra-6.1-xhigh",
             "balanced-high",
             "frontier-high",
             "frontier-xhigh",
@@ -140,6 +146,7 @@ def test_consultant_task_intersections_are_policy_owned() -> None:
             "astra-high",
             "astra-xhigh",
             "astra-max",
+            "terra-6.1-max",
         ],
         "critical-design": [
             "frontier-high",
@@ -154,6 +161,15 @@ def test_consultant_task_intersections_are_policy_owned() -> None:
     for task_class, expected_profiles in expected.items():
         description = _describe(task_class)
         assert [option["profile"] for option in description["options"]] == expected_profiles
+
+    for effort in ("high", "xhigh"):
+        assert _resolve(_describe("planning"), requested_model="gpt-6.1-terra",
+                        requested_effort=effort)["status"] == "resolved"
+    max_choice = dict(requested_model="gpt-6.1-terra", requested_effort="max")
+    denied_max = _resolve(_describe("planning"), **max_choice)
+    assert denied_max["status"] == "denied" and denied_max["fallback"] == "none"
+    assert denied_max["configurationDiagnostic"]["reason"] == "individual-launch-approval-required"
+    assert _resolve(_describe("planning"), user_approved_launch=True, **max_choice)["resolvedProfile"] == "terra-6.1-max"
 
     denied = _describe("exploration")
     assert denied["status"] == "denied"

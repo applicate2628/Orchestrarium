@@ -15,6 +15,7 @@ Covers the cases listed in the architecture review of commit 79aa5eb:
 from __future__ import annotations
 
 import json
+import hashlib
 import importlib.util
 import os
 import shutil
@@ -23,6 +24,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path, PureWindowsPath
+from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK_INSTALLER = REPO_ROOT / "scripts" / "install-hypothesis-hook.py"
@@ -78,6 +80,108 @@ def load_json(path: Path) -> dict:
 
 class TestInstallHypothesisHook(unittest.TestCase):
 
+    def test_windows_case_equivalent_target_updates_without_duplicate(self) -> None:
+        marker = "check-bugfix-discipline"
+        old = {"type": "command", "command": r'python "C:\MANAGED\CHECK-BUGFIX-DISCIPLINE.PY"', "statusMessage": "old"}
+        new = {"type": "command", "command": r'python "c:\managed\check-bugfix-discipline.py"', "statusMessage": "new"}
+        data = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [old]}]}}
+        self.assertTrue(HOOK_MODULE.install(data, {"matcher": "Bash", "hooks": [new]}, "PreToolUse", marker,
+                                            platform="codex", host_os="windows"))
+        self.assertEqual(data["hooks"]["PreToolUse"][0]["hooks"], [new])
+
+    def test_verified_legacy_witness_rejects_changed_bytes_and_binds_old_codex_root(self) -> None:
+        from scripts import production_installer as producer
+        marker = "check-bugfix-discipline"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = root / "current"
+            old_provider = root / "project/.codex"
+            legacy = old_provider / "skills/lead/scripts/check-bugfix-discipline.ps1"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_bytes(b"synthetic-pinned-legacy\n")
+            digest = hashlib.sha256(legacy.read_bytes()).hexdigest()
+            witnesses = {}
+            with patch.dict(producer._CODEX_RETIRED_PS1, {"skills/lead/scripts/" + legacy.name: digest}):
+                targets = producer._verified_legacy_hook_targets("codex", package, {marker},
+                                                                  legacy_provider_root=old_provider, witnesses=witnesses)
+                self.assertEqual(targets, {marker: {str(legacy)}})
+                producer._recheck_legacy_hook_targets("codex", package, marker, witnesses, old_provider)
+                legacy.write_bytes(b"changed-before-merge\n")
+                with self.assertRaisesRegex(ValueError, "verified legacy hook artifact changed"):
+                    producer._recheck_legacy_hook_targets("codex", package, marker, witnesses, old_provider)
+
+    def test_marker_only_remove_uses_logical_package_and_preserves_foreign(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "project"
+            for platform in ("codex", "claude"):
+                with self.subTest(platform=platform):
+                    config_dir = project / (".codex" if platform == "codex" else ".claude")
+                    config_dir.mkdir(parents=True, exist_ok=True)
+                    target = config_dir / ("hooks.json" if platform == "codex" else "settings.json")
+                    package = project / (".agents/skills/lead" if platform == "codex" else ".claude/agents")
+                    managed = (package / "scripts/check-bugfix-discipline.py").as_posix()
+                    foreign = (project / "user/check-bugfix-discipline.py").as_posix()
+                    def handler(path):
+                        return ({"type": "command", "command": "python " + path} if platform == "codex"
+                                else {"type": "command", "command": "python", "args": [path]})
+                    user = handler(foreign)
+                    target.write_text(json.dumps({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [user, handler(managed)]}]}}), encoding="utf-8")
+                    result = subprocess.run([sys.executable, "-B", str(HOOK_INSTALLER), "--target", str(target),
+                                             "--platform", platform, "--host-os", "posix", "--remove",
+                                             "--script-marker", "check-bugfix-discipline", "--script-path", ""],
+                                            capture_output=True, text=True, timeout=30)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(load_json(target)["hooks"]["PreToolUse"][0]["hooks"], [user])
+
+    def test_verified_legacy_package_leaf_migrates_without_adopting_unknown(self) -> None:
+        from scripts import production_installer as producer
+        marker = "check-bugfix-discipline"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            scripts = root / "scripts"
+            scripts.mkdir()
+            legacy = scripts / (marker + ".sh")
+            legacy.write_bytes(b"synthetic-owned-legacy\n")
+            digest = hashlib.sha256(legacy.read_bytes()).hexdigest()
+            with patch.dict(producer._CODEX_RETIRED_SH, {"scripts/" + legacy.name: digest}):
+                proven = producer._verified_legacy_hook_targets("codex", root, {marker})
+            self.assertEqual(proven, {marker: {str(legacy)}})
+            foreign = {"type": "command", "command": "bash /unknown/" + legacy.name}
+            known = {"type": "command", "command": "bash " + legacy.as_posix()}
+            data = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [foreign, known]}]}}
+            entry = {"matcher": "Bash", "hooks": [{"type": "command", "command": "python " + (scripts / (marker + ".py")).as_posix()}]}
+            self.assertTrue(HOOK_MODULE.install(data, entry, "PreToolUse", marker,
+                                                platform="codex", managed_targets=proven))
+            self.assertEqual(data["hooks"]["PreToolUse"][0]["hooks"][0], foreign)
+            self.assertEqual(data["hooks"]["PreToolUse"][0]["hooks"][1], entry["hooks"][0])
+
+    def test_install_preserves_user_marker_collisions_and_updates_current_runner(self) -> None:
+        marker = "check-git-push-gate"
+        for platform in ("codex", "claude"):
+            with self.subTest(platform=platform):
+                def handler(path, status):
+                    if platform == "codex":
+                        return {"type": "command", "command": "python " + path,
+                                "statusMessage": status, "custom": status}
+                    return {"type": "command", "command": "python", "args": [path],
+                            "statusMessage": status, "custom": status}
+
+                foreign = [handler("/user/" + name, name) for name in (
+                    "check-git-push-gate-custom.py", "my-check-git-push-gate.py",
+                    "check-git-push-gate-runner.py",
+                )]
+                current = handler("/managed/check-git-push-gate-runner.py", "old")
+                replacement = handler("/managed/check-git-push-gate-runner.py", "new")
+                data = {"hooks": {"PreToolUse": [{"matcher": "Bash", "groupMetadata": "keep",
+                                                   "hooks": [*foreign, current]}]}}
+                entry = {"matcher": "Bash", "hooks": [replacement]}
+                self.assertTrue(HOOK_MODULE.install(data, entry, "PreToolUse", marker, platform=platform))
+                group = data["hooks"]["PreToolUse"][0]
+                self.assertEqual(group["groupMetadata"], "keep")
+                self.assertEqual(group["hooks"][:3], foreign)
+                self.assertEqual(group["hooks"][3]["statusMessage"], "new")
+                self.assertFalse(HOOK_MODULE.install(data, entry, "PreToolUse", marker, platform=platform))
+
     def test_owned_handler_update_preserves_mixed_groups_and_codex_slots(self) -> None:
         for matcher in ("Bash", "ChangedTool"):
             with self.subTest(matcher=matcher):
@@ -122,7 +226,8 @@ class TestInstallHypothesisHook(unittest.TestCase):
         sys.modules[health_spec.name] = health
         health_spec.loader.exec_module(health)
         self.assertEqual(health.classify_hook_invocation(
-            {"command": "python /hooks/check-bugfix-discipline.py"}, {"check-bugfix-discipline"}, "codex", "posix"
+            {"command": "python /hooks/check-bugfix-discipline.py"}, {"check-bugfix-discipline"}, "codex", "posix",
+            {"check-bugfix-discipline": {"/hooks/check-bugfix-discipline.py"}},
         ).kind, "current-owned")
         isolated = self.tmpdir / "source-without-owner"
         isolated.mkdir()
@@ -461,15 +566,30 @@ class TestInstallHypothesisHook(unittest.TestCase):
         }) + "\n", encoding="utf-8")
         before = self.target.read_bytes()
         with self.assertRaisesRegex(RuntimeError, "injected verification failure"):
-            with installer._InstallTransaction([self.target], enabled=True):
-                result = run_installer(
-                    self.target, "--remove", "--script-marker", "check-mcp-momentum",
-                    "--tool-matcher", matcher, platform="codex", host_os="windows", script_path=str(script),
+            with installer._InstallTransaction([self.target], enabled=True) as transaction:
+                owner = installer._CreateOnlyMutablePath(self.tmpdir, transaction, dry_run=False)
+                hook_target = HOOK_MODULE.resolve_hook_target(str(script), "windows", "codex", require_script=False)
+                expected_entry = HOOK_MODULE.build_codex_entry(hook_target, "windows", "PreToolUse", matcher)
+                installer._transform_hook_registration(
+                    HOOK_MODULE, self.target, owner, "check-mcp-momentum", "PreToolUse",
+                    "codex", "windows", expected_entry=expected_entry,
                 )
-                self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(load_json(self.target)["hooks"]["PreToolUse"][0]["hooks"], [sibling])
                 raise RuntimeError("injected verification failure")
         self.assertEqual(self.target.read_bytes(), before)
+
+    def test_untracked_external_writer_is_not_overwritten_by_rollback(self) -> None:
+        from scripts import production_installer as installer
+        original = b'{"hooks": {}}\n'
+        foreign = b'{"hooks": {}, "external": true}\n'
+        self.target.write_bytes(original)
+        with self.assertRaises(installer._InstallFailure) as failure:
+            with installer._InstallTransaction([self.target], enabled=True):
+                self.target.write_bytes(foreign)
+                raise RuntimeError("synthetic initiating failure")
+        self.assertEqual(failure.exception.stable_id, "E_ROLLBACK_SETTLEMENT_FAILED")
+        self.assertEqual(self.target.read_bytes(), foreign)
+        self.assertTrue(failure.exception.recovery_path.exists())
 
     def test_codex_windows_remove_works(self) -> None:
         # Removal must work the same way on Codex+Windows as on POSIX.
@@ -632,10 +752,8 @@ class TestInstallHypothesisHook(unittest.TestCase):
 
     def test_duplicates_collapsed_on_install(self) -> None:
         # Simulate two old-style shell-form entries (older buggy install).
-        # The marker substring `check-bugfix-discipline` is what identifies
-        # our entries regardless of form (shell or exec), so duplicates are
-        # collapsed even if one is shell form and one is exec form.
-        old_cmd = f"bash {SCRIPT_PATH}"
+        # Both legacy shell entries invoke the exact selected managed target.
+        old_cmd = f"bash {PY_SCRIPT_PATH.as_posix()}"
         self.target.write_text(json.dumps({
             "hooks": {
                 "PreToolUse": [
@@ -654,9 +772,8 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(hook["args"], [str(PY_SCRIPT_PATH.resolve())])
 
     def test_duplicates_all_removed_on_uninstall(self) -> None:
-        # Old-style shell-form entries are still recognized by marker substring
-        # and removed cleanly even when the current install would use exec form.
-        old_cmd = f"bash {SCRIPT_PATH}"
+        # Exact selected targets remain removable in legacy shell form.
+        old_cmd = f"bash {PY_SCRIPT_PATH.as_posix()}"
         self.target.write_text(json.dumps({
             "hooks": {
                 "PreToolUse": [
@@ -931,7 +1048,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         )
         self.assertNotIn("python", json.dumps((claude, codex)).lower())
 
-    def test_migration_collapses_wrapper_entry_to_target_entry(self) -> None:
+    def test_unknown_wrapper_origin_is_preserved_during_install(self) -> None:
         old_entry = {
             "matcher": "Edit|Write|NotebookEdit|apply_patch",
             "hooks": [{
@@ -953,9 +1070,9 @@ class TestInstallHypothesisHook(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         entries = load_json(self.target)["hooks"]["PreToolUse"]
-        self.assertEqual(len(entries), 2)
-        self.assertEqual(entries[1], {"matcher": "Edit|Write|NotebookEdit|apply_patch", "hooks": []})
-        command = entries[0]["hooks"][0]["command"].lower()
+        self.assertEqual(len(entries), 3)
+        self.assertEqual(entries[:2], [old_entry, old_entry])
+        command = entries[2]["hooks"][0]["command"].lower()
         self.assertNotIn("powershell", command)
         self.assertIn(".py", command)
 

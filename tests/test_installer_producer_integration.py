@@ -10,6 +10,7 @@ import io
 import json
 import os
 import runpy
+import shlex
 from pathlib import Path
 import sys
 import subprocess
@@ -507,33 +508,61 @@ class ProducerIntegrationTests(unittest.TestCase):
         self.assertFalse(target.exists())
         self.assert_clean()
 
-    def test_typed_stale_file_tree_and_link_restore_original_objects(self):
+    def test_claude_instructions_preserve_custom_on_success_rerun_and_rollback(self):
+        for scope in ("agents", "commands"):
+            with self.subTest(scope=scope):
+                source = self.source / scope
+                target = self.target / scope
+                source.mkdir()
+                target.mkdir()
+                for name in ("custom.md", "equal.md", "new.md"):
+                    (source / name).write_bytes(b"---\nname: stock\n---\nstock body\n")
+                custom = target / "custom.md"
+                original = b"---\nname: user\nextra: retained\n---\nuser body\n"
+                custom.write_bytes(original)
+                equal = target / "equal.md"
+                equal.write_bytes((source / "equal.md").read_bytes())
+                new = target / "new.md"
+                paths = [custom, equal, new]
+                for _ in range(2):
+                    with self.transaction(paths, paths) as transaction:
+                        PI._sync_tree(source, target, False, mutable_owner=self.owner(transaction),
+                                      instruction_scope=scope)
+                        transaction.commit()
+                    self.assertEqual(original, custom.read_bytes())
+                    self.assertEqual((source / "equal.md").read_bytes(), equal.read_bytes())
+                    self.assertEqual((source / "new.md").read_bytes(), new.read_bytes())
+                new.unlink()
+                with self.assertRaisesRegex(RuntimeError, "forced failure"):
+                    with self.transaction(paths, paths) as transaction:
+                        PI._sync_tree(source, target, False, mutable_owner=self.owner(transaction),
+                                      instruction_scope=scope)
+                        raise RuntimeError("forced failure")
+                self.assertFalse(new.exists())
+                self.assertEqual(original, custom.read_bytes())
+        self.assert_clean()
+
+    def test_unowned_stale_file_tree_and_link_are_preserved(self):
         commands = self.target / "commands"
         skills = self.target / "skills"
         commands.mkdir()
         skills.mkdir()
         stale_file = commands / "agents-stale.md"
         stale_tree = skills / "agents-stale"
-        stale_file.write_bytes(b"stale file")
+        stale_file.write_bytes(b"user stale file")
         stale_tree.mkdir()
-        (stale_tree / "leaf").write_bytes(b"stale tree")
+        (stale_tree / "leaf").write_bytes(b"user stale tree")
         link = skills / "agents-link"
         link.symlink_to(stale_tree.name, target_is_directory=True)
         original = {p: PI._CreateOnlyMutablePath._identity(p) for p in (stale_file, stale_tree, link)}
-        transaction = self.transaction([stale_file, skills])
-        primary = RuntimeError("later")
-        with self.assertRaises(RuntimeError) as caught:
-            with transaction:
-                owner = self.owner(transaction)
-                PI._reclaim_claude_namespace(self.source, commands, skills, False,
-                                             commands_owner=owner, skills_owner=owner)
-                self.assertFalse(stale_file.exists())
-                self.assertFalse(stale_tree.exists())
-                self.assertFalse(link.is_symlink())
-                raise primary
-        self.assertIs(primary, caught.exception)
+        with self.transaction([]) as transaction:
+            owner = self.owner(transaction)
+            PI._reclaim_claude_namespace(self.source, commands, skills, False,
+                                         commands_owner=owner, skills_owner=owner)
+            transaction.commit()
         self.assertEqual(original, {p: PI._CreateOnlyMutablePath._identity(p) for p in original})
-        self.assertEqual(b"stale tree", (stale_tree / "leaf").read_bytes())
+        self.assertEqual(b"user stale file", stale_file.read_bytes())
+        self.assertEqual(b"user stale tree", (stale_tree / "leaf").read_bytes())
         self.assertEqual(stale_tree.name, os.readlink(link))
         self.assert_clean()
 
@@ -555,22 +584,20 @@ class ProducerIntegrationTests(unittest.TestCase):
         self.assertTrue(referent.is_dir())
         self.assert_clean()
 
-    def test_equal_byte_foreign_stale_leaf_is_refused_and_preserved(self):
-        commands = self.target / "commands"
-        commands.mkdir()
-        stale = commands / "agents-stale.md"
-        stale.write_bytes(b"stale")
-        transaction = self.transaction([stale])
-        with self.assertRaises(PI._InstallFailure) as caught:
+    def test_instruction_copy_race_is_refused_and_preserved(self):
+        source = self.source / "commands"
+        target = self.target / "commands"
+        source.mkdir()
+        target.mkdir()
+        (source / "new.md").write_bytes(b"stock")
+        destination = target / "new.md"
+        transaction = self.transaction([destination], [destination])
+        with self.assertRaises(PI._InstallFailure):
             with transaction:
-                foreign = self.target / "foreign"
-                foreign.write_bytes(b"stale")
-                os.replace(foreign, stale)
-                PI._reclaim_claude_namespace(self.source, commands, self.target / "skills", False,
-                                             commands_owner=self.owner(transaction))
-        self.assertIn("retention original source", str(caught.exception.cause))
-        self.assertEqual(b"stale", stale.read_bytes())
-        self.assertTrue(caught.exception.recovery_path.is_dir())
+                destination.write_bytes(b"concurrent user")
+                PI._sync_tree(source, target, False, mutable_owner=self.owner(transaction),
+                              instruction_scope="commands")
+        self.assertEqual(b"concurrent user", destination.read_bytes())
 
     def test_native_no_plan_config_uses_its_existing_migration_inverse(self):
         config = self.target / "config.toml"
@@ -1641,6 +1668,99 @@ class ProducerIntegrationTests(unittest.TestCase):
                 self.assertEqual({specs[0][0]}, I._load_codex_inventory(
                     inventory, target=selected, host_os="windows" if os.name == "nt" else "posix")[0])
                 transaction.commit()
+        self.assert_clean()
+
+    def test_repeated_hook_install_reconciles_stale_inventory_and_rolls_back(self):
+        specs, selected, storage, inventory, _original, _foreign = self.hook_fixture(linked=True)
+        host = "windows" if os.name == "nt" else "posix"
+        link = os.readlink(selected)
+        checks = []
+
+        def health(*_args):
+            arguments = _args[0]
+            selected_stems = {arguments[index + 1] for index, value in enumerate(arguments) if value == "--selected-hook"}
+            self.assertEqual(selected_stems, {marker for marker, _script, _event, _matcher in specs})
+            data = json.loads(storage.read_bytes())
+            targets = {marker: {str(script)} for marker, script, _event, _matcher in specs}
+            rows = list(I._iter_owned_hooks(data, set(targets), "codex", host, targets))
+            records = [{"eventName": event, "matcher": matcher, "handlerType": "command",
+                        "command": subprocess.list2cmdline(argv) if host == "windows" else shlex.join(argv),
+                        "sourcePath": str(storage), "enabled": True, "trustStatus": "trusted",
+                        "currentHash": "sha256:synthetic"}
+                       for event, _stem, argv, matcher in rows]
+            manifest = SimpleNamespace(registered_hook_specs=lambda _platform, _root: specs)
+            with patch.object(I, "_codex_hooks_list", return_value=records), patch.object(I, "_hook_manifest", return_value=manifest):
+                I.verify_config(target=selected, platform="codex", host_os=host, repo_root=self.source,
+                                verify_fires=False, inventory_path=inventory, codex_trust_mode="require",
+                                installed_root=self.source,
+                                selected_stems=selected_stems,
+                                codex_command=["synthetic-codex"], codex_home=self.root, query_cwd=self.root)
+            checks.append(True)
+            return subprocess.CompletedProcess([], 0)
+
+        def install(primary=None):
+            transaction = self.transaction([storage, inventory, selected], link_objects=(selected,))
+            with self.hook_support(specs, primary), patch.object(PI, "_run_hook_health_bounded", side_effect=health):
+                with transaction:
+                    PI._install_hooks(self.source, "codex", selected, self.source, "target", inventory,
+                                      transaction=transaction, mutable_owner=self.owner(transaction))
+                    transaction.commit()
+
+        install()
+        hooks_before = storage.read_bytes()
+        payload = json.loads(inventory.read_bytes())
+        payload["sourcePath"] = str(self.root / "unwitnessed-old-alias.json")
+        stale = json.dumps(payload).encode("utf-8")
+        inventory.write_bytes(stale)
+        install()
+        self.assertEqual(hooks_before, storage.read_bytes())
+        self.assertNotEqual(stale, inventory.read_bytes())
+        self.assertEqual(link, os.readlink(selected))
+        inventory.write_bytes(stale)
+        with self.assertRaisesRegex(RuntimeError, "synthetic later failure"):
+            install(RuntimeError("synthetic later failure"))
+        self.assertEqual(stale, inventory.read_bytes())
+        self.assertEqual(hooks_before, storage.read_bytes())
+        self.assertEqual(link, os.readlink(selected))
+        self.assertGreaterEqual(len(checks), 3)
+        self.assert_clean()
+
+    def test_changed_verified_legacy_is_rejected_before_registration_merge(self):
+        specs, selected, storage, inventory, _original, _foreign = self.hook_fixture()
+        marker = specs[0][0]
+        legacy = self.source / "scripts" / (marker + ".sh")
+        legacy.parent.mkdir()
+        legacy.write_bytes(b"synthetic-pinned-legacy\n")
+        digest = hashlib.sha256(legacy.read_bytes()).hexdigest()
+        config = {"hooks": {"PreToolUse": [{"matcher": specs[0][3], "hooks": [
+            {"type": "command", "command": subprocess.list2cmdline(["bash", str(legacy)])}
+        ]}]}}
+        storage.write_text(json.dumps(config), encoding="utf-8")
+        before = storage.read_bytes()
+        original = PI._verified_legacy_hook_targets
+        calls = []
+
+        def change_after_admission(*args, **kwargs):
+            result = original(*args, **kwargs)
+            calls.append(True)
+            if len(calls) == 1:
+                self.assertIn(str(legacy), result[marker])
+                self.assertIn(str(legacy), kwargs["witnesses"])
+                self.assertTrue(kwargs["witnesses"][str(legacy)])
+                legacy.write_bytes(b"changed-before-merge\n")
+            return result
+
+        transaction = self.transaction([storage, inventory])
+        with self.hook_support(specs), patch.dict(PI._CODEX_RETIRED_SH, {"scripts/" + legacy.name: digest}), \
+             patch.object(PI, "_verified_legacy_hook_targets", side_effect=change_after_admission):
+            with self.assertRaisesRegex(ValueError, "verified legacy hook artifact changed"):
+                with transaction:
+                    PI._install_hooks(self.source, "codex", selected, self.source, "target", inventory,
+                                      transaction=transaction, mutable_owner=self.owner(transaction))
+        self.assertGreaterEqual(len(calls), 2)
+        self.assertEqual(before, storage.read_bytes())
+        self.assertFalse(inventory.exists())
+        self.assertEqual(b"changed-before-merge\n", legacy.read_bytes())
         self.assert_clean()
 
     def test_malformed_hook_json_systemexit_becomes_visible_stage_cause(self):

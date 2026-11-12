@@ -9,6 +9,7 @@ import re
 import stat
 import sys
 from pathlib import Path
+from contextlib import contextmanager
 from typing import Callable, NamedTuple
 
 # Harness-injected spans that ride inside user-role transcript entries but are
@@ -48,6 +49,216 @@ class ModelShellCommandOccurrence(NamedTuple):
     call_id: str
     tool_name: str | None
     command_text: str
+
+
+class NativeControlCall(NamedTuple):
+    """A native call's correlation and input carrier, without executing it."""
+
+    call_id: str
+    tool_name: str
+    input_kind: str
+    input_text: str
+
+
+class NativeControlResult(NamedTuple):
+    """Original text-block boundaries; these bytes confer no authority."""
+
+    call_id: str
+    text_blocks: tuple[str, ...]
+
+
+class NativeCommandObservation(NamedTuple):
+    """Typed Core or app-server command item; never status-looking stdout."""
+
+    item_id: str
+    command: str
+    cwd: str
+    status: str
+    exit_code: int | None
+    process_id: str | None
+    output: str | None
+    completed: bool
+    thread_id: str
+    turn_id: str
+    source: str
+    argv: tuple[str, ...] = ()
+
+
+def _native_file_uri_path(value: object) -> str | None:
+    """Convert the Core PathUri file form using Python 3.10's stdlib port.
+
+    Opaque PathUri forms and another platform's file paths are unavailable,
+    never guessed into a local operation. Percent decoding happens once.
+    """
+    if type(value) is not str or not value or "\0" in value:
+        return None
+    from urllib.parse import urlsplit, unquote_to_bytes
+    from urllib.request import url2pathname
+    try:
+        uri = urlsplit(value)
+        if uri.scheme != "file" or uri.query or uri.fragment or uri.username is not None or uri.password is not None:
+            return None
+        if re.search(r"%(?![0-9a-fA-F]{2})", uri.path):
+            return None
+        if os.name != "nt" and uri.netloc not in {"", "localhost"}:
+            return None
+        unquote_to_bytes(uri.path).decode("utf-8", errors="strict")
+        encoded_path = ("//" + uri.netloc + uri.path) if uri.netloc not in {"", "localhost"} else uri.path
+        path = url2pathname(encoded_path)
+        if not Path(path).is_absolute() or "\0" in path:
+            return None
+        if os.name != "nt" and re.match(r"^/[A-Za-z]:/", path):
+            return None
+        return path
+    except (ValueError, OSError, UnicodeError):
+        return None
+
+
+def extract_native_command_observation(entry: object) -> NativeCommandObservation | None:
+    """Normalize published Core JSONL and app-server notification shapes.
+
+    Core's argument vector remains an argument vector. Model tool calls and
+    arbitrary JSON tool output are never upgraded into native completion.
+    """
+    if not isinstance(entry, dict):
+        return None
+    if entry.get("type") == "event_msg":
+        payload = entry.get("payload")
+        if not isinstance(payload, dict) or payload.get("type") not in {"item_started", "item_completed"}:
+            return None
+        item = payload.get("item")
+        if not isinstance(item, dict) or item.get("type") != "CommandExecution":
+            return None
+        argv = item.get("command")
+        if not isinstance(argv, list) or not argv or any(type(word) is not str or "\0" in word for word in argv):
+            return None
+        if not argv[0] or type(item.get("id")) is not str or not item["id"]:
+            return None
+        if any(type(payload.get(key)) is not str or not payload[key] for key in ("thread_id", "turn_id")):
+            return None
+        if not isinstance(item.get("parsed_cmd"), list):
+            return None
+        cwd = _native_file_uri_path(item.get("cwd"))
+        if cwd is None:
+            return None
+        statuses = {"in_progress": "inProgress", "completed": "completed", "failed": "failed", "declined": "declined"}
+        sources = {"agent": "agent", "user_shell": "userShell", "unified_exec_startup": "unifiedExecStartup", "unified_exec_interaction": "unifiedExecInteraction"}
+        status, source = statuses.get(item.get("status")), sources.get(item.get("source"))
+        if status is None or source is None:
+            return None
+        code, process_id, output = item.get("exit_code"), item.get("process_id"), item.get("aggregated_output")
+        if code is not None and type(code) is not int:
+            return None
+        if process_id is not None and type(process_id) is not str:
+            return None
+        if output is not None and type(output) is not str:
+            return None
+        completed = payload["type"] == "item_completed"
+        if completed and type(payload.get("completed_at_ms", 0)) is not int:
+            return None
+        return NativeCommandObservation(
+            item["id"], "", cwd, status, code, process_id, output, completed,
+            payload["thread_id"], payload["turn_id"], source, tuple(argv),
+        )
+    if entry.get("method") not in {"item/started", "item/completed"}:
+        return None
+    params = entry.get("params")
+    if not isinstance(params, dict):
+        return None
+    item = params.get("item")
+    if not isinstance(item, dict) or item.get("type") != "commandExecution":
+        return None
+    if any(type(item.get(key)) is not str or not item[key] for key in ("id", "command", "cwd")):
+        return None
+    if any(type(params.get(key)) is not str or not params[key] for key in ("threadId", "turnId")):
+        return None
+    if item.get("status") not in {"inProgress", "completed", "failed", "declined"}:
+        return None
+    source = item.get("source", "agent")
+    if source not in {"agent", "userShell", "unifiedExecStartup", "unifiedExecInteraction"}:
+        return None
+    if not isinstance(item.get("commandActions"), list):
+        return None
+    code, process_id, output = item.get("exitCode"), item.get("processId"), item.get("aggregatedOutput")
+    if code is not None and type(code) is not int:
+        return None
+    if process_id is not None and type(process_id) is not str:
+        return None
+    if output is not None and type(output) is not str:
+        return None
+    completed = entry["method"] == "item/completed"
+    if completed and type(params.get("completedAtMs")) is not int:
+        return None
+    return NativeCommandObservation(
+        item["id"], item["command"], item["cwd"], item["status"], code,
+        process_id, output, completed, params["threadId"], params["turnId"], source,
+    )
+
+
+def extract_native_control_calls(entry: object) -> tuple[NativeControlCall, ...]:
+    if not isinstance(entry, dict):
+        return ()
+    payload = entry.get("payload")
+    if isinstance(payload, dict) and payload.get("type") in {"function_call", "custom_tool_call"}:
+        call_id, name = payload.get("call_id"), payload.get("name")
+        key = "arguments" if payload["type"] == "function_call" else "input"
+        value = payload.get(key)
+        if all(isinstance(value, str) and value for value in (call_id, name)) and isinstance(value, str):
+            kind = "json" if key == "arguments" else "raw"
+            return (NativeControlCall(call_id, name, kind, value),)
+        return ()
+    if not is_assistant_message(entry):
+        return ()
+    message = entry.get("message")
+    content = entry.get("content", message.get("content") if isinstance(message, dict) else None)
+    if not isinstance(content, list):
+        return ()
+    result: list[NativeControlCall] = []
+    for item in content:
+        if not isinstance(item, dict) or item.get("type") != "tool_use":
+            continue
+        call_id, name, value = item.get("id"), item.get("name"), item.get("input")
+        if all(isinstance(value, str) and value for value in (call_id, name)) and isinstance(value, dict):
+            result.append(NativeControlCall(call_id, name, "json", json.dumps(value)))
+    return tuple(result)
+
+
+def extract_native_control_results(entry: object) -> tuple[NativeControlResult, ...]:
+    """Project supported original result carriers, never a flattened repr."""
+    if not isinstance(entry, dict):
+        return ()
+
+    def blocks(value: object) -> tuple[str, ...]:
+        if isinstance(value, str):
+            return (value,)
+        if not isinstance(value, list):
+            return ()
+        return tuple(
+            item["text"] for item in value
+            if isinstance(item, dict) and isinstance(item.get("text"), str)
+        )
+
+    payload = entry.get("payload")
+    if isinstance(payload, dict) and payload.get("type") in {"function_call_output", "custom_tool_call_output"}:
+        call_id = payload.get("call_id")
+        if isinstance(call_id, str) and call_id:
+            return (NativeControlResult(call_id, blocks(payload.get("output"))),)
+        return ()
+    if entry.get("type") == "function_call_output":
+        call_id = entry.get("call_id")
+        if isinstance(call_id, str) and call_id:
+            return (NativeControlResult(call_id, blocks(entry.get("output"))),)
+        return ()
+    message = entry.get("message")
+    content = entry.get("content", message.get("content") if isinstance(message, dict) else None)
+    if not isinstance(content, list):
+        return ()
+    return tuple(
+        NativeControlResult(item["tool_use_id"], blocks(item.get("content")))
+        for item in content
+        if isinstance(item, dict) and item.get("type") == "tool_result"
+        and isinstance(item.get("tool_use_id"), str) and item["tool_use_id"]
+    )
 
 
 _CODEX_EXIT_STATUS_RE = re.compile(r"Exit code: ([+-]?[0-9]+)\Z")
@@ -211,6 +422,72 @@ HISTORY_STATUSES = (
     HISTORY_STATUS_LIMIT,
     HISTORY_STATUS_RESOURCE_UNAVAILABLE,
 )
+
+
+
+class NativeHistorySourceError(OSError):
+    """Selected native-source acquisition/currentness, not body execution."""
+
+
+class NativeHistoryIdentity(NamedTuple):
+    logical_path: str
+    resolved_path: str
+    namespace: tuple[tuple[str, int, int, int, str | None], ...]
+    file_identity: tuple[int, int, int]
+
+
+def _native_history_identity(path: Path) -> NativeHistoryIdentity:
+    try:
+        logical = Path(os.path.abspath(path))
+        namespace = []
+        for node in (*reversed(logical.parents), logical):
+            observed = node.lstat()
+            reparse = bool(getattr(observed, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+            link = os.readlink(node) if stat.S_ISLNK(observed.st_mode) or reparse else None
+            namespace.append((str(node), observed.st_dev, observed.st_ino, stat.S_IFMT(observed.st_mode), link))
+        resolved = logical.resolve(strict=True)
+        observed = logical.stat()
+        if not stat.S_ISREG(observed.st_mode):
+            raise OSError("native history source is not a regular file")
+        return NativeHistoryIdentity(str(logical), str(resolved), tuple(namespace), (observed.st_dev, observed.st_ino, stat.S_IFMT(observed.st_mode)))
+    except OSError as exc:
+        raise NativeHistorySourceError("native history source unavailable") from exc
+
+
+class HeldNativeHistorySource(NamedTuple):
+    path: Path
+    stream: object
+    identity: NativeHistoryIdentity
+
+    def assert_current(self) -> None:
+        try:
+            observed = os.fstat(self.stream.fileno())
+            descriptor = (observed.st_dev, observed.st_ino, stat.S_IFMT(observed.st_mode))
+            if descriptor != self.identity.file_identity or _native_history_identity(self.path) != self.identity:
+                raise OSError("native history source association changed")
+        except OSError as exc:
+            raise NativeHistorySourceError("native history source association changed") from exc
+
+
+@contextmanager
+def hold_native_history_source(transcript_path: str):
+    """Own one selected source through receiving; allow same-file appends.
+
+    The descriptor and logical/resolved namespace witness live only for this
+    operation. No directory timestamps or perpetual inode promise are used.
+    Existing complete-history acquisition still proves each read's bytes.
+    """
+    path = Path(transcript_path)
+    identity = _native_history_identity(path)
+    try:
+        stream = path.open("rb")
+    except OSError as exc:
+        raise NativeHistorySourceError("native history source unavailable") from exc
+    with stream:
+        source = HeldNativeHistorySource(path, stream, identity)
+        source.assert_current()
+        yield source
+        source.assert_current()
 
 
 def read_transcript_history(
