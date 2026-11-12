@@ -2897,3 +2897,70 @@ def validate_record_transition(
             raise PolicyInputError("record-revocation-mutates-grant")
         return "revocation-update"
     raise PolicyInputError("record-transition")
+
+
+def materialize_portable_review(
+    decision: Mapping[str, Any],
+    *,
+    received_decision_sha256: str,
+    observed_project: Mapping[str, Any],
+    selected_repository: Mapping[str, Any],
+    current_record: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Prepare one native record from an owner-received portable review batch.
+
+    Like promote_decision, the caller is the authority boundary. It must obtain
+    received_decision_sha256 from the actual accepted reviewer decision, and
+    observed_project from the authenticated provider, not from repository files
+    or remote configuration. This function does not authenticate JSON labels.
+    It writes nothing and never converts a legacy native report into portable
+    authorization. Existing promotion, currentness and revocation still apply.
+    """
+    value = _thaw(decision)
+    _exact_object(value, ("schema", "scope", "project", "record"), "portable-decision")
+    if value["schema"] != "orchestrarium.portable-review.v1" or value["scope"] != "native-repository-content":
+        raise PolicyInputError("portable-schema")
+    expected = _require_sha(received_decision_sha256, "portable-received-sha")
+    if hashlib.sha256(C(value)).hexdigest() != expected:
+        raise PolicyInputError("portable-decision-drift")
+
+    def project(value):
+        checked = _exact_object(value, ("provider", "authority", "repositoryId"), "portable-project")
+        for name in ("provider", "authority", "repositoryId"):
+            _require_text(checked[name], "portable-project-" + name)
+        return checked
+
+    logical = project(value["project"])
+    if logical != project(_thaw(observed_project)):
+        raise PolicyInputError("portable-project-mismatch")
+    repository = _validate_repository(_thaw(selected_repository))
+    body = _thaw(value["record"])
+    if type(body) is not dict or "repository" in body or "recordSha256" in body:
+        raise PolicyInputError("portable-native-binding")
+    source_id = _require_id(body.get("id"), "portable-id")
+    if body.get("state") != "active" or body.get("revision") != 1 or body.get("previousRecordSha256") is not None:
+        raise PolicyInputError("portable-not-active-initial-decision")
+    # Stable across repeat materialization and content revisions: a revoked
+    # native grant cannot be resurrected merely by changing the decision bytes.
+    identity = {"project": logical, "decisionId": source_id, "repository": repository}
+    body["id"] = "portable-" + hashlib.sha256(C(identity)).hexdigest()
+    body["repository"] = repository
+    artifact = {"reference": "portable-review:" + source_id, "sha256": expected}
+    authorization = body.get("authorization")
+    if type(authorization) is not dict or type(authorization.get("supportingArtifacts")) is not list:
+        raise PolicyInputError("portable-authorization")
+    supporting = list(authorization["supportingArtifacts"])
+    authorization["supportingArtifacts"] = supporting
+    if any(type(item) is not dict or (item.get("reference") == artifact["reference"] and item != artifact) for item in supporting):
+        raise PolicyInputError("portable-artifact-conflict")
+    if artifact not in supporting:
+        supporting.append(artifact)
+    supporting.sort(key=lambda item: (item.get("reference", ""), item.get("sha256", "")))
+    prepared = seal_record(body)
+    if current_record is not None:
+        existing = _thaw(current_record)
+        _validate_record(existing)
+        if existing != prepared:
+            raise PolicyInputError("portable-existing-record-conflict")
+        return existing
+    return prepared

@@ -183,3 +183,60 @@ finally:
   if p is not None and p.poll() is None:p.kill();p.wait(timeout=5)
   for witness in reversed(held):witness.close()
   for pin in reversed(pins):pin.close()
+
+
+def prepare_portable_batch(gate, source, remote, decision, received_decision_sha256):
+ """Qualified GitHub owner preview only; never promotes or launches a push.
+
+ The accepted decision digest is owner authority, not an untrusted CLI input.
+ Bind the provider lookup to this repository's pinned effective push route.
+ """
+ if os.name!='nt':raise ValueError('unsupported portable owner platform')
+ if type(decision) is not dict or decision.get('schema')!='orchestrarium.portable-review.v1' or 'project' not in decision:
+  raise ValueError('explicit portable decision required')
+ source=pathlib.Path(source).resolve()
+ env=dict(os.environ);cfg=('-c','http.followRedirects=false');gh=r'C:\Program Files\GitHub CLI\gh.exe'
+ if any(env.get(k) for k in ('GH_HOST','GH_HTTP_UNIX_SOCKET','GH_CONFIG_DIR','GH_DEBUG')):
+  raise ValueError('unsupported provider environment')
+ initial=qualify(GIT,source,remote,env=env,config_args=cfg,approved_gh=gh)
+ if not initial.eligible:raise ValueError('unqualified portable publication route: '+initial.reason)
+ expected={canonical(source/'.git/config'),canonical(pathlib.Path.home()/'.gitconfig'),canonical(r'C:\Program Files\Git\etc\gitconfig')}
+ if {canonical(p) for p in initial.origins}!=expected:raise ValueError('unsupported config origin namespace')
+ pins=[];fds=();modules=None
+ try:
+  for name in (GIT,gh,*initial.origins,*initial.executables):pins.append(PinnedFile(name))
+  env.update(GIT_CONFIG_GLOBAL=str(pathlib.Path.home()/'.gitconfig'),GIT_CONFIG_SYSTEM=r'C:\Program Files\Git\etc\gitconfig')
+  if qualify(GIT,source,remote,env=env,config_args=cfg,approved_gh=gh)!=initial:raise ValueError('configuration drift')
+  endpoints=subprocess.check_output([GIT,'-C',str(source),*cfg,'remote','get-url','--push','--all',remote],env=env,timeout=10).decode('utf-8').splitlines()
+  if len(endpoints)!=1:raise ValueError('endpoint count')
+  endpoint=endpoints[0];parsed=urlsplit(endpoint);slug=parsed.path.lstrip('/')
+  if slug.endswith('.git'):slug=slug[:-4]
+  if parsed.scheme!='https' or parsed.netloc!='github.com' or len(slug.split('/'))!=2:raise ValueError('provider endpoint')
+  fds,closure=gate._capture_source_closure();modules=gate._load_captured_review_modules(closure);policy=modules.policy_module
+  native=gate._capture_repository_observation(policy,source,GIT)
+  if native['status']!='captured':raise ValueError('native repository unavailable')
+  result=subprocess.run([gh,'api','--hostname','github.com','repos/'+slug],env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30,check=False)
+  if result.returncode or len(result.stdout)>1024*1024:raise ValueError('provider identity unavailable')
+  response=json.loads(result.stdout)
+  if type(response.get('id')) is not int or response['id']<=0 or response.get('full_name','').lower()!=slug.lower() or response.get('html_url','').lower()!='https://github.com/'+slug.lower():
+   raise ValueError('provider identity route mismatch')
+  observed={'provider':'github','authority':'github.com','repositoryId':str(response['id'])}
+  prepared=policy.materialize_portable_review(decision,received_decision_sha256=received_decision_sha256,observed_project=observed,selected_repository=native['repository'])
+  origin=policy.resolve_trusted_origin();snapshot=policy.read_policy_snapshot(origin,source)
+  existing=next((r for r in snapshot.usable_records if r['id']==prepared['id']),None)
+  prepared=policy.materialize_portable_review(decision,received_decision_sha256=received_decision_sha256,observed_project=observed,selected_repository=native['repository'],current_record=existing)
+  preview=policy.promote_decision(origin,native['repository'],prepared,expected_document_sha256=snapshot.snapshot['rawSha256'],expected_record_sha256=existing['recordSha256'] if existing else None,apply=False)
+  if gate._capture_repository_observation(policy,source,GIT)!=native or qualify(GIT,source,remote,env=env,config_args=cfg,approved_gh=gh)!=initial:
+   raise ValueError('repository or route drift')
+  gate._recheck_source_closure(fds,closure)
+  return {'record':prepared,'preview':preview,'project':observed,'repository':native['repository'],'providerResponseSha256':hashlib.sha256(result.stdout).hexdigest()}
+ finally:
+  failures=[]
+  if modules is not None:
+   try:gate._release_captured_review_modules(modules)
+   except BaseException as e:failures.append(e)
+  failures.extend(e for _,e in gate._close_owned_descriptors(list(fds)))
+  for pin in reversed(pins):
+   try:pin.close()
+   except BaseException as e:failures.append(e)
+  if failures:raise RuntimeError('portable owner cleanup failed') from failures[0]
