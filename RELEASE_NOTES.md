@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-12
 
+- Root can now finalize a scanner-generated review packet using the actual delivered reviewer decisions, without hand-building occurrence records or policy hashes. The existing owner computes identities and current preimages and reuses atomic promotion/readback; packet drift and revoked replays refuse. This preserves Root authority, fresh scanning and publication controls rather than trusting report labels or adding a new permission stage.
+
 - Generate exact review candidates directly from captured blob content and project accepted reviewer decisions by finding ID, verdict and reason. This removes manual transcription of Git identities, byte coordinates and contexts without introducing repository-specific exemptions. Candidate IDs are rechecked against every occurrence field; partial review leaves the remainder blocked. These are data-preparation APIs, not an authenticated receiving adapter, automatic policy promotion or publication permission.
 
 ## 2026-11-11

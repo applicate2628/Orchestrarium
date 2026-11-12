@@ -3024,3 +3024,74 @@ def prepare_candidate_review(record_body: Mapping[str, Any],
     body["occurrences"] = sorted(selected, key=lambda row: row["id"])
     body["reason"] = "\n".join(reasons)
     return seal_record(body)
+
+
+def candidate_packet_id(packet_body: Mapping[str, Any]) -> str:
+    """Bind the full generated review scope, not merely occurrence IDs."""
+    body = _thaw(packet_body)
+    _exact_object(body, ("repository", "modes", "rangeScope", "occurrences"), "candidate-packet")
+    return hashlib.sha256(b"orchestrarium.review-packet.v1\0" + C(body)).hexdigest()
+
+
+def finalize_received_review(
+    trusted_origin: OriginSelection,
+    candidate_packet: Mapping[str, Any],
+    received_review: bytes,
+    *,
+    receiving_reference: str,
+    review_artifact_reference: str,
+    apply: bool = False,
+) -> dict[str, Any]:
+    """Root-owned projection and atomic promotion of an actually received review.
+
+    Like promote_decision, this is a trusted-owner API, NOT authentication of
+    arbitrary JSON, report files, role labels or ledger entries. Root receives
+    the real reviewer result and serializes writers before calling. Packet and
+    review hashes and policy preimages are computed here, never hand-entered.
+    The result is the existing promotion result, not scan/publication success.
+    """
+    if type(apply) is not bool or type(received_review) is not bytes:
+        raise PolicyInputError("received-review-input")
+    packet = _exact_object(_thaw(candidate_packet),
+        ("packetId", "repository", "modes", "rangeScope", "occurrences"), "candidate-packet")
+    packet_body = {key: value for key, value in packet.items() if key != "packetId"}
+    packet_id = candidate_packet_id(packet_body)
+    if packet["packetId"] != packet_id:
+        raise PolicyInputError("candidate-packet-drift")
+    try:
+        review = _materialize(json.loads(received_review.decode("utf-8", errors="strict"),
+            object_pairs_hook=_JSONObject, parse_int=_IntegerToken,
+            parse_float=_FloatToken, parse_constant=_FloatToken))
+    except (UnicodeError, ValueError, RecursionError) as exc:
+        raise PolicyInputError("received-review-json") from exc
+    review = _exact_object(review, ("packetId", "decisions", "removalCondition"), "received-review")
+    if review["packetId"] != packet_id:
+        raise PolicyInputError("received-review-packet-mismatch")
+    decisions = review["decisions"]
+    if type(decisions) is not list or not decisions:
+        raise PolicyInputError("received-review-decisions")
+    first = _exact_object(decisions[0], ("id", "verdict", "reason"), "candidate-verdict")
+    review_sha = hashlib.sha256(received_review).hexdigest()
+    # Root supplies the actual host result identity, never an invented label.
+    # One result+packet cannot regrant after revocation; a genuinely new result
+    # can express a new decision without changing its reviewed content/reasons.
+    receiving_reference = _require_text(receiving_reference)
+    record_id = "review-" + hashlib.sha256(C([receiving_reference, packet_id])).hexdigest()
+    body = dict(packet_body, id=record_id, revision=1, previousRecordSha256=None,
+        state="active", reason=_require_text(first["reason"], "candidate-verdict-reason"),
+        removalCondition=_require_text(review["removalCondition"], "record-removal-condition"),
+        authorization={
+            "reviewArtifact": {"reference": _require_text(review_artifact_reference), "sha256": review_sha},
+            "rootReceivingReference": _require_text(receiving_reference),
+            "supportingArtifacts": [{"reference": "candidate-packet:" + packet_id,
+                                      "sha256": hashlib.sha256(C(packet)).hexdigest()}],
+        }, revocation=None)
+    prepared = prepare_candidate_review(body, decisions)
+    repository = prepared["repository"]
+    snapshot, decoded, _selection = _load_policy_change_state(trusted_origin, repository)
+    existing = _current_record(decoded, record_id)
+    # No retry with newer preimages: concurrent changes retain existing refusal.
+    return promote_decision(trusted_origin, repository, prepared,
+        expected_document_sha256=_actual_document_sha(snapshot),
+        expected_record_sha256=existing["recordSha256"] if existing is not None else None,
+        apply=apply)

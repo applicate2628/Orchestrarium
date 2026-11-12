@@ -1889,6 +1889,30 @@ def build_review_occurrences(raw: bytes, path: bytes, *, object_format: str,
     return tuple(sorted(occurrences, key=lambda row: row["id"]))
 
 
+def build_review_packet(subjects, *, repository: dict, modes: list[str],
+                        range_scope: dict | None, policy_module) -> dict:
+    """Build one review assignment from the scan owner's captured blob inputs.
+
+    Subjects are (raw bytes, raw Git path, Git mode) triples from the selected
+    scan, not reviewer-supplied replacement occurrences. Scope is supplied by
+    that same scan owner; packet identity binds it for the returned decisions.
+    """
+    occurrences = []
+    for raw, path, git_mode in subjects:
+        occurrences.extend(build_review_occurrences(raw, path,
+            object_format=repository["objectFormat"], git_mode=git_mode,
+            policy_module=policy_module))
+    occurrences.sort(key=lambda row: row["id"])
+    ids = [row["id"] for row in occurrences]
+    if not ids or len(ids) != len(set(ids)):
+        raise ValueError("empty-or-duplicate-review-candidates")
+    body = {"repository": repository, "modes": modes, "rangeScope": range_scope,
+            "occurrences": occurrences}
+    # Copy through canonical JSON so later caller mutations do not change scope.
+    body = json.loads(policy_module.C(body))
+    return dict(body, packetId=policy_module.candidate_packet_id(body))
+
+
 def project_review_candidate(raw: bytes, path: bytes, detector: dict, review_region: dict, *, policy_module) -> dict:
     definitions = detector_definitions(policy_module)
     if not isinstance(detector, dict) or definitions.get(detector.get("ruleId"), {}).get("detector") != detector:
