@@ -90,6 +90,9 @@ monthly archive without inventing candidate, active, or closure history.
 
 ## Installation
 
+Explicit selection without a menu: `python install.py --clients codex claude --dry-run`. List supported host integrations with `python install.py --list-clients` (no installation). The portable launcher accepts the same options, for example `.\orche.ps1 --clients codex --dry-run`. Client calls retain the existing installer policy, run once in catalog order, and stop at the first failure; earlier successful calls are not rolled back. The menu remains unchanged when no selection is supplied.
+
+
 Use the root router installers for the common path:
 
 **Current platform limit:** Linux, macOS and Windows Subsystem for Linux

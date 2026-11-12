@@ -4,7 +4,10 @@ This monorepo ships a Python-owned root installer (`install.py`) plus the thin P
 
 The root installer keeps the calling directory: relative `--target` paths are resolved there, just as with the provider-specific entrypoints. Invoke it by an absolute path when installing from another project.
 
+Explicit selection without a menu: `python install.py --clients codex claude --dry-run`. List supported host integrations with `python install.py --list-clients` (no installation). The portable launcher accepts the same options, for example `.\orche.ps1 --clients codex --dry-run`. Client calls retain the existing installer policy, run once in catalog order, and stop at the first failure; earlier successful calls are not rolled back. The menu remains unchanged when no selection is supplied.
+
 ## Temporary POSIX installation hold
+
 
 This pre-SDK source refuses Codex and Claude installer operations on POSIX hosts (Linux, macOS and Windows Subsystem for Linux) with `E_POSIX_DISPOSAL_UNQUALIFIED` and exit status 1. The hold covers default, global and project installation, updates and `--dry-run`; `--force` does not bypass it. Rejection follows argument parsing, before target resolution, staging or transaction creation. `--help` and argument-error reporting remain available.
 

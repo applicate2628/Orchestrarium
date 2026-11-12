@@ -1,5 +1,6 @@
 """Root-router messages with inert runners, never real provider installers."""
 from __future__ import annotations
+import argparse
 import ast
 import contextlib
 import io
@@ -20,7 +21,7 @@ class RootInstallerSummaryTests(unittest.TestCase):
         main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
         runner = Mock(side_effect=exits)
         reader = Mock(side_effect=choice) if isinstance(choice, BaseException) else Mock(return_value=choice)
-        scope = {"sys": sys, "input": reader, "_run_production": runner}
+        scope = {"sys": sys, "argparse": argparse, "CLIENTS": {"codex": {"label": "Codex"}, "claude": {"label": "Claude Code"}}, "input": reader, "_run_production": runner}
         exec(compile(ast.Module(body=[main], type_ignores=[]), "install.py", "exec"), scope)
         class CapturedOutput(io.StringIO):
             def write(self, text):
@@ -142,6 +143,8 @@ class RootInstallerSummaryTests(unittest.TestCase):
                 scripts.mkdir()
                 shutil.copyfile(ROOT / "install.py", root / "install.py")
                 shutil.copyfile(ROOT / "scripts/python_installer_bootstrap.py", scripts / "python_installer_bootstrap.py")
+                (scripts / "installation").mkdir()
+                shutil.copyfile(ROOT / "scripts/installation/clients.py", scripts / "installation/clients.py")
                 for name, code in zip(("codex", "claude"), exits):
                     (scripts / f"install-{name}.py").write_text(
                         "import json, sys\n"
