@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-12
 
+- Shared hook/settings serialization now refuses non-finite numeric values instead of emitting invalid JSON. This also preserves existing Claude settings when a valid large exponent overflows the runtime float during a Lead-default merge. Finite values and the existing UTF-8 wire format remain unchanged.
+
 - Claude main-agent settings admission now refuses non-JSON NaN/Infinity constants before rewriting user settings, including nested values; valid finite numeric values and quoted strings remain accepted.
 
 - Windows replacement staging preserves inherited ACLs even when a file retains permissions from a different parent. A documented security-only backup stream restores the exact captured policy on the held new-object handle; it does not recompute inherited ACEs, enable privileges, or change existing-object ACLs.
