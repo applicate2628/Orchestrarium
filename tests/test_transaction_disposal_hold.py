@@ -64,8 +64,9 @@ class TransactionDisposalHoldTests(unittest.TestCase):
 
     def test_removed_posix_deletion_branch(self):
         node = self.methods["_dispose_node"]
-        self.assertEqual(len(node.body), 3)  # guard, witness check, unchanged Windows branch
-        self.assertEqual(ast.unparse(node.body[-1].test), "os.name == 'nt'")
+        self.assertEqual(len(node.body), 4)  # guard, witness, Windows, gated POSIX dispatch
+        self.assertEqual(ast.unparse(node.body[-2].test), "os.name == 'nt'")
+        self.assertEqual(ast.unparse(node.body[-1]), "self._dispose_posix_node(path, expected)")
         for call in (n for n in ast.walk(node) if isinstance(n, ast.Call)):
             self.assertNotIn(ast.unparse(call.func), {"os.unlink", "os.rmdir", "operation"})
 

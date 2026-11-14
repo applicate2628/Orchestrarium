@@ -22,6 +22,12 @@ The public POSIX installer hold, including dry run, is unchanged. A private call
 
 Five additional mutable-path entry points use the same preflight directly: directory preparation, anchor bootstrap, exact-file migration, projection creation and migrated-file rollback. They refuse non-Windows calls before observing inputs, including dry-run or potential no-op requests. Rollback does not enter a fresh writer context: refusal preserves its existing custody and propagates to the established incomplete-settlement owner. This finite entry set does not claim that every internal primitive, staging remover or uninstall route is covered; expansion beyond it requires a complete effect/caller inventory rather than repeated local guards.
 
+## Bounded ordinary POSIX leaf reconstruction
+
+`_InstallTransaction._dispose_posix_node` is the first reconstructed primitive for the supported caller-serialized scope. It requires a sealed ordinary leaf witness, compares current identity and content, holds a no-follow parent descriptor, and performs relative unlink or empty-directory removal. It does not change permissions, recurse into unknown children, or adopt a replacement. Close failures retain the primary exception by identity, including interruptions and false-valued exceptions.
+
+The existing `_dispose_node` admission gate still runs before dispatch. Public installation, transaction acquisition and direct-operation holds are unchanged. Native isolated leaf tests qualify only this primitive, not whole-tree settlement, ancestor lifetime, staging, update, uninstall or fresh-directory publication. This is not hostile concurrent-writer exclusion. The caller remains responsible for ancestor selection, serialization and journal advancement. Reconstruct and qualify those remaining owners before enabling POSIX transactions.
+
 ## Capability-probe failure receiving
 
 The existing directory-move capability probe chooses its primary exception by

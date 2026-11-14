@@ -4089,6 +4089,67 @@ class _InstallTransaction:
     def _clear_owned_readonly(path: Path, before: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
         return _InstallTransaction._chmod_owned(path, before, before[2] | stat.S_IWRITE)
 
+    def _dispose_posix_node(self, path: Path, expected: _PhysicalNode) -> None:
+        """Qualify one leaf under caller serialization, not hostile-writer exclusion.
+
+        The transaction admission gate stays closed while the remaining lifecycle
+        is unqualified. The caller owns ancestor selection and journal advancement.
+        No permission changes or recursive adoption occur in this primitive.
+        """
+        if (not isinstance(expected, _PhysicalNode)
+                or expected.evidence_role != "sealed"
+                or expected.kind not in {"file", "directory", "link"}
+                or expected.reparse_data is not None):
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: POSIX disposal witness")
+        required = {os.stat, os.unlink, os.rmdir}
+        if (os.name != "posix" or not required <= os.supports_dir_fd
+                or not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW")):
+            raise ValueError("E_EFFECT_BOUND_DISPOSAL_UNQUALIFIED: POSIX relative disposal capability")
+        parent_identity = _CreateOnlyMutablePath._identity(path.parent)
+        descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        primary = None
+        try:
+            parent = os.fstat(descriptor)
+            bound_parent = (parent.st_dev, parent.st_ino, parent.st_mode,
+                            getattr(parent, "st_file_attributes", 0))
+            if (not self._binding_identity_matches(parent_identity, bound_parent)
+                    or not self._point_matches(path, expected, check_file_content=True)):
+                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: POSIX disposal currentness")
+            leaf = os.stat(path.name, dir_fd=descriptor, follow_symlinks=False)
+            leaf_identity = (leaf.st_dev, leaf.st_ino, leaf.st_mode,
+                             getattr(leaf, "st_file_attributes", 0))
+            if (not self._binding_identity_matches(expected.python_identity, leaf_identity)
+                    or not self._binding_identity_matches(
+                        parent_identity, _CreateOnlyMutablePath._identity(path.parent))):
+                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: POSIX disposal binding")
+            operation = os.rmdir if expected.kind == "directory" else os.unlink
+            operation(path.name, dir_fd=descriptor)
+            try:
+                os.stat(path.name, dir_fd=descriptor, follow_symlinks=False)
+            except FileNotFoundError:
+                return
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: POSIX disposal postcondition")
+        except BaseException as error:
+            primary = error
+            raise
+        finally:
+            try:
+                os.close(descriptor)
+            except BaseException as cleanup:
+                cause = cleanup if primary is None else primary
+                previous = primary if isinstance(primary, _InstallFailure) else None
+                paths, members, errors = self._settlement_failure(
+                    cleanup, "backup", -1, path, "E_ROLLBACK_BACKUP_CLEANUP_FAILED",
+                    (path,), participant="backup")
+                raise _InstallFailure(
+                    "E_ROLLBACK_SETTLEMENT_FAILED", "disposal-close", cause,
+                    members=(previous.members if previous is not None else ()) + tuple(members),
+                    unresolved_paths=(previous.unresolved_paths if previous is not None else ()) + tuple(paths),
+                    recovery_path=(previous.recovery_path if previous is not None
+                                   and previous.recovery_path is not None else path),
+                    retained_errors=_merge_copy_setter_operation_errors(
+                        errors, (previous,) if _copy_setter_operation_errors(previous) else ())) from cause
+
     def _dispose_node(self, path: Path, expected: _PhysicalNode) -> None:
         _require_transaction_disposal_backend()
         if not isinstance(expected, _PhysicalNode):
@@ -4121,6 +4182,7 @@ class _InstallTransaction:
             except FileNotFoundError:
                 return
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal pending or replaced")
+        self._dispose_posix_node(path, expected)
 
     def _dispose_image(self, path: Path, expected: dict[Path, _PhysicalNode]) -> None:
         _require_transaction_disposal_backend()

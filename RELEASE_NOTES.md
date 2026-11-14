@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-14
 
+- Reconstruct the transaction owner's bounded POSIX leaf-disposal primitive for caller-serialized cooperating writers. Validate the sealed leaf and held parent, preserve observed foreign data, avoid permission mutation, and retain close failures without hiding the original cause. Existing installer and transaction admission holds remain until full lifecycle qualification; this is not POSIX installation enablement.
+
 - Select fresh-effect transaction tests according to the current platform admission contract: retain Windows lifecycle coverage and verify that non-Windows refusal preserves the prepared image before effects. This prevents unsupported-platform failures from being misreported as inverse regressions; the POSIX backend hold and missing directory-publication capability remain unchanged.
 
 - Clarify the installer filesystem contract for caller-serialized cooperating writers separately from hostile same-user exclusion. Preserve selection, observed-drift refusal and recoverable partial outcomes without requiring a privileged storage redesign for ordinary operation; existing POSIX holds and native acceptance requirements remain unchanged.
