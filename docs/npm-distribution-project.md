@@ -72,7 +72,9 @@ external-worker route from installation of a host pack.
 | --- | --- | --- |
 | Antigravity (AGY) | Native session as Lead, including its own native subagents as executors. | Discover the installed version and supported global/project surfaces; verify instruction/skill/role loading, supported hook events, and native delegation/result receiving independently. |
 | Claude | Native session as Lead with its own native subagents; retain existing admitted roles. | Preserve the selected-client lifecycle and test native role loading/delegation separately from file receipt success. |
-| Visual Studio Code Copilot | Any Orchestrarium role, including Lead and executor; not limited to an external-worker role. | Qualify the selected Local/Copilot mode and global/project scope independently, including role selection, instruction loading and supported hooks. |
+| Visual Studio Code Local harness | Any Orchestrarium role, including Lead and native delegated executor. | Qualify direct role selection and a separate delegated task/result using the available `runSubagent` contract; verify instruction loading and supported hooks in each admitted user/project scope. |
+| Visual Studio Code Copilot harness | Any Orchestrarium role, including Lead and native delegated executor. | Qualify direct role selection and a separate delegated task/result using the available `task` contract; do not reuse Local tool arguments or acceptance evidence. |
+| GitHub Copilot CLI | Any Orchestrarium role, including a directly selected custom Lead and delegated custom executor. | Qualify direct selection (`/agent` or `--agent`) separately from delegation, including repository-instruction loading in both contexts and result receipt by the Lead. |
 
 Role eligibility and access method are separate dimensions. Native delegation is
 not a third-party subscription wrapper. Programmatic invocation requires its own
@@ -82,6 +84,28 @@ and Claude workers; this is a project instruction, not a legal conclusion about
 all CLI use. Copilot's role coverage does not prove that a particular BYOK model,
 CLI/API route or billing lane is available. Never silently substitute a subscription
 or different account for the selected API route.
+
+Copilot qualification follows the official [VS Code subagent contracts](https://code.visualstudio.com/docs/agents/run/subagents),
+[customization migration guidance](https://code.visualstudio.com/docs/agent-customization/migrate-customizations)
+and [CLI custom-agent instruction behavior](https://docs.github.com/en/enterprise-cloud@latest/copilot/how-tos/copilot-cli/customize-copilot/create-custom-agents-for-cli),
+checked 2026-11-14. These describe provider behavior; the acceptance matrix above
+is the Orchestrarium delivery requirement, not observed runtime acceptance.
+
+For CLI custom executors that must follow repository conventions, emit
+`include-custom-instructions: true` in their agent frontmatter: delegated custom
+agents do not load repository instructions by default, unlike directly selected
+custom agents. Verify the effective configuration, including instruction-disabling
+options, rather than treating the emitted field as proof. Test personal/project
+agent-ID collisions and selection after restart; IDs, not display names alone,
+determine duplicate resolution. Preserve user-owned agents.
+
+Record host version, selected harness, user/project scope, selected agent ID,
+role-pack identity, observed instruction loading and delegated result receipt for
+each applicable cell. Test reinstallation and duplicate active customizations.
+For Local-to-Copilot migration, validate discovery and hook event timing, inputs,
+outputs, approvals and failure paths; automatic hook conversion is unavailable.
+Do not activate both old and converted hooks or assume editor search-location
+settings apply to another client. A file loading is not proof its hook works.
 
 Keep offline installer tests, installed host discovery/hook checks, native-session
 acceptance and any authorized model run as distinct evidence. Unsupported or
