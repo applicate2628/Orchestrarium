@@ -3269,7 +3269,7 @@ class ExpectedImageAndTypedSettlementTests(unittest.TestCase):
         sentinel = PI._RollbackFailureMember("backup", 82, str(endpoint), "E_SECONDARY_CLOSE", "secondary")
         def after_disposal(path, expected):
             dispose(path, expected)
-            if transaction._effects and path == transaction._effects[0].retained:
+            if transaction._effects and path == transaction._effects[0].location:
                 raise PI._InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "effect-close", "secondary",
                     members=(sentinel,), unresolved_paths=(endpoint,))
         with patch.object(transaction, "_dispose_image", after_disposal):

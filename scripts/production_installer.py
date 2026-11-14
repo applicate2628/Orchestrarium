@@ -4230,34 +4230,25 @@ class _InstallTransaction:
                     self._advance(effect.retained, {})
                 if not commit and not effect.before and effect.actual:
                     preserve = any(node.evidence_role == "runtime-observation" for node in effect.actual.values())
-                    destination = (effect.retained.with_name(effect.retained.name + ".after") if preserve else effect.retained)
-                    if preserve:
-                        effect.quarantine = destination
-                    detached = self._relocate(effect.actual, effect.location, destination)
-                    self._publish_retained(effect.location, destination, effect=effect)
-                    if preserve:
-                        effect.quarantine_state = detached
-                        effect.preserve_runtime_custody = True
-                        effect.actual = {}
-                        self._advance(effect.location, {})
-                        self._advance(destination, detached)
+                    if not preserve:
+                        # Empty-before effects own only newly created nodes. Their
+                        # inverse needs disposal, not retention of a prior object.
+                        self._dispose_image(effect.location, dict(effect.actual))
                         effect.restored_state = {}
                         self.assert_effect_current(effect)
                         effect.settled = True
                         continue
-                    effect.retained_state = detached
-                    self._advance(effect.retained, detached)
-                    if (not self._image_matches(effect.retained, detached)):
-                        if self._image_matches(effect.location, {}):
-                            self._publish_retained(effect.retained, effect.location, source_state=detached)
-                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: creation detach drift")
+                    destination = effect.retained.with_name(effect.retained.name + ".after")
+                    effect.quarantine = destination
+                    detached = self._relocate(effect.actual, effect.location, destination)
+                    self._publish_retained(effect.location, destination, effect=effect)
+                    effect.quarantine_state = detached
+                    effect.preserve_runtime_custody = True
                     effect.actual = {}
-                    effect.retained_state = detached
                     self._advance(effect.location, {})
-                    self._dispose_image(effect.retained, detached)
-                    effect.retained_state = None
-                    self._advance(effect.retained, {})
+                    self._advance(destination, detached)
                     effect.restored_state = {}
+                    self.assert_effect_current(effect)
                     effect.settled = True
                     continue
                 if effect.retained_state is None:

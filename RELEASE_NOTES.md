@@ -10,6 +10,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 - Receive explicit current Claude agent/command upgrades through declared global linked roots using the existing physical file owners and logical receipt owner in one transaction. Preserve unselected content and source/currentness checks; receipt selection remains an explicit current operation, not historical ownership or unattended upgrade/uninstall authority.
 - Keep lifecycle fault-injection test doubles compatible with keyword arguments from their production owners. Forwarding wrappers preserve the complete call, while the controlled failure double accepts owner options without changing its injected failure; drift and rollback assertions remain unchanged.
 - Keep lifecycle tests discoverable through both test runners: pytest no longer reruns the unittest adapter, and unittest includes functions defined at the end of the module. Test assertions and production behavior are unchanged.
+- Restore fresh-install rollback through the existing identity-checked disposal owner instead of requiring a native move merely to retain newly created data. Existing-object replacement and runtime-observation custody retain their original safeguards. This removes a fresh-file recovery failure under an unsupported native move capability; directory atomic-publication refusal and POSIX disposal holds remain unchanged, so this is not complete DrvFS installation support.
 
 ## 2026-11-10
 
