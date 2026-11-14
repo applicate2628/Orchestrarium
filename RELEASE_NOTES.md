@@ -4,6 +4,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-14
 
+- Clarify the installer filesystem contract for caller-serialized cooperating writers separately from hostile same-user exclusion. Preserve selection, observed-drift refusal and recoverable partial outcomes without requiring a privileged storage redesign for ordinary operation; existing POSIX holds and native acceptance requirements remain unchanged.
 - Qualify rollback of an owned POSIX projection using its captured link identity and raw target, without requiring its referent to remain present. This prevents a removed referent from becoming an unrelated rollback prerequisite while preserving rejection of changed targets; public POSIX installation and disposal qualification holds remain unchanged.
 
 ## 2026-11-10
