@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-14
+
+- Keep lifecycle tests discoverable through both test runners: pytest no longer reruns the unittest adapter, and unittest includes functions defined at the end of the module. Test assertions and production behavior are unchanged.
+
 ## 2026-11-10
 
 - Consolidate Codex routing, recovery and role resolution inline, combining the ordered route list with its required participants and referring to shared rules already composed in the same instruction document. Per-stage recovery, additive Architect participation in factual decisions, direct-role exceptions, lifecycle ownership and external worker/reviewer capability boundaries remain binding. This saves 3,232 source bytes without a new loader, read dependency or Lead activation; the broader instruction-budget problem and live loading/compaction qualification remain open.
