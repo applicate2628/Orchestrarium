@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-14
 
+- Preserve primary exceptions by presence across installer copy, scalar, payload, tree-construction and prepared-image cleanup boundaries. False-valued errors no longer become cleanup errors, and exception truthiness cannot interrupt settlement diagnostics. This changes cause selection only, not filesystem effects or platform admission.
+
 - Preserve the original transaction failure during rollback without invoking exception truthiness. Native snapshot component checks now cover file/tree acquisition and restoration, partial staging cleanup and foreign recovery data on Windows and POSIX; POSIX admission remains held pending the rest of the installer lifecycle.
 
 - Add native POSIX tree/journal component checks for completed and partial disposal, foreign data and pending migrations, and unresolved post-effect close failure. Test-only admission is explicit; public transaction and full lifecycle qualification remain pending.

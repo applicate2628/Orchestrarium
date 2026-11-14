@@ -32,6 +32,8 @@ The subsequent native tree-component tests invoke the existing image/journal own
 
 The snapshot component suite now exercises actual file/tree acquisition, backup creation, owned disposal, snapshot restoration, commit cleanup and partial-copy failure cleanup. Foreign payload and backup membership changes preserve recovery data. Rollback selects a primary exception by presence, never its truth value, including when exception truthiness raises. POSIX admission is substituted only in these isolated tests; declared replacements, migration, scalar effects, uninstall and the complete public installer lifecycle remain separate qualification obligations.
 
+The same primary-by-presence rule now applies to the remaining copy-close, scalar-parent-close, descriptor-read-reset, scalar-close, payload-close, tree-construction and prepared-image cleanup boundaries. Extracted production-expression checks cover absent, ordinary, false-valued and raising-truthiness causes; a real payload producer/descriptor-close test verifies retained bytes and recovery location. Expression checks establish diagnostic selection only, not complete native lifecycle qualification.
+
 ## Capability-probe failure receiving
 
 The existing directory-move capability probe chooses its primary exception by

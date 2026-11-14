@@ -2607,7 +2607,7 @@ class _InstallTransaction:
             try:
                 os.close(descriptor)
             except OSError as cleanup:
-                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "copy-close", primary or cleanup,
+                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "copy-close", cleanup if primary is None else primary,
                     members=(_RollbackFailureMember("backup", -1, str(path),
                              "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
                              cause_exception=cleanup),)) from primary
@@ -2942,7 +2942,7 @@ class _InstallTransaction:
                     try:
                         os.close(descriptor)
                     except OSError as cleanup:
-                        raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "scalar-parent-close", primary or cleanup,
+                        raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "scalar-parent-close", cleanup if primary is None else primary,
                             members=(_RollbackFailureMember("backup", -1, str(path),
                                      "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="scalar",
                                      cause_exception=cleanup),)) from primary
@@ -2984,7 +2984,7 @@ class _InstallTransaction:
                 paths, members, retained_errors = _InstallTransaction._settlement_failure(reset, "snapshot", -1, path,
                     "E_ROLLBACK_RESTORE_FAILED", (path,), participant="backup")
                 previous = primary if isinstance(primary, _InstallFailure) else None
-                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "descriptor-read-reset", primary or reset,
+                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "descriptor-read-reset", reset if primary is None else primary,
                     members=(previous.members if previous is not None else ()) + tuple(members),
                     unresolved_paths=(previous.unresolved_paths if previous is not None else ()) + tuple(paths),
                     recovery_path=previous.recovery_path if previous is not None else None,
@@ -3036,7 +3036,7 @@ class _InstallTransaction:
                 paths, members, retained_errors = self._settlement_failure(cleanup, "snapshot", -1, storage,
                     "E_ROLLBACK_RESTORE_FAILED", (storage,), participant="scalar")
                 previous = primary if isinstance(primary, _InstallFailure) else None
-                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "scalar-close", primary or cleanup,
+                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "scalar-close", cleanup if primary is None else primary,
                                       members=(previous.members if previous is not None else ()) + tuple(members),
                                       unresolved_paths=(previous.unresolved_paths if previous is not None else ()) + tuple(paths),
                                       recovery_path=entry["operation_backup"] if appended else None,
@@ -3887,7 +3887,7 @@ class _InstallTransaction:
             try:
                 os.close(descriptor)
             except OSError as cleanup:
-                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "file-close", primary or cleanup,
+                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "file-close", cleanup if primary is None else primary,
                                       members=(_RollbackFailureMember("backup", -1, str(path),
                                                "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
                                                cause_exception=cleanup),),
@@ -4033,7 +4033,7 @@ class _InstallTransaction:
                      participant="backup", cause_exception=cleanup))
             if failures:
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "construction",
-                                      original or failures[0].cause, members=tuple(failures),
+                                      failures[0].cause if original is None else original, members=tuple(failures),
                                       recovery_path=source.parent) from original
 
     @staticmethod
@@ -5994,7 +5994,7 @@ class _CreateOnlyMutablePath:
             paths, members, retained_errors = self.transaction._settlement_failure(cleanup, "backup", -1, path,
                 "E_ROLLBACK_BACKUP_CLEANUP_FAILED", (path,), participant="backup")
             raise _InstallFailure(
-                "E_ROLLBACK_SETTLEMENT_FAILED", "prepared", original or cleanup,
+                "E_ROLLBACK_SETTLEMENT_FAILED", "prepared", cleanup if original is None else original,
                 members=tuple(members), recovery_path=path, unresolved_paths=tuple(paths), retained_errors=retained_errors,
             ) from original
 
