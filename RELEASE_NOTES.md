@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-14
 
+- Add native POSIX tree/journal component checks for completed and partial disposal, foreign data and pending migrations, and unresolved post-effect close failure. Test-only admission is explicit; public transaction and full lifecycle qualification remain pending.
+
 - Reconstruct the transaction owner's bounded POSIX leaf-disposal primitive for caller-serialized cooperating writers. Validate the sealed leaf and held parent, preserve observed foreign data, avoid permission mutation, and retain close failures without hiding the original cause. Existing installer and transaction admission holds remain until full lifecycle qualification; this is not POSIX installation enablement.
 
 - Select fresh-effect transaction tests according to the current platform admission contract: retain Windows lifecycle coverage and verify that non-Windows refusal preserves the prepared image before effects. This prevents unsupported-platform failures from being misreported as inverse regressions; the POSIX backend hold and missing directory-publication capability remain unchanged.

@@ -28,6 +28,8 @@ Five additional mutable-path entry points use the same preflight directly: direc
 
 The existing `_dispose_node` admission gate still runs before dispatch. Public installation, transaction acquisition and direct-operation holds are unchanged. Native isolated leaf tests qualify only this primitive, not whole-tree settlement, ancestor lifetime, staging, update, uninstall or fresh-directory publication. This is not hostile concurrent-writer exclusion. The caller remains responsible for ancestor selection, serialization and journal advancement. Reconstruct and qualify those remaining owners before enabling POSIX transactions.
 
+The subsequent native tree-component tests invoke the existing image/journal owner with explicit test-only admission and leaf dispatch. They cover completed tree consumption, foreign membership and payload drift, pending migration, partial progress, late foreign children, and descriptor-close failure after a leaf effect. Uncertain completion retains unconsumed journal state; a retry refuses a missing expected member instead of inferring ownership from absence. Effect and backup images are checked separately. These tests do not enable public transactions or qualify acquisition, staging, crash recovery, update or uninstall.
+
 ## Capability-probe failure receiving
 
 The existing directory-move capability probe chooses its primary exception by
