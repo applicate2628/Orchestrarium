@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-14
+
+- Qualify rollback of an owned POSIX projection using its captured link identity and raw target, without requiring its referent to remain present. This prevents a removed referent from becoming an unrelated rollback prerequisite while preserving rejection of changed targets; public POSIX installation and disposal qualification holds remain unchanged.
+
 ## 2026-11-10
 
 - Consolidate Codex routing, recovery and role resolution inline, combining the ordered route list with its required participants and referring to shared rules already composed in the same instruction document. Per-stage recovery, additive Architect participation in factual decisions, direct-role exceptions, lifecycle ownership and external worker/reviewer capability boundaries remain binding. This saves 3,232 source bytes without a new loader, read dependency or Lead activation; the broader instruction-budget problem and live loading/compaction qualification remain open.

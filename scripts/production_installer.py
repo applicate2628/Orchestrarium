@@ -5533,9 +5533,13 @@ class _CreateOnlyMutablePath:
                 if (
                     record.projection_target is None
                     or not (stat.S_ISLNK(metadata.st_mode) or _is_reparse_metadata(metadata))
-                    or not _projection_resolves_to(
+                    or (os.name == "posix" and (
+                        not isinstance(record.projection_data, str)
+                        or os.readlink(record.leaf_path) != record.projection_data
+                    ))
+                    or (os.name != "posix" and not _projection_resolves_to(
                         record.leaf_path, record.projection_target
-                    )
+                    ))
                 ):
                     self._rollback_identity_changed()
                 self.transaction._dispose_node(record.leaf_path,
