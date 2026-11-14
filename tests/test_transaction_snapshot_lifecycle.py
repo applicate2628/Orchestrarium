@@ -111,3 +111,59 @@ def test_uncommitted_unchanged_snapshot_reports_without_retention(tmp_path, monk
     assert transaction._temporary is None
     assert list(storage.iterdir()) == []
     assert (source / "payload").read_bytes() == b"original"
+
+
+@pytest.mark.parametrize("outcome", ["commit", "rollback"])
+@pytest.mark.parametrize("origin", ["fresh", "existing", "legacy"])
+def test_scalar_component_terminal_lifecycle(tmp_path, monkeypatch, outcome, origin):
+    """Exercise actual scalar writers/inverses; admission alone is substituted."""
+    module, storage, source = setup(tmp_path, monkeypatch)
+    from contextlib import nullcontext
+    target = source / "scalar"
+    legacy = source / "legacy"
+    if origin != "fresh":
+        (target if origin == "existing" else legacy).write_bytes(b"before")
+    transaction = module._InstallTransaction([target, legacy], enabled=True)
+    primary = RuntimeError("scalar body")
+    receiving = pytest.raises(RuntimeError, match="^scalar body$") if outcome == "rollback" else nullcontext()
+    with receiving as caught:
+        with transaction:
+            owner = module._CreateOnlyMutablePath(source, transaction, dry_run=False)
+            transaction.transform_scalar(target, legacy, lambda _path: b"after", owner)
+            assert target.read_bytes() == b"after"
+            assert not legacy.exists()
+            if outcome == "commit":
+                transaction.commit()
+            else:
+                raise primary
+    if outcome == "rollback":
+        assert caught.value is primary
+        assert target.exists() == (origin == "existing")
+        assert legacy.exists() == (origin == "legacy")
+        if origin != "fresh":
+            assert (target if origin == "existing" else legacy).read_bytes() == b"before"
+    else:
+        assert target.read_bytes() == b"after"
+        assert not legacy.exists()
+    assert transaction._temporary is None
+    assert list(storage.iterdir()) == []
+
+
+def test_scalar_rollback_preserves_foreign_content_and_beforeimage(tmp_path, monkeypatch):
+    module, storage, source = setup(tmp_path, monkeypatch)
+    target = source / "scalar"
+    target.write_bytes(b"before")
+    transaction = module._InstallTransaction([target], enabled=True)
+    primary = RuntimeError("body after foreign mutation")
+    with pytest.raises(module._InstallFailure) as caught:
+        with transaction:
+            owner = module._CreateOnlyMutablePath(source, transaction, dry_run=False)
+            transaction.transform_scalar(target, source / "legacy", lambda _path: b"owned", owner)
+            target.write_bytes(b"foreign")
+            raise primary
+    assert caught.value.__cause__ is primary
+    assert target.read_bytes() == b"foreign"
+    entry = next(entry for entry in transaction._entries if entry["kind"] == "scalar")
+    assert not entry["consumed"]
+    assert entry["operation_backup"].read_bytes() == b"before"
+    assert transaction._temporary.exists()
