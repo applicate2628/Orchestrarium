@@ -1,5 +1,6 @@
 """Fresh-effect inverse without native moves; isolated Windows qualification."""
 from pathlib import Path
+import os
 import pytest
 from test_provider_prompt_projections import _load_installer
 
@@ -13,6 +14,7 @@ def _publish_fixture(owner, target, prepared):
 
 
 @pytest.mark.parametrize("finish", ["commit", "rollback"])
+@pytest.mark.skipif(os.name != "nt", reason="Transaction lifecycle is Windows-only until POSIX backend qualification")
 def test_fresh_file_without_native_move(tmp_path, monkeypatch, finish):
     installer = _load_installer()
     target = tmp_path / "installed"
@@ -44,6 +46,7 @@ def test_fresh_file_without_native_move(tmp_path, monkeypatch, finish):
     assert not prepared.exists()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Transaction lifecycle is Windows-only until POSIX backend qualification")
 def test_existing_file_without_native_move_is_preserved(tmp_path, monkeypatch):
     installer = _load_installer()
     target = tmp_path / "installed"
@@ -59,6 +62,7 @@ def test_existing_file_without_native_move_is_preserved(tmp_path, monkeypatch):
     assert target.read_bytes() == b"user bytes"
 
 @pytest.mark.parametrize("interference", ["content", "identity", "disposal-failure", "runtime-observation"])
+@pytest.mark.skipif(os.name != "nt", reason="Transaction lifecycle is Windows-only until POSIX backend qualification")
 def test_fresh_inverse_preserves_unqualified_or_failed_effect(tmp_path, monkeypatch, interference):
     from dataclasses import replace
     installer = _load_installer()
@@ -92,6 +96,7 @@ def test_fresh_inverse_preserves_unqualified_or_failed_effect(tmp_path, monkeypa
     assert any(not effect.settled for effect in transaction._effects)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Transaction lifecycle is Windows-only until POSIX backend qualification")
 def test_fresh_tree_rollback_uses_owned_images(tmp_path):
     installer = _load_installer()
     target, prepared = tmp_path / "installed", tmp_path / "prepared"
@@ -107,6 +112,7 @@ def test_fresh_tree_rollback_uses_owned_images(tmp_path):
     assert not target.exists()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Transaction lifecycle is Windows-only until POSIX backend qualification")
 def test_missing_directory_atomic_publish_stays_refused(tmp_path, monkeypatch):
     installer = _load_installer()
     target, prepared = tmp_path / "installed", tmp_path / "prepared"
@@ -122,6 +128,7 @@ def test_missing_directory_atomic_publish_stays_refused(tmp_path, monkeypatch):
     assert (prepared / "data").read_bytes() == b"new bytes"
 
 @pytest.mark.parametrize("interference", ["pending-migration", "partial-disposal"])
+@pytest.mark.skipif(os.name != "nt", reason="Transaction lifecycle is Windows-only until POSIX backend qualification")
 def test_fresh_tree_failed_inverse_tracks_remaining_owned_nodes(tmp_path, monkeypatch, interference):
     installer = _load_installer()
     target, prepared = tmp_path / "installed", tmp_path / "prepared"
@@ -159,3 +166,24 @@ def test_fresh_tree_failed_inverse_tracks_remaining_owned_nodes(tmp_path, monkey
         _unresolved, failures, _errors = transaction._settle_effects()
         assert failures
         assert (target / "foreign").read_bytes() == b"preserve foreign"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Checks the non-Windows transaction admission hold")
+def test_unqualified_transaction_preserves_prepared_image(tmp_path):
+    """The held platform must refuse before transaction writes, not report inverse success."""
+    installer = _load_installer()
+    target, prepared = tmp_path / "installed", tmp_path / "prepared"
+    prepared.mkdir()
+    payload = prepared / "data"
+    payload.write_bytes(b"preserve prepared bytes")
+    identity = (prepared.stat().st_dev, prepared.stat().st_ino)
+    entered = False
+    with pytest.raises(ValueError, match="E_EFFECT_BOUND_DISPOSAL_UNQUALIFIED"):
+        with installer._InstallTransaction([target], enabled=True):
+            entered = True
+    assert not entered
+    assert not target.exists()
+    assert list(tmp_path.iterdir()) == [prepared]
+    assert list(prepared.iterdir()) == [payload]
+    assert payload.read_bytes() == b"preserve prepared bytes"
+    assert (prepared.stat().st_dev, prepared.stat().st_ino) == identity
