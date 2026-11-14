@@ -5,6 +5,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 ## 2026-11-14
 
 - Keep lifecycle fault-injection test doubles compatible with keyword arguments from their production owners. Forwarding wrappers preserve the complete call, while the controlled failure double accepts owner options without changing its injected failure; drift and rollback assertions remain unchanged.
+- Keep lifecycle tests discoverable through both test runners: pytest no longer reruns the unittest adapter, and unittest includes functions defined at the end of the module. Test assertions and production behavior are unchanged.
 
 ## 2026-11-10
 
