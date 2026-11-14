@@ -4,6 +4,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-14
 
+- Verify selected Claude linked updates restore the original instruction and existing or absent receipt after a failure following receipt replacement.
 - Receive explicit current Claude agent/command upgrades through declared global linked roots using the existing physical file owners and logical receipt owner in one transaction. Preserve unselected content and source/currentness checks; receipt selection remains an explicit current operation, not historical ownership or unattended upgrade/uninstall authority.
 
 ## 2026-11-10

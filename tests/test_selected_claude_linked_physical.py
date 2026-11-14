@@ -21,7 +21,7 @@ def _link(path, target):
 
 
 @pytest.mark.parametrize("kind", ["agents", "commands"])
-@pytest.mark.parametrize("mode", ["success", "rollback", "stale", "wrong-owner", "source-drift"])
+@pytest.mark.parametrize("mode", ["success", "rollback", "receipt-rollback", "stale", "wrong-owner", "source-drift"])
 @pytest.mark.parametrize("selection", ["individual", "receipt"])
 def test_selected_linked_instruction_preserves_logical_receipt_and_neighbors(
     tmp_path, kind, mode, selection,
@@ -85,6 +85,8 @@ def test_selected_linked_instruction_preserves_logical_receipt_and_neighbors(
             if mode == "rollback":
                 raise RuntimeError("injected late failure")
             installer._record_selected_provider_receipt(batch)
+            if mode == "receipt-rollback":
+                raise RuntimeError("injected failure after receipt replacement")
             transaction.commit()
 
     if mode == "success":
@@ -93,7 +95,7 @@ def test_selected_linked_instruction_preserves_logical_receipt_and_neighbors(
         data = json.loads(receipt.read_bytes())
         assert data["files"][".claude/" + key] == hashlib.sha256(leaf.read_bytes()).hexdigest()
     else:
-        error = RuntimeError if mode == "rollback" else ValueError
+        error = RuntimeError if mode in {"rollback", "receipt-rollback"} else ValueError
         with pytest.raises(error):
             operation()
         assert leaf.read_bytes() == b"old instruction\n"
