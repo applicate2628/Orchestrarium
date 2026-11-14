@@ -1,4 +1,9 @@
-"""Historical logical receipts do not authorize a retargeted physical root."""
+"""Qualify conservative preservation, not historical retarget detection.
+
+The existing uninstall owner refuses both unchanged and retargeted linked roots.
+Ordinary controls distinguish that boundary from a universally failing fixture.
+These checks do not establish supported linked-root removal.
+"""
 import hashlib
 import os
 import subprocess
@@ -21,8 +26,10 @@ def link(path, target):
 
 @pytest.mark.parametrize("kind", ["agents", "commands"])
 @pytest.mark.parametrize("apply", [False, True])
-@pytest.mark.parametrize("retargeted", [False, True])
-def test_logical_receipt_cannot_remove_retargeted_instruction_root(tmp_path, monkeypatch, kind, apply, retargeted, capsys):
+@pytest.mark.parametrize("layout", ["ordinary", "linked-unchanged", "linked-retargeted"])
+def test_logical_receipt_preserves_linked_instruction_roots(tmp_path, monkeypatch, kind, apply, layout, capsys):
+    linked = layout != "ordinary"
+    retargeted = layout == "linked-retargeted"
     backend = load_module(ROOT / "scripts/production_installer.py", "retarget_uninstall_backend")
     codec = load_module(ROOT / "scripts/installation/ownership.py", "retarget_uninstall_codec")
     home = tmp_path / "home"
@@ -30,14 +37,14 @@ def test_logical_receipt_cannot_remove_retargeted_instruction_root(tmp_path, mon
     target.mkdir(parents=True)
     for variable in ("HOME", "USERPROFILE"):
         monkeypatch.setenv(variable, str(home))
-    first = tmp_path / "original" if retargeted else target / kind
+    first = tmp_path / "original" if linked else target / kind
     second = tmp_path / "foreign"
     for folder in (first, second):
         folder.mkdir()
         (folder / "example.md").write_bytes(b"same historical payload")
         (folder / "custom.md").write_bytes(b"preserve custom")
     logical = target / kind
-    if retargeted:
+    if linked:
         link(logical, first)
     key = ".claude/" + kind + "/example.md"
     receipt = target / codec.RECEIPT_NAME
@@ -58,7 +65,7 @@ def test_logical_receipt_cannot_remove_retargeted_instruction_root(tmp_path, mon
     result = backend.install("claude", arguments)
     captured = capsys.readouterr()
     output = captured.out + captured.err
-    if not retargeted:
+    if not linked:
         assert result == 0, output
         assert (first / "example.md").exists() != apply
         assert (first / "custom.md").read_bytes() == b"preserve custom"
@@ -71,4 +78,4 @@ def test_logical_receipt_cannot_remove_retargeted_instruction_root(tmp_path, mon
     assert receipt.read_bytes() == receipt_before
     assert {path: path.read_bytes() for path in before} == before
     assert set(first.iterdir()) | set(second.iterdir()) == set(before)
-    assert logical.resolve() == second.resolve()
+    assert logical.resolve() == (second if retargeted else first).resolve()
