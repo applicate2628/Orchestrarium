@@ -71,7 +71,7 @@ class SelectedCodexDocumentWiringTests(unittest.TestCase):
             "hashlib.sha256(before).hexdigest() != digest",
             '(root / "shared" / "AGENTS.shared.md", source / "AGENTS.codex.md")',
             "_capture_selected_source(path, transaction)",
-            "_SelectedReplacement(sources, path, before_node, before, after, digest, parents)",
+            "_SelectedReplacement(owner, sources, path, before_node, before, after, digest, parents)",
         ):
             self.require(prepare, text)
         digest = self.branch(prepare, "hashlib.sha256(before).hexdigest() != digest")
@@ -138,7 +138,8 @@ class SelectedCodexDocumentWiringTests(unittest.TestCase):
         apply = self.definition("_apply_selected_replacement")
         guard = next(node for node in apply.body if isinstance(node, ast.If))
         for text in (
-            "owner is not batch.owner", "owner.linked_authority is not None",
+            "owner is not selected.owner", "owner.transaction is not batch.owner.transaction",
+            'batch.provider != "claude" and owner.linked_authority is not None',
             "tuple(Path(os.path.abspath(source)) for source in source_paths) != tuple(source.path for source in selected.sources)",
             "Path(os.path.abspath(path)) != selected.path", "key in batch.received",
         ):

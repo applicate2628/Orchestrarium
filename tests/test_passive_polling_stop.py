@@ -343,6 +343,8 @@ class TestPassivePollingStop(unittest.TestCase):
         self.assert_allowed(result)
 
     def test_weak_waiting_for_review_approval_blocks_without_probe(self) -> None:
+        # Keep bare review approval distinct from a human handoff: only
+        # "waiting for YOUR review" is exempt without a probe.
         result = self.run_hook(
             message="waiting for review approval",
             transcript_entries=[entry("user", "status?")],
@@ -378,16 +380,6 @@ class TestPassivePollingStop(unittest.TestCase):
             transcript_entries=[entry("user", "status?")],
         )
         self.assert_allowed(result)
-
-    def test_bare_waiting_for_review_without_your_still_blocks_without_probe(self) -> None:
-        # The widening must stay scoped to "waiting for YOUR review" -- a bare
-        # "waiting for review" (no "your") is exactly the ambiguous CI/bot-review
-        # phrasing the guard exists to catch and must still block without a probe.
-        result = self.run_hook(
-            message="waiting for review approval",
-            transcript_entries=[entry("user", "status?")],
-        )
-        self.assert_passive_blocked(result)
 
     def test_nonpassive_user_handoff_russian_ukazaniy_allows_stop(self) -> None:
         result = self.run_hook(
