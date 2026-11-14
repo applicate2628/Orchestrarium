@@ -41,6 +41,12 @@ def test_selected_linked_instruction_preserves_logical_receipt_and_neighbors(
     leaf.write_bytes(b"old instruction\n")
     neighbor = physical / "custom.md"
     neighbor.write_bytes(b"preserve user content\n")
+    foreign = tmp_path / "foreign-user-directory"
+    foreign.mkdir()
+    (foreign / "user.md").write_bytes(b"preserve linked user content\n")
+    neighbor_link = physical / "custom-directory"
+    _link(neighbor_link, foreign)
+    neighbor_identity = neighbor_link.lstat()
     receipt = target / installer._PROVIDER_RECEIPT_NAME
     if selection == "receipt":
         outcome = installer._ReceiptOutcome(".claude/" + key, "file", None, leaf.read_bytes(), intent="create")
@@ -106,6 +112,12 @@ def test_selected_linked_instruction_preserves_logical_receipt_and_neighbors(
         assert leaf.read_bytes() == b"old instruction\n"
         assert (receipt.read_bytes() if receipt.exists() else None) == receipt_before
     assert neighbor.read_bytes() == b"preserve user content\n"
+    assert neighbor_link.resolve() == foreign.resolve()
+    after_identity = neighbor_link.lstat()
+    assert (after_identity.st_dev, after_identity.st_ino) == (neighbor_identity.st_dev, neighbor_identity.st_ino)
+    assert (foreign / "user.md").read_bytes() == b"preserve linked user content\n"
+    assert {path.name for path in foreign.iterdir()} == {"user.md"}
+    assert {path.name for path in physical.iterdir()} == {"example.md", "custom.md", "custom-directory"}
     assert (target / kind).resolve() == physical.resolve()
 
 
