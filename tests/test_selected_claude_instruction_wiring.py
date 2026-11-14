@@ -60,9 +60,12 @@ class SelectedClaudeInstructionWiringTests(unittest.TestCase):
         self.one(grant.value.body, "_claude_instruction_source_names")
         self.assertNotIn("force", ast.unparse(grant.value))
         self.assertNotIn("receipt", ast.unparse(grant.value))
-        linked = self.guard(install, "instruction_grants and any(authority.name in {key.split('/')[0] for key in instruction_grants} for authority in claude_link_authorities)")
-        self.assertTrue(any(isinstance(item, ast.Raise) for item in linked.body))
-        self.assertLess(linked.lineno, self.one(install, "_InstallTransaction").lineno)
+        prepare = self.fn("_prepare_selected_claude_instructions")
+        self.require(prepare, "physical_owner.transaction is not transaction")
+        self.require(prepare, 'scope != "global"')
+        self.require(prepare, "authority.logical_root != target / subroot")
+        self.require(prepare, "authority.resolved_root != physical_owner.anchor")
+        self.require(install, '{"agents": claude_agents_owner, "commands": claude_commands_owner}')
 
     def test_source_names_match_instruction_scope(self):
         names = self.fn("_claude_instruction_source_names")
@@ -95,11 +98,11 @@ class SelectedClaudeInstructionWiringTests(unittest.TestCase):
         guard = self.guard(prepare, "not grants")
         self.assertEqual(ast.unparse(guard.body[0]), "return None")
         for text in ("_admitted_mutation_image(transaction, path).get(path)",
-                     "owner._assert_bound_file(path, before_node, parents)",
+                     "physical_owner._assert_bound_file(path, before_node, parents)",
                      "hashlib.sha256(before).hexdigest() != digest",
                      "_capture_selected_source(source / key, transaction)",
                      "selected_source.raw",
-                     "_SelectedReplacement((selected_source,), path, before_node, before, after, digest, parents)",
+                     "_SelectedReplacement(physical_owner, (selected_source,), path, before_node, before, after, digest, parents)",
                      '_ReceiptOutcome(".claude/" + key, "file", before, after, intent="replace", adoption_sha256=digest)'):
             self.require(prepare, text)
         capture = self.fn("_capture_selected_source")
@@ -127,7 +130,7 @@ class SelectedClaudeInstructionWiringTests(unittest.TestCase):
     def test_shared_records_retain_raw_source_and_provider_identity(self):
         expected = {
             "_SelectedSource": ["path", "node", "raw"],
-            "_SelectedReplacement": ["sources", "path", "before_node", "before",
+            "_SelectedReplacement": ["owner", "sources", "path", "before_node", "before",
                                      "after", "digest", "parents"],
             "_SelectedProviderUpdates": ["provider", "owner", "scope", "receipt",
                 "receipt_node", "receipt_before", "receipt_parents",
@@ -162,7 +165,7 @@ class SelectedClaudeInstructionWiringTests(unittest.TestCase):
 
     def test_apply_checks_before_write_and_records_received_after_bound_outcome(self):
         apply = self.fn("_apply_selected_replacement")
-        for text in ("owner is not batch.owner", "owner.linked_authority is not None",
+        for text in ("owner is not selected.owner", "owner.transaction is not batch.owner.transaction",
                      "tuple(Path(os.path.abspath(source)) for source in source_paths) != tuple(source.path for source in selected.sources)",
                      "Path(os.path.abspath(path)) != selected.path", "key in batch.received"):
             self.require(apply, text)

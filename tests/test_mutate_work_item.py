@@ -3206,8 +3206,8 @@ def test_close_existing_closure_prewrite_drift_verifies_unchanged_native_preimag
     write_atomic = module._atomic_write
     retained, inverses, writes = {}, [], []
 
-    def classify_then_change(*args):
-        authority = classify(*args)
+    def classify_then_change(*args, **kwargs):
+        authority = classify(*args, **kwargs)
         held = module._CURRENT_LIFECYCLE_TRANSACTION.get()
         for path in paths[:2]:
             retained[path] = held._retained_observations.get(path)
@@ -3374,7 +3374,7 @@ def test_close_bug_compensation_preserves_unowned_source_and_target_images(
     concurrent = b"Distinct concurrent author bytes; preserve exactly.\n"
     archived_before_failure = None
     original_refresh, original_replace = module.refresh_readme, module.os.replace
-    def fail_after_move(_root):
+    def fail_after_move(_root, **kwargs):
         nonlocal archived_before_failure
         archived_before_failure = archived_bug.read_bytes()
         if state == "occupied-source":
@@ -16656,6 +16656,9 @@ def test_ledger_location_intent_discovery_bounds_cumulative_bytes_before_loading
 class _UnittestAdapter(unittest.TestCase):
     """Run the module's pytest-style functions under the plan's unittest CLI."""
 
+    # Pytest collects the original functions; unittest needs these adapters.
+    __test__ = False
+
 
 def _relocation_observation_fixture(tmp_path: Path):
     module = load_module()
@@ -18629,11 +18632,6 @@ def _adapt_test(function):
     return method
 
 
-for _name, _function in tuple(globals().items()):
-    if _name.startswith("test_") and callable(_function):
-        setattr(_UnittestAdapter, _name, _adapt_test(_function))
-
-
 @pytest.mark.parametrize("version", [1, 2, 3])
 def test_parent_park_preserves_fixed_and_open_bug_bytes_and_replays(tmp_path, version):
     module = load_module()
@@ -20437,3 +20435,8 @@ def test_successor_terminal_removal_defers_after_owned_image_release_failure(tmp
     assert not stage_root.exists()
     assert len(native_owners) == 1 and not native_owners[0]._open
     assert native_owners[0]._directories == [] and native_owners[0]._parent is None
+
+
+for _name, _function in tuple(globals().items()):
+    if _name.startswith("test_") and callable(_function):
+        setattr(_UnittestAdapter, _name, _adapt_test(_function))
