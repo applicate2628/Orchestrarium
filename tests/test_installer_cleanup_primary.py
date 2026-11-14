@@ -71,3 +71,51 @@ def test_payload_close_preserves_real_primary_and_created_bytes(tmp_path, monkey
     assert caught.value.recovery_path == path
     assert path.read_bytes() == b"payload"
     assert transaction._point_matches(path, node, check_file_content=True)
+
+
+@pytest.mark.parametrize("boundary", ["capture", "record", "first-write"])
+def test_payload_acquisition_failure_preserves_creator_and_closes_descriptor(tmp_path, monkeypatch, boundary):
+    """A failed creator witness must not authorize pathname cleanup."""
+    import errno
+    module = _load_installer()
+    transaction = module._InstallTransaction([], enabled=False)
+    primary = RuntimeError("acquisition failed")
+    allocated = {}
+    recorded = {}
+    allocate = module.tempfile.mkstemp
+    def allocate_and_remember(*args, **kwargs):
+        descriptor, name = allocate(*args, **kwargs)
+        allocated.update(descriptor=descriptor, path=Path(name))
+        return descriptor, name
+    def fail(*args, **kwargs):
+        raise primary
+    def record(path, node):
+        if boundary == "record":
+            raise primary
+        recorded[path] = node
+    with monkeypatch.context() as scoped:
+        scoped.setattr(module.tempfile, "mkstemp", allocate_and_remember)
+        if boundary == "capture":
+            scoped.setattr(transaction, "_capture_node", fail)
+        elif boundary == "first-write":
+            scoped.setattr(module.os, "write", fail)
+        with pytest.raises(module._InstallFailure if boundary == "capture" else RuntimeError) as caught:
+            transaction._prepare_payload_file(tmp_path, "prepared-", b"payload", record)
+    path = allocated["path"]
+    assert path.read_bytes() == b""
+    assert list(tmp_path.iterdir()) == [path]
+    with pytest.raises(OSError) as closed:
+        module.os.fstat(allocated["descriptor"])
+    assert closed.value.errno == errno.EBADF
+    if boundary == "capture":
+        assert caught.value.cause is primary
+        assert caught.value.__cause__ is primary
+        assert caught.value.recovery_path == path
+        assert caught.value.members[0].cause == "unproved creator image preserved"
+    else:
+        assert caught.value is primary
+    if boundary == "first-write":
+        assert len(recorded) == 1
+        assert transaction._point_matches(path, recorded[path], check_file_content=True)
+    else:
+        assert recorded == {}
