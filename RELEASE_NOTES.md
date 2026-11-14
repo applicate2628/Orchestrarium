@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-14
 
+- Align installer integration fixtures and installation guidance with the existing exact outside-document byte preservation contract. Tests now distinguish LF-rendered managed bodies from retained user CRLF text and supply the native-config plan's real storage binding, so Windows verification checks the current contract without normalizing user content.
+
 - Clarify the installer filesystem contract for caller-serialized cooperating writers separately from hostile same-user exclusion. Preserve selection, observed-drift refusal and recoverable partial outcomes without requiring a privileged storage redesign for ordinary operation; existing POSIX holds and native acceptance requirements remain unchanged.
 - Qualify rollback of an owned POSIX projection using its captured link identity and raw target, without requiring its referent to remain present. This prevents a removed referent from becoming an unrelated rollback prerequisite while preserving rejection of changed targets; public POSIX installation and disposal qualification holds remain unchanged.
 - Verify selected Claude linked updates restore the original instruction and existing or absent receipt after a failure following receipt replacement.
@@ -12,6 +14,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 - Keep lifecycle tests discoverable through both test runners: pytest no longer reruns the unittest adapter, and unittest includes functions defined at the end of the module. Test assertions and production behavior are unchanged.
 
 ## 2026-11-10
+
+- Windows exact-tree updates now capture the existing ordinary members' owner, group and discretionary access-control list (DACL) through identity-bound handles and create their replacements with that policy before writing payloads or publishing the tree. Protected files and directories no longer inherit broader staged-parent access during a selected Lead update. New members inherit their replacement parent; capture, creation or verification failure refuses publication, and rollback retains the original objects. No elevation or live permission rewrite is used. This is bounded owner/group/DACL preservation, not full security-descriptor, scalar-writer, race or crash qualification; platform and live-rollout holds remain independent.
 
 - Consolidate Codex routing, recovery and role resolution inline, combining the ordered route list with its required participants and referring to shared rules already composed in the same instruction document. Per-stage recovery, additive Architect participation in factual decisions, direct-role exceptions, lifecycle ownership and external worker/reviewer capability boundaries remain binding. This saves 3,232 source bytes without a new loader, read dependency or Lead activation; the broader instruction-budget problem and live loading/compaction qualification remain open.
 

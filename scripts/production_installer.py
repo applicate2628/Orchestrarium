@@ -855,6 +855,39 @@ class _NativeNodeProof:
 
 
 @dataclass(frozen=True)
+class _WindowsSecurityImage:
+    """Owner/group/DACL policy; the native self-relative buffer is a recipe only."""
+
+    descriptor: bytes = field(compare=False, repr=False)
+    policy: tuple[Any, ...] = field(repr=False)
+
+    @classmethod
+    def from_descriptor(cls, descriptor: bytes) -> "_WindowsSecurityImage":
+        import struct
+        if len(descriptor) < 20:
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: truncated security descriptor")
+        revision, _reserved, control, owner, group, _sacl, dacl = struct.unpack_from(
+            "<BBHLLLL", descriptor)
+        if revision != 1 or not control & 0x8000:
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: nonrelative security descriptor")
+        def member(offset, *, acl=False):
+            if not offset:
+                return None
+            if offset < 20 or offset + 8 > len(descriptor):
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: security member bounds")
+            size = (struct.unpack_from("<H", descriptor, offset + 2)[0] if acl
+                    else 8 + 4 * descriptor[offset + 1])
+            if size < 8 or offset + size > len(descriptor):
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: security member length")
+            return descriptor[offset:offset + size]
+        # Presence distinguishes absent and NULL DACLs. Ordered ACE bytes and
+        # protected/automatic-inheritance flags are policy, unlike buffer offsets.
+        policy = (member(owner), member(group), member(dacl, acl=True),
+                  control & 0x150F)
+        return cls(descriptor, policy)
+
+
+@dataclass(frozen=True)
 class _PhysicalNode:
     kind: str
     python_identity: tuple[int, int, int, int]
@@ -862,6 +895,7 @@ class _PhysicalNode:
     native_proof: _NativeNodeProof | None = None
     reparse_data: bytes | None = None
     evidence_role: str = field(default="sealed", compare=False)
+    security: _WindowsSecurityImage | None = field(default=None, repr=False)
 
 
 class _WindowsBoundNode:
@@ -870,6 +904,7 @@ class _WindowsBoundNode:
     _bindings = None
     _creation_bindings = None
     _security_bindings = None
+    _descriptor_bindings = None
     _target_bindings = None
 
     @classmethod
@@ -928,10 +963,12 @@ class _WindowsBoundNode:
         import msvcrt
         return cls.proof_from_handle(msvcrt.get_osfhandle(descriptor))
 
-    def __init__(self, path: Path, *, purpose: str = "observe", follow: bool = False):
+    def __init__(self, path: Path, *, purpose: str = "observe", follow: bool = False,
+                 security: bool = False):
         self.path = path
         self.purpose = purpose
         self.follow = follow
+        self.read_security = security
         self.handle = None
         self.descriptor = None
         self.creator_proof = None
@@ -947,6 +984,8 @@ class _WindowsBoundNode:
         access = (0x12019F if self.purpose == "parent" else
                   0x81 | (0x10100 if self.purpose == "dispose" else 0)
                   | (0x100 if self.purpose == "attributes" else 0))
+        if self.read_security:
+            access |= 0x20000  # READ_CONTROL; no WRITE_DAC/WRITE_OWNER or privilege.
         share = 7 if self.purpose in {"observe", "parent"} else 1
         flags = 0x2000000 | (0 if self.follow else 0x200000)
         handle = kernel.CreateFileW(str(self.path), access, share, None, 3, flags, None)
@@ -958,7 +997,8 @@ class _WindowsBoundNode:
     @classmethod
     @contextmanager
     def create(cls, path: Path, *, directory: bool, mode: int = 0o777,
-               parent_reference: "_WindowsBoundNode | None" = None):
+               parent_reference: "_WindowsBoundNode | None" = None,
+               security_image: _WindowsSecurityImage | None = None):
         ctypes, wintypes, kernel, *_rest = cls._api()
         if cls._creation_bindings is None:
             class UnicodeString(ctypes.Structure):
@@ -990,8 +1030,12 @@ class _WindowsBoundNode:
         born = None
         abandoned = False
         release = None
+        security_storage = None
         try:
-            if directory and mode == 0o700:
+            if security_image is not None:
+                security_storage = ctypes.create_string_buffer(security_image.descriptor)
+                security = ctypes.cast(security_storage, wintypes.LPVOID)
+            elif directory and mode == 0o700:
                 if cls._security_bindings is None:
                     advapi = ctypes.WinDLL("advapi32", use_last_error=True)
                     convert = advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW
@@ -1075,7 +1119,7 @@ class _WindowsBoundNode:
             primary = error
             raise
         finally:
-            if security.value:
+            if release is not None and security.value:
                 if release(security):
                     cleanup = ctypes.WinError(ctypes.get_last_error())
                     previous = primary if isinstance(primary, _InstallFailure) else None
@@ -1092,6 +1136,27 @@ class _WindowsBoundNode:
                                           retained_errors=tuple(error for error in (previous, cleanup)
                                               if _copy_setter_operation_errors(error))) from primary
                 security.value = None
+
+    def security_image(self) -> _WindowsSecurityImage:
+        """Read only owner/group/DACL from this held object, never a pathname."""
+        ctypes, wintypes, _kernel, *_rest = self._api()
+        if self._descriptor_bindings is None:
+            advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+            get = advapi.GetKernelObjectSecurity
+            get.argtypes = (wintypes.HANDLE, wintypes.DWORD, ctypes.c_void_p,
+                            wintypes.DWORD, ctypes.POINTER(wintypes.DWORD))
+            get.restype = wintypes.BOOL
+            type(self)._descriptor_bindings = get
+        get = self._descriptor_bindings
+        needed = wintypes.DWORD()
+        if get(self.live_handle, 7, None, 0, ctypes.byref(needed)):
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing security buffer")
+        if ctypes.get_last_error() != 122 or not needed.value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        buffer = ctypes.create_string_buffer(needed.value)
+        if not get(self.live_handle, 7, buffer, len(buffer), ctypes.byref(needed)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return _WindowsSecurityImage.from_descriptor(bytes(buffer.raw[:needed.value]))
 
     @property
     def proof(self) -> _NativeNodeProof:
@@ -1986,6 +2051,13 @@ class _DeclaredPathEffect:
     def location(self) -> Path:
         return self.path if self.current_path is None else self.current_path
 
+    @property
+    def preflight_state(self) -> tuple[tuple[Path, _PhysicalNode], ...]:
+        # Recognize the earlier content/identity acquisition, not fresh authority.
+        # Its caller must still assert the effect's stronger current witnesses.
+        return tuple(sorted((path, replace(node, security=None))
+                            for path, node in self.before.items()))
+
 
 def _require_transaction_disposal_backend() -> None:
     """Refuse unqualified transaction disposal before reads or effects.
@@ -2275,9 +2347,11 @@ class _InstallTransaction:
                         )
                         and current.native_proof == expected.native_proof)
             if os.name == "nt":
-                with _WindowsBoundNode(path) as bound:
+                with _WindowsBoundNode(path, security=expected.security is not None) as bound:
                     current = _InstallTransaction._capture_node(path, bound_node=bound, metadata_only=True)
                     if not metadata_matches(current):
+                        return False
+                    if expected.security is not None and bound.security_image() != expected.security:
                         return False
                     if expected.kind in {"link", "reparse"}:
                         return _InstallTransaction._capture_node(path, bound_node=bound, data=expected.data) == expected
@@ -3409,6 +3483,28 @@ class _InstallTransaction:
         self._effects.append(effect)  # Armed before the first destructive operation.
         return effect
 
+    def capture_replacement_security(self, effect: _DeclaredPathEffect) -> None:
+        """Add destination security witnesses before any replacement preparation."""
+        if os.name != "nt":
+            return
+        secured = {}
+        for path, expected in effect.before.items():
+            if expected.kind not in {"file", "directory"}:
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: nonordinary security counterpart")
+            with _WindowsBoundNode(path, security=True) as bound:
+                current = self._capture_node(path, bound_node=bound, metadata_only=True)
+                if (current.kind != expected.kind
+                        or not self._binding_identity_matches(expected.python_identity, current.python_identity)
+                        or current.native_proof != expected.native_proof):
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: security source identity")
+                secured[path] = replace(expected, security=bound.security_image())
+        if not self._image_matches(effect.location, secured):
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: security acquisition drift")
+        effect.before = secured
+        effect.actual = dict(secured)
+        # Admission adds evidence, not a mutation of the earlier snapshot.
+        # Normal relocation records it when an actual namespace effect occurs.
+
     def _assert_effect_endpoint(self, effect: _DeclaredPathEffect, path: Path) -> None:
         destination_owner = effect.retained_owner or effect.owner
         owner = (destination_owner if any(root is not None and (path == root or root in path.parents)
@@ -3494,7 +3590,8 @@ class _InstallTransaction:
                     not self._binding_identity_matches(
                         previous.python_identity, node.python_identity
                     )
-                    or replace(node, python_identity=previous.python_identity) != previous
+                    or replace(node, python_identity=previous.python_identity,
+                               security=previous.security) != previous
                 ):
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: sealed observation drift")
                 current[member] = previous
@@ -3667,13 +3764,22 @@ class _InstallTransaction:
 
     def _create_owned_directory(self, path: Path, record, *, parent_descriptor: int | None = None,
                                 parent_reference: _WindowsBoundNode | None = None,
-                                mode: int = 0o777, born=None) -> _PhysicalNode:
+                                mode: int = 0o777, born=None,
+                                security_image: _WindowsSecurityImage | None = None,
+                                capture_security: bool = False) -> _PhysicalNode:
         if os.name == "nt":
-            with _WindowsBoundNode.create(path, directory=True, mode=mode, parent_reference=parent_reference) as created:
+            options = {"security_image": security_image} if security_image is not None else {}
+            with _WindowsBoundNode.create(path, directory=True, mode=mode,
+                                          parent_reference=parent_reference, **options) as created:
                 if born is not None:
                     born(path)
                 node = self._capture_node(path, bound_node=created, kind="directory")
                 record(path, node)
+                if capture_security or security_image is not None:
+                    node = replace(node, security=created.security_image())
+                    record(path, node)
+                    if security_image is not None and node.security != security_image:
+                        raise ValueError("E_MUTABLE_PATH_POSTCONDITION: directory security creation")
                 return node
         if parent_descriptor is None:
             os.mkdir(path, mode)
@@ -3765,13 +3871,18 @@ class _InstallTransaction:
 
     def _copy_owned_file(self, source: Path, target: Path, expected: _PhysicalNode,
                          record, *, source_parent: int | None = None,
-                         target_parent: int | None = None) -> None:
+                         target_parent: int | None = None,
+                         security_image: _WindowsSecurityImage | None = None,
+                         capture_security: bool = False) -> None:
         """The shared exclusive file producer records actual creator and partial bytes."""
         descriptors = []
         primary = None
-        def fill(incoming, outgoing):
+        def fill(incoming, outgoing, created_security=None):
+            def receive(path, node):
+                record(path, replace(node, security=created_security)
+                       if created_security is not None else node)
             node = self._write_owned_file(target, outgoing,
-                iter(lambda: os.read(incoming, 1024 * 1024), b""), record, expected.data,
+                iter(lambda: os.read(incoming, 1024 * 1024), b""), receive, expected.data,
                 mode=None if target in self._copy_metadata else stat.S_IMODE(expected.python_identity[2]))
             if target in self._copy_metadata:
                 participant = self._copy_metadata[target]
@@ -3795,11 +3906,17 @@ class _InstallTransaction:
             if os.name == "nt":
                 if _WindowsBoundNode.proof_from_descriptor(incoming) != expected.native_proof:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: source native identity")
-                with _WindowsBoundNode.create(target, directory=False) as created:
+                options = {"security_image": security_image} if security_image is not None else {}
+                with _WindowsBoundNode.create(target, directory=False, **options) as created:
                     node = self._capture_node(target, bound_node=created, kind="file",
                                               data=hashlib.sha256(b"").hexdigest())
                     record(target, node)
-                    fill(incoming, created.descriptor)
+                    if capture_security or security_image is not None:
+                        node = replace(node, security=created.security_image())
+                        record(target, node)
+                        if security_image is not None and node.security != security_image:
+                            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: file security creation")
+                    fill(incoming, created.descriptor, node.security)
             else:
                 outgoing = (os.open(target.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                                     0o600, dir_fd=target_parent) if target_parent is not None else
@@ -3897,7 +4014,7 @@ class _InstallTransaction:
         self, source: Path, target: Path, before: dict[Path, _PhysicalNode],
         effect: _DeclaredPathEffect | None,
         *, stage: bool = False, source_witness: dict[Path, _PhysicalNode] | None = None,
-        sink=None,
+        sink=None, security: dict[Path, _WindowsSecurityImage] | None = None,
     ) -> dict[Path, _PhysicalNode]:
         """Reconstruct ordinary trees through held parents and exclusive nodes."""
         required = {os.open, os.mkdir, os.stat}
@@ -3974,7 +4091,10 @@ class _InstallTransaction:
                 if not self._binding_identity_matches(value.python_identity, identity(metadata)):
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: construction source")
                 if value.kind == "directory":
-                    created_node = self._create_owned_directory(new, record, parent_descriptor=destination_descriptor)
+                    created_node = self._create_owned_directory(
+                        new, record, parent_descriptor=destination_descriptor,
+                        security_image=(security or {}).get(old, value.security),
+                        capture_security=security is not None)
                     source_child = opened_directory(source_descriptor, old.name, old, value)
                     destination_child = opened_directory(destination_descriptor, old.name, new, created_node)
                     construct(old, source_child, new, destination_child)
@@ -3988,7 +4108,9 @@ class _InstallTransaction:
                         descriptors.remove(source_child)
                 elif value.kind == "file":
                     self._copy_owned_file(old, new, value, record,
-                                          source_parent=source_descriptor, target_parent=destination_descriptor)
+                                          source_parent=source_descriptor, target_parent=destination_descriptor,
+                                          security_image=(security or {}).get(old, value.security),
+                                          capture_security=security is not None)
                 else:
                     self._copy_owned_link(old, new, value, record)
         original = None
@@ -4003,7 +4125,10 @@ class _InstallTransaction:
             source_descriptor = opened_directory(source_parent, source.name, source, before[source])
             if effect is not None:
                 effect.owner.destination(target.relative_to(effect.owner.anchor))
-            created_node = self._create_owned_directory(target, record, parent_descriptor=destination_parent)
+            created_node = self._create_owned_directory(
+                target, record, parent_descriptor=destination_parent,
+                security_image=(security or {}).get(source, before[source].security),
+                capture_security=security is not None)
             destination_descriptor = opened_directory(destination_parent, target.name, target, created_node)
             construct(source, source_descriptor, target, destination_descriptor)
             changed = self._chmod_owned(target, actual[target].python_identity, stat.S_IMODE(before[source].python_identity[2]),
@@ -4096,7 +4221,8 @@ class _InstallTransaction:
         if os.name == "nt":
             if expected.native_proof is None:
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: missing native creator proof")
-            with _WindowsBoundNode(path, purpose="dispose") as bound:
+            with _WindowsBoundNode(path, purpose="dispose",
+                                   security=expected.security is not None) as bound:
                 if bound.proof != expected.native_proof:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal identity")
                 attributes = bound.basic().attributes
@@ -4114,6 +4240,8 @@ class _InstallTransaction:
                 if attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
                     if expected.reparse_data is None or bound.reparse_data() != expected.reparse_data:
                         raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal reparse metadata")
+                if expected.security is not None and bound.security_image() != expected.security:
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal security")
                 bound.mark_disposal()
             # Marking is not disappearance; a new occupant is never adopted.
             try:
@@ -6281,6 +6409,7 @@ class _CreateOnlyMutablePath:
         if current_digest is None:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: invalid source tree")
         effect = self.transaction.arm_replacement(target, None, self)
+        self.transaction.capture_replacement_security(effect)
         effect.ignore_runtime_cache = ignore_runtime_cache
         def record_stage(path, node):
             effect.prepared_path = path
@@ -7658,7 +7787,6 @@ def _copy_tree(
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing owned preparation")
         transaction = owner.transaction
         destination = effect.prepared_path
-        transaction._dispose_image(destination, effect.prepared_state)
         witness = transaction._observe(source)
         desired = dict(witness)
         if ignore_runtime_cache:
@@ -7669,8 +7797,21 @@ def _copy_tree(
                 if (path.name == "__pycache__" and desired[path].kind == "directory"
                         and not any(member != path and path in member.parents for member in desired)):
                     del desired[path]
+        security = None
+        if os.name == "nt" and effect.before:
+            security = {}
+            for path, node in desired.items():
+                previous = effect.before.get(effect.path / path.relative_to(source))
+                if previous is not None:
+                    if previous.kind != node.kind or previous.security is None:
+                        raise ValueError("E_MUTABLE_PATH_POSTCONDITION: invalid security counterpart")
+                    security[path] = previous.security
+            transaction.assert_effect_current(effect)
+        # Replacement members have their intended final security from birth.
+        # The empty 0700 reservation is not a privacy claim for the final tree.
+        transaction._dispose_image(destination, effect.prepared_state)
         transaction._construct_exclusive_tree(source, destination, desired, effect,
-                                               stage=True, source_witness=witness)
+                                               stage=True, source_witness=witness, security=security)
         return
     if not ignore_runtime_cache:
         shutil.copytree(source, destination, symlinks=True)
@@ -9371,7 +9512,7 @@ def _assert_canonical_skills_plan_current(
         own_effect = next((effect for effect in transaction._effects
                            if effect.path == installed and predecessor is not None
                            and skill.name == "lead"
-                           and tuple(sorted(effect.before.items())) == predecessor.canonical_state), None) if transaction is not None else None
+                           and effect.preflight_state == predecessor.canonical_state), None) if transaction is not None else None
         if own_effect is not None:
             transaction.assert_effect_current(own_effect)
             lead_effect = own_effect
@@ -9422,7 +9563,7 @@ def _assert_canonical_skills_plan_current(
         if predecessor is not None:
             effect = next((item for item in transaction._effects
                            if item.path == target / "lead"
-                           and tuple(sorted(item.before.items())) == predecessor.canonical_state), None) if transaction is not None else None
+                           and item.preflight_state == predecessor.canonical_state), None) if transaction is not None else None
             if effect is not None:
                 transaction.assert_effect_current(effect)
             if predecessor.canonical_target != target or (effect is None and not
