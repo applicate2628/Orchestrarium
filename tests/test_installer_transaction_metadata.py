@@ -3044,8 +3044,52 @@ class CreatedDirectorySnapshotHandoffTests(unittest.TestCase):
         transaction = self.refusal_after_children_settle(mutate)
         self.assertTrue(all(not row.consumed for row in transaction._slice_a_created if row.kind == "directory"))
 
-    def test_preexisting_snapshot_keeps_its_existing_refusal(self):
-        self.refusal_after_children_settle(lambda transaction: None, preexisting=True)
+    def test_preexisting_snapshot_preserves_original_after_owned_children_settle(self):
+        for populated in (False, True):
+            with self.subTest(populated=populated):
+                self.absent.mkdir(exist_ok=True)
+                original_identity = self.absent.stat().st_ino
+                sentinel = self.absent / "original-member"
+                if populated:
+                    sentinel.write_bytes(b"original member")
+                    sentinel_identity = sentinel.stat().st_ino
+                safe = self.root / "safe"
+                safe.write_bytes(b"original sibling")
+                transaction = PI._InstallTransaction([self.absent, safe], enabled=True)
+                with self.assertRaises(RuntimeError) as caught:
+                    with transaction:
+                        owner = self.populate(transaction)
+                        owner.write_file(Path("safe"), b"changed sibling")
+                        raise self.primary
+                self.assertIs(caught.exception, self.primary)
+                self.assertEqual(self.absent.stat().st_ino, original_identity)
+                self.assertEqual(set(self.absent.iterdir()), {sentinel} if populated else set())
+                if populated:
+                    self.assertEqual(sentinel.stat().st_ino, sentinel_identity)
+                    self.assertEqual(sentinel.read_bytes(), b"original member")
+                self.assertEqual(safe.read_bytes(), b"original sibling")
+                self.assertIsNone(transaction._temporary)
+
+    def test_preexisting_snapshot_preserves_unregistered_foreign_child(self):
+        self.absent.mkdir()
+        original_identity = self.absent.stat().st_ino
+        safe = self.root / "safe"
+        safe.write_bytes(b"original sibling")
+        foreign = self.absent / "foreign-member"
+        transaction = PI._InstallTransaction([self.absent, safe], enabled=True)
+        with self.assertRaises(PI._InstallFailure) as caught:
+            with transaction:
+                owner = self.populate(transaction)
+                owner.write_file(Path("safe"), b"changed sibling")
+                foreign.write_bytes(b"foreign member")
+                foreign_identity = foreign.stat().st_ino
+                raise self.primary
+        self.assertIs(caught.exception.cause, self.primary)
+        self.assertEqual(self.absent.stat().st_ino, original_identity)
+        self.assertEqual(foreign.stat().st_ino, foreign_identity)
+        self.assertEqual(foreign.read_bytes(), b"foreign member")
+        self.assertEqual(safe.read_bytes(), b"original sibling")
+        self.assertTrue(any(member.phase == "snapshot" for member in caught.exception.members))
 
     def test_reparse_residual_is_preserved_and_target_untouched(self):
         target = self.root / "target"
