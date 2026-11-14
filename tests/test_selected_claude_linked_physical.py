@@ -86,6 +86,10 @@ def test_selected_linked_instruction_preserves_logical_receipt_and_neighbors(
                 raise RuntimeError("injected late failure")
             installer._record_selected_provider_receipt(batch)
             if mode == "receipt-rollback":
+                assert leaf.read_bytes() == b"new instruction\n"
+                written_receipt = receipt.read_bytes()
+                assert written_receipt != receipt_before
+                assert json.loads(written_receipt)["files"][".claude/" + key] == hashlib.sha256(leaf.read_bytes()).hexdigest()
                 raise RuntimeError("injected failure after receipt replacement")
             transaction.commit()
 
@@ -96,7 +100,8 @@ def test_selected_linked_instruction_preserves_logical_receipt_and_neighbors(
         assert data["files"][".claude/" + key] == hashlib.sha256(leaf.read_bytes()).hexdigest()
     else:
         error = RuntimeError if mode in {"rollback", "receipt-rollback"} else ValueError
-        with pytest.raises(error):
+        message = "^injected failure after receipt replacement$" if mode == "receipt-rollback" else None
+        with pytest.raises(error, match=message):
             operation()
         assert leaf.read_bytes() == b"old instruction\n"
         assert (receipt.read_bytes() if receipt.exists() else None) == receipt_before
