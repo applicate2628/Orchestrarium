@@ -14,6 +14,14 @@ The Codex installer materializes 18 manifest native-role TOMLs and registers the
 
 A selected prepared-directory publication that lacks a supported no-replace operation reports E_ATOMIC_DIRECTORY_PUBLISH_UNSUPPORTED. The installer still refuses rather than falling back to an overwrite-prone rename. This diagnostic does not add filesystem support, establish rollback success or relax the temporary POSIX hold above; private helper calls and older installed copies remain outside that hold.
 
+### Choosing the execution platform
+
+For a Windows-resident target, run the existing Python installer from Windows so its native backend owns the entire transaction. This is a separate execution choice, not a fallback inside a POSIX transaction and not evidence that WSL installation is qualified. Do not translate individual POSIX operations into Windows subprocess calls: doing so loses the pinned parent-directory identity used by the POSIX owner.
+
+Native POSIX qualification requires both filesystem support for atomic no-replace directory operations and completion of the installer lifecycle checks before the existing hold can be removed. Moving a test to a supporting filesystem alone does not enable the public installer. Component tests that substitute admission verify only their declared components.
+
+The current pack installer has no uninstall command. Successful installation, repeat installation, selected upgrades, rollback, and any future uninstall surface are distinct acceptance results; do not report an uninstall pass from transaction-disposal tests.
+
 ## Quick install
 
 Run the router installer from the repository root:

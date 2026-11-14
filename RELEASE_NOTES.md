@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-14
 
+- Clarify platform selection for Windows-resident installer targets: the Windows backend must own the complete transaction rather than substitute individual POSIX operations. Separate native POSIX qualification, repeated installation and uninstall claims so component tests cannot be mistaken for full lifecycle acceptance.
+
 - Preserve primary exceptions by presence across installer copy, scalar, payload, tree-construction and prepared-image cleanup boundaries. False-valued errors no longer become cleanup errors, and exception truthiness cannot interrupt settlement diagnostics. This changes cause selection only, not filesystem effects or platform admission.
 
 - Preserve the original transaction failure during rollback without invoking exception truthiness. Native snapshot component checks now cover file/tree acquisition and restoration, partial staging cleanup and foreign recovery data on Windows and POSIX; POSIX admission remains held pending the rest of the installer lifecycle.
