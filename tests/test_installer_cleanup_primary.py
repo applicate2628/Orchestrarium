@@ -119,3 +119,43 @@ def test_payload_acquisition_failure_preserves_creator_and_closes_descriptor(tmp
         assert transaction._point_matches(path, recorded[path], check_file_content=True)
     else:
         assert recorded == {}
+
+
+@pytest.mark.parametrize("boundary", ["born", "capture", "record"])
+def test_directory_acquisition_failure_preserves_created_identity(tmp_path, monkeypatch, boundary):
+    """Creation without a registered witness must not authorize pathname cleanup."""
+    import errno
+    import os
+    module = _load_installer()
+    transaction = module._InstallTransaction([], enabled=False)
+    target = tmp_path / "created"
+    primary = RuntimeError("directory acquisition failed")
+    observed = {}
+    recorded = {}
+    capture = transaction._capture_node
+    def born(path):
+        observed["identity"] = module._CreateOnlyMutablePath._identity(path)
+        if boundary == "born":
+            raise primary
+    def capture_or_fail(path, **kwargs):
+        if "descriptor" in kwargs:
+            observed["descriptor"] = kwargs["descriptor"]
+        if boundary == "capture":
+            raise primary
+        return capture(path, **kwargs)
+    def record(path, node):
+        if boundary == "record":
+            raise primary
+        recorded[path] = node
+    monkeypatch.setattr(transaction, "_capture_node", capture_or_fail)
+    with pytest.raises(RuntimeError) as caught:
+        transaction._create_owned_directory(target, record, born=born)
+    assert caught.value is primary
+    assert target.is_dir() and list(target.iterdir()) == []
+    assert module._CreateOnlyMutablePath._identity(target) == observed["identity"]
+    assert list(tmp_path.iterdir()) == [target]
+    assert recorded == {}
+    if os.name == "posix" and boundary != "born":
+        with pytest.raises(OSError) as closed:
+            os.fstat(observed["descriptor"])
+        assert closed.value.errno == errno.EBADF
