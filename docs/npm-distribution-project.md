@@ -99,6 +99,20 @@ options, rather than treating the emitted field as proof. Test personal/project
 agent-ID collisions and selection after restart; IDs, not display names alone,
 determine duplicate resolution. Preserve user-owned agents.
 
+The [CLI command reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference#repository-custom-instructions-for-subagents)
+adds these qualification boundaries (checked 2026-11-14):
+
+| CLI case | Documented boundary to verify on the selected version |
+|---|---|
+| Custom delegated agent with instruction opt-in | Repository instruction files are included; extra directories supplied only to the parent through `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` are not inherited. |
+| Session started with `--no-custom-instructions` | Repository instructions are excluded even when the delegated agent opts in. |
+| Built-in delegated agents | `general-purpose` receives repository instructions; `explore`, `task`, and `code-review` do not. The built-in agent named `task` is distinct from the delegation tool with that name. |
+
+Record instruction source separately from agent type in the acceptance evidence.
+Do not infer installed-version support from current documentation. A discovery
+listing is not evidence of effective instruction loading in a delegated run;
+keep the native acceptance result unverified until that context is observed.
+
 Record host version, selected harness, user/project scope, selected agent ID,
 role-pack identity, observed instruction loading and delegated result receipt for
 each applicable cell. Test reinstallation and duplicate active customizations.

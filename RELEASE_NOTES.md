@@ -4,7 +4,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-14
 
-- Clarify selected-host delivery acceptance for Antigravity and Claude native Leads with native subagents, and Copilot in any role. Separate role coverage, access authorization and qualification evidence; preserve existing linked installations while the AGY skill-discovery layout is resolved. Separate VS Code Local and Copilot harness acceptance from Copilot CLI direct/delegated acceptance, including repository instructions for delegated custom agents and hook migration checks. This planning update enables no provider calls or migrations.
+- Clarify selected-host delivery acceptance for Antigravity and Claude native Leads with native subagents, and Copilot in any role. Separate role coverage, access authorization and qualification evidence; preserve existing linked installations while the AGY skill-discovery layout is resolved. Separate VS Code Local and Copilot harness acceptance from Copilot CLI direct/delegated acceptance, including repository instructions for delegated custom agents and hook migration checks. Distinguish repository instructions from parent-only additional directories, instruction-disabling precedence and built-in agent behavior so installation discovery is not mistaken for delegated runtime acceptance. This planning update enables no provider calls or migrations.
 
 ## 2026-10-31
 
