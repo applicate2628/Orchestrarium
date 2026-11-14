@@ -3206,8 +3206,8 @@ def test_close_existing_closure_prewrite_drift_verifies_unchanged_native_preimag
     write_atomic = module._atomic_write
     retained, inverses, writes = {}, [], []
 
-    def classify_then_change(*args):
-        authority = classify(*args)
+    def classify_then_change(*args, **kwargs):
+        authority = classify(*args, **kwargs)
         held = module._CURRENT_LIFECYCLE_TRANSACTION.get()
         for path in paths[:2]:
             retained[path] = held._retained_observations.get(path)
@@ -3374,7 +3374,7 @@ def test_close_bug_compensation_preserves_unowned_source_and_target_images(
     concurrent = b"Distinct concurrent author bytes; preserve exactly.\n"
     archived_before_failure = None
     original_refresh, original_replace = module.refresh_readme, module.os.replace
-    def fail_after_move(_root):
+    def fail_after_move(_root, **kwargs):
         nonlocal archived_before_failure
         archived_before_failure = archived_bug.read_bytes()
         if state == "occupied-source":
