@@ -54,6 +54,51 @@ Do not recreate shared skill links, junctions or peer-owned copies. Legacy link
 conversion is explicit, selected-client-only and preserves the referent.
 Updating or removing one client must not mutate the unselected peer.
 
+## Selected-host integration acceptance
+
+Accepted product requirements, reconciled 2026-11-14; these are qualification
+criteria, not claims of implemented adapters or provider permission. Finish the
+independent current-version repairs before the SDK/Rust transition. Common-rule
+restructuring and new machine-enforcement mechanisms remain post-transition work
+at their existing owners; they do not block independent installer repairs.
+
+The common installer owns delivery of instructions, skills, native role definitions
+and supported hooks. Host adapters translate the selected host's actual surfaces;
+SDK execution remains owned by [PR18](https://github.com/applicate2628/Orchestrarium/pull/18)
+and [PR19](https://github.com/applicate2628/Orchestrarium/pull/19). Do not infer an
+external-worker route from installation of a host pack.
+
+| Selected host | Requested role coverage | Receiving evidence |
+| --- | --- | --- |
+| Antigravity (AGY) | Native session as Lead, including its own native subagents as executors. | Discover the installed version and supported global/project surfaces; verify instruction/skill/role loading, supported hook events, and native delegation/result receiving independently. |
+| Claude | Native session as Lead with its own native subagents; retain existing admitted roles. | Preserve the selected-client lifecycle and test native role loading/delegation separately from file receipt success. |
+| Visual Studio Code Copilot | Any Orchestrarium role, including Lead and executor; not limited to an external-worker role. | Qualify the selected Local/Copilot mode and global/project scope independently, including role selection, instruction loading and supported hooks. |
+
+Role eligibility and access method are separate dimensions. Native delegation is
+not a third-party subscription wrapper. Programmatic invocation requires its own
+verified provider-supported access method, account/billing binding and current
+user permission. Retain the user's hold on subscription-backed external Gemini
+and Claude workers; this is a project instruction, not a legal conclusion about
+all CLI use. Copilot's role coverage does not prove that a particular BYOK model,
+CLI/API route or billing lane is available. Never silently substitute a subscription
+or different account for the selected API route.
+
+Keep offline installer tests, installed host discovery/hook checks, native-session
+acceptance and any authorized model run as distinct evidence. Unsupported or
+unverified cells remain explicit, without holding unrelated admitted work.
+
+**Layout decision still to qualify:** the independent-copy delivery target above
+does not authorize rewriting existing shared or linked installations. The AGY
+integration proposal also expects Codex and AGY to discover a common skill
+surface; verify the actual host discovery contract before choosing physical layout.
+If both consume the same physical target, one existing installer owner must retain
+shared custody and preserve every consumer. If supported host configuration permits
+independent targets, qualify isolated copies and their discovery instead. Neither
+option is selected by this acceptance update. Existing selected Claude linked-root
+updates in [PR25](https://github.com/applicate2628/Orchestrarium/pull/25) cover
+agents/commands, not skill migration or whole-pack uninstall. Preserve that bounded
+compatibility behavior; hold only a migration that depends on the unresolved layout.
+
 ## Acquisition and authenticity
 
 All channels must:
@@ -142,6 +187,11 @@ No package publication, model launch or GitHub Actions dispatch follows from thi
 design. Preserve the earlier manual-trust documentation/tests in this PR.
 
 ## Terms and Abbreviations
+
+- AGY: Antigravity, here treated as a native session host.
+- BYOK: bring your own key, distinct from subscription access.
+- API: application programming interface.
+- Lead: the session's orchestration role, distinct from its access method.
 
 - SDK: software development kit used behind the common execution contract.
 - CLI: command-line interface; some SDKs still depend on a provider CLI.

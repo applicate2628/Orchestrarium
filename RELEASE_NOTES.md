@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-14
+
+- Clarify selected-host delivery acceptance for Antigravity and Claude native Leads with native subagents, and Copilot in any role. Separate role coverage, access authorization and qualification evidence; preserve existing linked installations while the AGY skill-discovery layout is resolved. This planning update enables no provider calls or migrations.
+
 ## 2026-10-31
 
 - Delivery planning now follows the approved Orche sequence: integrate SDK execution and a minimal bundled Python runtime first, with npm, PowerShell and POSIX channels delegating to one installer; qualify Rust replacements later. The plan includes independent client copies, ownership-safe uninstall, retained runtime lifetime and honest Windows/Linux versus macOS qualification boundaries. This documentation does not publish a package or activate a provider.
