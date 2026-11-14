@@ -5198,7 +5198,7 @@ class _InstallTransaction:
                 raise exc._with_recovery_path(recovery_path) from exc
             return False
 
-        original: BaseException = exc or _InstallFailure(
+        original: BaseException = exc if exc is not None else _InstallFailure(
             "E_INSTALL_TRANSACTION_UNCOMMITTED",
             "transaction",
             "enabled transaction exited without commit",

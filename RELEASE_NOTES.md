@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-14
 
+- Preserve the original transaction failure during rollback without invoking exception truthiness. Native snapshot component checks now cover file/tree acquisition and restoration, partial staging cleanup and foreign recovery data on Windows and POSIX; POSIX admission remains held pending the rest of the installer lifecycle.
+
 - Add native POSIX tree/journal component checks for completed and partial disposal, foreign data and pending migrations, and unresolved post-effect close failure. Test-only admission is explicit; public transaction and full lifecycle qualification remain pending.
 
 - Reconstruct the transaction owner's bounded POSIX leaf-disposal primitive for caller-serialized cooperating writers. Validate the sealed leaf and held parent, preserve observed foreign data, avoid permission mutation, and retain close failures without hiding the original cause. Existing installer and transaction admission holds remain until full lifecycle qualification; this is not POSIX installation enablement.

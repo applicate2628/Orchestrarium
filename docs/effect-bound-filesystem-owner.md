@@ -30,6 +30,8 @@ The existing `_dispose_node` admission gate still runs before dispatch. Public i
 
 The subsequent native tree-component tests invoke the existing image/journal owner with explicit test-only admission and leaf dispatch. They cover completed tree consumption, foreign membership and payload drift, pending migration, partial progress, late foreign children, and descriptor-close failure after a leaf effect. Uncertain completion retains unconsumed journal state; a retry refuses a missing expected member instead of inferring ownership from absence. Effect and backup images are checked separately. These tests do not enable public transactions or qualify acquisition, staging, crash recovery, update or uninstall.
 
+The snapshot component suite now exercises actual file/tree acquisition, backup creation, owned disposal, snapshot restoration, commit cleanup and partial-copy failure cleanup. Foreign payload and backup membership changes preserve recovery data. Rollback selects a primary exception by presence, never its truth value, including when exception truthiness raises. POSIX admission is substituted only in these isolated tests; declared replacements, migration, scalar effects, uninstall and the complete public installer lifecycle remain separate qualification obligations.
+
 ## Capability-probe failure receiving
 
 The existing directory-move capability probe chooses its primary exception by
