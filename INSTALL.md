@@ -12,13 +12,13 @@ The Codex installer materializes 18 manifest native-role TOMLs and registers the
 
 ## Unsupported atomic directory publication
 
-A selected prepared-directory publication that lacks a supported no-replace operation reports E_ATOMIC_DIRECTORY_PUBLISH_UNSUPPORTED. The installer still refuses rather than falling back to an overwrite-prone rename. This diagnostic does not add filesystem support, establish rollback success or relax the temporary POSIX hold above; private helper calls and older installed copies remain outside that hold.
+A fresh prepared directory with no previous target and no migration may use the existing exclusive-tree constructor when native no-replace publication is unavailable and relative descriptor operations are supported. This is caller-serialized construction, not atomic directory publication: partial new identities are journaled for rollback, and the writer retains prepared-image cleanup ownership. Existing-object replacement still requires retention capability; unsupported selected publication reports E_ATOMIC_DIRECTORY_PUBLISH_UNSUPPORTED rather than using an overwrite-prone rename. Component qualification does not relax the temporary POSIX hold above or establish full installer lifecycle acceptance.
 
 ### Choosing the execution platform
 
 For a Windows-resident target, run the existing Python installer from Windows so its native backend owns the entire transaction. This is a separate execution choice, not a fallback inside a POSIX transaction and not evidence that WSL installation is qualified. Do not translate individual POSIX operations into Windows subprocess calls: doing so loses the pinned parent-directory identity used by the POSIX owner.
 
-Native POSIX qualification requires both filesystem support for atomic no-replace directory operations and completion of the installer lifecycle checks before the existing hold can be removed. Moving a test to a supporting filesystem alone does not enable the public installer. Component tests that substitute admission verify only their declared components.
+Native POSIX qualification requires completion of the installer lifecycle checks before the existing hold can be removed. Retaining existing directories still requires atomic no-replace support; fresh construction uses the narrower capability contract described above. Moving a test to a supporting filesystem alone does not enable the public installer. Component tests that substitute admission verify only their declared components.
 
 The current pack installer has no uninstall command. Successful installation, repeat installation, selected upgrades, rollback, and any future uninstall surface are distinct acceptance results; do not report an uninstall pass from transaction-disposal tests.
 

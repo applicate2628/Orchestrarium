@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-15
+
+- Restore fresh-directory construction through the existing effect-bound owner when native no-replace publication is unavailable and relative descriptor operations are supported. Record partial identities for rollback and preserve prepared-image cleanup ownership. Existing-object retention and the public POSIX hold are unchanged; native component tests do not claim full installer qualification.
+
 ## 2026-11-14
 
 - Clarify platform selection for Windows-resident installer targets: the Windows backend must own the complete transaction rather than substitute individual POSIX operations. Separate native POSIX qualification, repeated installation and uninstall claims so component tests cannot be mistaken for full lifecycle acceptance.

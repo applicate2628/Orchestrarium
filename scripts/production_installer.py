@@ -3658,6 +3658,18 @@ class _InstallTransaction:
                 self._moved(source, target, before, effect, migration)
                 return actual
             if (before[source].kind == "directory" and effect is not None
+                    and source == effect.prepared_path and target == effect.location
+                    and not effect.before and migration is None
+                    and {os.open, os.mkdir, os.stat} <= os.supports_dir_fd
+                    and hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW")
+                    and hasattr(os, "fchmod")):
+                # Fresh creation is caller-serialized, not an atomic tree rename.
+                # Record partial new identities before any later failure; the
+                # public writer still owns prepared-image cleanup in its finally.
+                self._transition_order += 1
+                effect.transition_order = self._transition_order
+                return self._construct_exclusive_tree(source, target, before, effect)
+            if (before[source].kind == "directory" and effect is not None
                     and source == effect.prepared_path and target == effect.location):
                 raise _InstallFailure("E_ATOMIC_DIRECTORY_PUBLISH_UNSUPPORTED", "transaction")
             if (before[source].kind != "directory" or effect is None
