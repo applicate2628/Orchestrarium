@@ -2653,10 +2653,57 @@ class _InstallTransaction:
             if actual.stable() != expected.stable():
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: copy stable metadata drift")
 
+    def _representable_copy_times(self, path: Path, descriptor: int,
+                                  requested: tuple[int, int]) -> tuple[int, int]:
+        """Measure this pair through the same setter on an owned sibling file."""
+        parent = _CreateOnlyMutablePath._identity(path.parent)
+        prepared = {}
+        primary = None
+        def record(member, node):
+            prepared[member] = node
+            self._advance(member, {member: node})
+        try:
+            probe, node = self._prepare_payload_file(path.parent, ".timestamp-", b"", record, fsync="none")
+            with self._copy_reference(probe, node, writable=True) as (fd, bound):
+                if (bound is not None or os.fstat(fd).st_dev != os.fstat(descriptor).st_dev
+                        or _CreateOnlyMutablePath._identity(path.parent) != parent):
+                    raise ValueError("E_MUTABLE_PATH_POSTCONDITION: timestamp probe binding")
+                def sample(pair):
+                    os.utime(fd, ns=pair)
+                    actual = os.fstat(fd)
+                    if self._scalar_descriptor_node(probe, fd, node) != node:
+                        raise ValueError("E_MUTABLE_PATH_POSTCONDITION: timestamp probe drift")
+                    result = (actual.st_atime_ns, actual.st_mtime_ns)
+                    if any(value > limit for value, limit in zip(result, pair)):
+                        raise ValueError("E_MUTABLE_PATH_POSTCONDITION: timestamp probe rounding")
+                    return result
+                first = sample(requested)
+                contrast = tuple(0 if value != 0 else 86_400_000_000_000 for value in first)
+                other = sample(contrast)
+                final = sample(requested)
+                if first != final or any(value == alternate for value, alternate in zip(first, other)):
+                    raise ValueError("E_MUTABLE_PATH_POSTCONDITION: timestamp probe reproducibility")
+                if _CreateOnlyMutablePath._identity(path.parent) != parent:
+                    raise ValueError("E_MUTABLE_PATH_POSTCONDITION: timestamp probe parent drift")
+                return final
+        except BaseException as error:
+            primary = error
+            raise
+        finally:
+            for member, witness in prepared.items():
+                try:
+                    self._dispose_image(member, {member: witness})
+                except BaseException as cleanup:
+                    paths, members, errors = self._settlement_failure(cleanup, "backup", -1, member,
+                        "E_ROLLBACK_BACKUP_CLEANUP_FAILED", (member,), participant="backup")
+                    raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "timestamp-probe",
+                        cleanup if primary is None else primary, members=tuple(members),
+                        recovery_path=member, unresolved_paths=tuple(paths), retained_errors=errors) from primary
+
     def _apply_copy_metadata(self, path: Path, node: _PhysicalNode,
                              desired: _CopyMetadataImage, mode: int, record,
                              participant: _CopyMetadataParticipant | None = None,
-                             *, restored=False) -> _CopyMetadataImage:
+                             *, restored=False, fresh_copy=False) -> _CopyMetadataImage:
         """Verify time assignment exactly; later atime is a read-variable observation.
 
         Stable metadata and physical/restriction identity remain constrained for
@@ -2761,6 +2808,22 @@ class _InstallTransaction:
                     if isinstance(primary, OSError) and primary.errno in optional_operation_errnos:
                         return  # Known optional operation error; recording already succeeded.
                     raise primary
+                if (observed_time_only and label == "timestamps" and fresh_copy and not restored and bound is None
+                        and participant is not None and participant.origin is None and participant.before is None
+                        and actual_effect != projected_effect):
+                    pair = self._representable_copy_times(path, descriptor, (projected.atime_ns, projected.mtime_ns))
+                    represented = replace(projected, atime_ns=pair[0], mtime_ns=pair[1])
+                    if actual == represented:
+                        if (self._scalar_descriptor_node(path, descriptor, node) != node
+                                or not self._image_matches(path, {path: node})):
+                            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: timestamp target drift")
+                        if self._read_copy_metadata(os.fstat(descriptor), descriptor, bound).stable() != actual.stable():
+                            participant.unknown = True
+                            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: timestamp target metadata drift")
+                        # Validation reads can update access time. Repeat the request
+                        # with its measured expectation through the same owner.
+                        progress(operation, represented, label="timestamps-representable", sets_times=True)
+                        return
                 if (actual_effect != projected_effect or actual_identity != valid_identity
                         or (assignment_pair is not None and not assigned)):
                     error = ValueError("E_MUTABLE_PATH_POSTCONDITION: copy metadata readback")
@@ -6113,7 +6176,8 @@ class _CreateOnlyMutablePath:
                     raise ValueError("E_MUTABLE_PATH_POSTCONDITION: copy completed bytes")
                 desired = self.transaction._read_copy_metadata(os.fstat(incoming), incoming, source_bound)
             self.transaction._apply_copy_metadata(path, node, desired,
-                stat.S_IMODE(expected.python_identity[2]), record, participant)
+                stat.S_IMODE(expected.python_identity[2]), record, participant,
+                fresh_copy=existing is None and participant.origin is None and participant.before is None)
         self._record_fresh_file(path, completed_node, fresh_parents)
         return path
 

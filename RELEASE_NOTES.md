@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-15
 
+- Qualify representable timestamps for genuinely new copied files using an owned same-filesystem probe of the specific requested pair. Independent field changes and repeated observations reject no-op or unstable setters; target identity, contents and binding are checked again before exact measured assignment. Existing originals and rollback timestamps remain exact, and public POSIX admission is unchanged.
+
 - Preserve the verified actual timestamp outcome of a successful copy setter for rollback even when it differs from the requested exact times. Exact assignment still fails, and later drift remains unknown. An assembled POSIX failure test now proves complete target and staging rollback with a preexisting user file; public admission and successful lifecycle qualification remain unchanged.
 
 - Extend owned reservation retention to regular files and initial file migration when native no-replace is unavailable. Migration records retain reservation custody across failed cleanup, distinguish it from original backups, and share checked cleanup across direct and transaction settlement; file rollback preserves the original inode and hardlinks. Public POSIX admission remains held pending whole-installer qualification.

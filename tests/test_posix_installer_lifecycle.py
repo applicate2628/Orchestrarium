@@ -106,7 +106,7 @@ class PosixInstallerLifecycleTests(unittest.TestCase):
         with patch.object(tx, "_read_copy_metadata", acquire):
             with self.assertRaisesRegex(ValueError, "unknown copy setter effect" if late_drift else "copy metadata readback"):
                 tx._apply_copy_metadata(path, node, desired, stat.S_IMODE(node.python_identity[2]),
-                    lambda path, image: records.append(image), participant)
+                    lambda path, image: records.append(image), participant, fresh_copy=True)
         self.assertEqual(len(records), 0 if late_drift else 1)
         if not late_drift:
             self.assertEqual(participant.current, observed[0])
@@ -120,6 +120,87 @@ class PosixInstallerLifecycleTests(unittest.TestCase):
 
     def test_later_timestamp_drift_stays_unknown(self):
         self.assert_timestamp_outcome(late_drift=True)
+
+
+    def test_probe_rejects_each_independently_stuck_timestamp(self):
+        real = os.utime
+        for stuck in (0, 1):
+            with self.subTest(stuck=stuck):
+                target = self.root / ("probe-target-" + str(stuck))
+                target.write_bytes(b"preserved")
+                tx = self.module._InstallTransaction([], enabled=False)
+                fd = os.open(target, os.O_RDWR)
+                def setter(descriptor, *, ns):
+                    pair = list(ns)
+                    pair[stuck] = 0
+                    real(descriptor, ns=tuple(pair))
+                try:
+                    with patch.object(self.module, "_require_transaction_disposal_backend", lambda: None), patch.object(os, "utime", setter):
+                        with self.assertRaisesRegex(ValueError, "probe reproducibility"):
+                            tx._representable_copy_times(target, fd, (1_650_000_000_123_456_700, 1_650_000_001_223_456_700))
+                    self.assertEqual(list(self.root.glob(".timestamp-*")), [])
+                    self.assertEqual(target.read_bytes(), b"preserved")
+                finally:
+                    os.close(fd)
+
+    def test_fresh_timestamp_representation_preserves_content(self):
+        from dataclasses import replace
+        import stat
+        target = self.root / "fresh"
+        target.write_bytes(b"fresh bytes")
+        tx = self.module._InstallTransaction([], enabled=False)
+        node = tx._capture_node(target)
+        with tx._copy_reference(target, node, metadata_only=True) as (fd, bound):
+            current = tx._read_copy_metadata(os.fstat(fd), fd, bound)
+        desired = replace(current, atime_ns=1_650_000_000_123_456_700, mtime_ns=1_650_000_001_223_456_700)
+        participant = self.module._CopyMetadataParticipant(None, None, current)
+        with patch.object(self.module, "_require_transaction_disposal_backend", lambda: None):
+            actual = tx._apply_copy_metadata(target, node, desired, stat.S_IMODE(node.python_identity[2]),
+                lambda path, image: None, participant, fresh_copy=True)
+        self.assertEqual(actual, participant.current)
+        self.assertFalse(participant.unknown)
+        self.assertLessEqual(actual.mtime_ns, desired.mtime_ns)
+        self.assertEqual(target.read_bytes(), b"fresh bytes")
+        self.assertEqual(list(self.root.glob(".timestamp-*")), [])
+
+    def assert_fresh_target_drift(self, *, metadata=False):
+        from dataclasses import replace
+        import stat
+        target = self.root / "changed"
+        target.write_bytes(b"fresh bytes")
+        tx = self.module._InstallTransaction([], enabled=False)
+        node = tx._capture_node(target)
+        with tx._copy_reference(target, node, metadata_only=True) as (fd, bound):
+            current = tx._read_copy_metadata(os.fstat(fd), fd, bound)
+        desired = replace(current, atime_ns=1_650_000_000_123_456_700, mtime_ns=1_650_000_001_223_456_700)
+        participant = self.module._CopyMetadataParticipant(None, None, current)
+        real = tx._representable_copy_times
+        def drift(path, descriptor, requested):
+            pair = real(path, descriptor, requested)
+            if metadata:
+                os.utime(target, ns=(1_600_000_000_000_000_000, 1_600_000_001_000_000_000))
+            else:
+                target.write_bytes(b"foreign content")
+            return pair
+        with patch.object(self.module, "_require_transaction_disposal_backend", lambda: None), patch.object(tx, "_representable_copy_times", drift):
+            # This fixture requires a genuinely inexact native setter.
+            with tx._copy_reference(target, node, metadata_only=True) as (fd, bound):
+                pair = real(target, fd, (desired.atime_ns, desired.mtime_ns))
+            if pair == (desired.atime_ns, desired.mtime_ns):
+                self.skipTest("Native timestamp representation is exact")
+            with self.assertRaisesRegex(ValueError, "timestamp target metadata drift" if metadata else "timestamp target drift"):
+                tx._apply_copy_metadata(target, node, desired, stat.S_IMODE(node.python_identity[2]),
+                    lambda path, image: None, participant, fresh_copy=True)
+        self.assertEqual(target.read_bytes(), b"fresh bytes" if metadata else b"foreign content")
+        if metadata:
+            self.assertEqual(target.stat().st_mtime_ns, 1_600_000_001_000_000_000)
+            self.assertTrue(participant.unknown)
+
+    def test_fresh_target_content_drift_during_probe_refuses(self):
+        self.assert_fresh_target_drift()
+
+    def test_fresh_target_metadata_drift_during_probe_refuses(self):
+        self.assert_fresh_target_drift(metadata=True)
 
 
 if __name__ == "__main__":
