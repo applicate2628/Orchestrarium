@@ -118,4 +118,3 @@ def test_powershell_smart_double_quotes_are_control_tokens(quote):
         HEALTH._command_argv(
             {"command": f'D:/"runtime/name{quote}literal/python.exe" E:/check.py'},
             "codex", "windows")
-
