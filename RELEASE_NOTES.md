@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-15
 
+- Retain original directories through an exclusively created, identity-checked empty reservation when native no-replace is unavailable. Descriptor-relative replacement of that owned slot preserves original identities under caller serialization; ambiguous outcomes and foreign reservations are preserved. New replacement trees can then be constructed against the verified retained original, enabling bounded commit and rollback without copying originals during retention. This does not provide hostile-writer exclusion or remove public POSIX admission holds.
+
 - Preserve held-parent selection on macOS native no-replace publication by using renameatx_np with descriptor-relative names. Missing bound capability no longer silently uses unbound pathname lookup. ABI dispatch and errno regression checks cover this seam; native macOS lifecycle and the public POSIX hold remain separate.
 
 - Roll back sealed replacement images through owned disposal rather than requiring an extra atomic quarantine move. Retry only residual backup cleanup after restoration, preserving the complete restored original when cleanup fails partway. Runtime observations, foreign changes and pending migrations remain protected; POSIX public admission and original-object retention requirements are unchanged.

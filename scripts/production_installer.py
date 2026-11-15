@@ -3606,6 +3606,68 @@ class _InstallTransaction:
                         members=tuple(members), unresolved_paths=tuple(paths),
                         retained_errors=errors) from primary
 
+    def _retain_reserved_directory(self, source: Path, target: Path,
+                                   before: dict[Path, _PhysicalNode],
+                                   effect: _DeclaredPathEffect) -> dict[Path, _PhysicalNode]:
+        """Move an original over our empty reservation in serialized-writer scope."""
+        relocated = self._relocate(before, source, target)
+        accounted = False
+        def record(path, node):
+            effect.reservation_state = {path: node}
+            self._advance(path, {path: node})
+        with ExitStack() as resources:
+            source_parent = self._capture_node(source.parent, kind="directory")
+            target_parent = self._capture_node(target.parent, kind="directory")
+            source_fd = self._bind_scalar_parent(source.parent, source_parent, resources)
+            target_fd = self._bind_scalar_parent(target.parent, target_parent, resources)
+            try:
+                self._create_owned_directory(target, record, parent_descriptor=target_fd)
+                self._assert_effect_endpoint(effect, source)
+                self._assert_effect_endpoint(effect, target)
+                if (not self._point_matches(source.parent, source_parent)
+                        or not self._point_matches(target.parent, target_parent)
+                        or not self._image_matches(source, before)
+                        or not effect.reservation_state
+                        or not self._image_matches(target, effect.reservation_state)):
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained reservation drift")
+                # Never remove the reservation first. Under caller serialization,
+                # this replaces only our verified empty directory, not an occupant.
+                os.rename(source.name, target.name, src_dir_fd=source_fd, dst_dir_fd=target_fd)
+                if not self._image_matches(source, {}) or not self._image_matches(target, relocated):
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained reservation outcome")
+                effect.reservation_state = None
+                accounted = True
+                self._moved(source, target, before, effect)
+                return relocated
+            except BaseException as primary:
+                if not accounted and self._image_matches(source, {}) and self._image_matches(target, relocated):
+                    effect.reservation_state = None
+                    accounted = True
+                    try:
+                        self._moved(source, target, before, effect)
+                    except BaseException as accounting:
+                        raise _InstallFailure(
+                            "E_ROLLBACK_SETTLEMENT_FAILED", "retained-accounting", primary,
+                            recovery_path=target,
+                            members=(_RollbackFailureMember(
+                                "backup", -1, str(target), "E_ROLLBACK_BACKUP_CLEANUP_FAILED",
+                                str(accounting), participant="effect", cause_exception=accounting),)) from primary
+                elif (not accounted and effect.reservation_state
+                        and self._image_matches(source, before)
+                        and self._image_matches(target, effect.reservation_state)):
+                    try:
+                        self._dispose_image(target, dict(effect.reservation_state))
+                        effect.reservation_state = None
+                        self._advance(target, {})
+                    except BaseException as cleanup:
+                        raise _InstallFailure(
+                            "E_ROLLBACK_SETTLEMENT_FAILED", "retained-reservation", primary,
+                            recovery_path=target,
+                            members=(_RollbackFailureMember(
+                                "backup", -1, str(target), "E_ROLLBACK_BACKUP_CLEANUP_FAILED",
+                                str(cleanup), participant="effect", cause_exception=cleanup),)) from primary
+                raise
+
     def _publish_retained(self, source: Path, target: Path, *,
                           effect: _DeclaredPathEffect | None = None,
                           migration: _SliceAMigratedFileRecord | None = None,
@@ -3655,6 +3717,11 @@ class _InstallTransaction:
                 return self._relocate(before, source, target)
             if (not self._image_matches(source, before)) or not self._image_matches(target, {}):
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: ambiguous publication")
+            if (effect is not None and source == effect.location and target == effect.retained
+                    and migration is None and before[source].kind == "directory"
+                    and {os.open, os.mkdir, os.stat, os.rename} <= os.supports_dir_fd
+                    and hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW")):
+                return self._retain_reserved_directory(source, target, before, effect)
             if ((effect is not None and source == effect.location)
                     or (migration is not None and source == migration.leaf_path)):
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained-object atomic capability")
@@ -3668,7 +3735,10 @@ class _InstallTransaction:
                 return actual
             if (before[source].kind == "directory" and effect is not None
                     and source == effect.prepared_path and target == effect.location
-                    and not effect.before and migration is None
+                    and (not effect.before or (not effect.actual and effect.retained_state
+                         and effect.retained in effect.retained_state
+                         and self._image_matches(effect.retained, effect.retained_state)))
+                    and migration is None
                     and {os.open, os.mkdir, os.stat} <= os.supports_dir_fd
                     and hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW")
                     and hasattr(os, "fchmod")):

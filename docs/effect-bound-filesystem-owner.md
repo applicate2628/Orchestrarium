@@ -12,6 +12,12 @@ Use the existing transaction, mutable-path and platform owners. Qualify acquisit
 
 This clarification does not enable a backend, remove current public/private POSIX holds, establish native receiving or authorize live installation. An implemented and tested owner lifecycle remains necessary; documentation is not runtime acceptance.
 
+## Serialized original-directory retention
+
+When native no-replace is unavailable, the existing transaction owner may retain an original directory into its declared retained slot by exclusively creating an empty destination reservation, recording its creator identity, and verifying the source image, held parents and empty reservation before descriptor-relative rename. The reservation stays present until the rename replaces it. This preserves original identities and existing dependent records; it does not copy/delete the original or overwrite an unverified occupant. The bounded path excludes migration records and requires relative descriptor capabilities. A confirmed move advances the existing journal once; a confirmed unchanged failure cleans only the exact owned reservation; ambiguous outcomes preserve recovery material.
+
+This transition relies on the ordinary serialized-writer scope above. It is not atomic no-replace against uncooperative concurrent writers. Prepared replacement construction is permitted only with an empty current target and a verified nonempty retained original; partial new construction and cleanup remain owned by the existing transaction. Component evidence for this path does not remove the public POSIX hold or qualify all migrations, metadata, providers and installer entry points.
+
 ## Existing owner and first implementation
 
 The production installer owns effects through `_InstallTransaction`, `_CreateOnlyMutablePath` and `_WindowsBoundNode`. Extend these owners rather than adding a second filesystem engine. `_require_transaction_disposal_backend` now rejects non-Windows entry to both `_dispose_node` and `_dispose_image`, before input observation, permission changes or transaction updates. The old POSIX name-based deletion branch is removed. The existing Windows branch remains unchanged and still requires its own checks; passing this negative gate grants no authority.

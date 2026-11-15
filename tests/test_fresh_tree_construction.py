@@ -238,14 +238,202 @@ class FreshTreeConstructionTests(unittest.TestCase):
         self.assertEqual((self.target / "second").read_bytes(), b"second original")
         self.assertFalse(retained.exists())
 
-    def test_existing_tree_still_requires_retention_capability(self):
+    def retention_fixture(self):
+        self.target.mkdir()
+        (self.target / "old").write_bytes(b"original")
+        tx = self.module._InstallTransaction([], enabled=False)
+        owner = self.module._CreateOnlyMutablePath(self.root, tx, dry_run=False)
+        before = tx._observe(self.target)
+        retained = self.root / "retained"
+        effect = tx.arm_replacement(self.target, None, owner,
+            retained_destination=retained, preserve_on_commit=True)
+        return tx, effect, before, retained
+
+    def test_reserved_retention_preserves_original_identities(self):
+        tx, effect, before, retained = self.retention_fixture()
+        result = tx._publish_retained(self.target, retained, effect=effect)
+        self.assertEqual(result, tx._relocate(before, self.target, retained))
+        self.assertFalse(self.target.exists())
+        self.assertEqual((retained / "old").read_bytes(), b"original")
+        self.assertIsNone(effect.reservation_state)
+        tx.retained_replacement(effect, before)
+        self.assertEqual(tx._settle_effects(commit=True), ([], [], ()))
+        self.assertEqual((retained / "old").read_bytes(), b"original")
+
+    def test_reserved_retention_preexisting_collision(self):
+        tx, effect, before, retained = self.retention_fixture()
+        retained.mkdir()
+        with self.assertRaises(FileExistsError):
+            tx._publish_retained(self.target, retained, effect=effect)
+        self.assertTrue(tx._image_matches(self.target, before))
+        self.assertTrue(retained.exists())
+
+    def test_reserved_retention_rename_failure_cleans_only_reservation(self):
+        tx, effect, before, retained = self.retention_fixture()
+        with patch.object(self.module.os, "rename", side_effect=OSError("rename refused")):
+            with self.assertRaisesRegex(OSError, "rename refused"):
+                tx._retain_reserved_directory(self.target, retained, before, effect)
+        self.assertTrue(tx._image_matches(self.target, before))
+        self.assertFalse(retained.exists())
+        self.assertIsNone(effect.reservation_state)
+
+    def test_reserved_retention_post_effect_error_records_move(self):
+        tx, effect, before, retained = self.retention_fixture()
+        rename = self.module.os.rename
+        def move_then_fail(*args, **kwargs):
+            rename(*args, **kwargs)
+            raise OSError("after rename")
+        with patch.object(self.module.os, "rename", move_then_fail):
+            with self.assertRaisesRegex(OSError, "after rename"):
+                tx._retain_reserved_directory(self.target, retained, before, effect)
+        self.assertTrue(tx._image_matches(retained, tx._relocate(before, self.target, retained)))
+        self.assertFalse(self.target.exists())
+        self.assertIsNone(effect.reservation_state)
+        self.assertGreater(effect.transition_order, 0)
+
+    def test_reserved_retention_preserves_changed_reservation(self):
+        for replacement in (False, True):
+            with self.subTest(replacement=replacement):
+                # Each scenario gets independent, exclusively owned objects.
+                self.root = self.root / ("changed-" + str(replacement))
+                self.root.mkdir()
+                self.target = self.root / "target"
+                tx, effect, before, retained = self.retention_fixture()
+                create = tx._create_owned_directory
+                displaced = self.root / "displaced-reservation"
+                def changed(path, record, **kwargs):
+                    node = create(path, record, **kwargs)
+                    if replacement:
+                        path.rename(displaced)
+                        path.mkdir()
+                    (path / "foreign").write_bytes(b"preserve")
+                    return node
+                with patch.object(tx, "_create_owned_directory", changed):
+                    with self.assertRaisesRegex(ValueError, "reservation drift"):
+                        tx._publish_retained(self.target, retained, effect=effect)
+                self.assertTrue(tx._image_matches(self.target, before))
+                self.assertEqual((retained / "foreign").read_bytes(), b"preserve")
+                # Keep the entire scenario for caller-owned trash disposition.
+                self.target = self.root / "second-target"
+
+    def test_reserved_retention_journal_error_does_not_repeat_move(self):
+        tx, effect, before, retained = self.retention_fixture()
+        moved = tx._moved
+        calls = []
+        def fail(*args, **kwargs):
+            calls.append(1)
+            moved(*args, **kwargs)
+            raise RuntimeError("journal completion failure")
+        with patch.object(tx, "_moved", fail):
+            with self.assertRaisesRegex(RuntimeError, "journal completion failure"):
+                tx._publish_retained(self.target, retained, effect=effect)
+        self.assertEqual(calls, [1])
+        self.assertIsNone(effect.reservation_state)
+        self.assertTrue(tx._image_matches(retained, tx._relocate(before, self.target, retained)))
+
+    def test_reserved_retention_parent_close_failure_preserves_move(self):
+        tx, effect, before, retained = self.retention_fixture()
+        bind, close = tx._bind_scalar_parent, self.module.os.close
+        parents = set()
+        def remember(*args, **kwargs):
+            fd = bind(*args, **kwargs)
+            parents.add(fd)
+            return fd
+        def fail_close(fd):
+            close(fd)
+            if fd in parents:
+                parents.remove(fd)
+                raise OSError("parent close failure")
+        with patch.object(tx, "_bind_scalar_parent", remember), patch.object(self.module.os, "close", fail_close):
+            with self.assertRaisesRegex(RuntimeError, "parent close failure"):
+                tx._publish_retained(self.target, retained, effect=effect)
+        self.assertIsNone(effect.reservation_state)
+        self.assertTrue(tx._image_matches(retained, tx._relocate(before, self.target, retained)))
+
+    def test_reserved_retention_cleanup_preserves_late_foreign_member(self):
+        tx, effect, before, retained = self.retention_fixture()
+        def fail(*args, **kwargs):
+            (retained / "foreign").write_bytes(b"preserve")
+            raise OSError("rename refused")
+        with patch.object(self.module.os, "rename", fail):
+            with self.assertRaisesRegex(OSError, "rename refused"):
+                tx._retain_reserved_directory(self.target, retained, before, effect)
+        self.assertTrue(tx._image_matches(self.target, before))
+        self.assertEqual((retained / "foreign").read_bytes(), b"preserve")
+        self.assertIsNotNone(effect.reservation_state)
+
+    def test_reserved_retention_keeps_primary_and_accounting_errors(self):
+        tx, effect, before, retained = self.retention_fixture()
+        rename = self.module.os.rename
+        primary, accounting = OSError("after rename"), RuntimeError("accounting")
+        def move_then_fail(*args, **kwargs):
+            rename(*args, **kwargs)
+            raise primary
+        with patch.object(self.module.os, "rename", move_then_fail), patch.object(
+                tx, "_moved", side_effect=accounting) as moved:
+            with self.assertRaises(self.module._InstallFailure) as caught:
+                tx._retain_reserved_directory(self.target, retained, before, effect)
+        self.assertIs(caught.exception.cause, primary)
+        self.assertIs(caught.exception.members[0].cause_exception, accounting)
+        self.assertEqual(moved.call_count, 1)
+        self.assertTrue(tx._image_matches(retained, tx._relocate(before, self.target, retained)))
+
+    def test_existing_tree_partial_new_construction_restores_original(self):
         self.target.mkdir()
         (self.target / "old").write_bytes(b"preserve")
-        with self.assertRaisesRegex(ValueError, "retained-object atomic capability"):
+        copy = self.transaction._copy_owned_file
+        def fail(source, target, *args, **kwargs):
+            copy(source, target, *args, **kwargs)
+            if self.target in target.parents and target.name == "data":
+                raise RuntimeError("partial replacement")
+        with patch.object(self.transaction, "_copy_owned_file", fail):
+            with self.assertRaisesRegex(RuntimeError, "^partial replacement$"):
+                with self.transaction:
+                    owner = self.module._CreateOnlyMutablePath(self.root, self.transaction, dry_run=False)
+                    owner.replace_exact_tree(Path("target"), self.module._tree_sha256(self.target), self.source)
+        self.assertEqual((self.target / "old").read_bytes(), b"preserve")
+        self.assertFalse((self.target / "nested").exists())
+
+    def test_existing_tree_retention_accounting_failure_records_beforeimage(self):
+        self.target.mkdir()
+        (self.target / "old").write_bytes(b"preserve")
+        moved = self.transaction._moved
+        def fail(*args, **kwargs):
+            moved(*args, **kwargs)
+            raise RuntimeError("accounting failure")
+        with self.assertRaisesRegex(RuntimeError, "E_INSTALL_TRANSACTION_UNCOMMITTED"), self.transaction:
+            owner = self.module._CreateOnlyMutablePath(self.root, self.transaction, dry_run=False)
+            with patch.object(self.transaction, "_moved", fail):
+                with self.assertRaisesRegex(RuntimeError, "accounting failure"):
+                    owner.replace_exact_tree(Path("target"), self.module._tree_sha256(self.target), self.source)
+            effect = self.transaction._effects[-1]
+            self.assertTrue(effect.retained_state)
+            self.assertEqual((effect.retained / "old").read_bytes(), b"preserve")
+            self.assertFalse(effect.settled)
+        self.assertEqual((self.target / "old").read_bytes(), b"preserve")
+
+    def test_existing_tree_replacement_commits(self):
+        self.target.mkdir()
+        (self.target / "old").write_bytes(b"preserve")
+        with self.transaction:
+            owner = self.module._CreateOnlyMutablePath(self.root, self.transaction, dry_run=False)
+            owner.replace_exact_tree(Path("target"), self.module._tree_sha256(self.target), self.source)
+            self.transaction.commit()
+        self.assertEqual((self.target / "nested" / "data").read_bytes(), b"source bytes")
+        self.assertFalse((self.target / "old").exists())
+        self.assert_source()
+
+    def test_existing_tree_replacement_rolls_back(self):
+        self.target.mkdir()
+        (self.target / "old").write_bytes(b"preserve")
+        with self.assertRaisesRegex(RuntimeError, "^late replacement$"):
             with self.transaction:
                 owner = self.module._CreateOnlyMutablePath(self.root, self.transaction, dry_run=False)
                 owner.replace_exact_tree(Path("target"), self.module._tree_sha256(self.target), self.source)
+                self.assertTrue((self.target / "nested" / "data").exists())
+                raise RuntimeError("late replacement")
         self.assertEqual((self.target / "old").read_bytes(), b"preserve")
+        self.assertFalse((self.target / "nested").exists())
         self.assert_source()
 
 
