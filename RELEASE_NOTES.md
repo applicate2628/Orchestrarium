@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-15
 
+- Port the shared Windows hook serializer into SDK delivery: preserve existing simple-path bytes and represent Unicode and spaced paths literally across cmd and PowerShell. Shell expansion and control syntax remains refused. This source change does not grant native hook trust or modify host settings.
+
 - Restore the shared Goal resumption and hold-currency rule in the SDK delivery source and align Codex and Claude adapter reminders. Completed one-off holds no longer override a later verified resume, while current stops, native pauses, scope and spending gates remain binding. This is guidance, not a native state-transition guarantee.
 
 ## 2026-11-01
