@@ -18,6 +18,10 @@ When native no-replace is unavailable, the existing transaction owner may retain
 
 This transition relies on the ordinary serialized-writer scope above. It is not atomic no-replace against uncooperative concurrent writers. Prepared replacement construction is permitted only with an empty current target and a verified nonempty retained original; partial new construction and cleanup remain owned by the existing transaction. Component evidence for this path does not remove the public POSIX hold or qualify all migrations, metadata, providers and installer entry points.
 
+## Selected migration parent custody
+
+Forward migration selection binds source and destination parents separately when the retained original is stored in a distinct registered directory. Frozen selection witnesses own the source parent; the existing migration-retention registry owns the retained directory witness. The guard validates selection and retention before acquisition, before yielding and after the effect, reusing a descriptor only for the same parent. Component tests use actual parent descriptors and a relative move, including drift and close failures; they do not qualify the complete migration lifecycle or remove admission holds.
+
 ## Existing owner and first implementation
 
 The production installer owns effects through `_InstallTransaction`, `_CreateOnlyMutablePath` and `_WindowsBoundNode`. Extend these owners rather than adding a second filesystem engine. `_require_transaction_disposal_backend` now rejects non-Windows entry to both `_dispose_node` and `_dispose_image`, before input observation, permission changes or transaction updates. The old POSIX name-based deletion branch is removed. The existing Windows branch remains unchanged and still requires its own checks; passing this negative gate grants no authority.

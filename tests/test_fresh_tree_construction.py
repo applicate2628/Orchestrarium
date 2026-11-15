@@ -437,6 +437,85 @@ class FreshTreeConstructionTests(unittest.TestCase):
         self.assert_source()
 
 
+    def migration_parent_fixture(self):
+        from types import SimpleNamespace
+        tx = self.module._InstallTransaction([], enabled=False)
+        owner = self.module._CreateOnlyMutablePath(self.root, tx, dry_run=False)
+        leaf = self.root / "selected-file"
+        leaf.write_bytes(b"original")
+        selected = tx._bind_scalar_storage(leaf)
+        retention_parent = self.root / "retention"
+        retention_parent.mkdir()
+        retained = tx.reserve_migration_retention(owner, Path("retention"), self.root)
+        record = SimpleNamespace(selection_links=selected[2], parent_path=self.root,
+            leaf_path=leaf, prepared_path=self.root / "prepared", tombstone_path=retained / "original",
+            retention_parent_path=retention_parent)
+        return tx, record, retained
+
+    def test_migration_guard_binds_distinct_destination_parent(self):
+        tx, record, retained = self.migration_parent_fixture()
+        descriptors = None
+        with tx._migration_selection_guard(record, record.leaf_path, record.tombstone_path) as descriptors:
+            self.assertEqual(os.fstat(descriptors[0]).st_ino, self.root.stat().st_ino)
+            self.assertEqual(os.fstat(descriptors[1]).st_ino, retained.stat().st_ino)
+            os.rename(record.leaf_path.name, record.tombstone_path.name,
+                      src_dir_fd=descriptors[0], dst_dir_fd=descriptors[1])
+        self.assertEqual(record.tombstone_path.read_bytes(), b"original")
+        self.assertFalse(record.leaf_path.exists())
+        for descriptor in set(descriptors):
+            with self.assertRaises(OSError):
+                os.fstat(descriptor)
+
+    def test_migration_guard_reuses_same_parent(self):
+        tx, record, _ = self.migration_parent_fixture()
+        with tx._migration_selection_guard(record, record.prepared_path, record.leaf_path) as descriptors:
+            self.assertEqual(descriptors[0], descriptors[1])
+            self.assertEqual(os.fstat(descriptors[0]).st_ino, self.root.stat().st_ino)
+
+    def test_migration_guard_refuses_replaced_retention_parent(self):
+        tx, record, retained = self.migration_parent_fixture()
+        retained.rename(retained.with_name("displaced"))
+        retained.mkdir()
+        with self.assertRaisesRegex(ValueError, "IDENTITY_CHANGED"):
+            with tx._migration_selection_guard(record, record.leaf_path, record.tombstone_path):
+                self.fail("drifted retention must not reach the move")
+        self.assertEqual(record.leaf_path.read_bytes(), b"original")
+
+    def test_migration_guard_reports_post_effect_foreign_retention(self):
+        tx, record, retained = self.migration_parent_fixture()
+        with self.assertRaisesRegex(ValueError, "foreign migration retention member"):
+            with tx._migration_selection_guard(record, record.leaf_path, record.tombstone_path):
+                (retained / "foreign").write_bytes(b"preserve")
+        self.assertEqual((retained / "foreign").read_bytes(), b"preserve")
+
+
+    def test_migration_guard_preserves_primary_with_retention_drift(self):
+        tx, record, retained = self.migration_parent_fixture()
+        primary = OSError("move failed")
+        with self.assertRaises(self.module._InstallFailure) as caught:
+            with tx._migration_selection_guard(record, record.leaf_path, record.tombstone_path):
+                (retained / "foreign").write_bytes(b"preserve")
+                raise primary
+        self.assertIs(caught.exception.cause, primary)
+        self.assertEqual((retained / "foreign").read_bytes(), b"preserve")
+
+    def test_migration_guard_reports_parent_close_failure(self):
+        tx, record, retained = self.migration_parent_fixture()
+        close = os.close
+        held = set()
+        def fail_close(fd):
+            close(fd)
+            if fd in held:
+                held.remove(fd)
+                raise OSError("migration parent close")
+        with patch.object(self.module.os, "close", fail_close):
+            with self.assertRaisesRegex(RuntimeError, "migration parent close"):
+                with tx._migration_selection_guard(record, record.leaf_path, record.tombstone_path) as descriptors:
+                    held.update(descriptors)
+        self.assertFalse(held)
+        self.assertEqual(record.leaf_path.read_bytes(), b"original")
+
+
 @unittest.skipUnless(os.name == "nt", "Requires native Windows regression")
 class WindowsReplacementInverseTests(unittest.TestCase):
     def setUp(self):

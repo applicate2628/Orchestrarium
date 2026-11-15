@@ -3584,19 +3584,34 @@ class _InstallTransaction:
             return
         with ExitStack() as resources:
             selected = {"links": migration.selection_links}
-            self._assert_scalar_binding(selected, check_storage=False)
-            parent = self._bind_scalar_parent(migration.parent_path,
-                dict(migration.selection_links)[migration.parent_path], resources)
-            self._assert_scalar_binding(selected, check_storage=False)
+            parents = dict(migration.selection_links)
+            retention = None
+            if target.parent != migration.parent_path:
+                retention = self._migration_retention.get(target.parent)
+                if retention is None or target != migration.tombstone_path:
+                    raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: unregistered migration parent")
+                parents[target.parent] = retention[2]
+            def validate():
+                self._assert_scalar_binding(selected, check_storage=False)
+                if retention is not None:
+                    self.assert_migration_retention(target.parent, retention[3], pending=migration)
+            validate()
+            references = {}
+            for path in (source.parent, target.parent):
+                if path not in references:
+                    if path not in parents:
+                        raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: unselected migration parent")
+                    references[path] = self._bind_scalar_parent(path, parents[path], resources)
+            validate()
             primary = None
             try:
-                yield (parent, parent) if os.name != "nt" else None
+                yield (references[source.parent], references[target.parent]) if os.name != "nt" else None
             except BaseException as error:
                 primary = error
                 raise
             finally:
                 try:
-                    self._assert_scalar_binding(selected, check_storage=False)
+                    validate()
                 except BaseException as drift:
                     if primary is None:
                         raise
