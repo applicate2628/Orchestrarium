@@ -1339,6 +1339,7 @@ class _SliceAMigratedFileRecord:
     old_current: _PhysicalNode | None = None
     new_current: _PhysicalNode | None = None
     selection_links: tuple[tuple[Path, _PhysicalNode], ...] = ()
+    reservation_state: dict[Path, _PhysicalNode] | None = None
 
     @property
     def proof_key(self) -> tuple[Any, ...]:
@@ -3316,7 +3317,9 @@ class _InstallTransaction:
                                                                  if record.retention_parent_path is not None else None),
                                           prepared_path=(moved(record.prepared_path)
                                                          if record.prepared_path is not None else None),
-                                          logical_leaf_path=record.logical_leaf_path or record.leaf_path)
+                                          logical_leaf_path=record.logical_leaf_path or record.leaf_path,
+                                          reservation_state=({moved(path): node for path, node in record.reservation_state.items()}
+                                              if record.reservation_state is not None else None))
                                    if (migration is None or record.proof_key != migration.proof_key)
                                    and any(moved(path) != path for path in
                                            (record.leaf_path, record.tombstone_path, record.prepared_path)
@@ -3621,14 +3624,40 @@ class _InstallTransaction:
                         members=tuple(members), unresolved_paths=tuple(paths),
                         retained_errors=errors) from primary
 
-    def _retain_reserved_directory(self, source: Path, target: Path,
+    def _set_reservation(self, state, effect=None, migration=None):
+        if effect is not None:
+            effect.reservation_state = state
+        else:
+            self._slice_a_migrated = [replace(item, reservation_state=state)
+                if item.proof_key == migration.proof_key else item for item in self._slice_a_migrated]
+
+    def _dispose_reservation(self, path, state, *, migration=None):
+        if migration is None:
+            self._dispose_image(path, state)
+        else:
+            if (set(state) != {path} or state[path].kind != "file"
+                    or any(item.proof_key != migration.proof_key for item in self._migration_dependencies(path))
+                    or any(not item.settled and any(self._paths_overlap(path, endpoint)
+                        for endpoint in (item.location, item.retained, item.quarantine, item.prepared_path)
+                        if endpoint is not None) for item in self._effects)):
+                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: reservation dependency")
+            self._dispose_node(path, state[path])
+            self._advance(path, {})
+
+    def _retain_reserved_original(self, source: Path, target: Path,
                                    before: dict[Path, _PhysicalNode],
-                                   effect: _DeclaredPathEffect) -> dict[Path, _PhysicalNode]:
-        """Move an original over our empty reservation in serialized-writer scope."""
+                                   effect: _DeclaredPathEffect | None,
+                                   migration: _SliceAMigratedFileRecord | None = None) -> dict[Path, _PhysicalNode]:
+        """Move an original over our empty typed reservation under caller serialization."""
         relocated = self._relocate(before, source, target)
         accounted = False
+        reservation = None
+        def set_state(state):
+            nonlocal reservation
+            reservation = state
+            self._set_reservation(state, effect, migration)
         def record(path, node):
-            effect.reservation_state = {path: node}
+            set_state({path: node})
             self._advance(path, {path: node})
         with ExitStack() as resources:
             source_parent = self._capture_node(source.parent, kind="directory")
@@ -3636,30 +3665,51 @@ class _InstallTransaction:
             source_fd = self._bind_scalar_parent(source.parent, source_parent, resources)
             target_fd = self._bind_scalar_parent(target.parent, target_parent, resources)
             try:
-                self._create_owned_directory(target, record, parent_descriptor=target_fd)
-                self._assert_effect_endpoint(effect, source)
-                self._assert_effect_endpoint(effect, target)
+                if before[source].kind == "directory":
+                    self._create_owned_directory(target, record, parent_descriptor=target_fd)
+                else:
+                    descriptor = os.open(target.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                         0o600, dir_fd=target_fd)
+                    primary = None
+                    try:
+                        record(target, self._capture_node(target, descriptor=descriptor, kind="file",
+                                                          data=hashlib.sha256(b"").hexdigest()))
+                    except BaseException as error:
+                        primary = error
+                        raise
+                    finally:
+                        try:
+                            os.close(descriptor)
+                        except OSError as cleanup:
+                            raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "reservation-close",
+                                primary if primary is not None else cleanup, recovery_path=target,
+                                members=(_RollbackFailureMember("backup", -1, str(target),
+                                    "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup),
+                                    participant="reservation", cause_exception=cleanup),)) from primary
+                if effect is not None:
+                    self._assert_effect_endpoint(effect, source)
+                    self._assert_effect_endpoint(effect, target)
                 if (not self._point_matches(source.parent, source_parent)
                         or not self._point_matches(target.parent, target_parent)
                         or not self._image_matches(source, before)
-                        or not effect.reservation_state
-                        or not self._image_matches(target, effect.reservation_state)):
+                        or not reservation
+                        or not self._image_matches(target, reservation)):
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained reservation drift")
                 # Never remove the reservation first. Under caller serialization,
-                # this replaces only our verified empty directory, not an occupant.
+                # this replaces only our verified empty typed slot, not an occupant.
                 os.rename(source.name, target.name, src_dir_fd=source_fd, dst_dir_fd=target_fd)
                 if not self._image_matches(source, {}) or not self._image_matches(target, relocated):
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained reservation outcome")
-                effect.reservation_state = None
+                set_state(None)
                 accounted = True
-                self._moved(source, target, before, effect)
+                self._moved(source, target, before, effect, migration)
                 return relocated
             except BaseException as primary:
                 if not accounted and self._image_matches(source, {}) and self._image_matches(target, relocated):
-                    effect.reservation_state = None
+                    set_state(None)
                     accounted = True
                     try:
-                        self._moved(source, target, before, effect)
+                        self._moved(source, target, before, effect, migration)
                     except BaseException as accounting:
                         raise _InstallFailure(
                             "E_ROLLBACK_SETTLEMENT_FAILED", "retained-accounting", primary,
@@ -3667,12 +3717,12 @@ class _InstallTransaction:
                             members=(_RollbackFailureMember(
                                 "backup", -1, str(target), "E_ROLLBACK_BACKUP_CLEANUP_FAILED",
                                 str(accounting), participant="effect", cause_exception=accounting),)) from primary
-                elif (not accounted and effect.reservation_state
+                elif (not accounted and reservation
                         and self._image_matches(source, before)
-                        and self._image_matches(target, effect.reservation_state)):
+                        and self._image_matches(target, reservation)):
                     try:
-                        self._dispose_image(target, dict(effect.reservation_state))
-                        effect.reservation_state = None
+                        self._dispose_reservation(target, dict(reservation), migration=migration if effect is None else None)
+                        set_state(None)
                         self._advance(target, {})
                     except BaseException as cleanup:
                         raise _InstallFailure(
@@ -3732,11 +3782,14 @@ class _InstallTransaction:
                 return self._relocate(before, source, target)
             if (not self._image_matches(source, before)) or not self._image_matches(target, {}):
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: ambiguous publication")
-            if (effect is not None and source == effect.location and target == effect.retained
-                    and migration is None and before[source].kind == "directory"
+            if (((effect is not None and source == effect.location and target == effect.retained)
+                     or (effect is None and migration is not None
+                         and source == migration.leaf_path and target == migration.tombstone_path
+                         and before[source].kind == "file"))
+                    and before[source].kind in {"directory", "file"}
                     and {os.open, os.mkdir, os.stat, os.rename} <= os.supports_dir_fd
                     and hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW")):
-                return self._retain_reserved_directory(source, target, before, effect)
+                return self._retain_reserved_original(source, target, before, effect, migration)
             if ((effect is not None and source == effect.location)
                     or (migration is not None and source == migration.leaf_path)):
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained-object atomic capability")
@@ -4903,6 +4956,10 @@ class _InstallTransaction:
                 if (not self._image_matches(member, state)):
                     raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: retained replacement")
             else:
+                reservation = next((record.reservation_state for record in self._slice_a_migrated
+                    if record.tombstone_path == member and record.reservation_state is not None), None)
+                if reservation is not None and not self._image_matches(member, reservation):
+                    raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: migration reservation")
                 owner._assert_regular(member, existing=True)
 
     def _settle_migration_retention(self, *, only_empty: bool = False,
@@ -5050,6 +5107,26 @@ class _InstallTransaction:
                 retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
         return unresolved, failures, retained_errors
 
+    def _settle_migration_reservation(self, record, owner=None):
+        record = next((item for item in self._slice_a_migrated if item.proof_key == record.proof_key), record)
+        if record.reservation_state is None:
+            return record
+        registered = self._slice_a_owners.get(os.path.normcase(str(record.anchor_path)))
+        if registered is None or (owner is not None and owner is not registered):
+            raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: migration reservation owner")
+        if not self._binding_identity_matches(record.anchor_identity, registered._identity(record.anchor_path)):
+            raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: migration reservation anchor")
+        registered._walk_existing(record.leaf_path)
+        registered._walk_existing(record.tombstone_path)
+        registered._assert_migration_retention_record(record)
+        if (record.started or set(record.reservation_state) != {record.tombstone_path}
+                or not self._image_matches(record.leaf_path, {
+                    record.leaf_path: self._current_role(record, old=True)})):
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: migration reservation source")
+        self._dispose_reservation(record.tombstone_path, record.reservation_state, migration=record)
+        self._set_reservation(None, migration=record)
+        return next(item for item in self._slice_a_migrated if item.proof_key == record.proof_key)
+
     def _settle_migrated(
         self, blocked: list[Path] | None = None,
     ) -> tuple[list[Path], list[_RollbackFailureMember], tuple[BaseException, ...]]:
@@ -5070,6 +5147,7 @@ class _InstallTransaction:
                 )
                 if owner is None:
                     raise RuntimeError("E_ROLLBACK_CREATED_IDENTITY_CHANGED")
+                record = self._settle_migration_reservation(record)
                 if not record.started and not record.tombstone_path.exists() and (self._image_matches(record.leaf_path, {
                         record.leaf_path: self._current_role(record, old=True)})):
                     continue  # An armed migration failed before its first effect.
@@ -5276,6 +5354,12 @@ class _InstallTransaction:
             if record.settled:
                 continue
             try:
+                if record.reservation_state is not None:
+                    if not record.started and usable(record.leaf_path,
+                            {record.leaf_path: self._current_role(record, old=True)},
+                            "migration", ordinal, "migration"):
+                        return record.leaf_path, unresolved, failures, retained_errors
+                    continue
                 if not record.started and self._node_metadata_matches(record.tombstone_path, None):
                     continue  # No retained candidate from an unperformed migration.
                 current = self._current_role(record, old=True)
@@ -6363,6 +6447,10 @@ class _CreateOnlyMutablePath:
 
         record = next((current for current in self.transaction._slice_a_migrated
                        if current.proof_key == record.proof_key), record)
+        record = self.transaction._settle_migration_reservation(record, self)
+        if not record.started and self.transaction._image_matches(record.leaf_path, {
+                record.leaf_path: self.transaction._current_role(record, old=True)}) and not record.tombstone_path.exists():
+            return
         effect = None
         try:
             if (
@@ -6424,6 +6512,7 @@ class _CreateOnlyMutablePath:
 
         record = next((current for current in self.transaction._slice_a_migrated
                        if current.proof_key == record.proof_key), record)
+        record = self.transaction._settle_migration_reservation(record, self)
         self.transaction._assert_scalar_binding({"links": record.selection_links}, check_storage=False)
         self._walk_existing(record.leaf_path)
         self._walk_existing(record.tombstone_path)

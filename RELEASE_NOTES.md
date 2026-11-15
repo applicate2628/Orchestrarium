@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-15
 
+- Extend owned reservation retention to regular files and initial file migration when native no-replace is unavailable. Migration records retain reservation custody across failed cleanup, distinguish it from original backups, and share checked cleanup across direct and transaction settlement; file rollback preserves the original inode and hardlinks. Public POSIX admission remains held pending whole-installer qualification.
+
 - Bind selected configuration migration moves to their actual source and destination parents. A separate retained-original directory no longer receives the source parent descriptor; its registered ownership and contents are checked before and after the move, preserving drift and cleanup diagnostics.
 
 - Retain original directories through an exclusively created, identity-checked empty reservation when native no-replace is unavailable. Descriptor-relative replacement of that owned slot preserves original identities under caller serialization; ambiguous outcomes and foreign reservations are preserved. New replacement trees can then be constructed against the verified retained original, enabling bounded commit and rollback without copying originals during retention. This does not provide hostile-writer exclusion or remove public POSIX admission holds.

@@ -272,7 +272,7 @@ class FreshTreeConstructionTests(unittest.TestCase):
         tx, effect, before, retained = self.retention_fixture()
         with patch.object(self.module.os, "rename", side_effect=OSError("rename refused")):
             with self.assertRaisesRegex(OSError, "rename refused"):
-                tx._retain_reserved_directory(self.target, retained, before, effect)
+                tx._retain_reserved_original(self.target, retained, before, effect)
         self.assertTrue(tx._image_matches(self.target, before))
         self.assertFalse(retained.exists())
         self.assertIsNone(effect.reservation_state)
@@ -285,7 +285,7 @@ class FreshTreeConstructionTests(unittest.TestCase):
             raise OSError("after rename")
         with patch.object(self.module.os, "rename", move_then_fail):
             with self.assertRaisesRegex(OSError, "after rename"):
-                tx._retain_reserved_directory(self.target, retained, before, effect)
+                tx._retain_reserved_original(self.target, retained, before, effect)
         self.assertTrue(tx._image_matches(retained, tx._relocate(before, self.target, retained)))
         self.assertFalse(self.target.exists())
         self.assertIsNone(effect.reservation_state)
@@ -357,7 +357,7 @@ class FreshTreeConstructionTests(unittest.TestCase):
             raise OSError("rename refused")
         with patch.object(self.module.os, "rename", fail):
             with self.assertRaisesRegex(OSError, "rename refused"):
-                tx._retain_reserved_directory(self.target, retained, before, effect)
+                tx._retain_reserved_original(self.target, retained, before, effect)
         self.assertTrue(tx._image_matches(self.target, before))
         self.assertEqual((retained / "foreign").read_bytes(), b"preserve")
         self.assertIsNotNone(effect.reservation_state)
@@ -372,7 +372,7 @@ class FreshTreeConstructionTests(unittest.TestCase):
         with patch.object(self.module.os, "rename", move_then_fail), patch.object(
                 tx, "_moved", side_effect=accounting) as moved:
             with self.assertRaises(self.module._InstallFailure) as caught:
-                tx._retain_reserved_directory(self.target, retained, before, effect)
+                tx._retain_reserved_original(self.target, retained, before, effect)
         self.assertIs(caught.exception.cause, primary)
         self.assertIs(caught.exception.members[0].cause_exception, accounting)
         self.assertEqual(moved.call_count, 1)
@@ -514,6 +514,176 @@ class FreshTreeConstructionTests(unittest.TestCase):
                     held.update(descriptors)
         self.assertFalse(held)
         self.assertEqual(record.leaf_path.read_bytes(), b"original")
+
+
+    def migrate_file(self, *, separate=False):
+        owner = self.module._CreateOnlyMutablePath(self.root, self.transaction, dry_run=False)
+        selection = self.transaction._bind_scalar_storage(self.target)
+        if separate:
+            (self.root / "retention").mkdir(exist_ok=True)
+        owner.migrate_exact_file(Path("target"), self.module._file_sha256(self.target),
+            b"replacement", selection=selection, retention_parent=Path("retention") if separate else None)
+        return owner
+
+    def test_file_reservation_migration_commit(self):
+        self.target.write_bytes(b"original")
+        original = self.target.stat().st_ino
+        with self.transaction:
+            self.migrate_file(separate=True)
+            record = self.transaction._slice_a_migrated[-1]
+            self.assertEqual(record.tombstone_path.stat().st_ino, original)
+            self.assertIsNone(record.reservation_state)
+            self.transaction.commit()
+        self.assertEqual(self.target.read_bytes(), b"replacement")
+        self.assertFalse(record.tombstone_path.exists())
+
+    def test_file_reservation_migration_rollback_preserves_inode(self):
+        self.target.write_bytes(b"original")
+        original = self.target.stat().st_ino
+        os.link(self.target, self.root / "alias")
+        with self.assertRaisesRegex(RuntimeError, "^late migration$"):
+            with self.transaction:
+                self.migrate_file(separate=True)
+                raise RuntimeError("late migration")
+        self.assertEqual(self.target.read_bytes(), b"original")
+        self.assertEqual(self.target.stat().st_ino, original)
+        self.assertEqual((self.root / "alias").stat().st_ino, original)
+
+    def test_file_reservation_publication_failure_restores_inode(self):
+        self.target.write_bytes(b"original")
+        original = self.target.stat().st_ino
+        publish = self.transaction._publish_retained
+        def fail(source, target, **kwargs):
+            record = kwargs.get("migration")
+            if record is not None and source == record.prepared_path:
+                raise OSError("new publication failed")
+            return publish(source, target, **kwargs)
+        with patch.object(self.transaction, "_publish_retained", fail):
+            with self.assertRaisesRegex(OSError, "new publication failed"):
+                with self.transaction:
+                    self.migrate_file()
+        self.assertEqual(self.target.read_bytes(), b"original")
+        self.assertEqual(self.target.stat().st_ino, original)
+
+
+    def failed_file_reservation(self, *, foreign=False):
+        self.target.write_bytes(b"original")
+        self.transaction = self.module._InstallTransaction([], enabled=False)
+        retain = self.transaction._retain_reserved_original
+        def wrapped(*args, **kwargs):
+            def fail_rename(*_args, **_kwargs):
+                if foreign:
+                    args[1].write_bytes(b"foreign")
+                raise OSError("retention rename failed")
+            with patch.object(self.module.os, "rename", fail_rename):
+                return retain(*args, **kwargs)
+        with patch.object(self.transaction, "_retain_reserved_original", wrapped):
+            with patch.object(self.transaction, "_dispose_reservation", side_effect=OSError("reservation cleanup failed")):
+                with self.assertRaises(OSError if foreign else self.module._InstallFailure):
+                    self.migrate_file()
+        record = self.transaction._slice_a_migrated[-1]
+        self.assertIsNotNone(record.reservation_state)
+        self.assertFalse(record.started)
+        self.assertEqual(self.target.read_bytes(), b"original")
+        return record
+
+    def test_file_reservation_failed_cleanup_is_retryable(self):
+        record = self.failed_file_reservation()
+        unresolved, failures, _ = self.transaction._settle_migrated()
+        self.assertEqual((unresolved, failures), ([], []))
+        self.assertFalse(record.tombstone_path.exists())
+        self.assertIsNone(self.transaction._slice_a_migrated[-1].reservation_state)
+        self.assertEqual(self.target.read_bytes(), b"original")
+
+    def test_file_reservation_direct_rollback_cleans_reservation(self):
+        record = self.failed_file_reservation()
+        owner = self.transaction._slice_a_owners[os.path.normcase(str(record.anchor_path))]
+        owner.rollback_migrated(record, replacement_may_be_absent=True)
+        self.assertFalse(record.tombstone_path.exists())
+        self.assertEqual(self.target.read_bytes(), b"original")
+
+    def test_file_reservation_direct_commit_does_not_claim_success(self):
+        record = self.failed_file_reservation()
+        owner = self.transaction._slice_a_owners[os.path.normcase(str(record.anchor_path))]
+        with self.assertRaisesRegex(RuntimeError, "E_ROLLBACK_CREATED_IDENTITY_CHANGED"):
+            owner.commit_migrated(record)
+        self.assertFalse(record.tombstone_path.exists())
+        self.assertFalse(self.transaction._slice_a_migrated[-1].settled)
+        self.assertEqual(self.target.read_bytes(), b"original")
+
+    def test_file_reservation_foreign_bytes_preserved(self):
+        record = self.failed_file_reservation(foreign=True)
+        unresolved, failures, _ = self.transaction._settle_migrated()
+        self.assertTrue(failures)
+        self.assertIn(record.tombstone_path, unresolved)
+        self.assertEqual(record.tombstone_path.read_bytes(), b"foreign")
+        self.assertIsNotNone(self.transaction._slice_a_migrated[-1].reservation_state)
+        self.assertEqual(self.target.read_bytes(), b"original")
+
+    def test_file_reservation_post_move_error_restores_original(self):
+        self.target.write_bytes(b"original")
+        original = self.target.stat().st_ino
+        retain, rename = self.transaction._retain_reserved_original, os.rename
+        def wrapped(*args, **kwargs):
+            def after(*pos, **named):
+                rename(*pos, **named)
+                raise OSError("after file retention")
+            with patch.object(self.module.os, "rename", after):
+                return retain(*args, **kwargs)
+        with patch.object(self.transaction, "_retain_reserved_original", wrapped):
+            with self.assertRaisesRegex(OSError, "after file retention"):
+                with self.transaction:
+                    self.migrate_file()
+        self.assertEqual(self.target.read_bytes(), b"original")
+        self.assertEqual(self.target.stat().st_ino, original)
+
+
+    def test_file_reservation_unrelated_move_preserves_reservation_path(self):
+        record = self.failed_file_reservation()
+        before = self.transaction._observe(self.target)
+        moved = self.root / "moved-leaf"
+        os.rename(self.target, moved)
+        self.transaction._moved(self.target, moved, before, None)
+        current = self.transaction._slice_a_migrated[-1]
+        self.assertEqual(current.leaf_path, moved)
+        self.assertEqual(current.reservation_state, record.reservation_state)
+        self.assertTrue(record.tombstone_path.exists())
+
+    def test_file_reservation_wrong_direct_owner_cannot_clean(self):
+        record = self.failed_file_reservation()
+        other = self.root / "other-owner"
+        other.mkdir()
+        owner = self.module._CreateOnlyMutablePath(other, self.transaction, dry_run=False)
+        for operation in (owner.rollback_migrated, owner.commit_migrated):
+            with self.assertRaisesRegex(ValueError, "reservation owner"):
+                operation(record)
+        self.assertTrue(self.transaction._image_matches(record.tombstone_path, record.reservation_state))
+
+    def test_file_reservation_close_failure_preserves_original(self):
+        import stat
+        self.target.write_bytes(b"original")
+        original = self.target.stat().st_ino
+        retain, close = self.transaction._retain_reserved_original, os.close
+        def wrapped(*args, **kwargs):
+            def fail_close(fd):
+                metadata = os.fstat(fd)
+                close(fd)
+                if stat.S_ISREG(metadata.st_mode) and metadata.st_size == 0:
+                    raise OSError("reservation descriptor close")
+            with patch.object(self.module.os, "close", fail_close):
+                return retain(*args, **kwargs)
+        with patch.object(self.transaction, "_retain_reserved_original", wrapped):
+            with self.assertRaisesRegex(RuntimeError, "reservation descriptor close"):
+                with self.transaction:
+                    self.migrate_file()
+        self.assertEqual(self.target.read_bytes(), b"original")
+        self.assertEqual(self.target.stat().st_ino, original)
+
+
+    def test_file_reservation_real_native_dispatch_commit(self):
+        # Exercise actual filesystem capability detection, not an assumed directory result.
+        with patch.object(self.transaction, "_native_publish_no_replace", self.native_publish):
+            self.test_file_reservation_migration_commit()
 
 
 @unittest.skipUnless(os.name == "nt", "Requires native Windows regression")
