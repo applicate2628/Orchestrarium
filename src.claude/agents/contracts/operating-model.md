@@ -26,6 +26,8 @@ Team templates in `.claude/agents/team-templates/` define the team composition a
 
 ## Routing principles
 
+Before routing a resumed plan with materially changed architectural assumptions, apply the bounded revalidation in shared Reuse before hand-rolling; retain the existing owner/review route rather than treating prior acceptance as current structural evidence.
+
 When the main conversation (holding the Lead role) needs to decide between roles within a template:
 
 1. **Risk owners trigger reviewers**: if a specialist constraint role participated in design, add the corresponding reviewer after QA.
