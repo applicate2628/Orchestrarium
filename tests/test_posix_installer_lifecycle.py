@@ -122,6 +122,69 @@ class PosixInstallerLifecycleTests(unittest.TestCase):
         self.assert_timestamp_outcome(late_drift=True)
 
 
+    def test_repeated_transaction_born_copy_keeps_representability(self):
+        target = self.project / "copied"
+        source = ROOT / "AGENTS.md"
+        tx = self.module._InstallTransaction([target], enabled=True, copy_paths=(target,))
+        with patch.object(self.module, "_require_transaction_disposal_backend", lambda: None):
+            with tx:
+                owner = self.module._CreateOnlyMutablePath(self.project, tx, dry_run=False)
+                owner.copy_file(Path("copied"), source)
+                self.assertIsNone(tx._copy_metadata[target].origin)
+                self.assertIsNone(tx._copy_metadata[target].before)
+                owner.copy_file(Path("copied"), source)
+                tx.commit()
+        self.assertEqual(target.read_bytes(), source.read_bytes())
+        self.assertEqual(list(self.project.iterdir()), [target])
+
+    def test_moved_original_without_creator_witness_stays_exact(self):
+        target = self.project / "copied"
+        original = self.project / "original"
+        source = self.root / "source"
+        source.write_bytes(b"original bytes")
+        original.write_bytes(b"original bytes")
+        tx = self.module._InstallTransaction([original, target], enabled=True, copy_paths=(target,))
+        observed = []
+        def metadata(path, node, desired, mode, record, participant, **kwargs):
+            observed.append(kwargs["fresh_copy"])
+            return participant.current
+        with patch.object(self.module, "_require_transaction_disposal_backend", lambda: None):
+            with tx:
+                image = dict(tx._expected[original])
+                original.rename(target)
+                tx._moved(original, target, image, None)
+                participant = tx._copy_metadata[target]
+                self.assertIsNone(participant.origin)
+                self.assertIsNone(participant.before)
+                self.assertIsNone(participant.created_origin)
+                owner = self.module._CreateOnlyMutablePath(self.project, tx, dry_run=False)
+                with patch.object(tx, "_apply_copy_metadata", metadata):
+                    owner.copy_file(Path("copied"), source)
+                tx.commit()
+        self.assertEqual(observed, [False])
+        self.assertEqual(target.read_bytes(), b"original bytes")
+
+    def test_transaction_born_same_bytes_foreign_inode_refuses(self):
+        target = self.project / "copied"
+        source = self.root / "source"
+        source.write_bytes(b"same bytes")
+        refused = []
+        tx = self.module._InstallTransaction([target], enabled=True, copy_paths=(target,))
+        with patch.object(self.module, "_require_transaction_disposal_backend", lambda: None):
+            with self.assertRaises(self.module._InstallFailure) as outcome:
+                with tx:
+                    owner = self.module._CreateOnlyMutablePath(self.project, tx, dry_run=False)
+                    owner.copy_file(Path("copied"), source)
+                    target.rename(self.root / "displaced")
+                    target.write_bytes(b"same bytes")
+                    with self.assertRaisesRegex(ValueError, "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY"):
+                        owner.copy_file(Path("copied"), source)
+                    refused.append(True)
+                    raise RuntimeError("foreign replacement retained")
+        self.assertEqual(refused, [True], repr(outcome.exception))
+        self.assertEqual(target.read_bytes(), b"same bytes")
+        self.assertEqual((self.root / "displaced").read_bytes(), b"same bytes")
+
     def test_probe_rejects_each_independently_stuck_timestamp(self):
         real = os.utime
         for stuck in (0, 1):

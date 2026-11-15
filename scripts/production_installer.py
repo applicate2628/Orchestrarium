@@ -1940,6 +1940,7 @@ class _CopyMetadataParticipant:
     restored: _CopyMetadataImage | None = None
     unknown: bool = False
     target_text: str | None = field(default=None, compare=False, repr=False)
+    created_origin: _PhysicalNode | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -4004,6 +4005,8 @@ class _InstallTransaction:
                 mode=None if target in self._copy_metadata else stat.S_IMODE(expected.python_identity[2]))
             if target in self._copy_metadata:
                 participant = self._copy_metadata[target]
+                if participant.origin is None and participant.before is None:
+                    participant.created_origin = node
                 participant.unknown = True
                 native = None
                 if os.name == "nt":
@@ -6158,6 +6161,8 @@ class _CreateOnlyMutablePath:
                     node = self.transaction._scalar_descriptor_node(path, outgoing, existing)
                     if node != existing:
                         raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: copy bound bytes")
+                if existing is None:
+                    participant.created_origin = node  # Exclusive creator, never a moved-in original.
                 participant.current = self.transaction._read_copy_metadata(os.fstat(outgoing), outgoing, target_bound)
                 self.transaction._copy_current[path] = participant.current
                 if node.data != expected.data:
@@ -6177,7 +6182,10 @@ class _CreateOnlyMutablePath:
                 desired = self.transaction._read_copy_metadata(os.fstat(incoming), incoming, source_bound)
             self.transaction._apply_copy_metadata(path, node, desired,
                 stat.S_IMODE(expected.python_identity[2]), record, participant,
-                fresh_copy=existing is None and participant.origin is None and participant.before is None)
+                fresh_copy=(participant.origin is None and participant.before is None
+                    and participant.created_origin is not None
+                    and self.transaction._same_origin(node, participant.created_origin.python_identity,
+                                                      participant.created_origin.native_proof)))
         self._record_fresh_file(path, completed_node, fresh_parents)
         return path
 
