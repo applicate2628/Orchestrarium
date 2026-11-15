@@ -3549,12 +3549,21 @@ class _InstallTransaction:
                       if parent_descriptors is not None else
                       operation(-100, os.fsencode(source), -100, os.fsencode(target), 1))
         elif sys.platform == "darwin":
-            operation = getattr(runtime, "renamex_np", None)
-            if operation is None:
-                return False
-            operation.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
-            operation.restype = ctypes.c_int
-            result = operation(os.fsencode(source), os.fsencode(target), 4)
+            if parent_descriptors is not None:
+                operation = getattr(runtime, "renameatx_np", None)
+                if operation is None:
+                    return False  # Held-parent selection must not become pathname selection.
+                operation.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+                operation.restype = ctypes.c_int
+                result = operation(parent_descriptors[0], os.fsencode(source.name),
+                                   parent_descriptors[1], os.fsencode(target.name), 4)
+            else:
+                operation = getattr(runtime, "renamex_np", None)
+                if operation is None:
+                    return False
+                operation.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+                operation.restype = ctypes.c_int
+                result = operation(os.fsencode(source), os.fsencode(target), 4)
         else:
             return False
         if result == 0:
