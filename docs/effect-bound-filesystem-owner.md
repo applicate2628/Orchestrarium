@@ -53,9 +53,10 @@ presence (`is None`), never truthiness. If both its body and disposal fail, the
 existing typed settlement failure retains the original body cause, cleanup
 exception context and recovery locator. A false-valued exception must not replace
 the original cause, and an exception's `__bool__` must not run during this choice.
-When only disposal fails, disposal remains the selected cause. The probe still
-performs exactly the previous operations; this diagnostic correction adds no
-backend admission and does not change the public or private POSIX holds.
+When only disposal fails, disposal remains the selected cause. That diagnostic
+correction alone added no backend admission and did not change the public or
+private POSIX holds. The later selected-tree retention qualification below
+updates the probed owner without changing those diagnostic guarantees.
 
 The focused tests execute the extracted probe control flow and real diagnostic
 declarations against inert paths and a synthetic transaction. They include the
