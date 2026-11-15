@@ -11,7 +11,7 @@ Hold `$lead` as the orchestration role in the main Codex session. Codex loads ro
 
 ## Bootstrap — first action
 
-For an enrolled native Goal, first apply the shared same-task/native-binding authority rule before any Goal-dependent step below; otherwise execute the existing sequence.
+For an enrolled native Goal, first apply shared **Goal resumption and hold currency**, including current same-task/native binding and consumed one-off holds, before any Goal-dependent step below; otherwise execute the existing sequence.
 
 1. **Classify before full task-memory recovery** — apply the shared `quick-fix` predicate first. When it matches, create the minimal `work-items/active/<slug>/status.md` defined in `subagent-contracts.md` before the first repository mutation, perform at most one preflight, route `implementation -> QA`, verify the result, and write one post-verification summary. The minimal status is the handoff and contains only ordinary lifecycle fields plus task, current step, last result, and next action; do not add `roadmap.md`, `brief.md`, Research, Design, Plan, consultant, pre-implementation review, or a report before that mutation. If any predicate fails, continue below with the selected heavier route by enriching the same work-item instead of creating a late unrelated item.
 2. **Verify work-items task memory (ENFORCED)** — for non-trivial lead-managed work outside `quick-fix`, the default repository task-memory root is `work-items/`:
@@ -348,9 +348,9 @@ When an accepted artifact asserts a root cause, a fix verification, or `diagnosi
 - Do not pause between accepted artifacts unless a true gate failure or a policy-required human or CI check requires it.
 - Keep the next approved role ready whenever the current gate is likely to pass so the pipeline can keep moving.
 - Apply the shared **Primary-task continuity and side work** rule in AGENTS.md: answer brief questions/status/clarifications in commentary; promptly delegate eligible substantive admitted side work under existing authority and resource gates; take the next ready primary action in the same turn without waiting for the side result. Task-free questions may end. Preserve explicit user/manual/native holds, dependent-only decisions and existing recovery/resource settlement.
-- After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting; continue from that point unless the user or persisted status says the task is parked, blocked, or complete.
+- After context compaction or resume from a summary, restore the active task, next unchecked step and open evidence gates, then reconcile current authority under shared **Goal resumption and hold currency** before treating any persisted hold or completion summary as current. Continue ready admitted work; preserve genuinely current stops, required gates and same-task/native binding. Ordinary or unenrolled/no-Goal tasks retain their existing workflow.
 - If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану`, or an equivalent continue-working signal, take the next concrete action in the active task immediately instead of only acknowledging the correction.
-- For stop-after-current-run intent, persist the stop across turns, allow only the in-flight run to finish, then stop before any new action.
+- For stop-after-current-run intent, persist the stop across turns, allow only the in-flight run to finish, then stop before any new action. Under shared **Goal resumption and hold currency**, the fulfilled one-off stop is consumed by a later user resume of that same task; do not reimpose it from recovery.
 - Do not stop at one completed sub-batch when a known admitted-scope next action already exists; keep the task open and continue until a real gate or explicit user reprioritization intervenes.
 - Apply the shared action-local blocker rule before closeout: a grouped gate is not a global stop; name the exact action each prerequisite prevents and continue any independently ready admitted action whose own gates pass.
 

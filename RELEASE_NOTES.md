@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-15
+
+- Restore the shared Goal resumption and hold-currency rule in the SDK delivery source and align Codex and Claude adapter reminders. Completed one-off holds no longer override a later verified resume, while current stops, native pauses, scope and spending gates remain binding. This is guidance, not a native state-transition guarantee.
+
 ## 2026-11-01
 
 - Explain the retired legacy alias-creation option accurately and point to explicit copy-migration preview. Update compatibility tests to preserve old user trees without recreating links; existing copy-migration rollback and lifecycle coverage remains active. Installation guidance now states per-client receipt ownership and the separate explicit legacy-copy migration operation.
