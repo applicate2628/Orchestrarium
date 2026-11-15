@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-15
 
+- Roll back sealed replacement images through owned disposal rather than requiring an extra atomic quarantine move. Retry only residual backup cleanup after restoration, preserving the complete restored original when cleanup fails partway. Runtime observations, foreign changes and pending migrations remain protected; POSIX public admission and original-object retention requirements are unchanged.
+
 - Restore fresh-directory construction through the existing effect-bound owner when native no-replace publication is unavailable and relative descriptor operations are supported. Record partial identities for rollback and preserve prepared-image cleanup ownership. Existing-object retention and the public POSIX hold are unchanged; native component tests do not claim full installer qualification.
 
 ## 2026-11-14

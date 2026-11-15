@@ -4325,6 +4325,22 @@ class _InstallTransaction:
                     self.assert_effect_current(effect)
                     effect.settled = True
                     continue
+                if not commit and effect.restored_state is not None:
+                    # Restoration already completed. Retained cleanup may be
+                    # partial; never replace the restored original with that tail.
+                    if not self._image_matches(effect.location, effect.restored_state):
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: restored image drift")
+                    if effect.retained_state:
+                        self._dispose_image(effect.retained, dict(effect.retained_state))
+                    effect.retained_state = None
+                    self._advance(effect.retained, {})
+                    if effect.quarantine_state and not effect.preserve_runtime_custody:
+                        self._dispose_image(effect.quarantine, dict(effect.quarantine_state))
+                        effect.quarantine_state = None
+                        self._advance(effect.quarantine, {})
+                    self.assert_effect_current(effect)
+                    effect.settled = True
+                    continue
                 if effect.retained_state is None:
                     if commit:
                         effect.settled = True
@@ -4341,6 +4357,13 @@ class _InstallTransaction:
                     self._advance(effect.retained, {})
                     effect.settled = True
                     continue
+                if effect.actual and all(node.evidence_role == "sealed" for node in effect.actual.values()):
+                    # The retained beforeimage owns recovery. A sealed replacement
+                    # needs disposal, not an additional atomic quarantine move.
+                    # The image owner checks migration dependencies and journals
+                    # completed members so partial disposal remains recoverable.
+                    self._dispose_image(effect.location, dict(effect.actual))
+                    self._advance(effect.location, {})
                 detached = effect.retained.with_name(effect.retained.name + ".after")
                 effect.quarantine = detached
                 if effect.actual:
