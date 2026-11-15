@@ -9310,7 +9310,7 @@ def _assert_canonical_member_state(
 
 
 def _preflight_directory_move_capabilities(plan: _CanonicalSkillsPlan, target: Path) -> tuple[tuple[Path, tuple[int, int, int, int]], ...]:
-    """Probe required native directory moves before any coupled live effects."""
+    """Probe the selected retention owner before any coupled live effects."""
     parents = { (target / skill.name).parent for skill in plan.skills
                 if skill.accepted_prior is not None and skill.managed_before is None }
     witnesses = []
@@ -9320,21 +9320,27 @@ def _preflight_directory_move_capabilities(plan: _CanonicalSkillsPlan, target: P
         transaction = _InstallTransaction([], enabled=False)
         state = transaction._observe(probe)
         original = None
+        effect = None
+        move_finished = False
         try:
             source = probe / "source"
             destination = probe / "destination"
             source.mkdir()
             source_state = transaction._observe(source)
             state.update(source_state)
-            if not transaction._native_publish_no_replace(source, destination):
-                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: required directory no-replace capability unavailable")
+            owner = _CreateOnlyMutablePath(probe, transaction, dry_run=False)
+            effect = transaction.arm_replacement(source, None, owner,
+                retained_destination=destination, preserve_on_commit=True)
+            transaction._publish_retained(source, destination, effect=effect)
+            move_finished = True
             state = transaction._relocate(source_state, source, destination) | {probe: state[probe]}
             if (not transaction._image_matches(probe, state)):
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION: directory capability probe drift")
             source.mkdir()
-            state.update(transaction._observe(source))
+            source_state = transaction._observe(source)
+            state.update(source_state)
             try:
-                transaction._native_publish_no_replace(source, destination)
+                transaction._publish_retained(source, destination, source_state=source_state)
             except FileExistsError:
                 pass
             else:
@@ -9346,6 +9352,16 @@ def _preflight_directory_move_capabilities(plan: _CanonicalSkillsPlan, target: P
             raise
         finally:
             try:
+                if effect is not None and not move_finished:
+                    # A move can finish before accounting or descriptor close fails.
+                    # Consider only the original witnesses and our recorded slot;
+                    # never adopt an arbitrary current directory census.
+                    candidates = (state | (effect.reservation_state or {}),
+                        transaction._relocate(source_state, source, destination) | {probe: state[probe]})
+                    for candidate in candidates:
+                        if transaction._image_matches(probe, candidate):
+                            state = candidate
+                            break
                 transaction._dispose_image(probe, state)
             except BaseException as cleanup:
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "capability",

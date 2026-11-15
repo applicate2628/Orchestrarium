@@ -347,5 +347,60 @@ class PosixInstallerLifecycleTests(unittest.TestCase):
         self.assert_fresh_target_drift(metadata=True)
 
 
+    def test_selected_tree_capability_uses_available_retention_owner(self):
+        from types import SimpleNamespace
+        target = self.root / "skills"
+        target.mkdir()
+        plan = SimpleNamespace(skills=(SimpleNamespace(
+            name="selected", accepted_prior="a" * 64, managed_before=None),))
+        with patch.object(self.module, "_require_transaction_disposal_backend", lambda: None):
+            parents = self.module._preflight_directory_move_capabilities(plan, target)
+        self.assertEqual(len(parents), 1)
+        self.assertEqual(parents[0][0], target)
+        self.assertEqual(list(target.iterdir()), [])
+
+
+    def test_selected_tree_probe_settles_completed_move_before_error(self):
+        from types import SimpleNamespace
+        target = self.root / "skills"
+        target.mkdir()
+        plan = SimpleNamespace(skills=(SimpleNamespace(
+            name="selected", accepted_prior="a" * 64, managed_before=None),))
+        original = self.module._InstallTransaction._publish_retained
+        def publish(tx, source, destination, **kwargs):
+            result = original(tx, source, destination, **kwargs)
+            if kwargs.get("effect") is not None:
+                raise RuntimeError("after probe move")
+            return result
+        with patch.object(self.module, "_require_transaction_disposal_backend", lambda: None), \
+                patch.object(self.module._InstallTransaction, "_publish_retained", publish):
+            with self.assertRaisesRegex(RuntimeError, "after probe move"):
+                self.module._preflight_directory_move_capabilities(plan, target)
+        self.assertEqual(list(target.iterdir()), [])
+
+    def test_selected_tree_probe_preserves_foreign_destination(self):
+        from types import SimpleNamespace
+        target = self.root / "skills"
+        target.mkdir()
+        plan = SimpleNamespace(skills=(SimpleNamespace(
+            name="selected", accepted_prior="a" * 64, managed_before=None),))
+        original = self.module._InstallTransaction._publish_retained
+        foreign = []
+        def publish(tx, source, destination, **kwargs):
+            if kwargs.get("effect") is not None:
+                destination.mkdir()
+                member = destination / "foreign"
+                member.write_bytes(b"do not delete")
+                foreign.append(member)
+            return original(tx, source, destination, **kwargs)
+        with patch.object(self.module, "_require_transaction_disposal_backend", lambda: None), \
+                patch.object(self.module._InstallTransaction, "_publish_retained", publish):
+            with self.assertRaises(self.module._InstallFailure):
+                self.module._preflight_directory_move_capabilities(plan, target)
+        self.assertEqual(len(foreign), 1)
+        self.assertEqual(foreign[0].read_bytes(), b"do not delete")
+        self.assertTrue((foreign[0].parent.parent / "source").is_dir())
+
+
 if __name__ == "__main__":
     unittest.main()

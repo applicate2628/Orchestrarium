@@ -135,3 +135,18 @@ Before changing an existing POSIX copy participant, independently measure its or
 If the current full metadata image and requested mode already match exactly, perform no setter. In particular, refusing a preflight must not round an unchanged original merely while trying to restore an already-satisfied state. Changed mode or any metadata difference still follows the ordinary verified path. Unrestorable originals refuse before writing; foreign changes during qualification are preserved rather than overwritten.
 
 Native isolated Codex qualification has completed fresh and repeat installation with only the public POSIX admission/disposal holds substituted, without models or hooks. This is not public POSIX admission, native macOS qualification, or hook health acceptance. The pack installer has no uninstall command; a rejected unsupported removal option is not an uninstall result.
+
+## Selected-tree retention capability
+
+Selected whole-tree replacement qualifies the same retained-object owner used by
+the real transition. Its isolated source and destination are explicitly bound to
+one owner effect, so supported native no-replace or the existing verified empty
+reservation can carry the original identity. The probe is not admission authority
+and does not change public POSIX holds or production ownership checks.
+
+After movement, the exact relocated original image and source absence must match.
+A second source cannot replace the occupied destination. If publication completed
+before a later accounting or close error, cleanup considers only the original
+witnesses, their exact relocation and an already-recorded owned reservation.
+Unknown or foreign members are never adopted from a new census; failed complete
+image checks preserve them and retain the primary and cleanup failures.
