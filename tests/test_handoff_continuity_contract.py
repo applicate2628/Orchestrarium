@@ -57,7 +57,9 @@ def test_pao_revision_and_scenario_reject_stale_environment_evidence() -> None:
 
 
 def test_upstream_claim_owner_survives_implementation_and_review() -> None:
-    for path in LEADS + OPERATING_MODELS:
+    # Both installed providers receive this canonical skill body; the Claude
+    # skills tree is historical migration input, not a current policy owner.
+    for path in (CODEX_LEAD,) + OPERATING_MODELS:
         _requires(
             path,
             "accepted Architect or domain artifact/revision unchanged in `Approved inputs`",
