@@ -202,3 +202,9 @@ the unrelated marker and installed configuration remained. This is fresh-install
 receiving plus an observed trust boundary, not trusted-repeat acceptance or a
 solution for ownership of native host runtime files. Nine query-custody unit
 checks passed on both Windows and macOS; the pytest-based suite remains unrun.
+
+
+### Native Codex selected-upgrade receiving
+- Added the missing Codex global selected non-lead upgrade scenario with hooks explicitly disabled for both fresh install and upgrade. Native macOS CPython 3.13.18 executed one test in 21.041s: PASS; fresh 11.82s and selected upgrade 8.90s both returned zero.
+- Assertions verified selected source bytes restored, neighboring analyst tree unchanged, receipt schema/member manifest correct, source bytes unchanged, user marker preserved, staging empty and no retained/probe/upgrade leftovers. This is additional acceptance coverage, not red-before-fix regression evidence or trusted-hook acceptance.
+- ASUS and Mac test blob identities matched. Independent test-only review PASS and release-notes-exempt. Native hook trust and runtime-state ownership remain outside this check; public POSIX admission unchanged.

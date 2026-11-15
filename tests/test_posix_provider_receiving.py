@@ -107,7 +107,12 @@ class PosixProviderReceivingTests(unittest.TestCase):
         self.invoke("codex", global_install=True)
         self.assertEqual(config.read_bytes(), before)
 
-    def receive_selected_nonlead_upgrade(self, provider="codex"):
+    def test_codex_global_selected_upgrade_without_hooks(self):
+        no_hooks = ("--no-hypothesis-hook",)
+        self.invoke("codex", global_install=True, extra=no_hooks)
+        self.receive_selected_nonlead_upgrade("codex", extra=no_hooks)
+
+    def receive_selected_nonlead_upgrade(self, provider="codex", *, extra=()):
         import json
         skills = self.home / ".agents/skills"
         receipt = skills / ".orchestrarium-nonlead-skills-receipt.v1.json"
@@ -122,7 +127,7 @@ class PosixProviderReceivingTests(unittest.TestCase):
         sibling_before = self.module._tree_sha256(sibling, ignore_runtime_cache=True)
         source_before = (ROOT / "src.codex/skills/knowledge-archivist/SKILL.md").read_bytes()
         self.invoke(provider, global_install=True, extra=(
-            "--replace-unreceipted-skill-sha256", "knowledge-archivist=tree-v2:" + observed))
+            "--replace-unreceipted-skill-sha256", "knowledge-archivist=tree-v2:" + observed, *extra))
         self.assertEqual(selected_file.read_bytes(), expected)
         self.assertEqual(self.module._tree_sha256(sibling, ignore_runtime_cache=True), sibling_before)
         data = json.loads(receipt.read_bytes())
