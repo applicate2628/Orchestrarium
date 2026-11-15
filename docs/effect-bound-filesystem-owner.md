@@ -151,3 +151,31 @@ before a later accounting or close error, cleanup considers only the original
 witnesses, their exact relocation and an already-recorded owned reservation.
 Unknown or foreign members are never adopted from a new census; failed complete
 image checks preserve them and retain the primary and cleanup failures.
+
+
+## Native macOS receiving boundary
+
+On source revision `0ff5a46e`, isolated macOS x86_64 receiving with CPython
+3.13.18 completed the Claude project fresh/repeat and global fresh/repeat/selected
+nonlead upgrade cases. Codex global fresh/repeat without hooks also completed.
+Only the two existing POSIX admission checks were substituted in the receiving
+harness; filesystem effects and hook health subprocesses were real. Public
+POSIX admission is unchanged.
+
+The four-case provider matrix was not green: three cases passed and Codex
+hook-enabled fresh installation failed with `E_HOOK_HEALTH_FAILED` caused by
+`PSV1-TREE-NOT-EMPTY`; its repeat was never reached. Rollback reported
+`E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY` and preserved recovery state. Native
+Codex hook inventory had created runtime databases, shared-memory/write-ahead
+files and an installation identifier in the isolated provider directory outside
+the installer's journal. Those files are not disposable installer payload merely
+because this health invocation produced them. The next correction must address
+the host-query process lifecycle and ownership boundary, not weaken rollback
+identity checks or reinterpret the failed run as acceptance.
+
+Focused native lifecycle checks ran 18 cases: 16 passed and two existing
+representability-probe cases skipped because native timestamp representation was
+exact. Probe-settlement diagnostics passed nine cases; the public-hold tests
+passed five. The separate leaf/tree disposal test modules could not load because
+pytest was absent in that interpreter; they are unverified, not passing. These
+results do not establish race freedom or release admission.
