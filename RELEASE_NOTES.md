@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-15
 
+- Failed installations now distinguish an implicitly created parent directory from installer-owned payload. After owned child operations roll back, a same-identity parent containing external runtime state is explicitly retained rather than blocking unrelated rollback or deleting that state. Changed owned files and substituted parents still fail closed; public POSIX admission is unchanged.
+
 - Codex hook-inventory queries on POSIX now own a private process group, offer stdin EOF for graceful host shutdown, and require complete group and reader settlement before accepting inventory. Cleanup failures retain their primary cause instead of allowing background Git descendants to escape the query lifetime. This does not qualify host-created runtime files or enable public POSIX installation.
 
 - Added opt-in isolated POSIX provider receiving tests for fresh/repeat installs, selected non-Lead upgrades and real hook health. They require caller-owned temporary storage and frozen installer source; native Codex hook-list discovery is a real prerequisite, never replaced by a fake executable or conflated with the no-hooks matrix. Public POSIX installation remains held.

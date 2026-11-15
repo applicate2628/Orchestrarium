@@ -3178,7 +3178,7 @@ class _InstallTransaction:
                 parent_entry = {"kind": "scalar", "path": logical, "current_path": directory,
                                 "before_node": None, "current_node": None, "origin": None,
                                 "links": links, "operation_backup": None, "consumed": False, "born": True,
-                                "logical_views": ()}
+                                "logical_views": (), "implicit_container": True}
                 def record_directory(path, node):
                     parent_entry["origin"] = parent_entry["current_node"] = node
                     self._advance(path, {path: node})
@@ -3276,7 +3276,8 @@ class _InstallTransaction:
                    and not self._same_origin(origin, record.old_identity, record.old_native_proof)
                    for record in self._slice_a_migrated)
 
-    def _settle_scalars(self, blocked: list[Path], *, entries=None) -> tuple[list[Path], list[_RollbackFailureMember], tuple[BaseException, ...]]:
+    def _settle_scalars(self, blocked: list[Path], *, entries=None,
+                        allow_container_retention: bool = False) -> tuple[list[Path], list[_RollbackFailureMember], tuple[BaseException, ...]]:
         unresolved, failures = [], []
         retained_errors = ()
         selected = None if entries is None else {id(entry) for entry in entries}
@@ -3292,6 +3293,26 @@ class _InstallTransaction:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar dependency")
                 if entry["origin"] is None:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: unproved scalar creator retained")
+                if allow_container_retention and entry.get("implicit_container") is True:
+                    # Only the dependency scheduler may settle a shared parent.
+                    # Its creator owns the directory identity, not external children.
+                    if (entry.get("born") is not True or entry["before_node"] is not None
+                            or entry["origin"].kind != "directory"
+                            or entry["current_node"] is None
+                            or not self._same_origin(entry["origin"],
+                                entry["current_node"].python_identity, entry["current_node"].native_proof)):
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: container proof")
+                    self._assert_scalar_binding(entry, check_storage=False)
+                    if not self._point_matches(path, entry["current_node"]):
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: container origin")
+                    if any(path.iterdir()):
+                        self._assert_scalar_binding(entry, check_storage=False)
+                        if not self._point_matches(path, entry["current_node"]):
+                            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: container observation drift")
+                        entry["disposition"] = "retained-external-container"
+                        entry["consumed"] = True
+                        print("  RETAINED_EXTERNAL_CONTAINER: external state preserved after owned rollback")
+                        continue
                 self._assert_scalar_binding(entry)
                 if entry["before_node"] is None:
                     self._dispose_node(path, entry["current_node"])
@@ -5351,7 +5372,7 @@ class _InstallTransaction:
                 retain_backup = True
                 continue
             if kind == "scalar":
-                paths, members, errors = self._settle_scalars(unresolved, entries=(record,))
+                paths, members, errors = self._settle_scalars(unresolved, entries=(record,), allow_container_retention=True)
             elif kind == "created":
                 paths, members, errors = self._settle_created(unresolved, records=(record,))
             elif kind == "retention":
