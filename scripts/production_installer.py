@@ -2725,7 +2725,14 @@ class _InstallTransaction:
                 projected_effect = projected.stable() if stable_observation else projected
                 known_effect = (actual_effect == projected_effect if assigned else
                                 actual_effect in (current_effect, projected_effect))
-                if not assignment_known or not known_effect or actual_identity not in (node.python_identity, valid_identity):
+                # A successful setter can produce a verified but unrequested time
+                # image (for example filesystem quantization). Record that outcome
+                # for rollback without accepting it as exact requested assignment.
+                observed_time_only = (sets_times and primary is None and assignment is not None
+                    and replace(assignment, atime_ns=projected.atime_ns, mtime_ns=projected.mtime_ns) == projected
+                    and actual == assignment and actual_identity == valid_identity)
+                if (not observed_time_only and (not assignment_known or not known_effect)
+                        or actual_identity not in (node.python_identity, valid_identity)):
                     if primary is not None:
                         _CopySetterDiagnostic.attach(primary, label, restored, "operation", operation_ordinal,
                             current, projected, node.python_identity, valid_identity, actual, actual_identity, participant=participant)
@@ -12545,11 +12552,16 @@ def _finish_install_result(provider, target, dry_run, applied, primary, cleanup_
     return 0
 
 
+def _installer_platform_admitted() -> bool:
+    """Temporary public admission boundary; no command-line or environment override."""
+    return os.name != "posix"
+
+
 def install(provider: str, argv: list[str] | None = None) -> int:
     args = _parser(provider).parse_args(argv)
     # Even dry-run builds and disposes staging before entering the transaction.
     # Keep this temporary hold ahead of target resolution and all plan creation.
-    if os.name == "posix":
+    if not _installer_platform_admitted():
         print(
             "FAIL: E_POSIX_DISPOSAL_UNQUALIFIED: POSIX installer operations are "
             "temporarily disabled, including --dry-run; the disposal race remains unresolved. "

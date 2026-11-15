@@ -110,3 +110,10 @@ The current tests execute only the negative gate and extracted refusal paths, in
 - WSL: Windows Subsystem for Linux.
 - DrvFS: the WSL filesystem interface exposing Windows drives.
 - Native qualification: actual platform lifecycle verification, not a source or mocked test result.
+
+
+### Verified unrequested copy timestamps
+
+A successful timestamp setter may return a full same-operation observation that differs only in the requested times. If all other metadata and the retained identity match the projected state, and the subsequent complete observation exactly matches that operation result, the copy owner journals the actual image before rejecting the unfulfilled exact assignment. This is factual rollback custody, not acceptance of filesystem rounding. Missing observations, setter errors, changed non-time metadata, identity changes and later timestamp drift retain the unknown-effect path.
+
+The assembled POSIX regression substitutes only the internal admission boundaries and injects an unexpected timestamp result on a real held descriptor. It checks the full remaining target tree and empty staging, not just regular files. This qualifies failed-install rollback, not public POSIX installation, timestamp representability, successful upgrade/removal or native macOS acceptance.

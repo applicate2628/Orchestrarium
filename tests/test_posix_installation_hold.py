@@ -23,6 +23,8 @@ class PosixInstallationHoldTests(unittest.TestCase):
         cls.tree = ast.parse(SOURCE.read_bytes())
         cls.parser = next(node for node in cls.tree.body
                           if isinstance(node, ast.FunctionDef) and node.name == "_parser")
+        cls.admission = next(node for node in cls.tree.body
+                             if isinstance(node, ast.FunctionDef) and node.name == "_installer_platform_admitted")
         cls.install = next(node for node in cls.tree.body
                            if isinstance(node, ast.FunctionDef) and node.name == "install")
 
@@ -31,7 +33,7 @@ class PosixInstallationHoldTests(unittest.TestCase):
         # No installer import, preflight, filesystem operation or dependency runs.
         prefix = copy.deepcopy(self.install)
         prefix.body = prefix.body[:2] + [ast.Return(value=ast.Constant(CONTINUED))]
-        module = ast.fix_missing_locations(ast.Module(body=[self.parser, prefix], type_ignores=[]))
+        module = ast.fix_missing_locations(ast.Module(body=[self.parser, self.admission, prefix], type_ignores=[]))
         output, error = io.StringIO(), io.StringIO()
         scope = {"__builtins__": {"print": print}, "argparse": argparse,
                  "os": SimpleNamespace(name=host), "sys": SimpleNamespace(stderr=error)}
@@ -46,7 +48,8 @@ class PosixInstallationHoldTests(unittest.TestCase):
                          "args = _parser(provider).parse_args(argv)")
         guard = self.install.body[1]
         self.assertIsInstance(guard, ast.If)
-        self.assertEqual(ast.unparse(guard.test), "os.name == 'posix'")
+        self.assertEqual(ast.unparse(guard.test), "not _installer_platform_admitted()")
+        self.assertEqual(ast.unparse(self.admission.body[-1]), "return os.name != 'posix'")
         self.assertEqual(len(guard.body), 2)
         self.assertIsInstance(guard.body[0], ast.Expr)
         self.assertIsInstance(guard.body[0].value, ast.Call)
