@@ -2123,10 +2123,11 @@ class CopyMetadataTests(unittest.TestCase):
         primary.__cause__ = ValueError("original-cause")
         primary.__context__ = RuntimeError("original-context")
         original = (primary.args, primary.__cause__, primary.__context__)
+        desired = replace(current, mtime_ns=300)  # Require an operation, not the exact-image no-op.
         def action():
             with patch.object(PI._WindowsBoundNode, "set_copy_times", side_effect=primary), \
                     patch.object(tx, "_read_copy_metadata", side_effect=[current, current]):
-                tx._apply_copy_metadata(self.target, node, current, stat.S_IMODE(node.python_identity[2]), record, participant)
+                tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
         result, stderr, escaped = self.through_install(action)
         self.assertEqual(result, 1)
         self.assertIs(escaped[0], primary)

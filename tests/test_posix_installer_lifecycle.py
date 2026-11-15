@@ -185,6 +185,87 @@ class PosixInstallerLifecycleTests(unittest.TestCase):
         self.assertEqual(target.read_bytes(), b"same bytes")
         self.assertEqual((self.root / "displaced").read_bytes(), b"same bytes")
 
+    def test_existing_copy_restores_original_bytes_and_exact_times(self):
+        target = self.project / "original"
+        target.write_bytes(b"user original")
+        os.utime(target, ns=(1_600_000_000_000_000_000, 1_600_000_001_000_000_000))
+        before = target.stat()
+        tx = self.module._InstallTransaction([target], enabled=True, copy_paths=(target,))
+        with patch.object(self.module, "_require_transaction_disposal_backend", lambda: None):
+            with self.assertRaisesRegex(RuntimeError, "later failure"):
+                with tx:
+                    owner = self.module._CreateOnlyMutablePath(self.project, tx, dry_run=False)
+                    owner.copy_file(Path("original"), ROOT / "AGENTS.md")
+                    self.assertEqual(target.read_bytes(), (ROOT / "AGENTS.md").read_bytes())
+                    raise RuntimeError("later failure")
+        after = target.stat()
+        self.assertEqual((after.st_atime_ns, after.st_mtime_ns), (before.st_atime_ns, before.st_mtime_ns))
+        self.assertEqual(target.read_bytes(), b"user original")
+
+    def test_unrestorable_original_refuses_before_byte_write(self):
+        target = self.project / "original"
+        target.write_bytes(b"user original")
+        tx = self.module._InstallTransaction([target], enabled=True, copy_paths=(target,))
+        with patch.object(self.module, "_require_transaction_disposal_backend", lambda: None):
+            with self.assertRaisesRegex(ValueError, "original timestamps not restorable"):
+                with tx:
+                    owner = self.module._CreateOnlyMutablePath(self.project, tx, dry_run=False)
+                    with patch.object(tx, "_representable_copy_times", return_value=(-1, -1)), \
+                            patch.object(tx, "_write_owned_file", side_effect=AssertionError("destructive write reached")):
+                        owner.copy_file(Path("original"), ROOT / "AGENTS.md")
+        self.assertEqual(target.read_bytes(), b"user original")
+
+    def test_existing_preflight_metadata_drift_refuses_before_write(self):
+        target = self.project / "original"
+        target.write_bytes(b"user original")
+        os.utime(target, ns=(1_600_000_000_000_000_000, 1_600_000_001_000_000_000))
+        tx = self.module._InstallTransaction([target], enabled=True, copy_paths=(target,))
+        refused = []
+        def drift(path, descriptor, pair):
+            os.utime(target, ns=(1_610_000_000_000_000_000, 1_610_000_001_000_000_000))
+            return pair
+        with patch.object(self.module, "_require_transaction_disposal_backend", lambda: None):
+            with self.assertRaises(self.module._InstallFailure):
+                with tx:
+                    owner = self.module._CreateOnlyMutablePath(self.project, tx, dry_run=False)
+                    with patch.object(tx, "_representable_copy_times", drift), \
+                            patch.object(tx, "_write_owned_file", side_effect=AssertionError("destructive write reached")):
+                        try:
+                            owner.copy_file(Path("original"), ROOT / "AGENTS.md")
+                        except ValueError as error:
+                            self.assertIn("copy stable metadata drift", str(error))
+                            refused.append(True)
+                            raise
+        self.assertEqual(refused, [True])
+        self.assertEqual(target.read_bytes(), b"user original")
+        self.assertEqual(target.stat().st_mtime_ns, 1_610_000_001_000_000_000)
+
+    def test_exact_original_metadata_does_not_call_setters(self):
+        import stat
+        target = self.project / "original"
+        target.write_bytes(b"user original")
+        tx = self.module._InstallTransaction([], enabled=False)
+        node = tx._capture_node(target)
+        with tx._copy_reference(target, node, metadata_only=True) as (fd, bound):
+            current = tx._read_copy_metadata(os.fstat(fd), fd, bound)
+        participant = self.module._CopyMetadataParticipant(node, current, current)
+        with patch.object(os, "utime", side_effect=AssertionError("timestamp setter reached")), \
+                patch.object(tx, "_chmod_owned", side_effect=AssertionError("mode setter reached")):
+            result = tx._apply_copy_metadata(target, node, current, stat.S_IMODE(node.python_identity[2]),
+                lambda path, image: None, participant, restored=True)
+        self.assertEqual(result, current)
+        self.assertEqual(participant.restored, current)
+        # A representable time pair lets the changed-mode case reach its setter.
+        os.utime(target, ns=(1_600_000_000_000_000_000, 1_600_000_001_000_000_000))
+        tx = self.module._InstallTransaction([], enabled=False)
+        with tx._copy_reference(target, node, metadata_only=True) as (fd, bound):
+            current = tx._read_copy_metadata(os.fstat(fd), fd, bound)
+        participant = self.module._CopyMetadataParticipant(node, current, current)
+        with patch.object(tx, "_chmod_owned", side_effect=RuntimeError("mode change reached")):
+            with self.assertRaisesRegex(RuntimeError, "mode change reached"):
+                tx._apply_copy_metadata(target, node, current, stat.S_IMODE(node.python_identity[2]) ^ stat.S_IXUSR,
+                    lambda path, image: None, participant)
+
     def test_probe_rejects_each_independently_stuck_timestamp(self):
         real = os.utime
         for stuck in (0, 1):

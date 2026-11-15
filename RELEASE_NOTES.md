@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-15
 
+- Before updating existing POSIX copy files, independently qualify exact restoration of their original timestamps, then permit measured forward timestamp representation. Rollback remains exact, and unchanged full metadata avoids needless setters that could round it. This enables qualified repeat installs while refusing unrestorable or concurrently changed originals before destructive writes.
+
 - Keep actual exclusive-creator identity in copy participants so files created earlier in the same transaction remain eligible for measured timestamps on repeat copies. Moved-in user originals and foreign replacement objects do not inherit this permission. This fixes the later duplicate-copy stage of a fresh POSIX install without relaxing original-file metadata restoration.
 
 - Qualify representable timestamps for genuinely new copied files using an owned same-filesystem probe of the specific requested pair. Independent field changes and repeated observations reject no-op or unstable setters; target identity, contents and binding are checked again before exact measured assignment. Existing originals and rollback timestamps remain exact, and public POSIX admission is unchanged.

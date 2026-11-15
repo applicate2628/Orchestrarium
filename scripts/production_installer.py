@@ -2704,7 +2704,8 @@ class _InstallTransaction:
     def _apply_copy_metadata(self, path: Path, node: _PhysicalNode,
                              desired: _CopyMetadataImage, mode: int, record,
                              participant: _CopyMetadataParticipant | None = None,
-                             *, restored=False, fresh_copy=False) -> _CopyMetadataImage:
+                             *, restored=False, fresh_copy=False,
+                             restoration_verified=False) -> _CopyMetadataImage:
         """Verify time assignment exactly; later atime is a read-variable observation.
 
         Stable metadata and physical/restriction identity remain constrained for
@@ -2716,6 +2717,13 @@ class _InstallTransaction:
             known = self._copy_current.get(path)
             if known is not None and current.stable() != known.stable():
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: copy setter beforeimage drift")
+            if current == desired and stat.S_IMODE(node.python_identity[2]) == mode:
+                self._copy_current[path] = current
+                if participant is not None:
+                    participant.current, participant.unknown = current, False
+                    if restored:
+                        participant.restored = current
+                return current  # Already exact; do not round an unchanged original through a setter.
             operation_ordinal = 0
             def progress(operation, projected, *, identity=None, label,
                          sets_times=False, optional_operation_errnos=()):
@@ -2809,9 +2817,11 @@ class _InstallTransaction:
                     if isinstance(primary, OSError) and primary.errno in optional_operation_errnos:
                         return  # Known optional operation error; recording already succeeded.
                     raise primary
-                if (observed_time_only and label == "timestamps" and fresh_copy and not restored and bound is None
-                        and participant is not None and participant.origin is None and participant.before is None
-                        and actual_effect != projected_effect):
+                if (observed_time_only and label == "timestamps" and not restored and bound is None
+                        and participant is not None and actual_effect != projected_effect
+                        and ((fresh_copy and participant.origin is None and participant.before is None)
+                             or (restoration_verified and participant.origin is not None and participant.before is not None
+                                 and self._same_origin(node, participant.origin.python_identity, participant.origin.native_proof)))):
                     pair = self._representable_copy_times(path, descriptor, (projected.atime_ns, projected.mtime_ns))
                     represented = replace(projected, atime_ns=pair[0], mtime_ns=pair[1])
                     if actual == represented:
@@ -6134,6 +6144,7 @@ class _CreateOnlyMutablePath:
         self._ensure_parent(path)
         fresh_parents = self._fresh_file_parents(path) if existing is None else None
         completed_node = None
+        restoration_verified = False
         def record(member, node):
             nonlocal completed_node
             completed_node = node
@@ -6161,6 +6172,16 @@ class _CreateOnlyMutablePath:
                     node = self.transaction._scalar_descriptor_node(path, outgoing, existing)
                     if node != existing:
                         raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: copy bound bytes")
+                if existing is not None and target_bound is None and participant.before is not None:
+                    before = participant.before
+                    pair = (before.atime_ns, before.mtime_ns)
+                    if self.transaction._representable_copy_times(path, outgoing, pair) != pair:
+                        raise ValueError("E_MUTABLE_PATH_POSTCONDITION: original timestamps not restorable")
+                    # This qualification must precede the first byte or metadata write.
+                    self.transaction._assert_copy_metadata(path)
+                    if self.transaction._scalar_descriptor_node(path, outgoing, existing) != existing:
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: copy restore preflight drift")
+                    restoration_verified = True
                 if existing is None:
                     participant.created_origin = node  # Exclusive creator, never a moved-in original.
                 participant.current = self.transaction._read_copy_metadata(os.fstat(outgoing), outgoing, target_bound)
@@ -6185,7 +6206,8 @@ class _CreateOnlyMutablePath:
                 fresh_copy=(participant.origin is None and participant.before is None
                     and participant.created_origin is not None
                     and self.transaction._same_origin(node, participant.created_origin.python_identity,
-                                                      participant.created_origin.native_proof)))
+                                                      participant.created_origin.native_proof)),
+                restoration_verified=restoration_verified)
         self._record_fresh_file(path, completed_node, fresh_parents)
         return path
 
