@@ -37,7 +37,7 @@ Codex loads skills statically → contract docs must be self-contained lead guid
 
 | Block | Claude (`src.claude/agents/contracts/subagent-contracts.md`) | Codex (`src.codex/skills/lead/subagent-contracts.md`) | Notes |
 |-------|-------------------------------------------------------------|-------------------------------------------------------|-------|
-| Handoff template | §"Handoff template" | §"Shared handoff template" | Identical structure and admission-to-assignment input receiving plus result-to-dispatch correlation; shared field meanings are owned by the canonical shared blueprint; Codex has extra placeholder lines |
+| Handoff template | §"Handoff template" | §"Shared handoff template" | Identical structure and admission-to-assignment input receiving, ready-solution route receiving, result-restriction receiving, and result-to-dispatch correlation; shared field meanings are owned by the canonical shared blueprint; Codex has extra placeholder lines |
 | Artifact gate | §"Artifact gate" | §"Artifact gate — no delegation without brief" | Identical rules; Codex adds "if the repository uses one" qualifier |
 | status.md format | §"status.md format" | §"status.md format" | Identical format. Only diff: Codex says "role to invoke" vs Claude's "agent to launch" |
 | Response format | §"Response format" | §"Shared response format" | Same 5-line format. Codex adds fact-first note and consultant exception inline |

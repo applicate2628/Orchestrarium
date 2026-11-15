@@ -30,9 +30,11 @@ Deferral leaves cleanup incomplete: the affected cleanup predicate and all depen
 
 ## General artifact-disposition consumer
 
-The shared Engineering hygiene **Artifact disposition and project hygiene** rule in `AGENTS.md` is the single general owner for ordinary disposal, attempted-deletion fallback, user-selected manual quarantine and receiving. Every producing role applies it without invoking `$repo-cleanup`; this coordinator only projects the selected owner/action evidence. It creates no mutation engine, helper, schema, registry, receipt or mandatory cleanup stage.
+The shared Engineering hygiene **Artifact disposition and project hygiene** rule in `AGENTS.md` is the single general owner for ordinary trash-first disposition, authorized deletion from trash and receiving. Every producing role applies it without invoking `$repo-cleanup`; this coordinator only projects the selected owner/action evidence. It creates no mutation engine, helper, schema, registry, receipt or mandatory cleanup stage.
 
-Use the existing `ResourceRowV1` fields to bind the selected disposition, actual identity, owner proof and observed remaining action. A proved user-selected manual-deletion handoff may satisfy the agent duty while physical trash remains listed: report `quarantine prepared; manual deletion pending`, never physical deletion. Unproved handoff, lost bytes, collision, active writer, foreign/valuable evidence, denied action or an explicit unmet physical-deletion outcome still fails its dependent predicate. The coordinator neither grants a move nor asks the human to empty already accepted trash merely to advance independent work. Existing lifecycle scratch/receipt and creator-resource contracts stay distinct.
+Trash is safe for complete manual emptying: no required evidence, unique changes, active material or unresolved recovery depends on it. Producing owners apply trash-first during ordinary work; a failed deletion is not its prerequisite.
+
+Use the existing `ResourceRowV1` fields to bind the selected disposition, actual identity, owner proof and observed remaining action. A proved user-selected manual-deletion handoff may satisfy the agent duty while physical trash remains listed: report `moved to trash; not deleted`, never physical deletion. Unproved handoff, lost bytes, collision, active writer, foreign/valuable evidence, denied action or an explicit unmet physical-deletion outcome still fails its dependent predicate. The coordinator neither grants a move nor asks the human to empty already accepted trash merely to advance independent work. Existing lifecycle scratch/receipt and creator-resource contracts stay distinct.
 
 ## Universal no-self-residue invariant
 
@@ -40,7 +42,7 @@ Before lane/task `PASS`, handoff, commit, push or transfer readiness, receive fu
 
 Pre-existing user state remains untouched. Ambiguous ownership preserves the state and blocks destructive action. Each selected resource has a current-invocation `ResourceRowV1`; `unknown` remains preserved, and unknown ownership, identity, classification, settlement, or disposition makes that row `unclassified` and yields `REVISE`.
 
-The existing ephemeral-volume exemption is owned by the installed `$repo-cleanup` `SKILL.md`: fixed safe-floor/preferred-target hysteresis and exact `ResourceRowV1` evidence, with no repository-local threshold override. It is separate from a fulfilled manual-deletion handoff under the shared general rule.
+The existing ephemeral-volume exemption is owned by the installed `$repo-cleanup` `SKILL.md`: fixed safe-floor/preferred-target hysteresis and exact `ResourceRowV1` evidence, with no repository-local threshold override. It governs retention of already-trashed disposable bytes, never delays trash-first placement or grants automatic purge authority.
 
 ## Current-invocation report
 

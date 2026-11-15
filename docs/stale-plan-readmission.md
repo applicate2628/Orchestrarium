@@ -14,9 +14,9 @@ The reported incident establishes an execution/process concern, not which histor
 ## Verification
 - Canonical spine validator: PASS, 112/112 protection tokens.
 - Five test_plan_currency_contract source guards: PASS by direct Python function execution, including removal and fenced-example mutations and operating-model projection checks.
-- Existing handoff-continuity guards: seven pass; one unchanged baseline failure references a missing phrase in the legacy Claude Lead skill, which this patch does not modify.
+- After integrating current main, all 16 existing handoff-continuity guards and four ready-solution receiving guards pass. The older baseline had one legacy Claude Lead phrase failure; current upstream changes resolve it, not this patch.
 - pytest is absent in both installed Python versions; no dependency was installed. Direct execution covers the argument-free guard functions, not the full pytest suite.
 - git diff --check: PASS.
 - Two independent instruction/architecture reviews accepted the bounded change after operating-model projection links were added.
 
-These are source-contract checks, not a live reproduction of model behavior. Publication and installation remain separate from this local patch.
+These are source-contract checks, not a live reproduction of model behavior. Publication and installation remain separate from source verification.
