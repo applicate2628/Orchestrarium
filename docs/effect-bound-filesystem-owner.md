@@ -190,3 +190,15 @@ used the existing group owner for cleanup; its five-second settlement reported
 absence unconfirmed, and a subsequent process census observed no remaining group.
 Do not reinterpret the earlier incomplete closure as successful settlement or
 remove the outer health process-tree guard to make this scenario pass.
+
+At revision `328d46e2`, the query owns and settles its private group, with
+EOF-first host shutdown and interrupted-binding reconciliation. The bounded native
+query returned its inventory and the group was independently observed absent.
+Native Codex global hook-enabled fresh installation then returned success with
+`PENDING_MANUAL_TRUST`. Repeat before that manual trust was granted refused with
+`CODEX_HOOK_TRUST_PREEXISTING_DRIFT`, as required by the current trust policy;
+there was no process-tree or rollback-settlement failure. Staging was empty and
+the unrelated marker and installed configuration remained. This is fresh-install
+receiving plus an observed trust boundary, not trusted-repeat acceptance or a
+solution for ownership of native host runtime files. Nine query-custody unit
+checks passed on both Windows and macOS; the pytest-based suite remains unrun.
