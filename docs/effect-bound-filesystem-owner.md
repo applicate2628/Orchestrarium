@@ -179,3 +179,14 @@ exact. Probe-settlement diagnostics passed nine cases; the public-hold tests
 passed five. The separate leaf/tree disposal test modules could not load because
 pytest was absent in that interpreter; they are unverified, not passing. These
 results do not establish race freedom or release admission.
+
+A bounded follow-up probe using native Codex 0.166.0 identified live Git and
+HTTPS-transport descendants in the query's private process group after the
+app-server direct process had been terminated and waited. The first remaining
+Git process was reparented to the system parent. The query helper's direct-PID
+cleanup therefore does not settle the native host's complete process lifecycle.
+Its zero-item inventory result was not evidence of process completion. The probe
+used the existing group owner for cleanup; its five-second settlement reported
+absence unconfirmed, and a subsequent process census observed no remaining group.
+Do not reinterpret the earlier incomplete closure as successful settlement or
+remove the outer health process-tree guard to make this scenario pass.

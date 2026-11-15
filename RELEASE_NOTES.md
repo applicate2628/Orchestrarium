@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-15
 
+- Codex hook-inventory queries on POSIX now own a private process group, offer stdin EOF for graceful host shutdown, and require complete group and reader settlement before accepting inventory. Cleanup failures retain their primary cause instead of allowing background Git descendants to escape the query lifetime. This does not qualify host-created runtime files or enable public POSIX installation.
+
 - Added opt-in isolated POSIX provider receiving tests for fresh/repeat installs, selected non-Lead upgrades and real hook health. They require caller-owned temporary storage and frozen installer source; native Codex hook-list discovery is a real prerequisite, never replaced by a fake executable or conflated with the no-hooks matrix. Public POSIX installation remains held.
 
 - Selected installer tree upgrades now qualify the actual retained-object owner, including its verified owned-reservation path, rather than requiring an obsolete native-only directory primitive. The probe preserves exact original identities, rejects occupied destinations and settles only proved probe objects after partial outcomes; public POSIX installation remains held pending complete platform qualification.
