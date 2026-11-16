@@ -131,3 +131,24 @@ and commit-scoped review authority. The classifier must remain pure during the
 captured scan. A 100-context, 55 kB clean-input microbenchmark changed from
 100,000 classifier calls / 0.564 seconds to 1,000 calls / 0.029 seconds with the
 same result. This is not evidence that complete native history meets its budget.
+
+
+### Deferred timeout redesign and cancelled experiment
+
+The owner deferred timeout redesign until the Rust transition. Production
+scanner and supervisor budgets remain 240 and 300 seconds respectively. The
+scanner constant originated in 8f92dc73 (complete unpublished history, 2026-08-26);
+the supervisor constant originated in 1ac19a3f (process ownership and fail-closed
+publication, 2026-08-11). Those changes justify bounded work/settlement, but their
+inspected messages and diffs provide no measurement deriving the exact values.
+The supervisor budget also participates in authorization lifetime; it is not an
+isolated performance knob.
+
+One read-only internal experiment used a larger diagnostic-only budget with no
+callback, receipt, push or saved setting change. It was cancelled on the owner's
+instruction before completion. Last retained observation: 514.016 seconds,
+2,893 candidate analyses, 23,163 object reads; process peak working set
+440,860,672 bytes. This is partial progress, not a completed scan or a universal
+memory bound. Termination of the experiment and its observed Python/Git child
+processes was verified. No timeout redesign or repeat publication follows this
+measurement. Bounded runtime/notice acceptance remains distinct from delivery.
