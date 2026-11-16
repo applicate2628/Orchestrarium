@@ -92,6 +92,8 @@ monthly archive without inventing candidate, active, or closure history.
 
 ## Installation
 
+The pre-SDK installer uses its existing Windows and POSIX transaction backends under the ordinary serialized-writer contract. Capability, ownership and recovery checks remain active; see [Installation](INSTALL.md) for platform-specific limits.
+
 Use the root router installers for the common path:
 
 ```bash

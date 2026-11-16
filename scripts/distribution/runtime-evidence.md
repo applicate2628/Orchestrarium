@@ -151,3 +151,22 @@ The retained real Windows bundle from source `ab0f428d` completed public-launche
 Both installed clients had 54 skill directories and ownership records. The user marker and both ownership records remained byte-identical across repeat installation. Uninstall removed 199 Codex and 352 Claude owned files plus three configuration entries per client. Independent post-action readback confirmed the user marker unchanged, both skill trees absent, empty residual ownership records, and the retained interpreter and original evidence record preserved. An initial postcheck incorrectly expected ownership-record deletion; inspection of the uninstall owner established that empty residual records are the intended output, and the check was corrected without changing product code.
 
 The exact original installation fixture was reused for uninstall only after its marker and ownership-record hashes matched the preceding checkpoint. It was returned to the designated trash after verification. No already-passed installation was repeated during this evidence reconciliation. Global or hook-enabled installation, other operating systems, publication, full attribution and publisher provenance remain unverified; this checkpoint does not qualify internet release. No model, live-profile or security-setting change occurred.
+
+
+## Published-main integration checkpoint: 2026-11-16
+
+Reconciled delivery source `07f6b7ba` with published main `891f61a1`, retaining
+its Claude uninstall and admitted POSIX backend changes. The production merge
+was conflict-free; the duplicated release-date heading was consolidated without
+dropping any release entries. The existing caller-directory fix and Windows
+projection selection/no-follow rollback remain in the combined source.
+
+On Windows, distribution/layout checks passed 9 tests, selected-current uninstall
+passed 21 tests, and inert Windows projection checks passed 17 tests. Universal
+hook mirror parity, staged publication checks and diff hygiene passed. These are
+focused integration checks, not a new native bundle assembly or full-repository
+result. Earlier bundle acceptance continues to describe only its recorded source.
+
+No native push was repeated: the prior complete-history scan refusal remains
+unresolved under the unchanged deadline. No scanner, supervisor, access policy,
+model, Actions or live profile was changed. Publication and archival remain open.

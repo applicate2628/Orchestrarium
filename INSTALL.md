@@ -6,17 +6,25 @@ Optional local distribution assembly is documented in [the distribution guide](s
 
 This monorepo ships a Python-owned root installer (`install.py`) plus the thin POSIX launcher `install.sh`. They require Python 3.11 or newer, offer the supported Codex and Claude Code packs, then forward arguments to the matching pack-specific installers in the `scripts/` directory.
 
-## Temporary POSIX installation hold
+## Supported filesystem backends
 
-This pre-SDK source refuses Codex and Claude installer operations on POSIX hosts (Linux, macOS and Windows Subsystem for Linux) with `E_POSIX_DISPOSAL_UNQUALIFIED` and exit status 1. The hold covers default, global and project installation, updates and `--dry-run`; `--force` does not bypass it. Rejection follows argument parsing, before target resolution, staging or transaction creation. `--help` and argument-error reporting remain available.
+The pre-SDK installer admits native Windows and POSIX hosts (Linux, macOS and Windows Subsystem for Linux) through the existing transaction owner. Unknown platforms fail before target resolution or staging with E_INSTALLER_PLATFORM_UNSUPPORTED. Admission is not a capability override: selected identities, content, permissions, destination occupancy, timestamp representability and recovery checks remain mandatory.
 
-This is a temporary limitation while the POSIX deletion race remains unresolved, not a correction to the deletion primitive. Even ordinary dry-run creates and removes temporary staging, so it is held too. The Windows branch is unchanged by this guard; that is not a new qualification of the Windows lifecycle. Existing installations and separate SDK sources are not modified by this source change. Direct private transaction disposal now also refuses non-Windows execution at both node and tree entry points before observation or permission changes; other private operations and staging cleanup remain outside this protection. Enabled transaction acquisition and direct writer scopes also refuse before their scoped effects, including direct writer dry-run or potential exact-no-op requests; an empty disabled context remains a no-op. Directory preparation, anchor bootstrap, exact-file migration, projection creation and migrated-file rollback also refuse at entry on non-Windows hosts, including their dry-run or potential no-op calls. Earlier private effects outside these entry paths may leave recovery material when disposal refuses. See the [effect-bound owner contract](docs/effect-bound-filesystem-owner.md); this mitigation does not qualify races or recovery. The POSIX installer commands below describe the interface but remain unavailable during the hold. Do not remove or bypass the guard to proceed with installation.
+The supported contract is ordinary cooperating writers serialized by the caller. Observed foreign replacements and ambiguous settlement are refused or retained for recovery. This is not protection against hostile concurrent writers or a guarantee of atomic directory publication. No trust settings are granted and no live profile is changed by enabling the backend. See the [effect-bound owner contract](docs/effect-bound-filesystem-owner.md) for platform-specific evidence and limits.
 
 The Codex installer materializes 18 manifest native-role TOMLs and registers their compatible name/description/file mappings in `.codex/config.toml`. Ordinary role defaults follow the current role policy, including GPT-6.1 Terra and Sol profiles; scientific-software-engineer defaults to Sol high. The named Luna `mechanical-scout` and `mechanical-worker` roles have zero decision authority: when its feature is enabled and the caller supplies a valid exact plan, `resolve_role_dispatch` returns `native-required`; disabled state returns `E_NATIVE_V2_DISABLED`. This named corridor requires exact `gpt-6-luna` with `high` as the default and minimum, allowing only `high`, `xhigh`, or `max`; host rejection is the nonauthorizing `E_LUNA_UNAVAILABLE` handoff. Factory payload hashes and approved stock-only migrations remain exact. All 18 factory role TOMLs ship `[features] apps=false` and `plugins=false`; compatible user tuning remains supported, main-session settings stay unchanged, and these flags do not establish selective MCP-server startup isolation. Manifest version 2 separately binds the owned parsed profession instructions, so compatible user runtime tuning and descriptions are preserved byte-for-byte without re-signing or rewriting TOML. Incompatible profession instructions, logical names or ambiguous registration sources remain preserved and fail closed; a known configured model/effort conflict holds the affected invocation under existing policy rather than declaring the model unavailable. These roles are native shared-policy corridors, not agents-mode or external-provider settings. Named mechanical callers consume the policy-only `resolve_role_dispatch` contract before considering native launch; host outcomes are not replayed and no fallback exists. Ordinary producer professions may explicitly select nonauthorizing `luna-high` or `luna-xhigh` at the policy-admitted `exploration`/`engineering` intersection through `describe_ordinary_native_role_options` then `resolve_ordinary_native_dispatch`, retaining profession, scoped tools/effects, omitted defaults, independent gates and final review/critical/recovery membership. Choose an exact admissible model/effort by actual task fit and expected total cost, time and quality of a verified result, including supervision, validation and rework; compare higher effort with the next suitable model without a fixed unit-price ranking, quota, weak-first trial or fallback. Prefer exact `gpt-6.1-terra` Medium for suitable ordinary producer work; High/Extra high require the same task-first comparison. Luna ordinary minimum is High and Terra minimum is Medium; Low is not selected on any model. Sol remains primary for science. Exceptional supplemental scientific Terra Max is individually agreed instead of recommending Sol Max for that extra lane; it does not replace independent domain/critical/final acceptance. Every Astra launch at any admitted effort and every model Max needs one genuine user agreement for that exact task, scope, route, tuple and single attempt; Astra Max needs one combined agreement. A routing-table approval, prior launch or flag is not that agreement. Preserve genuine current user controls, generic recovery and science defaults, eligible role/task membership, host controls and the named mechanical luna-high corridor; migrate factory controls only with positive stock provenance. Main-session model selection remains the user/app choice.
 
 ## Unsupported atomic directory publication
 
-A selected prepared-directory publication that lacks a supported no-replace operation reports E_ATOMIC_DIRECTORY_PUBLISH_UNSUPPORTED. The installer still refuses rather than falling back to an overwrite-prone rename. This diagnostic does not add filesystem support, establish rollback success or relax the temporary POSIX hold above; private helper calls and older installed copies remain outside that hold.
+A prepared directory with no previous target, or with a verified retained original and an empty current target, may use the existing exclusive-tree constructor when native no-replace publication is unavailable and relative descriptor operations are supported. Migration remains separate. This is caller-serialized construction, not atomic directory publication: partial new identities are journaled for rollback, and the writer retains prepared-image cleanup ownership. For an original directory or regular file moving into its declared retained slot, the owner may exclusively create and verify its own empty typed reservation, then rename the original over that reservation through held parent descriptors. Initial file migration also uses this mechanism; reservation custody stays in its migration record until confirmed movement or checked cleanup, so a failed reservation is not treated as an original backup. Original identities are preserved; observed occupants, changed reservations and uncertain outcomes are not adopted. This is not blind overwrite or protection against uncooperative concurrent writers. Other unsupported selected publication still reports E_ATOMIC_DIRECTORY_PUBLISH_UNSUPPORTED. Component qualification alone does not establish full installer lifecycle acceptance; use the platform-specific receiving evidence.
+
+### Choosing the execution platform
+
+A Windows-resident target can use the native Windows installer or the qualified WSL/DrvFS path. The chosen backend owns the entire transaction; the filesystem must support its required primitives. Do not translate individual POSIX operations into Windows subprocess calls: doing so loses the pinned parent-directory identity used by the POSIX owner.
+
+Retaining existing directories and regular files requires native no-replace support or the bounded owned-reservation transition described above. Unsupported primitives and unrepresentable inverse metadata still fail without a pathname fallback. Keep Linux, macOS and mounted Windows filesystem results separate; component tests that substitute admission verify only their declared components.
+
+Claude supports ownership-aware uninstall through the existing installer. Installation, repeat, selected upgrade, rollback and uninstall are distinct acceptance results. Unknown or modified user data is preserved; transaction-disposal tests alone do not prove uninstall acceptance.
 
 ## Quick install
 
@@ -405,3 +413,30 @@ The existing Lead package/receipt update carries these sections for Codex and th
 - `stdin`: standard input stream used by CLIs and wrappers.
 - `status.md`: human-readable recovery summary for the active work item.
 - `winerror`: native Windows error code; the installer reports only an exact integer in the unsigned 32-bit range.
+
+
+### Bounded pre-SDK Claude removal
+
+For Claude target paths, `python scripts/install-claude.py --global --uninstall`
+previews the exact currently selected receipt and objects. Review its file/control lists,
+then repeat with `--apply --uninstall-selection <SHA256>` only for that selection.
+Project mode uses the existing target option. The token is current-state selection,
+not historical root ownership; changing the receipt or selected objects invalidates it.
+Newly created control files are recorded only from transaction creator witnesses.
+Pre-existing or subsequently edited controls are not adopted: their presence preserves
+the runtime and returns a partial result. Modified payload and unrecorded user files
+remain; directories and the residual receipt are retained. Removal uses the existing
+transaction, and a late failure restores its effects. Preview performs no target writes.
+Global agents/skills/commands junctions use the existing linked-root authority.
+The selection binds their current logical and physical identities and link chain;
+retargeting invalidates the preview. Junctions and neighboring files remain untouched.
+Project links, nested links, and shared Codex runtime removal remain outside this route.
+An old receipt is not promoted into proof of historical physical ownership.
+Receipted document blocks are removed through the shared configuration renderer;
+bytes outside the markers are preserved exactly. Edited or ambiguous owned blocks
+preserve the installation. An already absent block is a no-op, not document deletion.
+
+Receipted linked documents bind their physical file and full link chain to the
+preview, then use the existing scalar transaction owner. The link remains in
+place. This does not change the platform admission boundary: public POSIX
+installation still depends on the separate effect-bound backend qualification.
