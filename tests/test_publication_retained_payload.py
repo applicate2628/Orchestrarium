@@ -230,16 +230,55 @@ class RetainedPayloadTests(unittest.TestCase):
                         self.assertIsInstance(result, scanner.Refusal)
                         self.assertEqual(result.failure_id, "PS-MSG-READ-TIMEOUT")
 
-    def test_aggregate_budget_boundary_is_unchanged(self):
+    def test_blob_count_boundary_remains_enforced(self):
         selection, objects, _ = fixture()
-        for cap, accepted in ((3072, True), (3071, False)):
+        for cap, accepted in ((3, True), (2, False)):
             with self.subTest(cap=cap), mock.patch.object(
-                scanner, "_MAX_AGGREGATE_BLOB_BYTES", cap
+                scanner, "_MAX_BLOBS", cap
             ):
                 result = acquire(selection, Reader(objects))
                 self.assertEqual(isinstance(result, tuple), accepted)
                 if not accepted:
                     self.assertEqual(result.failure_id, "PS-MSG-LIMIT")
+
+    def test_history_volume_is_not_a_retained_payload_budget(self):
+        # Exceed the former 512 MiB cache cap without holding that history.
+        # The actual acquisition/hash/coverage code runs; detector semantics
+        # are tested separately so this resource regression stays focused.
+        size = 16 * 1024 * 1024
+        count = 33
+        specs = {}
+        for index in range(count):
+            chunk = bytes([index]) + b"\0" * 1023
+            digest = hashlib.sha1()
+            digest.update(f"blob {size}\0".encode())
+            for _ in range(size // len(chunk)):
+                digest.update(chunk)
+            specs[digest.hexdigest()] = chunk
+        tree = b"".join(b"100644 " + f"file{i:03}".encode() + b"\0"
+                        + bytes.fromhex(value) for i, value in enumerate(specs))
+        tree_id = oid("tree", tree)
+        selection = scanner.NativePushSelection(
+            None, (), (tree_id, *specs), scanner._SHA1_OBJECT_FORMAT, (tree_id,),
+        )
+
+        class LazyReader:
+            reads = 0
+            async def read(self, value, expected_type=None, *, scan_deadline):
+                self.reads += 1
+                kind = "tree" if value == tree_id else "blob"
+                raw = tree if kind == "tree" else specs[value] * (size // 1024)
+                return scanner.ObjectReadSuccess(value, value, kind, raw)
+
+        reader = LazyReader()
+        with mock.patch.object(scanner, "_binary_content_hits", return_value=[]), \
+             mock.patch.object(scanner, "_line_limit_refusal", return_value=None):
+            result = acquire(selection, reader)
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(result[0].blob_bytes, count * size)
+        self.assertEqual(result[0].binary_blobs, count)
+        self.assertEqual(result[1].scanned_count, count + 1)
+        self.assertEqual(reader.reads, count * 2 + 1)
 
 
 if __name__ == "__main__":
