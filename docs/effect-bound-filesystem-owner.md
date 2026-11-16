@@ -2,6 +2,16 @@
 
 Status: source design and defensive mitigation, not a qualified mutation backend. This is an Orchestrarium repository contract, not a Codex or Claude provider guarantee. No native qualification is established by the pure tests described here.
 
+## Supported ordinary-writer scope
+
+The accepted ordinary installation scope is cooperating writers serialized by the caller. Selection still identifies intended objects, parents and destinations. Refuse observed foreign replacements, changed targets and occupied destinations; retain recovery material and report uncertain or partial settlement honestly. Caller serialization does not establish operating-system exclusion of unrelated processes.
+
+The stronger namespace/content exclusion requirements below describe a separate adversarial guarantee, not a prerequisite for every ordinary installation. Checked name-based operations may be qualified within the serialized ordinary-writer contract, but are not atomic selected-object deletion or protection against uncooperative concurrent writers. This distinction supersedes blanket readings of the earlier requirements without dismissing historical counterexamples.
+
+Use the existing transaction, mutable-path and platform owners. Qualify acquisition, forward effects, rollback, cleanup, staging and uninstall within the supported scope, including observed drift, collisions and recoverable failures. Keep Linux, macOS and mounted Windows filesystem evidence separate; do not require a privileged storage redesign for an unrequested hostile-writer guarantee.
+
+This clarification does not enable a backend, remove current public/private POSIX holds, establish native receiving or authorize live installation. An implemented and tested owner lifecycle remains necessary; documentation is not runtime acceptance.
+
 ## Existing owner and first implementation
 
 The production installer owns effects through `_InstallTransaction`, `_CreateOnlyMutablePath` and `_WindowsBoundNode`. Extend these owners rather than adding a second filesystem engine. `_require_transaction_disposal_backend` now rejects non-Windows entry to both `_dispose_node` and `_dispose_image`, before input observation, permission changes or transaction updates. The old POSIX name-based deletion branch is removed. The existing Windows branch remains unchanged and still requires its own checks; passing this negative gate grants no authority.

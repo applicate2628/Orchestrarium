@@ -62,13 +62,17 @@ except ModuleNotFoundError as error:
 try:
     from installation.ownership import (
         RECEIPT_NAME as _PROVIDER_RECEIPT_NAME,
-        serialize_fresh_payloads as _serialize_fresh_payloads)
+        serialize_fresh_payloads as _serialize_fresh_payloads,
+        serialize_fresh_install as _serialize_fresh_install,
+        fresh_control_paths as _fresh_control_paths)
 except ModuleNotFoundError as error:
     if error.name not in {"installation", "installation.ownership"}:
         raise
     from scripts.installation.ownership import (
         RECEIPT_NAME as _PROVIDER_RECEIPT_NAME,
-        serialize_fresh_payloads as _serialize_fresh_payloads)
+        serialize_fresh_payloads as _serialize_fresh_payloads,
+        serialize_fresh_install as _serialize_fresh_install,
+        fresh_control_paths as _fresh_control_paths)
 
 try:
     from installation.configuration import render_selected_document as _render_selected_document
@@ -679,6 +683,9 @@ def _parser(provider: str) -> argparse.ArgumentParser:
     modes.add_argument("--global", "-Global", dest="global_install", action="store_true")
     modes.add_argument("--target", "-Target")
     parser.add_argument("--force", "-Force", action="store_true")
+    parser.add_argument("--uninstall", action="store_true", help="Preview selected-current owned content removal")
+    parser.add_argument("--apply", action="store_true", help="Apply the reviewed uninstall selection")
+    parser.add_argument("--uninstall-selection", metavar="SHA256", help="Exact current selection from uninstall preview")
     parser.add_argument(
         "--replace-unreceipted-lead-sha256",
         metavar="SHA256",
@@ -5533,9 +5540,13 @@ class _CreateOnlyMutablePath:
                 if (
                     record.projection_target is None
                     or not (stat.S_ISLNK(metadata.st_mode) or _is_reparse_metadata(metadata))
-                    or not _projection_resolves_to(
+                    or (os.name == "posix" and (
+                        not isinstance(record.projection_data, str)
+                        or os.readlink(record.leaf_path) != record.projection_data
+                    ))
+                    or (os.name != "posix" and not _projection_resolves_to(
                         record.leaf_path, record.projection_target
-                    )
+                    ))
                 ):
                     self._rollback_identity_changed()
                 self.transaction._dispose_node(record.leaf_path,
@@ -11873,6 +11884,7 @@ def _fresh_provider_receipt_candidate(target: Path) -> Path | None:
 
 def _fresh_provider_receipt_files(
     provider: str, scope: str, receipt: Path, owner: _CreateOnlyMutablePath,
+    *, include_controls: bool = False,
 ) -> dict[str, _FreshFileWitness]:
     transaction = owner.transaction
     transient = {path for path in (transaction._temporary, *transaction._migration_retention)
@@ -11893,9 +11905,14 @@ def _fresh_provider_receipt_files(
     selected = {key: rows[0] for key, rows in candidates.items() if len(rows) == 1}
     payload = _serialize_fresh_payloads(
         {key: witness.node.data for key, witness in selected.items()}, provider, scope)
-    if payload is None:
-        return {}
-    files = json.loads(payload)["files"]
+    files = {} if payload is None else json.loads(payload)["files"]
+    if include_controls:
+        for key in selected.keys() & _fresh_control_paths(provider, scope):
+            witness = selected[key]
+            # A subsequent write is not the original creator's afterimage.
+            # Preserve it unclaimed rather than infer ownership from its name.
+            if transaction._image_matches(witness.path, {witness.path: witness.node}):
+                files[key] = witness.node.data
     return {key: selected[key] for key in files}
 
 
@@ -11910,9 +11927,13 @@ def _record_fresh_provider_receipt(
     if (not any(receipt == root or root in receipt.parents for root in transaction._original)
             or any(receipt in image for image in transaction._original.values())):
         return
-    selected = _fresh_provider_receipt_files(provider, scope, receipt, owner)
-    payload = _serialize_fresh_payloads(
-        {key: witness.node.data for key, witness in selected.items()}, provider, scope)
+    selected = _fresh_provider_receipt_files(
+        provider, scope, receipt, owner, include_controls=True)
+    control_paths = _fresh_control_paths(provider, scope)
+    payload = _serialize_fresh_install(
+        {key: witness.node.data for key, witness in selected.items() if key not in control_paths},
+        {key: witness.node.data for key, witness in selected.items() if key in control_paths},
+        provider, scope)
     if payload is None:
         return
     for witness in selected.values():
@@ -11941,6 +11962,7 @@ class _SelectedSource:
 
 @dataclass(frozen=True)
 class _SelectedReplacement:
+    owner: _CreateOnlyMutablePath
     sources: tuple[_SelectedSource, ...]
     path: Path
     before_node: _PhysicalNode
@@ -12030,21 +12052,33 @@ def _prepare_selected_provider_updates(
 def _prepare_selected_claude_instructions(
     grants: dict[str, str], source: Path, target: Path, scope: str,
     owner: _CreateOnlyMutablePath,
+    *, instruction_owners: dict[str, _CreateOnlyMutablePath] | None = None,
 ) -> _SelectedProviderUpdates | None:
     if not grants:
         return None
     transaction, items, outcomes = owner.transaction, {}, []
     for key, digest in grants.items():
-        path = owner.destination((target / key).relative_to(owner.anchor))
+        subroot, relative = key.split("/", 1)
+        physical_owner = (instruction_owners or {}).get(subroot, owner)
+        if physical_owner.transaction is not transaction:
+            raise _selected_error("claude", "transaction owner", invalid=True)
+        authority = physical_owner.linked_authority
+        if authority is not None:
+            if (scope != "global" or authority.logical_root != target / subroot
+                    or authority.resolved_root != physical_owner.anchor):
+                raise _selected_error("claude", "linked owner", invalid=True)
+            path = physical_owner.destination(Path(relative))
+        else:
+            path = physical_owner.destination((target / key).relative_to(physical_owner.anchor))
         before_node = _admitted_mutation_image(transaction, path).get(path)
-        parents = owner._file_parent_identities(path)
-        before = owner._assert_bound_file(path, before_node, parents)
+        parents = physical_owner._file_parent_identities(path)
+        before = physical_owner._assert_bound_file(path, before_node, parents)
         if hashlib.sha256(before).hexdigest() != digest:
             raise ValueError("E_CLAUDE_INSTRUCTION_SELECTION_DRIFT: " + key)
         selected_source = _capture_selected_source(source / key, transaction)
         after = selected_source.raw
         items[key] = _SelectedReplacement(
-            (selected_source,), path, before_node, before, after, digest, parents)
+            physical_owner, (selected_source,), path, before_node, before, after, digest, parents)
         outcomes.append(_ReceiptOutcome(".claude/" + key, "file", before, after,
                                         intent="replace", adoption_sha256=digest))
     return _prepare_selected_provider_updates(
@@ -12054,6 +12088,7 @@ def _prepare_selected_claude_instructions(
 def _prepare_receipted_claude_instructions(
     receipt_digest: str, source: Path, target: Path, scope: str,
     owner: _CreateOnlyMutablePath, linked_subroots: tuple[str, ...],
+    *, instruction_owners: dict[str, _CreateOnlyMutablePath] | None = None,
 ) -> _SelectedProviderUpdates:
     # The explicit option authorizes this current batch, not the receipt's
     # authorship or historical storage. Reuse the exact-current owner below.
@@ -12064,11 +12099,13 @@ def _prepare_receipted_claude_instructions(
     before = owner._assert_bound_file(receipt, node, parents)
     grants = _claude_instruction_grants_from_receipt(
         before, receipt_digest, scope, _claude_instruction_source_names(source))
-    if any(key.split("/")[0] in linked_subroots for key in grants):
-        raise ValueError("E_CLAUDE_RECEIPT_SELECTION_INVALID: linked subroot")
+    if any(key.split("/")[0] in linked_subroots
+           and key.split("/")[0] not in (instruction_owners or {}) for key in grants):
+        raise ValueError("E_CLAUDE_RECEIPT_SELECTION_INVALID: missing physical owner")
     # Every selected current file must match before any content write; a stale,
     # missing or nonordinary member refuses the entire explicit batch.
-    batch = _prepare_selected_claude_instructions(grants, source, target, scope, owner)
+    batch = _prepare_selected_claude_instructions(
+        grants, source, target, scope, owner, instruction_owners=instruction_owners)
     if (batch is None or batch.receipt != receipt or batch.receipt_node != node
             or batch.receipt_before != before or batch.receipt_parents != parents):
         raise ValueError("E_CLAUDE_RECEIPT_SELECTION_DRIFT: receipt binding")
@@ -12099,7 +12136,7 @@ def _prepare_selected_codex_document(
         before.decode("utf-8"), "codex", payload, _markdown_document_context,
         document_digest=digest, span=span).encode("utf-8")
     key = "AGENTS.md" if scope == "project" else ".codex/AGENTS.md"
-    selected = _SelectedReplacement(sources, path, before_node, before, after, digest, parents)
+    selected = _SelectedReplacement(owner, sources, path, before_node, before, after, digest, parents)
     outcome = _ReceiptOutcome(key, "block", before, after, intent="replace",
                               adoption_sha256=digest, adoption_span=span)
     return _prepare_selected_provider_updates(
@@ -12127,7 +12164,8 @@ def _apply_selected_replacement(
     owner: _CreateOnlyMutablePath | None, dry_run: bool,
 ) -> None:
     selected = batch.items[key]
-    if (owner is not batch.owner or owner.linked_authority is not None
+    if (owner is not selected.owner or owner.transaction is not batch.owner.transaction
+            or (batch.provider != "claude" and owner.linked_authority is not None)
             or tuple(Path(os.path.abspath(source)) for source in source_paths)
                 != tuple(source.path for source in selected.sources)
             or Path(os.path.abspath(path)) != selected.path or key in batch.received):
@@ -12154,7 +12192,7 @@ def _record_selected_provider_receipt(batch: _SelectedProviderUpdates) -> None:
     if not transaction.enabled or set(batch.received) != set(batch.items):
         raise _selected_error(batch.provider, "incomplete outcomes")
     for key, selected in batch.items.items():
-        _assert_selected_replacement(selected, owner, batch.received[key], batch.provider)
+        _assert_selected_replacement(selected, selected.owner, batch.received[key], batch.provider)
     fresh = _fresh_provider_receipt_files(batch.provider, batch.scope, batch.receipt, owner)
     selected_keys = {item.path for item in batch.outcomes}
     fresh = {key: value for key, value in fresh.items() if key not in selected_keys}
@@ -12194,7 +12232,7 @@ def _record_selected_provider_receipt(batch: _SelectedProviderUpdates) -> None:
                                      hashlib.sha256(batch.receipt_before).hexdigest(), payload)
         receipt_after = _admitted_mutation_image(transaction, batch.receipt).get(batch.receipt)
     for key, selected in batch.items.items():
-        _assert_selected_replacement(selected, owner, batch.received[key], batch.provider)
+        _assert_selected_replacement(selected, selected.owner, batch.received[key], batch.provider)
     for witness in fresh.values():
         owner._assert_fresh_file(witness)
     if batch.receipt_node is None:
@@ -12265,6 +12303,27 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
+    if args.uninstall_selection is not None and not args.uninstall:
+        print("FAIL: --uninstall-selection requires --uninstall", file=sys.stderr)
+        return 1
+    if args.uninstall and any(value for name, value in vars(args).items()
+                              if name.startswith(("replace_", "migrate_", "enroll_"))):
+        print("FAIL: uninstall and update selections are separate operations", file=sys.stderr)
+        return 1
+    if args.apply and not args.uninstall:
+        print("FAIL: --apply requires --uninstall", file=sys.stderr)
+        return 1
+    if args.uninstall and provider != "claude":
+        print("FAIL: selected-current uninstall is qualified only for Claude; shared Codex runtime preserved", file=sys.stderr)
+        return 1
+    if args.uninstall:
+        root = Path(__file__).resolve().parents[1]
+        try:
+            operation = _load_module_from_path("orche_presdk_uninstall", root / "scripts/installation/uninstall.py")
+            return operation.run(sys.modules[__name__], root, provider, args)
+        except Exception as exc:
+            print("FAIL: uninstall preserved unverified state: " + _installer_failure_text(exc), file=sys.stderr)
+            return 1
     if args.replace_claude_instruction and provider != "claude":
         print("FAIL: E_CLAUDE_INSTRUCTION_SELECTION_INVALID: Claude only", file=sys.stderr)
         return 1
@@ -12386,11 +12445,6 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             target_tree = claude_agents_root
             mode_target = target / ".agents-mode.yaml"
             normalize_provider = "shared"
-        if instruction_grants and any(
-            authority.name in {key.split("/")[0] for key in instruction_grants}
-            for authority in claude_link_authorities
-        ):
-            raise ValueError("E_CLAUDE_INSTRUCTION_SELECTION_INVALID: linked subroot")
         home = _resolve_global_home() if mode == "global" else None
         shared_mode_target: Path | None = None
         if mode == "global":
@@ -12742,11 +12796,14 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             instruction_updates = _prepare_selected_claude_instructions(
                 instruction_grants, source, target, "global" if mode == "global" else "project",
                 create_only,
+                instruction_owners={"agents": claude_agents_owner, "commands": claude_commands_owner}
+                    if provider == "claude" else None,
             )
             if receipt_grant is not None:
                 instruction_updates = _prepare_receipted_claude_instructions(
                     receipt_grant, source, target, "global" if mode == "global" else "project",
-                    create_only, tuple(authority.name for authority in claude_link_authorities))
+                    create_only, tuple(authority.name for authority in claude_link_authorities),
+                    instruction_owners={"agents": claude_agents_owner, "commands": claude_commands_owner})
             selected_updates = (
                 _prepare_selected_codex_document(
                     document_grant, root, source, target, docs_target,

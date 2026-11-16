@@ -84,21 +84,21 @@ class ReceiptedClaudeInstructionWiringTests(unittest.TestCase):
         self.assertLess(calls(prepare, "_assert_bound_file")[0].lineno, select.lineno)
         self.assertEqual(calls(prepare, "read_bytes"), [])
 
-    def test_selected_linked_roots_refuse_before_individual_preimages(self):
+    def test_selected_linked_roots_require_physical_owner_before_preimages(self):
         prepare = self.fn("_prepare_receipted_claude_instructions")
-        linked = self.branch(prepare, 'any(key.split("/")[0] in linked_subroots for key in grants)')
+        linked = self.branch(prepare, 'any(key.split("/")[0] in linked_subroots and key.split("/")[0] not in (instruction_owners or {}) for key in grants)')
         self.assertIsInstance(linked.body[0], ast.Raise)
         individual = self.one(prepare, "_prepare_selected_claude_instructions")
         self.assertLess(linked.end_lineno, individual.lineno)
         self.assertEqual(ast.unparse(individual),
-                         "_prepare_selected_claude_instructions(grants, source, target, scope, owner)")
+                         "_prepare_selected_claude_instructions(grants, source, target, scope, owner, instruction_owners=instruction_owners)")
 
     def test_shared_preparation_keeps_old_current_byte_and_source_checks(self):
         prepare = self.fn("_prepare_selected_claude_instructions")
         check = self.branch(prepare, "hashlib.sha256(before).hexdigest() != digest")
         self.assertIsInstance(check.body[0], ast.Raise)
         self.assertLess(check.end_lineno, self.one(prepare, "_capture_selected_source").lineno)
-        self.require(prepare, "owner._assert_bound_file(path, before_node, parents)")
+        self.require(prepare, "physical_owner._assert_bound_file(path, before_node, parents)")
         self.require(prepare, '_ReceiptOutcome(".claude/" + key, "file", before, after, intent="replace", adoption_sha256=digest)')
         self.one(prepare, "_prepare_selected_provider_updates")
 

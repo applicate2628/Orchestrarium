@@ -156,13 +156,49 @@ def plan_file_removal(record: dict, observed: dict[str, str | None]) -> dict[str
     return {key: tuple(paths) for key, paths in result.items()}
 
 
+def fresh_control_paths(provider: str, scope: str) -> frozenset[str]:
+    """Known control surfaces; membership is not creation authority."""
+    client = get_client(provider)
+    paths = set(client["documents"][scope])
+    paths.update((client["mode_file"][scope], client["registration"]))
+    if client["native_config"] is not None:
+        paths.add(client["native_config"])
+    return frozenset(paths)
+
+
+def serialize_fresh_install(files: dict[str, str], controls: dict[str, str],
+                            provider: str, scope: str) -> bytes | None:
+    """Serialize only caller-proven creations, never infer control ownership.
+
+    Whole-file claims require a creator witness. Existing merged controls must
+    not enter this input. A later edit preserves the entire control file.
+    """
+    payload = serialize_fresh_payloads(files, provider, scope)
+    value = (decode_record(payload, provider, scope) if payload is not None else
+             dict(schema=SCHEMA, provider=provider, scope=scope, files={}))
+    if type(controls) is not dict:
+        raise ValueError("Invalid created control map")
+    configs = {path: {"kind": "created-file", "sha256": digest}
+               for path, digest in controls.items()}
+    if configs:
+        value["configs"] = configs
+    if not value["files"] and not configs:
+        return None
+    return serialize_record(value, provider, scope)
+
+
 def validate_config(path: str, spec: object, provider: str, scope: str) -> None:
     validate_path(path, provider, scope)
     if type(spec) is not dict:
         raise ValueError("Invalid owned configuration")
     client = get_client(provider)
     kind = spec.get("kind")
-    if kind == "block":
+    if kind == "created-file":
+        if (path not in fresh_control_paths(provider, scope)
+            or set(spec) != {"kind", "sha256"}
+            or type(spec["sha256"]) is not str or not _HASH.fullmatch(spec["sha256"])):
+            raise ValueError("Invalid created control file")
+    elif kind == "block":
         allowed = client["documents"][scope]
         if (set(spec) != {"kind", "blockKind", "sha256"} or allowed.get(path) != spec["blockKind"]
             or type(spec["sha256"]) is not str or not _HASH.fullmatch(spec["sha256"])):
