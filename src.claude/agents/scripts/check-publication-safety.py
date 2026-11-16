@@ -4158,7 +4158,7 @@ async def _acquire_history(
     commit_records: dict[str, CommitRecord] = {}
     tag_targets: dict[str, tuple[str, str]] = {}
     tree_cache: dict[str, bytes] = {}
-    blob_contents: dict[str, bytes] = {}
+    blob_records: dict[str, tuple[int, bytes, bool]] = {}
     findings: list[Finding] = []
     aggregate_messages = 0
     aggregate_blobs = 0
@@ -4235,14 +4235,19 @@ async def _acquire_history(
                 return _refusal("PS-MSG-LIMIT", "tree-cache-bytes")
             tree_cache[oid] = result.raw
         elif result.object_type == "blob":
-            if len(blob_contents) >= _MAX_BLOBS:
+            if len(blob_records) >= _MAX_BLOBS:
                 return _refusal("PS-MSG-LIMIT", "blob-count")
             aggregate_blobs += len(result.raw)
             if aggregate_blobs > _MAX_AGGREGATE_BLOB_BYTES:
                 return _refusal("PS-MSG-LIMIT", "aggregate-blob-bytes")
-            blob_contents[oid] = result.raw
+            # Keep identity and disposition, not the complete payload history.
+            blob_records[oid] = (
+                len(result.raw), hashlib.sha256(result.raw).digest(),
+                _is_binary(result.raw),
+            )
         else:
             return _refusal("PS-MSG-FRAME", "object-type")
+        result = None  # Release the previous blob before the next reader allocation.
 
     if tuple(object_types) != selection.object_oids:
         return _refusal("PS-MSG-COVERAGE", "object-set")
@@ -4317,7 +4322,7 @@ async def _acquire_history(
     unpublished_trees = {
         oid for oid, object_type in object_types.items() if object_type == "tree"
     }
-    unpublished_blobs = set(blob_contents)
+    unpublished_blobs = set(blob_records)
     reached_unpublished_trees: set[str] = set()
     visited_tree_ids: set[str] = set()
     tree_visits = 0
@@ -4430,19 +4435,47 @@ async def _acquire_history(
     if len(blob_paths) > _MAX_BLOB_PATHS:
         return _refusal("PS-MSG-LIMIT", "blob-path-count")
 
-    binary_blobs = {oid for oid, raw in blob_contents.items() if _is_binary(raw)}
-    text_blobs = set(blob_contents) - binary_blobs
+    binary_blobs = {oid for oid, (_, _, binary) in blob_records.items() if binary}
+    text_blobs = set(blob_records) - binary_blobs
     subjects_by_path: dict[tuple[bytes, str], list[tuple[str, str]]] = {}
     if review_evaluation is not None:
         for commit_oid, raw_path, blob_oid in sorted(subjects):
             subjects_by_path.setdefault((raw_path, blob_oid), []).append(
                 (commit_oid, subject_modes[(commit_oid, raw_path, blob_oid)])
             )
+    # Preserve path-first finding/review order. A single payload cache bounds
+    # retained memory independently of the cumulative admitted blob volume.
+    # Rereads are at most the number of distinct blob/path pairs and share the
+    # original deadline. No reread adds coverage events or receipt byte counts.
+    cached_blob_oid = None
+    raw = b""
+    result = None
     for path, blob_oid in sorted(blob_paths):
+        if asyncio.get_running_loop().time() >= scan_deadline:
+            return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+        if blob_oid != cached_blob_oid:
+            raw = b""  # Release before allocating the next payload.
+            result = None
+            result = await reader.read(blob_oid, "blob", scan_deadline=scan_deadline)
+            if isinstance(result, Refusal):
+                return result
+            size, content_digest, _binary = blob_records[blob_oid]
+            if (result.returned_oid != blob_oid or result.object_type != "blob"
+                    or len(result.raw) != size
+                    or hashlib.sha256(result.raw).digest() != content_digest):
+                return _refusal("PS-MSG-COVERAGE", "object-content-identity")
+            if native:
+                digest = hashlib.new(selection.object_format.name)
+                digest.update(f"blob {size}\0".encode("ascii"))
+                digest.update(result.raw)
+                if digest.hexdigest() != blob_oid:
+                    return _refusal("PS-MSG-COVERAGE", "object-content-identity")
+            raw = result.raw
+            result = None
+            cached_blob_oid = blob_oid
         decoded_path = path.decode("utf-8", "surrogateescape")
         if not native:
             _append_findings(findings, _filename_findings(decoded_path, "history-blob"))
-        raw = blob_contents[blob_oid]
         line_refusal = _line_limit_refusal(raw)
         if line_refusal is not None:
             return line_refusal
@@ -4490,7 +4523,7 @@ async def _acquire_history(
     canonical_subjects = tuple(sorted(subjects))
     canonical_paths = tuple(sorted((blob, path) for path, blob in blob_paths))
     canonical_objects = tuple(sorted(selection.object_oids))
-    canonical_blobs = tuple(sorted(blob_contents))
+    canonical_blobs = tuple(sorted(blob_records))
     proof = HistoryProof(
         selection.expected_oids,
         canonical_objects,

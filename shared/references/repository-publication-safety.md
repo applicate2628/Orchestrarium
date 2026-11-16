@@ -65,6 +65,12 @@ A pull-request grant remains limited to its admitted pull request, branch, repos
 
 The push hook does not acquire transcript data or read/write old consent sidecars. Existing sidecars remain untouched local history; no migration or purge is needed. Shared history readers used by other hooks retain their own contracts. A changed installed hook still requires its normal native trust review and health receiving.
 
+## Retained payload and cumulative work
+
+Complete-history scanning retains blob size, content identity and binary/text disposition rather than all blob payloads. The path-ordered evaluation pass holds only its current blob payload, rereads through the same object-reader owner and verifies type, identifier, size and digest before evaluation. Every commit/path review context, ordered finding, unique-object coverage event and receipt count remains required. Rereads share the original deadline and do not create additional authorization evidence.
+
+This changes retained payload memory, not the existing cumulative admission limits. The number of additional reads is at most the number of distinct blob/path pairs; repeated nonadjacent paths can increase input/output work. Reader buffers, decoding, hashing and metadata still consume memory, so a one-payload cache is not a process-memory ceiling. Resource-model changes require measured memory and work bounds, complete-coverage equivalence and safe refusal on exhaustion; neither an arbitrary larger constant nor partial scanning qualifies a previously refused transfer.
+
 ## Terms and Abbreviations
 
 - **HEAD** — the current local Git commit; it may differ from the separately approved publication source.

@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-16
 
+- Complete-history publication scanning no longer retains every blob payload at once. It keeps bounded per-object identity metadata and revalidates one path-ordered payload at a time, preserving finding order, review contexts and complete coverage. This reduces retained memory at the cost of possible repeated reads; cumulative admission limits and fail-closed publication decisions are unchanged.
+
 - Preserve a closed, redacted scanner refusal identifier in native and tool-facing publication diagnostics so operators can distinguish causes without weakening denial, scan coverage or target checks. Accept both scanner field orders and native line endings; never echo arbitrary scanner output.
 
 ## 2026-11-15
