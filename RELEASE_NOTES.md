@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-16
 
+- Native publication scans now distinguish new disclosure from history already held by the same receiver. A verified direct HTTPS receiver with redirects disabled can use its fresh ref inventory; custom or ambiguous transports retain conservative callback-only coverage. New content, paths and annotations remain checked, so new branches no longer repeatedly reject previously published history merely because their destination ref is new.
+
 - Publication scanning reuses only exact negative lexical results from the preceding payload within one scan, avoiding repeated regular-expression work across historical file versions. Candidate evidence, per-commit review authority, full graph coverage, machine-path checks and the existing scan deadlines are unchanged.
 
 - Reuse pure machine-path line detection for successive review subjects of the same exact payload and path. A single metadata entry preserves per-subject authorization, line masks, finding locations and unresolved accounting without retaining payload bytes or changing coverage/deadlines.

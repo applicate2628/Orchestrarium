@@ -807,8 +807,8 @@ def test_v3_used_authority_is_received_again_after_v4_excludes_its_subject(nativ
         other_origin = other_home / ".agents" / "publication"
         other_origin.mkdir(parents=True)
         (other_origin / "reviewed-exceptions.json").write_bytes(policy.canonical_document(1, [record_a]))
-    # V3 scans commit..old. The separate deletion's actual old root lets V4
-    # legitimately exclude that same subject without using its exception.
+    # Both versions share actual old roots. A deletion of this same commit
+    # now leaves no newly disclosed commit and cannot authorize publication.
     v3_only = scenario.startswith("v3-only-")
     wire = f"HEAD {commit} refs/heads/first {old}\n".encode()
     if v3_only:
@@ -880,9 +880,15 @@ def test_v3_used_authority_is_received_again_after_v4_excludes_its_subject(nativ
             result = owner._native_pre_push_main(["origin", str(remote)])
             assert "_orchestrarium_publication_review_policy_v1" not in sys.modules
             assert "_orchestrarium_linked_runtime_subroots_v1" not in sys.modules
-    assert [item.parsed_outcome.kind for item in seen] == ["qualified-v3", "valid-v4" if v3_only else "qualified-v4"], errors.getvalue()
     if v3_only:
-        assert seen[1].parsed_outcome.receipt.objects == 0
+        # Shared receiver scope removes the former V3/V4 asymmetry. Neither
+        # an active nor a revoked grant can turn empty coverage into authority.
+        assert result == 2 and "PS-MSG-COVERAGE" in errors.getvalue()
+        assert not seen and verify.call_count == 0
+        assert output.getvalue() == ""
+        assert raw.decode().strip() not in errors.getvalue()
+        return
+    assert [item.parsed_outcome.kind for item in seen] == ["qualified-v3", "qualified-v4"], errors.getvalue()
     if scenario in {"origin-return", "origin-content"}:
         first_review = seen[0].execution.pending.captured_review
         second_review = seen[1].execution.pending.captured_review

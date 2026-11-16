@@ -429,6 +429,7 @@ class NativePushRequest:
     selection_sha256: str
     repository_observation_sha256: str
     updates: tuple[NativePushUpdate, ...]
+    receiver_inventory: bool = False
 
 
 @dataclass(frozen=True)
@@ -2464,7 +2465,9 @@ def _native_push_request(payload: object) -> NativePushRequest | Refusal:
     Local source bytes are opaque; object authority comes from the local OID.
     """
     fields = {"version", "objectFormat", "repositoryObservation", "endpoint", "endpointIdentity", "inputSha256", "wireBase64"}
-    if type(payload) is not dict or set(payload) != fields or type(payload["version"]) is not int or payload["version"] != 1:
+    if (type(payload) is not dict or set(payload) not in (fields, fields | {"receiverInventory"})
+        or type(payload.get("receiverInventory", False)) is not bool
+        or type(payload["version"]) is not int or payload["version"] != 1):
         return _refusal("PS-INPUT-REFUSAL", "native-selection")
     object_format = _SUPPORTED_OBJECT_FORMATS.get(payload["objectFormat"]) if isinstance(payload["objectFormat"], str) else None
     observation, endpoint = payload["repositoryObservation"], payload["endpoint"]
@@ -2512,7 +2515,8 @@ def _native_push_request(payload: object) -> NativePushRequest | Refusal:
         return NativePushRequest(object_format, json.loads(_native_json_bytes(observation)), endpoint, endpoint_identity,
                                  payload["inputSha256"], update_set,
                                  hashlib.sha256(_native_json_bytes(payload)).hexdigest(),
-                                 hashlib.sha256(_native_json_bytes(observation)).hexdigest(), tuple(decoded))
+                                 hashlib.sha256(_native_json_bytes(observation)).hexdigest(), tuple(decoded),
+                                 payload.get("receiverInventory", False))
     except (ValueError, TypeError, UnicodeError):
         return _refusal("PS-INPUT-REFUSAL", "native-selection")
 
@@ -2775,7 +2779,7 @@ _REMOTE_PROBE_NONCE_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _remote_probe_binding(
-    push_destination: str,
+    push_destination: str, *, no_redirect: bool = False,
 ) -> tuple[str, dict[str, str]] | Refusal:
     try:
         nonce = secrets.token_hex(_REMOTE_PROBE_NONCE_BYTES)
@@ -2808,6 +2812,12 @@ def _remote_probe_binding(
             f"GIT_CONFIG_KEY_{config_count}": f"url.{push_destination}.insteadOf",
             f"GIT_CONFIG_VALUE_{config_count}": remote_alias,
         })
+        if no_redirect:
+            child_env.update({
+                "GIT_CONFIG_COUNT": str(config_count + 2),
+                f"GIT_CONFIG_KEY_{config_count + 1}": f"http.{push_destination}.followRedirects",
+                f"GIT_CONFIG_VALUE_{config_count + 1}": "false",
+            })
     except Exception:
         return _refusal("PS-MSG-RANGE", "remote-binding")
     return remote_alias, child_env
@@ -2945,10 +2955,11 @@ async def _remote_ref_tip_oids(
     *,
     deadline: float,
     object_format: GitObjectFormat,
+    no_redirect: bool = False,
 ) -> tuple[RemoteRefTip, ...] | Refusal:
     base_line_cap = object_format.hex_length + 1 + _MAX_PATH_BYTES
     peeled_line_cap = base_line_cap + len(b"^{}")
-    binding = _remote_probe_binding(push_destination)
+    binding = _remote_probe_binding(push_destination, no_redirect=no_redirect)
     if isinstance(binding, Refusal):
         return binding
     remote_alias, child_env = binding
@@ -3386,6 +3397,33 @@ async def _range_selection(
     )
 
 
+async def _native_prior_receiver_roots(
+    request: NativePushRequest, deadline: float,
+) -> tuple[str, ...] | Refusal:
+    """Use actual old roots, plus inventory only for a qualified same receiver.
+
+    Prior disclosure is content-addressed; deleting a remote ref afterwards
+    cannot make that already disclosed content a new disclosure. This does not
+    claim to predict Git's physical pack transfer.
+    """
+    zero = "0" * request.object_format.hex_length
+    prior = tuple(RemoteRefTip(row.remote_ref, row.remote_oid)
+                  for row in request.updates if row.remote_oid != zero)
+    loop_deadline = asyncio.get_running_loop().time() + _remaining_seconds(deadline)
+    if request.receiver_inventory:
+        inventory = await _remote_ref_tip_oids(
+            request.endpoint, deadline=loop_deadline, object_format=request.object_format,
+            no_redirect=True,
+        )
+        if isinstance(inventory, Refusal):
+            return inventory
+        prior += inventory
+    return await _local_remote_commit_tip_oids(
+        prior, deadline=loop_deadline, object_format=request.object_format,
+        include_object_roots=True,
+    )
+
+
 async def _native_push_selection(request: NativePushRequest, deadline: float) -> NativePushSelection | Refusal:
     try:
         if _detect_git_object_format(_remaining_seconds(deadline)) != request.object_format:
@@ -3402,11 +3440,7 @@ async def _native_push_selection(request: NativePushRequest, deadline: float) ->
         return NativePushSelection(request, (), (), request.object_format, ())
     loop = asyncio.get_running_loop()
     loop_deadline = loop.time() + _remaining_seconds(deadline)
-    native_old = tuple(RemoteRefTip(row.remote_ref, row.remote_oid) for row in request.updates if row.remote_oid != zero)
-    exclusions = await _local_remote_commit_tip_oids(
-        native_old, deadline=loop_deadline,
-        object_format=request.object_format, include_object_roots=True,
-    )
+    exclusions = await _native_prior_receiver_roots(request, deadline)
     if isinstance(exclusions, Refusal):
         return exclusions
     revisions = b"".join((oid.encode("ascii") + b"\n") for oid in roots)
@@ -3433,10 +3467,10 @@ async def _native_push_selection(request: NativePushRequest, deadline: float) ->
 async def _native_commit_range_selection(
     primary: RangeRequest, request: NativePushRequest, deadline: float,
 ) -> RangeSelection | Refusal:
-    """Union each actual update's commit graph relative to its own old OID.
+    """Union newly disclosed actual update graphs for this receiver.
 
-    A separately advertised server is never evidence about a custom receiver.
-    Unknown old objects are conservatively included instead of excluded.
+    Unknown roots remain included. Unqualified transports cannot use a
+    nominal server's inventory as evidence about a custom receiver.
     """
     object_format = request.object_format
     if _detect_git_object_format(_remaining_seconds(deadline)) != object_format or _graft_overlay_present(_remaining_seconds(deadline)):
@@ -3445,6 +3479,10 @@ async def _native_commit_range_selection(
     parents: dict[str, tuple[str, ...]] = {}
     objects: set[str] = set()
     selected_primary = None
+    prior_roots = await _native_prior_receiver_roots(request, deadline)
+    if isinstance(prior_roots, Refusal):
+        return prior_roots
+    exclusion = ("--not", *prior_roots) if prior_roots else ()
     for row in request.updates:
         if row.local_oid == zero:
             continue
@@ -3455,14 +3493,6 @@ async def _native_commit_range_selection(
             continue
         if selected_primary is None:
             selected_primary = (os.fsdecode(row.remote_ref), tip)
-        exclusion = ()
-        if row.remote_oid != zero:
-            try:
-                old = _resolve_commit(row.remote_oid, _remaining_seconds(deadline), object_format=object_format)
-            except ValueError:
-                pass
-            else:
-                exclusion = ("--not", old)
         loop_deadline = asyncio.get_running_loop().time() + _remaining_seconds(deadline)
         graph = await _read_parent_graph_bounded(
             _range_git_argv("rev-list", "--parents", "--topo-order", tip, *exclusion),
