@@ -77,6 +77,31 @@ SCAN_SETTLEMENT_ATTEMPT_SECONDS = 3.0
 SCAN_SETTLEMENT_MAX_ENTRIES = 2
 
 
+class _ScannerRefusalDenied(PrRouteDenied):
+    """Preserve only a closed scanner ID; arbitrary output is never retained."""
+
+    _IDS = frozenset({
+        "PS-INPUT-REFUSAL", "PS-MSG-RANGE", "PS-MSG-READ", "PS-MSG-SPAWN",
+        "PS-MSG-READ-TIMEOUT", "PS-MSG-REAP", "PS-MSG-FRAME",
+        "PS-MSG-DECODE", "PS-MSG-LIMIT", "PS-MSG-COVERAGE", "PS-MSG-TIP-CHANGED",
+    })
+
+    def __init__(self, failure_id: str, scanner_output: str):
+        super().__init__(failure_id)
+        match = re.fullmatch(
+            r"publication-safety: refusing id=(PS-[A-Z-]+) "
+            r"(?:reason=[a-z0-9-]+ phase=[a-z0-9-]+|phase=[a-z0-9-]+ reason=[a-z0-9-]+)"
+            r"(?:\r?\n)?", scanner_output,
+        )
+        self.scanner_id = match.group(1) if match and match.group(1) in self._IDS else None
+
+
+def _format_scanner_refusal(exc: PrRouteDenied) -> str:
+    if type(exc) is _ScannerRefusalDenied and exc.scanner_id in _ScannerRefusalDenied._IDS:
+        return f" Scanner diagnostic: id={exc.scanner_id}."
+    return ""
+
+
 @dataclass(frozen=True)
 class GitObjectFormat:
     name: str
@@ -470,7 +495,7 @@ class PendingScanInvocation:
                 if execution.exit_code == 1:
                     raise PrRouteDenied(prefix + "-SCAN-FINDING")
                 if execution.exit_code == 2:
-                    raise PrRouteDenied(prefix + "-SCAN-REFUSAL")
+                    raise _ScannerRefusalDenied(prefix + "-SCAN-REFUSAL", text)
                 if execution.exit_code != 0:
                     raise PrRouteDenied(prefix + "-SCAN-EXECUTION")
                 receipt = parsed.receipt
@@ -1355,7 +1380,11 @@ elif observation["status"] in ("not-requested","unavailable"):
 else:
     raise ValueError("repository observation status")
 if native_mode:
-    native=exact_object(bundle["nativePush"],("version","objectFormat","repositoryObservation","endpoint","endpointIdentity","inputSha256","wireBase64"),"native push shape")
+    native_keys=("version","objectFormat","repositoryObservation","endpoint","endpointIdentity","inputSha256","wireBase64")
+    if type(bundle["nativePush"]) is dict and "receiverInventory" in bundle["nativePush"]:
+        native_keys+=("receiverInventory",)
+    native=exact_object(bundle["nativePush"],native_keys,"native push shape")
+    if type(native.get("receiverInventory",False)) is not bool: raise RuntimeError("native receiver shape")
     if type(native["version"]) is not int or native["version"]!=1 or native["repositoryObservation"]!=observation or observation["status"]!="captured":
         raise ValueError("native repository binding")
     if native["objectFormat"]!=observation["repository"]["objectFormat"] or type(native["endpoint"]) is not str or type(native["wireBase64"]) is not str:
@@ -2874,8 +2903,34 @@ def _refresh_scan_binding(
     )
 
 
+def _native_receiver_inventory_qualified(native: NativePushInput, cwd: str | None, git_exe: str | None) -> bool:
+    """Admit only the ordinary nonredirecting HTTPS receiver; otherwise fallback."""
+    if not cwd or not git_exe:
+        return False
+    # Git chooses its helper from the raw spelling, unlike urlsplit's normalization.
+    if (not native.endpoint.startswith("https://")
+        or any(ord(char) <= 32 or ord(char) == 127 for char in native.endpoint)):
+        return False
+    try:
+        url = urlsplit(native.endpoint)
+        if (url.scheme != "https" or not url.hostname or url.username is not None
+            or url.password is not None or url.query or url.fragment):
+            return False
+        if _native_config_values(git_exe, (), cwd, f"remote.{native.remote_name}.vcs"):
+            return False
+        redirects = _native_configuration_query(
+            git_exe, (), cwd,
+            ("config", "--type=bool", "--get-urlmatch", "http.followRedirects", native.endpoint),
+            accepted=(0, 1),
+        )
+        return redirects.returncode == 0 and redirects.stdout == b"false\n"
+    except (PrRouteDenied, ValueError, OSError):
+        return False
+
+
 def _native_push_selection(
     native: NativePushInput, observation: dict, canonical_bytes: Callable[[object], bytes],
+    *, repository_workdir: str | None = None, git_exe: str | None = None,
 ) -> tuple[dict, NativePushScanBinding]:
     """Bind opaque actual bytes; the captured scanner is the sole wire decoder."""
     if (
@@ -2896,6 +2951,7 @@ def _native_push_selection(
         "endpointIdentity": _native_endpoint_identity(native.endpoint),
         "inputSha256": hashlib.sha256(native.wire).hexdigest(),
         "wireBase64": base64.b64encode(native.wire).decode("ascii"),
+        "receiverInventory": _native_receiver_inventory_qualified(native, repository_workdir, git_exe),
     }
     binding = NativePushScanBinding(
         object_format.name, request["endpointIdentity"], request["inputSha256"],
@@ -2929,6 +2985,7 @@ def _run_authoritative_scan(
             if native is not None:
                 request, native_binding = _native_push_selection(
                     native, captured_review.repository_observation, modules.policy_module.C,
+                    repository_workdir=repository_workdir, git_exe=git_exe,
                 )
                 if native_objects:
                     binding = native_binding
@@ -2977,7 +3034,7 @@ def _run_authoritative_scan(
                 )
                 if observation_after != captured_review.repository_observation:
                     raise PrRouteDenied("PGG-TARGET-CURRENTNESS")
-                _request_after, native_binding_after = _native_push_selection(native, observation_after, modules.policy_module.C)
+                _request_after, native_binding_after = _native_push_selection(native, observation_after, modules.policy_module.C, repository_workdir=repository_workdir, git_exe=git_exe)
                 if _request_after != request:
                     raise PrRouteDenied("PGG-TARGET-CURRENTNESS")
                 binding_after = native_binding_after if native_objects else _refresh_scan_binding(binding, repository_workdir, git_exe)
@@ -3488,6 +3545,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
     failure_id = result.failure_id or "PRG-INTERNAL"
     workdir_diagnostic = result.workdir_diagnostic
     process_diagnostic = ""
+    scanner_diagnostic = ""
     native_entry_stage = None
     native_entry_hint = None
     if result.continuation == "EVALUATE_HEAVY":
@@ -3498,6 +3556,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
             failure_id = exc.failure_id
             workdir_diagnostic = exc.workdir_diagnostic
             process_diagnostic = _format_process_failure(exc)
+            scanner_diagnostic = _format_scanner_refusal(exc)
             if type(exc) is _NativeEntryDenied and exc.stage in _NativeEntryDenied._STAGES:
                 native_entry_stage = exc.stage
                 native_entry_hint = exc.native_hint
@@ -3537,7 +3596,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
     }
     if failure_id not in reasons:
         failure_id = "PRG-INTERNAL"
-    reason = f"{failure_id}: {reasons[failure_id]}"
+    reason = f"{failure_id}: {reasons[failure_id]}" + scanner_diagnostic
     if failure_id == "PGG-NATIVE-ENTRY-REQUIRED" and native_entry_stage is not None:
         reason += f" Native-entry diagnostic: stage={native_entry_stage}."
         if native_entry_hint is not None:
@@ -3589,6 +3648,7 @@ def _native_callback_currentness(native: NativePushInput, root: str, git_exe: st
         observations.append(endpoint.stdout)
     elif native.remote_name != native.endpoint:
         raise PrRouteDenied("PGG-TARGET-CURRENTNESS")
+    observations.append(b"receiver-inventory:" + (b"true" if _native_receiver_inventory_qualified(native, root, git_exe) else b"false"))
     return tuple(observations)
 
 
@@ -3675,7 +3735,8 @@ def _native_pre_push_main(arguments: list[str]) -> int:
         sys.stdout.write(evidence.execution.stdout.decode("utf-8", errors="strict"))
         return 0
     except PrRouteDenied as exc:
-        print(f"{exc.failure_id}: Native publication scan did not qualify this transfer.", file=sys.stderr)
+        print(f"{exc.failure_id}: Native publication scan did not qualify this transfer."
+              + _format_scanner_refusal(exc), file=sys.stderr)
         return 2
     except Exception:
         print("PGG-SCAN-EXECUTION: Native publication scan did not complete.", file=sys.stderr)

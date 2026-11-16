@@ -316,7 +316,6 @@ _MAX_AGGREGATE_MESSAGE_BYTES = 16_777_216
 _MAX_COMMIT_TREE_BYTES = 1_048_576
 _MAX_TREE_CACHE_BYTES = 64 * 1_048_576
 _MAX_BLOB_BYTES = 64 * 1_048_576
-_MAX_AGGREGATE_BLOB_BYTES = 512 * 1_048_576
 _MAX_LINE_BYTES = 8 * 1_048_576
 _MAX_PARENT_GRAPH_BYTES = 16 * 1_048_576
 _MAX_FINDINGS = 32
@@ -430,6 +429,7 @@ class NativePushRequest:
     selection_sha256: str
     repository_observation_sha256: str
     updates: tuple[NativePushUpdate, ...]
+    receiver_inventory: bool = False
 
 
 @dataclass(frozen=True)
@@ -1561,6 +1561,21 @@ def _byte_region(raw: bytes, start: int, end: int) -> dict:
     return {"startByte": start, "endByteExclusive": end, "sha256": hashlib.sha256(raw[start:end]).hexdigest()}
 
 
+class _CleanLineAnalysis:
+    """Exact negative lexical results from only the preceding payload.
+
+    This is not review authority: candidate-bearing lines, byte coordinates,
+    machine paths and per-commit authorization are always evaluated normally.
+    Retention is bounded by two admitted payloads during a transition, rather
+    than by repository history. The captured detector callable and subject kind
+    bind reuse; path-specific filtering remains outside this cache.
+    """
+
+    def __init__(self):
+        self.context = None
+        self.lines: set[str] = set()
+
+
 def _analyze_review_candidates(
     raw: bytes,
     path: str,
@@ -1568,13 +1583,31 @@ def _analyze_review_candidates(
     subject_kind: str,
     digest: Callable[[str, object], str],
     canonical: Callable[[object], bytes],
+    clean_lines: _CleanLineAnalysis | None = None,
 ) -> tuple[dict, ...]:
-    text, boundaries = _original_byte_boundaries(raw)
+    # Validate UTF-8 before detection, but only allocate byte coordinates when
+    # an observation needs a candidate witness. Clean text has no byte regions.
+    text = raw.decode("utf-8", "strict")
     _definitions, leaves = _build_detector_catalog(digest)
     groups: dict[tuple, list[_TextObservation]] = {}
+    context = (subject_kind, _line_observations)
+    previous = clean_lines.lines if clean_lines is not None and clean_lines.context == context else set()
+    current: set[str] = set()
     for line_number, line_start, line in _selected_text_lines(text, path, subject_kind):
+        if line in previous or line in current:
+            current.add(line)
+            continue
+        observed = False
         for observation in _line_observations(line, line_number, line_start, subject_kind):
+            observed = True
             groups.setdefault((line_start, _observation_key(observation)), []).append(observation)
+        if not observed:
+            current.add(line)
+    if clean_lines is not None:
+        clean_lines.context, clean_lines.lines = context, current
+    if not groups:
+        return ()
+    _text, boundaries = _original_byte_boundaries(raw)
     result: list[dict] = []
     for observations in groups.values():
         first = observations[0]
@@ -1715,14 +1748,15 @@ def resolve_review_detector(diagnostic_class: str, *, policy_module) -> dict:
     raise ValueError("unknown-detector")
 
 
-def analyze_review_candidates(raw: bytes, path: bytes, *, subject_kind: str, policy_module) -> dict:
+def analyze_review_candidates(raw: bytes, path: bytes, *, subject_kind: str, policy_module,
+                              clean_lines: _CleanLineAnalysis | None = None) -> dict:
     if not isinstance(raw, bytes) or not isinstance(path, bytes) or not path or b"\0" in path:
         return {"complete": False, "candidates": (), "unresolved": (),
                 "refusal": _refusal("PS-INPUT-REFUSAL", "review-evaluation")}
     decoded_path = path.decode("utf-8", "surrogateescape")
     try:
         rows = _analyze_review_candidates(raw, decoded_path, subject_kind=subject_kind,
-            digest=policy_module.H, canonical=policy_module.C)
+            digest=policy_module.H, canonical=policy_module.C, clean_lines=clean_lines)
     except UnicodeError:
         return {"complete": True, "candidates": (), "unresolved": tuple(_content_hits(
             raw.decode("utf-8", "replace"), decoded_path, lambda _line: (), subject_kind=subject_kind,
@@ -1822,6 +1856,8 @@ class ReviewEvaluation:
         self.execution = execution
         self.unresolved = 0
         self._analysis: dict[tuple, dict] = {}
+        self._machine_path_analysis = None
+        self._clean_line_analysis = _CleanLineAnalysis()
         self._applications: list[tuple[dict, dict, dict, dict]] = []
         self._applied_keys: set[tuple] = set()
 
@@ -1890,7 +1926,8 @@ class ReviewEvaluation:
         key = (raw_path, blob_oid, git_mode, subject_kind, hashlib.sha256(raw).digest())
         analysis = self._analysis.get(key)
         if analysis is None:
-            analysis = analyze_review_candidates(raw, raw_path, subject_kind=subject_kind, policy_module=self.policy)
+            analysis = analyze_review_candidates(raw, raw_path, subject_kind=subject_kind, policy_module=self.policy,
+                                                 clean_lines=self._clean_line_analysis)
             self._analysis[key] = analysis
         if not analysis["complete"] or analysis["refusal"] is not None:
             raise RuntimeError("review-evaluation")
@@ -1923,8 +1960,18 @@ class ReviewEvaluation:
                 raise RuntimeError("review-evaluation-duplicate")
             self._applied_keys.add(applied_key)
             self._applications.append((subject, row["candidate"], row["detector"], application))
-        for number, _offset, line in _selected_text_lines(raw.decode("utf-8", "replace"), path, subject_kind):
-            if (machine_path_lines is None or number in machine_path_lines) and find_machine_paths(line):
+        # The classifier is pure for one captured scan. Retain only one
+        # payload/path's matching line numbers, never its bytes or a verdict.
+        # Commit authorization and occurrence accounting above remain per subject.
+        cached = self._machine_path_analysis
+        if cached is None or cached[0] != (key, path) or cached[1] is not find_machine_paths:
+            numbers = tuple(number for number, _offset, line in
+                            _selected_text_lines(raw.decode("utf-8", "replace"), path, subject_kind)
+                            if find_machine_paths(line))
+            cached = ((key, path), find_machine_paths, numbers)
+            self._machine_path_analysis = cached
+        for number in cached[2]:
+            if machine_path_lines is None or number in machine_path_lines:
                 findings.append(Finding("PS-FINDING-CONTENT", subject_kind, locator, number, "machine-path", display_locator, staged_index))
         self.unresolved += len(findings)
         return findings
@@ -2418,7 +2465,9 @@ def _native_push_request(payload: object) -> NativePushRequest | Refusal:
     Local source bytes are opaque; object authority comes from the local OID.
     """
     fields = {"version", "objectFormat", "repositoryObservation", "endpoint", "endpointIdentity", "inputSha256", "wireBase64"}
-    if type(payload) is not dict or set(payload) != fields or type(payload["version"]) is not int or payload["version"] != 1:
+    if (type(payload) is not dict or set(payload) not in (fields, fields | {"receiverInventory"})
+        or type(payload.get("receiverInventory", False)) is not bool
+        or type(payload["version"]) is not int or payload["version"] != 1):
         return _refusal("PS-INPUT-REFUSAL", "native-selection")
     object_format = _SUPPORTED_OBJECT_FORMATS.get(payload["objectFormat"]) if isinstance(payload["objectFormat"], str) else None
     observation, endpoint = payload["repositoryObservation"], payload["endpoint"]
@@ -2466,7 +2515,8 @@ def _native_push_request(payload: object) -> NativePushRequest | Refusal:
         return NativePushRequest(object_format, json.loads(_native_json_bytes(observation)), endpoint, endpoint_identity,
                                  payload["inputSha256"], update_set,
                                  hashlib.sha256(_native_json_bytes(payload)).hexdigest(),
-                                 hashlib.sha256(_native_json_bytes(observation)).hexdigest(), tuple(decoded))
+                                 hashlib.sha256(_native_json_bytes(observation)).hexdigest(), tuple(decoded),
+                                 payload.get("receiverInventory", False))
     except (ValueError, TypeError, UnicodeError):
         return _refusal("PS-INPUT-REFUSAL", "native-selection")
 
@@ -2729,7 +2779,7 @@ _REMOTE_PROBE_NONCE_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _remote_probe_binding(
-    push_destination: str,
+    push_destination: str, *, no_redirect: bool = False,
 ) -> tuple[str, dict[str, str]] | Refusal:
     try:
         nonce = secrets.token_hex(_REMOTE_PROBE_NONCE_BYTES)
@@ -2762,6 +2812,12 @@ def _remote_probe_binding(
             f"GIT_CONFIG_KEY_{config_count}": f"url.{push_destination}.insteadOf",
             f"GIT_CONFIG_VALUE_{config_count}": remote_alias,
         })
+        if no_redirect:
+            child_env.update({
+                "GIT_CONFIG_COUNT": str(config_count + 2),
+                f"GIT_CONFIG_KEY_{config_count + 1}": f"http.{push_destination}.followRedirects",
+                f"GIT_CONFIG_VALUE_{config_count + 1}": "false",
+            })
     except Exception:
         return _refusal("PS-MSG-RANGE", "remote-binding")
     return remote_alias, child_env
@@ -2899,10 +2955,11 @@ async def _remote_ref_tip_oids(
     *,
     deadline: float,
     object_format: GitObjectFormat,
+    no_redirect: bool = False,
 ) -> tuple[RemoteRefTip, ...] | Refusal:
     base_line_cap = object_format.hex_length + 1 + _MAX_PATH_BYTES
     peeled_line_cap = base_line_cap + len(b"^{}")
-    binding = _remote_probe_binding(push_destination)
+    binding = _remote_probe_binding(push_destination, no_redirect=no_redirect)
     if isinstance(binding, Refusal):
         return binding
     remote_alias, child_env = binding
@@ -3340,6 +3397,33 @@ async def _range_selection(
     )
 
 
+async def _native_prior_receiver_roots(
+    request: NativePushRequest, deadline: float,
+) -> tuple[str, ...] | Refusal:
+    """Use actual old roots, plus inventory only for a qualified same receiver.
+
+    Prior disclosure is content-addressed; deleting a remote ref afterwards
+    cannot make that already disclosed content a new disclosure. This does not
+    claim to predict Git's physical pack transfer.
+    """
+    zero = "0" * request.object_format.hex_length
+    prior = tuple(RemoteRefTip(row.remote_ref, row.remote_oid)
+                  for row in request.updates if row.remote_oid != zero)
+    loop_deadline = asyncio.get_running_loop().time() + _remaining_seconds(deadline)
+    if request.receiver_inventory:
+        inventory = await _remote_ref_tip_oids(
+            request.endpoint, deadline=loop_deadline, object_format=request.object_format,
+            no_redirect=True,
+        )
+        if isinstance(inventory, Refusal):
+            return inventory
+        prior += inventory
+    return await _local_remote_commit_tip_oids(
+        prior, deadline=loop_deadline, object_format=request.object_format,
+        include_object_roots=True,
+    )
+
+
 async def _native_push_selection(request: NativePushRequest, deadline: float) -> NativePushSelection | Refusal:
     try:
         if _detect_git_object_format(_remaining_seconds(deadline)) != request.object_format:
@@ -3356,11 +3440,7 @@ async def _native_push_selection(request: NativePushRequest, deadline: float) ->
         return NativePushSelection(request, (), (), request.object_format, ())
     loop = asyncio.get_running_loop()
     loop_deadline = loop.time() + _remaining_seconds(deadline)
-    native_old = tuple(RemoteRefTip(row.remote_ref, row.remote_oid) for row in request.updates if row.remote_oid != zero)
-    exclusions = await _local_remote_commit_tip_oids(
-        native_old, deadline=loop_deadline,
-        object_format=request.object_format, include_object_roots=True,
-    )
+    exclusions = await _native_prior_receiver_roots(request, deadline)
     if isinstance(exclusions, Refusal):
         return exclusions
     revisions = b"".join((oid.encode("ascii") + b"\n") for oid in roots)
@@ -3387,10 +3467,10 @@ async def _native_push_selection(request: NativePushRequest, deadline: float) ->
 async def _native_commit_range_selection(
     primary: RangeRequest, request: NativePushRequest, deadline: float,
 ) -> RangeSelection | Refusal:
-    """Union each actual update's commit graph relative to its own old OID.
+    """Union newly disclosed actual update graphs for this receiver.
 
-    A separately advertised server is never evidence about a custom receiver.
-    Unknown old objects are conservatively included instead of excluded.
+    Unknown roots remain included. Unqualified transports cannot use a
+    nominal server's inventory as evidence about a custom receiver.
     """
     object_format = request.object_format
     if _detect_git_object_format(_remaining_seconds(deadline)) != object_format or _graft_overlay_present(_remaining_seconds(deadline)):
@@ -3399,6 +3479,10 @@ async def _native_commit_range_selection(
     parents: dict[str, tuple[str, ...]] = {}
     objects: set[str] = set()
     selected_primary = None
+    prior_roots = await _native_prior_receiver_roots(request, deadline)
+    if isinstance(prior_roots, Refusal):
+        return prior_roots
+    exclusion = ("--not", *prior_roots) if prior_roots else ()
     for row in request.updates:
         if row.local_oid == zero:
             continue
@@ -3409,14 +3493,6 @@ async def _native_commit_range_selection(
             continue
         if selected_primary is None:
             selected_primary = (os.fsdecode(row.remote_ref), tip)
-        exclusion = ()
-        if row.remote_oid != zero:
-            try:
-                old = _resolve_commit(row.remote_oid, _remaining_seconds(deadline), object_format=object_format)
-            except ValueError:
-                pass
-            else:
-                exclusion = ("--not", old)
         loop_deadline = asyncio.get_running_loop().time() + _remaining_seconds(deadline)
         graph = await _read_parent_graph_bounded(
             _range_git_argv("rev-list", "--parents", "--topo-order", tip, *exclusion),
@@ -4158,9 +4234,12 @@ async def _acquire_history(
     commit_records: dict[str, CommitRecord] = {}
     tag_targets: dict[str, tuple[str, str]] = {}
     tree_cache: dict[str, bytes] = {}
-    blob_contents: dict[str, bytes] = {}
+    blob_records: dict[str, tuple[int, bytes, bool]] = {}
     findings: list[Finding] = []
     aggregate_messages = 0
+    # Total unique bytes are receipt evidence, not retained-cache allocation.
+    # Payload memory is independent of this total; object/count/deadline guards
+    # remain owned by the reader, traversal, and publication supervisor.
     aggregate_blobs = 0
     aggregate_trees = 0
 
@@ -4235,14 +4314,17 @@ async def _acquire_history(
                 return _refusal("PS-MSG-LIMIT", "tree-cache-bytes")
             tree_cache[oid] = result.raw
         elif result.object_type == "blob":
-            if len(blob_contents) >= _MAX_BLOBS:
+            if len(blob_records) >= _MAX_BLOBS:
                 return _refusal("PS-MSG-LIMIT", "blob-count")
             aggregate_blobs += len(result.raw)
-            if aggregate_blobs > _MAX_AGGREGATE_BLOB_BYTES:
-                return _refusal("PS-MSG-LIMIT", "aggregate-blob-bytes")
-            blob_contents[oid] = result.raw
+            # Keep identity and disposition, not the complete payload history.
+            blob_records[oid] = (
+                len(result.raw), hashlib.sha256(result.raw).digest(),
+                _is_binary(result.raw),
+            )
         else:
             return _refusal("PS-MSG-FRAME", "object-type")
+        result = None  # Release the previous blob before the next reader allocation.
 
     if tuple(object_types) != selection.object_oids:
         return _refusal("PS-MSG-COVERAGE", "object-set")
@@ -4317,7 +4399,7 @@ async def _acquire_history(
     unpublished_trees = {
         oid for oid, object_type in object_types.items() if object_type == "tree"
     }
-    unpublished_blobs = set(blob_contents)
+    unpublished_blobs = set(blob_records)
     reached_unpublished_trees: set[str] = set()
     visited_tree_ids: set[str] = set()
     tree_visits = 0
@@ -4430,19 +4512,47 @@ async def _acquire_history(
     if len(blob_paths) > _MAX_BLOB_PATHS:
         return _refusal("PS-MSG-LIMIT", "blob-path-count")
 
-    binary_blobs = {oid for oid, raw in blob_contents.items() if _is_binary(raw)}
-    text_blobs = set(blob_contents) - binary_blobs
+    binary_blobs = {oid for oid, (_, _, binary) in blob_records.items() if binary}
+    text_blobs = set(blob_records) - binary_blobs
     subjects_by_path: dict[tuple[bytes, str], list[tuple[str, str]]] = {}
     if review_evaluation is not None:
         for commit_oid, raw_path, blob_oid in sorted(subjects):
             subjects_by_path.setdefault((raw_path, blob_oid), []).append(
                 (commit_oid, subject_modes[(commit_oid, raw_path, blob_oid)])
             )
+    # Preserve path-first finding/review order. A single payload cache bounds
+    # retained memory independently of the cumulative admitted blob volume.
+    # Rereads are at most the number of distinct blob/path pairs and share the
+    # original deadline. No reread adds coverage events or receipt byte counts.
+    cached_blob_oid = None
+    raw = b""
+    result = None
     for path, blob_oid in sorted(blob_paths):
+        if asyncio.get_running_loop().time() >= scan_deadline:
+            return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+        if blob_oid != cached_blob_oid:
+            raw = b""  # Release before allocating the next payload.
+            result = None
+            result = await reader.read(blob_oid, "blob", scan_deadline=scan_deadline)
+            if isinstance(result, Refusal):
+                return result
+            size, content_digest, _binary = blob_records[blob_oid]
+            if (result.returned_oid != blob_oid or result.object_type != "blob"
+                    or len(result.raw) != size
+                    or hashlib.sha256(result.raw).digest() != content_digest):
+                return _refusal("PS-MSG-COVERAGE", "object-content-identity")
+            if native:
+                digest = hashlib.new(selection.object_format.name)
+                digest.update(f"blob {size}\0".encode("ascii"))
+                digest.update(result.raw)
+                if digest.hexdigest() != blob_oid:
+                    return _refusal("PS-MSG-COVERAGE", "object-content-identity")
+            raw = result.raw
+            result = None
+            cached_blob_oid = blob_oid
         decoded_path = path.decode("utf-8", "surrogateescape")
         if not native:
             _append_findings(findings, _filename_findings(decoded_path, "history-blob"))
-        raw = blob_contents[blob_oid]
         line_refusal = _line_limit_refusal(raw)
         if line_refusal is not None:
             return line_refusal
@@ -4490,7 +4600,7 @@ async def _acquire_history(
     canonical_subjects = tuple(sorted(subjects))
     canonical_paths = tuple(sorted((blob, path) for path, blob in blob_paths))
     canonical_objects = tuple(sorted(selection.object_oids))
-    canonical_blobs = tuple(sorted(blob_contents))
+    canonical_blobs = tuple(sorted(blob_records))
     proof = HistoryProof(
         selection.expected_oids,
         canonical_objects,
@@ -4507,6 +4617,9 @@ async def _acquire_history(
         _path_set_digest(canonical_paths),
         tuple(sorted(tag_targets)),
     )
+    # Synchronous detectors and proof hashing may cross the shared deadline.
+    if asyncio.get_running_loop().time() >= scan_deadline:
+        return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
     return proof, coverage, tuple(findings)
 
 

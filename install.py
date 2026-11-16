@@ -19,7 +19,6 @@ ensure_supported_python(str(Path(__file__).resolve()))
 def _run_production(name: str, forwarded: list[str]) -> int:
     return subprocess.run(
         [sys.executable, str(ROOT / "scripts" / f"install-{name}.py"), *forwarded],
-        cwd=ROOT,
     ).returncode
 
 
