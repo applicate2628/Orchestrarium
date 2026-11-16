@@ -243,13 +243,13 @@ class RetainedPayloadTests(unittest.TestCase):
 
     def test_history_volume_is_not_a_retained_payload_budget(self):
         # Exceed the former 512 MiB cache cap without holding that history.
-        # The actual acquisition/hash/coverage code runs; detector semantics
-        # are tested separately so this resource regression stays focused.
+        # Run real acquisition, identity, line and content checks; the reader
+        # generates immutable objects lazily instead of retaining the corpus.
         size = 16 * 1024 * 1024
         count = 33
         specs = {}
         for index in range(count):
-            chunk = bytes([index]) + b"\0" * 1023
+            chunk = bytes([index]) + b"\0" * 1022 + b"\n"
             digest = hashlib.sha1()
             digest.update(f"blob {size}\0".encode())
             for _ in range(size // len(chunk)):
@@ -271,9 +271,7 @@ class RetainedPayloadTests(unittest.TestCase):
                 return scanner.ObjectReadSuccess(value, value, kind, raw)
 
         reader = LazyReader()
-        with mock.patch.object(scanner, "_binary_content_hits", return_value=[]), \
-             mock.patch.object(scanner, "_line_limit_refusal", return_value=None):
-            result = acquire(selection, reader)
+        result = acquire(selection, reader)
         self.assertIsInstance(result, tuple)
         self.assertEqual(result[0].blob_bytes, count * size)
         self.assertEqual(result[0].binary_blobs, count)

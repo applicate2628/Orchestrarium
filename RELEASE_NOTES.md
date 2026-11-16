@@ -6,7 +6,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 - Publication history acquisition now rejects a result when its final synchronous detector or proof hashing finishes at or beyond the existing shared deadline. This closes a late-result acceptance gap without adding a timeout, changing coverage, or claiming synchronous work can be preempted.
 
-- Complete-history publication scanning no longer retains every blob payload at once. It keeps bounded per-object identity metadata and revalidates one path-ordered payload at a time, preserving finding order, review contexts and complete coverage. This reduces retained memory at the cost of possible repeated reads; cumulative admission limits and fail-closed publication decisions are unchanged.
+- Complete-history publication scanning retains one revalidated payload instead of the whole blob history. The obsolete 512 MiB cumulative-cache cap is replaced by the existing per-object, inventory, metadata and supervised-time bounds, while all selected objects and path/review contexts must still be checked. Larger histories may now qualify without repository-specific exceptions; repeated reads can cost more work, direct CLI timeout remains cooperative, and no hard resident-memory ceiling is claimed.
 
 - Preserve a closed, redacted scanner refusal identifier in native and tool-facing publication diagnostics so operators can distinguish causes without weakening denial, scan coverage or target checks. Accept both scanner field orders and native line endings; never echo arbitrary scanner output.
 

@@ -316,7 +316,6 @@ _MAX_AGGREGATE_MESSAGE_BYTES = 16_777_216
 _MAX_COMMIT_TREE_BYTES = 1_048_576
 _MAX_TREE_CACHE_BYTES = 64 * 1_048_576
 _MAX_BLOB_BYTES = 64 * 1_048_576
-_MAX_AGGREGATE_BLOB_BYTES = 512 * 1_048_576
 _MAX_LINE_BYTES = 8 * 1_048_576
 _MAX_PARENT_GRAPH_BYTES = 16 * 1_048_576
 _MAX_FINDINGS = 32
@@ -4161,6 +4160,9 @@ async def _acquire_history(
     blob_records: dict[str, tuple[int, bytes, bool]] = {}
     findings: list[Finding] = []
     aggregate_messages = 0
+    # Total unique bytes are receipt evidence, not retained-cache allocation.
+    # Payload memory is independent of this total; object/count/deadline guards
+    # remain owned by the reader, traversal, and publication supervisor.
     aggregate_blobs = 0
     aggregate_trees = 0
 
@@ -4238,8 +4240,6 @@ async def _acquire_history(
             if len(blob_records) >= _MAX_BLOBS:
                 return _refusal("PS-MSG-LIMIT", "blob-count")
             aggregate_blobs += len(result.raw)
-            if aggregate_blobs > _MAX_AGGREGATE_BLOB_BYTES:
-                return _refusal("PS-MSG-LIMIT", "aggregate-blob-bytes")
             # Keep identity and disposition, not the complete payload history.
             blob_records[oid] = (
                 len(result.raw), hashlib.sha256(result.raw).digest(),
