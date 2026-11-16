@@ -115,3 +115,19 @@ path work remained. These profiled observations include profiling overhead and
 are not a full native-history benchmark or proof that the native deadline will
 be met. A native attempt before this optimization failed closed with
 PS-MSG-READ-TIMEOUT after 243.828 seconds; no retry is implied by the measurement.
+
+The next bounded full-graph internal experiment selected 1,086 commits and
+20,252 objects at b3ac155f, acquired every selected object, but refused after
+240.781 seconds before blob scan completion. It used internal acquisition with
+real Git reads and the unchanged deadline, not a callback, receipt or push.
+Acquisition took 32.107 seconds across 21,074 reads; 822 candidate analyses took
+92.404 seconds. The lazy coordinate map ran only four times (0.083 seconds).
+
+Successive review subjects can reuse pure machine-path detection for the same
+analysis key, exact decoded path and classifier identity. Only one entry of
+matching line numbers is retained, not bytes or authorization. Every subject
+still applies its own line mask, locations, staged index, unresolved accounting
+and commit-scoped review authority. The classifier must remain pure during the
+captured scan. A 100-context, 55 kB clean-input microbenchmark changed from
+100,000 classifier calls / 0.564 seconds to 1,000 calls / 0.029 seconds with the
+same result. This is not evidence that complete native history meets its budget.

@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-16
 
+- Reuse pure machine-path line detection for successive review subjects of the same exact payload and path. A single metadata entry preserves per-subject authorization, line masks, finding locations and unresolved accounting without retaining payload bytes or changing coverage/deadlines.
+
 - Build publication review byte-coordinate maps only when detected candidates require them. Strict UTF-8 validation, all detectors, candidate witnesses and review authorization remain unchanged; clean text no longer allocates a scalar-sized coordinate table.
 
 - Preserve the caller working directory when the interactive root installer dispatches a client. Relocated bundles now install into the caller project rather than their own packaged source tree; absolute installer selection, explicit-target safeguards and global-home selection remain unchanged.

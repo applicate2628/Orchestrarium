@@ -1826,6 +1826,7 @@ class ReviewEvaluation:
         self.execution = execution
         self.unresolved = 0
         self._analysis: dict[tuple, dict] = {}
+        self._machine_path_analysis = None
         self._applications: list[tuple[dict, dict, dict, dict]] = []
         self._applied_keys: set[tuple] = set()
 
@@ -1927,8 +1928,18 @@ class ReviewEvaluation:
                 raise RuntimeError("review-evaluation-duplicate")
             self._applied_keys.add(applied_key)
             self._applications.append((subject, row["candidate"], row["detector"], application))
-        for number, _offset, line in _selected_text_lines(raw.decode("utf-8", "replace"), path, subject_kind):
-            if (machine_path_lines is None or number in machine_path_lines) and find_machine_paths(line):
+        # The classifier is pure for one captured scan. Retain only one
+        # payload/path's matching line numbers, never its bytes or a verdict.
+        # Commit authorization and occurrence accounting above remain per subject.
+        cached = self._machine_path_analysis
+        if cached is None or cached[0] != (key, path) or cached[1] is not find_machine_paths:
+            numbers = tuple(number for number, _offset, line in
+                            _selected_text_lines(raw.decode("utf-8", "replace"), path, subject_kind)
+                            if find_machine_paths(line))
+            cached = ((key, path), find_machine_paths, numbers)
+            self._machine_path_analysis = cached
+        for number in cached[2]:
+            if machine_path_lines is None or number in machine_path_lines:
                 findings.append(Finding("PS-FINDING-CONTENT", subject_kind, locator, number, "machine-path", display_locator, staged_index))
         self.unresolved += len(findings)
         return findings

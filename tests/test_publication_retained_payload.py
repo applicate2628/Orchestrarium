@@ -97,6 +97,36 @@ def acquire(selection, reader, review=None):
 
 
 class RetainedPayloadTests(unittest.TestCase):
+    def test_machine_path_detection_reused_but_subject_findings_remain_independent(self):
+        from types import SimpleNamespace
+        evaluation = scanner.ReviewEvaluation.__new__(scanner.ReviewEvaluation)
+        evaluation.policy = scanner._load_review_policy_module()
+        evaluation.read = SimpleNamespace(usable_records=(object(),))
+        evaluation.repository_observation = {"status": "captured", "repository": {}, "diagnostic": "none"}
+        evaluation.unresolved = 0
+        evaluation._analysis = {}
+        evaluation._machine_path_analysis = None
+        finder = mock.Mock(side_effect=lambda line: "marked" in line)
+        arguments = dict(subject_kind="history-blob", mode="range-blob-text",
+                         raw_path=b"sample.txt", blob_oid="1" * 40, git_mode="100644")
+        for index in range(3):
+            findings = evaluation.scan_text_subject(
+                b"ordinary\nmarked\n", "sample.txt", finder,
+                commit_oid=f"{index:040x}", display_locator=str(index), **arguments,
+            )
+            self.assertEqual(len(findings), 1)
+            self.assertEqual(findings[0].display_locator, str(index))
+        self.assertEqual(finder.call_count, 2)
+        self.assertEqual(evaluation.unresolved, 3)
+        self.assertEqual(evaluation.scan_text_subject(
+            b"ordinary\nmarked\n", "sample.txt", finder, commit_oid="3" * 40,
+            machine_path_lines=frozenset(), **arguments), [])
+        self.assertEqual(finder.call_count, 2)
+        other = mock.Mock(return_value=False)
+        self.assertEqual(evaluation.scan_text_subject(
+            b"ordinary\nmarked\n", "sample.txt", other, commit_oid="4" * 40, **arguments), [])
+        self.assertEqual(other.call_count, 2)
+
     def test_clean_review_text_does_not_materialize_byte_map(self):
         policy = scanner._load_review_policy_module()
         for raw in (b"ordinary prose\n", bytes.fromhex("6f7264696e61727920d09fd180d0b8d0b2d0b5d18220f09f98802070726f73650a")):
