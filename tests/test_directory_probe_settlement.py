@@ -77,7 +77,10 @@ class DirectoryProbeSettlementTests(unittest.TestCase):
                 events.append("observe")
                 return {path: "inert-state"}
 
-            def _native_publish_no_replace(self, source, destination):
+            def arm_replacement(self, source, prepared, owner, **kwargs):
+                return SimpleNamespace(reservation_state=None)
+
+            def _publish_retained(self, source, destination, **kwargs):
                 events.append("move")
                 self.moves += 1
                 if self.moves == 2:
@@ -101,11 +104,19 @@ class DirectoryProbeSettlementTests(unittest.TestCase):
             def _binding_identity_matches(before, after):
                 return before == after
 
+        class InertOwner:
+            def __init__(self, path, transaction, *, dry_run):
+                pass
+
+            @staticmethod
+            def _identity(path):
+                return (1, 2, 3, 4)
+
         scope = {
             "Path": InertPath,
             "tempfile": SimpleNamespace(mkdtemp=acquire),
             "os": SimpleNamespace(name="posix" if posix_hold else "nt"),
-            "_CreateOnlyMutablePath": SimpleNamespace(_identity=lambda path: (1, 2, 3, 4)),
+            "_CreateOnlyMutablePath": InertOwner,
             "_InstallTransaction": InertTransaction,
             "_InstallFailure": DIAGNOSTICS._InstallFailure,
         }

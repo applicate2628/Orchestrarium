@@ -1,7 +1,8 @@
-"""Read-only Linux leaf-link selection; not public POSIX installer admission."""
+"""Linux leaf-link selection and public-backend lifecycle in disposable storage."""
 import os
 import unittest
 import test_presdk_uninstall as fixtures
+import test_presdk_windows_document_link as windows_cases
 
 @unittest.skipUnless(os.name == "posix", "Requires POSIX symlink fixtures")
 class LinkedDocumentPreviewTests(unittest.TestCase):
@@ -9,6 +10,11 @@ class LinkedDocumentPreviewTests(unittest.TestCase):
     setUp = fixtures.PhysicalTests.setUp
     add_document = fixtures.PhysicalTests.add_document
     call = fixtures.PhysicalTests.call
+    link_document = windows_cases.WindowsDocumentLinkTests.link_document
+    test_relative_link_apply_repeat = windows_cases.WindowsDocumentLinkTests.test_relative_link_apply_repeat_preserves_link_and_user_text
+    test_absolute_link_rollback = windows_cases.WindowsDocumentLinkTests.test_absolute_link_rollback_restores_target_and_link
+    test_same_bytes_retarget = windows_cases.WindowsDocumentLinkTests.test_same_bytes_retarget_refuses_without_mutation
+    test_public_entrypoint = fixtures.PhysicalTests.test_public_entrypoint_preview_and_apply
 
     def test_relative_link_preview_and_same_bytes_retarget(self):
         raw = self.add_document()
