@@ -1,4 +1,4 @@
-"""Conservative uninstall renderers. No filesystem writes or host operations."""
+"""Conservative owned-configuration renderers. No filesystem writes or host operations."""
 from __future__ import annotations
 
 import hashlib
@@ -7,6 +7,7 @@ import re
 import tomllib
 
 MARKERS = {
+    "copilot": ("<!-- BEGIN ORCHESTRARIUM COPILOT MANAGED -->", "<!-- END ORCHESTRARIUM COPILOT MANAGED -->"),
     "codex": ("<!-- BEGIN ORCHESTRARIUM CODEX PACK -->", "<!-- END ORCHESTRARIUM CODEX PACK -->"),
     "claude": ("<!-- BEGIN ORCHESTRARIUM CLAUDE MANAGED -->", "<!-- END ORCHESTRARIUM CLAUDE MANAGED -->"),
     "shared": ("<!-- BEGIN ORCHESTRARIUM SHARED MANAGED -->", "<!-- END ORCHESTRARIUM SHARED MANAGED -->"),
@@ -25,11 +26,17 @@ def owned_block(text: str, kind: str, document_context) -> tuple[int, int] | Non
     return starts[0].start(), stops[0].start() + len(end)
 
 
+def text_receipt_digest(text: str) -> str:
+    """Hash the existing LF-decoded UTF-8 configuration-text contract."""
+    canonical = text.replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def block_digest(text: str, kind: str, document_context) -> str | None:
     bounds = owned_block(text, kind, document_context)
     if bounds is None:
         return None
-    return hashlib.sha256(text[bounds[0]:bounds[1]].encode("utf-8")).hexdigest()
+    return text_receipt_digest(text[bounds[0]:bounds[1]])
 
 
 def remove_owned_block(text: str, kind: str, expected: str, document_context) -> str:
@@ -41,6 +48,98 @@ def remove_owned_block(text: str, kind: str, expected: str, document_context) ->
     start, stop = bounds
     # Keep every byte outside the owned markers, including user imports/comments.
     return text[:start] + text[stop:]
+
+
+def merge_owned_block(text: str | None, kind: str, payload: str, document_context,
+                      *, expected_digest: str | None = None) -> str:
+    """Render an install/update without claiming user edits or marker examples.
+
+    The existing receipt supplies the digest for updates. Publication and
+    recording the resulting digest remain with the installation transaction.
+    """
+    begin, end = MARKERS[kind]
+    if (text is not None and not isinstance(text, str)
+            or not isinstance(payload, str) or not payload or not payload.endswith("\n")
+            or "\0" in payload
+            or any(marker.removesuffix(" -->") in payload
+                   for pair in MARKERS.values() for marker in pair)):
+        raise ValueError("Invalid managed document payload")
+    current = "" if text is None else text
+    bounds = owned_block(current, kind, document_context)
+    visible, _ = document_context(current)
+    count = 0 if bounds is None else 1
+    if any(visible.count(marker.removesuffix(" -->")) != count for marker in (begin, end)):
+        raise ValueError("Ambiguous managed document block")
+    block = begin + "\n" + payload + end
+    if bounds is None:
+        if expected_digest is not None:
+            raise ValueError("Missing recorded managed document block")
+        start = 0
+        result = block + "\n" + ("\n" + current if current else "")
+    else:
+        if expected_digest is None or block_digest(current, kind, document_context) != expected_digest:
+            raise ValueError("Unowned or modified managed document block preserved")
+        start, stop = bounds
+        result = current[:start] + block + current[stop:]
+    # Source fences must not swallow the closing marker or foreign user text.
+    if owned_block(result, kind, document_context) != (start, start + len(block)):
+        raise ValueError("Invalid managed document frame")
+    return result
+
+
+def validate_selected_document(text: str, kind: str, document_context, *,
+                               document_digest: str, span: tuple[int, int]) -> tuple[int, int]:
+    """Validate an explicitly selected interval against exact UTF-8 preimage bytes.
+
+    Selection and storage authority belong to the caller. A matching digest or
+    recognizable frame supplies neither consent nor permission to write.
+    """
+    if (type(text) is not str or type(kind) is not str or kind not in MARKERS
+            or type(document_digest) is not str
+            or type(span) is not tuple or len(span) != 2
+            or any(type(index) is not int for index in span)):
+        raise ValueError("Invalid selected document")
+    start, end = span
+    if (not 0 <= start < end <= len(text)
+            or hashlib.sha256(text.encode("utf-8")).hexdigest() != document_digest):
+        raise ValueError("Invalid selected document")
+    # Parsing errors are final; malformed marked documents are never legacy.
+    bounds = owned_block(text, kind, document_context)
+    visible, code_spans = document_context(text)
+    count = 0 if bounds is None else 1
+    if any(visible.count(marker.removesuffix(" -->")) != count for marker in MARKERS[kind]):
+        raise ValueError("Ambiguous managed document block")
+    if bounds is not None:
+        if bounds != span:
+            raise ValueError("Selected span differs from managed document block")
+        return bounds
+
+    def line_boundary(index):
+        return (index == 0 or index == len(text)
+                or (text[index - 1] in "\r\n" and text[index - 1:index + 1] != "\r\n"))
+
+    if (kind != "codex" or not line_boundary(start) or not line_boundary(end)
+            or any(begin < boundary < finish
+                   for begin, finish in code_spans for boundary in (start, end))
+            or not re.match(r"# (?:Shared Governance|Codex Platform Rules)[ \t]*(?:\r\n|\r|\n|$)",
+                            visible[start:end])):
+        raise ValueError("Invalid selected legacy document")
+    return start, end
+
+
+def render_selected_document(existing: str, kind: str, payload: str, document_context, *,
+                             document_digest: str, span: tuple[int, int]) -> str:
+    """Replace only a caller-selected interval; perform no storage operation."""
+    start, end = validate_selected_document(
+        existing, kind, document_context, document_digest=document_digest, span=span)
+    replacement = merge_owned_block(None, kind, payload, document_context)
+    marked = owned_block(existing, kind, document_context) is not None
+    # A marked interval excludes its trailing newline, which remains user text.
+    inserted = replacement[:-1] if marked else replacement
+    result = existing[:start] + inserted + existing[end:]
+    if owned_block(result, kind, document_context) != (start, start + len(replacement) - 1):
+        raise ValueError("Invalid selected managed document frame")
+    return result
 
 
 def remove_native_roles(payload: bytes, registrations: dict[str, dict[str, str]]) -> bytes:

@@ -32,10 +32,17 @@ def validate_path(value: object, provider: str, scope: str) -> str:
     if PurePosixPath(value).is_absolute():
         raise ValueError("Absolute owned path")
     roots = client["roots"]
+    if "scope_roots" in client:
+        scoped = client["scope_roots"]
+        if type(scoped) is not dict or scope not in scoped:
+            raise ValueError("Invalid installation scope roots")
+        roots = scoped[scope]
+        if type(roots) not in (tuple, list) or any(type(root) is not str for root in roots):
+            raise ValueError("Invalid installation scope roots")
     allowed = len(parts) > 1 and parts[0] in roots
     if value in client["documents"][scope]:
         allowed = True
-    if not allowed or parts[-1] == RECEIPT_NAME:
+    if not allowed or parts[-1].casefold() == RECEIPT_NAME:
         raise ValueError("Owned path outside selected provider")
     return value
 
@@ -95,11 +102,46 @@ def encode_record(files: dict[str, str], provider: str, scope: str, *, configs: 
         value["configs"] = configs
     if directories is not None:
         value["directories"] = directories
+    return serialize_record(value, provider, scope)
+
+
+def serialize_record(value: dict, provider: str, scope: str) -> bytes:
+    """Serialize a validated projection without adding ownership or layout.
+
+    This pure codec grants no storage authority or permission to persist.
+    encode_record retains its existing copy-layout construction contract.
+    """
     value = validate_record(value, provider, scope)
     payload = (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
     if len(payload) > MAX_BYTES:
         raise ValueError("Ownership record exceeds limit")
     return payload
+
+
+def serialize_fresh_payloads(files: dict[str, str], provider: str, scope: str) -> bytes | None:
+    """Project already confirmed fresh file outcomes into a minimal receipt.
+
+    The caller owns freshness and persistence authority. This pure serializer
+    neither verifies that authority nor reads or merges historical ownership.
+    """
+    client = get_client(provider)
+    value = dict(schema=SCHEMA, provider=provider, scope=scope, files={})
+    validate_record(value, provider, scope)
+    if type(files) is not dict:
+        raise ValueError("Invalid fresh payload map")
+    for path, digest in files.items():
+        if type(path) is not str or type(digest) is not str:
+            raise ValueError("Invalid fresh payload entry")
+        if not any(path.startswith(root + "/") for root in client["payload_roots"]):
+            continue
+        parts = path.split("/")
+        if "__pycache__" in parts or parts[-1].casefold() == RECEIPT_NAME:
+            continue
+        validate_path(path, provider, scope)
+        value["files"][path] = digest
+    if not value["files"]:
+        return None
+    return serialize_record(value, provider, scope)
 
 
 def plan_file_removal(record: dict, observed: dict[str, str | None]) -> dict[str, tuple[str, ...]]:
@@ -114,13 +156,49 @@ def plan_file_removal(record: dict, observed: dict[str, str | None]) -> dict[str
     return {key: tuple(paths) for key, paths in result.items()}
 
 
+def fresh_control_paths(provider: str, scope: str) -> frozenset[str]:
+    """Known control surfaces; membership is not creation authority."""
+    client = get_client(provider)
+    paths = set(client["documents"][scope])
+    paths.update((client["mode_file"][scope], client["registration"]))
+    if client["native_config"] is not None:
+        paths.add(client["native_config"])
+    return frozenset(paths)
+
+
+def serialize_fresh_install(files: dict[str, str], controls: dict[str, str],
+                            provider: str, scope: str) -> bytes | None:
+    """Serialize only caller-proven creations, never infer control ownership.
+
+    Whole-file claims require a creator witness. Existing merged controls must
+    not enter this input. A later edit preserves the entire control file.
+    """
+    payload = serialize_fresh_payloads(files, provider, scope)
+    value = (decode_record(payload, provider, scope) if payload is not None else
+             dict(schema=SCHEMA, provider=provider, scope=scope, files={}))
+    if type(controls) is not dict:
+        raise ValueError("Invalid created control map")
+    configs = {path: {"kind": "created-file", "sha256": digest}
+               for path, digest in controls.items()}
+    if configs:
+        value["configs"] = configs
+    if not value["files"] and not configs:
+        return None
+    return serialize_record(value, provider, scope)
+
+
 def validate_config(path: str, spec: object, provider: str, scope: str) -> None:
     validate_path(path, provider, scope)
     if type(spec) is not dict:
         raise ValueError("Invalid owned configuration")
     client = get_client(provider)
     kind = spec.get("kind")
-    if kind == "block":
+    if kind == "created-file":
+        if (path not in fresh_control_paths(provider, scope)
+            or set(spec) != {"kind", "sha256"}
+            or type(spec["sha256"]) is not str or not _HASH.fullmatch(spec["sha256"])):
+            raise ValueError("Invalid created control file")
+    elif kind == "block":
         allowed = client["documents"][scope]
         if (set(spec) != {"kind", "blockKind", "sha256"} or allowed.get(path) != spec["blockKind"]
             or type(spec["sha256"]) is not str or not _HASH.fullmatch(spec["sha256"])):

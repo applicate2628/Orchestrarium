@@ -25,3 +25,6 @@ tests/fixtures/provider-prompt-priors/** -text
 
 # Release prose has a cross-platform LF contract; archived payload bytes above remain exact.
 RELEASE_NOTES.md text eol=lf
+
+# This source-format regression checks its own checkout bytes.
+/tests/test_codex_skill_catalog_budget.py text eol=lf

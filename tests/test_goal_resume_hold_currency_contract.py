@@ -128,14 +128,10 @@ def test_current_instruction_renderers_retain_goal_authority_rule() -> None:
     # Existing pure renderer extraction: no install, import of effect owners, or model call.
     import re
     tree = ast.parse((ROOT / "scripts/production_installer.py").read_text(encoding="utf-8"))
-    names = {"_merge_codex_agents", "_render_claude_document"}
+    names = {"_codex_document_payload", "_render_codex_document", "_render_claude_document"}
     nodes = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
     assert {node.name for node in nodes} == names
-    written: list[str] = []
-    ns = {"re": re, "Path": Path, "_CreateOnlyMutablePath": object,
-          "_read_owned_text": lambda target, owner: None,
-          "_write_owned_text": lambda target, content, owner: written.append(content),
-          "_CLAUDE_DOC_MARKER_PREFIXES": tuple(
+    ns = {"re": re, "_CLAUDE_DOC_MARKER_PREFIXES": tuple(
         f"<!-- {edge} ORCHESTRARIUM {kind} MANAGED"
         for kind in ("CLAUDE", "SHARED") for edge in ("BEGIN", "END"))}
     for node in tree.body:
@@ -145,12 +141,10 @@ def test_current_instruction_renderers_retain_goal_authority_rule() -> None:
                     ns[target.id] = ast.literal_eval(node.value)
     exec(compile(ast.Module(body=nodes, type_ignores=[]), "<pure instruction renderers>", "exec"), ns)
     shared = SHARED.read_text(encoding="utf-8")
-    # Capture the real SDK renderer output without writing an installed file.
-    ns["_merge_codex_agents"](ROOT, ROOT / "src.codex", Path("AGENTS.md"),
-                              False, prefer_global=False)
-    assert len(written) == 1
+    provider = (ROOT / "src.codex/AGENTS.codex.md").read_text(encoding="utf-8")
+    payload = ns["CODEX_BEGIN"] + "\n" + ns["_codex_document_payload"](shared, provider) + ns["CODEX_END"] + "\n"
     for text in (
-        written[0],
+        ns["_render_codex_document"](None, payload),
         ns["_render_claude_document"](None, shared, claude=False),
     ):
         check(text, tuple(fragment for fragments in CASES.values() for fragment in fragments))

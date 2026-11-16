@@ -44,7 +44,7 @@ Before pausing or handing off, keep important source changes, unpublished commit
 | Claude common-skill projections | The secondary adapter receives independent skill copies from the common source through the production installer; historical Source comparison trees stay protected unless compatibility migration is explicitly admitted. |
 | Provider-specific addenda | `references-codex/`, `adapters/claude/references/` |
 | Agents-mode schema and defaults | `shared/agents-mode.schema.json`, `shared/agents-mode.presets.json`, `shared/agents-mode.defaults.yaml` |
-| Installers | root `install.*`, `scripts/install-*.{sh,ps1}` |
+| Installers | Python entry points `install.py`, `scripts/install-codex.py`, and `scripts/install-claude.py`; matching `.sh` files are thin POSIX launchers. |
 | Release log | `RELEASE_NOTES.md` |
 
 ## Runtime Map

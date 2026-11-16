@@ -64,6 +64,13 @@ def _live_common_skill_hashes(root: Path = ROOT) -> dict[str, dict[str, str]]:
             hashes[pack] = digest(path.read_bytes())
         # Claude's source tree is a protected historical migration input, not
         # a second live owner. The installer projection is checked separately.
+        if name == "repo-cleanup":
+            assert hashes == {
+                "src.codex": "80d1a331232eb39aafbc1f328831212b1bb4633a0a7efe8aedaec99c04ad4234",
+                "adapters/claude": "942d2eed5941b4468b28fcb8c89d3ac03416d963c598613c0e8e3cb5553b2616",
+            }, f"repo-cleanup canonical or historical body drifted: {hashes}"
+            result[name] = hashes
+            continue
         result[name] = hashes
     return result
 

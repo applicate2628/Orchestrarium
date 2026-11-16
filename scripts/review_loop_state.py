@@ -391,7 +391,7 @@ def _scout_amendment_history(data: dict[str, Any]) -> tuple[dict[int, dict[str, 
         if not isinstance(operation, dict) or not isinstance(operation.get("receipt"), dict):
             continue
         receipt = operation["receipt"]
-        if receipt.get("command") in {"begin", "next-round"} and type(receipt.get("round")) is int:
+        if isinstance(receipt.get("command"), str) and receipt["command"] in {"begin", "next-round"} and type(receipt.get("round")) is int:
             admitted_round = max(admitted_round, receipt["round"])
         if receipt.get("command") == "close":
             closed = True
@@ -546,7 +546,7 @@ def _unstarted_round_errors(data: dict[str, Any], rnd: dict[str, Any], operation
     for operation in operations:
         receipt = operation["receipt"]
         if receipt.get("round") == rnd["round"]:
-            if receipt.get("command") not in {"begin", "next-round"}:
+            if not isinstance(receipt.get("command"), str) or receipt["command"] not in {"begin", "next-round"}:
                 errors.append("unstarted close has recorded round execution")
             else:
                 admissions.append(receipt)
@@ -609,7 +609,7 @@ def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: b
         if not _nonempty(data.get(key)):
             errors.append(f"{key}: expected non-empty string")
     status = data.get("status")
-    if status not in {"running", *OUTCOMES}:
+    if not isinstance(status, str) or status not in {"running", *OUTCOMES}:
         errors.append("status: invalid value")
     if require_terminal and status == "running":
         errors.append("status: terminal state required")
@@ -633,6 +633,8 @@ def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: b
                 seen_ops.add(op_id)
             if not _nonempty(operation.get("fingerprint")) or not isinstance(operation.get("receipt"), dict):
                 errors.append(f"{label}: invalid fingerprint or receipt")
+            elif "command" in operation["receipt"] and not isinstance(operation["receipt"]["command"], str):
+                errors.append(f"{label}.receipt.command: expected string")
     rounds = data.get("rounds")
     if not isinstance(rounds, list) or not rounds:
         return errors + ["rounds: expected non-empty list"]
@@ -653,7 +655,7 @@ def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: b
         if rnd.get("round") != index:
             errors.append(f"{label}.round: expected {index}")
         phase = rnd.get("phase")
-        if phase not in {"admitted", "collecting", "complete"}:
+        if not isinstance(phase, str) or phase not in {"admitted", "collecting", "complete"}:
             errors.append(f"{label}.phase: invalid value")
         if not _nonempty(rnd.get("diff")):
             errors.append(f"{label}.diff: expected non-empty string")
@@ -763,7 +765,7 @@ def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: b
             if block.get("artifact_revision") != revision:
                 errors.append(f"{lane_label}.artifact_revision: must equal round revision")
             state = block.get("state")
-            if state not in {"admitted", "running", "complete"}:
+            if not isinstance(state, str) or state not in {"admitted", "running", "complete"}:
                 errors.append(f"{lane_label}.state: invalid value")
             if state == "complete":
                 if lane in VERDICT_LANES:
@@ -1801,14 +1803,24 @@ def _qualify_ledger_closure(root: Path, metadata: dict[str, Any], revision: str,
         raise StateError("RLSTATE_CLOSURE_UNQUALIFIED", "ledger qualification cardinality differs")
     positions = {}
     for key in ("target_run_id", "closer_run_id"):
-        found = [i for i, row in enumerate(context.rows) if row.event.get("runId") == metadata[key]]
+        found = [i for i, row in enumerate(context.rows) if isinstance(row.event.get("runId"), str)
+                 and row.event["runId"].casefold() == metadata[key].casefold()]
         if len(found) != 1:
             raise StateError("RLSTATE_CLOSURE_UNQUALIFIED", f"unique {key} not found")
         positions[key] = found[0]
     target_pos, closer_pos = positions["target_run_id"], positions["closer_run_id"]
     target, closer = context.rows[target_pos].event, context.rows[closer_pos].event
-    if (errors or target_pos >= closer_pos
+    for event in (target, closer):
+        launch_id = event.get("launchRunId")
+        if isinstance(launch_id, str) and sum(
+                isinstance(row.event.get("runId"), str)
+                and row.event["runId"].casefold() == launch_id.casefold() for row in context.rows) != 1:
+            raise StateError("RLSTATE_CLOSURE_UNQUALIFIED", "selected launch identity is ambiguous")
+    if (target_pos >= closer_pos
             or target.get("gate") != "REVISE" or closer.get("gate") != "PASS"
+            or target.get("runId") != metadata["target_run_id"]
+            or closer.get("runId") != metadata["closer_run_id"]
+            or not validity[target_pos].authority.artifact_evidence_eligible
             or not validity[target_pos].authority.revise_target_eligible
             or not validity[closer_pos].authority.closer_eligible
             or metadata["target_run_id"] not in closer.get("closesRunIds", [])):
@@ -1816,9 +1828,10 @@ def _qualify_ledger_closure(root: Path, metadata: dict[str, Any], revision: str,
     # Restrict existing authority to this closer; a different PASS must not win.
     restricted = tuple(replace(entry, authority=replace(entry.authority, closer_eligible=False))
                        if pos != closer_pos else entry for pos, entry in enumerate(validity))
-    open_revise, _open_launches = owner.validate_closure(
-        context.rows, errors, validity=restricted, context=context)
-    if errors or any(event.get("runId") == metadata["target_run_id"] for event in open_revise):
+    closed_relations = {}
+    owner.validate_closure(context.rows, errors, validity=restricted, context=context,
+                           closed_relations_out=closed_relations)
+    if closed_relations.get(metadata["target_run_id"]) != metadata["closer_run_id"]:
         raise StateError("RLSTATE_CLOSURE_UNQUALIFIED", errors[0] if errors else "original obligation remains open")
     try:
         sources = owner.qualify_review_loop_receiving_sources_v1(
@@ -1827,8 +1840,9 @@ def _qualify_ledger_closure(root: Path, metadata: dict[str, Any], revision: str,
             validity=validity, target_pos=target_pos, reviewer_pos=closer_pos,
             initial_receiving=initial_receiving)
         final_errors = []
-        final_open, _ = owner.validate_closure(context.rows, final_errors, validity=restricted, context=context)
-        if final_errors or any(event.get("runId") == metadata["target_run_id"] for event in final_open):
+        owner.validate_closure(context.rows, final_errors, validity=restricted, context=context,
+                               closed_relations_out=closed_relations)
+        if closed_relations.get(metadata["target_run_id"]) != metadata["closer_run_id"]:
             raise ValueError("selected ledger closure changed during source receiving")
     except (ValueError, TypeError, KeyError, RuntimeError) as exc:
         raise StateError("RLSTATE_CLOSURE_UNQUALIFIED", str(exc)) from exc
@@ -1849,7 +1863,7 @@ def _verdict_closure_history(data: dict[str, Any]):
         if not isinstance(operation, dict) or not isinstance(operation.get("receipt"), dict):
             continue
         receipt = operation["receipt"]
-        if receipt.get("command") in {"begin", "next-round"} and type(receipt.get("round")) is int:
+        if isinstance(receipt.get("command"), str) and receipt["command"] in {"begin", "next-round"} and type(receipt.get("round")) is int:
             admitted_round = max(admitted_round, receipt["round"])
         if receipt.get("command") == "close":
             closed = True

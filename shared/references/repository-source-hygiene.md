@@ -47,6 +47,10 @@ every command. Unknown proof retains that entry while independently ready work
 continues. Blob matching preserves bytes, not an otherwise unrecorded directory
 layout or metadata; canonical artifact promotion still owns those requirements.
 
+## Instruction scope across work areas
+
+The shared **Repository orientation; Mechanism inventory before new paths** rule owns instruction discovery for every additional directory/repository, including parallel assignments. Resolve that target's applicable local instruction chain before operating there; startup guidance for another working directory is not a substitute, and deeper policies stay scoped to their subtree. Apply **Context handoff economy**: reuse applicable unchanged guidance only when it is already in the receiver's actual context, and supply missing or uncertain target instructions through the existing trusted input path before relying on them. Reading or forwarding instructions does not expand permissions. This is Orchestrarium guidance, not a guarantee of automatic host loading or a registry of machine paths or special-case folders.
+
 ## What counts as an "entity type"
 
 An entity type is the **kind of work the file does**, classified by:
