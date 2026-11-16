@@ -124,6 +124,24 @@ class PhysicalTests(unittest.TestCase):
         self.assertEqual(self.document.read_bytes(), b"user only\r\n")
         self.assertEqual(self.document.stat().st_ino, identity)
 
+
+    def test_absent_document_block_changed_during_apply_preserves_new_content(self):
+        self.add_document()
+        self.document.write_bytes(b"user only")
+        _, report = self.call()
+        original = self.backend._CreateOnlyMutablePath.remove_exact_file
+        def change(owner, relative, expected):
+            result = original(owner, relative, expected)
+            if relative.name == "settings.json":
+                self.document.write_bytes(b"concurrent user edit")
+            return result
+        with patch.object(self.backend._CreateOnlyMutablePath, "remove_exact_file", change):
+            with self.assertRaisesRegex(self.backend._InstallFailure, "E_ROLLBACK_SETTLEMENT_FAILED.*E_UNINSTALL_DOCUMENT_DRIFT"):
+                self.call(True, report["selection"])
+        self.assertEqual(self.document.read_bytes(), b"concurrent user edit")
+        self.assertEqual(self.file.read_bytes(), b"owned")
+        self.assertTrue(self.control.exists())
+
     def link_agents(self):
         import _winapi
         storage = self.home / "storage"

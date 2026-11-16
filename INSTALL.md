@@ -423,3 +423,8 @@ An old receipt is not promoted into proof of historical physical ownership.
 Receipted document blocks are removed through the shared configuration renderer;
 bytes outside the markers are preserved exactly. Edited or ambiguous owned blocks
 preserve the installation. An already absent block is a no-op, not document deletion.
+
+Receipted linked documents bind their physical file and full link chain to the
+preview, then use the existing scalar transaction owner. The link remains in
+place. This does not change the platform admission boundary: public POSIX
+installation still depends on the separate effect-bound backend qualification.
