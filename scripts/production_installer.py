@@ -1999,7 +1999,7 @@ class _DeclaredPathEffect:
 def _require_transaction_disposal_backend() -> None:
     """Refuse unqualified transaction disposal before reads or effects.
 
-    This negative gate is not a capability or ownership proof. Windows callers
+    This platform gate is not a capability or ownership proof. Every caller
     must still satisfy the existing native object and transaction checks.
     """
     if os.name not in {"nt", "posix"}:
@@ -4362,8 +4362,8 @@ class _InstallTransaction:
     def _dispose_posix_node(self, path: Path, expected: _PhysicalNode) -> None:
         """Qualify one leaf under caller serialization, not hostile-writer exclusion.
 
-        The transaction admission gate stays closed while the remaining lifecycle
-        is unqualified. The caller owns ancestor selection and journal advancement.
+        The caller owns ancestor selection and journal advancement within the
+        supported ordinary serialized-writer lifecycle.
         No permission changes or recursive adoption occur in this primitive.
         """
         if (not isinstance(expected, _PhysicalNode)
@@ -12701,14 +12701,14 @@ def _finish_install_result(provider, target, dry_run, applied, primary, cleanup_
 
 
 def _installer_platform_admitted() -> bool:
-    """Temporary public admission boundary; no command-line or environment override."""
+    """Admit implemented platform backends; native operation checks remain mandatory."""
     return os.name in {"nt", "posix"}
 
 
 def install(provider: str, argv: list[str] | None = None) -> int:
     args = _parser(provider).parse_args(argv)
     # Even dry-run builds and disposes staging before entering the transaction.
-    # Keep this temporary hold ahead of target resolution and all plan creation.
+    # Refuse unsupported hosts before target resolution and all plan creation.
     if not _installer_platform_admitted():
         print(
             "FAIL: E_INSTALLER_PLATFORM_UNSUPPORTED: this host has no qualified installer backend. "

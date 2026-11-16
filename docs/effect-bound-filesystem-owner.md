@@ -227,3 +227,14 @@ and same-byte retarget refusal preserving both targets. The test process alone
 was elevated after owner confirmation; no security policy, ACL, trust or live
 profile was changed. This is bounded operation acceptance, not crash atomicity
 or public POSIX qualification.
+
+
+## Current public POSIX receiving - 2026-11-16
+
+Dmitry explicitly approved admission of the implemented backend, preserving the ordinary serialized-writer scope and existing guards. Current main was merged without replacing either history. The public receiving harness no longer substitutes admission checks.
+
+On the assembled source at 6613ed01, native Ubuntu on WSL/DrvFS completed both public Claude receiving cases (1494.493 seconds, exit 0): project fresh 360.51 seconds and repeat 226.72 seconds; global fresh 372.33 seconds, repeat 302.60 seconds and selected non-Lead skill upgrade 227.10 seconds. All five invocations ran real local hook health, returned success, preserved the unrelated user marker and left staging empty. The selected upgrade also preserved the neighboring skill tree and source bytes, validated receipt members and left no retained/probe/upgrade debris.
+
+Current assembled checks also passed: 18 POSIX lifecycle tests; five Linux linked-document tests including public entry, apply/repeat, rollback and same-byte retarget; 13 platform admission/disposal checks. The separate authorized elevated Windows file-symlink qualification passed three tests with zero skips. Earlier Windows uninstall qualification passed 21 tests. Independent review approved the bounded admission delta; publication safety gate passed. Later installer comment corrections were checked for identical executable AST after stripping docstrings.
+
+This establishes the tested ordinary lifecycle, not hostile-writer exclusion or crash atomicity. No model requests, live profile updates, trust changes, SDK changes or new native macOS combined-version run occurred. Earlier native macOS component/checkpoint evidence remains scoped to those recorded versions.
