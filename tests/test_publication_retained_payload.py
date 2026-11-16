@@ -106,6 +106,7 @@ class RetainedPayloadTests(unittest.TestCase):
         evaluation.unresolved = 0
         evaluation._analysis = {}
         evaluation._machine_path_analysis = None
+        evaluation._clean_line_analysis = scanner._CleanLineAnalysis()
         finder = mock.Mock(side_effect=lambda line: "marked" in line)
         arguments = dict(subject_kind="history-blob", mode="range-blob-text",
                          raw_path=b"sample.txt", blob_oid="1" * 40, git_mode="100644")

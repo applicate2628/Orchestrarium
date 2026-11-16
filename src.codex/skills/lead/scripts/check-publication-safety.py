@@ -1560,6 +1560,21 @@ def _byte_region(raw: bytes, start: int, end: int) -> dict:
     return {"startByte": start, "endByteExclusive": end, "sha256": hashlib.sha256(raw[start:end]).hexdigest()}
 
 
+class _CleanLineAnalysis:
+    """Exact negative lexical results from only the preceding payload.
+
+    This is not review authority: candidate-bearing lines, byte coordinates,
+    machine paths and per-commit authorization are always evaluated normally.
+    Retention is bounded by two admitted payloads during a transition, rather
+    than by repository history. The captured detector callable and subject kind
+    bind reuse; path-specific filtering remains outside this cache.
+    """
+
+    def __init__(self):
+        self.context = None
+        self.lines: set[str] = set()
+
+
 def _analyze_review_candidates(
     raw: bytes,
     path: str,
@@ -1567,15 +1582,28 @@ def _analyze_review_candidates(
     subject_kind: str,
     digest: Callable[[str, object], str],
     canonical: Callable[[object], bytes],
+    clean_lines: _CleanLineAnalysis | None = None,
 ) -> tuple[dict, ...]:
     # Validate UTF-8 before detection, but only allocate byte coordinates when
     # an observation needs a candidate witness. Clean text has no byte regions.
     text = raw.decode("utf-8", "strict")
     _definitions, leaves = _build_detector_catalog(digest)
     groups: dict[tuple, list[_TextObservation]] = {}
+    context = (subject_kind, _line_observations)
+    previous = clean_lines.lines if clean_lines is not None and clean_lines.context == context else set()
+    current: set[str] = set()
     for line_number, line_start, line in _selected_text_lines(text, path, subject_kind):
+        if line in previous or line in current:
+            current.add(line)
+            continue
+        observed = False
         for observation in _line_observations(line, line_number, line_start, subject_kind):
+            observed = True
             groups.setdefault((line_start, _observation_key(observation)), []).append(observation)
+        if not observed:
+            current.add(line)
+    if clean_lines is not None:
+        clean_lines.context, clean_lines.lines = context, current
     if not groups:
         return ()
     _text, boundaries = _original_byte_boundaries(raw)
@@ -1719,14 +1747,15 @@ def resolve_review_detector(diagnostic_class: str, *, policy_module) -> dict:
     raise ValueError("unknown-detector")
 
 
-def analyze_review_candidates(raw: bytes, path: bytes, *, subject_kind: str, policy_module) -> dict:
+def analyze_review_candidates(raw: bytes, path: bytes, *, subject_kind: str, policy_module,
+                              clean_lines: _CleanLineAnalysis | None = None) -> dict:
     if not isinstance(raw, bytes) or not isinstance(path, bytes) or not path or b"\0" in path:
         return {"complete": False, "candidates": (), "unresolved": (),
                 "refusal": _refusal("PS-INPUT-REFUSAL", "review-evaluation")}
     decoded_path = path.decode("utf-8", "surrogateescape")
     try:
         rows = _analyze_review_candidates(raw, decoded_path, subject_kind=subject_kind,
-            digest=policy_module.H, canonical=policy_module.C)
+            digest=policy_module.H, canonical=policy_module.C, clean_lines=clean_lines)
     except UnicodeError:
         return {"complete": True, "candidates": (), "unresolved": tuple(_content_hits(
             raw.decode("utf-8", "replace"), decoded_path, lambda _line: (), subject_kind=subject_kind,
@@ -1827,6 +1856,7 @@ class ReviewEvaluation:
         self.unresolved = 0
         self._analysis: dict[tuple, dict] = {}
         self._machine_path_analysis = None
+        self._clean_line_analysis = _CleanLineAnalysis()
         self._applications: list[tuple[dict, dict, dict, dict]] = []
         self._applied_keys: set[tuple] = set()
 
@@ -1895,7 +1925,8 @@ class ReviewEvaluation:
         key = (raw_path, blob_oid, git_mode, subject_kind, hashlib.sha256(raw).digest())
         analysis = self._analysis.get(key)
         if analysis is None:
-            analysis = analyze_review_candidates(raw, raw_path, subject_kind=subject_kind, policy_module=self.policy)
+            analysis = analyze_review_candidates(raw, raw_path, subject_kind=subject_kind, policy_module=self.policy,
+                                                 clean_lines=self._clean_line_analysis)
             self._analysis[key] = analysis
         if not analysis["complete"] or analysis["refusal"] is not None:
             raise RuntimeError("review-evaluation")
