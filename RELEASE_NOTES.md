@@ -2,6 +2,8 @@
 
 ## 2026-11-16
 
+- Refresh native role byte bindings after the existing browser/computer feature changes, preserving every role instruction and runtime setting. Source-manifest validation still rejects unrecorded drift; bundled installation can now validate the accepted current factory payload.
+
 - Add distribution-only runtime/notice binding to the existing pre-SDK layout. Local assembly requires matching runtime and notice inventories before output; no SDK transition, model launch or installer policy change is included. Historical recovery evidence is distinct from acceptance of this source revision.
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.

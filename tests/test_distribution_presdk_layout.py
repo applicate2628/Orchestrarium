@@ -1,5 +1,6 @@
 """Source-layout and memory-only runtime evidence checks for pre-SDK distribution."""
 import importlib.util
+import sys
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,6 +22,22 @@ class PreSdkDistributionTests(unittest.TestCase):
     def setUp(self):
         self.builder = load("build")
         self.launcher = load("launch")
+
+    def test_current_factory_role_manifest_is_valid(self):
+        with patch.object(sys, "path", [str(ROOT / "scripts"), *sys.path]):
+            installer = __import__("production_installer")
+        manifest = installer._source_codex_role_manifest(ROOT, ROOT / "src.codex/agents")
+        self.assertTrue(manifest["roles"])
+
+    def test_factory_role_byte_drift_is_still_refused(self):
+        with patch.object(sys, "path", [str(ROOT / "scripts"), *sys.path]):
+            installer = __import__("production_installer")
+        original = installer._file_sha256
+        def changed_role(path):
+            return "0" * 64 if Path(path).suffix == ".toml" else original(path)
+        with patch.object(installer, "_file_sha256", side_effect=changed_role):
+            with self.assertRaisesRegex(ValueError, "role digest"):
+                installer._source_codex_role_manifest(ROOT, ROOT / "src.codex/agents")
 
     def test_selected_application_inputs_exist_in_current_layout(self):
         for name in self.builder.APP_INPUTS:
