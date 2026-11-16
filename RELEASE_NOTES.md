@@ -2,7 +2,17 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-16
+
+- Bind receipted linked-document uninstall selection to the existing scalar owner, including physical storage and complete link-chain witnesses. Preserve the link and surrounding user text; keep public platform admission unchanged.
+
+- Remove receipted Claude document blocks through the existing configuration owner while retaining exact surrounding user bytes. Modified or ambiguous blocks preserve the installation; absent blocks and completed removals repeat safely.
+
+- Add bounded pre-SDK Claude selected-current uninstall through the existing transaction. Fresh control-file ownership comes from successful creator witnesses, not a pathname census; unknown or edited controls preserve their runtime, while unrecorded user data remains untouched. Preview and exact-state selection avoid treating legacy content hashes as historical linked-root authority. Global linked Claude runtime subroots reuse the existing identity-bound owner; preview/apply binds the link chain and physical target, preserves the junction, and refuses retarget drift. Shared Codex removal remains outside this slice.
+
 ## 2026-11-15
+
+- Reuse/admission guidance now includes evidenced neighboring owners and implementations. Materially invalidated architectural assumptions return to the existing Architect/review route before dependent execution; age and unchanged continuation create no new gate. This is instruction-level protection, not a claim of host enforcement or historical model compliance.
 
 - Failed installations now distinguish an implicitly created parent directory from installer-owned payload. After owned child operations roll back, a same-identity parent containing external runtime state is explicitly retained rather than blocking unrelated rollback or deleting that state. Changed owned files and substituted parents still fail closed; public POSIX admission is unchanged.
 

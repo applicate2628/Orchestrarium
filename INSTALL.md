@@ -409,3 +409,30 @@ The existing Lead package/receipt update carries these sections for Codex and th
 - `stdin`: standard input stream used by CLIs and wrappers.
 - `status.md`: human-readable recovery summary for the active work item.
 - `winerror`: native Windows error code; the installer reports only an exact integer in the unsigned 32-bit range.
+
+
+### Bounded pre-SDK Claude removal
+
+For Claude target paths, `python scripts/install-claude.py --global --uninstall`
+previews the exact currently selected receipt and objects. Review its file/control lists,
+then repeat with `--apply --uninstall-selection <SHA256>` only for that selection.
+Project mode uses the existing target option. The token is current-state selection,
+not historical root ownership; changing the receipt or selected objects invalidates it.
+Newly created control files are recorded only from transaction creator witnesses.
+Pre-existing or subsequently edited controls are not adopted: their presence preserves
+the runtime and returns a partial result. Modified payload and unrecorded user files
+remain; directories and the residual receipt are retained. Removal uses the existing
+transaction, and a late failure restores its effects. Preview performs no target writes.
+Global agents/skills/commands junctions use the existing linked-root authority.
+The selection binds their current logical and physical identities and link chain;
+retargeting invalidates the preview. Junctions and neighboring files remain untouched.
+Project links, nested links, and shared Codex runtime removal remain outside this route.
+An old receipt is not promoted into proof of historical physical ownership.
+Receipted document blocks are removed through the shared configuration renderer;
+bytes outside the markers are preserved exactly. Edited or ambiguous owned blocks
+preserve the installation. An already absent block is a no-op, not document deletion.
+
+Receipted linked documents bind their physical file and full link chain to the
+preview, then use the existing scalar transaction owner. The link remains in
+place. This does not change the platform admission boundary: public POSIX
+installation still depends on the separate effect-bound backend qualification.

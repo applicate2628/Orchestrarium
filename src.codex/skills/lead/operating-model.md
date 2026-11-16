@@ -49,6 +49,8 @@ Apply the binding shared **Workflow economy (binding)** rule. This Codex project
 
 ## Change classification
 
+Before routing a resumed plan with materially changed architectural assumptions, apply the bounded revalidation in shared Reuse before hand-rolling; retain the existing owner/review route rather than treating prior acceptance as current structural evidence.
+
 - Classify the change before selecting routing: `cosmetic`, `additive`, `behavioral`, or `breaking-or-cross-cutting`.
 - `cosmetic` usually stays on the normal delivery loop with QA only.
 - `additive` describes impact, not route admission. The lead applies the shared `quick-fix` predicate independently and re-classifies on any failed predicate.
