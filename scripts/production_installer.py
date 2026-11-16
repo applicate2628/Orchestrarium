@@ -62,13 +62,17 @@ except ModuleNotFoundError as error:
 try:
     from installation.ownership import (
         RECEIPT_NAME as _PROVIDER_RECEIPT_NAME,
-        serialize_fresh_payloads as _serialize_fresh_payloads)
+        serialize_fresh_payloads as _serialize_fresh_payloads,
+        serialize_fresh_install as _serialize_fresh_install,
+        fresh_control_paths as _fresh_control_paths)
 except ModuleNotFoundError as error:
     if error.name not in {"installation", "installation.ownership"}:
         raise
     from scripts.installation.ownership import (
         RECEIPT_NAME as _PROVIDER_RECEIPT_NAME,
-        serialize_fresh_payloads as _serialize_fresh_payloads)
+        serialize_fresh_payloads as _serialize_fresh_payloads,
+        serialize_fresh_install as _serialize_fresh_install,
+        fresh_control_paths as _fresh_control_paths)
 
 try:
     from installation.configuration import render_selected_document as _render_selected_document
@@ -679,6 +683,9 @@ def _parser(provider: str) -> argparse.ArgumentParser:
     modes.add_argument("--global", "-Global", dest="global_install", action="store_true")
     modes.add_argument("--target", "-Target")
     parser.add_argument("--force", "-Force", action="store_true")
+    parser.add_argument("--uninstall", action="store_true", help="Preview selected-current owned content removal")
+    parser.add_argument("--apply", action="store_true", help="Apply the reviewed uninstall selection")
+    parser.add_argument("--uninstall-selection", metavar="SHA256", help="Exact current selection from uninstall preview")
     parser.add_argument(
         "--replace-unreceipted-lead-sha256",
         metavar="SHA256",
@@ -11877,6 +11884,7 @@ def _fresh_provider_receipt_candidate(target: Path) -> Path | None:
 
 def _fresh_provider_receipt_files(
     provider: str, scope: str, receipt: Path, owner: _CreateOnlyMutablePath,
+    *, include_controls: bool = False,
 ) -> dict[str, _FreshFileWitness]:
     transaction = owner.transaction
     transient = {path for path in (transaction._temporary, *transaction._migration_retention)
@@ -11897,9 +11905,14 @@ def _fresh_provider_receipt_files(
     selected = {key: rows[0] for key, rows in candidates.items() if len(rows) == 1}
     payload = _serialize_fresh_payloads(
         {key: witness.node.data for key, witness in selected.items()}, provider, scope)
-    if payload is None:
-        return {}
-    files = json.loads(payload)["files"]
+    files = {} if payload is None else json.loads(payload)["files"]
+    if include_controls:
+        for key in selected.keys() & _fresh_control_paths(provider, scope):
+            witness = selected[key]
+            # A subsequent write is not the original creator's afterimage.
+            # Preserve it unclaimed rather than infer ownership from its name.
+            if transaction._image_matches(witness.path, {witness.path: witness.node}):
+                files[key] = witness.node.data
     return {key: selected[key] for key in files}
 
 
@@ -11914,9 +11927,13 @@ def _record_fresh_provider_receipt(
     if (not any(receipt == root or root in receipt.parents for root in transaction._original)
             or any(receipt in image for image in transaction._original.values())):
         return
-    selected = _fresh_provider_receipt_files(provider, scope, receipt, owner)
-    payload = _serialize_fresh_payloads(
-        {key: witness.node.data for key, witness in selected.items()}, provider, scope)
+    selected = _fresh_provider_receipt_files(
+        provider, scope, receipt, owner, include_controls=True)
+    control_paths = _fresh_control_paths(provider, scope)
+    payload = _serialize_fresh_install(
+        {key: witness.node.data for key, witness in selected.items() if key not in control_paths},
+        {key: witness.node.data for key, witness in selected.items() if key in control_paths},
+        provider, scope)
     if payload is None:
         return
     for witness in selected.values():
@@ -12286,6 +12303,27 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
+    if args.uninstall_selection is not None and not args.uninstall:
+        print("FAIL: --uninstall-selection requires --uninstall", file=sys.stderr)
+        return 1
+    if args.uninstall and any(value for name, value in vars(args).items()
+                              if name.startswith(("replace_", "migrate_", "enroll_"))):
+        print("FAIL: uninstall and update selections are separate operations", file=sys.stderr)
+        return 1
+    if args.apply and not args.uninstall:
+        print("FAIL: --apply requires --uninstall", file=sys.stderr)
+        return 1
+    if args.uninstall and provider != "claude":
+        print("FAIL: selected-current uninstall is qualified only for Claude; shared Codex runtime preserved", file=sys.stderr)
+        return 1
+    if args.uninstall:
+        root = Path(__file__).resolve().parents[1]
+        try:
+            operation = _load_module_from_path("orche_presdk_uninstall", root / "scripts/installation/uninstall.py")
+            return operation.run(sys.modules[__name__], root, provider, args)
+        except Exception as exc:
+            print("FAIL: uninstall preserved unverified state: " + _installer_failure_text(exc), file=sys.stderr)
+            return 1
     if args.replace_claude_instruction and provider != "claude":
         print("FAIL: E_CLAUDE_INSTRUCTION_SELECTION_INVALID: Claude only", file=sys.stderr)
         return 1

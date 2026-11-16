@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-16
+
+- Add bounded pre-SDK Claude selected-current uninstall through the existing transaction. Fresh control-file ownership comes from successful creator witnesses, not a pathname census; unknown or edited controls preserve their runtime, while unrecorded user data remains untouched. Preview and exact-state selection avoid treating legacy content hashes as historical linked-root authority. Linked namespaces and shared Codex removal remain outside this received slice.
+
 ## 2026-11-15
 
 - Reuse/admission guidance now includes evidenced neighboring owners and implementations. Materially invalidated architectural assumptions return to the existing Architect/review route before dependent execution; age and unchanged continuation create no new gate. This is instruction-level protection, not a claim of host enforcement or historical model compliance.

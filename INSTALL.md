@@ -401,3 +401,19 @@ The existing Lead package/receipt update carries these sections for Codex and th
 - `stdin`: standard input stream used by CLIs and wrappers.
 - `status.md`: human-readable recovery summary for the active work item.
 - `winerror`: native Windows error code; the installer reports only an exact integer in the unsigned 32-bit range.
+
+
+### Bounded pre-SDK Claude removal
+
+For ordinary Claude target paths, `python scripts/install-claude.py --global --uninstall`
+previews the exact currently selected receipt and objects. Review its file/control lists,
+then repeat with `--apply --uninstall-selection <SHA256>` only for that selection.
+Project mode uses the existing target option. The token is current-state selection,
+not historical root ownership; changing the receipt or selected objects invalidates it.
+Newly created control files are recorded only from transaction creator witnesses.
+Pre-existing or subsequently edited controls are not adopted: their presence preserves
+the runtime and returns a partial result. Modified payload and unrecorded user files
+remain; directories and the residual receipt are retained. Removal uses the existing
+transaction, and a late failure restores its effects. Preview performs no target writes.
+This bounded route does not support linked namespaces or shared Codex runtime removal,
+and does not establish the ticket's full linked-installation lifecycle acceptance.
