@@ -789,6 +789,101 @@ class _WindowsBoundNode:
     _creation_bindings = None
     _security_bindings = None
     _target_bindings = None
+    _privilege_bindings = None
+
+    @classmethod
+    @contextmanager
+    def symlink_privilege(cls, *, required: bool = True):
+        """Use an existing privilege on a private thread token before acquisition.
+
+        FSCTL symlink access is captured when the creator handle is opened.
+        Never adjust the process token or grant a privilege absent from the
+        current effective token. Restore any prior impersonation exactly.
+        """
+        if not required:
+            yield
+            return
+        ctypes, W, kernel, *_rest = cls._api()
+        if cls._privilege_bindings is None:
+            class Luid(ctypes.Structure):
+                _fields_ = [("low", W.DWORD), ("high", W.LONG)]
+
+            class Item(ctypes.Structure):
+                _fields_ = [("luid", Luid), ("attributes", W.DWORD)]
+
+            class Privileges(ctypes.Structure):
+                _fields_ = [("count", W.DWORD), ("items", Item * 1)]
+
+            api = ctypes.WinDLL("advapi32", use_last_error=True)
+            kernel.GetCurrentThread.argtypes = ()
+            kernel.GetCurrentThread.restype = W.HANDLE
+            kernel.GetCurrentProcess.argtypes = ()
+            kernel.GetCurrentProcess.restype = W.HANDLE
+            api.OpenThreadToken.argtypes = (W.HANDLE, W.DWORD, W.BOOL, ctypes.POINTER(W.HANDLE))
+            api.OpenThreadToken.restype = W.BOOL
+            api.OpenProcessToken.argtypes = (W.HANDLE, W.DWORD, ctypes.POINTER(W.HANDLE))
+            api.OpenProcessToken.restype = W.BOOL
+            api.DuplicateTokenEx.argtypes = (W.HANDLE, W.DWORD, ctypes.c_void_p,
+                                             ctypes.c_int, ctypes.c_int, ctypes.POINTER(W.HANDLE))
+            api.DuplicateTokenEx.restype = W.BOOL
+            api.LookupPrivilegeValueW.argtypes = (W.LPCWSTR, W.LPCWSTR, ctypes.POINTER(Luid))
+            api.LookupPrivilegeValueW.restype = W.BOOL
+            api.AdjustTokenPrivileges.argtypes = (W.HANDLE, W.BOOL, ctypes.POINTER(Privileges),
+                                                  W.DWORD, ctypes.c_void_p, ctypes.c_void_p)
+            api.AdjustTokenPrivileges.restype = W.BOOL
+            api.SetThreadToken.argtypes = (ctypes.POINTER(W.HANDLE), W.HANDLE)
+            api.SetThreadToken.restype = W.BOOL
+            cls._privilege_bindings = api, Privileges
+        api, Privileges = cls._privilege_bindings
+        source, private = W.HANDLE(), W.HANDLE()
+        had_thread_token = False
+        attached = False
+        try:
+            # QUERY | DUPLICATE | IMPERSONATE; the latter permits exact restore.
+            if api.OpenThreadToken(kernel.GetCurrentThread(), 0x0E, True, ctypes.byref(source)):
+                had_thread_token = True
+            else:
+                error = ctypes.get_last_error()
+                if error != 1008:  # ERROR_NO_TOKEN is the only process-token route.
+                    raise ctypes.WinError(error)
+                if not api.OpenProcessToken(kernel.GetCurrentProcess(), 0x0A, ctypes.byref(source)):
+                    raise ctypes.WinError(ctypes.get_last_error())
+            # QUERY | ADJUST_PRIVILEGES | IMPERSONATE, SecurityImpersonation,
+            # TokenImpersonation. The source token remains unchanged.
+            if not api.DuplicateTokenEx(source, 0x2C, None, 2, 2, ctypes.byref(private)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            state = Privileges()
+            state.count = 1
+            state.items[0].attributes = 2  # SE_PRIVILEGE_ENABLED, never REMOVED.
+            if not api.LookupPrivilegeValueW(None, "SeCreateSymbolicLinkPrivilege",
+                                              ctypes.byref(state.items[0].luid)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            ctypes.set_last_error(0)
+            success = api.AdjustTokenPrivileges(private, False, ctypes.byref(state), 0, None, None)
+            error = ctypes.get_last_error()
+            if not success or error:  # Includes successful API / NOT_ALL_ASSIGNED.
+                raise ctypes.WinError(error)
+            if not api.SetThreadToken(None, private):
+                raise ctypes.WinError(ctypes.get_last_error())
+            attached = True
+            yield
+        finally:
+            try:
+                if attached and not api.SetThreadToken(None, source if had_thread_token else None):
+                    # Do not run rollback/caller code under an unrestored identity.
+                    # Process death releases the private token and native handles.
+                    try:
+                        os.write(2, b"E_WINDOWS_TOKEN_RESTORE_FAILED: installer stopped; inspect retained transaction state.\n")
+                    finally:
+                        os._exit(70)
+            finally:
+                try:
+                    if private and not kernel.CloseHandle(private):
+                        raise ctypes.WinError(ctypes.get_last_error())
+                finally:
+                    if source and not kernel.CloseHandle(source):
+                        raise ctypes.WinError(ctypes.get_last_error())
+
 
     @classmethod
     def _api(cls):
@@ -1111,7 +1206,7 @@ class _WindowsBoundNode:
         return name
 
     @classmethod
-    def target_reparse_data(cls, target: "_WindowsBoundNode", *, junction: bool = False) -> bytes:
+    def target_reparse_data(cls, target: "_WindowsBoundNode", *, junction: bool | None = None) -> bytes:
         """Let the OS name the target; encode the documented reparse metadata layout."""
         import struct
         ctypes, wintypes, kernel, *_rest = cls._api()
@@ -1139,6 +1234,8 @@ class _WindowsBoundNode:
             raise ctypes.WinError(ctypes.get_last_error())
         if length >= len(buffer):
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: native target spelling drift")
+        if junction is None:
+            junction = _windows_projection_uses_junction(buffer.value)
         converted = UnicodeString()
         try:
             status = convert(buffer.value, ctypes.byref(converted), None, None)
@@ -2048,10 +2145,10 @@ class _InstallTransaction:
                     if descriptor is not None:
                         raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing actual producer digest")
                     node_data = bound.digest() if bound is not None else _file_sha256(path)
-                elif node_kind == "link":
+                elif node_kind in {"link", "reparse"}:
+                    # The acquired object's stored target is evidence even when
+                    # its referent was removed by an earlier owned inverse.
                     node_data = bound.logical_target() if bound is not None else os.readlink(path)
-                elif node_kind == "reparse":
-                    node_data = str(Path(bound.logical_target()).resolve(strict=True)) if bound is not None else str(path.resolve(strict=True))
             reparse = (bound.reparse_data() if bound is not None and not metadata_only
                        and getattr(metadata, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT else None)
             return _PhysicalNode(node_kind, (metadata.st_dev, metadata.st_ino, metadata.st_mode,
@@ -3585,7 +3682,8 @@ class _InstallTransaction:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: source link native identity")
                 data = original.reparse_data()
                 directory = bool(original.basic().attributes & stat.FILE_ATTRIBUTE_DIRECTORY)
-            with _WindowsBoundNode.create(target, directory=directory) as created:
+            with _WindowsBoundNode.symlink_privilege(required=int.from_bytes(data[:4], "little") == 0xA000000C), \
+                    _WindowsBoundNode.create(target, directory=directory) as created:
                 node = self._capture_node(target, bound_node=created,
                                           kind="directory" if directory else "file",
                                           data=None if directory else hashlib.sha256(b"").hexdigest())
@@ -3608,18 +3706,23 @@ class _InstallTransaction:
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: source link copy drift")
 
     def _create_owned_projection(self, source: Path, target: Path, record,
-                                  *, junction: bool = False) -> _PhysicalNode:
+                                  *, junction: bool | None = None) -> _PhysicalNode:
         if os.name != "nt":
             target.symlink_to(source, target_is_directory=True)
             node = self._capture_node(target)
             record(target, node)
             return node
-        with _WindowsBoundNode.create(target, directory=True) as created:
-            node = self._capture_node(target, bound_node=created, kind="directory")
-            record(target, node)
-            with _WindowsBoundNode(source, purpose="observe", follow=True) as original:
-                target_proof = original.proof
-                raw = _WindowsBoundNode.target_reparse_data(original, junction=junction)
+        # Select the representation from the OS-resolved bound target before
+        # acquiring the creator. Local directory projections use mount points;
+        # other namespaces retain symbolic-link semantics and admission.
+        with _WindowsBoundNode(source, purpose="observe", follow=True) as original:
+            target_proof = original.proof
+            raw = _WindowsBoundNode.target_reparse_data(original, junction=junction)
+            with _WindowsBoundNode.symlink_privilege(
+                    required=int.from_bytes(raw[:4], "little") == 0xA000000C), \
+                    _WindowsBoundNode.create(target, directory=True) as created:
+                node = self._capture_node(target, bound_node=created, kind="directory")
+                record(target, node)
                 created.set_reparse_data(raw)
                 node = self._capture_node(target, bound_node=created)
                 if node.native_proof != created.creator_proof or node.reparse_data != raw:
@@ -3980,7 +4083,7 @@ class _InstallTransaction:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal bytes")
                 if expected.kind == "link" and bound.logical_target() != expected.data:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal link")
-                if expected.kind == "reparse" and str(Path(bound.logical_target()).resolve(strict=True)) != expected.data:
+                if expected.kind == "reparse" and bound.logical_target() != expected.data:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal reparse")
                 if attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
                     if expected.reparse_data is None or bound.reparse_data() != expected.reparse_data:
@@ -4321,7 +4424,7 @@ class _InstallTransaction:
                             "target_is_directory": path.is_dir(),
                         }
                     )
-                elif getattr(os.path, "isjunction", lambda _path: False)(path):
+                elif _is_directory_junction(path):
                     self._entries.append(
                         {
                             "path": path,
@@ -5458,18 +5561,21 @@ class _CreateOnlyMutablePath:
                     self._rollback_identity_changed()
                 self.transaction._dispose_node(record.leaf_path, current)
             elif record.kind == "projection":
+                # The target may already have been reclaimed by an earlier
+                # owned inverse. Prove the exact link object without following
+                # it; never acquire authority over a replacement destination.
+                expected = _PhysicalNode(
+                    "link" if stat.S_ISLNK(record.leaf_identity[2]) else "reparse",
+                    record.leaf_identity, record.projection_data,
+                    record.native_proof, record.reparse_data,
+                )
                 if (
                     record.projection_target is None
                     or not (stat.S_ISLNK(metadata.st_mode) or _is_reparse_metadata(metadata))
-                    or not _projection_resolves_to(
-                        record.leaf_path, record.projection_target
-                    )
+                    or not self.transaction._image_matches(record.leaf_path, {record.leaf_path: expected})
                 ):
                     self._rollback_identity_changed()
-                self.transaction._dispose_node(record.leaf_path,
-                    _PhysicalNode("link" if stat.S_ISLNK(record.leaf_identity[2]) else "reparse",
-                                  record.leaf_identity,
-                                  record.projection_data, record.native_proof, record.reparse_data))
+                self.transaction._dispose_node(record.leaf_path, expected)
             elif record.kind == "directory":
                 if (
                     not stat.S_ISDIR(metadata.st_mode)
@@ -7586,7 +7692,7 @@ def _legacy_tree_sha256(path: Path, *, ignore_runtime_cache: bool = False, read_
         not stat.S_ISDIR(root_metadata.st_mode)
         or stat.S_ISLNK(root_metadata.st_mode)
         or _is_reparse_metadata(root_metadata)
-        or getattr(os.path, "isjunction", lambda _path: False)(path)
+        or _is_directory_junction(path)
     ):
         return None
     digest = hashlib.sha256()
@@ -7598,7 +7704,7 @@ def _legacy_tree_sha256(path: Path, *, ignore_runtime_cache: bool = False, read_
         if (
             stat.S_ISLNK(metadata.st_mode)
             or _is_reparse_metadata(metadata)
-            or getattr(os.path, "isjunction", lambda _path: False)(item)
+            or _is_directory_junction(item)
         ):
             return None
         relative_path = item.relative_to(path)
@@ -7674,8 +7780,23 @@ def _adoption_identity_v2(name: str, target: Path, token: str, *, factory: Path 
     raise ValueError("E_CANONICAL_SKILL_ADOPTION_MISMATCH")
 
 
+def _windows_projection_uses_junction(native_target: str) -> bool:
+    """Local DOS volumes use mount points; UNC/other namespaces keep symlinks."""
+    import ntpath
+    drive, tail = ntpath.splitdrive(native_target)
+    return bool(re.fullmatch(r"[A-Za-z]:", drive.removeprefix("\\\\?\\"))) and tail.startswith(("\\", "/"))
+
+
+def _is_directory_junction(path: Path) -> bool:
+    """Recognize only mount-point reparses, including on supported Python 3.11."""
+    try:
+        return getattr(path.lstat(), "st_reparse_tag", None) == 0xA0000003
+    except OSError:
+        return False
+
+
 def _projection_resolves_to(path: Path, expected: Path) -> bool:
-    if not (path.is_symlink() or getattr(os.path, "isjunction", lambda _path: False)(path)):
+    if not (path.is_symlink() or _is_directory_junction(path)):
         return False
     try:
         return os.path.samefile(path.resolve(strict=True), expected.resolve(strict=True))

@@ -121,8 +121,13 @@ and scopes the duplicate to the calling thread. It never changes the process tok
 grants a missing privilege, or changes Windows policy. Prior thread impersonation is
 restored on success and ordinary failure. Failure to restore identity terminates the
 installer with exit 70; it cannot safely continue rollback in an unexpected context,
-so retained transaction state requires inspection. Standard-user support is not
-established by the elevated tests; junction fallback is not shipped.
+so retained transaction state requires inspection. Current pre-SDK local directory
+projections select native junctions from the OS-resolved target before creator
+acquisition. UNC and other namespaces retain symbolic-link semantics and their
+privilege requirement. This is a deliberate representation choice, not an
+error-triggered fallback; native identity and rollback checks remain unchanged.
+
+Windows directory-link semantics: [Microsoft hard links and junctions](https://learn.microsoft.com/en-us/windows/win32/fileio/hard-links-and-junctions). Cross-volume and remote receiving are not established by the local tests.
 
 API references: [FSCTL_SET_REPARSE_POINT](https://learn.microsoft.com/en-us/windows/desktop/api/winioctl/ni-winioctl-fsctl_set_reparse_point),
 [AdjustTokenPrivileges](https://learn.microsoft.com/windows/win32/api/securitybaseapi/nf-securitybaseapi-adjusttokenprivileges),
