@@ -32,6 +32,12 @@ Actual Windows assembly passed in 97.97 seconds. Through the public bundled laun
 
 This establishes local Windows project installation/repeat receiving without hooks or global profiles, not cross-volume/network receiving, other operating systems, positive privileged-symlink execution, publisher authentication or internet-release certification. No model, GitHub Actions, system security setting, elevation or denied publication operation was used. After independent evidence readback, the exclusively owned receiving workspace was returned to designated trash, with source absence verified; original qualified inputs remained untouched.
 
+## Current-main reconciliation checkpoint: 2026-11-16
+
+The candidate now integrates published main `b6217d74` with the earlier pre-SDK candidate `781d0fcc`. The shared projection owner retains target-dependent Windows representation selection and exact no-follow rollback, including raw reparse bytes and identity. Current-main changes outside these three conflict regions are preserved. Independent review accepted the production reconciliation.
+
+The main-branch inert projection fixtures required alignment with the shared owner rather than restoring an obsolete unconditional junction default or live-referent rollback prerequisite. These are source-method checks, not native filesystem acceptance. The eight distribution/layout tests passed. Native bundle assembly and installation recorded above qualify their earlier source only; they must not be reported as acceptance of this changed installer. Current combined native receiving and publication remain pending. No model, Actions, live-profile installation or previously refused publication was attempted.
+
 # Runtime evidence recovery scope
 
 This branch restores the bounded runtime/notice consistency contract on the committed SDK baseline. It is not the later combined candidate, a release, or authorization to install. The final combined archive has not been recovered. Later hook projection, packaging omissions and provider changes are not recreated from guesses.

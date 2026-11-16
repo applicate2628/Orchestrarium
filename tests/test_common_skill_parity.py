@@ -62,6 +62,16 @@ def _live_common_skill_hashes(root: Path = ROOT) -> dict[str, dict[str, str]]:
             assert path.is_file(), f"live common-skill {name} missing from {pack}"
             _assert_frontmatter(path, f"{pack}/{name}")
             hashes[pack] = digest(path.read_bytes())
+        # Current production installs use the Codex canonical tree. This admitted
+        # revision intentionally differs from the frozen Claude migration witness;
+        # pin both inputs rather than rewriting that witness to restore parity.
+        if name == "repo-cleanup":
+            assert hashes == {
+                "src.codex": "80d1a331232eb39aafbc1f328831212b1bb4633a0a7efe8aedaec99c04ad4234",
+                "src.claude": "942d2eed5941b4468b28fcb8c89d3ac03416d963c598613c0e8e3cb5553b2616",
+            }, f"repo-cleanup canonical or historical body drifted: {hashes}"
+            result[name] = hashes
+            continue
         assert len(set(hashes.values())) == 1, (
             f"live common-skill {name} BODY drifted between production packs: {hashes}"
         )
@@ -110,7 +120,7 @@ def _add_live_name(root: Path, name: str) -> None:
     spine.write_text(text, encoding="utf-8")
 
 
-def test_live_common_skill_bodies_are_byte_identical() -> None:
+def test_common_skill_bodies_match_parity_or_exact_accepted_revisions() -> None:
     hashes = _live_common_skill_hashes()
     assert tuple(hashes) == _common_skills()
 
