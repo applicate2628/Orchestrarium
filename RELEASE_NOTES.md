@@ -1,5 +1,9 @@
 # Release Notes
 
+## 2026-11-16
+
+- Add distribution-only runtime/notice binding to the existing pre-SDK layout. Local assembly requires matching runtime and notice inventories before output; no SDK transition, model launch or installer policy change is included. Historical recovery evidence is distinct from acceptance of this source revision.
+
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
 ## 2026-10-28

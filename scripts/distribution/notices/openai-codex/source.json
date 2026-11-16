@@ -1,0 +1,18 @@
+{
+  "packages": {
+    "openai-codex": "0.163.0"
+  },
+  "upstreamCommit": "83086188ae0614bd882818ff1aa23f3194962012",
+  "upstreamTag": "rust-v0.163.0",
+  "scope": "Upstream notices for the Python SDK wrapper; the Codex CLI and its native dependencies are not bundled. The external CLI installation retains its own notices.",
+  "files": {
+    "LICENSE": {
+      "url": "https://raw.githubusercontent.com/openai/codex/83086188ae0614bd882818ff1aa23f3194962012/LICENSE",
+      "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
+    },
+    "NOTICE": {
+      "url": "https://raw.githubusercontent.com/openai/codex/83086188ae0614bd882818ff1aa23f3194962012/NOTICE",
+      "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+    }
+  }
+}

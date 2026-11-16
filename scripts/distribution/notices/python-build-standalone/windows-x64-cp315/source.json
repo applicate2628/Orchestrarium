@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "target": "x86_64-pc-windows-msvc",
+  "pythonVersion": "3.15.2",
+  "runtime": {
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.15.2%2B20261026-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+    "sha256": "02e532b60e720aa3d77e757c349ae9cc945441c05851fa646336fc9ff0403041"
+  },
+  "metadataArchive": {
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.15.2%2B20261026-x86_64-pc-windows-msvc-pgo-full.tar.zst",
+    "sha256": "5fc81405bbe4d0372302970372cde44fa0d755a0148a7d291168fba3e605a2f5",
+    "metadataPath": "python/PYTHON.json",
+    "metadataSha256": "b79b79667edff4b693fc98290a312c27b7a95a9f6eac24301055c205e1007683"
+  },
+  "upstreamReleaseTarget": "fa506e0858ac9f2cc5b289c137b888a2aa24d1ee",
+  "attributions": [
+    {
+      "owner": "/build_info/extensions/_bz2/0",
+      "paths": [
+        "licenses/LICENSE.bzip2.txt"
+      ]
+    },
+    {
+      "owner": "/build_info/extensions/_ctypes/0",
+      "paths": [
+        "licenses/LICENSE.libffi.txt"
+      ]
+    },
+    {
+      "owner": "/build_info/extensions/_hashlib/0",
+      "paths": [
+        "licenses/LICENSE.openssl-3.txt"
+      ]
+    },
+    {
+      "owner": "/build_info/extensions/_lzma/0",
+      "paths": [
+        "licenses/LICENSE.liblzma.txt"
+      ]
+    },
+    {
+      "owner": "/build_info/extensions/_sqlite3/0",
+      "paths": [
+        "licenses/LICENSE.sqlite.txt"
+      ]
+    },
+    {
+      "owner": "/build_info/extensions/_ssl/0",
+      "paths": [
+        "licenses/LICENSE.openssl-3.txt"
+      ]
+    },
+    {
+      "owner": "/build_info/extensions/_tkinter/0",
+      "paths": [
+        "licenses/LICENSE.tcl.txt"
+      ]
+    },
+    {
+      "owner": "/build_info/extensions/_uuid/0",
+      "paths": [
+        "licenses/LICENSE.libuuid.txt"
+      ]
+    },
+    {
+      "owner": "/build_info/extensions/_zstd/0",
+      "paths": [
+        "licenses/LICENSE.zstd.txt"
+      ]
+    },
+    {
+      "owner": "",
+      "paths": [
+        "licenses/LICENSE.cpython.txt"
+      ]
+    }
+  ],
+  "files": {
+    "LICENSE.bzip2.txt": {
+      "archivePath": "python/licenses/LICENSE.bzip2.txt",
+      "sha256": "bd5628cc76fb0ebf9c657d1dd4d1a240a1a7b216c31663e7bbf1131c0b70a910"
+    },
+    "LICENSE.cpython.txt": {
+      "archivePath": "python/licenses/LICENSE.cpython.txt",
+      "sha256": "8fe98bf9822926d854f56ffd8d97877d8b942617aa44eb7ea77fd99e22f2537e"
+    },
+    "LICENSE.libffi.txt": {
+      "archivePath": "python/licenses/LICENSE.libffi.txt",
+      "sha256": "9afb8970cd29fc1031fa647278e4bef613399e2e3468a1e3a397f4d158c6101c"
+    },
+    "LICENSE.liblzma.txt": {
+      "archivePath": "python/licenses/LICENSE.liblzma.txt",
+      "sha256": "d87d218dd908b3243ec4cbc72af400e5b7437513ea9d9229291d0812b8464fec"
+    },
+    "LICENSE.libuuid.txt": {
+      "archivePath": "python/licenses/LICENSE.libuuid.txt",
+      "sha256": "cbccaa3efe07a9a602751375085be572d4410a250b996716fbe8c5255c7ec6f2"
+    },
+    "LICENSE.openssl-3.txt": {
+      "archivePath": "python/licenses/LICENSE.openssl-3.txt",
+      "sha256": "ed72ce2b51ee58f117e5a021e2e04af158857f40269fbc03491f0b2a99dbcc96"
+    },
+    "LICENSE.sqlite.txt": {
+      "archivePath": "python/licenses/LICENSE.sqlite.txt",
+      "sha256": "d8eb9aba7ef6b5ed06cb3ec19a7242316af2e5933c638eb67fb781c13884e01d"
+    },
+    "LICENSE.tcl.txt": {
+      "archivePath": "python/licenses/LICENSE.tcl.txt",
+      "sha256": "41613eabfc08921a7da9c4bfd7f3ce5d5406f55214b253d89f392ed86eebeb8f"
+    },
+    "LICENSE.zstd.txt": {
+      "archivePath": "python/licenses/LICENSE.zstd.txt",
+      "sha256": "d3baadc2e1dd7a7e0b483633e6b39743c16a16f28d696baff507fcd451f3d4ad"
+    }
+  },
+  "scope": "Preserves notices declared by matching upstream Windows full-build metadata; not an exhaustive native dependency or license-clearance claim."
+}
