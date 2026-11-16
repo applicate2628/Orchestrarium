@@ -75,6 +75,67 @@ class PhysicalTests(unittest.TestCase):
         rows=[json.loads(l) for l in out.getvalue().splitlines() if l.startswith("{")]
         return result, rows[0] if rows else {}
 
+
+    def link_agents(self):
+        import _winapi
+        storage = self.home / "storage"
+        self.file.parent.rename(storage)
+        _winapi.CreateJunction(str(storage), str(self.target / "agents"))
+        return storage
+
+    def test_linked_apply_repeat_and_neighbor(self):
+        storage = self.link_agents()
+        _, report = self.call()
+        self.assertEqual(self.call(True, report["selection"])[0], 0)
+        self.assertFalse((storage / "a.md").exists())
+        self.assertEqual((storage / "user.md").read_bytes(), b"user")
+        self.assertTrue(os.path.isjunction(self.target / "agents"))
+        _, report = self.call()
+        self.assertEqual(self.call(True, report["selection"])[0], 0)
+
+    def test_linked_same_bytes_retarget_refuses(self):
+        import _winapi
+        storage = self.link_agents()
+        _, report = self.call()
+        other = self.home / "other"
+        other.mkdir()
+        (other / "a.md").write_bytes(b"owned")
+        os.rmdir(self.target / "agents")
+        _winapi.CreateJunction(str(other), str(self.target / "agents"))
+        with self.assertRaisesRegex(ValueError, "E_UNINSTALL_SELECTION_DRIFT"):
+            self.call(True, report["selection"])
+        self.assertEqual((storage / "a.md").read_bytes(), b"owned")
+        self.assertEqual((other / "a.md").read_bytes(), b"owned")
+        self.assertTrue(self.control.exists())
+
+
+    def test_linked_retarget_during_apply_does_not_touch_new_target(self):
+        import _winapi
+        storage = self.link_agents()
+        other = self.home / "other"
+        other.mkdir()
+        (other / "a.md").write_bytes(b"owned")
+        _, report = self.call()
+        original = self.backend._CreateOnlyMutablePath.remove_exact_file
+        def retarget(owner, relative, expected):
+            result = original(owner, relative, expected)
+            if relative.name == "settings.json":
+                os.rmdir(self.target / "agents")
+                _winapi.CreateJunction(str(other), str(self.target / "agents"))
+            return result
+        with patch.object(self.backend._CreateOnlyMutablePath, "remove_exact_file", retarget):
+            with self.assertRaises(ValueError):
+                self.call(True, report["selection"])
+        self.assertEqual((storage / "a.md").read_bytes(), b"owned")
+        self.assertEqual((other / "a.md").read_bytes(), b"owned")
+        self.assertEqual(self.control.read_bytes(), b'{"hooks":{}}')
+
+    def test_linked_late_failure_rolls_back_physical_payload(self):
+        storage = self.link_agents()
+        self.test_late_failure_rolls_back()
+        self.assertEqual((storage / "a.md").read_bytes(), b"owned")
+        self.assertTrue(os.path.isjunction(self.target / "agents"))
+
     def test_preview_apply_repeat_preserves_neighbor(self):
         before=self.receipt.read_bytes()
         result, report=self.call()

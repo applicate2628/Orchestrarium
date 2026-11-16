@@ -1,7 +1,8 @@
 """Explicit-current removal using the existing transaction and receipt codec.
 
 A preview token binds current objects, not historical physical ownership.
-Unknown configuration and linked namespaces are never silently adopted.
+Unknown configuration is never silently adopted. Linked runtime subroots use
+the existing global authority, bound to the explicit current preview.
 """
 from __future__ import annotations
 
@@ -28,17 +29,48 @@ def run(backend, root: Path, provider: str, args) -> int:
     before = raw.encode("utf-8")
     record = codec.decode_record(before, provider, scope)
     controls = codec.fresh_control_paths(provider, scope)
-    paths = [receipt, *(anchor / p for p in record["files"]),
+    bindings = {}
+    for name in sorted(backend._CLAUDE_LINKED_SUBROOT_NAMES):
+        logical = target / name
+        if any((anchor / p).is_relative_to(logical) for p in record["files"]):
+            resolved, authority = backend._resolve_global_claude_linked_subroot(
+                root, target, mode, name)
+            if authority is not None:
+                bindings[logical] = (resolved, authority)
+    def location(relative):
+        logical = anchor / relative
+        for prefix, (resolved, authority) in bindings.items():
+            if logical.is_relative_to(prefix):
+                return resolved / logical.relative_to(prefix), authority
+        return logical, None
+    paths = [receipt, *(location(p)[0] for p in record["files"]),
              *(anchor / p for p in controls)]
+    if len(set(paths)) != len(paths):
+        raise ValueError("E_UNINSTALL_DESTINATION_ALIAS")
+    binding_witnesses = [
+        (str(logical.relative_to(anchor)), authority.logical_identity,
+         str(authority.resolved_root), authority.resolved_identity, authority.link_chain)
+        for logical, (_, authority) in bindings.items()]
     apply = bool(args.apply and not args.dry_run)
+    for _, authority in bindings.values():
+        authority.assert_current()
     with backend._InstallTransaction(paths, enabled=apply) as transaction:
         owner = backend._CreateOnlyMutablePath(anchor, transaction, dry_run=not apply)
         if backend._read_owned_text(receipt, owner, preserve_newlines=True).encode("utf-8") != before:
             raise ValueError("E_UNINSTALL_RECEIPT_DRIFT")
         receipt_node = transaction._capture_node(receipt)
+        linked_owners = {
+            logical: backend._CreateOnlyMutablePath(resolved, transaction,
+                dry_run=not apply, linked_authority=authority)
+            for logical, (resolved, authority) in bindings.items()}
+        def destination(relative):
+            path, authority = location(relative)
+            selected = owner if authority is None else linked_owners[authority.logical_root]
+            return selected, path.relative_to(selected.anchor)
         observed, witnesses = {}, []
         for relative in sorted(set(record["files"]) | controls):
-            path = owner.destination(Path(relative))
+            selected, suffix = destination(relative)
+            path = selected.destination(suffix)
             try:
                 node = transaction._capture_node(path)
             except FileNotFoundError:
@@ -67,7 +99,7 @@ def run(backend, root: Path, provider: str, args) -> int:
         preserve = sorted(set(record["files"]) - set(classified["absent"]) - set(remove))
         token = hashlib.sha256(json.dumps(
             [hashlib.sha256(before).hexdigest(), receipt_node.python_identity,
-             backend._CreateOnlyMutablePath._identity(anchor), witnesses],
+             backend._CreateOnlyMutablePath._identity(anchor), binding_witnesses, witnesses],
             sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         print(json.dumps({"selection": token, "removeFiles": remove,
                           "removeControls": control_remove if not unresolved else [],
@@ -85,7 +117,10 @@ def run(backend, root: Path, provider: str, args) -> int:
         for relative in control_remove:
             owner.remove_exact_file(Path(relative), configs[relative]["sha256"])
         for relative in remove:
-            owner.remove_exact_file(Path(relative), record["files"][relative])
+            selected, suffix = destination(relative)
+            selected.remove_exact_file(suffix, record["files"][relative])
+        for _, authority in bindings.values():
+            authority.assert_current()
         residual = dict(record)
         residual["files"] = {p: record["files"][p] for p in preserve}
         residual["configs"] = {p: v for p, v in configs.items()
@@ -94,6 +129,8 @@ def run(backend, root: Path, provider: str, args) -> int:
         owner.replace_file_atomic(receipt.relative_to(anchor), payload, fsync="required")
         if backend._read_owned_text(receipt, owner, preserve_newlines=True).encode("utf-8") != payload:
             raise ValueError("E_UNINSTALL_RECEIPT_READBACK")
+        for _, authority in bindings.values():
+            authority.assert_current()
         transaction.commit()
     print("RESULT: selected current content removed; unrecorded data retained")
     return 2 if preserve else 0

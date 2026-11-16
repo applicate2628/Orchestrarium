@@ -405,7 +405,7 @@ The existing Lead package/receipt update carries these sections for Codex and th
 
 ### Bounded pre-SDK Claude removal
 
-For ordinary Claude target paths, `python scripts/install-claude.py --global --uninstall`
+For Claude target paths, `python scripts/install-claude.py --global --uninstall`
 previews the exact currently selected receipt and objects. Review its file/control lists,
 then repeat with `--apply --uninstall-selection <SHA256>` only for that selection.
 Project mode uses the existing target option. The token is current-state selection,
@@ -415,5 +415,8 @@ Pre-existing or subsequently edited controls are not adopted: their presence pre
 the runtime and returns a partial result. Modified payload and unrecorded user files
 remain; directories and the residual receipt are retained. Removal uses the existing
 transaction, and a late failure restores its effects. Preview performs no target writes.
-This bounded route does not support linked namespaces or shared Codex runtime removal,
-and does not establish the ticket's full linked-installation lifecycle acceptance.
+Global agents/skills/commands junctions use the existing linked-root authority.
+The selection binds their current logical and physical identities and link chain;
+retargeting invalidates the preview. Junctions and neighboring files remain untouched.
+Project links, nested links, and shared Codex runtime removal remain outside this route.
+An old receipt is not promoted into proof of historical physical ownership.
