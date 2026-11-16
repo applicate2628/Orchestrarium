@@ -420,3 +420,6 @@ The selection binds their current logical and physical identities and link chain
 retargeting invalidates the preview. Junctions and neighboring files remain untouched.
 Project links, nested links, and shared Codex runtime removal remain outside this route.
 An old receipt is not promoted into proof of historical physical ownership.
+Receipted document blocks are removed through the shared configuration renderer;
+bytes outside the markers are preserved exactly. Edited or ambiguous owned blocks
+preserve the installation. An already absent block is a no-op, not document deletion.

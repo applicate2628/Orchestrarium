@@ -76,6 +76,54 @@ class PhysicalTests(unittest.TestCase):
         return result, rows[0] if rows else {}
 
 
+
+    def add_document(self, edited=False):
+        from installation import configuration
+        block = "\r\n".join((configuration.MARKERS["claude"][0], "owned",
+                              configuration.MARKERS["claude"][1]))
+        self.document = self.target / "CLAUDE.md"
+        raw = ("user before\r\n" + block + "\r\nuser after\r\n").encode()
+        self.document.write_bytes(raw.replace(b"owned", b"edited") if edited else raw)
+        record = ownership.decode_record(self.receipt.read_bytes(), "claude", "global")
+        record["configs"][".claude/CLAUDE.md"] = {
+            "kind":"block", "blockKind":"claude",
+            "sha256":configuration.text_receipt_digest(block)}
+        self.receipt.write_bytes(ownership.serialize_record(record, "claude", "global"))
+        return raw
+
+    def test_owned_document_block_preserves_exact_user_bytes_and_repeat(self):
+        self.add_document()
+        _, report = self.call()
+        self.assertEqual(report["removeBlocks"], [".claude/CLAUDE.md"])
+        self.assertEqual(self.call(True, report["selection"])[0], 0)
+        self.assertEqual(self.document.read_bytes(), b"user before\r\n\r\nuser after\r\n")
+        _, report = self.call()
+        self.assertEqual(self.call(True, report["selection"])[0], 0)
+
+    def test_edited_document_block_preserves_whole_installation(self):
+        self.add_document(edited=True)
+        before = self.document.read_bytes()
+        _, report = self.call()
+        self.assertEqual(self.call(True, report["selection"])[0], 2)
+        self.assertEqual(self.document.read_bytes(), before)
+        self.assertTrue(self.file.exists())
+        self.assertTrue(self.control.exists())
+
+    def test_document_block_rollback_restores_exact_bytes(self):
+        before = self.add_document()
+        self.test_late_failure_rolls_back()
+        self.assertEqual(self.document.read_bytes(), before)
+
+    def test_missing_owned_block_preserves_document(self):
+        self.add_document()
+        self.document.write_bytes(b"user only\r\n")
+        identity = self.document.stat().st_ino
+        _, report = self.call()
+        self.assertEqual(report["removeBlocks"], [])
+        self.assertEqual(self.call(True, report["selection"])[0], 0)
+        self.assertEqual(self.document.read_bytes(), b"user only\r\n")
+        self.assertEqual(self.document.stat().st_ino, identity)
+
     def link_agents(self):
         import _winapi
         storage = self.home / "storage"
