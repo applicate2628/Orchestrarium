@@ -28,6 +28,7 @@ def run(backend, root: Path, provider: str, args) -> int:
         return 0
     before = raw.encode("utf-8")
     record = codec.decode_record(before, provider, scope)
+    configuration = backend._load_module_from_path("orche_uninstall_configuration", root / "scripts/installation/configuration.py")
     controls = codec.fresh_control_paths(provider, scope)
     bindings = {}
     for name in sorted(backend._CLAUDE_LINKED_SUBROOT_NAMES):
@@ -81,7 +82,7 @@ def run(backend, root: Path, provider: str, args) -> int:
                 observed[relative] = node.data if node.kind == "file" else None
         classified = codec.plan_file_removal(record, observed)
         configs = record.get("configs", {})
-        control_remove, unresolved = [], []
+        control_remove, unresolved, block_updates, absent_blocks = [], [], {}, set()
         state = dict(witnesses)
         for relative in sorted(controls):
             current = state[relative]
@@ -91,6 +92,21 @@ def run(backend, root: Path, provider: str, args) -> int:
             if (claim is not None and claim["kind"] in {"created-file", "file"}
                 and current[0] == "file" and current[1] == claim["sha256"]):
                 control_remove.append(relative)
+            elif claim is not None and claim["kind"] == "block" and current[0] == "file":
+                text = backend._read_owned_text(anchor / relative, owner, preserve_newlines=True)
+                if hashlib.sha256(text.encode("utf-8")).hexdigest() != current[1]:
+                    raise ValueError("E_UNINSTALL_DOCUMENT_DRIFT")
+                try:
+                    replacement = configuration.remove_owned_block(
+                        text, claim["blockKind"], claim["sha256"],
+                        backend._markdown_document_context)
+                except ValueError:
+                    unresolved.append(relative)
+                else:
+                    if replacement == text:
+                        absent_blocks.add(relative)
+                    else:
+                        block_updates[relative] = replacement.encode("utf-8")
             else:
                 unresolved.append(relative)
         # Unknown or edited controls may still invoke the payload. Do not leave
@@ -103,6 +119,7 @@ def run(backend, root: Path, provider: str, args) -> int:
             sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         print(json.dumps({"selection": token, "removeFiles": remove,
                           "removeControls": control_remove if not unresolved else [],
+                          "removeBlocks": sorted(block_updates) if not unresolved else [],
                           "preservedFiles": preserve, "unresolvedControls": unresolved},
                          sort_keys=True))
         if not apply:
@@ -113,7 +130,14 @@ def run(backend, root: Path, provider: str, args) -> int:
         if unresolved:
             transaction.commit()  # Settled no-op; all content is preserved.
             print("RESULT: preserved installation; control ownership is incomplete")
-            return 2
+            return 2 if record["files"] or configs else 0
+        for relative, replacement in block_updates.items():
+            current = backend._read_owned_text(anchor / relative, owner, preserve_newlines=True)
+            if hashlib.sha256(current.encode("utf-8")).hexdigest() != state[relative][1]:
+                raise ValueError("E_UNINSTALL_DOCUMENT_DRIFT")
+            owner.replace_file_atomic(Path(relative), replacement, fsync="required")
+            if backend._read_owned_text(anchor / relative, owner, preserve_newlines=True).encode("utf-8") != replacement:
+                raise ValueError("E_UNINSTALL_DOCUMENT_READBACK")
         for relative in control_remove:
             owner.remove_exact_file(Path(relative), configs[relative]["sha256"])
         for relative in remove:
@@ -124,7 +148,8 @@ def run(backend, root: Path, provider: str, args) -> int:
         residual = dict(record)
         residual["files"] = {p: record["files"][p] for p in preserve}
         residual["configs"] = {p: v for p, v in configs.items()
-                               if p not in control_remove and state.get(p) is not None}
+                               if p not in control_remove and p not in block_updates
+                               and p not in absent_blocks and state.get(p) is not None}
         payload = codec.serialize_record(residual, provider, scope)
         owner.replace_file_atomic(receipt.relative_to(anchor), payload, fsync="required")
         if backend._read_owned_text(receipt, owner, preserve_newlines=True).encode("utf-8") != payload:
