@@ -200,6 +200,36 @@ class RetainedPayloadTests(unittest.TestCase):
                 failed = acquire(selection, Reader(objects, "content"), Review())
                 self.assertIsInstance(failed, scanner.Refusal)
 
+    def test_final_detector_and_proof_must_finish_before_deadline(self):
+        from types import SimpleNamespace
+        for phase in ("detector", "proof"):
+            for completed_at in (0.999, 1.0, 1.001):
+                with self.subTest(phase=phase, completed_at=completed_at):
+                    selection, objects, _ = fixture(count=1)
+                    clock = [0.0]
+                    target = ("_binary_content_hits" if phase == "detector"
+                              else "_path_set_digest")
+                    original = getattr(scanner, target)
+                    def finish(*args, **kwargs):
+                        result = original(*args, **kwargs)
+                        clock[0] = completed_at
+                        return result
+                    async def run():
+                        with mock.patch.object(
+                            scanner.asyncio, "get_running_loop",
+                            return_value=SimpleNamespace(time=lambda: clock[0]),
+                        ), mock.patch.object(scanner, target, side_effect=finish):
+                            return await scanner._acquire_history(
+                                selection, Reader(objects), lambda _line: [],
+                                scanner.CoverageRecorder(selection.object_oids), 1.0,
+                            )
+                    result = asyncio.run(run())
+                    if completed_at < 1.0:
+                        self.assertIsInstance(result, tuple)
+                    else:
+                        self.assertIsInstance(result, scanner.Refusal)
+                        self.assertEqual(result.failure_id, "PS-MSG-READ-TIMEOUT")
+
     def test_aggregate_budget_boundary_is_unchanged(self):
         selection, objects, _ = fixture()
         for cap, accepted in ((3072, True), (3071, False)):

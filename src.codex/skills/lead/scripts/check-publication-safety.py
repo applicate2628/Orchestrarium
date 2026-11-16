@@ -4540,6 +4540,9 @@ async def _acquire_history(
         _path_set_digest(canonical_paths),
         tuple(sorted(tag_targets)),
     )
+    # Synchronous detectors and proof hashing may cross the shared deadline.
+    if asyncio.get_running_loop().time() >= scan_deadline:
+        return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
     return proof, coverage, tuple(findings)
 
 
