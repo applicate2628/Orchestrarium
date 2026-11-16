@@ -44,6 +44,16 @@ Merged source `597cae7d` assembled successfully in 177.93 seconds. Public previe
 
 The root dispatcher now inherits the caller working directory while retaining its absolute client-script path. Source ownership, global-home selection and explicit-target safeguards stay unchanged; no unsafe-target override was added. The new source-method regression reproduced the reset for both clients under ordinary, explicit relative target, global and preview argument sets before the correction. A fresh assembly and independent actual-target readback are required before claiming corrected native acceptance. All affected installation outputs were confined to the disposable receiving workspace; live profiles were not modified.
 
+## Corrected caller-project native receiving: 2026-11-16
+
+Committed source `fa89cb15` was rebuilt from the unchanged qualified runtime/notice inputs: assembly exited zero in 83.34 seconds. Through the public bundled launcher and its ordinary interactive choice of both clients, preview passed in 9.90 seconds, fresh installation in 72.68 seconds and repeat in 66.64 seconds. All returned zero. HOME, application-data and temporary directories were confined to the isolated receiving workspace; no unsafe-target override, hook-enabled mode, global installation or model was used.
+
+Independent readback verified the actual caller-project Codex and Claude targets, not just process exit codes. Fresh, repeat and live no-follow snapshots match exactly: 337 files and 54 links. Every Claude skill junction has native mount-point tag and the same file identity as its corresponding canonical skill directory. The user marker and ownership receipt bytes were preserved, and the bundle application tree was not used as the installation target.
+
+Bundled entry SHA-256 is `b0fbcc1e1554eae47e525b614616d306b34a653ed3a7a79d5cb818e924afa3e3`; installer SHA-256 is `f22c05f45c631fb146f6d859574bc655477b9b79ba77df4c19cf28019dfbd44a`. Both match committed source bytes. The independently qualified runtime evidence remains `db195ff2a110d7ff83c9ab41744138f04cb2b19676f4574ba631c2d916faa3f1`. The completed repeat process was independently confirmed settled.
+
+This supersedes the failed caller-project acceptance of `597cae7d`, while preserving that failure record above. It establishes bounded isolated Windows installation/repeat receiving, not native pytest-suite coverage, global/hooks-enabled installation, other operating systems, publisher authentication, complete attribution or internet release. No prior publication refusal was retried or bypassed; publication remains pending.
+
 # Runtime evidence recovery scope
 
 This branch restores the bounded runtime/notice consistency contract on the committed SDK baseline. It is not the later combined candidate, a release, or authorization to install. The final combined archive has not been recovered. Later hook projection, packaging omissions and provider changes are not recreated from guesses.
