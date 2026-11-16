@@ -1,0 +1,68 @@
+{
+  "packages": {
+    "openai-codex": "0.163.0",
+    "openai-codex-cli-bin": "0.163.0"
+  },
+  "upstreamCommit": "83086188ae0614bd882818ff1aa23f3194962012",
+  "scope": "Version-bound supplemental notice texts, not complete legal clearance or a complete bill of materials. No runtime execution or dependency removal.",
+  "ripgrepVersion": "15.2.0",
+  "ripgrepManifest": {
+    "url": "https://raw.githubusercontent.com/openai/codex/83086188ae0614bd882818ff1aa23f3194962012/scripts/codex_package/rg",
+    "sha256": "41a10ca63365560d899a82b6f825fd7b420a18b34f660a98bffeece77eeae1f1"
+  },
+  "ripgrepArchives": {
+    "linux-x64": {
+      "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-unknown-linux-musl.tar.gz",
+      "sha256": "33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c",
+      "bytes": 2265718,
+      "binaryPath": "ripgrep-15.2.0-x86_64-unknown-linux-musl/rg",
+      "binarySha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+      "qualification": "Matches retained platform runtime binary inventory; not full binary dependency attribution."
+    },
+    "windows-x64": {
+      "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-pc-windows-msvc.zip",
+      "sha256": "71b2fef860abe467217a538ff31de02f5258807c0129f771846f87bd029aafc5",
+      "bytes": 1789611,
+      "binaryPath": "ripgrep-15.2.0-x86_64-pc-windows-msvc/rg.exe",
+      "binarySha256": "14231169855ec5205cf5a1b6f1db358ff4aed4247c86b69ce8aae647c77f6680",
+      "qualification": "Matches retained platform runtime binary inventory; not full binary dependency attribution."
+    }
+  },
+  "files": {
+    "ripgrep/linux-x64/COPYING": {
+      "archivePath": "ripgrep-15.2.0-x86_64-unknown-linux-musl/COPYING",
+      "archiveSha256": "33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c",
+      "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f"
+    },
+    "ripgrep/linux-x64/LICENSE-MIT": {
+      "archivePath": "ripgrep-15.2.0-x86_64-unknown-linux-musl/LICENSE-MIT",
+      "archiveSha256": "33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c",
+      "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f"
+    },
+    "ripgrep/linux-x64/UNLICENSE": {
+      "archivePath": "ripgrep-15.2.0-x86_64-unknown-linux-musl/UNLICENSE",
+      "archiveSha256": "33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c",
+      "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c"
+    },
+    "ripgrep/windows-x64/COPYING": {
+      "archivePath": "ripgrep-15.2.0-x86_64-pc-windows-msvc/COPYING",
+      "archiveSha256": "71b2fef860abe467217a538ff31de02f5258807c0129f771846f87bd029aafc5",
+      "sha256": "dfe7d0a6134a17d3de7409762e08dc02133303912875cab40a74ba07a390f85a"
+    },
+    "ripgrep/windows-x64/LICENSE-MIT": {
+      "archivePath": "ripgrep-15.2.0-x86_64-pc-windows-msvc/LICENSE-MIT",
+      "archiveSha256": "71b2fef860abe467217a538ff31de02f5258807c0129f771846f87bd029aafc5",
+      "sha256": "970813655a1bf777d2ead189cef71ab73ab92ce04dc864027d61a45de03e6728"
+    },
+    "ripgrep/windows-x64/UNLICENSE": {
+      "archivePath": "ripgrep-15.2.0-x86_64-pc-windows-msvc/UNLICENSE",
+      "archiveSha256": "71b2fef860abe467217a538ff31de02f5258807c0129f771846f87bd029aafc5",
+      "sha256": "640514163b17f977adc997cb16f51871122cfb0555ebad1a3f01e167b7ba8857"
+    },
+    "bubblewrap/COPYING": {
+      "url": "https://raw.githubusercontent.com/openai/codex/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/vendor/bubblewrap/COPYING",
+      "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c",
+      "qualification": "Notice from pinned Codex vendored source. Corresponding complete-source delivery and static dependency attribution remain open."
+    }
+  }
+}
