@@ -2,8 +2,9 @@
 
 The historical checkpoints below were produced on the recovery branch ending at
 `7652a203`. They qualify only the recorded inputs and operations, not installation
-of the pre-SDK main revision now packaged by this branch. This backport changes
-application source selection only; runtime/notice binding remains unchanged.
+of the pre-SDK main revision now packaged by this branch. The initial backport
+changed application source selection; subsequent bounded installer corrections
+are recorded in the pre-SDK checkpoints. Runtime/notice binding remains unchanged.
 Do not reuse the recorded installer lifecycle as receiving evidence for changed
 application inputs. Publication and attribution limitations remain explicit.
 
@@ -18,6 +19,18 @@ With the corrected assembly, the public launcher selected both clients interacti
 A separate public-launcher Codex repeat then passed in 22.46 seconds. Its 19 native-role/config files remained byte-identical and the user marker was preserved. No hooks, global profile, model, security setting, GitHub Actions or publication was changed. The supplied runtime evidence remained byte-identical, and the bundled builder, launcher and corrected role manifest matched their current source bytes.
 
 The bounded runtime/notice and Codex receiving result is established. Native Claude installation on this Windows connection is not accepted; no privilege elevation, weakened guard, SDK switch or copy fallback was attempted. Other operating systems, publisher authentication, full attribution and internet release certification remain outside this checkpoint. Historical SDK lifecycle results below do not replace this new result. After recording the result, exclusively owned assembly, retention and project fixtures were moved to the designated trash, with source absence and destination presence verified; original qualified inputs were untouched.
+
+## Pre-SDK local Windows projection receiving: 2026-11-16
+
+This checkpoint supersedes the local Windows Claude privilege limitation in the preceding pre-SDK checkpoint only. Native diagnosis on the unmodified candidate identified error 1314 at `set_reparse_data` during Claude projection creation. The effective token does not contain the symbolic-link privilege: the bounded private-token helper correctly refused with 1300 rather than granting it. Neither the process token nor system policy was changed.
+
+Source `ca5fd4fb` selects the existing native junction representation for OS-resolved local drive directory targets before opening creator handles. Other namespaces retain symbolic-link requirements, without an error-triggered fallback. Both new and replacement directory projections use this shared owner. The independently reproduced dangling-junction rollback defect was also corrected at the shared no-follow capture/disposal boundary: exact object identity, logical target and raw reparse bytes remain mandatory, but cleanup no longer requires the already reclaimed referent to exist.
+
+The focused suite passed 23 tests with three explicit capability skips in 0.59 seconds. Native creation, copying, commit, ordinary rollback and rollback after canonical-target removal passed. Negative cases preserve a changed raw reparse target at the same identity and preserve a replacement user directory/marker. Process and thread token snapshots were unchanged. The three skipped cases require an assigned symbolic-link privilege and are not counted as successful native coverage. Eight adjacent distribution/source tests also passed; independent review and the staged publication gate passed.
+
+Actual Windows assembly passed in 97.97 seconds. Through the public bundled launcher, interactive Claude selection completed fresh installation in 52.19 seconds, and interactive selection of both clients completed repeat installation in 66.49 seconds. All commands exited 0. Readback found 54 Claude junctions, each with native mount-point tag and the same file identity as its corresponding canonical skill directory; the user marker was preserved. The bundled installer, builder, launcher and role manifest matched current source bytes. Installer SHA-256 was `54a7b45ef1f95235b60e9db090e1f10362c0bafce6f317d4658b92583025f5bf`; runtime evidence remained `db195ff2a110d7ff83c9ab41744138f04cb2b19676f4574ba631c2d916faa3f1`.
+
+This establishes local Windows project installation/repeat receiving without hooks or global profiles, not cross-volume/network receiving, other operating systems, positive privileged-symlink execution, publisher authentication or internet-release certification. No model, GitHub Actions, system security setting, elevation or denied publication operation was used. After independent evidence readback, the exclusively owned receiving workspace was returned to designated trash, with source absence verified; original qualified inputs remained untouched.
 
 # Runtime evidence recovery scope
 
