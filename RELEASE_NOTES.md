@@ -2,6 +2,8 @@
 
 ## 2026-11-16
 
+- Preserve the caller working directory when the interactive root installer dispatches a client. Relocated bundles now install into the caller project rather than their own packaged source tree; absolute installer selection, explicit-target safeguards and global-home selection remain unchanged.
+
 - Select native junctions for local Windows directory projections before creator acquisition, preserving source/target identity and rollback checks. Other namespaces retain symbolic-link admission without fallback or elevation; shared reparse-tag recognition also supports Python 3.11. Projection rollback now validates the exact no-follow object when its owned referent was already reclaimed, without following or deleting a replacement target.
 
 - Scope Windows symbolic-link creation and rollback to a private copy of the existing effective thread token before acquiring creator handles. This enables an already assigned privilege only for the operation, preserves the process token and prior impersonation, and still rejects missing privileges; no system security settings or SDK transition are involved.

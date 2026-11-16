@@ -38,6 +38,12 @@ The candidate now integrates published main `b6217d74` with the earlier pre-SDK 
 
 The main-branch inert projection fixtures required alignment with the shared owner rather than restoring an obsolete unconditional junction default or live-referent rollback prerequisite. These are source-method checks, not native filesystem acceptance. The eight distribution/layout tests passed. Native bundle assembly and installation recorded above qualify their earlier source only; they must not be reported as acceptance of this changed installer. Current combined native receiving and publication remain pending. No model, Actions, live-profile installation or previously refused publication was attempted.
 
+## Caller-project receiving correction: 2026-11-16
+
+Merged source `597cae7d` assembled successfully in 177.93 seconds. Public preview, fresh and repeat returned zero, but independent readback rejected the intended project acceptance: `install.py` reset the child working directory to its own source root, so both clients were installed into the disposable bundle application tree, not the caller project. The marker-only project snapshot could not prove installed-state repeat safety. Those successful process exits are not a passed caller-project lifecycle.
+
+The root dispatcher now inherits the caller working directory while retaining its absolute client-script path. Source ownership, global-home selection and explicit-target safeguards stay unchanged; no unsafe-target override was added. The new source-method regression reproduced the reset for both clients under ordinary, explicit relative target, global and preview argument sets before the correction. A fresh assembly and independent actual-target readback are required before claiming corrected native acceptance. All affected installation outputs were confined to the disposable receiving workspace; live profiles were not modified.
+
 # Runtime evidence recovery scope
 
 This branch restores the bounded runtime/notice consistency contract on the committed SDK baseline. It is not the later combined candidate, a release, or authorization to install. The final combined archive has not been recovered. Later hook projection, packaging omissions and provider changes are not recreated from guesses.

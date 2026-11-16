@@ -1,5 +1,6 @@
 """Source-layout and memory-only runtime evidence checks for pre-SDK distribution."""
 import importlib.util
+import ast
 import sys
 import json
 from pathlib import Path
@@ -90,6 +91,29 @@ class PreSdkDistributionTests(unittest.TestCase):
                 self.launcher, "_exec_child", return_value=0) as child:
             self.assertEqual(self.launcher.main(["--permanent-runtime", "--dry-run"]), 0)
             self.assertEqual(child.call_args.args[1], ["python", "-I", "install.py", "--dry-run"])
+
+class RootInstallerDispatchTests(unittest.TestCase):
+    def test_production_dispatch_inherits_caller_directory_and_preserves_arguments(self):
+        tree = ast.parse((ROOT / "install.py").read_bytes())
+        dispatch = next(node for node in tree.body
+                        if isinstance(node, ast.FunctionDef) and node.name == "_run_production")
+        code = compile(ast.fix_missing_locations(ast.Module(
+            body=ast.parse("from __future__ import annotations").body + [dispatch],
+            type_ignores=[])), str(ROOT / "install.py"), "exec")
+        for provider in ("codex", "claude"):
+            for arguments in ([], ["--target", "relative project"], ["--global"],
+                              ["--no-hypothesis-hook", "--dry-run"]):
+                with self.subTest(provider=provider, arguments=arguments):
+                    runner = Mock(return_value=SimpleNamespace(returncode=23))
+                    scope = {"ROOT": ROOT, "sys": sys,
+                             "subprocess": SimpleNamespace(run=runner)}
+                    exec(code, scope)
+                    forwarded = list(arguments)
+                    self.assertEqual(scope["_run_production"](provider, forwarded), 23)
+                    runner.assert_called_once_with([
+                        sys.executable, str(ROOT / "scripts" / f"install-{provider}.py"),
+                        *arguments])
+                    self.assertEqual(forwarded, arguments)
 
 if __name__ == "__main__":
     unittest.main()
