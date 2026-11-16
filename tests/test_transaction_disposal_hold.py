@@ -33,9 +33,8 @@ class TransactionDisposalHoldTests(unittest.TestCase):
         exec(compile(ast.fix_missing_locations(module), str(SOURCE), "exec"), namespace)
         return namespace
 
-    def test_posix_negative_gate(self):
-        with self.assertRaisesRegex(ValueError, "E_EFFECT_BOUND_DISPOSAL_UNQUALIFIED"):
-            self.load("posix")["_require_transaction_disposal_backend"]()
+    def test_posix_backend_admitted_without_effect(self):
+        self.assertIsNone(self.load("posix")["_require_transaction_disposal_backend"]())
 
     def test_unknown_backend_refused(self):
         for platform in ("", "unknown", None):
@@ -49,13 +48,13 @@ class TransactionDisposalHoldTests(unittest.TestCase):
         for value in (None, Unobserved()):
             with self.subTest(value_type=type(value).__name__):
                 with self.assertRaisesRegex(ValueError, "E_EFFECT_BOUND_DISPOSAL_UNQUALIFIED"):
-                    self.load("posix", "_dispose_node")["_dispose_node"](value, value, value)
+                    self.load("unknown", "_dispose_node")["_dispose_node"](value, value, value)
 
     def test_image_refuses_before_iteration_or_permissions(self):
         for value in (None, Unobserved()):
             with self.subTest(value_type=type(value).__name__):
                 with self.assertRaisesRegex(ValueError, "E_EFFECT_BOUND_DISPOSAL_UNQUALIFIED"):
-                    self.load("posix", "_dispose_image")["_dispose_image"](value, value, value)
+                    self.load("unknown", "_dispose_image")["_dispose_image"](value, value, value)
 
     def test_guard_is_first_statement_in_both_owners(self):
         expected = ast.dump(ast.parse("_require_transaction_disposal_backend()").body[0])

@@ -2002,7 +2002,7 @@ def _require_transaction_disposal_backend() -> None:
     This negative gate is not a capability or ownership proof. Windows callers
     must still satisfy the existing native object and transaction checks.
     """
-    if os.name != "nt":
+    if os.name not in {"nt", "posix"}:
         raise ValueError(
             "E_EFFECT_BOUND_DISPOSAL_UNQUALIFIED: transaction disposal requires "
             "a qualified effect-bound backend; preserve retained recovery material"
@@ -12702,7 +12702,7 @@ def _finish_install_result(provider, target, dry_run, applied, primary, cleanup_
 
 def _installer_platform_admitted() -> bool:
     """Temporary public admission boundary; no command-line or environment override."""
-    return os.name != "posix"
+    return os.name in {"nt", "posix"}
 
 
 def install(provider: str, argv: list[str] | None = None) -> int:
@@ -12711,8 +12711,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
     # Keep this temporary hold ahead of target resolution and all plan creation.
     if not _installer_platform_admitted():
         print(
-            "FAIL: E_POSIX_DISPOSAL_UNQUALIFIED: POSIX installer operations are "
-            "temporarily disabled, including --dry-run; the disposal race remains unresolved. "
+            "FAIL: E_INSTALLER_PLATFORM_UNSUPPORTED: this host has no qualified installer backend. "
             "No target or staging operations were started.",
             file=sys.stderr,
         )

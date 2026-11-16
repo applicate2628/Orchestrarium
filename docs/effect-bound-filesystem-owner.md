@@ -1,6 +1,6 @@
-# Effect-bound filesystem owner: contracts and current hold
+# Effect-bound filesystem owner: contracts and qualification
 
-Status: source design and defensive mitigation, not a qualified mutation backend. This is an Orchestrarium repository contract, not a Codex or Claude provider guarantee. No native qualification is established by the pure tests described here.
+Status: the current source admits the implemented Windows/POSIX transaction backends for the ordinary serialized-writer contract below. This is an Orchestrarium repository contract, not a Codex or Claude provider guarantee. Dated sections retain historical evidence and limits; earlier statements that public POSIX admission is held describe those earlier checkpoints, not the current admission decision. Pure tests alone do not establish native qualification.
 
 ## Supported ordinary-writer scope
 
@@ -10,7 +10,7 @@ The stronger namespace/content exclusion requirements below describe a separate 
 
 Use the existing transaction, mutable-path and platform owners. Qualify acquisition, forward effects, rollback, cleanup, staging and uninstall within the supported scope, including observed drift, collisions and recoverable failures. Keep Linux, macOS and mounted Windows filesystem evidence separate; do not require a privileged storage redesign for an unrequested hostile-writer guarantee.
 
-This clarification does not enable a backend, remove current public/private POSIX holds, establish native receiving or authorize live installation. An implemented and tested owner lifecycle remains necessary; documentation is not runtime acceptance.
+The clarification originally did not enable a backend. Current admission follows the implemented owner lifecycle and separately recorded isolated receiving evidence; it does not authorize live installation or strengthen the contract to hostile-writer exclusion.
 
 ## Serialized original-directory retention
 

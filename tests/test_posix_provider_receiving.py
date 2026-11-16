@@ -1,6 +1,6 @@
 """Opt-in real provider receiving matrix in caller-owned disposable storage.
 
-Only public/private POSIX admission gates are substituted. No filesystem or
+Public platform admission is exercised without substitution. No filesystem or
 health runner is mocked. The caller owns fixture disposition after inspection.
 """
 import contextlib
@@ -44,8 +44,6 @@ class PosixProviderReceivingTests(unittest.TestCase):
             "TMPDIR": str(self.staging), "PYTHONDONTWRITEBYTECODE": "1",
             "ORCHESTRARIUM_NO_HYPOTHESIS_HOOK": ""}))
         self.stack.enter_context(patch.object(self.module.tempfile, "tempdir", str(self.staging)))
-        self.stack.enter_context(patch.object(self.module, "_installer_platform_admitted", lambda: True))
-        self.stack.enter_context(patch.object(self.module, "_require_transaction_disposal_backend", lambda: None))
         self.marker = self.home / "user.txt"
         self.marker.write_bytes(b"Unrelated user content")
         print("RECEIVING FIXTURE", self.root, flush=True)

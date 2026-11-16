@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-16
 
+- Admit the implemented POSIX transaction backend for ordinary serialized installation and Claude removal, replacing the blanket platform hold without weakening identity, content, filesystem-capability or recovery checks. Receiving now exercises the public entry point rather than substituting admission gates; unknown platforms still refuse before target effects.
+
 - Bind receipted linked-document uninstall selection to the existing scalar owner, including physical storage and complete link-chain witnesses. Preserve the link and surrounding user text; keep public platform admission unchanged.
 
 - Remove receipted Claude document blocks through the existing configuration owner while retaining exact surrounding user bytes. Modified or ambiguous blocks preserve the installation; absent blocks and completed removals repeat safely.

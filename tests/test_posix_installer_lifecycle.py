@@ -42,11 +42,10 @@ class PosixInstallerLifecycleTests(unittest.TestCase):
                 "--allow-unsafe-target", "--no-hypothesis-hook", *extra])
         return result, output.getvalue()
 
-    def test_public_hold_still_precedes_target_and_staging(self):
+    def test_public_entry_reaches_target_with_admitted_backend(self):
         with patch.object(self.module, "_target", side_effect=AssertionError("target reached")):
-            code, output = self.invoke("codex")
-        self.assertEqual(code, 1)
-        self.assertIn("E_POSIX_DISPOSAL_UNQUALIFIED", output)
+            with self.assertRaisesRegex(AssertionError, "target reached"):
+                self.invoke("codex")
         self.assertEqual(list(self.staging.iterdir()), [])
         self.assertEqual(list(self.project.iterdir()), [])
 
