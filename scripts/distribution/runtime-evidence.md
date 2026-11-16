@@ -206,3 +206,35 @@ and both original and bundled runtime evidence hashes. No receiving-process
 children remained. Both owned disposable fixture roots were moved to designated
 trash with source absence and destination presence verified. Original inputs
 were retained unchanged.
+
+
+## Native publication delivered
+
+The publication obstacle recorded above is resolved by commit
+`3252314b714da52476494dead9721065eeb6d8be`. The scanner now evaluates new
+disclosure to the same qualified receiver instead of treating all already
+published ancestry as new merely because a destination ref is new.
+Custom or unqualified transports retain conservative callback-only scope.
+The production scanner and supervisor deadlines remain unchanged.
+
+An ordinary native Windows push completed successfully in 39.46 seconds,
+with separate clean Version 3 and Version 4 results: 22 commits, 356 objects,
+169 text blobs, 17,643,189 blob bytes, 1,805 subjects and 187 paths.
+Both versions reported the same object and subject sets. No reviewed exception,
+fabricated receipt, alternative publication carrier or disabled check was used.
+A fresh remote readback matched the full commit identifier above.
+Delivery is recorded in pull request #37.
+
+Verification includes 93 initially passing native regression cases; the two
+old per-ref asymmetry expectations were corrected to require refusal for
+empty shared receiver coverage. All eight authority scenarios then passed,
+along with the mode-only metadata case. Ten receiver qualification tests
+passed, including real inherited Git configuration and URL-specific overrides.
+Prior-disclosure tests cover unknown advertised objects, new content,
+new tree metadata, new tag annotations and unqualified-receiver fallback.
+Independent scanner and integration reviews found no remaining blocking issue.
+The staged publication gate and whitespace checks passed.
+
+This publication evidence does not expand the bounded runtime acceptance above
+into global/hooks-enabled installation, other-platform receiving, provider
+execution or a new SDK deployment.
