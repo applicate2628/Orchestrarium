@@ -97,6 +97,21 @@ def acquire(selection, reader, review=None):
 
 
 class RetainedPayloadTests(unittest.TestCase):
+    def test_clean_review_text_does_not_materialize_byte_map(self):
+        policy = scanner._load_review_policy_module()
+        for raw in (b"ordinary prose\n", bytes.fromhex("6f7264696e61727920d09fd180d0b8d0b2d0b5d18220f09f98802070726f73650a")):
+            with self.subTest(raw=raw), mock.patch.object(
+                scanner, "_original_byte_boundaries",
+                side_effect=AssertionError("clean text needs no candidate byte map"),
+            ):
+                result = scanner.analyze_review_candidates(
+                    raw, b"sample.txt", subject_kind="history-blob", policy_module=policy,
+                )
+                self.assertTrue(result["complete"])
+                self.assertEqual(result["candidates"], ())
+                self.assertEqual(result["unresolved"], ())
+                self.assertIsNone(result["refusal"])
+
     def test_retained_payload_does_not_grow_with_unique_blobs(self):
         selection, objects, _ = fixture(count=8, size=256 * 1024)
         reader = Reader(objects)

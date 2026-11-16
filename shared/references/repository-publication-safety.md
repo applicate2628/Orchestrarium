@@ -96,3 +96,22 @@ The direct scanner's deadline is cooperative: a synchronous detector is not pree
 
 - **HEAD** — the current local Git commit; it may differ from the separately approved publication source.
 - **PR** — pull request.
+
+### Measured candidate-coordinate allocation
+
+Candidate review validates strict UTF-8 and evaluates the unchanged detector set
+before constructing character-to-byte coordinates. When no observation exists,
+there is no candidate region to bind, so no coordinate table is allocated.
+Nonempty observations use the original byte-map and witness path; malformed input
+still follows the original refusal/unresolved path. This changes neither
+authorization nor coverage and adds no cache or resource allowance.
+
+A Windows Python 3.15.2 cProfile comparison on the same standalone range at
+source 999df838 (14 commits, 251 objects, 137 blobs, 10,782,266 blob bytes,
+925 subjects) measured 56.936 seconds before and 38.238 seconds after this
+change. Receipt selection and coverage digests were identical. Byte-coordinate
+construction previously consumed 18.225 cumulative seconds; regex and machine
+path work remained. These profiled observations include profiling overhead and
+are not a full native-history benchmark or proof that the native deadline will
+be met. A native attempt before this optimization failed closed with
+PS-MSG-READ-TIMEOUT after 243.828 seconds; no retry is implied by the measurement.

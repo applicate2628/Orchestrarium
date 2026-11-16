@@ -1568,12 +1568,17 @@ def _analyze_review_candidates(
     digest: Callable[[str, object], str],
     canonical: Callable[[object], bytes],
 ) -> tuple[dict, ...]:
-    text, boundaries = _original_byte_boundaries(raw)
+    # Validate UTF-8 before detection, but only allocate byte coordinates when
+    # an observation needs a candidate witness. Clean text has no byte regions.
+    text = raw.decode("utf-8", "strict")
     _definitions, leaves = _build_detector_catalog(digest)
     groups: dict[tuple, list[_TextObservation]] = {}
     for line_number, line_start, line in _selected_text_lines(text, path, subject_kind):
         for observation in _line_observations(line, line_number, line_start, subject_kind):
             groups.setdefault((line_start, _observation_key(observation)), []).append(observation)
+    if not groups:
+        return ()
+    _text, boundaries = _original_byte_boundaries(raw)
     result: list[dict] = []
     for observations in groups.values():
         first = observations[0]
