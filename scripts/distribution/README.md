@@ -98,7 +98,7 @@ Linux support floor from the Python archive alone. Alpine/musl is not qualified.
 Apply requires an explicit first launcher option: `--retain-to ABSOLUTE_DIRECTORY`
 or `--permanent-runtime` for an already permanently placed bundle. Retention
 re-executes the retained launcher with that explicit lifetime decision; repeated
-apply uses `--permanent-runtime`. Listing, help and dry-run do not need it. This
+apply uses `--permanent-runtime`. Help and dry-run do not need it. This
 records operator intent, not a promise that a directory can never be deleted.
 
 Use verified, quiescent source/runtime trees and an exclusively controlled output

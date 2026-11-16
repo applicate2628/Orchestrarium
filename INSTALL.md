@@ -1,6 +1,6 @@
 # Installation
 
-Optional local distribution assembly is documented in [the distribution guide](scripts/distribution/README.md). It binds the supplied runtime to its exact notice inventory before producing a bundle, and packages this existing installer without changing its ownership or provider policies. The pre-SDK candidate is not yet natively qualified; historical SDK recovery evidence is not acceptance of this layout.
+Optional local distribution assembly is documented in [the distribution guide](scripts/distribution/README.md). It binds the supplied runtime to its exact notice inventory before producing a bundle, and packages this existing installer without changing its ownership or provider policies. Windows build and bounded Codex receiving are recorded in [runtime evidence](scripts/distribution/runtime-evidence.md); Claude native receiving remains limited by symbolic-link privilege. Historical SDK recovery evidence is not acceptance of this layout.
 
 This monorepo ships a Python-owned root installer (`install.py`) plus the thin POSIX launcher `install.sh`. They require Python 3.11 or newer, offer the supported Codex and Claude Code packs, then forward arguments to the matching pack-specific installers in the `scripts/` directory.
 

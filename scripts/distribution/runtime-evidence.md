@@ -7,6 +7,18 @@ application source selection only; runtime/notice binding remains unchanged.
 Do not reuse the recorded installer lifecycle as receiving evidence for changed
 application inputs. Publication and attribution limitations remain explicit.
 
+## Pre-SDK native Windows checkpoint: 2026-11-16
+
+Source `f034b843` packages the pre-SDK main layout without importing the SDK installer. Actual Windows assembly passed in 84.56 seconds with the unchanged qualified runtime/notice record `db195ff2a110d7ff83c9ab41744138f04cb2b19676f4574ba631c2d916faa3f1`. Before the role-manifest correction, assembly passed in 196.53 seconds and public create-only retention plus native installer help passed in 86.18 seconds. The correction changed only accepted factory role byte bindings, not assembly or retention logic.
+
+The first installation preview exposed stale role hashes already present in main `d288cf78`: all 18 source TOMLs contained the accepted browser/computer feature changes but the manifest bound their previous bytes. Source-to-bundle comparisons were exact. Each old digest was verified against the parent revision, every parsed difference was confined to the five added false-valued feature flags, and all profession instructions and existing settings were preserved. Only the 18 current byte hashes were updated. Eight source/memory regressions passed, including current factory validation and rejection of unrecorded role drift. Independent review and publication checks passed; this is not a publication result.
+
+With the corrected assembly, the public launcher selected both clients interactively and completed preview in 10.56 seconds. Fresh Codex installation succeeded, installing 54 canonical skill directories and all 18 native roles. The subsequent Claude phase failed with Windows error 1314; the overall two-client operation returned 1 in 81.51 seconds. The Claude target was absent after rollback, while the successful Codex target and user marker remained. Source inspection identifies the unchanged native symbolic-link path as consistent with the privilege failure; this does not establish the exact failing API from a trace.
+
+A separate public-launcher Codex repeat then passed in 22.46 seconds. Its 19 native-role/config files remained byte-identical and the user marker was preserved. No hooks, global profile, model, security setting, GitHub Actions or publication was changed. The supplied runtime evidence remained byte-identical, and the bundled builder, launcher and corrected role manifest matched their current source bytes.
+
+The bounded runtime/notice and Codex receiving result is established. Native Claude installation on this Windows connection is not accepted; no privilege elevation, weakened guard, SDK switch or copy fallback was attempted. Other operating systems, publisher authentication, full attribution and internet release certification remain outside this checkpoint. Historical SDK lifecycle results below do not replace this new result. After recording the result, exclusively owned assembly, retention and project fixtures were moved to the designated trash, with source absence and destination presence verified; original qualified inputs were untouched.
+
 # Runtime evidence recovery scope
 
 This branch restores the bounded runtime/notice consistency contract on the committed SDK baseline. It is not the later combined candidate, a release, or authorization to install. The final combined archive has not been recovered. Later hook projection, packaging omissions and provider changes are not recreated from guesses.
