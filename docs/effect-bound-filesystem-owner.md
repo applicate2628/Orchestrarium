@@ -216,3 +216,14 @@ checks passed on both Windows and macOS; the pytest-based suite remains unrun.
 - Missing parents created by transform_scalar now have an explicit implicit-container marker. Only the existing dependency-ordered inverse scheduler admits retention after child settlement; original identity and links are checked before and after nonempty observation. External contents are preserved without adoption or false advancement to absence. Scalar files and explicit payload trees keep their strict contract.
 - Five native regression/neighbor cases PASS in 0.585s; the external-sibling case failed before the fix. Parent directory/symlink substitution and changed owned file remain refusals; empty parents are removed. Native lifecycle: 18 cases in 2.108s, 16 PASS and two unchanged exact-timestamp skips.
 - Native full fresh installer ran real hook health successfully, then injected an operation failure: installer returned failure as required, zero rollback members, explicit RETAINED_EXTERNAL_CONTAINER notice, owned config and canonical agents root removed, staging empty, and native runtime files preserved. The process completed in 13.82s. No trust was granted, no model request sent, no live profile changed. This qualifies that failure path, not trusted-repeat or public POSIX admission.
+
+
+### Native Windows linked-document receiving (2026-11-16)
+
+The pre-SDK scalar-document uninstall owner passed three isolated native Windows
+file-symlink scenarios: relative-link apply/repeat preserving user bytes and link
+identity; absolute-link late rollback restoring the physical target and link;
+and same-byte retarget refusal preserving both targets. The test process alone
+was elevated after owner confirmation; no security policy, ACL, trust or live
+profile was changed. This is bounded operation acceptance, not crash atomicity
+or public POSIX qualification.
