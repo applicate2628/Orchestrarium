@@ -842,6 +842,32 @@ def test_require_rejects_wrong_host_command(tmp_path: Path, monkeypatch: pytest.
         )
 
 
+def _mock_appserver(monkeypatch, factory):
+    """Mock both process and POSIX group custody; never signal synthetic PIDs."""
+    from types import SimpleNamespace
+    class Owner:
+        popen_kwargs = {"start_new_session": True}
+        @classmethod
+        def acquire(cls):
+            return cls()
+        def bind_process_group(self, pid):
+            assert pid == 321
+        def close(self):
+            pass
+        def settle(self, timeout, *, direct_process):
+            if direct_process.poll() is None:
+                direct_process.terminate()
+                try:
+                    direct_process.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    direct_process.kill()
+                    direct_process.wait(timeout=timeout)
+            return SimpleNamespace(complete=True)
+    monkeypatch.setattr(CHECKER, "_load_posix_process_group_module",
+                        lambda: SimpleNamespace(PosixProcessGroupOwnerV1=Owner))
+    monkeypatch.setattr(CHECKER.subprocess, "Popen", factory)
+
+
 class _RecordingInput(io.BytesIO):
     def __init__(self, cancel: bool = False) -> None:
         super().__init__(); self.cancel = cancel
@@ -851,6 +877,7 @@ class _RecordingInput(io.BytesIO):
 
 
 class _FakeAppServer:
+    pid = 321
     def __init__(
         self,
         stdout: str,
@@ -882,7 +909,7 @@ def test_app_server_cleanup_success_malformed_and_list_timeout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stdout: str, expected: str | None
 ) -> None:
     process = _FakeAppServer(stdout)
-    monkeypatch.setattr(CHECKER.subprocess, "Popen", lambda *_a, **_kw: process)
+    _mock_appserver(monkeypatch, lambda *_a, **_kw: process)
     call = lambda: CHECKER._codex_hooks_list(
         codex_command=[str(Path(sys.executable).resolve())],
         codex_home=tmp_path / "home", query_cwd=tmp_path, timeout=0.01,
@@ -890,7 +917,7 @@ def test_app_server_cleanup_success_malformed_and_list_timeout(
     if expected:
         with pytest.raises(ValueError, match=expected): call()
     else: assert call() == []
-    assert process.terminated
+    assert process.terminated or process.returncode == 0
     assert process.stdin.closed and process.stdout.closed and process.stderr.closed
 
 
@@ -899,20 +926,20 @@ def test_app_server_cleanup_cancellation_and_terminate_timeout(
 ) -> None:
     response = '{"id":1,"result":{}}\n{"id":2,"result":{"data":[]}}\n'
     cancelled = _FakeAppServer(response, cancel=True)
-    monkeypatch.setattr(CHECKER.subprocess, "Popen", lambda *_a, **_kw: cancelled)
+    _mock_appserver(monkeypatch, lambda *_a, **_kw: cancelled)
     with pytest.raises(KeyboardInterrupt):
         CHECKER._codex_hooks_list(
             codex_command=[str(Path(sys.executable).resolve())],
             codex_home=tmp_path / "home", query_cwd=tmp_path,
         )
-    assert cancelled.terminated and cancelled.stdin.closed and cancelled.stdout.closed and cancelled.stderr.closed
+    assert (cancelled.terminated or cancelled.returncode == 0) and cancelled.stdin.closed and cancelled.stdout.closed and cancelled.stderr.closed
     timed = _FakeAppServer(response, terminate_timeout=True)
-    monkeypatch.setattr(CHECKER.subprocess, "Popen", lambda *_a, **_kw: timed)
+    _mock_appserver(monkeypatch, lambda *_a, **_kw: timed)
     assert CHECKER._codex_hooks_list(
         codex_command=[str(Path(sys.executable).resolve())],
         codex_home=tmp_path / "home", query_cwd=tmp_path,
     ) == []
-    assert timed.terminated and timed.killed and timed.wait_calls == 2
+    assert timed.terminated and timed.killed and timed.wait_calls == (3 if os.name == "posix" else 2)
 
 
 def test_app_server_waits_for_stderr_reader_before_closing_pipe(
@@ -943,7 +970,7 @@ def test_app_server_waits_for_stderr_reader_before_closing_pipe(
 
     process.stderr = SlowStderr()
     process.stdout = GatedStdout(process.stdout.getvalue())
-    monkeypatch.setattr(CHECKER.subprocess, "Popen", lambda *_a, **_kw: process)
+    _mock_appserver(monkeypatch, lambda *_a, **_kw: process)
 
     assert CHECKER._codex_hooks_list(
         codex_command=[str(Path(sys.executable).resolve())],
@@ -970,7 +997,7 @@ def test_app_server_stderr_reader_failure_rejects_trust_result_without_detail(
 
     process.stderr = FailingStderr()
     process.stdout = GatedStdout(process.stdout.getvalue())
-    monkeypatch.setattr(CHECKER.subprocess, "Popen", lambda *_a, **_kw: process)
+    _mock_appserver(monkeypatch, lambda *_a, **_kw: process)
 
     with pytest.raises(ValueError, match="CODEX_HOOK_LIST_BOUNDS") as failure:
         CHECKER._codex_hooks_list(
@@ -989,7 +1016,7 @@ def test_inventory_probe_uses_exact_scope_and_excludes_sentinels(
         captured["arguments"] = arguments; captured.update(kwargs); return process
     monkeypatch.setenv("OPENAI_API_KEY", "credential-sentinel")
     monkeypatch.setenv("PROMPT_SENTINEL", "prompt-sentinel")
-    monkeypatch.setattr(CHECKER.subprocess, "Popen", fake_popen)
+    _mock_appserver(monkeypatch, fake_popen)
     command = [str(Path(sys.executable).resolve()), str(tmp_path / "codex-owner.py")]
     home = tmp_path / "selected-home"; cwd = tmp_path / "selected-cwd"; cwd.mkdir()
     assert CHECKER._codex_hooks_list(
@@ -1611,14 +1638,14 @@ def test_jsonrpc_error_and_malformed_envelopes_fail_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stdout: str
 ) -> None:
     process = _FakeAppServer(stdout)
-    monkeypatch.setattr(CHECKER.subprocess, "Popen", lambda *_a, **_kw: process)
+    _mock_appserver(monkeypatch, lambda *_a, **_kw: process)
     with pytest.raises(ValueError, match="PROTOCOL_ERROR|MALFORMED"):
         CHECKER._codex_hooks_list(
             codex_command=[str(Path(sys.executable).resolve())],
             codex_home=tmp_path / "home",
             query_cwd=tmp_path,
         )
-    assert process.terminated
+    assert process.terminated or process.returncode == 0
     assert process.stdin.closed and process.stdout.closed and process.stderr.closed
 
 
@@ -1634,7 +1661,7 @@ def test_app_server_stdout_bounds_fail_closed_and_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stdout: str
 ) -> None:
     process = _FakeAppServer(stdout)
-    monkeypatch.setattr(CHECKER.subprocess, "Popen", lambda *_a, **_kw: process)
+    _mock_appserver(monkeypatch, lambda *_a, **_kw: process)
     with pytest.raises(ValueError, match="CODEX_HOOK_LIST_BOUNDS"):
         CHECKER._codex_hooks_list(
             codex_command=[str(Path(sys.executable).resolve())],
@@ -1642,7 +1669,7 @@ def test_app_server_stdout_bounds_fail_closed_and_cleanup(
             query_cwd=tmp_path,
             timeout=0.5,
         )
-    assert process.terminated
+    assert process.terminated or process.returncode == 0
     assert process.stdin.closed and process.stdout.closed and process.stderr.closed
 
 
@@ -1650,7 +1677,7 @@ def test_started_app_server_nonzero_exit_is_reaped_and_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     process = _FakeAppServer("", returncode=7)
-    monkeypatch.setattr(CHECKER.subprocess, "Popen", lambda *_a, **_kw: process)
+    _mock_appserver(monkeypatch, lambda *_a, **_kw: process)
     with pytest.raises(ValueError, match="CODEX_HOOK_LIST_UNAVAILABLE"):
         CHECKER._codex_hooks_list(
             codex_command=[str(Path(sys.executable).resolve())],

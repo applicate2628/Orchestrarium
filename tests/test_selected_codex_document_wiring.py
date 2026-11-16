@@ -55,9 +55,9 @@ class SelectedCodexDocumentWiringTests(unittest.TestCase):
         self.assertEqual(len(parse.args), 1)
         self.assertEqual(parse.keywords, [])
 
-    def test_posix_hold_remains_before_target_resolution(self):
+    def test_unsupported_platform_hold_remains_before_target_resolution(self):
         install = self.definition("install")
-        hold = self.branch(install, 'os.name == "posix"')
+        hold = self.branch(install, 'not _installer_platform_admitted()')
         self.assertIsInstance(hold.body[-1], ast.Return)
         self.assertLess(hold.end_lineno, self.one(install, "_target").lineno)
 

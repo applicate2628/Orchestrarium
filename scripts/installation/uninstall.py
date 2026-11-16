@@ -405,6 +405,4 @@ def run(backend, root: Path, provider: str, args) -> int:
         return _run_owned_copies(backend, root, provider, args)
     if provider != "claude":
         raise ValueError("Selected-current uninstall is qualified only for Claude")
-    if os.name != "nt":
-        raise ValueError("Selected-current legacy uninstall requires qualified native Windows storage")
     return _run_selected_current(backend, root, provider, args)

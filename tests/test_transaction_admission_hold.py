@@ -41,7 +41,7 @@ class TransactionAdmissionHoldTests(unittest.TestCase):
 
     def test_enabled_snapshot_refuses_before_paths_and_allocation(self):
         with self.assertRaisesRegex(ValueError, "E_EFFECT_BOUND_DISPOSAL_UNQUALIFIED"):
-            self.load("posix", "__enter__")(EnabledOnly())
+            self.load("unknown", "__enter__")(EnabledOnly())
 
     def test_empty_disabled_context_remains_noop(self):
         owner = SimpleNamespace(enabled=False)
@@ -51,14 +51,14 @@ class TransactionAdmissionHoldTests(unittest.TestCase):
 
     def test_direct_scope_refuses_before_observing_transaction(self):
         with self.assertRaisesRegex(ValueError, "E_EFFECT_BOUND_DISPOSAL_UNQUALIFIED"):
-            with self.load("posix", "direct_operation")(Unobserved()):
+            with self.load("unknown", "direct_operation")(Unobserved()):
                 self.fail("Unqualified scope yielded")
 
     def test_enabled_nested_and_disabled_direct_scopes_all_refuse(self):
         for enabled, depth in ((True, 0), (False, 0), (False, 1), (True, 1)):
             owner = SimpleNamespace(enabled=enabled, _direct_operation_depth=depth)
             with self.subTest(enabled=enabled, depth=depth), self.assertRaises(ValueError):
-                with self.load("posix", "direct_operation")(owner):
+                with self.load("unknown", "direct_operation")(owner):
                     self.fail("Unqualified scope yielded")
 
     def test_unknown_backend_refuses_snapshot_and_direct_scope(self):
@@ -67,6 +67,15 @@ class TransactionAdmissionHoldTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             with self.load("unknown", "direct_operation")(Unobserved()):
                 self.fail("Unknown scope yielded")
+
+    def test_supported_backend_admission_gate_accepts_nt_and_posix(self):
+        # Invoke only the pure gate, not transaction or filesystem effects.
+        module = ast.fix_missing_locations(ast.Module(body=[self.helper], type_ignores=[]))
+        for platform in ("nt", "posix"):
+            with self.subTest(platform=platform):
+                scope = {"os": SimpleNamespace(name=platform)}
+                exec(compile(module, str(SOURCE), "exec"), scope)
+                self.assertIsNone(scope["_require_transaction_disposal_backend"]())
 
     def test_direct_gate_precedes_fast_path(self):
         self.assertEqual(ast.unparse(self.methods["direct_operation"].body[0]),

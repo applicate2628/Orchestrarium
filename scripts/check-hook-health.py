@@ -24,6 +24,56 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 
+_POSIX_PROCESS_GROUP_CONTRACT_V1 = "orchestrarium.posix-process-group.module.v1"
+
+
+def _valid_posix_process_group_module(module: object) -> bool:
+    try:
+        marker = getattr(module, "POSIX_PROCESS_GROUP_MODULE_CONTRACT_V1")
+        contract = getattr(module, "posix_process_group_module_contract_v1")
+        owner_type = getattr(module, "PosixProcessGroupOwnerV1")
+        error_type = getattr(module, "PosixProcessGroupError")
+        returned = contract()
+    except BaseException:
+        return False
+    return (
+        marker == _POSIX_PROCESS_GROUP_CONTRACT_V1
+        and getattr(module, "POSIX_PROCESS_GROUP_IDEMPOTENT_BIND_V1", None) is True
+        and returned == (marker, owner_type, error_type)
+        and isinstance(owner_type, type)
+        and isinstance(error_type, type)
+        and issubclass(error_type, RuntimeError)
+    )
+
+
+def _load_posix_process_group_module():
+    module_name = "_orchestrarium_posix_process_group_v1"
+    path = (
+        Path(__file__).resolve().parent
+        / "process_supervision"
+        / "posix_process_group.py"
+    )
+    existing = sys.modules.get(module_name)
+    if existing is not None:
+        if not _valid_posix_process_group_module(existing):
+            raise RuntimeError("posix-process-group-v1-identity-mismatch")
+        return existing
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("posix-process-group-v1-unavailable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(module_name, None)
+        raise
+    if not _valid_posix_process_group_module(module):
+        sys.modules.pop(module_name, None)
+        raise RuntimeError("posix-process-group-v1-identity-mismatch")
+    return module
+
+
 CODEX_TRUST_MODES = frozenset({"report", "require"})
 INVENTORY_NAME = "codex-hook-inventory.json"
 FAILURE_ENVELOPE_MAX_BYTES = 4096
@@ -454,7 +504,7 @@ def _codex_hooks_list(
     query_cwd: Path,
     timeout: float = 15,
 ) -> list[dict[str, Any]]:
-    """Ask the Codex host for its current hook admission inventory, read-only."""
+    """Query hook admission; the native host may create its own runtime files."""
     if not codex_command or not Path(codex_command[0]).is_absolute():
         raise ValueError("FAIL CODEX_HOOK_LIST_UNAVAILABLE: Codex command is not absolute")
     initialize = {
@@ -475,7 +525,10 @@ def _codex_hooks_list(
     messages: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=MAX_STDOUT_MESSAGES)
     reader_errors: queue.Queue[BaseException] = queue.Queue(maxsize=1)
     response: dict[str, Any] | None = None
+    group_owner = None
     try:
+        if os.name == "posix":
+            group_owner = _load_posix_process_group_module().PosixProcessGroupOwnerV1.acquire()
         process = subprocess.Popen(
             [*codex_command, "app-server", "--listen", "stdio://"],
             stdin=subprocess.PIPE,
@@ -483,7 +536,10 @@ def _codex_hooks_list(
             stderr=subprocess.PIPE,
             cwd=query_cwd,
             env=_minimal_codex_env(codex_home),
+            **(group_owner.popen_kwargs if group_owner is not None else {}),
         )
+        if group_owner is not None:
+            group_owner.bind_process_group(process.pid)
         assert process.stdin is not None and process.stdout is not None and process.stderr is not None
 
         def record_reader_error(exc: BaseException) -> None:
@@ -588,7 +644,38 @@ def _codex_hooks_list(
     except (ChildProcessError, OSError, subprocess.TimeoutExpired) as exc:
         raise ValueError("FAIL CODEX_HOOK_LIST_UNAVAILABLE: app-server query failed") from exc
     finally:
-        if process is not None:
+        primary = sys.exc_info()[1]
+        cleanup_errors: list[BaseException] = []
+        if group_owner is not None:
+            if process is not None:
+                try:
+                    # EOF lets the native host stop its own background workers.
+                    if process.stdin is not None:
+                        process.stdin.close()
+                    process.wait(timeout=0.25)
+                except (BrokenPipeError, subprocess.TimeoutExpired):
+                    pass
+                except BaseException as exc:
+                    cleanup_errors.append(exc)
+                try:
+                    # Registration is idempotent only for this same created session.
+                    group_owner.bind_process_group(process.pid)
+                except BaseException as exc:
+                    cleanup_errors.append(exc)
+                try:
+                    # Even a failed rebind must not skip already-owned cleanup.
+                    closure = group_owner.settle(5, direct_process=process)
+                    if not closure.complete:
+                        cleanup_errors.append(ValueError("app-server group did not settle"))
+                except BaseException as exc:
+                    cleanup_errors.append(exc)
+            else:
+                try:
+                    group_owner.close()
+                except BaseException as exc:
+                    cleanup_errors.append(exc)
+        elif process is not None:
+            # Preserve the existing Windows route; POSIX owns the complete group.
             if process.poll() is None:
                 try:
                     process.terminate()
@@ -606,17 +693,26 @@ def _codex_hooks_list(
                     pass
         for reader in readers:
             reader.join(timeout=5)
-        if process is not None:
+        unsettled_readers = any(reader.is_alive() for reader in readers)
+        if process is not None and (group_owner is None or not unsettled_readers):
             for stream in (process.stdin, process.stdout, process.stderr):
                 if stream is not None:
                     try:
                         stream.close()
-                    except OSError:
-                        pass
-        for reader in readers:
-            reader.join(timeout=5)
-        if any(reader.is_alive() for reader in readers):
-            record_reader_error(ValueError("app-server reader did not settle"))
+                    except OSError as exc:
+                        if group_owner is not None:
+                            cleanup_errors.append(exc)
+        if group_owner is None:
+            for reader in readers:
+                reader.join(timeout=5)
+            if any(reader.is_alive() for reader in readers):
+                record_reader_error(ValueError("app-server reader did not settle"))
+        elif unsettled_readers:
+            cleanup_errors.append(ValueError("app-server reader did not settle"))
+        if cleanup_errors:
+            failure = ValueError("FAIL CODEX_HOOK_LIST_CLEANUP: app-server did not settle")
+            failure.cleanup_errors = tuple(cleanup_errors)
+            raise failure from (primary if primary is not None else cleanup_errors[0])
     try:
         reader_error = reader_errors.get_nowait()
     except queue.Empty:

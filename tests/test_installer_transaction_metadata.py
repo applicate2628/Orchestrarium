@@ -700,7 +700,7 @@ class CopyMetadataTests(unittest.TestCase):
         dispose = transaction._dispose_node
 
         def fail_after_one(path, expected):
-            quarantine = effect.quarantine if effect is not None else None
+            quarantine = (effect.quarantine or unit) if effect is not None else None
             if quarantine is not None and path.parent == quarantine and path.name in selected_names:
                 if partial.get("completed") is None:
                     partial["beforeKeys"] = dict(transaction._copy_current)
@@ -743,7 +743,9 @@ class CopyMetadataTests(unittest.TestCase):
                                       mtime_ns=participant.before.mtime_ns + 1_000_000_000)
                     set_times = PI._WindowsBoundNode.set_copy_times
                     def wrong_time_assignment(bound, atime, mtime):
-                        return set_times(bound, atime, mtime + 100)
+                        # Omit the assignment observation: an actual unknown setter effect.
+                        set_times(bound, atime, mtime + 100)
+                        return None
                     with patch.object(PI._WindowsBoundNode, "set_copy_times", wrong_time_assignment):
                         with self.assertRaisesRegex(ValueError, "unknown copy setter effect"):
                             transaction._apply_copy_metadata(sibling, node, desired,
@@ -754,11 +756,20 @@ class CopyMetadataTests(unittest.TestCase):
         self.assertIn("failed", partial)
         self.assertIsNotNone(partial["nativeProof"])
         self.assertNotIn(partial["completed"], partial["currentKeys"])
-        for member in (first, second, third):
-            self.assertEqual(transaction._expected[container][member].native_proof, original[member].native_proof)
-        self.assertEqual(first.read_bytes(), b"old a\n")
-        self.assertEqual(second.read_bytes(), b"old b\n")
-        self.assertEqual(third.read_bytes(), b"old c\n")
+        # Direct disposal may fail before restoring the retained original.
+        # Quarantine disposal happens after restoration. Both must preserve the
+        # original objects, their physical identities and their exact bytes.
+        if effect.retained_state is not None:
+            self.assertTrue(transaction._image_matches(effect.retained, effect.retained_state))
+            self.assertFalse(effect.settled)
+            for member, payload in ((first, b"old a\n"), (second, b"old b\n"), (third, b"old c\n")):
+                retained = effect.retained / member.relative_to(unit)
+                self.assertEqual(effect.retained_state[retained].native_proof, original[member].native_proof)
+                self.assertEqual(retained.read_bytes(), payload)
+        else:
+            for member, payload in ((first, b"old a\n"), (second, b"old b\n"), (third, b"old c\n")):
+                self.assertEqual(transaction._expected[container][member].native_proof, original[member].native_proof)
+                self.assertEqual(member.read_bytes(), payload)
         self.assertIsNotNone(caught.exception.recovery_path)
         self.assertTrue(caught.exception.recovery_path.exists())
         self.assertTrue(any(member.cause_exception is cleanup for member in caught.exception.members))
@@ -2150,10 +2161,11 @@ class CopyMetadataTests(unittest.TestCase):
         primary.__cause__ = ValueError("original-cause")
         primary.__context__ = RuntimeError("original-context")
         original = (primary.args, primary.__cause__, primary.__context__)
+        desired = replace(current, mtime_ns=300)  # Require an operation, not the exact-image no-op.
         def action():
             with self.timestamp_failure(primary), \
                     patch.object(tx, "_read_copy_metadata", side_effect=[current, current]):
-                tx._apply_copy_metadata(self.target, node, current, stat.S_IMODE(node.python_identity[2]), record, participant)
+                tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
         result, stderr, escaped = self.through_install(action)
         self.assertEqual(result, 1)
         self.assertIs(escaped[0], primary)
@@ -3338,7 +3350,7 @@ class ExpectedImageAndTypedSettlementTests(unittest.TestCase):
         sentinel = PI._RollbackFailureMember("backup", 82, str(endpoint), "E_SECONDARY_CLOSE", "secondary")
         def after_disposal(path, expected):
             dispose(path, expected)
-            if transaction._effects and path == transaction._effects[0].retained:
+            if transaction._effects and path == transaction._effects[0].location:
                 raise PI._InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "effect-close", "secondary",
                     members=(sentinel,), unresolved_paths=(endpoint,))
         with patch.object(transaction, "_dispose_image", after_disposal):

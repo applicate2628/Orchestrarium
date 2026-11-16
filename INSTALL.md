@@ -135,24 +135,25 @@ The builder's target list does not imply those platform checks have passed.
 
 This monorepo ships a Python-owned root installer (`install.py`) plus the thin POSIX launcher `install.sh`. They require Python 3.11 or newer, offer the supported Codex and Claude Code packs, then forward arguments to the matching pack-specific installers in the `scripts/` directory.
 
-## Platform qualification boundaries
+## Supported filesystem backends
 
-This synchronized SDK source retains the current main transaction-disposal
-qualification hold: POSIX installer operations, including dry-run, fail before
-target resolution or staging. Earlier SDK Linux independent-copy qualification
-is historical evidence, not qualification of this merged transaction owner.
-Windows callers still satisfy all existing native storage and ownership checks.
-A separately qualified POSIX backend is required before removing this hold.
+The synchronized installer admits native Windows and POSIX hosts (Linux, macOS and Windows Subsystem for Linux) through the existing transaction owner. Unknown platforms fail before target resolution or staging with E_INSTALLER_PLATFORM_UNSUPPORTED. Admission is not a capability override: selected identities, content, permissions, destination occupancy, timestamp representability and recovery checks remain mandatory.
 
-Legacy selected-current uninstall remains Claude/Windows-only. SDK copy-layout
-receipts retain their separate ownership-driven uninstall contract; neither a
-receipt nor an earlier successful run bypasses current platform admission.
+The supported contract is ordinary cooperating writers serialized by the caller. Observed foreign replacements and ambiguous settlement are refused or retained for recovery. This is not protection against hostile concurrent writers or a guarantee of atomic directory publication. No trust settings are granted and no live profile is changed by enabling the backend. See the [effect-bound owner contract](docs/effect-bound-filesystem-owner.md) for platform-specific evidence and limits.
 
 The installer-managed helper payload includes optional software development kit (SDK) modules for both host packs; it does not provision their Python dependencies, log in, change billing, or activate execution. The explicit `--sdk-review-binding` option is limited to Codex reviews on the current Windows containment path; omission retains the legacy command-line interface (CLI) route. The dispatch module is registered in the source installer payload; installed readback and bridge qualification must be verified before use; diagnostic recovery is implemented but not yet native-qualified. See [SDK execution](docs/sdk-execution.md).
 
 ## Unsupported atomic directory publication
 
-A selected prepared-directory publication that lacks a supported no-replace operation reports E_ATOMIC_DIRECTORY_PUBLISH_UNSUPPORTED. The installer still refuses rather than falling back to an overwrite-prone rename. This diagnostic does not add filesystem support, establish rollback success or relax the applicable operation-specific platform qualification boundaries.
+A prepared directory with no previous target, or with a verified retained original and an empty current target, may use the existing exclusive-tree constructor when native no-replace publication is unavailable and relative descriptor operations are supported. Migration remains separate. This is caller-serialized construction, not atomic directory publication: partial new identities are journaled for rollback, and the writer retains prepared-image cleanup ownership. For an original directory or regular file moving into its declared retained slot, the owner may exclusively create and verify its own empty typed reservation, then rename the original over that reservation through held parent descriptors. Initial file migration also uses this mechanism; reservation custody stays in its migration record until confirmed movement or checked cleanup, so a failed reservation is not treated as an original backup. Original identities are preserved; observed occupants, changed reservations and uncertain outcomes are not adopted. This is not blind overwrite or protection against uncooperative concurrent writers. Other unsupported selected publication still reports E_ATOMIC_DIRECTORY_PUBLISH_UNSUPPORTED. Component qualification alone does not establish full installer lifecycle acceptance; use the platform-specific receiving evidence.
+
+### Choosing the execution platform
+
+A Windows-resident target can use the native Windows installer or the qualified WSL/DrvFS path. The chosen backend owns the entire transaction; the filesystem must support its required primitives. Do not translate individual POSIX operations into Windows subprocess calls: doing so loses the pinned parent-directory identity used by the POSIX owner.
+
+Retaining existing directories and regular files requires native no-replace support or the bounded owned-reservation transition described above. Unsupported primitives and unrepresentable inverse metadata still fail without a pathname fallback. Keep Linux, macOS and mounted Windows filesystem results separate; component tests that substitute admission verify only their declared components.
+
+Claude supports ownership-aware uninstall through the existing installer. Installation, repeat, selected upgrade, rollback and uninstall are distinct acceptance results. Unknown or modified user data is preserved; transaction-disposal tests alone do not prove uninstall acceptance.
 
 ## Quick install
 
@@ -592,10 +593,12 @@ The existing Lead package/receipt update carries these sections for Codex and th
 
 ### Bounded pre-SDK Claude removal
 
-For Claude target paths, `python scripts/install-claude.py --global --uninstall`
+For Claude receipts without the independent-copy layout, `python scripts/install-claude.py --global --uninstall`
 previews the exact currently selected receipt and objects. Review its file/control lists,
 then repeat with `--apply --uninstall-selection <SHA256>` only for that selection.
-Project mode uses the existing target option. The token is current-state selection,
+Project mode uses the existing target option. Independent-copy receipts instead use
+the ownership-driven removal described above and do not accept this selection token.
+The token is current-state selection,
 not historical root ownership; changing the receipt or selected objects invalidates it.
 Newly created control files are recorded only from transaction creator witnesses.
 Pre-existing or subsequently edited controls are not adopted: their presence preserves
@@ -613,5 +616,6 @@ preserve the installation. An already absent block is a no-op, not document dele
 
 Receipted linked documents bind their physical file and full link chain to the
 preview, then use the existing scalar transaction owner. The link remains in
-place. This does not change the platform admission boundary: public POSIX
-installation still depends on the separate effect-bound backend qualification.
+place. The qualified effect-bound backend owns platform admission; Windows, Linux,
+macOS and mounted Windows filesystem receiving remain separate evidence. Earlier SDK
+Linux tests do not by themselves qualify every lifecycle path in this merged source.

@@ -101,5 +101,85 @@ class AtomicDirectoryDiagnosticTests(unittest.TestCase):
                             "filesystem cannot safely publish a directory without replacing an existing target"])
 
 
+class NativePublicationDispatchTests(unittest.TestCase):
+    def setUp(self):
+        import ctypes
+        import os
+        from unittest.mock import patch
+        self.ctypes = ctypes
+        self.patch = patch
+        self.os = os
+        tree = ast.parse(SOURCE.read_bytes())
+        owner = next(n for n in tree.body if isinstance(n, ast.ClassDef)
+                     and n.name == "_InstallTransaction")
+        method = next(n for n in owner.body if isinstance(n, ast.FunctionDef)
+                      and n.name == "_native_publish_no_replace")
+        method.decorator_list = []
+        self.code = compile(ast.fix_missing_locations(ast.Module(
+            body=ast.parse("from __future__ import annotations").body + [method],
+            type_ignores=[])), str(SOURCE), "exec")
+
+    def operation(self, result=0):
+        calls = []
+        def invoke(*args):
+            calls.append(args)
+            return result
+        invoke.calls = calls
+        return invoke
+
+    def run_dispatch(self, runtime, *, parents=(0, 12), platform="darwin", error=0):
+        scope = {"os": SimpleNamespace(name="posix", fsencode=self.os.fsencode,
+                                       strerror=self.os.strerror),
+                 "sys": SimpleNamespace(platform=platform)}
+        exec(self.code, scope)
+        with self.patch.object(self.ctypes, "CDLL", return_value=runtime), self.patch.object(
+                self.ctypes, "get_errno", return_value=error):
+            return scope["_native_publish_no_replace"](
+                Path("source/old"), Path("destination/new"), parent_descriptors=parents)
+
+    def test_darwin_bound_uses_exact_parents_and_basenames(self):
+        bound, unbound = self.operation(), self.operation()
+        self.assertTrue(self.run_dispatch(SimpleNamespace(renameatx_np=bound, renamex_np=unbound)))
+        self.assertEqual(bound.calls, [(0, b"old", 12, b"new", 4)])
+        self.assertEqual(unbound.calls, [])
+        self.assertEqual(bound.argtypes, [self.ctypes.c_int, self.ctypes.c_char_p,
+                         self.ctypes.c_int, self.ctypes.c_char_p, self.ctypes.c_uint])
+        self.assertIs(bound.restype, self.ctypes.c_int)
+
+    def test_darwin_missing_bound_does_not_fall_back(self):
+        unbound = self.operation()
+        self.assertFalse(self.run_dispatch(SimpleNamespace(renamex_np=unbound)))
+        self.assertEqual(unbound.calls, [])
+
+    def test_darwin_unbound_unchanged(self):
+        unbound, bound = self.operation(), self.operation()
+        self.assertTrue(self.run_dispatch(SimpleNamespace(renamex_np=unbound, renameatx_np=bound),
+                                          parents=None))
+        self.assertEqual(unbound.calls, [(self.os.fsencode(Path("source/old")),
+                                         self.os.fsencode(Path("destination/new")), 4)])
+        self.assertEqual(bound.calls, [])
+        self.assertEqual(unbound.argtypes, [self.ctypes.c_char_p, self.ctypes.c_char_p,
+                                           self.ctypes.c_uint])
+
+    def test_native_errors_preserve_capability_boundary(self):
+        import errno
+        for platform, symbol in (("darwin", "renameatx_np"), ("linux", "renameat2")):
+            for error in (errno.ENOSYS, errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP):
+                with self.subTest(platform=platform, error=error):
+                    runtime = SimpleNamespace(**{symbol: self.operation(-1)})
+                    self.assertFalse(self.run_dispatch(runtime, platform=platform, error=error))
+            for error in (errno.EEXIST, errno.EBADF, errno.EXDEV, errno.EACCES):
+                with self.subTest(platform=platform, error=error):
+                    runtime = SimpleNamespace(**{symbol: self.operation(-1)})
+                    with self.assertRaises(OSError) as caught:
+                        self.run_dispatch(runtime, platform=platform, error=error)
+                    self.assertEqual(caught.exception.errno, error)
+
+    def test_linux_bound_dispatch_unchanged(self):
+        operation = self.operation()
+        self.assertTrue(self.run_dispatch(SimpleNamespace(renameat2=operation), platform="linux"))
+        self.assertEqual(operation.calls, [(0, b"old", 12, b"new", 1)])
+
+
 if __name__ == "__main__":
     unittest.main()
