@@ -170,3 +170,39 @@ result. Earlier bundle acceptance continues to describe only its recorded source
 No native push was repeated: the prior complete-history scan refusal remains
 unresolved under the unchanged deadline. No scanner, supervisor, access policy,
 model, Actions or live profile was changed. Publication and archival remain open.
+
+
+## Integrated-main native Windows receiving: 2026-11-16
+
+Committed source `d9b045c1`, including main `891f61a1`, completed a fresh real
+Windows assembly and public interactive two-client preview, install and repeat.
+Assembly took 184.622 seconds; preview 11.119, fresh 90.157 and repeat 82.061
+seconds. All four exited zero. The first fixture selection was refused before
+copying because the output was inside the source tree; selecting a separate
+disposable workspace resolved that harness error without changing product code.
+
+The original qualified runtime/notice record still matches
+`db195ff2a110d7ff83c9ab41744138f04cb2b19676f4574ba631c2d916faa3f1`.
+The builder revalidated these retained real inputs; no runtime packages were
+reacquired or requalified. Bundled entry, installer, builder and launcher bytes
+matched committed source. The integrated installer SHA-256 is
+`042c6256030313daaa823703ba0b6d653f67f96a52b1e4a706a737063504388c`.
+
+Actual caller-project snapshots contain 337 files and 54 native junctions. Fresh
+and repeat snapshots match exactly, including both ownership receipts and the
+user marker. Every Claude junction resolves to its corresponding canonical skill
+directory by native identity. The bundle application tree was not an installation
+target. HOME, profile, application-data and temporary storage were isolated.
+
+This supersedes the integrated-main native receiving gap above for this bounded
+Windows no-hooks project flow only. It is not global/hooks-enabled installation,
+other-platform receiving, internet-release qualification, publication or archival.
+No models, GitHub Actions, security settings, timeout redesign or native push were
+used. The existing publication refusal remains unresolved.
+
+Independent physical readback confirmed all 337 file hashes and 54 junction
+identities, six source-to-bundle file matches including ownership and uninstall,
+and both original and bundled runtime evidence hashes. No receiving-process
+children remained. Both owned disposable fixture roots were moved to designated
+trash with source absence and destination presence verified. Original inputs
+were retained unchanged.
