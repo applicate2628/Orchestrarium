@@ -65,6 +65,33 @@ A pull-request grant remains limited to its admitted pull request, branch, repos
 
 The push hook does not acquire transcript data or read/write old consent sidecars. Existing sidecars remain untouched local history; no migration or purge is needed. Shared history readers used by other hooks retain their own contracts. A changed installed hook still requires its normal native trust review and health receiving.
 
+## Publication scan resource contract
+
+The scanner must evaluate the exact selected object graph and every required commit/path context before returning authorizing evidence. It must not truncate coverage, skip history, substitute separately advertised refs, or emit success after a read, identity, coverage, deadline or child-settlement failure. Total unique blob bytes remain part of the receipt, not an authorization shortcut.
+
+Acquisition retains each blob's size, content digest and binary/text disposition, not the complete payload history. Path-ordered evaluation keeps one current blob payload; each reread verifies type, identifier, size and digest before scanning. This preserves ordered findings, review contexts and unique-object coverage while separating live payload from cumulative history volume.
+
+The former 512 MiB cumulative blob cap was introduced in commit `8f92dc73` alongside the all-payload cache. Its inspected commit, policy and test evidence did not establish a calibration or external contract for that exact value. After replacing that cache, the cap is removed rather than raised to fit a particular repository. This deliberately admits larger histories when all remaining checks complete. It does not change object selection or permit a failed scan.
+
+The remaining bounds have distinct owners and purposes:
+
+| Resource | Existing bound and owner | Purpose and overflow |
+| --- | --- | --- |
+| Current blob | 64 MiB, object reader | Bound one acquired payload and decoder input; oversized object refuses before payload acquisition. Copies and decoded forms still consume additional memory. |
+| Enumeration | 10,000 commits, 100,000 objects, 50,000 blobs, selection/acquisition | Bound inventories and their bookkeeping; no partial inventory is accepted. |
+| Traversal/context | 1,000,000 subjects/visits, 50,000 blob/path pairs, 4,096 path bytes, traversal | Bound path expansion, review contexts and rereads; exceeding a bound refuses instead of omitting contexts. |
+| Cached metadata | 1 MiB commit/tree object, 64 MiB tree cache, 16 MiB parent graph, reader/traversal | Bound retained structural data and parsing. These are engineering defaults, not Git protocol maxima. |
+| Messages/lines | 1 MiB message, 16 MiB aggregate messages, 8 MiB line, scanner | Bound retained message/line processing; no silent content truncation. |
+| Work deadline | 240 s scanner deadline; 300 s gate-owned child deadline | Scanner refuses late acquisition results. The gate independently supervises the scanner process and requires settled child execution before consuming evidence. |
+| Output | 32 displayed findings, diagnostic owner | Bound diagnostic output, not inspection scope or residual-finding evaluation. |
+| Transport/cleanup | 64 KiB read chunks; existing request/reap budgets, reader/supervisor | Bound allocation increments and waits; incomplete reads or unsettled children never authorize. |
+
+These historical engineering defaults are not a claim that every numeric value is optimally calibrated or that total process memory is capped. Changing a remaining bound requires its concrete resource rationale and boundary/overflow verification, not a repository-specific exception. This change removes only the implicated obsolete cumulative-cache bound.
+
+Additional payload reads are at most the number of distinct blob/path pairs; nonadjacent occurrences may increase input/output and hashing work. The cumulative volume is finite under the object/count bounds but can be much larger than the old cache budget. Memory measurements must include metadata, hashing, decoding and interpreter overhead, not just retained payload.
+
+The direct scanner's deadline is cooperative: a synchronous detector is not preempted, but its late result is rejected. The gate's external child supervisor supplies the independent timeout boundary for publication. Neither route claims a hard resident-memory ceiling. Timeout, output overflow and unknown child settlement remain fail-closed. A stopped scan provides no partial approval and does not resume from an unauthenticated receipt.
+
 ## Terms and Abbreviations
 
 - **HEAD** — the current local Git commit; it may differ from the separately approved publication source.
