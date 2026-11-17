@@ -39,10 +39,12 @@ def _show_clients() -> None:
 
 
 def _run_selected(selected: tuple[str, ...], forwarded: list[str]) -> int:
-    preview = any(flag in forwarded for flag in ("--dry-run", "-DryRun")) or (
+    dry_run = any(flag in forwarded for flag in ("--dry-run", "-DryRun"))
+    preview = dry_run or (
         any(flag in forwarded for flag in ("--uninstall", "--materialize-legacy-skills"))
         and "--apply" not in forwarded
     )
+    first_failure = 0
     for index, name in enumerate(selected):
         status = _run_production(name, forwarded)
         label = ("PREVIEW COMPLETE" if preview else "COMPLETE") if status == 0 else "STOPPED"
@@ -51,10 +53,15 @@ def _run_selected(selected: tuple[str, ...], forwarded: list[str]) -> int:
             # Exit 2 can mean partial removal or invalid arguments. The
             # operation's own report establishes which; do not invent success.
             print("See the installer report above for the result and recovery steps.")
+            if dry_run:
+                # Independent previews report every selected client. Preserve the
+                # first failure so a later success cannot authorize menu apply.
+                first_failure = first_failure or status
+                continue
             for pending in selected[index + 1:]:
                 print(f"{pending}: NOT ATTEMPTED")
             return status  # Preserve the existing fail-fast operation order.
-    return 0
+    return first_failure
 
 
 def main(argv: list[str] | None = None) -> int:

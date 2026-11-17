@@ -169,3 +169,45 @@ def test_project_preview_uses_callers_repository_not_installer_source(tmp_path, 
     assert target_lines == ["Target: " + str(project.resolve() / ("." + provider))]
     assert not (project / ("." + provider)).exists()
     assert not (project / ".agents").exists()
+
+
+@pytest.mark.parametrize("flag", ["--dry-run", "-DryRun"])
+@pytest.mark.parametrize("statuses,expected", [((7, 0), 7), ((7, 9), 7), ((0, 9), 9), ((0, 0), 0)])
+def test_dry_run_collects_each_client_result(installer, monkeypatch, capsys, flag, statuses, expected):
+    module, calls = installer
+    outcomes = dict(zip(("codex", "claude"), statuses))
+    def run(name, args):
+        calls.append((name, list(args)))
+        return outcomes[name]
+    monkeypatch.setattr(module, "_run_production", run)
+    forwarded = ["--global", flag, "--no-hypothesis-hook"]
+    assert module.main(["--clients", "codex", "claude", *forwarded]) == expected
+    assert calls == [("codex", forwarded), ("claude", forwarded)]
+    output = capsys.readouterr().out
+    assert "NOT ATTEMPTED" not in output
+    for name, status in outcomes.items():
+        label = "PREVIEW COMPLETE" if status == 0 else "STOPPED"
+        assert f"{name}: {label} ({status})" in output
+
+
+def test_common_preview_argument_failure_is_reported_for_all_clients(installer, monkeypatch):
+    module, calls = installer
+    monkeypatch.setattr(module, "_run_production", lambda name, args: calls.append((name, list(args))) or 2)
+    args = ["--global", "--dry-run", "--unknown-common-option"]
+    assert module.main(["--clients", "codex", "claude", *args]) == 2
+    assert calls == [("codex", args), ("claude", args)]
+
+
+def test_menu_failed_batch_preview_never_prompts_or_applies(installer, monkeypatch):
+    module, calls = installer
+    answer(monkeypatch, "1,2")
+    monkeypatch.setattr(module, "_run_production", lambda name, args: calls.append((name, list(args))) or (7 if name == "codex" else 0))
+    assert module.main(["--global"]) == 7
+    assert calls == [("codex", ["--global", "--dry-run"]), ("claude", ["--global", "--dry-run"])]
+
+
+def test_implicit_lifecycle_preview_keeps_existing_stop_order(installer, monkeypatch):
+    module, calls = installer
+    monkeypatch.setattr(module, "_run_production", lambda name, args: calls.append((name, list(args))) or 2)
+    assert module.main(["--clients", "codex", "claude", "--uninstall"]) == 2
+    assert calls == [("codex", ["--uninstall"])]
