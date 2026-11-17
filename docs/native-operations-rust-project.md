@@ -498,6 +498,169 @@ Unavailable generic routes stay unavailable. A simple hook does not wait for
 every generic process target; npm and SDK do not wait for this full roadmap.
 Use each existing state owner, not one universal Rust transaction manager.
 
+## Complete source coverage and incident preservation
+
+The [source inventory](native-rust-source-inventory.csv) is a design appendix, not
+a runtime registry or permission source. It records every tracked Python source,
+Python fragment, POSIX/PowerShell launcher and non-document hook-directory artifact
+in the union of Rust-plan commit `ae9081173e159c74eb1e9d756dedfc58942924c2`
+and SDK commit `5b19ab8852385d2bb0362b35a2856f48b220ab19`: 676 distinct paths
+(546 in the Rust snapshot, 643 in the SDK snapshot). Each row carries both available
+Git blob identities, category, planned disposition and owning responsibility.
+An absent blob means absent from that snapshot, not a safe deletion candidate.
+
+This closes inventory coverage, not implementation or per-file acceptance. Refresh
+the inventory against accepted receiving revisions before the relevant slice;
+incorporate newer separately received fixes before comparison. Compare the exact
+`git ls-tree -r` set with the CSV: all `.py`, `.pyfrag`, `.sh`, `.ps1`
+and non-Markdown artifacts in `/hooks/` or `/universal-hooks/`; require no
+missing or duplicate paths and matching blob identities. Generated host hook
+registrations are separately inventoried through the existing installer, health
+and `universal_hooks_manifest.py` owners; source filenames do not prove actual
+event/matcher/argv/trust registration. No installed or untracked file is silently
+claimed to be covered by this tracked-source snapshot.
+
+| Inventory category | Count | Treatment |
+| --- | ---: | --- |
+| Canonical projections | 51 | Migrate the single canon and all supported receiving bindings, not separate copies. |
+| Hook candidates | 22 | Capture event/input/output/failure semantics and host consumers before porting. |
+| Native operation candidates | 46 | Migrate the existing deterministic owner by qualified slice. |
+| Provider boundaries | 13 | Use supported SDK/native transport; preserve vendor and account constraints. |
+| Launchers | 24 | Retarget or retire only with the owning operation; do not port logic that is only forwarding. |
+| Validation tooling | 20 | Reuse or port when beneficial; preserve actual blocking/advisory semantics. |
+| Historical oracles | 16 | Keep immutable baseline evidence, not a competing production implementation. |
+| SDK bridges | 22 | Retain the vendor-supported SDK coordination boundary until an equivalent official route qualifies. |
+| Development oracles | 16 | Keep useful verification tooling; runtime migration is not a ban on Python tests. |
+| Delivery tooling | 3 | Align existing distribution owners; no duplicate installer. |
+| Third-party parser sources | 72 | Evaluate a maintained upstream crate instead of manually translating vendored code. |
+| Maintenance tooling | 2 | Preserve bounded owner operations; no machine-wide cleaner. |
+| Tests and test fixtures | 369 | Reuse as behavior oracles and add only missing native cases. |
+
+All categories are included in the project; inclusion does not mean copying every
+test, vendored dependency or official Python SDK into Rust. The design goal is
+native ownership of qualified deterministic production operations with explicit
+SDK bridges and retained useful tooling. Any proposed full Python-free runtime
+would require a supported replacement for each remaining bridge, not a language
+purge. Source-only components stay inactive until their own admission qualifies.
+
+### Skills and activation-surface coverage
+
+The [skill inventory](native-rust-skill-inventory.csv) covers the same two frozen
+revisions: 228 distinct paths (175 per snapshot), including 90 skill-body paths,
+70 provider-role entrypoints, 52 activation-metadata files and 16 historical
+fixtures. These are paths across layouts, not 228 distinct skills. The canonical
+Codex skill tree contains 54 skills; historical Claude copies and SDK adapter
+entrypoints must not become additional semantic owners. Verify actual installer
+projection/binding rather than infer ownership from a similar filename.
+
+| Canonical skill family (count) | Rust-capable mechanics | Retained semantic responsibility |
+| --- | --- | --- |
+| Coordination (6) | Scope/lineage/dependency/artifact binding and current-state projection | Outcomes, priorities, decomposition and architecture; no universal stage chain |
+| Implementation (11) | Scope/revision binding, admitted test invocation and result capture | Correct implementation and domain judgment; route-specific prerequisites |
+| Research/advice (6) | Provenance, linking, retention and currentness through existing owners | Research, mathematical validity and synthesis; advice does not grant authority |
+| Assurance (8) | Evidence identity, coverage links and state/result contracts | Threat/severity, test adequacy, architecture and performance judgment |
+| UI/UX (5) | Capture lifecycle and state/environment identity | Visual quality and usability; keep accessibility severity with its specialist |
+| External execution (3) | Scope/result bindings and supported SDK transport | Lead selects context/route/role; output does not grant permission |
+| Review utilities (2) | Existing revision/attempt/delta and settlement contracts | Finding relevance and option comparison; no new owner or mandatory loop |
+| Git/resources (4) | Existing Git, transfer, lifecycle and creator-bound settlement | Consent, value/ownership classification and substantive completion |
+| Diagnosis (2) | Scoped evidence acquisition and capture cleanup | Hypothesis selection and observer effects; correct overbroad logs-first gates |
+| Specialized toolchains (2) | Existing process/evidence primitives | Project-specific build/update policy is not universal admission |
+| Explanation/documents (5) | Optional shared artifact/lifecycle helpers | Communication, generalization, scientific/document judgment |
+
+
+The inventory maps all 54 canonical skill names to these 11 families. The audit
+read every description/heading and contract excerpts, with high-risk sections
+read in full; it is family-level semantic coverage, not line-by-line proof.
+
+Apply the per-skill migration review to the actual body and activation/reference
+consumers, not only this family table or file count. Keep a skill's governing
+workflow owner; extracting a mechanical helper does not authorize another model
+launch, another approval gate or a second copy of the methodology.
+
+The source audit identified concrete correction or reconciliation targets before
+mechanical translation:
+- `bug-hunting/SKILL.md` requires absolute runtime logs before every edit, stops
+  all edits after a second cross-break, and describes logging as effectively
+  zero-risk/no timing effect. Correct these overbroad claims through its existing
+  owner: evidence appropriate to the affected hypothesis, scoped diagnosis, and
+  explicit observer effects. The separately owned skill correction must be
+  received, not duplicated in this plan branch.
+- `reliability-engineer/SKILL.md` has a blanket research/design input requirement
+  to reconcile with route-aware neighboring contracts; do not automatically impose
+  research/design on every bounded repair.
+- `performance-engineer/SKILL.md` sampling and live-profile requirements belong
+  to the relevant performance claim, not every task's launch quota. Reconcile its
+  approval wording with current lifecycle/standing authority instead of compiling
+  a duplicate unconditional gate.
+- Transfer parser-size caps and cleanup free-space thresholds are existing
+  resource contracts to justify in their actual scope, not global progress
+  thresholds or permission to purge data.
+- Preserve the UX/accessibility owner separation; reusing verification machinery
+  must not duplicate substantive specialist gates.
+
+These findings do not declare every skill defective, every line reviewed, or every
+mechanical requirement portable. Each implementation slice supplies the affected
+body/consumer evidence and closes its concrete findings through independent review.
+No rule is removed solely because an SDK or Rust library is present.
+
+
+### Incident-to-regression map
+
+Every affected slice binds its actual old and new revisions, input/environment,
+expected result and side effects. The following existing regression families are
+starting points, not claims that every incident is already reproduced natively.
+
+| Incident / obligation | Existing evidence or regression family | Native comparison / additional probe |
+| --- | --- | --- |
+| Declared validator actions not executed | `tests/test_python_validator_runtime.py` | Verify required checks actually run; declared inventory and green summary alone are insufficient. |
+| Baseline bytes changed by checkout line endings | `tests/test_pinned_source_checkout.py`, `tests/test_orche_baseline_pin.py` | Preserve byte-pinned evidence through Windows checkout, packaging and installed readback. |
+| Managed/user Markdown and encoding preservation | `tests/test_markdown_bom_preservation.py`, `tests/test_markdown_private_semantic_contract.py` | BOM, CRLF/LF, fenced text and user-owned bytes match the owning contract; parser replacement must not rewrite unrelated content. |
+| Canonical hook/mirror drift or import failure | `tests/test_universal_hook_surfaces.py`, `tests/test_universal_audit_hooks_hook_common_unimportable.py` | All supported projections updated together; preserve each hook's advisory/fail-open/fail-closed behavior. |
+| Copy/descriptor-close failure hides primary outcome | `tests/test_installer_cleanup_primary.py`, `tests/test_production_installer_receiving_errors.py` | Preserve primary and cleanup errors, actual effects and rollback custody on all exit paths. |
+| Installer metadata, user edits and rollback | `tests/test_installer_transaction_metadata.py`, `tests/test_installer_projection_rollback.py` | Compare owned writes and rollback; add real process-loss recovery, not only caught exceptions. |
+| Partial SDK environment or failed batch preview | SDK `tests/test_sdk_setup.py` and SDK `tests/test_install_selection.py` | Do not accept incomplete setup; report unaffected preview targets without changing apply semantics. |
+| Ledger metadata-write leak / unknown outcome | SDK `tests/test_agent_run_ledger.py` and separately received lock failure tests | Partial writes, close failure, replaced/foreign locks and crash recovery; no PID-only takeover or duplicate events. Cooperative path checks are not atomic fencing. |
+| Publication scanner timeout or incomplete range | `tests/test_publication_native_timeout.py`, `tests/test_publication_safety_scanner.py`, `tests/test_publication_prior_disclosure.py` | Reap owned processes, retain full required graph scope, refuse only affected publication; independent repair continues. |
+| Stale plan resumes despite changed implementation | `tests/test_plan_currency_contract.py`, `docs/stale-plan-readmission.md` | Validate relevant bindings and preserve required architectural judgment; no age-only automatic veto. |
+| Review/context evidence binds the wrong revision or session | `tests/test_review_loop_state_v2.py`; SDK `tests/test_sdk_context_selection.py`, `tests/test_sdk_runtime.py` | Changed scope invalidates dependent evidence only; fresh/handoff/resume/fork claims match actual supported behavior. |
+| Cleanup removes useful data or leaves owned resources | `tests/test_scratch_evidence_lifecycle.py`, `tests/test_retained_scratch_file_lifecycle.py`, `tests/test_cleanup_engine.py` | Preserve unique results, release owned resources despite reporting failure, and keep foreign/unknown identities untouched. |
+
+The SDK snapshot includes received fixes: lock-acquisition cleanup
+`e558ecf2184abc286d1c693f9e0ede727fe55ed6`, independent dry-run previews
+`26a3c934`, and process-lineage-aware Windows timeout tests `5b19ab88`.
+Their combined focused check passed 47 tests; this is not a full-suite, native Rust
+or hard-crash qualification. Partial-environment and process-loss recovery remain
+separate open design/acceptance work.
+
+Receiving each later fix extends the affected row rather than starting a duplicate
+bug catalog. Same-item ledger integrity can legitimately hold that item's dispatch;
+do not weaken integrity to achieve finer isolation. Unrelated work-items remain
+independent. Simulated process/provider checks do not establish native provider,
+crash or installed-platform acceptance.
+
+### Old/new qualification and cutover
+
+For each operation, run the current Python oracle and Rust candidate on isolated
+copies or deterministic replay inputs, not twice against live mutable state.
+Compare protocol bytes where required, structural values without hiding meaningful
+differences, error/exit behavior, owned effects and protected data. Classify known
+Python defects explicitly: approved fixes may differ intentionally; do not enshrine
+a bug as parity or quietly normalize it away.
+
+Bind publication/installation to the qualified executable, resources and consumer
+descriptor. Preview, apply and read back through the existing owner; on partial
+failure reconcile the real effect before retry. Keep known-good recovery material
+until the owning rollback conditions no longer need it. Rollback means an
+identity-checked restoration compatible with current user changes and state formats,
+not overwriting newer work or blindly installing an old binary.
+
+Retire the replaced Python production entrypoint and mirrors only after its
+supported consumers qualify. Retain needed historical evidence and development
+oracles, not a permanent second live implementation. No absolute guarantee of
+bug-free operation is claimed: completion means the declared coverage and evidence
+are met, remaining limitations are named, and failure/recovery paths are usable.
+
+
 ## Native components to evaluate
 
 [clap](https://github.com/clap-rs/clap) for CLI
@@ -530,6 +693,31 @@ already belongs to its native descriptor owner (see source baseline above); it i
 new Rust scope. Count packaging, updates, bridge removal and platform/dependency
 maintenance when assessing complexity; claim no speed or reliability gain without
 matched measurements.
+
+### Library reuse decisions to qualify
+
+Prefer maintained upstream primitives where they reduce custom code, but keep
+application authority, custody and recovery with the existing owners. The following
+licenses were checked in upstream manifests/license files on 2026-11-17; no version
+is selected or installed by this plan. At implementation, review the exact release,
+features, compiler requirement, transitive licenses, advisories and supported targets.
+
+| Need | Candidate / existing path | License and acceptance boundary |
+| --- | --- | --- |
+| Source-span Markdown parsing | [pulldown-cmark](https://github.com/pulldown-cmark/pulldown-cmark) | [MIT](https://github.com/pulldown-cmark/pulldown-cmark/blob/main/LICENSE). Use offsets to preserve untouched bytes; not a lossless reserializer or assumed markdown-it replacement. |
+| JSON Schema | [jsonschema](https://docs.rs/jsonschema/latest/jsonschema/) | [MIT](https://github.com/Stranger6667/jsonschema/blob/master/Cargo.toml). Match the actual draft/formats and offline refs; reject duplicates before a value tree loses them. Keep semantic validators separate. |
+| SHA-256 identities | [sha2](https://github.com/RustCrypto/hashes/tree/master/sha2) | [MIT OR Apache-2.0](https://github.com/RustCrypto/hashes/blob/master/sha2/Cargo.toml). Preserve exact bytes/domain separation and existing persisted IDs; hashing grants no authority. |
+| Git graph traversal | Keep [Git cat-file](https://git-scm.com/docs/git-cat-file)/[rev-list](https://git-scm.com/docs/git-rev-list) first; evaluate [gix](https://github.com/GitoxideLabs/gitoxide) only for demonstrated benefit | [gix MIT OR Apache-2.0](https://github.com/GitoxideLabs/gitoxide/blob/main/Cargo.toml). Require complete-graph parity, tags/noncommit roots, missing objects, worktrees and exact blobs; not filesystem traversal. |
+| Lock primitives | [standard-library File locks](https://doc.rust-lang.org/std/fs/struct.File.html), then missing native APIs | Platform semantics must qualify. Neither a lock nor path existence proves fencing, dead ownership or safe takeover. |
+| Scoped temporary files / single-file writes | [tempfile](https://github.com/Stebalien/tempfile); [atomicwrites](https://docs.rs/crate/atomicwrites/latest/source/Cargo.toml.orig) only if useful | tempfile MIT OR Apache-2.0; atomicwrites MIT. Select an authorized workspace explicitly; test permissions/durability/partial effects. Neither RAII cleanup nor rename is a multi-file crash-recovery protocol. |
+| Process containment | [process-wrap](https://github.com/watchexec/process-wrap/blob/main/Cargo.toml), missing APIs through [windows-rs](https://github.com/microsoft/windows-rs/blob/master/crates/libs/windows/Cargo.toml) | Both MIT OR Apache-2.0. Qualify partial spawn, cancellation, capture and descendant settlement; no mandatory Tokio runtime. |
+| CLI / JSON / TOML / file inventory / parallelism | Existing candidates clap, serde_json, toml_edit, walkdir, rayon above | clap's MIT option verified; serde_json/toml_edit/rayon MIT OR Apache-2.0; walkdir MIT OR Unlicense. Preserve byte/number/order/duplicate contracts, link policy and deterministic assembly. Add parallelism only with measured benefit. |
+
+A rejected crate remains a documented tradeoff, not a reason to invent a large
+replacement framework. Check the actual old/new incident corpus before replacing
+a parser or persistence primitive. Unavailable capabilities stay explicit; library
+installation or compilation is not runtime acceptance.
+
 
 ## Acceptance, parity and deliberate improvements
 
@@ -582,6 +770,8 @@ an unavailable route or grants native/provider launch authority.
 
 ## Terms and Abbreviations
 
+- CSV: comma-separated table; the inventory is a frozen design snapshot.
+- RAII: resource acquisition is initialization; object lifetime owns cleanup, not crash recovery.
 - Rust / Cargo: native programming language / its build and package tool.
 - CLI / argv: command-line interface / exact argument vector.
 - PowerShell bootstrap: download/verification/launch channel, not managed-state logic.
