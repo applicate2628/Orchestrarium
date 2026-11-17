@@ -109,7 +109,7 @@ Routing conventions (not persisted as keys):
       - `externalCodexWorkdirMode: neutral`
       - `externalClaudeWorkdirMode: neutral`
       - `externalModelMode: runtime-default`
-      - `externalCodexProfile: gpt-6.1-sol-xhigh`
+      - `externalCodexProfile: gpt-6.2-sol-xhigh`
     - `externalProvider: auto` resolves by lane type through the active named production priority profile rather than a Claude-line default provider. Shipped `auto` stays on the Codex/Claude pair. Kimi is explicit-only through fixed `kimi-code/k3` for policy-admitted read-only exploration/research/planning/review or mapped `external-worker` engineering. Omitting the capability file keeps tools/servers/subagents empty with permission `reject`; a validated file may select admitted read tools/Model Context Protocol servers or scoped worker tools. Every result remains independently verified and nonauthorizing, while Grok remains unavailable in 1.x.
     - Accept shorthand answers such as `force`, `external reviewer only`, or `defaults for the rest`.
 
