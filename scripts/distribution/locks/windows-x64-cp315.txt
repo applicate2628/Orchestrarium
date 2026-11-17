@@ -1,3 +1,5 @@
+# HISTORICAL SDK-IN-BUNDLE EXPERIMENT ONLY. Not current install requirements.
+# Provider SDKs use complete official installation in a separate environment.
 # Windows x64 CPython 3.15 normal GIL; pinned wheels excluding the SDK bundled CLI.
 annotated-types==0.8.0 --hash=sha256:f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0
 anyio==4.15.1 --hash=sha256:6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101

@@ -1,5 +1,52 @@
 # Install Orche
 
+## Official agent SDK setup
+
+Orche supplies its integration code, not repackaged vendor SDKs or coding CLI
+binaries. Agent SDKs are installed separately using each vendor's ordinary
+supported package installation, including its normal dependencies. Such a package
+may itself install or download a CLI/runtime; the setup proposal discloses that
+before presenting a command. No dependency metadata is rewritten and no
+`--no-deps` workaround is used in the current setup workflow.
+
+To print a proposal without installing anything:
+
+```sh
+python install.py --sdk-setup codex --sdk-python .venv-codex/bin/python
+```
+
+On Windows select `.venv-codex/Scripts/python.exe` instead. Create/select an
+appropriate separate environment first; the argument identifies its interpreter,
+not the immutable installer-bundle interpreter. The proposal prints the official
+package command and `pip check`. It does not install, log in, register a host,
+change routing or launch a model. A successful package installation alone does
+not qualify Orche's adapter or authorize provider quota use. Package resolution
+selects available dependency-compatible releases; adapter/protocol compatibility
+still needs the existing checks, not an assumption that every latest release works.
+
+Run the existing SDK-enabled entrypoint with that same selected Python. The
+current worker profile uses its caller's `sys.executable`, fixed worker source
+and isolated `-I -u` arguments; no `PYTHONPATH` injection or alternate executable
+substitution is required. For example, use the selected environment's Python to
+invoke `scripts/provider_prompt.py` with the existing admitted review arguments.
+The distribution launcher remains the base installer, not a provider worker.
+Never pip-install into the qualified immutable bundle runtime: use the separate
+provider environment so existing runtime evidence and retention remain valid.
+
+Antigravity (AGY) is the selected primary Lead direction, not Gemini CLI. This
+choice does not pretend that a new native-host installer or live SDK route is
+already qualified. A native Lead's own session/subagents, an installed agent SDK,
+and a programmatically invoked worker are distinct. The qualified host catalog
+and existing worker admission/account boundaries remain unchanged. In particular,
+Claude workers retain the official API/cloud credential boundary, not a wrapper
+around a native Lead's subscription session.
+
+The setup catalog describes official agent SDK installation only. Kimi's current
+Python agent SDK depends on legacy `kimi-cli`; it is not asserted compatible with
+the separate newer Kimi Code CLI. Grok's ACP (Agent Client Protocol) integration
+with Grok Build is not relabelled as a standalone Grok-branded agent SDK. Ordinary
+LLM API clients are not substitutes for agent SDKs in this workflow.
+
 ## Selected-client copies and uninstall
 
 Codex is the primary host. The common installer lifecycle serves the qualified

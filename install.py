@@ -15,6 +15,7 @@ if str(SCRIPTS) not in sys.path:
 
 from python_installer_bootstrap import ensure_supported_python
 from installation.clients import CLIENTS as CLIENT_CATALOG
+from installation.sdk_setup import SDK_PROVIDERS, setup_guidance
 
 ensure_supported_python(str(Path(__file__).resolve()))
 
@@ -66,7 +67,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--clients", nargs="+", choices=[name for name, _ in CLIENTS])
     parser.add_argument("--list-clients", action="store_true")
+    parser.add_argument("--sdk-setup", choices=tuple(SDK_PROVIDERS),
+                        help="Show official agent SDK installation guidance only; no installation or model launch.")
+    parser.add_argument("--sdk-python", help="Python executable in the selected worker environment; used only in guidance.")
     options, forwarded = parser.parse_known_args(sys.argv[1:] if argv is None else argv)
+    if options.sdk_setup is not None:
+        if options.clients is not None or options.list_clients or forwarded:
+            parser.error("SDK setup guidance cannot be combined with client installation/lifecycle options.")
+        try:
+            print(setup_guidance(options.sdk_setup, options.sdk_python))
+        except ValueError as exc:
+            parser.error(str(exc))
+        return 0
+    if options.sdk_python is not None:
+        parser.error("--sdk-python requires --sdk-setup.")
     if options.list_clients:
         _show_clients()
         return 0

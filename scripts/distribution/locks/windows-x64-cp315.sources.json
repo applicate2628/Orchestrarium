@@ -251,5 +251,5 @@
       "sha256": "c2f03a0f73f804a13c2735b99392b0cd426bb4f2c4d0178e5ac966a0f21618d5"
     }
   ],
-  "scope": "Pinned Python wheel inputs excluding the SDK bundled CLI; selected external Codex executable required. Not a complete pip dependency closure."
+  "scope": "Historical SDK-in-bundle experiment; not current install requirements. Python archive provenance is preserved. Provider SDKs use complete official installation in a separate environment."
 }

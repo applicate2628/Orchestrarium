@@ -29,43 +29,51 @@ The retained interpreter lifetime remains independent: removing a client does
 not authorize deleting its runtime. Runtime input and notice inventories must
 match the separately qualified evidence record exactly.
 
-## Selected dependency inputs
+## Base installer runtime and provider SDK installation
 
-`locks/linux-x64-cp315.txt` selects 40 binary wheels for Linux
-x64 with normal-GIL CPython 3.15.2. Its companion sources JSON records the exact
-wheel URLs and SHA-256 values from the package resolver. This is a platform-specific
-qualification input, not a floating upgrade policy or a universal requirements file.
-Use `python -m pip install --no-deps --require-hashes --only-binary=:all: -r <lock>` when
-preparing an isolated, verified runtime. The local builder does not run pip.
+The bundle contains the installer and a separately qualified base Python, not
+repackaged provider SDKs or CLIs. Start from a pristine official Python input.
+Upstream packaging bootstrap tools (pip, setuptools and wheel) may be retained
+intact; installed third-party packages in site-packages/dist-packages or package
+metadata outside those directories are rejected before output creation. This is
+a layout guard, not a classifier for arbitrary executables: exact qualified
+runtime evidence still owns the selected input inventory and provenance.
 
-`locks/windows-x64-cp315.txt` records the corresponding Windows x64 resolution:
-41 selected binary wheels, including the Windows-only `pywin32` dependency.
-Its sources JSON also records the normal-GIL CPython 3.15.2 Windows standalone
-archive URL and checksum. Runtime assembly, import, and launcher checks do not
-by themselves qualify actual client installation or native hook trust.
+The builder does not install packages, trim provider payloads, remove dependency
+metadata or acquire provider runtimes. The installer launcher remains bound to
+its own Python. Provider SDK installation belongs to the explicit selected-provider
+setup route and uses the official package manager with normal dependency resolution
+in a separate environment. An official SDK can include its own CLI/runtime; disclose
+that dependency before setup. Package installation is not permission to start a model.
 
-The exploratory Python build is Astral python-build-standalone 20261026,
-CPython 3.15.2, Linux x64 GNU, install-only stripped archive. Recorded SHA-256:
-`7b03163a980c607ba8194709d4a4086735a7a9c488cc475b098157306927b36b`.
-No interpreter binary is checked into Git. The SDK wheel declares a separate
-CLI dependency, but this distribution deliberately supplies only the Python SDK.
-The adapter requires an explicitly selected external Codex executable. Use
-`--no-deps` with either platform lock: these selected inputs are not a complete
-pip dependency closure. The builder excludes the separate CLI package, its
-metadata and entrypoints, and excludes its historical native notices from the
-output while preserving those notices in the source repository. Linked CLI
-inputs are refused rather than allowing aliases to defeat selection. Other
-custom package layouts require separate qualification.
-The selected cryptography wheel has a manylinux_2_34 tag: do not infer an older
-Linux support floor from the Python archive alone. Alpine/musl is not qualified.
+Do not install SDK packages into the retained base Python: that would change its
+qualified inventory and couple hook lifetime to provider updates. Existing retained
+releases remain untouched; build a new base bundle from qualified clean inputs.
+The existing optional Linux dbm omission is unchanged and is separate from provider
+dependency selection.
 
-## Dependency refresh: 2026-11-17
+## Historical SDK dependency records
 
-Both platform inputs select Codex Python SDK 0.169.0, OpenAI API SDK 3.52.0,
+The two platform wheel locks and companion source records under locks/ preserve
+the superseded SDK-in-bundle experiment only. They are not current installation
+requirements. Do not use those partial closures to prepare the base installer or
+a provider environment. Their Python standalone archive identities remain useful
+historical source evidence, not automatic qualification of a new runtime.
+
+For that experiment, the normal-GIL CPython 3.15.2 upstream standalone build was
+20261026; the Linux x64 install-only stripped archive SHA-256 was
+7b03163a980c607ba8194709d4a4086735a7a9c488cc475b098157306927b36b.
+No interpreter binary is checked into Git. Provider/native notice inventories
+remain preserved as historical attribution, without requiring redistribution
+of those provider payloads.
+
+## Historical dependency refresh: 2026-11-17
+
+Both historical platform inputs selected Codex Python SDK 0.169.0, OpenAI API SDK 3.52.0,
 Pydantic 2.14.3 and its exact pydantic-core 2.50.4 dependency. OpenAI Agents SDK
 0.24.0 and MCP 2.3.0 remain current compatible selections. Updated wheel bytes
 were verified against the version-specific PyPI SHA-256 metadata. The deliberately
-external Codex CLI contract above is unchanged. Historical execution evidence
+external Codex CLI experiment was later superseded by official complete installation. Historical execution evidence
 below describes its recorded versions, not acceptance of these new inputs.
 
 The pydantic-core wheel license bytes are unchanged on both platforms; its new
@@ -229,7 +237,10 @@ binary is removed or bypassed to avoid these obligations.
 
 Assembly now requires --runtime-evidence with an independently qualified expected record. See [recovery scope and compatibility](runtime-evidence.md); consistency is not provenance or legal clearance.
 
-### Updated Python dependency qualification (2026-11-17)
+### Historical Python dependency qualification (2026-11-17)
+
+This experiment predates the base-only distribution decision above and is not
+the current installation recipe. The recorded failure is preserved, not waived.
 
 An isolated Windows CPython 3.15.2 environment installed all 41 entries from the
 Windows lock with `--no-deps --require-hashes --only-binary=:all:` successfully.
@@ -241,18 +252,18 @@ Codex session or a rebuilt distribution bundle.
 
 `pip check` returned exit 1 with exactly one missing dependency:
 `openai-codex 0.169.0 requires openai-codex-cli-bin, which is not installed.`
-This distribution deliberately selects the separately managed external executable
+That experiment deliberately selected the separately managed external executable
 through `CodexConfig.codex_bin`; it is not a complete default upstream pip closure.
 Without that explicit selection the SDK correctly refuses implicit bundled CLI
 resolution. Do not report this result as a clean `pip check`, remove upstream
 metadata, or install the excluded executable merely to hide the distinction.
 
 The upstream dependency is unconditional (`Requires-Dist:
-openai-codex-cli-bin==0.169.0`), not an optional extra. The builder does not install
-packages; it copies the qualified runtime while excluding that CLI package,
-its metadata and entrypoints. An external executable cannot satisfy Python
+openai-codex-cli-bin==0.169.0`), not an optional extra. The superseded builder copied the qualified runtime while excluding that CLI
+package, its metadata and entrypoints. An external executable cannot satisfy Python
 package metadata. A complete upstream pip closure therefore requires shipping
 the upstream CLI package (and revisiting the separate-executable distribution
-contract), or an upstream optional dependency. This remains an explicit open
-distribution tradeoff, not a fully resolved dependency closure. Do not fabricate
+contract), or an upstream optional dependency. The current route resolves the distribution choice by not bundling the SDK and
+using complete official installation separately; this historical environment
+was not a fully resolved dependency closure. Do not fabricate
 a replacement package or edit vendor metadata to make dependency checks pass.

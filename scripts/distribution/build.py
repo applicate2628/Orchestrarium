@@ -28,7 +28,7 @@ APP_INPUTS = ('install.py', 'scripts', 'src.codex', 'adapters', 'shared',
 IGNORE = shutil.ignore_patterns('__pycache__', '*.pyc', '.DS_Store')
 
 PYTHON_PACKAGE_DIRS = frozenset({'site-packages', 'dist-packages'})
-CLI_ENTRY_NAMES = frozenset({'codex', 'codex.exe', 'codex.cmd', 'codex-script.py'})
+BOOTSTRAP_PACKAGES = frozenset({'pip', 'setuptools', 'wheel', '_distutils_hack', 'pkg_resources'})
 # The pinned Linux SDK runtime does not use the optional Berkeley DB backend.
 RUNTIME_OMISSIONS = {
     'linux-x64': frozenset({'lib/python3.15/lib-dynload/_dbm.cpython-315-x86_64-linux-gnu.so'}),
@@ -64,11 +64,35 @@ def _ordinary_directory_path(path: Path, *, missing_ok: bool = False) -> None:
             raise ValueError('Bundle roots and destination parents must be ordinary directories')
 
 
-def _is_embedded_cli_package(name: str) -> bool:
-    name = name.casefold()
-    return name == 'codex_cli_bin' or (
-        name.startswith('openai_codex_cli_bin-') and name.endswith('.dist-info')
-    )
+def _validate_base_runtime(runtime: Path) -> None:
+    """Reject third-party environments instead of rewriting vendor distributions.
+
+    Exact qualified input evidence remains the provenance owner. This layout check
+    catches populated package directories, including in-boundary directory aliases;
+    it is not an arbitrary-binary classifier or publisher authentication.
+    """
+    def bootstrap(name: str) -> bool:
+        folded = name.casefold()
+        if folded in BOOTSTRAP_PACKAGES or folded in {'distutils-precedence.pth', 'readme.txt'}:
+            return True
+        return any(folded.startswith(package + '-') and folded.endswith('.dist-info')
+                   for package in ('pip', 'setuptools', 'wheel'))
+
+    for directory, names, files in os.walk(runtime, followlinks=False):
+        current = Path(directory)
+        if current.name.casefold() in PYTHON_PACKAGE_DIRS:
+            children = set(names + files) - set(IGNORE(directory, names + files))
+            if any(not bootstrap(name) for name in children):
+                raise ValueError('Base installer runtime contains third-party packages; use a pristine Python input')
+        for name in names:
+            child = current / name
+            if child.is_symlink() and name.casefold() in PYTHON_PACKAGE_DIRS:
+                if any(not bootstrap(p.name) for p in child.iterdir()
+                       if p.name not in IGNORE(str(child), [p.name])):
+                    raise ValueError('Base installer runtime contains third-party packages; use a pristine Python input')
+        for name in names + files:
+            if name.casefold().endswith(('.dist-info', '.egg-info')) and not bootstrap(name):
+                raise ValueError('Base installer runtime contains third-party packages; use a pristine Python input')
 
 
 def _validate_tree(path: Path, boundary: Path, *, runtime: bool = False) -> None:
@@ -79,19 +103,6 @@ def _validate_tree(path: Path, boundary: Path, *, runtime: bool = False) -> None
         target = path.resolve(strict=True)
         if not target.is_relative_to(boundary):
             raise ValueError('Input link escapes its payload root')
-        if runtime:
-            name = path.name.casefold()
-            parent = path.parent.name.casefold()
-            linked_cli = parent in PYTHON_PACKAGE_DIRS and _is_embedded_cli_package(name)
-            linked_entry = parent in {'bin', 'scripts'} and name in CLI_ENTRY_NAMES
-            linked_site = name in PYTHON_PACKAGE_DIRS and target.is_dir() and any(
-                _is_embedded_cli_package(child.name) for child in target.iterdir()
-            )
-            linked_entries = name in {'bin', 'scripts'} and target.is_dir() and any(
-                child.name.casefold() in CLI_ENTRY_NAMES for child in target.iterdir()
-            )
-            if linked_cli or linked_entry or linked_site or linked_entries:
-                raise ValueError('Linked embedded Codex CLI input is not supported; prepare an unlinked runtime')
     elif stat.S_ISDIR(metadata.st_mode):
         for child in path.iterdir():
             _validate_tree(child, boundary, runtime=runtime)
@@ -191,12 +202,6 @@ def _runtime_ignore(runtime: Path, target: str):
             candidate = (relative / name).as_posix()
             if (candidate.casefold() if target.startswith('windows-') else candidate) in omissions:
                 ignored.add(name)
-        # The adapter supplies an explicitly selected external Codex executable.
-        # Do not distribute the SDK wheel's separate bundled CLI or its metadata.
-        if relative.name.casefold() in PYTHON_PACKAGE_DIRS:
-            ignored.update(name for name in names if _is_embedded_cli_package(name))
-        if relative.as_posix().casefold() in {'.', 'bin', 'scripts'}:
-            ignored.update(name for name in names if name.casefold() in CLI_ENTRY_NAMES)
         return ignored
 
     return ignore_runtime
@@ -227,6 +232,7 @@ def build(source: Path, runtime: Path, output: Path, *, target: str, release: st
         return ignored
 
     _validate_tree(runtime, runtime, runtime=True)
+    _validate_base_runtime(runtime)
     for name in APP_INPUTS:
         item = source / name
         if not item.exists():

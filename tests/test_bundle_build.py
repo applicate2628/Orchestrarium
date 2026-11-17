@@ -273,52 +273,41 @@ def test_codex_native_notices_are_pinned_but_not_shipped(builder, tmp_path, targ
 
 
 @pytest.mark.parametrize("package_dir", ["lib/python3.15/site-packages", "lib/python3.16/dist-packages", "Lib/site-packages"])
-def test_sdk_only_runtime_selection_preserves_neighbors(builder, tmp_path, package_dir):
+@pytest.mark.parametrize("package", ["openai_codex", "claude_agent_sdk", "another_provider", "unrelated_library-1.0.dist-info"])
+def test_provider_populated_runtime_is_refused_without_mutation(builder, tmp_path, package_dir, package):
     source, runtime = small_inputs(builder, tmp_path)
-    packages = runtime / package_dir
-    packages.mkdir(parents=True)
-    for name in ('codex_cli_bin', 'openai_codex_cli_bin-0.163.0.dist-info', 'openai_codex', 'codex_cli_binary'):
-        (packages / name).mkdir()
-        (packages / name / 'payload').write_bytes(b'keep input')
-    (runtime / 'bin/codex').write_bytes(b'CLI entry')
-    (runtime / 'bin/codex-helper').write_bytes(b'neighbor')
-    output = tmp_path / 'output'
-    build_synthetic_bundle(builder, source, runtime, output, target='linux-x64', release='development')
-    copied = output / 'python' / package_dir
-    assert not (copied / 'codex_cli_bin').exists()
-    assert not (copied / 'openai_codex_cli_bin-0.163.0.dist-info').exists()
-    assert (copied / 'openai_codex/payload').read_bytes() == b'keep input'
-    assert (copied / 'codex_cli_binary/payload').read_bytes() == b'keep input'
-    assert not (output / 'python/bin/codex').exists()
-    assert (output / 'python/bin/codex-helper').read_bytes() == b'neighbor'
-    assert (runtime / 'bin/codex').read_bytes() == b'CLI entry'
+    payload = runtime / package_dir / package
+    payload.mkdir(parents=True)
+    (payload / "payload").write_bytes(b"preserve complete vendor input")
+    before = builder._payload_inventory(runtime)
+    with pytest.raises(ValueError, match="Base installer runtime"):
+        build_synthetic_bundle(builder, source, runtime, tmp_path / "output",
+                               target="linux-x64", release="development")
+    assert builder._payload_inventory(runtime) == before
+    assert not (tmp_path / "output").exists()
+
+
+def test_bootstrap_packages_are_preserved_not_sliced(builder, tmp_path):
+    source, runtime = small_inputs(builder, tmp_path)
+    for name in ("pip", "pip-26.0.dist-info", "setuptools", "wheel"):
+        directory = runtime / "lib/python3.15/site-packages" / name
+        directory.mkdir(parents=True)
+        (directory / "payload").write_bytes(b"bootstrap input")
+    output = tmp_path / "output"
+    build_synthetic_bundle(builder, source, runtime, output, target="linux-x64", release="development")
+    assert builder._payload_inventory(runtime) == builder._payload_inventory(output / "python")
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX alias semantics; Windows reparse refusal is covered separately")
-@pytest.mark.parametrize("kind", ["package", "entry", "site", "bin-directory"])
-def test_linked_embedded_cli_is_refused_before_assembly(builder, tmp_path, kind):
+def test_linked_populated_package_directory_is_refused(builder, tmp_path):
     source, runtime = small_inputs(builder, tmp_path)
-    payload = runtime / 'payload'; payload.mkdir()
-    (payload / 'codex').write_bytes(b'CLI')
-    (payload / 'codex_cli_bin').mkdir()
-    if kind == 'package':
-        link = runtime / 'site-packages/codex_cli_bin'; target = payload
-    elif kind == 'entry':
-        link = runtime / 'bin/codex'; target = payload / 'codex'
-    elif kind == 'site':
-        link = runtime / 'site-packages'; target = payload
-    else:
-        link = runtime / 'Scripts'; target = payload
-    link.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        link.symlink_to(os.path.relpath(target, link.parent), target_is_directory=target.is_dir())
-    except OSError as error:
-        if getattr(error, 'winerror', None) == 1314:
-            pytest.skip('Windows symlink privilege required')
-        raise
-    with pytest.raises(ValueError, match='Linked embedded Codex CLI'):
-        build_synthetic_bundle(builder, source, runtime, tmp_path / 'output', target='linux-x64', release='development')
-    assert not (tmp_path / 'output').exists()
+    payload = runtime / "payload"
+    (payload / "another_provider").mkdir(parents=True)
+    (runtime / "site-packages").symlink_to("payload", target_is_directory=True)
+    with pytest.raises(ValueError, match="Base installer runtime"):
+        build_synthetic_bundle(builder, source, runtime, tmp_path / "output",
+                               target="linux-x64", release="development")
+    assert not (tmp_path / "output").exists()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX alias semantics; Windows reparse refusal is covered separately")
@@ -371,3 +360,33 @@ def test_selected_wheel_locks_match_sources_and_native_notice_inventory(target, 
                        if o["platform"] == target and o["wheel"].startswith("pydantic_core-")]
         assert occurrences
         assert all(o["wheel"] == filename for o in occurrences)
+
+
+def test_base_runtime_rejects_third_party_metadata_outside_site_packages(builder, tmp_path):
+    source, runtime = small_inputs(builder, tmp_path)
+    metadata = runtime / "vendor/another_provider-1.0.dist-info"
+    metadata.mkdir(parents=True)
+    (metadata / "METADATA").write_text("Name: another-provider\nVersion: 1.0\n")
+    with pytest.raises(ValueError, match="Base installer runtime"):
+        build_synthetic_bundle(builder, source, runtime, tmp_path / "output",
+                               target="linux-x64", release="development")
+    assert (metadata / "METADATA").is_file()
+    assert not (tmp_path / "output").exists()
+
+
+def test_empty_package_directory_is_valid_base_python(builder, tmp_path):
+    source, runtime = small_inputs(builder, tmp_path)
+    (runtime / "lib/python3.15/site-packages").mkdir(parents=True)
+    output = tmp_path / "output"
+    build_synthetic_bundle(builder, source, runtime, output, target="linux-x64", release="development")
+    assert (output / "python/lib/python3.15/site-packages").is_dir()
+
+
+def test_pristine_cpython_site_packages_marker_is_preserved(builder, tmp_path):
+    source, runtime = small_inputs(builder, tmp_path)
+    marker = runtime / "Lib/site-packages/README.txt"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("This directory exists so that 3rd party packages can be installed here.\n")
+    output = tmp_path / "output"
+    build_synthetic_bundle(builder, source, runtime, output, target="linux-x64", release="development")
+    assert (output / "python/Lib/site-packages/README.txt").read_bytes() == marker.read_bytes()

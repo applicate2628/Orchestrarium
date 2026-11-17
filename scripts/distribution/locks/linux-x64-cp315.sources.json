@@ -1,5 +1,5 @@
 {
-  "scope": "Pinned Python wheel inputs excluding the SDK bundled CLI; selected external Codex executable required. Not a complete pip dependency closure.",
+  "scope": "Historical SDK-in-bundle experiment; not current install requirements. Python archive provenance is preserved. Provider SDKs use complete official installation in a separate environment.",
   "resolvedOn": "2026-11-17",
   "packages": [
     {

@@ -15,6 +15,10 @@ checks and the bounded live Codex review passed on October 25; the outer Agents
 cycle passed on October 26. Their exact evidence boundaries are recorded below.
 These results do not enable a default route or qualify arbitrary general use.
 
+## Provider installation boundary
+
+Use the [official agent SDK setup proposal](../INSTALL.md#official-agent-sdk-setup) in a separate provider environment. Orche does not repackage provider SDKs or CLI binaries. Ordinary vendor installation may supply its own runtime and retains complete original metadata/dependencies. Launch the existing SDK entrypoint with that environment's Python; the supervised worker uses the same interpreter. The base distribution launcher remains installer-only. Historical SDK-only bundle and `--no-deps` qualification below is preserved evidence, not the current installation recommendation. No source fixture or package install activates a live route.
+
 ## Explicit Codex review opt-in (repository-local contract)
 
 The existing provider-prompt entrypoint accepts `--sdk-review-binding <path>` only
