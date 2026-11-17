@@ -4,7 +4,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-17
 
-- Restored source-only ledger, state-schema, and architecture-layering checks that were declared but omitted from the Python pack validators. Preserve the byte-pinned migration baseline during Git checkout so Windows newline conversion cannot invalidate its approved digest. Ledger fixture checks run only in the full monorepo, not provider exports or installed packs; existing governance limits and installed validation remain unchanged.
+- Restored source-only ledger, state-schema, and architecture-layering checks that were declared but omitted from the Python pack validators. Preserve the byte-pinned migration baseline during Git checkout so Windows newline conversion cannot invalidate its approved digest. Ledger fixture checks run only in the full monorepo, not provider exports or installed packs; existing governance limits and installed validation remain unchanged. Reconciled all 19 architecture role slices with the current shared reference before refreshing its review stamp; both complete source pack validators pass.
 
 ## 2026-11-16
 
