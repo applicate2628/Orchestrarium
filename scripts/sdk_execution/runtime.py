@@ -173,6 +173,8 @@ def validate_admitted_request(request: ExecutionRequest, selection: Any) -> None
     """Check exact current common-governance input, without changing admission."""
     if type(request) not in {ExecutionRequest, CoordinationInferenceRequest}:
         raise RuntimeBindingError("admitted_execution_request_required")
+    if request.result_kind != "review":
+        raise RuntimeBindingError("task_runtime_receiving_not_qualified")
     if type(request) is CoordinationInferenceRequest:
         if (selection.auth_mode != "codex-auth-file"
             or selection.config_overrides != CODEX_BOUNDED_REVIEW_OVERRIDES
@@ -387,6 +389,8 @@ def claim_launch(request: ExecutionRequest, selection: Any, *, authority: Callab
 
 def create_codex_adapter(request: ExecutionRequest, sink: Any, selection: CodexRuntimeSelection):
     """Real worker-only factory, called after creator-verified Job containment."""
+    if request.result_kind != "review":
+        raise RuntimeBindingError("task_runtime_receiving_not_qualified")
     from .codex import CodexReviewAdapter, _official_client_binding
     adapter_type = CodexReviewAdapter
     if type(request) is CoordinationInferenceRequest:

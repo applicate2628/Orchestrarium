@@ -25,7 +25,7 @@ from ._async import drain_owned
 from .codex_tools import CodexMcpScope, CodexMcpScopeError, MAX_SERVERS
 from .contracts import (
     CancelReceipt, ExecutionRequest, ExecutionResult, Observation, ReviewResult,
-    json_text, review_schema, validate_review,
+    json_text, review_schema, validate_review, task_schema, validate_task,
 )
 
 
@@ -211,6 +211,10 @@ class CodexReviewAdapter:
         self._finished = False
         self._used = False
 
+    def _validate_output_kind(self, request):
+        if request.result_kind != "review":
+            raise AdapterError("review_result_kind_required")
+
     def _output_schema(self, request):
         return review_schema(request)
 
@@ -238,6 +242,7 @@ class CodexReviewAdapter:
     async def _run_async(self, request: ExecutionRequest, resume: tuple[str, str] | None) -> ExecutionResult:
         if not isinstance(request, ExecutionRequest) or request.provider != "codex":
             raise AdapterError("unsupported_provider")
+        self._validate_output_kind(request)
         with self._lock:
             if self._used:
                 raise AdapterError("operation_already_consumed")
@@ -652,3 +657,21 @@ class CodexReviewAdapter:
             execution_error=execution_error, capture_error=capture_error, cleanup_error=cleanup_error,
             protocol_closed=protocol_closed,
         )
+
+
+class CodexConsultantAdapter(CodexReviewAdapter):
+    def _validate_output_kind(self, request):
+        if request.role != "consultant" or request.result_kind != "task":
+            raise AdapterError("consultant_task_request_required")
+
+    async def reconcile(self, *args, **kwargs):
+        raise AdapterError("consultant_resume_not_qualified")
+
+    def _output_schema(self, request):
+        return task_schema(request)
+
+    def _parse_final(self, text, request):
+        return validate_task(text, request=request)
+
+    def _make_result(self, **values):
+        return ExecutionResult(task=values.pop("review"), **values)

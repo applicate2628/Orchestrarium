@@ -54,8 +54,8 @@
     },
     "sdk_execution/__init__.py": {
       "source": "scripts/sdk_execution/__init__.py",
-      "sha256": "43b155df3f0610a35b79cdf5fc634a3fe8c3d7fa9825fc2c0bf9ed5688909bdd",
-      "destination": "scripts/sdk_execution/__init__.py"
+      "destination": "scripts/sdk_execution/__init__.py",
+      "sha256": "12e7d51082ee627a709bf0da4f5820b26a7613e69dc72d7df48124824022194c"
     },
     "sdk_execution/_async.py": {
       "source": "scripts/sdk_execution/_async.py",
@@ -74,8 +74,8 @@
     },
     "sdk_execution/codex.py": {
       "source": "scripts/sdk_execution/codex.py",
-      "sha256": "87425bf7accab1c1f6ce63673ba7c44fe05e022508bc1ddaf0e436ead5b02279",
-      "destination": "scripts/sdk_execution/codex.py"
+      "destination": "scripts/sdk_execution/codex.py",
+      "sha256": "fb99b8f0687b7d80e6d178a224c26e42aea8e84a43f20114398db437a6c2f88c"
     },
     "sdk_execution/codex_tools.py": {
       "source": "scripts/sdk_execution/codex_tools.py",
@@ -89,8 +89,8 @@
     },
     "sdk_execution/contracts.py": {
       "source": "scripts/sdk_execution/contracts.py",
-      "sha256": "24883f02e4a1f7a0d09db7cf23357b5a79ec43dee81c179d48f20454c1007d11",
-      "destination": "scripts/sdk_execution/contracts.py"
+      "destination": "scripts/sdk_execution/contracts.py",
+      "sha256": "9ebdb5a1cafcc973e613bd2117aeb2e6b6ced20094e4b45154a60fd94128d06c"
     },
     "sdk_execution/coordinator.py": {
       "source": "scripts/sdk_execution/coordinator.py",
@@ -100,7 +100,7 @@
     "sdk_execution/coordination.py": {
       "source": "scripts/sdk_execution/coordination.py",
       "destination": "scripts/sdk_execution/coordination.py",
-      "sha256": "0075d4157a13f8179449dc874cac3b6add137c6698d316834bc44cc92760b66c"
+      "sha256": "831a3a3110f13078f8844a7062ea4434a703d6cf097e9673ea39e598e5441864"
     },
     "sdk_execution/coordination_codex.py": {
       "source": "scripts/sdk_execution/coordination_codex.py",
@@ -144,8 +144,8 @@
     },
     "sdk_execution/runtime.py": {
       "source": "scripts/sdk_execution/runtime.py",
-      "sha256": "c22c2825e16645aae70a873ab076c4e927b5486f6f4e7a7befb9bae4eca4f326",
-      "destination": "scripts/sdk_execution/runtime.py"
+      "destination": "scripts/sdk_execution/runtime.py",
+      "sha256": "96d1cab230a1d124ba626d030d3e7ab1109f1355f5bb2053720ef93b5832b59c"
     },
     "sdk_execution/worker.py": {
       "source": "scripts/sdk_execution/worker.py",

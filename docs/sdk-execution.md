@@ -278,6 +278,26 @@ Record the commit, runtime/access method, platform, scenario and result. Local
 fakes, setup success and unavailable live runs do not complete that route.
 One unresolved provider does not stop independent ready implementation.
 
+### Read-only Consultant adapter increment
+
+The Codex Consultant adapter now uses the existing read-only transport lifecycle
+with a typed task result (`run_id`, `artifact_id`, `role`, `content`), not a review
+verdict. The request's explicit `result_kind: task` selects an output contract,
+not a permission or launch route. Existing review requests omit the default kind
+and existing results omit absent task evidence, retaining their serialized shape.
+The adapter checks the Consultant role and task kind before client construction;
+account verification, read-only sandbox, denied approvals, observations and
+cleanup remain owned by the existing Codex adapter. Resume is not enabled by this
+increment. Task content is evidence requiring independent validation, not proof
+that files changed or a review passed.
+
+This is an offline-tested adapter increment, not live qualification or public
+Consultant activation. The public dispatch remains Reviewer-only and runtime
+admission/factory reject task-kind requests until the existing launch provenance
+and receiving owners support them. Worker write/tool scope and those public
+Consultant integrations remain the next slices; there is no second ledger,
+permission owner, or default-route change.
+
 ### Ordered implementation slices
 
 1. **Official setup and selected environment.** Finish explicit apply, normal

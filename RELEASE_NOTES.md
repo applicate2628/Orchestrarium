@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-17
 
+- Add a typed task-evidence contract and a read-only Codex Consultant adapter using the existing execution lifecycle. Advisory results no longer need a fabricated review verdict. This offline-qualified adapter is not yet a public runtime route: Reviewer-only admission and receiving remain protected, Worker write permissions are unchanged, and legacy review serialization stays compatible.
+
 - Retain the selected task class and a detached snapshot of task-scoped Astra authorization through each prepared SDK invocation. Changing a valid grant after preparation now stops that affected invocation before its next effect; equivalent grant values remain compatible, and ordinary permission checks and independent work are unchanged.
 
 - Task-first routing now favors Sol 6.2 for ordinary implementation, Luna Extra high for bounded mechanics and Terra 6.1 High for fitting bounded/repository/visual work. Astra High/Extra high can use genuine task-scoped approval for scientific formulation, complex audit, architecture and security, including covered repeats; Max and separate launch/spending permissions remain protected. Substantive results now require a proportionate nonauthor check, not only critical results, without adding duplicate review loops.

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -65,11 +65,18 @@ class ExecutionRequest:
     max_output_bytes: int = 1_048_576
     max_events: int = 4096
     context_mode: str = "fresh"
+    result_kind: str = field(default="review", kw_only=True)
 
     def __post_init__(self) -> None:
         for field in fields(self):
             if field.name not in {"scope", "max_output_bytes", "max_events"}:
                 _text(getattr(self, field.name), field.name, 262_144 if field.name == "prompt" else 4096)
+        if self.result_kind not in {"review", "task"}:
+            raise ValueError("unsupported result kind")
+        # Only this implemented adapter currently consumes task-kind evidence.
+        # Expand with the next qualified adapter, not by relabeling a review.
+        if self.result_kind == "task" and (self.provider, self.role) != ("codex", "consultant"):
+            raise ValueError("task adapter combination not implemented")
         if self.context_mode not in {"fresh", "handoff"}:
             raise ValueError("unsupported context mode")
         if self.provider not in {"codex", "claude", "kimi", "grok", "minimax", "mimo"}:
@@ -102,6 +109,8 @@ class ExecutionRequest:
         # Omission is the canonical fresh spelling, preserving retained request hashes.
         if self.context_mode == "fresh":
             result.pop("context_mode")
+        if self.result_kind == "review":
+            result.pop("result_kind")
         return result
 
     @classmethod
@@ -109,6 +118,8 @@ class ExecutionRequest:
         # Older serialized requests predate explicit context selection and were fresh.
         if isinstance(value, dict) and "context_mode" not in value:
             value = {**value, "context_mode": "fresh"}
+        if isinstance(value, dict) and "result_kind" not in value:
+            value = {**value, "result_kind": "review"}
         data = dict(_keys(value, {field.name for field in fields(cls)}))
         if not isinstance(data["scope"], list):
             raise ValueError("scope must be a list")
@@ -174,6 +185,8 @@ class ReviewResult:
 
 def review_schema(request: ExecutionRequest) -> dict[str, Any]:
     """Native outputSchema, independently revalidated after completion."""
+    if request.result_kind != "review":
+        raise ValueError("review result kind required")
     return {
         "type": "object", "additionalProperties": False,
         "required": ["run_id", "artifact_id", "role", "verdict", "findings"],
@@ -191,6 +204,58 @@ def review_schema(request: ExecutionRequest) -> dict[str, Any]:
                     "message": {"type": "string"}, "evidence": {"type": "string"},
                 },
             }},
+        },
+    }
+
+
+@dataclass(frozen=True, slots=True)
+class TaskResult:
+    """Provider-produced task evidence, not a review verdict or effect receipt."""
+    run_id: str
+    artifact_id: str
+    role: str
+    content: str
+
+    def __post_init__(self) -> None:
+        for name in ("run_id", "artifact_id", "role"):
+            _text(getattr(self, name), name)
+        # Outer ExecutionRequest owns the narrower selected output budget.
+        _text(self.content, "task content", 16_777_216)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: object) -> TaskResult:
+        return cls(**_keys(value, {field.name for field in fields(cls)}))
+
+
+def validate_task(payload: object, *, request: ExecutionRequest) -> TaskResult:
+    if request.result_kind != "task":
+        raise ValueError("task result kind required")
+    if isinstance(payload, str):
+        payload = strict_json(payload, max_bytes=request.max_output_bytes)
+    result = TaskResult.from_dict(payload)
+    if (result.run_id, result.artifact_id, result.role) != (
+        request.external_evidence_run_id, request.artifact_id, request.role
+    ):
+        raise ValueError("task identity mismatch")
+    if len(json_text(result.to_dict()).encode("utf-8")) > request.max_output_bytes:
+        raise ValueError("task output too large")
+    return result
+
+
+def task_schema(request: ExecutionRequest) -> dict[str, Any]:
+    if request.result_kind != "task":
+        raise ValueError("task result kind required")
+    return {
+        "type": "object", "additionalProperties": False,
+        "required": ["run_id", "artifact_id", "role", "content"],
+        "properties": {
+            "run_id": {"type": "string", "enum": [request.external_evidence_run_id]},
+            "artifact_id": {"type": "string", "enum": [request.artifact_id]},
+            "role": {"type": "string", "enum": [request.role]},
+            "content": {"type": "string", "minLength": 1},
         },
     }
 
@@ -229,6 +294,7 @@ class ExecutionResult:
     sdk_execution_json: str | None = None
     observations: tuple[Observation, ...] = ()
     review: ReviewResult | None = None
+    task: TaskResult | None = field(default=None, kw_only=True)
     usage_json: str | None = None
     execution_error: str | None = None
     capture_error: str | None = None
@@ -246,14 +312,14 @@ class ExecutionResult:
             raise ValueError("invalid actual execution path")
         if self.native_result_text is not None:
             _text(self.native_result_text, "native result text", self.request.max_output_bytes)
-        if self.review is not None and self.native_result_text is not None:
+        if sum(value is not None for value in (self.review, self.task, self.native_result_text)) > 1:
             raise ValueError("result representations are mutually exclusive")
         if self.actual_execution_path == "direct-external-cli":
-            if self.sdk_execution_json is not None or self.review is not None:
+            if self.sdk_execution_json is not None or self.review is not None or self.task is not None:
                 raise ValueError("CLI result must preserve native text and provenance")
         elif self.native_result_text is not None:
-            raise ValueError("SDK result requires structured review")
-        has_result = self.review is not None or self.native_result_text is not None
+            raise ValueError("SDK result requires structured evidence")
+        has_result = self.review is not None or self.task is not None or self.native_result_text is not None
         if self.status == "completed" and (self.provider_status != "completed" or not has_result or self.execution_error or self.capture_error or self.cleanup_error or not self.protocol_closed):
             raise ValueError("completed result lacks required evidence")
         if not isinstance(self.observations, tuple) or any(not isinstance(o, Observation) for o in self.observations):
@@ -271,7 +337,13 @@ class ExecutionResult:
             value = getattr(self, name)
             if value is not None and (not isinstance(value, str) or not isinstance(strict_json(value, max_bytes=65_536), dict)):
                 raise ValueError(f"invalid {name}")
+        if self.task is not None:
+            if not isinstance(self.task, TaskResult):
+                raise ValueError("invalid task result")
+            validate_task(self.task.to_dict(), request=self.request)
         if self.review is not None:
+            if self.request.result_kind != "review":
+                raise ValueError("review result kind required")
             if not isinstance(self.review, ReviewResult) or (
                 self.review.run_id, self.review.artifact_id, self.review.role
             ) != (self.request.external_evidence_run_id, self.request.artifact_id, self.request.role):
@@ -286,7 +358,7 @@ class ExecutionResult:
         return strict_json(self.usage_json, max_bytes=65_536) if self.usage_json else None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "request": self.request.to_dict(), "status": self.status, "provider_status": self.provider_status,
             "actual_execution_path": self.actual_execution_path, "native_result_text": self.native_result_text,
             "native_thread_id": self.native_thread_id, "native_turn_id": self.native_turn_id,
@@ -297,19 +369,26 @@ class ExecutionResult:
             "cleanup_error": self.cleanup_error, "protocol_closed": self.protocol_closed,
         }
 
+        if self.task is not None:
+            result["task"] = self.task.to_dict()
+        return result
+
     @classmethod
     def from_dict(cls, value: object) -> ExecutionResult:
+        if isinstance(value, dict) and "task" not in value:
+            value = {**value, "task": None}
         data = dict(_keys(value, {field.name for field in fields(cls)}))
         data["request"] = ExecutionRequest.from_dict(data["request"])
         if not isinstance(data["observations"], list):
             raise ValueError("observations must be a list")
         data["observations"] = tuple(Observation.from_dict(o) for o in data["observations"])
         data["review"] = ReviewResult.from_dict(data["review"]) if data["review"] is not None else None
+        data["task"] = TaskResult.from_dict(data["task"]) if data["task"] is not None else None
         return cls(**data)
 
     def to_tool_output(self) -> dict[str, Any]:
         """External evidence, not a ledger write, accepted review, or settlement."""
-        return {
+        result = {
             "authoritative": False, "process_settlement": "not_established",
             "actual_execution_path": self.actual_execution_path, "native_result_text": self.native_result_text,
             "run_id": self.request.run_id, "external_dispatch_id": self.request.external_dispatch_id,
@@ -319,6 +398,10 @@ class ExecutionResult:
             "cleanup_error": self.cleanup_error, "protocol_closed": self.protocol_closed,
             "usage": self.usage,
         }
+
+        if self.task is not None:
+            result["task"] = self.task.to_dict()
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -350,6 +433,8 @@ class CancelReceipt:
 
 def validate_review(payload: object, *, request: ExecutionRequest | None = None) -> ReviewResult:
     """Validate shape and, when supplied, the authoritative request binding."""
+    if request is not None and request.result_kind != "review":
+        raise ValueError("review result kind required")
     if isinstance(payload, str):
         if len(payload.encode("utf-8")) > (request.max_output_bytes if request else 1_048_576):
             raise ValueError("review output too large")
