@@ -408,7 +408,7 @@ class CodexReviewAdapter:
         final_items: dict[str, dict[str, Any]] = {}
         pending_items: set[str] = set()
 
-        def capture(kind: str, payload: dict[str, Any]) -> None:
+        def capture(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
             nonlocal total_bytes, capture_error
             encoded = json_text(payload)
             size = len(encoded.encode("utf-8"))
@@ -423,6 +423,9 @@ class CodexReviewAdapter:
             except Exception as exc:
                 capture_error = "evidence_sink_failed"
                 raise AdapterError(capture_error) from exc
+            # Observation validates this JSON. Interpret its detached snapshot,
+            # never provider-owned dictionaries that may be reused or changed.
+            return json.loads(encoded)
 
         def accept_item(item: dict[str, Any]) -> None:
             self._check_item(item)
@@ -503,7 +506,7 @@ class CodexReviewAdapter:
             self._authority(request, "client_start")
             client.start()
             initialized = _object(client.initialize())
-            capture("initialize", initialized)
+            initialized = capture("initialize", initialized)
             runtime = _runtime_version(initialized)
             account = _object(client.account_read({"refreshToken": False}))
             if self._verify_account(request, account) != request.account_binding:
@@ -517,7 +520,7 @@ class CodexReviewAdapter:
             }
             self._authority(request, "resume" if resume else "thread_start")
             started = _object(client.thread_resume(resume[0], settings) if resume else client.thread_start(settings))
-            capture("thread/resume" if resume else "thread/start", started)
+            started = capture("thread/resume" if resume else "thread/start", started)
             self._thread_id = _identifier(_object(started.get("thread")).get("id"))
             if resume and self._thread_id != resume[0]:
                 raise AdapterError("native_thread_mismatch")
@@ -533,7 +536,7 @@ class CodexReviewAdapter:
                 self._turn_id = resume[1]
                 self._authority(request, "reconcile")
                 history = _object(client.thread_read(self._thread_id, include_turns=True))
-                capture("thread/read", history)
+                history = capture("thread/read", history)
                 thread = _object(history.get("thread"))
                 if thread.get("id") != self._thread_id:
                     raise AdapterError("incomplete_history")
@@ -568,7 +571,7 @@ class CodexReviewAdapter:
                             raise AdapterError("unknown_or_invalid_notification")
                         continue
                     payload = _object(payload)
-                    capture(method, payload)
+                    payload = capture(method, payload)
                     if payload.get("threadId") != self._thread_id:
                         raise AdapterError("native_thread_mismatch")
                     if method == "turn/started":

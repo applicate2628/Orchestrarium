@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import inspect
 from dataclasses import replace
 from pathlib import Path
 import threading
@@ -36,6 +37,8 @@ class KimiAcpAdapter:
     ``record`` retains only bounded observations derived from the already-scanned
     native terminal. It is not a second receiving or ledger callback. A returned
     native result must not be submitted to the structured SDK receiving path.
+    Both callbacks must be synchronous and return None. Deferred evidence
+    callbacks are refused rather than scheduled or treated as persistence.
     """
 
     def __init__(
@@ -47,6 +50,13 @@ class KimiAcpAdapter:
             raise KimiAdapterError("existing_kimi_launch_required")
         if not callable(assert_current) or not callable(record):
             raise KimiAdapterError("explicit_owner_callbacks_required")
+        # These owners are synchronous and execute in the launch worker thread.
+        # Reject async call shapes before any provider effect, rather than
+        # silently treating an unawaited callback as persisted evidence.
+        for callback in (assert_current, record):
+            if any(inspect.iscoroutinefunction(value) or inspect.isasyncgenfunction(value)
+                   for value in (callback, getattr(callback, "__call__", None))):
+                raise KimiAdapterError("synchronous_owner_callbacks_required")
         self._prepared = copy.deepcopy(prevalidated)
         self._assert_current, self._record = assert_current, record
         self._lock = threading.RLock()
@@ -181,9 +191,15 @@ class KimiAcpAdapter:
             observation = Observation(0, "kimi.acp.terminal", encoded)
             observations = (observation,)
             try:
-                self._record(observation)
+                recorded = self._record(observation)
             except Exception:
                 raise KimiAdapterError("evidence_sink_failed") from None
+            if recorded is not None:
+                # A synchronous wrapper can still return a coroutine. Do not
+                # schedule it or claim persistence; discard its unstarted frame.
+                if inspect.iscoroutine(recorded) and inspect.getcoroutinestate(recorded) == inspect.CORO_CREATED:
+                    recorded.close()
+                raise KimiAdapterError("invalid_evidence_callback")
             if self._prepared.control.ledger and owner.read_back_external_terminal(
                 self._prepared.control, "kimi", request.run_id, provenance,
             ) is None:

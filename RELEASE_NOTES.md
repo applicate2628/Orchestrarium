@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-17
+
+- SDK execution now interprets detached captured Codex observations, owns the admitted resume snapshot before asynchronous restoration, and rejects asynchronous or unacknowledged Kimi evidence callbacks. This prevents mutable provider data and incomplete recording from changing already accepted orchestration state; no provider is launched or newly admitted by these changes.
+
 ## 2026-11-16
 
 - Native publication scans now distinguish new disclosure from history already held by the same receiver. A verified direct HTTPS receiver with redirects disabled can use its fresh ref inventory; custom or ambiguous transports retain conservative callback-only coverage. New content, paths and annotations remain checked, so new branches no longer repeatedly reject previously published history merely because their destination ref is new.

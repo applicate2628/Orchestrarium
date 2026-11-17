@@ -14,6 +14,7 @@ this module deliberately has no checkpoint store, retry registry or scheduler.
 """
 from __future__ import annotations
 
+import copy
 import importlib
 from importlib import metadata
 import inspect
@@ -308,6 +309,11 @@ class AgentsCoordinator:
         snapshot = claim(request, snapshot_id)
         if not isinstance(snapshot, dict):
             raise CoordinatorBindingError("resume owner did not return a verified snapshot object")
+        # Own the claimed JSON values before validation and the async restore.
+        # Owner-side reuse or SDK normalization must not edit the other side's
+        # snapshot after its bound was checked. This does not authenticate it or
+        # replace the owner's atomic claim/current-authority responsibilities.
+        snapshot = copy.deepcopy(snapshot)
         # A saved snapshot can restore max_turns rather than the Runner.run
         # argument on resume. Preserve a tighter saved bound, but never
         # let an old unlimited/larger bound weaken the caller's selected limit.
