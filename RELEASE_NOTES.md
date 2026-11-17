@@ -8,6 +8,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 - Preserve the original copy failure and its existing recovery evidence when a source, fresh target, or metadata descriptor also fails to close. Successful copy ordering and timestamp restoration qualification remain unchanged.
 
+- Restored source-only ledger, state-schema, and architecture-layering checks that were declared but omitted from the Python pack validators. Preserve the byte-pinned migration baseline during Git checkout so Windows newline conversion cannot invalidate its approved digest. Ledger fixture checks run only in the full monorepo, not provider exports or installed packs; existing governance limits and installed validation remain unchanged. Reconciled all 19 architecture role slices with the current shared reference before refreshing its review stamp; both complete source pack validators pass.
+
 ## 2026-11-16
 
 - Native publication scans now distinguish new disclosure from history already held by the same receiver. A verified direct HTTPS receiver with redirects disabled can use its fresh ref inventory; custom or ambiguous transports retain conservative callback-only coverage. New content, paths and annotations remain checked, so new branches no longer repeatedly reject previously published history merely because their destination ref is new.
