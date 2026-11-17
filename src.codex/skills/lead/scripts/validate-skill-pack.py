@@ -1644,6 +1644,17 @@ def _is_source_only_maintainer_action(action: tuple[str, ...]) -> bool:
 
 # Historical sections retain their existing source coverage, but a source-only
 # assertion may never leak into the installed-pack action set as an index moves.
+_SOURCE_STATE_CONTRACT_ACTIONS = tuple(
+    action for action in _DECLARED_ACTIONS
+    if action[:3] in {
+        ('check_contains', '@ROOT/scripts/validate-work-item-state.py', 'agent-runs.jsonl'),
+        ('check_contains', '@ROOT/scripts/validate-work-item-state.sh', 'validate-work-item-state.py'),
+        ('check_contains', '@ROOT/shared/schemas/agent-runs.schema.json', 'agent-runs.schema.json'),
+        ('check_contains', '@ROOT/shared/schemas/agent-runs.schema.json', '"executionRole"'),
+        ('check_contains', '@ROOT/shared/schemas/agent-runs.schema.json', '"evidence"'),
+    }
+)
+
 _ALL_ACTIONS = (
     _DECLARED_ACTIONS[0:35]
     + _DECLARED_ACTIONS[141:305]
@@ -1692,6 +1703,9 @@ ACTIONS = (
             action for action in _ALL_ACTIONS
             if _is_source_only_maintainer_action(action)
         )
+        + _SOURCE_STATE_CONTRACT_ACTIONS
+        + tuple(action for action in _DECLARED_ACTIONS
+                if action[0] == "check_arch_layering_slices")
         + _APAT_DEV_ACTIONS
         + _UI_CONTINUITY_DEV_ACTIONS
         + (
@@ -1731,6 +1745,10 @@ ACTIONS = (
         + _DECLARED_ACTIONS[335:336]
         + _DECLARED_ACTIONS[343:352],
     ),
+    ("dev_repo_monorepo", tuple(
+        action for action in _DECLARED_ACTIONS
+        if action[0] == "check_agent_run_ledger_contract"
+    )),
     ("installed", _INSTALLED_ACTIONS),
 )
 
