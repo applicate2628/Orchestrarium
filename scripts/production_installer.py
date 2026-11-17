@@ -1365,7 +1365,7 @@ class _WindowsBoundNode:
         return name
 
     @classmethod
-    def target_reparse_data(cls, target: "_WindowsBoundNode", *, junction: bool = False) -> bytes:
+    def target_reparse_data(cls, target: "_WindowsBoundNode", *, junction: bool | None = None) -> bytes:
         """Let the OS name the target; encode the documented reparse metadata layout."""
         import struct
         ctypes, wintypes, kernel, *_rest = cls._api()
@@ -1393,6 +1393,8 @@ class _WindowsBoundNode:
             raise ctypes.WinError(ctypes.get_last_error())
         if length >= len(buffer):
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: native target spelling drift")
+        if junction is None:
+            junction = _windows_projection_uses_junction(buffer.value)
         converted = UnicodeString()
         try:
             status = convert(buffer.value, ctypes.byref(converted), None, None)
@@ -2368,10 +2370,10 @@ class _InstallTransaction:
                     if descriptor is not None:
                         raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing actual producer digest")
                     node_data = bound.digest() if bound is not None else _file_sha256(path)
-                elif node_kind == "link":
+                elif node_kind in {"link", "reparse"}:
+                    # The acquired object's stored target is evidence even when
+                    # its referent was removed by an earlier owned inverse.
                     node_data = bound.logical_target() if bound is not None else os.readlink(path)
-                elif node_kind == "reparse":
-                    node_data = str(Path(bound.logical_target()).resolve(strict=True)) if bound is not None else str(path.resolve(strict=True))
             reparse = (bound.reparse_data() if bound is not None and not metadata_only
                        and getattr(metadata, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT else None)
             return _PhysicalNode(node_kind, (metadata.st_dev, metadata.st_ino, metadata.st_mode,
@@ -4191,22 +4193,23 @@ class _InstallTransaction:
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: source link copy drift")
 
     def _create_owned_projection(self, source: Path, target: Path, record,
-                                  *, junction: bool = True) -> _PhysicalNode:
-        # New Windows directory projections use a mount-point reparse tag.
-        # This preserves creator-handle custody without requiring the symbolic
-        # link privilege. A native failure is not retried through a pathname API.
+                                  *, junction: bool | None = None) -> _PhysicalNode:
         if os.name != "nt":
             target.symlink_to(source, target_is_directory=True)
             node = self._capture_node(target)
             record(target, node)
             return node
-        with _WindowsBoundNode.symlink_privilege(required=not junction), \
-                _WindowsBoundNode.create(target, directory=True) as created:
-            node = self._capture_node(target, bound_node=created, kind="directory")
-            record(target, node)
-            with _WindowsBoundNode(source, purpose="observe", follow=True) as original:
-                target_proof = original.proof
-                raw = _WindowsBoundNode.target_reparse_data(original, junction=junction)
+        # Select the representation from the OS-resolved bound target before
+        # acquiring the creator. Local directory projections use mount points;
+        # other namespaces retain symbolic-link semantics and admission.
+        with _WindowsBoundNode(source, purpose="observe", follow=True) as original:
+            target_proof = original.proof
+            raw = _WindowsBoundNode.target_reparse_data(original, junction=junction)
+            with _WindowsBoundNode.symlink_privilege(
+                    required=int.from_bytes(raw[:4], "little") == 0xA000000C), \
+                    _WindowsBoundNode.create(target, directory=True) as created:
+                node = self._capture_node(target, bound_node=created, kind="directory")
+                record(target, node)
                 created.set_reparse_data(raw)
                 node = self._capture_node(target, bound_node=created)
                 if node.native_proof != created.creator_proof or node.reparse_data != raw:
@@ -4631,7 +4634,7 @@ class _InstallTransaction:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal bytes")
                 if expected.kind == "link" and bound.logical_target() != expected.data:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal link")
-                if expected.kind == "reparse" and str(Path(bound.logical_target()).resolve(strict=True)) != expected.data:
+                if expected.kind == "reparse" and bound.logical_target() != expected.data:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal reparse")
                 if attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
                     if expected.reparse_data is None or bound.reparse_data() != expected.reparse_data:
@@ -8469,10 +8472,17 @@ def _adoption_identity_v2(name: str, target: Path, token: str, *, factory: Path 
                      else "E_CANONICAL_SKILL_ADOPTION_MISMATCH")
 
 
+def _windows_projection_uses_junction(native_target: str) -> bool:
+    """Local DOS volumes use mount points; UNC/other namespaces keep symlinks."""
+    import ntpath
+    drive, tail = ntpath.splitdrive(native_target)
+    return bool(re.fullmatch(r"[A-Za-z]:", drive.removeprefix("\\\\?\\"))) and tail.startswith(("\\", "/"))
+
+
 def _is_directory_junction(path: Path) -> bool:
     """Recognize only mount-point reparses, including on supported Python 3.11."""
     try:
-        return getattr(path.lstat(), "st_reparse_tag", None) == 0xA0000003  # IO_REPARSE_TAG_MOUNT_POINT
+        return getattr(path.lstat(), "st_reparse_tag", None) == 0xA0000003
     except OSError:
         return False
 

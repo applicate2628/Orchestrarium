@@ -4,6 +4,30 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-16
 
+- Native publication scans now distinguish new disclosure from history already held by the same receiver. A verified direct HTTPS receiver with redirects disabled can use its fresh ref inventory; custom or ambiguous transports retain conservative callback-only coverage. New content, paths and annotations remain checked, so new branches no longer repeatedly reject previously published history merely because their destination ref is new.
+
+- Publication scanning reuses only exact negative lexical results from the preceding payload within one scan, avoiding repeated regular-expression work across historical file versions. Candidate evidence, per-commit review authority, full graph coverage, machine-path checks and the existing scan deadlines are unchanged.
+
+- Reuse pure machine-path line detection for successive review subjects of the same exact payload and path. A single metadata entry preserves per-subject authorization, line masks, finding locations and unresolved accounting without retaining payload bytes or changing coverage/deadlines.
+
+- Build publication review byte-coordinate maps only when detected candidates require them. Strict UTF-8 validation, all detectors, candidate witnesses and review authorization remain unchanged; clean text no longer allocates a scalar-sized coordinate table.
+
+- Preserve the caller working directory when the interactive root installer dispatches a client. Relocated bundles now install into the caller project rather than their own packaged source tree; absolute installer selection, explicit-target safeguards and global-home selection remain unchanged.
+
+- Select native junctions for local Windows directory projections before creator acquisition, preserving source/target identity and rollback checks. Other namespaces retain symbolic-link admission without fallback or elevation; shared reparse-tag recognition also supports Python 3.11. Projection rollback now validates the exact no-follow object when its owned referent was already reclaimed, without following or deleting a replacement target.
+
+- Scope Windows symbolic-link creation and rollback to a private copy of the existing effective thread token before acquiring creator handles. This enables an already assigned privilege only for the operation, preserves the process token and prior impersonation, and still rejects missing privileges; no system security settings or SDK transition are involved.
+
+- Refresh native role byte bindings after the existing browser/computer feature changes, preserving every role instruction and runtime setting. Source-manifest validation still rejects unrecorded drift; bundled installation can now validate the accepted current factory payload.
+
+- Add distribution-only runtime/notice binding to the existing pre-SDK layout. Local assembly requires matching runtime and notice inventories before output; no SDK transition, model launch or installer policy change is included. Historical recovery evidence is distinct from acceptance of this source revision.
+
+- Publication history acquisition now rejects a result when its final synchronous detector or proof hashing finishes at or beyond the existing shared deadline. This closes a late-result acceptance gap without adding a timeout, changing coverage, or claiming synchronous work can be preempted.
+
+- Complete-history publication scanning retains one revalidated payload instead of the whole blob history. The obsolete 512 MiB cumulative-cache cap is replaced by the existing per-object, inventory, metadata and supervised-time bounds, while all selected objects and path/review contexts must still be checked. Larger histories may now qualify without repository-specific exceptions; repeated reads can cost more work, direct CLI timeout remains cooperative, and no hard resident-memory ceiling is claimed.
+
+- Preserve a closed, redacted scanner refusal identifier in native and tool-facing publication diagnostics so operators can distinguish causes without weakening denial, scan coverage or target checks. Accept both scanner field orders and native line endings; never echo arbitrary scanner output.
+
 - Admit the implemented POSIX transaction backend for ordinary serialized installation and Claude removal, replacing the blanket platform hold without weakening identity, content, filesystem-capability or recovery checks. Receiving now exercises the public entry point rather than substituting admission gates; unknown platforms still refuse before target effects.
 
 

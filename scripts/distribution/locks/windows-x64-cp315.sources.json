@@ -155,12 +155,6 @@
       "sha256": "6abbd3e82c731c8e531714466acd5d87b5e88ac3243465337ba71d68e23ae7e3"
     },
     {
-      "name": "openai-codex-cli-bin",
-      "version": "0.163.0",
-      "url": "https://files.pythonhosted.org/packages/a3/0e/ac903da78d517bb0c4f83ad52dd44a7eefddf23c806e147adc123e4e1d3c/openai_codex_cli_bin-0.163.0-py3-none-win_amd64.whl",
-      "sha256": "b759f212cc0deec6da9f297800797232c73d3f0d963842deaa02df965ee0b8b6"
-    },
-    {
       "name": "openai-codex",
       "version": "0.163.0",
       "url": "https://files.pythonhosted.org/packages/d8/9e/423922a79df8dc61ed668a4b2d6d46e75a6e754f5a18cf967188aa85e97e/openai_codex-0.163.0-py3-none-any.whl",
@@ -256,5 +250,6 @@
       "url": "https://files.pythonhosted.org/packages/0f/cd/7e1de64a4a6f69c04214169657ccab0d93a670ea50e35eb8f489d7378249/pywin32-312-cp315-cp315-win_amd64.whl",
       "sha256": "c2f03a0f73f804a13c2735b99392b0cd426bb4f2c4d0178e5ac966a0f21618d5"
     }
-  ]
+  ],
+  "scope": "Pinned Python wheel inputs excluding the SDK bundled CLI; selected external Codex executable required. Not a complete pip dependency closure."
 }

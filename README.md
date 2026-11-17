@@ -11,6 +11,8 @@ Other clients are integrations of that core, not parallel products. Kimi and Gro
 have higher secondary integration priority than Claude; priority alone does not
 enable a model, qualify a host installer or authorize a paid run.
 
+Optional local distribution assembly is documented in [the distribution guide](scripts/distribution/README.md). It binds the supplied runtime to its exact notice inventory before producing a bundle, and packages this existing installer without changing its ownership or provider policies. Windows build and bounded Codex/Claude project receiving are recorded in [runtime evidence](scripts/distribution/runtime-evidence.md); local directory projections use native junctions without privilege elevation. Historical SDK recovery evidence is not acceptance of this layout.
+
 Codex native roles use the task and role selector, with Terra for suitable ordinary work and Sol for science. Named Luna mechanical roles have a separate supervised corridor; ordinary eligible producer roles can use `luna-high` or `luna-xhigh`. Explicit user controls, host restrictions, independent reviews and per-attempt Astra or Max consent remain binding. See [Codex platform rules](src.codex/AGENTS.codex.md) and [installation details](INSTALL.md) for role, migration and runtime contracts.
 
 - `src.codex/` — the production Codex provider-pack source
@@ -185,7 +187,7 @@ If a repo-local lane policy explicitly asks for consultant input at closeout, it
 
 See [INSTALL.md](INSTALL.md) for quick install, pack-specific install details, dual-platform setup, and post-install customization.
 
-Publication scan-derived push credit requires the actual native Git callback to receive one fresh bounded, reaped, non-empty Version 3 union of actual update commit/tree/blob graphs relative to the union of known old objects from that same native callback and a separate Version 4 result covering actual transferred roots, including noncommit objects. Version 2 and manual/default/path scan output remain diagnostic only and cannot authorize a push.
+Publication scan-derived push credit requires the actual native Git callback to receive one fresh bounded, reaped, non-empty Version 3 union of actual update commit/tree/blob graphs relative to content already disclosed to the same qualified receiver and a separate Version 4 result covering newly disclosed actual update roots, including noncommit objects. Version 2 and manual/default/path scan output remain diagnostic only and cannot authorize a push.
 
 ## Orchestration utilities
 

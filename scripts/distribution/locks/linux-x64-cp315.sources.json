@@ -1,5 +1,5 @@
 {
-  "scope": "Linux x64 CPython 3.15 normal GIL exploratory qualification; not a released artifact",
+  "scope": "Pinned Python wheel inputs excluding the SDK bundled CLI; selected external Codex executable required. Not a complete pip dependency closure.",
   "resolvedOn": "2026-10-28",
   "packages": [
     {
@@ -13,12 +13,6 @@
       "version": "0.24.0",
       "url": "https://files.pythonhosted.org/packages/05/93/01efc034d7011b89381f96a9fb8957c09a16e3c190f3a5de128e1d0a42e9/openai_agents-0.24.0-py3-none-any.whl",
       "sha256": "18d4ac34e84ed937333ec8ce46395ed3521ffcbb0a521780a4c2eaa451467f49"
-    },
-    {
-      "name": "openai-codex-cli-bin",
-      "version": "0.163.0",
-      "url": "https://files.pythonhosted.org/packages/5f/64/eb70467d717510b78da54e2ae604a1b5348c17f535086e2825a283e540e2/openai_codex_cli_bin-0.163.0-py3-none-manylinux_2_17_x86_64.whl",
-      "sha256": "76db41fb07fdf9ddacbe892b48d21dfde270031ec0f5666b5e558114355f006d"
     },
     {
       "name": "griffelib",

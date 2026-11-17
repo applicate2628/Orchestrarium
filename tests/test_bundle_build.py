@@ -1,4 +1,5 @@
 """Local bundle assembly preserves sources and refuses destructive targets."""
+from synthetic_bundle_support import build_synthetic_bundle
 import importlib.util
 import json
 import os
@@ -17,7 +18,7 @@ def test_build_uses_relative_layout_and_keeps_source(builder, tmp_path):
     runtime = tmp_path/'runtime'; (runtime/'bin').mkdir(parents=True)
     (runtime/'bin/python3').write_bytes(b'not executed')
     out = tmp_path/'bundle'
-    builder.build(SOURCE, runtime, out, target='linux-x64', release='development')
+    build_synthetic_bundle(builder, SOURCE, runtime, out, target='linux-x64', release='development')
     data = json.loads((out/'bundle.json').read_text())
     assert data['python'] == 'python/bin/python3'
     assert data['entry'] == 'app/install.py'
@@ -33,13 +34,13 @@ def test_build_uses_relative_layout_and_keeps_source(builder, tmp_path):
 def test_existing_output_is_never_overwritten(builder,tmp_path):
     out=tmp_path/'out';out.mkdir();marker=out/'user';marker.write_text('keep')
     with pytest.raises((ValueError,FileExistsError)):
-        builder.build(SOURCE,tmp_path/'missing',out,target='linux-x64',release='development')
+        build_synthetic_bundle(builder, SOURCE,tmp_path/'missing',out,target='linux-x64',release='development')
     assert marker.read_text()=='keep'
 
 
 def test_unknown_target_refused_before_output(builder,tmp_path):
     out=tmp_path/'out'
-    with pytest.raises(ValueError):builder.build(SOURCE,tmp_path,out,target='unknown',release='development')
+    with pytest.raises(ValueError):build_synthetic_bundle(builder, SOURCE,tmp_path,out,target='unknown',release='development')
     assert not out.exists()
 
 
@@ -51,7 +52,7 @@ def test_escaping_runtime_symlink_refused(builder,tmp_path):
         if getattr(e,'winerror',None)==1314:pytest.skip('Windows symlink privilege required')
         raise
     out=tmp_path/'out'
-    with pytest.raises(ValueError):builder.build(SOURCE,runtime,out,target='linux-x64',release='development')
+    with pytest.raises(ValueError):build_synthetic_bundle(builder, SOURCE,runtime,out,target='linux-x64',release='development')
     assert not out.exists()
 
 
@@ -94,7 +95,7 @@ def test_source_link_swap_before_copy_call_is_rejected(builder, tmp_path, monkey
     monkeypatch.setattr(builder.shutil, 'copy2', swap_then_copy)
     output = tmp_path / 'output'
     with pytest.raises(ValueError):
-        builder.build(source, runtime, output, target='linux-x64', release='development')
+        build_synthetic_bundle(builder, source, runtime, output, target='linux-x64', release='development')
     assert swapped
     assert not (output / 'bundle.json').exists()
     copied = output / 'app/README.md'
@@ -113,7 +114,7 @@ def test_output_parent_symlink_is_refused(builder, tmp_path):
             pytest.skip('Windows symlink privilege required')
         raise
     with pytest.raises(ValueError):
-        builder.build(source, runtime, alias / 'output', target='linux-x64', release='development')
+        build_synthetic_bundle(builder, source, runtime, alias / 'output', target='linux-x64', release='development')
     assert list(outside.iterdir()) == []
 
 
@@ -128,7 +129,7 @@ def test_reparse_directory_is_refused_before_traversal(builder, tmp_path, monkey
         return value
     monkeypatch.setattr(Path, 'lstat', reparse)
     with pytest.raises(ValueError):
-        builder.build(source, runtime, tmp_path / 'output', target='linux-x64', release='development')
+        build_synthetic_bundle(builder, source, runtime, tmp_path / 'output', target='linux-x64', release='development')
     assert not (tmp_path / 'output').exists()
 
 
@@ -136,7 +137,7 @@ def test_locked_codex_notices_are_version_bound_and_shipped(builder, tmp_path):
     import hashlib
     notice_root = SOURCE / 'scripts/distribution/notices/openai-codex'
     manifest = json.loads((notice_root / 'source.json').read_text())
-    expected = {'openai-codex', 'openai-codex-cli-bin'}
+    expected = {'openai-codex'}
     assert set(manifest['packages']) == expected
     for filename, key in [('linux-x64-cp315.sources.json', 'packages'),
                           ('windows-x64-cp315.sources.json', 'wheels')]:
@@ -151,7 +152,7 @@ def test_locked_codex_notices_are_version_bound_and_shipped(builder, tmp_path):
     runtime = tmp_path / 'runtime'; (runtime / 'bin').mkdir(parents=True)
     (runtime / 'bin/python3').write_bytes(b'synthetic; never executed')
     output = tmp_path / 'bundle'
-    builder.build(SOURCE, runtime, output, target='linux-x64', release='development')
+    build_synthetic_bundle(builder, SOURCE, runtime, output, target='linux-x64', release='development')
     for name in ('LICENSE', 'NOTICE', 'source.json'):
         assert (output / 'app/scripts/distribution/notices/openai-codex' / name).read_bytes() == (notice_root / name).read_bytes()
 
@@ -209,7 +210,7 @@ def test_python_notices_bind_locked_runtime_and_ship(builder, tmp_path, target, 
     interpreter.parent.mkdir(parents=True, exist_ok=True)
     interpreter.write_bytes(b'synthetic; never executed')
     output = tmp_path / 'bundle'
-    builder.build(SOURCE, runtime, output, target=target, release='development')
+    build_synthetic_bundle(builder, SOURCE, runtime, output, target=target, release='development')
     for name in (*expected, 'source.json'):
         assert (output / 'app/scripts/distribution/notices/python-build-standalone' / (target + '-cp315') / name).read_bytes() == (notice_root / name).read_bytes()
 
@@ -228,20 +229,20 @@ def test_sdk_runtime_omits_only_qualified_linux_optional_dbm(builder, tmp_path, 
     unrelated.parent.mkdir()
     unrelated.write_bytes(b"must remain")
     output = tmp_path / "bundle"
-    builder.build(SOURCE, runtime, output, target=target, release="development")
+    build_synthetic_bundle(builder, SOURCE, runtime, output, target=target, release="development")
     assert (output / "python" / relative).exists() == (not omitted)
     assert optional.read_bytes() == b"synthetic optional extension"
     assert (output / "python/user-data" / optional.name).read_bytes() == b"must remain"
 
 
 @pytest.mark.parametrize("target", ["linux-x64", "windows-x64"])
-def test_codex_native_notices_are_pinned_and_preserved(builder, tmp_path, target):
+def test_codex_native_notices_are_pinned_but_not_shipped(builder, tmp_path, target):
     import hashlib
     root = SOURCE / "scripts/distribution/notices/openai-codex/native"
     manifest = json.loads((root / "source.json").read_text(encoding="utf-8"))
     codex = json.loads((root.parent / "source.json").read_text(encoding="utf-8"))
     assert manifest["upstreamCommit"] == codex["upstreamCommit"]
-    assert manifest["packages"] == codex["packages"]
+    assert manifest["packages"]["openai-codex"] == codex["packages"]["openai-codex"]
     expected = {"bubblewrap/COPYING"} | {
         f"ripgrep/{platform}/{name}"
         for platform in ("linux-x64", "windows-x64")
@@ -264,6 +265,74 @@ def test_codex_native_notices_are_pinned_and_preserved(builder, tmp_path, target
     interpreter.parent.mkdir(parents=True)
     interpreter.write_bytes(b"synthetic interpreter; never executed")
     output = tmp_path / "bundle"
-    builder.build(SOURCE, runtime, output, target=target, release="development")
+    build_synthetic_bundle(builder, SOURCE, runtime, output, target=target, release="development")
     for name in (*expected, "source.json"):
-        assert (output / "app/scripts/distribution/notices/openai-codex/native" / name).read_bytes() == (root / name).read_bytes()
+        assert (root / name).is_file()
+    assert not (output / "app/scripts/distribution/notices/openai-codex/native").exists()
+
+
+@pytest.mark.parametrize("package_dir", ["lib/python3.15/site-packages", "lib/python3.16/dist-packages", "Lib/site-packages"])
+def test_sdk_only_runtime_selection_preserves_neighbors(builder, tmp_path, package_dir):
+    source, runtime = small_inputs(builder, tmp_path)
+    packages = runtime / package_dir
+    packages.mkdir(parents=True)
+    for name in ('codex_cli_bin', 'openai_codex_cli_bin-0.163.0.dist-info', 'openai_codex', 'codex_cli_binary'):
+        (packages / name).mkdir()
+        (packages / name / 'payload').write_bytes(b'keep input')
+    (runtime / 'bin/codex').write_bytes(b'CLI entry')
+    (runtime / 'bin/codex-helper').write_bytes(b'neighbor')
+    output = tmp_path / 'output'
+    build_synthetic_bundle(builder, source, runtime, output, target='linux-x64', release='development')
+    copied = output / 'python' / package_dir
+    assert not (copied / 'codex_cli_bin').exists()
+    assert not (copied / 'openai_codex_cli_bin-0.163.0.dist-info').exists()
+    assert (copied / 'openai_codex/payload').read_bytes() == b'keep input'
+    assert (copied / 'codex_cli_binary/payload').read_bytes() == b'keep input'
+    assert not (output / 'python/bin/codex').exists()
+    assert (output / 'python/bin/codex-helper').read_bytes() == b'neighbor'
+    assert (runtime / 'bin/codex').read_bytes() == b'CLI entry'
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX alias semantics; Windows reparse refusal is covered separately")
+@pytest.mark.parametrize("kind", ["package", "entry", "site", "bin-directory"])
+def test_linked_embedded_cli_is_refused_before_assembly(builder, tmp_path, kind):
+    source, runtime = small_inputs(builder, tmp_path)
+    payload = runtime / 'payload'; payload.mkdir()
+    (payload / 'codex').write_bytes(b'CLI')
+    (payload / 'codex_cli_bin').mkdir()
+    if kind == 'package':
+        link = runtime / 'site-packages/codex_cli_bin'; target = payload
+    elif kind == 'entry':
+        link = runtime / 'bin/codex'; target = payload / 'codex'
+    elif kind == 'site':
+        link = runtime / 'site-packages'; target = payload
+    else:
+        link = runtime / 'Scripts'; target = payload
+    link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        link.symlink_to(os.path.relpath(target, link.parent), target_is_directory=target.is_dir())
+    except OSError as error:
+        if getattr(error, 'winerror', None) == 1314:
+            pytest.skip('Windows symlink privilege required')
+        raise
+    with pytest.raises(ValueError, match='Linked embedded Codex CLI'):
+        build_synthetic_bundle(builder, source, runtime, tmp_path / 'output', target='linux-x64', release='development')
+    assert not (tmp_path / 'output').exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX alias semantics; Windows reparse refusal is covered separately")
+def test_unrelated_linked_entry_directory_remains_supported(builder, tmp_path):
+    source, runtime = small_inputs(builder, tmp_path)
+    target = runtime / 'tools'; target.mkdir()
+    (target / 'helper').write_bytes(b'keep')
+    link = runtime / 'Scripts'
+    try:
+        link.symlink_to('tools', target_is_directory=True)
+    except OSError as error:
+        if getattr(error, 'winerror', None) == 1314:
+            pytest.skip('Windows symlink privilege required')
+        raise
+    output = tmp_path / 'output'
+    build_synthetic_bundle(builder, source, runtime, output, target='linux-x64', release='development')
+    assert (output / 'python/Scripts').is_symlink()
+    assert (output / 'python/Scripts/helper').read_bytes() == b'keep'

@@ -11,31 +11,35 @@ absolute Python with an argument sequence and no shell, waits for it, and return
 its actual exit status. This preserves spaces/Unicode and avoids the Windows CRT
 `execve` quoting/overlay behavior. It is not a new hostile-process containment claim.
 
-## Current installation model
+## SDK integration boundary
 
 Selected clients receive independent ordinary copies. New installations do not
 use a shared skill directory or client-to-client projection links. Explicit legacy
 migration converts only the selected client's historical links; uninstall uses
 that client's ownership records and must not remove another client's files.
 
-The symbolic-link qualification below is historical evidence and remains relevant
-to legacy restoration paths. It is not a requirement to create links in a fresh
-copy-based installation, nor evidence that the final internet distribution is
-qualified. The retained interpreter lifetime is a separate concern: registered
-hooks may still reference it, so removing client copies does not authorize runtime
-garbage collection.
+This branch packages the selected-client SDK layout: `src.codex`,
+`adapters/claude`, shared resources and branding. The root selector supports
+`--clients` and `--list-clients`; installer lifecycle and ownership remain in
+the common installer rather than the distribution wrapper.
 
-## Current reproducibility record
+The runtime-evidence and notice-selection fixes from main apply to this layout.
+Pre-SDK runtime receiving evidence is not native acceptance of this SDK revision.
+The retained interpreter lifetime remains independent: removing a client does
+not authorize deleting its runtime. Runtime input and notice inventories must
+match the separately qualified evidence record exactly.
 
-`locks/linux-x64-cp315.txt` freezes the 41 binary wheels actually tested on Linux
+## Historical reproducibility record
+
+`locks/linux-x64-cp315.txt` freezes the 40 selected binary wheels actually tested on Linux
 x64 with normal-GIL CPython 3.15.2. Its companion sources JSON records the exact
 wheel URLs and SHA-256 values from the package resolver. This is a platform-specific
 qualification input, not a floating upgrade policy or a universal requirements file.
-Use `python -m pip install --require-hashes --only-binary=:all: -r <lock>` when
+Use `python -m pip install --no-deps --require-hashes --only-binary=:all: -r <lock>` when
 preparing an isolated, verified runtime. The local builder does not run pip.
 
 `locks/windows-x64-cp315.txt` records the corresponding Windows x64 resolution:
-42 installed binary wheels, including the Windows-only `pywin32` dependency.
+41 selected binary wheels, including the Windows-only `pywin32` dependency.
 Its sources JSON also records the normal-GIL CPython 3.15.2 Windows standalone
 archive URL and checksum. Runtime assembly, import, and launcher checks do not
 by themselves qualify actual client installation or native hook trust.
@@ -43,8 +47,15 @@ by themselves qualify actual client installation or native hook trust.
 The exploratory Python build is Astral python-build-standalone 20261026,
 CPython 3.15.2, Linux x64 GNU, install-only stripped archive. Recorded SHA-256:
 `7b03163a980c607ba8194709d4a4086735a7a9c488cc475b098157306927b36b`.
-No interpreter binary is checked into Git. The native Codex CLI is a declared
-SDK wheel dependency; do not silently omit it to advertise a smaller archive.
+No interpreter binary is checked into Git. The SDK wheel declares a separate
+CLI dependency, but this distribution deliberately supplies only the Python SDK.
+The adapter requires an explicitly selected external Codex executable. Use
+`--no-deps` with either platform lock: these selected inputs are not a complete
+pip dependency closure. The builder excludes the separate CLI package, its
+metadata and entrypoints, and excludes its historical native notices from the
+output while preserving those notices in the source repository. Linked CLI
+inputs are refused rather than allowing aliases to defeat selection. Other
+custom package layouts require separate qualification.
 The selected cryptography wheel has a manylinux_2_34 tag: do not infer an older
 Linux support floor from the Python archive alone. Alpine/musl is not qualified.
 
@@ -85,7 +96,7 @@ Linux support floor from the Python archive alone. Alpine/musl is not qualified.
 Apply requires an explicit first launcher option: `--retain-to ABSOLUTE_DIRECTORY`
 or `--permanent-runtime` for an already permanently placed bundle. Retention
 re-executes the retained launcher with that explicit lifetime decision; repeated
-apply uses `--permanent-runtime`. Listing, help and dry-run do not need it. This
+apply uses `--permanent-runtime`. Help and dry-run do not need it. This
 records operator intent, not a promise that a directory can never be deleted.
 
 Use verified, quiescent source/runtime trees and an exclusively controlled output
@@ -108,8 +119,13 @@ and scopes the duplicate to the calling thread. It never changes the process tok
 grants a missing privilege, or changes Windows policy. Prior thread impersonation is
 restored on success and ordinary failure. Failure to restore identity terminates the
 installer with exit 70; it cannot safely continue rollback in an unexpected context,
-so retained transaction state requires inspection. Standard-user support is not
-established by the elevated tests; junction fallback is not shipped.
+so retained transaction state requires inspection. Current pre-SDK local directory
+projections select native junctions from the OS-resolved target before creator
+acquisition. UNC and other namespaces retain symbolic-link semantics and their
+privilege requirement. This is a deliberate representation choice, not an
+error-triggered fallback; native identity and rollback checks remain unchanged.
+
+Windows directory-link semantics: [Microsoft hard links and junctions](https://learn.microsoft.com/en-us/windows/win32/fileio/hard-links-and-junctions). Cross-volume and remote receiving are not established by the local tests.
 
 API references: [FSCTL_SET_REPARSE_POINT](https://learn.microsoft.com/en-us/windows/desktop/api/winioctl/ni-winioctl-fsctl_set_reparse_point),
 [AdjustTokenPrivileges](https://learn.microsoft.com/windows/win32/api/securitybaseapi/nf-securitybaseapi-adjusttokenprivileges),
@@ -117,8 +133,8 @@ and [impersonation restoration failure](https://learn.microsoft.com/en-us/window
 
 ## Version-bound upstream notices
 
-`notices/openai-codex/` supplies the upstream LICENSE and NOTICE for the two
-locked Codex 0.163.0 distributions whose installed wheel records did not contain
+`notices/openai-codex/` supplies the upstream LICENSE and NOTICE for the
+locked Codex 0.163.0 Python SDK whose installed wheel records did not contain
 those files. `source.json` pins the upstream release commit and file digests;
 the qualification test binds both platform lock versions to that metadata.
 The existing builder copies this directory with `scripts/`, preserving exact
@@ -194,3 +210,7 @@ is not a reproducible-build proof. Complete corresponding-source delivery for
 bubblewrap, its static dependencies, ripgrep dependencies, and the remaining
 Codex/host native components still require release qualification. No sandbox
 binary is removed or bypassed to avoid these obligations.
+
+## Runtime evidence
+
+Assembly now requires --runtime-evidence with an independently qualified expected record. See [recovery scope and compatibility](runtime-evidence.md); consistency is not provenance or legal clearance.

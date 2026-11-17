@@ -807,10 +807,9 @@ def test_native_union_and_used_authority_currentness(native_repository, monkeypa
         other_origin = other_home / ".agents" / "publication"
         other_origin.mkdir(parents=True)
         (other_origin / "reviewed-exceptions.json").write_bytes(policy.canonical_document(1, [record_a]))
-    # Same-callback native old roots now apply to BOTH scans. A deletion
-    # advertising the entire selected commit makes this a zero-commit union,
-    # which remains non-authorizing regardless of any unused review grant.
-    zero_union = scenario.startswith("zero-union-")
+    # Both versions share actual old roots. A deletion of this same commit
+    # now leaves no newly disclosed commit and cannot authorize publication.
+    v3_only = scenario.startswith("v3-only-")
     wire = f"HEAD {commit} refs/heads/first {old}\n".encode()
     if zero_union:
         wire += f"(delete) {'0' * 40} refs/heads/retired {commit}\n".encode()
@@ -875,10 +874,13 @@ def test_native_union_and_used_authority_currentness(native_repository, monkeypa
             result = owner._native_pre_push_main(["origin", str(remote)])
             assert "_orchestrarium_publication_review_policy_v1" not in sys.modules
             assert "_orchestrarium_linked_runtime_subroots_v1" not in sys.modules
-    if zero_union:
-        assert result == 2 and "PGG-SCAN-REFUSAL" in errors.getvalue()
-        assert seen == [] and verify.call_count == 0
+    if v3_only:
+        # Shared receiver scope removes the former V3/V4 asymmetry. Neither
+        # an active nor a revoked grant can turn empty coverage into authority.
+        assert result == 2 and "PS-MSG-COVERAGE" in errors.getvalue()
+        assert not seen and verify.call_count == 0
         assert output.getvalue() == ""
+        assert raw.decode().strip() not in errors.getvalue()
         return
     assert [item.parsed_outcome.kind for item in seen] == ["qualified-v3", "qualified-v4"], errors.getvalue()
     if scenario in {"origin-return", "origin-content"}:

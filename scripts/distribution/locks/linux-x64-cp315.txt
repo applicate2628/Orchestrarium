@@ -1,6 +1,6 @@
 # Linux x64, CPython 3.15 normal GIL; resolved 2026-10-28.
-# Exact tested binary-wheel closure only; not a cross-platform lock.
-# Install with --require-hashes --only-binary=:all:.
+# Pinned wheels excluding the SDK bundled CLI; not a cross-platform lock.
+# Install every listed wheel with --no-deps --require-hashes --only-binary=:all:.
 annotated-types==0.8.0 --hash=sha256:f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0
 anyio==4.15.1 --hash=sha256:6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101
 attrs==26.1.0 --hash=sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309
@@ -20,7 +20,6 @@ jsonschema==4.26.0 --hash=sha256:d489f15263b8d200f8387e64b4c3a75f06629559fb73deb
 mcp-types==2.3.0 --hash=sha256:968efdbdaedfab06adae40d378a34395f1090c5921d4be3c9cde283aaf76d91d
 mcp==2.3.0 --hash=sha256:dd0c44c089d16453e8ae31a3877a0054d7a2314caaa81f5e0541b9b1734b2377
 openai-agents==0.24.0 --hash=sha256:18d4ac34e84ed937333ec8ce46395ed3521ffcbb0a521780a4c2eaa451467f49
-openai-codex-cli-bin==0.163.0 --hash=sha256:76db41fb07fdf9ddacbe892b48d21dfde270031ec0f5666b5e558114355f006d
 openai-codex==0.163.0 --hash=sha256:d151e3ff8188bc2c07a962855d598b93bf87a49ec3440810e45a5f2e1167d99e
 openai==3.41.0 --hash=sha256:7060a74b239609b21f2919eb98807a8aad463b4f510b8b3b388b15559360b0a8
 opentelemetry-api==1.45.1 --hash=sha256:b31553efa588ae44bc306f863c785c5333a9ecc091248c6ee68b4b6c87fdedfb

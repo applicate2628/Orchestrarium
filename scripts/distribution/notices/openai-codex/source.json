@@ -1,11 +1,10 @@
 {
   "packages": {
-    "openai-codex": "0.163.0",
-    "openai-codex-cli-bin": "0.163.0"
+    "openai-codex": "0.163.0"
   },
   "upstreamCommit": "83086188ae0614bd882818ff1aa23f3194962012",
   "upstreamTag": "rust-v0.163.0",
-  "scope": "Upstream release notices for locked Codex components; not an exhaustive native dependency license inventory.",
+  "scope": "Upstream notices for the Python SDK wrapper; the Codex CLI and its native dependencies are not bundled. The external CLI installation retains its own notices.",
   "files": {
     "LICENSE": {
       "url": "https://raw.githubusercontent.com/openai/codex/83086188ae0614bd882818ff1aa23f3194962012/LICENSE",

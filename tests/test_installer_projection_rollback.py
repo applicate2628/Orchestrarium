@@ -55,6 +55,7 @@ def _windows_token_snapshot(*, thread):
 
 @pytest.mark.skipif(os.name != 'nt', reason='native Windows token scope')
 def test_symlink_privilege_restores_nested_thread_and_unchanged_process():
+    _require_existing_symlink_privilege()
     before_thread = _windows_token_snapshot(thread=True)
     before_process = _windows_token_snapshot(thread=False)
     with pytest.raises(RuntimeError, match='operation failed'):
@@ -73,6 +74,7 @@ def test_symlink_privilege_restores_nested_thread_and_unchanged_process():
 
 @pytest.mark.skipif(os.name != 'nt', reason='native Windows fail-closed restore')
 def test_failed_thread_restore_stops_child_before_caller_continues():
+    _require_existing_symlink_privilege()
     script = r'''
 import sys
 from pathlib import Path
@@ -105,6 +107,7 @@ def test_unneeded_symlink_privilege_never_loads_windows_api(monkeypatch):
 
 @pytest.mark.skipif(os.name != 'nt', reason='native Windows missing privilege')
 def test_symlink_privilege_cannot_grant_missing_effective_privilege():
+    _require_existing_symlink_privilege()
     before_thread = _windows_token_snapshot(thread=True)
     before_process = _windows_token_snapshot(thread=False)
     with installer._WindowsBoundNode.symlink_privilege():
@@ -130,3 +133,191 @@ def test_symlink_privilege_cannot_grant_missing_effective_privilege():
             assert kernel.CloseHandle(token)
     assert _windows_token_snapshot(thread=True) == before_thread
     assert _windows_token_snapshot(thread=False) == before_process
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows link copy")
+@pytest.mark.parametrize("rollback", [False, True])
+def test_owned_link_copy_preserves_reparse_bytes_and_transaction_inverse(tmp_path, rollback):
+    before_thread = _windows_token_snapshot(thread=True)
+    before_process = _windows_token_snapshot(thread=False)
+    anchor = tmp_path / "home"
+    anchor.mkdir()
+    provider = anchor / ".claude"
+    provider.mkdir()
+    referent = tmp_path / "referent"
+    referent.mkdir()
+    payload = referent / "SKILL.md"
+    payload.write_text("Independent user data.\n", encoding="utf-8")
+    before = payload.read_bytes()
+    original = provider / "source-link"
+    copied = provider / "copied-link"
+
+    def operation():
+        with installer._InstallTransaction([provider], enabled=True) as tx:
+            owner = installer._CreateOnlyMutablePath(anchor, tx, dry_run=False)
+            owner.create_projection(Path(".claude/source-link"), referent)
+            expected = tx._capture_node(original)
+            assert int.from_bytes(expected.reparse_data[:4], 'little') == 0xA0000003
+            received = {}
+            def record(path, node):
+                received[path] = node
+                tx._advance(path, {path: node})
+            tx._copy_owned_link(original, copied, expected, record)
+            node = received[copied]
+            assert node.reparse_data == expected.reparse_data
+            assert node.native_proof != expected.native_proof
+            assert tx._image_matches(original, {original: expected})
+            assert installer._projection_resolves_to(copied, referent)
+            owner._record_created(copied, "projection", None,
+                                  projection_target=referent.resolve(strict=True),
+                                  acquired_node=node)
+            if rollback:
+                raise RuntimeError("forced copied-link rollback")
+            tx.commit()
+
+    if rollback:
+        with pytest.raises(RuntimeError, match="forced copied-link rollback"):
+            operation()
+        assert not os.path.lexists(original)
+        assert not os.path.lexists(copied)
+        assert list(provider.iterdir()) == []
+    else:
+        operation()
+        assert installer._projection_resolves_to(original, referent)
+        assert installer._projection_resolves_to(copied, referent)
+    assert payload.read_bytes() == before
+    assert _windows_token_snapshot(thread=True) == before_thread
+    assert _windows_token_snapshot(thread=False) == before_process
+
+def _require_existing_symlink_privilege():
+    if os.name != "nt":
+        return
+    before_thread = _windows_token_snapshot(thread=True)
+    before_process = _windows_token_snapshot(thread=False)
+    try:
+        with installer._WindowsBoundNode.symlink_privilege():
+            pass
+    except OSError as error:
+        assert _windows_token_snapshot(thread=True) == before_thread
+        assert _windows_token_snapshot(thread=False) == before_process
+        if error.winerror == 1300:
+            pytest.skip("Effective token has no symlink privilege; positive native path not accepted")
+        raise
+    assert _windows_token_snapshot(thread=True) == before_thread
+    assert _windows_token_snapshot(thread=False) == before_process
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows missing privilege")
+def test_already_missing_privilege_refuses_without_token_changes():
+    before_thread = _windows_token_snapshot(thread=True)
+    before_process = _windows_token_snapshot(thread=False)
+    try:
+        with installer._WindowsBoundNode.symlink_privilege():
+            pass
+    except OSError as error:
+        assert error.winerror == 1300
+        assert _windows_token_snapshot(thread=True) == before_thread
+        assert _windows_token_snapshot(thread=False) == before_process
+    else:
+        assert _windows_token_snapshot(thread=True) == before_thread
+        assert _windows_token_snapshot(thread=False) == before_process
+        pytest.skip("This token contains the privilege; negative removed-token case is separate")
+
+
+
+@pytest.mark.parametrize("native_target, expected", [
+    ("Q:" + chr(92) + "project", True),
+    ("q:/project", True),
+    (chr(92) * 2 + "?" + chr(92) + "R:" + chr(92) + "project", True),
+    (chr(92) * 2 + "server" + chr(92) + "share", False),
+    (chr(92) * 2 + "?" + chr(92) + "UNC" + chr(92) + "server" + chr(92) + "share", False),
+    (chr(92) * 2 + "?" + chr(92) + "Volume{synthetic}" + chr(92), False),
+    ("Q:relative", False),
+    ("relative/project", False),
+    ("/relative-to-drive", False),
+    ("", False),
+])
+def test_projection_representation_uses_resolved_local_volume_only(native_target, expected):
+    assert installer._windows_projection_uses_junction(native_target) is expected
+
+
+@pytest.mark.parametrize("tag, expected", [
+    (0xA0000003, True), (0xA000000C, False), (0x8000001B, False), (None, False),
+])
+def test_junction_classifier_uses_native_tag_without_python_isjunction(tag, expected, monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.delattr(os.path, "isjunction", raising=False)
+    path = SimpleNamespace(lstat=lambda: SimpleNamespace(st_reparse_tag=tag))
+    assert installer._is_directory_junction(path) is expected
+
+
+def test_junction_classifier_handles_disappearing_node():
+    from types import SimpleNamespace
+    def missing():
+        raise FileNotFoundError("synthetic disappearance")
+    assert installer._is_directory_junction(SimpleNamespace(lstat=missing)) is False
+
+
+def test_same_target_junction_is_recognized_without_python_isjunction(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.delattr(os.path, "isjunction", raising=False)
+    target = object()
+    path = SimpleNamespace(is_symlink=lambda: False,
+                           lstat=lambda: SimpleNamespace(st_reparse_tag=0xA0000003),
+                           resolve=lambda strict: target)
+    expected = SimpleNamespace(resolve=lambda strict: target)
+    monkeypatch.setattr(os.path, "samefile", lambda first, second: first is second)
+    assert installer._projection_resolves_to(path, expected)
+    foreign = SimpleNamespace(resolve=lambda strict: object())
+    assert not installer._projection_resolves_to(path, foreign)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows junction identity")
+def test_junction_same_identity_changed_raw_target_is_not_disposed(tmp_path):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    marker = second / "user-data.txt"
+    marker.write_text("Must survive refusal.", encoding="utf-8")
+    link = tmp_path / "projection"
+    tx = installer._InstallTransaction([tmp_path], enabled=True)
+    with installer._WindowsBoundNode(first, follow=True) as first_bound:
+        first_raw = installer._WindowsBoundNode.target_reparse_data(first_bound)
+    with installer._WindowsBoundNode(second, follow=True) as second_bound:
+        second_raw = installer._WindowsBoundNode.target_reparse_data(second_bound)
+    with installer._WindowsBoundNode.create(link, directory=True) as created:
+        created.set_reparse_data(first_raw)
+        expected = tx._capture_node(link, bound_node=created)
+        created.set_reparse_data(second_raw)
+        changed = tx._capture_node(link, bound_node=created)
+        assert changed.native_proof == expected.native_proof
+        assert changed.reparse_data != expected.reparse_data
+    assert not tx._image_matches(link, {link: expected})
+    with pytest.raises(ValueError, match="E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY"):
+        tx._dispose_node(link, expected)
+    assert installer._projection_resolves_to(link, second)
+    assert marker.read_text(encoding="utf-8") == "Must survive refusal."
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows target replacement")
+def test_projection_inverse_never_disposes_replacement_target(tmp_path):
+    anchor = tmp_path / "home"
+    anchor.mkdir()
+    provider = anchor / ".claude"
+    provider.mkdir()
+    referent = tmp_path / "referent"
+    referent.mkdir()
+    retained = tmp_path / "retained-original"
+    marker = referent / "user-data.txt"
+    with pytest.raises(RuntimeError, match="forced rollback"):
+        with installer._InstallTransaction([provider], enabled=True) as tx:
+            owner = installer._CreateOnlyMutablePath(anchor, tx, dry_run=False)
+            owner.create_projection(Path(".claude/projection"), referent)
+            referent.rename(retained)
+            referent.mkdir()
+            marker.write_text("Replacement user data.", encoding="utf-8")
+            raise RuntimeError("forced rollback")
+    assert not os.path.lexists(provider / "projection")
+    assert marker.read_text(encoding="utf-8") == "Replacement user data."
+    assert retained.is_dir()

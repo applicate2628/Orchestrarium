@@ -1,6 +1,8 @@
 """Relative bundle launch must never fall back to ambient Python."""
+from synthetic_bundle_support import build_synthetic_bundle
 import importlib.util
 import json
+import hashlib
 import os
 import sys
 from pathlib import Path
@@ -23,9 +25,13 @@ def bundle(tmp_path, launcher):
     exe = root / 'python/bin/python3'
     exe.write_bytes(b'synthetic interpreter; never executed')
     (root / 'app/install.py').write_text('# synthetic entry')
-    data = {'schemaVersion': 1, 'product': 'Orche', 'release': 'development',
+    evidence = b'{}'
+    (root / 'runtime-evidence.json').write_bytes(evidence)
+    data = {'schemaVersion': 2, 'product': 'Orche', 'release': 'development',
             'target': launcher.current_target(), 'python': 'python/bin/python3',
-            'entry': 'app/install.py'}
+            'entry': 'app/install.py',
+            'runtimeEvidence': 'runtime-evidence.json',
+            'runtimeEvidenceSha256': hashlib.sha256(evidence).hexdigest()}
     (root / 'bundle.json').write_text(json.dumps(data))
     return root, exe, data
 
@@ -139,7 +145,7 @@ def test_retention_uses_shared_builder_and_refuses_existing_target(launcher,tmp_
     runtime=tmp_path/'runtime'
     exe=runtime/builder.TARGETS[target];exe.parent.mkdir(parents=True)
     exe.write_bytes(b'synthetic interpreter; never executed')
-    source=builder.build(PATH.parents[2],runtime,tmp_path/'original',target=target,release='development')
+    source=build_synthetic_bundle(builder, PATH.parents[2],runtime,tmp_path/'original',target=target,release='development')
     (tmp_path/'parent').mkdir()
     destination=tmp_path/'parent'/'..'/'permanent Ω'
     python,entry=launcher.retain_bundle(source,destination)
@@ -184,7 +190,7 @@ def test_dangling_retention_name_is_not_followed(launcher, tmp_path):
     runtime = tmp_path / 'runtime'
     exe = runtime / builder.TARGETS[launcher.current_target()]
     exe.parent.mkdir(parents=True); exe.write_bytes(b'synthetic; never executed')
-    root = builder.build(PATH.parents[2], runtime, tmp_path / 'original',
+    root = build_synthetic_bundle(builder, PATH.parents[2], runtime, tmp_path / 'original',
                          target=launcher.current_target(), release='development')
     redirect = tmp_path / 'outside-selected-name'
     chosen = tmp_path / 'chosen'
@@ -255,3 +261,19 @@ def test_windows_child_preserves_real_argument_boundaries(launcher, tmp_path):
     args = [sys.executable, '-I', str(script), str(result), *values]
     assert launcher._exec_child(sys.executable, args, launcher.child_environment(dict(os.environ))) == 23
     assert json.loads(result.read_text(encoding='utf-8')) == values
+
+def test_legacy_manifest_is_not_silently_qualified(launcher, tmp_path):
+    root, exe, data = bundle(tmp_path, launcher)
+    data['schemaVersion'] = 1
+    data.pop('runtimeEvidence')
+    data.pop('runtimeEvidenceSha256')
+    (root / 'bundle.json').write_text(json.dumps(data))
+    with pytest.raises(ValueError, match='Unsupported'):
+        launcher.resolve_launch(root, exe)
+
+
+def test_changed_expected_record_refused_before_launch(launcher, tmp_path):
+    root, exe, data = bundle(tmp_path, launcher)
+    (root / 'runtime-evidence.json').write_bytes(b'changed')
+    with pytest.raises(ValueError):
+        launcher.resolve_launch(root, exe)

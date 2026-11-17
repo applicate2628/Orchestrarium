@@ -6,6 +6,7 @@ channel must authenticate the complete release before executing its interpreter.
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -49,11 +50,16 @@ def _manifest(root: Path) -> dict:
             result[key] = value
         return result
     data = json.loads(raw, object_pairs_hook=unique)
-    if (type(data) is not dict or set(data) != {'schemaVersion', 'product', 'release', 'target', 'python', 'entry'}
-        or type(data['schemaVersion']) is not int or data['schemaVersion'] != 1
+    if (type(data) is not dict or set(data) != {'schemaVersion', 'product', 'release', 'target', 'python', 'entry', 'runtimeEvidence', 'runtimeEvidenceSha256'}
+        or type(data['schemaVersion']) is not int or data['schemaVersion'] != 2
         or data['product'] != 'Orche' or type(data['release']) is not str or not data['release'].strip()
+        or data['runtimeEvidence'] != 'runtime-evidence.json'
+        or type(data['runtimeEvidenceSha256']) is not str
         or data['target'] != current_target() or data['entry'] != 'app/install.py'):
         raise ValueError('Unsupported or mismatched bundle manifest')
+    evidence = _member(root, data['runtimeEvidence']).read_bytes()
+    if hashlib.sha256(evidence).hexdigest() != data['runtimeEvidenceSha256']:
+        raise ValueError('Runtime evidence bytes differ from the bundle manifest')
     return data
 
 
@@ -81,7 +87,8 @@ def retain_bundle(root: Path, destination: Path) -> tuple[Path, Path]:
     builder = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(builder)
     destination = builder.build(root / 'app', root / 'python', destination,
-                                target=data['target'], release=data['release']).resolve(strict=True)
+                                target=data['target'], release=data['release'],
+                                runtime_evidence=_member(root, data['runtimeEvidence'])).resolve(strict=True)
     return _member(destination, data['python']), _member(destination, 'launch.py')
 
 
