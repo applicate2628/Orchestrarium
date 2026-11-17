@@ -134,7 +134,7 @@ VALIDATOR_ENVIRONMENT_ALLOWLIST = (
 LAW_ID_PATTERN = r"(?:A[1-9]|B[1-3]|C[1-6]|D[1-5]|M)"
 LAW_ID_RE = re.compile(rf"\b{LAW_ID_PATTERN}\b")
 ACTION_SCOPES = frozenset(
-    {"all", "dev_repo", "dev_repo_nonstandalone", "installed"}
+    {"all", "dev_repo", "dev_repo_nonstandalone", "dev_repo_monorepo", "installed"}
 )
 PROJECT_SPECIFIC_UPGRADE_LEDGER_MARKERS = (
     "work-items/roadmaps/orchestrator-upgrades.md",
@@ -1606,6 +1606,11 @@ def _scope_applies(scope: str, layout: Layout) -> bool:
         return True
     if scope == "dev_repo":
         return layout.dev_repo
+    if scope == "dev_repo_monorepo":
+        # Provider exports may retain canonical skills, but omit ledger fixtures.
+        return (layout.dev_repo
+                and (layout.root / "src.codex/AGENTS.codex.md").is_file()
+                and (layout.root / "src.claude/CLAUDE.md").is_file())
     if scope == "dev_repo_nonstandalone":
         return layout.dev_repo and not layout.standalone
     if scope == "installed":

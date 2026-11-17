@@ -1346,6 +1346,24 @@ def _is_source_only_maintainer_action(action: tuple[str, ...]) -> bool:
     )
 
 
+_SOURCE_STATE_CONTRACT_ACTIONS = tuple(
+    action for action in _DECLARED_ACTIONS
+    if action[:3] in {
+        ('check_contains', '@ROOT/scripts/agent-run-ledger.py', 'restore_ledger'),
+        ('check_contains', '@ROOT/scripts/agent-run-ledger.sh', 'agent-run-ledger.py'),
+        ('check_contains', '@ROOT/scripts/check-work-items-state.py', 'validate_work_item'),
+        ('check_contains', '@ROOT/scripts/check-work-items-state.py', 'stale running agent'),
+        ('check_contains', '@ROOT/scripts/check-work-items-state.sh', 'check-work-items-state.py'),
+        ('check_contains', '@ROOT/scripts/validate-work-item-state.py', 'PASS gate requires evidence'),
+        ('check_contains', '@ROOT/scripts/validate-work-item-state.py', 'escapes the work item'),
+        ('check_contains', '@ROOT/scripts/validate-work-item-state.py', 'agent-runs.jsonl'),
+        ('check_contains', '@ROOT/scripts/validate-work-item-state.sh', 'validate-work-item-state.py'),
+        ('check_contains', '@ROOT/shared/schemas/agent-runs.schema.json', 'agent-runs.schema.json'),
+        ('check_contains', '@ROOT/shared/schemas/agent-runs.schema.json', '"executionRole"'),
+        ('check_contains', '@ROOT/shared/schemas/agent-runs.schema.json', '"evidence"'),
+    }
+)
+
 _ALL_ACTIONS = (
     _DECLARED_ACTIONS[0:40]
     + _DECLARED_ACTIONS[41:42]
@@ -1403,6 +1421,9 @@ ACTIONS = (
                 "historical Claude Source Lead declares main-conversation ownership",
             ),
         )
+        + _SOURCE_STATE_CONTRACT_ACTIONS
+        + tuple(action for action in _DECLARED_ACTIONS
+                if action[0] == "check_arch_layering_slices")
         + _APAT_DEV_ACTIONS
         + _UI_CONTINUITY_DEV_ACTIONS
         + (
@@ -1452,6 +1473,10 @@ ACTIONS = (
         + _DECLARED_ACTIONS[287:294]
         + _CURRENT_SKILL_ACTIONS,
     ),
+    ("dev_repo_monorepo", tuple(
+        action for action in _DECLARED_ACTIONS
+        if action[0] == "check_agent_run_ledger_contract"
+    )),
     ("installed", _INSTALLED_ACTIONS + _CURRENT_SKILL_ACTIONS),
 )
 
