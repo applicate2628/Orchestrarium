@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-17
 
+- Replace logging-only bug-investigation gates with evidence matched to the hypothesis: deterministic source/tests where sufficient, native/runtime checks for runtime claims, and explicit diagnostic observer-effect/privacy handling. Repeated neighboring regressions pause speculative changes only to the affected mechanism while safe diagnosis and independent work continue; shared governance, live role guidance and provider projection integrity remain aligned.
+
 - Release the newly acquired ledger lock and descriptor when writing its owner metadata fails, across ordinary writes and recovery writes. Partial writes are completed and observed replacement owners are preserved. Under the existing cooperative locking contract, a transient metadata-write error no longer leaves that work item stuck behind our abandoned lock; uncertain identity or close outcomes remain explicit recovery cases.
 
 - Qualify the native Windows publication-timeout harness with both direct Python and virtual-environment redirectors. The check binds the scanner to its actual launcher, observes Git membership in the owned Windows Job, and requires launcher, scanner and Git termination without changing runtime deadlines or publication authorization.

@@ -1,124 +1,97 @@
 ---
 name: bug-hunting
-description: "Debug runtime bugs by logging first, not guessing."
+description: "Diagnose bugs with hypothesis-appropriate evidence, then verify the scoped fix."
 ---
 
 # Bug Hunting
 
-## Iron law
+## Core discipline
 
-**Stop guessing, start logging.** Every minute spent reasoning from architecture alone is a minute the runtime would have told you the truth in. Every diagnostic round you add narrows the search; every speculative fix you ship widens it.
+**Investigate before guessing; choose evidence that can distinguish the hypotheses.** Identify the violated invariant, its owner, the observed symptom and a falsifying case. Reuse current trustworthy evidence before collecting more. More logs are not automatically more certainty.
 
-## Rule 0 — Never fix until logs prove the hypothesis (ABSOLUTE, two-sided)
+## Rule 0 - Establish the cause, then verify the fix
 
-**ABSOLUTE RULE.** Hypotheses MUST be confirmed by debugging, and NO fix is permitted until full, absolute runtime confirmation. This binds at BOTH ends of every fix — confirming the cause is necessary but not sufficient:
+- **Before the fix:** connect the hypothesis to inspectable evidence. Static evidence and deterministic unit tests can establish a deterministic code defect; runtime or integration evidence is needed when the claim depends on actual scheduling, environment, native behavior or external state. Code inspection is not a substitute for those runtime claims, and a timestamped log is not a prerequisite for every source edit.
+- **After the fix:** reproduce the relevant failure before the change where feasible, verify the corrected behavior and neighboring cases, and distinguish implemented code from executed acceptance. When required acceptance evidence is unavailable, report that affected criterion as "implemented, not yet verified" and name the next check. Passing scoped checks is not a guarantee of perfect correctness or whole-system readiness.
+- External advice, including official documentation and another model's answer, is a candidate explanation. Check its applicability to the current code and scenario; it does not replace evidence or authorize execution.
+- Honor an explicit user requirement to collect particular evidence before a particular change. Otherwise select the smallest sufficient method rather than adding an automatic logging gate.
 
-- **Before the fix — prove the CAUSE.** No edit to production code while the working theory of the bug is still a theory. Diagnostic output must show — in the runtime, with timestamps — exactly the cause believed to be acting. If the log does not show it, the theory is wrong or incomplete; add more logging, do not patch.
-- **After the fix — prove the FIX is perfectly correct.** Identifying the cause does not make a fix "done". Re-run with the diagnostics still in and prove in the runtime that (1) the symptom is gone AND (2) no adjacent behavior regressed. "It should work now" / "this is the right fix" is never confirmation — only a clean runtime log is. Until that log exists the fix stays "implemented, not yet verified", never "done". A fix asserted correct without a runtime log proving it is a Rule 0 violation as severe as patching on an unverified cause.
+## Rule 1 - A failed fix changes the investigation, not all work
 
-This applies even when the theory comes from an authoritative source: a consultant memo, a Codex/Claude answer, a Stack Overflow accepted answer, official documentation. External advice is a candidate hypothesis, not a verified one — treat it as a pointer to which signals to log next, never as a green light to ship a fix.
+If a fix leaves the symptom unchanged, do not stack another speculative patch. Reconcile the attempted change with the failing case and choose a discriminating check: focused source/data-flow analysis, a deterministic regression test, targeted instrumentation or a native reproduction as appropriate.
 
-Trigger phrases meaning "go log, do not patch":
-- "still happening" / "ничего не поменялось"
-- "this needs to be checked first"
-- "don't fix until logs show this"
-- Any moment where you find yourself about to issue an `Edit` after reading only code, not after reading a log
+- **Second-cross-break stop:** If a second fix in the same session breaks a previously working neighbor, pause speculative changes to the affected mechanism. Diagnose its owner, sibling modes and shared-state/lifecycle interactions before the next behavior change; retain safe diagnostic edits and continue independent authorized work. Expand the pause only when evidence shows a shared dependency or safety risk. Preserve user data, required permissions and mandatory safety checks.
 
-## Rule 1 — When a fix does not land first try, stop guessing immediately
+## Rule 2 - Pick the smallest signal that distinguishes live hypotheses
 
-If a hypothesis-driven fix does not visibly remove the symptom, do not try another hypothesis-driven fix. Switch to instrumentation. Adding logs is cheap; re-rolling the dice on guesses burns user trust faster than the bug itself.
+For a timing or state-observation hypothesis, log a few orthogonal events with timestamp, short tag and relevant state values (`inFlight`, `attached`, `bounds`, `session`). Keep events compact and correlate them to the actual run, source and task. Do not dump unrelated state or secrets.
 
-Concrete trigger: "still happening" / "ничего не поменялось" → next action is **diagnostic output**, not another speculative edit.
-
-- **Second-cross-break stop:** If a second fix in the same session breaks a previously working neighbor, STOP all edits. Before any further edit, run a read-only multi-angle structural diagnosis covering (1) the owning invariant and call/data flow, (2) sibling modes/surfaces, and (3) timing/lifecycle/shared-state interactions; identify which prior edit changed the real symptom and verify the structural cause.
-
-## Rule 2 — Pick the smallest signal that distinguishes live hypotheses
-
-Pick a handful of orthogonal events and log them with a single line each, prefixed by timestamp + short tag + the state values that matter (`inFlight`, `attached`, `bounds`, `session`, etc.). One line per event, fixed shape, parseable by eye. Do not dump a wall of structured data — you will be reading dozens of these in sequence to spot the timing gap.
-
-Provider-neutral example shape:
+Provider-neutral example:
 
 ```
 [TAG hh:mm:ss.fff] EVENT_NAME field1=value1 field2=value2 field3=value3
 ```
 
-Look for:
-- which event is missing entirely (the one you expected to see never fires)
-- which event runs twice (unexpected re-entry or duplicate firing)
-- the gap between two events (something is happening in the silence)
-- a field value that disagrees with your mental model
+Look for a missing event, duplicate entry, an unexpected interval or a state value inconsistent with the hypothesis. Absence is evidence only if the observation covered that event and its collection completed. Treat apparently similar UI variants as distinct paths until their relevant behavior is established.
 
-If a UI variant works correctly but another does not, treat them as separate code paths even when they look like they share state — log inside each to confirm rather than assume.
+- When N symptoms or failing cases are reported, keep N independent root hypotheses and choose evidence for each case. Collapse them to one common root only when one observed mechanism explains every case; shared timing, location or correlation is not proof.
 
-- When N symptoms or failing cases are reported, keep N independent root hypotheses and instrument each case. Collapse them to one common root only when one observed mechanism explains every case; shared timing, location, or correlation is not proof.
+## Rule 3 - Retain only the evidence the investigation needs
 
-## Rule 3 — Redirect stderr to a scratch file, never lean on console output
+Reuse complete evidence already retained by the execution tool or test report. When a run can lose necessary output, capture it in the authorized ignored scratch workspace, such as `.scratch/<topic>.log`; preserve unique load-bearing evidence before overwriting it. A file is not mandatory for a simple check whose complete result is already retained. Follow the project's storage, privacy and cleanup rules; scratch storage is not a durable source of truth.
 
-Console output is lost between iterations. Redirect to a scratch file under the repo (e.g. `.scratch/<topic>.log`, already covered by repo `.gitignore` conventions). Persistent log files survive app crashes and allow diff between runs.
-
-PowerShell:
+PowerShell capture example:
 
 ```powershell
 Start-Process -RedirectStandardError .scratch/bug.log <command>
 ```
 
-POSIX shell:
+POSIX capture example:
 
 ```bash
 <command> 2> .scratch/bug.log
 ```
 
-## Rule 4 — Visual or animation bugs go through frame extraction, not raw video
+## Rule 4 - Use frame evidence for visual transitions
 
-For UI bugs that depend on animation, timing, or sequence, do not stare at the raw video. Extract frames first and read the smallest set that distinguishes states. The detailed video-frame workflow lives in `$analyzing-video-bugs`. The broader visual-verification workflow (theme/state context, capturing a fresh recording when none exists, classifying structural vs cosmetic) lives in `$windows-gui-manual-testing`.
+For animation, timing or sequence bugs, inspect the smallest relevant frame set rather than relying on an impression of a video. Use `$analyzing-video-bugs` for frame extraction and `$windows-gui-manual-testing` for capture, theme/state context and structural-versus-cosmetic verification. Use a specific user-provided frame pointer directly when available.
 
-If the user has already identified a specific frame number ("frame 39 is the bug"), use that pointer directly — it is a one-word hint that saves an hour of derivation.
+## Rule 5 - Resolve conflicting observations
 
-## Rule 5 — Trust the live state more than the code's claimed state
+A log records the instrumented path, not necessarily the complete system. When source analysis and a trace disagree, check source/version identity, execution path, capture completeness, buffering, correlation and observer effects. Resolve the contradiction rather than automatically trusting either a mental model or a log line. Do not infer successful execution from missing output or exit status alone.
 
-A log line is what the runtime actually did. A trace through the source code is what you believe it did. When they disagree, **the log wins**. Mental models of multi-callback async UI code, lifecycle handlers, and partially-initialized state are wrong more often than logs are.
+## Rule 6 - Diagnostics can change behavior
 
-## Rule 6 — When diagnostics themselves do not change behaviour, you have a clean signal
+Logging can alter timing, allocation, locks, blocking I/O and thread scheduling; evaluating diagnostic arguments can itself have side effects. It can expose secrets or affect the failure being investigated. Use the least intrusive sufficient signal, avoid sensitive values, and compare instrumented versus normal behavior when relevant. If instrumentation hides or changes the symptom, record that limitation and select a safer signal or controlled test; do not claim a clean reproduction merely because the instrumented run passes.
 
-Read-only diagnostic output (e.g. `Console.Error.WriteLine`, `print`, `log.debug`) is observably zero-risk for most UI and lifecycle bugs — no side effects, no allocations that matter, no thread reordering. If the symptom persists with logs in, you can compare runs cleanly. Do not conflate "added diagnostics" with "changed the system" — that is the whole point.
+## Rule 7 - Remove temporary diagnostics without losing verification
 
-## Rule 7 — Remove diagnostics after the fix is verified, in the same commit cycle
+Remove temporary diagnostic code in the same change cycle once its evidence has served the investigation, unless retained observability is an intentional reviewed requirement. Preserve the necessary result in the existing task/verification artifact. Re-run the affected regression with diagnostics removed when removal can change behavior; verify the delivered configuration, not just the instrumented one.
 
-Diagnostics are scaffolding. Once the root cause is committed, sweep the temporary log lines in the same commit cycle. Leaving them in pollutes future debugging — every new bug ends up co-located with stale tracing from an old one.
+## Rule 8 - Make runs and outcomes explicit
 
-## Rule 8 — Announce launch parameters before a non-trivial run, verify artifact existence after
+For a non-trivial run, state the relevant mode, inputs, outputs and expected scope before starting. Ask only when an unresolved parameter changes correctness, cost, permissions or safety. Reuse an already authorized run plan; do not add a new confirmation for routine unchanged checks. Distinguish a bounded diagnostic case from production acceptance and do not silently substitute one for the other. Model, quota and other required approvals remain in force.
 
-Before kicking off a non-trivial run that takes more than a few seconds (batch job, optimization stage, multi-hour compute, training run, simulation, benchmark, dataset rebuild, debugger session with custom config), announce the full parameter set in a single block — mode or profile, key configuration values, input source path, output destination, expected runtime or ETA — and pause for user correction if any parameter is ambiguous. Diagnostic and production runs use the same parameter set unless the user explicitly authorized a faster diagnostic mode; do not silently substitute a faster regime for the authorized one or invert the relationship by treating the diagnostic mode as the default.
-
-After such a run, a completion notification, callback, exit-code-zero, or "task done" message is not by itself evidence the run succeeded. Verify the expected output artifact exists at the declared destination, check its success markers (file present, expected size, normal-completion log entry, exit status), and only then claim success. A run that produced no artifact at the declared path is `BLOCKED` or `REVISE`, regardless of how cleanly its process exited.
+Check the required outcome after the run. If an output artifact is required, verify its existence, content and success markers at the declared destination; a completion message or exit zero alone is insufficient. A test with no required output artifact needs its actual test result, not an invented file. Missing required evidence blocks the affected claim or dependent operation, not independent authorized work.
 
 ## Pattern in action
 
-Abstracted from real incident loops:
-
-1. **First speculative fix fails.** The user reports the symptom unchanged. Treat this as the Rule 1 trigger: do not re-roll on another guess.
-2. **Add 3–5 orthogonal log lines** at suspected branch points: state-change handlers, lifecycle entries, completion callbacks, gate conditions. Same prefix shape, parseable by eye.
-3. **The user reproduces the bug; logs are captured to the scratch file.** Read the log end-to-end and look for: a missing event, a doubled event, a large gap between two events, or a field value that disagrees with the mental model.
-4. **The cause appears in the log** — usually one of:
-   - a gate condition was different than code-reading suggested
-   - a callback fired with stale state
-   - an event fired twice from two different sources
-   - an event never fired at all
-   - geometry, bounds, or attachment state was wrong at the moment a downstream event tried to use it
-5. **Fix the smallest thing that closes the gap.** When logging is right, a one-line change is typical.
-6. **Re-run with diagnostics still in.** Verify the failure shape is gone in the same log file, then sweep the diagnostics in the next commit.
-
-The pattern across cases: **log first, read the gap or the missing event, fix the smallest thing that closes it.** Never re-roll on guesses.
+1. Identify the invariant and competing explanations; record the observed failure.
+2. Choose the smallest discriminating evidence. A deterministic branch bug may need a focused test; an async lifecycle race may need controlled scheduling and targeted event capture.
+3. Inspect the result, including missing coverage and observer effects. Reject explanations contradicted by evidence.
+4. Fix the owning mechanism with the smallest adequate change; preserve unrelated behavior and user state.
+5. Run the regression and relevant neighboring checks. Remove temporary diagnostics and verify the delivered behavior where their removal matters.
+6. Report what changed, what was actually verified and any scoped remainder. Continue independent authorized work.
 
 ## Non-goals
 
-- Not a substitute for `$qa-engineer` review gates — this is methodology for the diagnostic phase, not for verification or for owning the fix as an artifact.
-- Not for design-stage decisions, performance budgets, or architectural reasoning.
-- Not for visual-bug capture or frame-level analysis — use `$analyzing-video-bugs` (frame extraction and transition detection) and `$windows-gui-manual-testing` (broader visual verification including screen capture).
+- Not a substitute for `$qa-engineer` acceptance or independent review.
+- Not permission to run models, spend quota, change protected settings or bypass ownership checks.
+- Not a replacement for design decisions or the specialized visual-evidence skills.
 
 ## Terms and abbreviations
 
-- `Edit`: tool call that modifies a tracked source file. The discipline above forbids issuing one before the working theory is verified in a log.
-- `repro`: reproduction; the user's act of running the failing case so the agent can collect runtime evidence.
-- `scratch file`: a file under `.scratch/` (gitignored by repository convention) used for transient logs, frames, and probes.
-- `gate condition`: the boolean expression guarding whether a code path executes; bugs frequently live in a gate that looked correct on paper but was wrong at runtime.
+- `Edit`: a tool action changing source; evidence requirements follow the proposed change and its claims, not the tool name.
+- `repro`: a controlled reproduction used to distinguish explanations or verify the fix.
+- `scratch file`: ignored transient evidence stored according to the project's authorized workspace policy.
+- `gate condition`: a predicate controlling a code path; test the actual relevant inputs instead of assuming its outcome.

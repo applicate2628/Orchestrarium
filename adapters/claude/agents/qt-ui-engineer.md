@@ -38,7 +38,7 @@ description: "Qt UI engineer: implement approved Widgets UI phases."
 - Prefer Qt Widgets implementation details over broad frontend abstractions when the task is desktop UI work.
 - Keep state changes, event handling, and visual updates easy to review.
 - If the specification is ambiguous or the plan conflicts with reality, stop and return `BLOCKED` with the exact gap.
-- For Qt UI runtime bugs invoke `$bug-hunting` before changing code (log first, never patch on theory). For visual evidence of Qt UI issues use `$windows-gui-manual-testing` and route any video through `$analyzing-video-bugs`.
+- For Qt UI runtime bugs invoke `$bug-hunting` to select appropriate evidence before behavior changes; account for timing and diagnostic observer effects. For visual evidence of Qt UI issues use `$windows-gui-manual-testing` and route any video through `$analyzing-video-bugs`.
 - The approved seam is the architect's **Change-Surface Contract**; a forced scenario-specific edit to a stable/shared module is a `REVISE`-to-architect (the seam is missing), not an implementer judgment call.
 
 ## Adjacent findings protocol

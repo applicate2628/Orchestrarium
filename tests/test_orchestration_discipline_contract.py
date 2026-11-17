@@ -160,8 +160,8 @@ PINS = [
 
     # P4 — spine stop-rule (Fable probe text) + operational bullet (Sol text)
     ("P4-spine", None, [SPINE]),
-    ("P4-op", "**Second-cross-break stop:** If a second fix in the same session breaks a previously working neighbor, STOP all edits.",
-     ["src.claude/commands/agents-bugfix.md", "src.codex/skills/bug-hunting/SKILL.md"]),
+    ("P4-op", "**Second-cross-break stop:** If a second fix in the same session breaks a previously working neighbor, pause speculative changes to the affected mechanism.",
+     ["adapters/claude/commands/agents-bugfix.md", "src.codex/skills/bug-hunting/SKILL.md"]),
 
     # A5 — shared dead-lane and missing-verdict duties
     ("A5-spine", None, [SPINE]),
@@ -537,7 +537,9 @@ def quick_fix_duties(text: str) -> dict[str, bool]:
 def stop_rule_duties(text: str) -> dict[str, bool]:
     unit = selected_unit(text, "Scope and ownership discipline", "No logic duplication / no fix layering:")
     return complete_shared_relationships(unit, {
-        "second-cross-break-stop": "SECOND same-session fix breaking a working neighbor: STOP all edits",
+        "second-cross-break-stop": "SECOND same-session fix breaking a working neighbor: pause speculative changes to the affected mechanism",
+        "independent-continuation": "Continue safe diagnosis and independent authorized work",
+        "scoped-escalation": "expand the pause only for evidenced shared dependencies or safety risks",
         "owner-siblings-contract-diagnosis": "diagnose owner/siblings/shared contract",
     })
 
@@ -915,8 +917,10 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
             (quick_fix_duties, "Core delegation principles", "quick-fix:", "same-item-reclassification", "enrich/reclassify same item", "create a replacement item"),
             (quick_fix_duties, "Core delegation principles", "quick-fix:", "bounded-delivery", "One preflight, implement/QA, close/archive", "Repeated preflight, implement, leave open"),
             (stop_rule_duties, "Scope and ownership discipline", "No logic duplication / no fix layering:", "second-cross-break-stop", "SECOND same-session fix", "THIRD same-session fix"),
-            (stop_rule_duties, "Scope and ownership discipline", "No logic duplication / no fix layering:", "second-cross-break-stop", "STOP all edits", "continue editing"),
+            (stop_rule_duties, "Scope and ownership discipline", "No logic duplication / no fix layering:", "second-cross-break-stop", "pause speculative changes to the affected mechanism", "continue editing"),
             (stop_rule_duties, "Scope and ownership discipline", "No logic duplication / no fix layering:", "owner-siblings-contract-diagnosis", "diagnose owner/siblings/shared contract", "patch only the visible symptom"),
+            (stop_rule_duties, "Scope and ownership discipline", "No logic duplication / no fix layering:", "independent-continuation", "Continue safe diagnosis and independent authorized work", "Block all independent work"),
+            (stop_rule_duties, "Scope and ownership discipline", "No logic duplication / no fix layering:", "scoped-escalation", "expand the pause only for evidenced shared dependencies or safety risks", "expand the pause for any inconvenience"),
             (lead_dispatch_duties, "Core delegation principles", "$lead:", "root-only-dispatch-and-lifecycle", "root main conversation alone", "root and every specialist"),
             (lead_dispatch_duties, "Core delegation principles", "$lead:", "no-specialist-or-delivery-owner", "never subagent/end-to-end coder/roadmap owner", "may be subagent/end-to-end coder/roadmap owner"),
             (isolation_duties, "Operational and environment safety", "Parallel resource-surface isolation:", "full-overlap-surfaces", "throughout overlap", "only at launch"),
@@ -962,7 +966,9 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
             (baseline_duties, "producing-scope-baseline", "later independent deltas get own review"),
             (baseline_duties, "material-upstream-invalidation", "material upstream change invalidates dependent PASS"),
             (baseline_duties, "affected-re-review", "full only new defect class/material upstream revision"),
-            (stop_rule_duties, "second-cross-break-stop", "STOP all edits"),
+            (stop_rule_duties, "second-cross-break-stop", "pause speculative changes to the affected mechanism"),
+            (stop_rule_duties, "independent-continuation", "Continue safe diagnosis and independent authorized work"),
+            (stop_rule_duties, "scoped-escalation", "expand the pause only for evidenced shared dependencies or safety risks"),
             (isolation_duties, "conflict-serialization-or-isolation", "explicitly requested validated isolation"),
             (lead_dispatch_duties, "root-only-dispatch-and-lifecycle", "root main conversation alone dispatches/writes lifecycle"),
             (fixed_value_duties, "single-owned-safe-defaults", "policy defaults need one owner/omission safety"),
