@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-17
 
+- Installer rollback now keeps the original scalar restore failure when closing its descriptor also fails, including recovery details. Move metadata is recorded only after all destination observations succeed, so failed observations leave the rollback journal unchanged. Existing shared-container retention and reservation relocation remain intact.
+
 - Preserve the original copy failure and its existing recovery evidence when a source, fresh target, or metadata descriptor also fails to close. Successful copy ordering and timestamp restoration qualification remain unchanged.
 
 ## 2026-11-16

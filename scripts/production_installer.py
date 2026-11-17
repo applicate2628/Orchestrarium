@@ -3450,6 +3450,7 @@ class _InstallTransaction:
                     if hashlib.sha256(payload).hexdigest() != entry["before_node"].data:
                         raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar inverse input")
                     descriptor = os.open(path, os.O_RDWR | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0))
+                    primary = None
                     try:
                         current = self._scalar_descriptor_node(path, descriptor, entry["origin"])
                         if current != entry["current_node"]:
@@ -3457,8 +3458,31 @@ class _InstallTransaction:
                         self._write_owned_file(path, descriptor, (payload,),
                             lambda member, node: self._advance(member, {member: node}), entry["before_node"].data,
                             initial_state=current)
+                    except BaseException as error:
+                        primary = error
+                        raise
                     finally:
-                        os.close(descriptor)
+                        try:
+                            os.close(descriptor)
+                        except OSError as cleanup:
+                            paths, members, errors = self._settlement_failure(
+                                cleanup, "snapshot", ordinal, path, "E_ROLLBACK_RESTORE_FAILED",
+                                (path,), participant="scalar")
+                            if primary is not None:
+                                prior_paths, prior_members, prior_errors = self._settlement_failure(
+                                    primary, "snapshot", ordinal, path, "E_ROLLBACK_RESTORE_FAILED",
+                                    participant="scalar")
+                                paths = prior_paths + paths
+                                members = prior_members + members
+                                errors = _merge_copy_setter_operation_errors(prior_errors, errors)
+                            prior = primary if isinstance(primary, _InstallFailure) else None
+                            raise _InstallFailure(
+                                "E_ROLLBACK_SETTLEMENT_FAILED", "scalar-close",
+                                primary if primary is not None else cleanup,
+                                members=tuple(members),
+                                recovery_path=None if prior is None else prior.recovery_path,
+                                unresolved_paths=tuple(dict.fromkeys(paths)),
+                                retained_errors=errors) from primary
                     self._assert_scalar_binding(entry)
                 entry["consumed"] = True
             except BaseException as error:
@@ -3489,15 +3513,20 @@ class _InstallTransaction:
         """Move only known physical references; logical historical paths stay fixed."""
         def moved(path):
             return target / path.relative_to(source) if path == source or source in path.parents else path
-        self._copy_current = {moved(path): metadata for path, metadata in self._copy_current.items()}
+        copy_current = {moved(path): metadata for path, metadata in self._copy_current.items()}
         relocated = self._relocate(image, source, target)
+        copy_updates = []
         for selected, participant in self._copy_metadata.items():
             if selected == source or source in selected.parents:
-                participant.current = None
+                copy_updates.append((participant, None))
             if selected in relocated:
                 with self._copy_reference(selected, relocated[selected]) as (descriptor, bound):
                     metadata = self._read_copy_metadata(os.fstat(descriptor), descriptor, bound)
-                self._copy_current[selected] = participant.current = metadata
+                copy_current[selected] = metadata
+                copy_updates.append((participant, metadata))
+        self._copy_current = copy_current
+        for participant, metadata in copy_updates:
+            participant.current = metadata
         for entry in self._entries:
             if entry["kind"] == "scalar":
                 entry["current_path"] = moved(entry["current_path"])

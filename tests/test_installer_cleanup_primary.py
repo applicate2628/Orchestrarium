@@ -24,7 +24,7 @@ def test_cleanup_cause_expression_preserves_primary(context, kind):
                and node.func.id == "_InstallFailure" and len(node.args) >= 3
                and (owner is not None or
                     isinstance(node.args[1], ast.Constant) and node.args[1].value == context)]
-    assert len(matches) == 1
+    assert matches
     class Primary(RuntimeError):
         def __bool__(self):
             if kind == "raises":
@@ -32,11 +32,12 @@ def test_cleanup_cause_expression_preserves_primary(context, kind):
             return kind == "ordinary"
     primary = None if kind == "absent" else Primary("body")
     cleanup = OSError("cleanup")
-    expression = ast.Expression(matches[0])
-    actual = eval(compile(expression, str(SOURCE), "eval"), {}, {
-        "primary": primary, "original": primary, "cleanup": cleanup,
-        "reset": cleanup, "failures": [SimpleNamespace(cause=cleanup)]})
-    assert actual is (cleanup if primary is None else primary)
+    for cause in matches:
+        expression = ast.Expression(cause)
+        actual = eval(compile(expression, str(SOURCE), "eval"), {}, {
+            "primary": primary, "original": primary, "cleanup": cleanup,
+            "reset": cleanup, "failures": [SimpleNamespace(cause=cleanup)]})
+        assert actual is (cleanup if primary is None else primary)
 
 
 @pytest.mark.parametrize("kind", ["absent", "ordinary", "false", "raises"])
