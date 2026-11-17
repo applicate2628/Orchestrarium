@@ -12829,6 +12829,21 @@ def _capture_provider_configs(root, provider, scope, target, anchor, owner, befo
     return configs
 
 
+def _selected_lead_prior_files(plan: _CanonicalSkillsPlan, target: Path, transaction: _InstallTransaction):
+    """Transfer only exact current authored-file evidence, never a subtree exemption."""
+    receipt_plan = plan.lead_receipt
+    if receipt_plan is None or receipt_plan.selection is None:
+        return {}
+    receipt = _assert_lead_receipt_current(receipt_plan, target / _LEAD_RECEIPT_NAME, transaction)
+    manifest = _admitted_tree_manifest(transaction, target / "lead", ignore_runtime_cache=True)
+    selection = receipt_plan.selection
+    if (receipt is None or hashlib.sha256(receipt[0]).hexdigest() != selection[0]
+            or _tree_manifest_sha256(manifest) != selection[1] or plan.stage.digest != selection[2]):
+        raise ValueError("E_CANONICAL_LEAD_SELECTION_INVALID: provider preimage drift")
+    return {target / "lead" / member: digest for member, digest in manifest
+            if type(digest) is str and re.fullmatch(r"[0-9a-f]{64}", digest) is not None}
+
+
 def _record_provider_install(root, provider, mode, target, anchor, transaction, owner, before,
                              config_before, docs_target, mode_target, registration,
                              installed_hook_root, hooks_enabled, *,
@@ -13870,29 +13885,6 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     expected=codex_native_role_plan.config_selection)
                 config_before[target / "config.toml"] = (
                     native_before.decode("utf-8") if native_before is not None else None)
-            if ownership_before is not None:
-                previous_record = _provider_ownership_module(root).decode_record(
-                    ownership_before.encode("utf-8"), provider,
-                    "global" if mode == "global" else "project")
-                observed = {path: node for image in transaction._expected.values() for path, node in image.items()}
-                for relative, expected in previous_record["files"].items():
-                    selected_path = mutable_anchor / relative
-                    node = observed.get(selected_path)
-                    if not transaction.enabled and any(selected_path == base or base in selected_path.parents for base in transaction.paths):
-                        create_only.destination(Path(relative), allow_leaf_reparse=True)
-                        try:
-                            node = transaction._capture_node(selected_path)
-                        except FileNotFoundError:
-                            node = None
-                    if node is not None and (node.kind != "file" or node.data != expected):
-                        raise ValueError("E_PROVIDER_PAYLOAD_MODIFIED: " + relative)
-                configuration = _provider_configuration_module(root)
-                for relative, spec in previous_record.get("configs", {}).items():
-                    text = config_before.get(mutable_anchor / relative)
-                    if spec["kind"] == "block" and text is not None:
-                        current = configuration.block_digest(text, spec["blockKind"], _claude_document_context)
-                        if current is not None and current != spec["sha256"]:
-                            raise ValueError("E_PROVIDER_CONFIG_MODIFIED: " + relative)
             claude_agents_owner: _CreateOnlyMutablePath | None = None
             claude_skills_owner: _CreateOnlyMutablePath | None = None
             claude_commands_owner: _CreateOnlyMutablePath | None = None
@@ -13972,6 +13964,46 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     document_grant, root, source, target, docs_target,
                     "global" if mode == "global" else "project", create_only)
                 if document_grant is not None else instruction_updates)
+            if ownership_before is not None:
+                previous_record = _provider_ownership_module(root).decode_record(
+                    ownership_before.encode("utf-8"), provider,
+                    "global" if mode == "global" else "project")
+                observed = {path: node for image in transaction._expected.values() for path, node in image.items()}
+                selected_lead_files = _selected_lead_prior_files(canonical_plan, canonical_skills_target, transaction)
+                for relative, expected in previous_record["files"].items():
+                    if selected_updates is not None and any(
+                            outcome.path == relative for outcome in selected_updates.outcomes):
+                        # Only exact-current preparation can exempt this selected leaf.
+                        continue
+                    selected_path = mutable_anchor / relative
+                    expected = selected_lead_files.get(selected_path, expected)
+                    node = observed.get(selected_path)
+                    if not transaction.enabled and any(selected_path == base or base in selected_path.parents for base in transaction.paths):
+                        create_only.destination(Path(relative), allow_leaf_reparse=True)
+                        try:
+                            node = transaction._capture_node(selected_path)
+                        except FileNotFoundError:
+                            node = None
+                    receipt_plan = canonical_plan.lead_receipt
+                    if (receipt_plan is not None and receipt_plan.selection is not None
+                            and selected_path == canonical_skills_target / _LEAD_RECEIPT_NAME):
+                        prior = _assert_lead_receipt_current(receipt_plan, selected_path, transaction)
+                        if (prior is None or node is None or node.kind != "file"
+                                or node.python_identity != prior[1]):
+                            raise ValueError("E_PROVIDER_PAYLOAD_MODIFIED: " + relative)
+                        expected = hashlib.sha256(prior[0]).hexdigest()
+                    if node is not None and (node.kind != "file" or node.data != expected):
+                        raise ValueError("E_PROVIDER_PAYLOAD_MODIFIED: " + relative)
+                configuration = _provider_configuration_module(root)
+                for relative, spec in previous_record.get("configs", {}).items():
+                    if selected_updates is not None and relative in selected_updates.items:
+                        # The bound document selection owns only this logical key.
+                        continue
+                    text = config_before.get(mutable_anchor / relative)
+                    if spec["kind"] == "block" and text is not None:
+                        current = configuration.block_digest(text, spec["blockKind"], _claude_document_context)
+                        if current is not None and current != spec["sha256"]:
+                            raise ValueError("E_PROVIDER_CONFIG_MODIFIED: " + relative)
             # Canonical roles resolve the neutral contract through .agents.
             # Publish that leaf before the canonical skills tree, while the
             # transaction still owns both canonical and provider destinations.
