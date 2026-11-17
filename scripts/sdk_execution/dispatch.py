@@ -1,4 +1,4 @@
-"""Explicit one-shot Codex REVIEW bridge under the existing launch owner.
+"""Explicit one-shot read-only Codex execution bridge under the existing launch owner.
 
 The invoking Host authorizes execution, just as for the legacy wrapper. A binding
 file supplies constraints, never permission. No SDK import, subprocess, credential
@@ -146,7 +146,8 @@ class CodexReviewDispatch:
                 c.ledger_artifact, tuple(c.ledger_closes), c.ledger_max_events,
                 c.ledger_max_bytes, c.timeout_secs, c.result_max_bytes, c.capture_max_bytes,
                 tuple(c.provider_flags), str(c.terminal_receipt), c.user_approved_launch,
-                c.task_class, json_text(c.astra_task_authorization))
+                c.task_class, json_text(c.astra_task_authorization),
+                str(c.sdk_task_binding), str(c.sdk_review_binding))
 
     def assert_current(self, request, effect):
         with self._lock:
@@ -332,7 +333,11 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
     c = prevalidated.control
     role = owner.external_role_provenance(c, "codex")
     flags, model, effort = owner.resolved_profile("codex", c.provider_flags)
-    if (role.execution_role != "external-reviewer" or role != prevalidated.role_provenance
+    if c.sdk_task_binding is not None and c.sdk_review_binding is not None:
+        raise DispatchError("E_CODEX_SDK_SELECTION_INVALID")
+    task_mode = c.sdk_task_binding is not None
+    expected_role = "consultant" if task_mode else "external-reviewer"
+    if (role.execution_role != expected_role or role != prevalidated.role_provenance
         or (tuple(flags), model, effort) != (prevalidated.flags, prevalidated.model, prevalidated.effort)
         or not c.ledger or not c.ledger_artifact or c.terminal_receipt is None
         or c.ledger_lane or c.ledger_closes or prevalidated.provenance is not None):
@@ -386,6 +391,7 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
         work_item_id=item.name, provider="codex", external_dispatch_id="dispatch-" + secrets.token_hex(16),
         external_evidence_run_id="evidence-" + secrets.token_hex(16), artifact_id=binding["artifactIdentity"],
         role=role.assigned_role, model=model, effort=effort, cwd=str(cwd),
+        result_kind="task" if task_mode else "review",
         account_binding=binding["accountBinding"], prompt=prompt,
         context_mode=binding.get("contextMode", "fresh"),
         coordinator_binding=binding["coordinatorBinding"], scope=tuple(binding["scope"]),

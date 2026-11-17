@@ -4,7 +4,9 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-17
 
-- Add a typed task-evidence contract and a read-only Codex Consultant adapter using the existing execution lifecycle. Advisory results no longer need a fabricated review verdict. This offline-qualified adapter is not yet a public runtime route: Reviewer-only admission and receiving remain protected, Worker write permissions are unchanged, and legacy review serialization stays compatible.
+- Connect read-only Codex Consultant task execution through the existing launch, process and receiving owners with explicit `--sdk-task-binding`. Consultant evidence retains its role and never becomes a review verdict or closure; review flags remain review-only, and receiving failure preserves diagnostics without relaunch. This is offline-qualified source integration, not installation or live acceptance.
+
+- Add a typed task-evidence contract and a read-only Codex Consultant adapter using the existing execution lifecycle. Advisory results no longer need a fabricated review verdict. The initial adapter increment retained Reviewer-only admission until the separate public Consultant integration above. Worker write permissions are unchanged, and legacy review serialization stays compatible.
 
 - Retain the selected task class and a detached snapshot of task-scoped Astra authorization through each prepared SDK invocation. Changing a valid grant after preparation now stops that affected invocation before its next effect; equivalent grant values remain compatible, and ordinary permission checks and independent work are unchanged.
 

@@ -173,8 +173,6 @@ def validate_admitted_request(request: ExecutionRequest, selection: Any) -> None
     """Check exact current common-governance input, without changing admission."""
     if type(request) not in {ExecutionRequest, CoordinationInferenceRequest}:
         raise RuntimeBindingError("admitted_execution_request_required")
-    if request.result_kind != "review":
-        raise RuntimeBindingError("task_runtime_receiving_not_qualified")
     if type(request) is CoordinationInferenceRequest:
         if (selection.auth_mode != "codex-auth-file"
             or selection.config_overrides != CODEX_BOUNDED_REVIEW_OVERRIDES
@@ -314,7 +312,7 @@ def assert_current_launch(request: ExecutionRequest, selection: Any, effect: str
     expected = {
         "workItem": request.work_item_id, "provider": request.provider, "model": request.model,
         "effort": request.effort, "scope": list(request.scope), "assignedRole": request.role,
-        "executionRole": "main" if type(request) is CoordinationInferenceRequest else "external-reviewer", "artifactIdentity": request.artifact_id,
+        "executionRole": execution_role(request), "artifactIdentity": request.artifact_id,
         "externalDispatchId": request.external_dispatch_id, "externalEvidenceRunId": request.external_evidence_run_id,
         "actualExecutionPath": "direct-external-sdk", "sdkExecution": selected_sdk_execution(request, selection),
         "status": "running", "gate": "none",
@@ -338,6 +336,15 @@ def _require_authority(authority: Callable[[ExecutionRequest, str], None], reque
         raise RuntimeBindingError("policy_owner_must_raise_on_denial")
 
 
+def execution_role(request: ExecutionRequest) -> str:
+    """Project provenance for the already validated operation, not permission."""
+    if type(request) is CoordinationInferenceRequest:
+        return "main"
+    if type(request) is not ExecutionRequest:
+        raise RuntimeBindingError("admitted_execution_request_required")
+    return "consultant" if request.result_kind == "task" else "external-reviewer"
+
+
 def build_launch_arguments(request: ExecutionRequest, selection: Any, *, started_at: str) -> list[str]:
     """Pure exact launch argv for the canonical ledger admission/claim owners.
 
@@ -345,10 +352,10 @@ def build_launch_arguments(request: ExecutionRequest, selection: Any, *, started
     the result to provider_prompt.prepare_ledger_admission before execution;
     claim_launch remains the sole atomic claim/duplicate-guard owner.
     """
-    actor_role, execution_role = (("lead", "main") if type(request) is CoordinationInferenceRequest
-                                  else ("external-reviewer", "external-reviewer"))
+    selected_role = execution_role(request)
+    actor_role = "lead" if selected_role == "main" else selected_role
     arguments = ["--work-item", selection.work_item, "append", "--run-id", request.external_dispatch_id,
-        "--role", actor_role, "--execution-role", execution_role, "--assigned-role", request.role,
+        "--role", actor_role, "--execution-role", selected_role, "--assigned-role", request.role,
         "--provider", request.provider, "--model", request.model, "--effort", request.effort,
         "--status", "running", "--gate", "none", "--event-kind", "launch",
         "--actual-execution-path", "direct-external-sdk", "--sdk-execution-json", json_text(selected_sdk_execution(request, selection)),
@@ -389,10 +396,10 @@ def claim_launch(request: ExecutionRequest, selection: Any, *, authority: Callab
 
 def create_codex_adapter(request: ExecutionRequest, sink: Any, selection: CodexRuntimeSelection):
     """Real worker-only factory, called after creator-verified Job containment."""
-    if request.result_kind != "review":
-        raise RuntimeBindingError("task_runtime_receiving_not_qualified")
-    from .codex import CodexReviewAdapter, _official_client_binding
-    adapter_type = CodexReviewAdapter
+    from .codex import CodexConsultantAdapter, CodexReviewAdapter, _official_client_binding
+    if request.result_kind == "task":
+        validate_admitted_request(request, selection)
+    adapter_type = CodexConsultantAdapter if request.result_kind == "task" else CodexReviewAdapter
     if type(request) is CoordinationInferenceRequest:
         validate_admitted_request(request, selection)
         from .coordination_codex import CodexCoordinationAdapter

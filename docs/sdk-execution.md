@@ -291,12 +291,21 @@ cleanup remain owned by the existing Codex adapter. Resume is not enabled by thi
 increment. Task content is evidence requiring independent validation, not proof
 that files changed or a review passed.
 
-This is an offline-tested adapter increment, not live qualification or public
-Consultant activation. The public dispatch remains Reviewer-only and runtime
-admission/factory reject task-kind requests until the existing launch provenance
-and receiving owners support them. Worker write/tool scope and those public
-Consultant integrations remain the next slices; there is no second ledger,
-permission owner, or default-route change.
+The explicit `--sdk-task-binding PATH` selector now connects Consultant execution
+through the existing runtime, process, ledger and receiving owners. Use
+`--ledger-role consultant` with the existing ledger/artifact/terminal-receipt
+controls and binding schema shown for review below. It is mutually exclusive
+with `--sdk-review-binding`: the review selector remains review-only. Task kind
+is committed in the request hash; launch and terminal keep the Consultant role,
+`gate: none`, and nonauthorizing evidence. Advice is never a PASS/REVISE verdict
+or a closure of another run. Failed receiving retains the same diagnostic and
+explicit reconciliation path, without relaunching the operation.
+
+This public source integration is tested offline, not installed or live-qualified.
+Existing spending and launch authorization still apply; no default-route change
+or provider call follows merely from selecting a binding. Worker write/tool scope
+and other provider task adapters remain later slices, without a second ledger or
+permission owner.
 
 ### Ordered implementation slices
 

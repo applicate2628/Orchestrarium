@@ -366,3 +366,23 @@ def test_prepared_sdk_accepts_equivalent_grant_and_rejects_revocation(tmp_path, 
     with pytest.raises(dispatch.DispatchError, match="INVOCATION_NOT_CURRENT"):
         operation.assert_current(operation.request, "sdk_launch_admission")
     assert operation._stage == 1
+
+
+def test_explicit_task_selector_preserves_consultant_and_readonly(tmp_path, monkeypatch):
+    operation = prepare(tmp_path, monkeypatch, ledger_role="consultant", sdk_task_binding=tmp_path / "task.json")
+    assert operation.request.result_kind == "task"
+    assert operation.request.role == "consultant"
+    assert runtime.execution_role(operation.request) == "consultant"
+    assert runtime.selected_sdk_execution(operation.request, operation.selection)["sandboxMode"] == "read-only"
+    operation._consumed = True
+    operation.prevalidated.control.sdk_task_binding = None
+    with pytest.raises(dispatch.DispatchError, match="NOT_CURRENT"):
+        operation.assert_current(operation.request, "sdk_prepare")
+
+
+@pytest.mark.parametrize("role", ["qa-engineer", "backend-engineer", "lead"])
+def test_task_selector_cannot_convert_other_roles(tmp_path, monkeypatch, role):
+    # The shared taxonomy rejects unsupported Lead before SDK preparation.
+    expected = "ROLE_UNSUPPORTED" if role == "lead" else "REVIEW_ONLY"
+    with pytest.raises(ValueError, match=expected):
+        prepare(tmp_path, monkeypatch, ledger_role=role, sdk_task_binding=tmp_path / "task.json")

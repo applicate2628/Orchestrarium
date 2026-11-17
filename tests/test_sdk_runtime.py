@@ -172,8 +172,11 @@ def test_policy_callback_is_not_a_boolean_permission_switch(tmp_path, result):
     assert not ledger.exists() or not ledger.read_bytes()
 
 
-def test_real_factory_builds_explicit_config_without_launch(tmp_path, monkeypatch):
+@pytest.mark.parametrize("kind", ["review", "task"])
+def test_real_factory_builds_explicit_config_without_launch(tmp_path, monkeypatch, kind):
     request, selection = fixture(tmp_path)
+    if kind == "task":
+        request = runtime.prepare_codex_request(replace(request, role="consultant", result_kind="task"))
     selection = replace(selection, config_overrides=("agents.enabled=false", "features.multi_agent_v2=false", *CODEX_MCP_ISOLATION_OVERRIDES))
     admitted = claim(request, selection)
     monkeypatch.setattr(runtime.os, "environ", {"CODEX_HOME": selection.codex_home, "UNRELATED_SECRET": "not-forwarded"})
@@ -624,3 +627,25 @@ def test_current_launch_rejects_ledger_capture_drift(tmp_path, monkeypatch, muta
     with pytest.raises(runtime.RuntimeBindingError, match="current_ledger_invalid"):
         runtime.assert_current_launch(request, selection, "turn_start")
     assert not armed
+
+
+def test_consultant_launch_uses_existing_ledger_and_exact_kind(tmp_path):
+    request, selection = fixture(tmp_path)
+    request = runtime.prepare_codex_request(replace(request, role="consultant", result_kind="task"))
+    runtime.validate_admitted_request(request, selection)
+    admitted = claim(request, selection)
+    runtime.assert_current_launch(request, admitted, "client_start")
+    rows = [json.loads(line) for line in (Path(selection.work_item) / "agent-runs.jsonl").read_text().splitlines()]
+    assert len(rows) == 1
+    assert rows[0]["role"] == rows[0]["executionRole"] == rows[0]["assignedRole"] == "consultant"
+    assert rows[0]["gate"] == "none"
+    assert rows[0]["sdkExecution"]["requestSha256"] == runtime.request_sha256(request, selection)
+    with pytest.raises(runtime.RuntimeBindingError, match="changed_or_settled"):
+        runtime.assert_current_launch(replace(request, result_kind="review"), admitted, "turn_start")
+
+
+def test_consultant_still_requires_governance_frame(tmp_path):
+    request, selection = fixture(tmp_path)
+    request = replace(request, role="consultant", result_kind="task")
+    with pytest.raises(runtime.RuntimeBindingError, match="governance_frame"):
+        runtime.validate_admitted_request(request, selection)

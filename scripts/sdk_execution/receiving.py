@@ -1,6 +1,6 @@
 """SDK evidence receiving through existing provider and ledger owners.
 
-A provider review remains nonauthorizing. Process settlement and a durable ledger
+Provider task and review evidence remain nonauthorizing. Process settlement and a durable ledger
 readback are required separately; this module grants no execution permission.
 """
 from __future__ import annotations
@@ -48,7 +48,7 @@ def preworker_failure_payload(run: Any) -> dict[str, object]:
     code is a wrapper failure code, NOT an observed native process exit; cleanup
     remains conservatively incomplete without a creator-owned observation.
     """
-    from .runtime import RuntimeRun, selected_sdk_execution
+    from .runtime import RuntimeRun, selected_sdk_execution, execution_role
 
     if (type(run) is not RuntimeRun or run.observation is not None
             or type(run.terminal) is not dict
@@ -62,7 +62,7 @@ def preworker_failure_payload(run: Any) -> dict[str, object]:
     identity = {
         "provider": request.provider, "model": request.model, "effort": request.effort,
         "workItem": request.work_item_id, "assignedRole": request.role,
-        "executionRole": "external-reviewer", "artifactIdentity": request.artifact_id,
+        "executionRole": execution_role(request), "artifactIdentity": request.artifact_id,
         "externalDispatchId": request.external_dispatch_id,
         "externalEvidenceRunId": request.external_evidence_run_id,
         "effortMappingLoss": request.effort_mapping_loss,
@@ -141,6 +141,7 @@ def terminal_payload(request: ExecutionRequest, observation: Any, *, output_cont
         return coordination_terminal_payload(request, observation, output_context=output_context,
                                               admitted_sdk_execution=admitted_sdk_execution)
     from process_supervision.sdk_worker import SdkWorkerObservation
+    from .runtime import execution_role
 
     if type(observation) is not SdkWorkerObservation or not observation.is_bound_to(request):
         raise ValueError("SDK worker observation pairing unavailable")
@@ -149,11 +150,13 @@ def terminal_payload(request: ExecutionRequest, observation: Any, *, output_cont
         raise ValueError("SDK receiving identity mismatch")
     scan_execution_output(result, output_context)
     process = _require_sdk_process_settlement(observation)
+    task_result = request.result_kind == "task"
+    evidence = result.task if task_result else result.review
     complete = not (
         process.outcome != "success" or process.failure_id is not None
         or process.target_exit_code != 0 or process.timed_out or process.cancelled
         or process.stdout.truncated or process.stderr.truncated
-        or result.status != "completed" or result.review is None
+        or result.status != "completed" or evidence is None
         or result.execution_error is not None or result.capture_error is not None
         or observation.protocol_error is not None
     )
@@ -199,13 +202,13 @@ def terminal_payload(request: ExecutionRequest, observation: Any, *, output_cont
                     == {key: value for key, value in selected_config.items()
                         if key not in {"schemaVersion", "requestSha256"}}
                 )
-    verdict = result.review.verdict if complete else "none"
-    status = ("completed" if verdict == "PASS" else "revise") if complete else "blocked"
-    token = f"COMPLETE:{verdict}" if complete else "UNVERIFIED:E_SDK_EXECUTION_INCOMPLETE"
+    verdict = result.review.verdict if complete and not task_result else "none"
+    status = ("completed" if task_result or verdict == "PASS" else "revise") if complete else "blocked"
+    token = ("COMPLETE:EXTERNAL_NONAUTHORIZING" if task_result else f"COMPLETE:{verdict}") if complete else "UNVERIFIED:E_SDK_EXECUTION_INCOMPLETE"
     primary = {"exitCode": process.target_exit_code, "token": token,
                "status": status, "gate": verdict,
-               "note": "structured SDK review evidence" if complete else "settled SDK execution was incomplete"}
-    result_content = result.review.to_dict() if complete else {
+               "note": ("structured SDK task evidence" if task_result else "structured SDK review evidence") if complete else "settled SDK execution was incomplete"}
+    result_content = evidence.to_dict() if complete else {
         "adapter": result.to_tool_output(),
         "reported_sdk_configuration": result.sdk_execution,
         "process": {"outcome": process.outcome, "failure_id": process.failure_id,
@@ -213,10 +216,10 @@ def terminal_payload(request: ExecutionRequest, observation: Any, *, output_cont
                     "cancelled": process.cancelled, "timed_out": process.timed_out},
         "protocol_error": observation.protocol_error,
     }
-    if complete and selected_config["schemaVersion"] == 2:
+    if complete and (task_result or selected_config["schemaVersion"] == 2):
         # The durable artifact, whose exact bytes are bound by the terminal,
         # retains observed versions separately from selected launch controls.
-        result_content = {"review": result_content, "reported_sdk_configuration": result.sdk_execution}
+        result_content = {"task" if task_result else "review": result_content, "reported_sdk_configuration": result.sdk_execution}
     payload: dict[str, object] = {
         "schema": "orchestrarium.provider-result.v3", "provider": request.provider,
         "model": request.model, "effort": request.effort,
@@ -227,7 +230,7 @@ def terminal_payload(request: ExecutionRequest, observation: Any, *, output_cont
         "authorizing": False, "closesRunIds": [], "independentVerificationRequired": True,
         "terminalClass": "external-nonauthorizing", "actualExecutionPath": "direct-external-sdk",
         "workItem": request.work_item_id, "assignedRole": request.role,
-        "executionRole": "external-reviewer", "artifactIdentity": request.artifact_id,
+        "executionRole": execution_role(request), "artifactIdentity": request.artifact_id,
         "externalDispatchId": request.external_dispatch_id,
         "externalEvidenceRunId": request.external_evidence_run_id,
         "effortMappingLoss": request.effort_mapping_loss,
@@ -292,7 +295,7 @@ def receive_terminal(
     if not artifact_matches():
         raise ValueError("SDK review artifact does not contain the received result")
     expected = {key: payload[key] for key in (
-        "workItem", "provider", "model", "effort", "assignedRole", "artifactIdentity",
+        "workItem", "provider", "model", "effort", "assignedRole", "executionRole", "artifactIdentity",
         "externalDispatchId", "externalEvidenceRunId", "effortMappingLoss",
         "actualExecutionPath", "sdkExecution",
     )}
@@ -312,6 +315,8 @@ def receive_terminal(
         "--started-at", started_at, "--updated-at", updated_at,
          "--evidence", ("command:SDK coordination inference and creator-owned process settlement"
             if type(request) is CoordinationInferenceRequest
+            else "command:SDK structured task and creator-owned process settlement"
+            if request.result_kind == "task"
             else "command:SDK structured review and creator-owned process settlement"),
     ]
     if writer.main(args, settlement_output=sys.stderr) != 0:

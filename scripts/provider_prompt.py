@@ -238,6 +238,7 @@ class Control:
     prompt_file: Path | None = None
     terminal_receipt: Path | None = None
     sdk_review_binding: Path | None = None
+    sdk_task_binding: Path | None = field(default=None, kw_only=True)
     ledger: str | None = None
     ledger_role: str | None = None
     ledger_role_explicit: bool = False
@@ -2893,6 +2894,7 @@ def parse_control(
         "--prompt-file": "prompt_file",
         "--terminal-receipt": "terminal_receipt",
         "--sdk-review-binding": "sdk_review_binding",
+        "--sdk-task-binding": "sdk_task_binding",
         "-ledger": "ledger",
         "--ledger": "ledger",
         "-ledgerrole": "ledger_role",
@@ -2948,6 +2950,7 @@ def parse_control(
                 "prompt_file",
                 "terminal_receipt",
                 "sdk_review_binding",
+                "sdk_task_binding",
                 "kimi_capabilities_file",
             }:
                 parsed_value: object = Path(value)
@@ -2990,6 +2993,10 @@ def parse_control(
         else:
             result.provider_flags.append(token)
         index += 1
+    if result.sdk_review_binding is not None and result.sdk_task_binding is not None:
+        raise ValueError("E_SDK_BINDING_KIND_CONFLICT")
+    if result.sdk_task_binding is not None and provider != "codex":
+        raise ValueError("E_SDK_TASK_PROVIDER_REQUIRED")
     if result.sdk_review_binding is not None and provider != "codex":
         raise ValueError("E_SDK_REVIEW_PROVIDER_REQUIRED")
     if result.result_max_bytes > RESULT_MAX_BYTES_HARD:
@@ -7235,7 +7242,17 @@ def _validate_sdk_result_binding(payload: dict[str, object]) -> None:
             raise ValueError("provider result SDK identity missing")
     if payload["externalDispatchId"] == payload["externalEvidenceRunId"]:
         raise ValueError("provider result SDK identities must be distinct")
-    if payload.get("executionRole") != "external-reviewer":
+    if payload.get("executionRole") == "consultant":
+        primary = payload.get("primaryOutcome")
+        if (payload.get("provider") != "codex" or payload.get("assignedRole") != "consultant"
+                or payload.get("gate") != "none"
+                or payload.get("status") not in {"completed", "blocked"}
+                or not isinstance(primary, dict) or primary.get("gate") != "none"
+                or primary.get("status") != payload.get("status")
+                or primary.get("token") in {"COMPLETE:PASS", "COMPLETE:REVISE", "COMPLETE:BLOCKED"}
+                or payload.get("token") in {"COMPLETE:PASS", "COMPLETE:REVISE", "COMPLETE:BLOCKED"}):
+            raise ValueError("provider result SDK consultant role or outcome mismatch")
+    elif payload.get("executionRole") != "external-reviewer":
         raise ValueError("provider result SDK review role mismatch")
 
 
@@ -8106,11 +8123,14 @@ def launch(
             else None
         )
         sdk_operation = None
-        if prevalidated.control.sdk_review_binding is not None:
+        sdk_binding = (prevalidated.control.sdk_task_binding
+                       if prevalidated.control.sdk_task_binding is not None
+                       else prevalidated.control.sdk_review_binding)
+        if sdk_binding is not None:
             from sdk_execution.dispatch import prepare_dispatch
             cancellation = threading.Event()
             sdk_operation = prepare_dispatch(
-                prevalidated, prevalidated.control.sdk_review_binding,
+                prevalidated, sdk_binding,
                 source_environment=dict(os.environ), cancellation_probe=cancellation.is_set,
                 runtime_namespace=runtime_namespace,
             )

@@ -122,12 +122,6 @@ def test_unimplemented_task_adapters_rejected_at_request_boundary(provider):
         task_request(provider=provider)
 
 
-def test_task_request_cannot_enter_unqualified_public_runtime():
-    from sdk_execution import runtime
-    for call in (lambda:runtime.validate_admitted_request(task_request(),None),
-                 lambda:runtime.create_codex_adapter(task_request(),None,None)):
-        with pytest.raises(runtime.RuntimeBindingError,match="not_qualified"):
-            call()
 
 
 def test_consultant_denies_provider_approval():
