@@ -1,5 +1,8 @@
 # Orche distribution: bundled Python and thin delivery channels
 
+> Historical recovery snapshot of local acceptance notes from 2026-11-14. This branch is not the current delivery plan and does not establish current provider behavior or runtime qualification. Revalidate dated references and reconcile superseded installer/PR scope before selectively incorporating any text into the owning active plan.
+
+
 Status: delivery design aligned with the SDK implementation in
 [PR19](https://github.com/applicate2628/Orchestrarium/pull/19).
 This PR does not publish an npm package, an internet bootstrap, a signed release,
