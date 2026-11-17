@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-17
 
+- Explicitly selected installer updates now preserve exact receipt bytes, including original line endings, and finalize linked instruction files by their logical ownership keys. This prevents false receipt-drift failures and external-storage path errors; exact receipt replacement and final source checks also detect changes during publication without altering ordinary update or canonical ownership behavior.
+
 - Explicit selected Codex document updates now preserve the same qualified global-policy reuse as ordinary installation. A separate witness tracks the actual visible native policy and rechecks override priority, home selection and exact content before and after applying the update; standalone/global modes and the strict two-source route remain unchanged.
 
 - SDK selected updates now prepare and bind the exact requested replacements before comparing the previous provider receipt. Only proven selected logical keys and current modified-Lead witnesses are exempt from old payload hashes, so explicit authorized replacement works while unrelated modified files and receipt drift remain protected.

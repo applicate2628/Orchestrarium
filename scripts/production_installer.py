@@ -12868,9 +12868,10 @@ def _record_provider_install(root, provider, mode, target, anchor, transaction, 
         transient.update(path for path in (effect.retained, effect.prepared_path, effect.quarantine) if path is not None)
     def temporary(path):
         return any(path == base or base in path.parents for base in transient)
+    selected_paths = {item.path for item in selected_updates.items.values()} if selected_updates else set()
     files = {}
     for path, node in current.items():
-        if temporary(path) or node.kind != "file" or not any(path == base or base in path.parents for base in transaction.paths):
+        if path in selected_paths or temporary(path) or node.kind != "file" or not any(path == base or base in path.parents for base in transaction.paths):
             continue
         relative = path.relative_to(anchor).as_posix()
         parts = relative.split("/")
@@ -12971,7 +12972,7 @@ def _record_provider_install(root, provider, mode, target, anchor, transaction, 
             if _file_sha256(candidate) == digest:
                 files[relative] = digest
     receipt = target / codec.RECEIPT_NAME
-    if _read_owned_text(receipt, owner) != before:
+    if _read_owned_text(receipt, owner, preserve_newlines=True) != before:
         raise _InstallFailure("E_PROVIDER_RECEIPT_DRIFT", "verify")
     prior_configs = codec.decode_record(before.encode("utf-8"), provider, scope).get("configs", {}) if before else {}
     configs = _capture_provider_configs(root, provider, scope, target, anchor, owner,
@@ -12993,8 +12994,16 @@ def _record_provider_install(root, provider, mode, target, anchor, transaction, 
     relative = receipt.relative_to(owner.anchor)
     if before is None:
         owner.create_file(relative, payload)
+    elif selected_updates is not None:
+        owner.replace_exact_file(relative, hashlib.sha256(selected_updates.receipt_before).hexdigest(), payload)
     else:
         owner.replace_file_atomic(relative, payload, fsync="required")
+    if selected_updates is not None:
+        for key, selected in selected_updates.items.items():
+            _assert_selected_replacement(selected, selected.owner, selected_updates.received[key], provider)
+        if _read_owned_text(receipt, owner, preserve_newlines=True) != payload.decode("utf-8"):
+            raise _selected_error(provider, "receipt outcome")
+
 def _fresh_provider_receipt_candidate(target: Path) -> Path | None:
     """Existing receipts of every type remain on the unchanged legacy route."""
     candidate = target / _PROVIDER_RECEIPT_NAME
@@ -13907,7 +13916,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             create_only.destination(receipt_path.relative_to(create_only.anchor))
             if receipt_path.exists() and receipt_path.stat().st_size > 4 * 1024 * 1024:
                 raise ValueError("E_PROVIDER_RECEIPT_INVALID: size")
-            ownership_before = _read_owned_text(receipt_path, create_only)
+            ownership_before = _read_owned_text(receipt_path, create_only, preserve_newlines=True)
             if ownership_before is not None:
                 _provider_ownership_module(root).decode_record(
                     ownership_before.encode("utf-8"), provider,
