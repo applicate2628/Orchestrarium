@@ -1,4 +1,4 @@
-# Linux x64, CPython 3.15 normal GIL; resolved 2026-10-28.
+# Linux x64, CPython 3.15 normal GIL; SDK dependency refresh 2026-11-17.
 # Pinned wheels excluding the SDK bundled CLI; not a cross-platform lock.
 # Install every listed wheel with --no-deps --require-hashes --only-binary=:all:.
 annotated-types==0.8.0 --hash=sha256:f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0
@@ -20,13 +20,13 @@ jsonschema==4.26.0 --hash=sha256:d489f15263b8d200f8387e64b4c3a75f06629559fb73deb
 mcp-types==2.3.0 --hash=sha256:968efdbdaedfab06adae40d378a34395f1090c5921d4be3c9cde283aaf76d91d
 mcp==2.3.0 --hash=sha256:dd0c44c089d16453e8ae31a3877a0054d7a2314caaa81f5e0541b9b1734b2377
 openai-agents==0.24.0 --hash=sha256:18d4ac34e84ed937333ec8ce46395ed3521ffcbb0a521780a4c2eaa451467f49
-openai-codex==0.163.0 --hash=sha256:d151e3ff8188bc2c07a962855d598b93bf87a49ec3440810e45a5f2e1167d99e
-openai==3.41.0 --hash=sha256:7060a74b239609b21f2919eb98807a8aad463b4f510b8b3b388b15559360b0a8
+openai-codex==0.169.0 --hash=sha256:c3f614570e8634a92a1a1ff27906b2467a82dd2d9d71072e189c1c34bdfcc1db
+openai==3.52.0 --hash=sha256:fc220b5f06d354e8f48ab38a64410ec1537957a47d6e584b77cee8c21b7cb84e
 opentelemetry-api==1.45.1 --hash=sha256:b31553efa588ae44bc306f863c785c5333a9ecc091248c6ee68b4b6c87fdedfb
 packaging==26.3 --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
 pycparser==3.12 --hash=sha256:a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e
-pydantic==2.14.1 --hash=sha256:9195d967ec791692a04438115466764fb8b9a27b31f14a760437694f40d6b454
-pydantic_core==2.50.1 --hash=sha256:7689580e72a642ab5ec64d5f55b2e33636fa43b4ebe63c0c2c965ef307c7d1aa
+pydantic==2.14.3 --hash=sha256:3f7b347782ab7e4cf4c798496ae3a82787d9f21ec12676a9c564355eeef8daa8
+pydantic_core==2.50.4 --hash=sha256:26cb012c4b8ca9f847bd0ac15978bd3d0f55b050bfbe6c47355edfc7e945029b
 PyJWT==2.15.1 --hash=sha256:42d59d631f7768a1028a64c7ff581a9bf7519804daf91fc5b6c56e30eec5e193
 python-multipart==0.0.32 --hash=sha256:ff6d3f776f16878c894e52e107296ffc890e913c611b1a4ec6c44e2821fe2e23
 referencing==0.37.0 --hash=sha256:381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231

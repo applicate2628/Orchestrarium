@@ -20,6 +20,23 @@ from sdk_execution.codex import (
 from sdk_execution.codex_tools import CodexMcpScope
 
 
+# Reviewed source evidence only, never a runtime-version allowlist.
+RELEASE_SOURCES = json.loads(
+    (Path(__file__).resolve().parents[1] / "tests/fixtures/codex-sdk-sources.json").read_text()
+)["releases"]
+
+
+def released_source(release, name):
+    import hashlib
+    source = Path(__file__).resolve().parents[1] / ".scratch/sdk-api-fixture" / release["version"] / name
+    if not source.exists():
+        pytest.skip(f"reviewed Codex {release['version']} source fixture {name} not provisioned")
+    raw = source.read_bytes()
+    blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
+    assert blob == release["sources"][name]["git_blob_sha1"]
+    return source, raw
+
+
 def request(**changes):
     value = ExecutionRequest(
         work_item_id="item-1", provider="codex", external_dispatch_id="dispatch-1",
@@ -569,20 +586,15 @@ def test_import_never_loads_provider_package():
     assert "openai_codex" not in sys.modules
 
 
-def test_released_public_types_match_adapter_wire_and_event_models():
+@pytest.mark.parametrize("release", RELEASE_SOURCES, ids=lambda release: release["version"])
+def test_released_public_types_match_adapter_wire_and_event_models(release):
     """Pinned official source-only compatibility, never SDK client execution.
 
     The inspected optional source fixture is local evidence, not vendored runtime
     code. Its exact Git blob is checked before loading the generated pure models.
     """
-    import hashlib
     import importlib.util
-    source = Path(__file__).resolve().parents[1] / ".scratch/sdk-api-fixture/0.163.0/v2_all.py"
-    if not source.exists():
-        pytest.skip("pinned official generated source fixture not provisioned")
-    raw = source.read_bytes()
-    blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
-    assert blob == "0faaa9e074c4de86f9087d4e355bd1ebee42c2b9"
+    source, _raw = released_source(release, "v2_all.py")
     spec = importlib.util.spec_from_file_location("codex_release_public_models", source)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -593,7 +605,7 @@ def test_released_public_types_match_adapter_wire_and_event_models():
             module.ThreadStartParams.model_validate(params)
             response = super().thread_start(params)
             response["thread"] = {
-                "id":"thread-1", "cliVersion":"0.163.0", "createdAt":0, "updatedAt":0,
+                "id":"thread-1", "cliVersion":release["version"], "createdAt":0, "updatedAt":0,
                 "cwd":"/fixture/repo", "ephemeral":False, "modelProvider":"openai", "preview":"fixture",
                 "sessionId":"session-1", "source":"appServer", "historyMode":"legacy", "status":{"type":"idle"}, "turns":[],
             }
@@ -861,16 +873,11 @@ def test_owned_task_cancellation_is_not_mistaken_for_caller_cancellation():
     asyncio.run(scenario())
 
 
-def test_released_client_public_signatures_match_owned_composition_without_loading_sdk():
+@pytest.mark.parametrize("release", RELEASE_SOURCES, ids=lambda release: release["version"])
+def test_released_client_public_signatures_match_owned_composition_without_loading_sdk(release):
     """Read the hash-verified published client source; never import/launch it."""
     import ast
-    import hashlib
-    source = Path(__file__).resolve().parents[1] / ".scratch/sdk-api-fixture/0.163.0/client.py"
-    if not source.exists():
-        pytest.skip("pinned official client source fixture not provisioned")
-    raw = source.read_bytes()
-    blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
-    assert blob == "5b38538c541aa17e807aecfa3d5a58c9ee76d0ff"
+    _source, raw = released_source(release, "client.py")
     tree = ast.parse(raw)
     client = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "CodexClient")
     methods = {node.name: node for node in client.body if isinstance(node, ast.FunctionDef)}

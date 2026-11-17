@@ -4,6 +4,10 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-17
 
+- Refresh both platform distribution inputs to Codex Python SDK 0.169.0, OpenAI SDK 3.52.0, Pydantic 2.14.3 and pydantic-core 2.50.4, with exact wheel hashes and matching source notices. Historical CLI notices and runtime evidence remain separate rather than being relabelled as qualification of the updated inputs; no global installation or provider activation is performed.
+
+- Refresh reviewed Codex SDK compatibility evidence with the current Python release while retaining the historical regression baseline. Maintainers can reproduce both public API checks from hash-verified official source fixtures without installing or launching a provider; missing fixtures remain explicit and no runtime version allowlist is introduced.
+
 - Refresh the SDK transport source manifest after the captured-state and callback fixes. Claude installation and transport validation now receive the corrected SDK sources instead of refusing them as digest drift; source integrity checks remain strict.
 
 - Explicitly selected installer updates now preserve exact receipt bytes, including original line endings, and finalize linked instruction files by their logical ownership keys. This prevents false receipt-drift failures and external-storage path errors; exact receipt replacement and final source checks also detect changes during publication without altering ordinary update or canonical ownership behavior.

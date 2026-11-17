@@ -558,7 +558,7 @@ Global uninstall warns about that dependency; it neither scans arbitrary project
 nor silently rewrites them. The uninstall ownership receipt continues to protect
 user additions and modified managed content. No global consumer registry is added.
 
-The pinned Codex 0.163.0 source reads the first nonempty global candidate fully:
+The historical Codex 0.163.0 source inspection (not a current install pin) reads the first nonempty global candidate fully:
 [codex-home instructions](https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/codex-home/src/instructions/mod.rs).
 Project document size limits are a separate mechanism. Source inspection and
 isolated file-lifecycle tests do not establish live model compliance or measured

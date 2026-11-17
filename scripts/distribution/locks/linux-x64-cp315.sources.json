@@ -1,12 +1,12 @@
 {
   "scope": "Pinned Python wheel inputs excluding the SDK bundled CLI; selected external Codex executable required. Not a complete pip dependency closure.",
-  "resolvedOn": "2026-10-28",
+  "resolvedOn": "2026-11-17",
   "packages": [
     {
       "name": "openai-codex",
-      "version": "0.163.0",
-      "url": "https://files.pythonhosted.org/packages/d8/9e/423922a79df8dc61ed668a4b2d6d46e75a6e754f5a18cf967188aa85e97e/openai_codex-0.163.0-py3-none-any.whl",
-      "sha256": "d151e3ff8188bc2c07a962855d598b93bf87a49ec3440810e45a5f2e1167d99e"
+      "version": "0.169.0",
+      "url": "https://files.pythonhosted.org/packages/24/6b/b2146f4d6f8787af1965c3dd7e0ab452c92fd1a381db5fcb6cda0fbb2f73/openai_codex-0.169.0-py3-none-any.whl",
+      "sha256": "c3f614570e8634a92a1a1ff27906b2467a82dd2d9d71072e189c1c34bdfcc1db"
     },
     {
       "name": "openai-agents",
@@ -34,9 +34,9 @@
     },
     {
       "name": "openai",
-      "version": "3.41.0",
-      "url": "https://files.pythonhosted.org/packages/83/23/089333ff950ee07c30762160f4eff5ac5d376934c2d6797abf6da9cd06a5/openai-3.41.0-py3-none-any.whl",
-      "sha256": "7060a74b239609b21f2919eb98807a8aad463b4f510b8b3b388b15559360b0a8"
+      "version": "3.52.0",
+      "url": "https://files.pythonhosted.org/packages/65/14/e6e4ee80bcca7c89377e4263ff9125ed5d6fe656f34215675669449fb3a2/openai-3.52.0-py3-none-any.whl",
+      "sha256": "fc220b5f06d354e8f48ab38a64410ec1537957a47d6e584b77cee8c21b7cb84e"
     },
     {
       "name": "anyio",
@@ -64,15 +64,15 @@
     },
     {
       "name": "pydantic",
-      "version": "2.14.1",
-      "url": "https://files.pythonhosted.org/packages/35/ea/a56b9fe5066f3537b7882f77e9c5dfb26d8c2eefdaed9b5fc73d57b4dc22/pydantic-2.14.1-py3-none-any.whl",
-      "sha256": "9195d967ec791692a04438115466764fb8b9a27b31f14a760437694f40d6b454"
+      "version": "2.14.3",
+      "url": "https://files.pythonhosted.org/packages/72/b8/b864503789ef5c58597d2a7b4adbee62c26440ab1e682581fc6838df8947/pydantic-2.14.3-py3-none-any.whl",
+      "sha256": "3f7b347782ab7e4cf4c798496ae3a82787d9f21ec12676a9c564355eeef8daa8"
     },
     {
       "name": "pydantic_core",
-      "version": "2.50.1",
-      "url": "https://files.pythonhosted.org/packages/b8/0d/1b1149f60a00ea21ba5f70e28acbd40feb4598af414f80f53c921fac07c9/pydantic_core-2.50.1-cp315-cp315-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
-      "sha256": "7689580e72a642ab5ec64d5f55b2e33636fa43b4ebe63c0c2c965ef307c7d1aa"
+      "version": "2.50.4",
+      "url": "https://files.pythonhosted.org/packages/ac/5e/145a02bf2b9f66981108caf6cc9e78917e31e4caca14d1e3ccd3ff2c7293/pydantic_core-2.50.4-cp315-cp315-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "sha256": "26cb012c4b8ca9f847bd0ac15978bd3d0f55b050bfbe6c47355edfc7e945029b"
     },
     {
       "name": "requests",

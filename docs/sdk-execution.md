@@ -255,6 +255,41 @@ required package versions or an installation lock:
 - Claude Agent SDK 0.2.173 and bundled CLI 2.1.309:
   [inspected source](https://github.com/anthropics/claude-agent-sdk-python/tree/163f50ed56fa8c3fd9346148b6e56e7696794b58).
 
+### Reviewed Codex source fixtures
+
+On 2026-11-17, the published Python package `openai-codex` 0.169.0 was also
+checked against [its official release source](https://github.com/openai/codex/tree/69231e119bfca0b14453515e97d99688ce1c47c9/sdk/python).
+The Python SDK and the separately installed Codex command-line executable are
+different artifacts; matching version labels alone do not establish compatibility.
+
+`tests/fixtures/codex-sdk-sources.json` records the reviewed historical 0.163.0
+and current 0.169.0 source evidence. The same adapter contract checks run for both:
+generated public request/response/event models and the client method/configuration
+signatures actually used by the adapter. These reviewed rows are not a minimum,
+exclusive supported-version list, or runtime admission gate.
+
+To provision the optional source-only fixtures from the repository root:
+
+```console
+python scripts/maintenance/fetch-codex-source-fixtures.py
+python -m pytest -q tests/test_sdk_codex.py tests/test_fetch_codex_source_fixtures.py
+```
+
+The acquisition helper verifies the official wheel SHA-256 and each selected Git
+blob hash, then retains only the upstream `client.py` and `generated/v2_all.py`, flattened as
+`client.py` and `v2_all.py`, under ignored
+`.scratch/sdk-api-fixture/<version>/`. It neither installs the SDK nor launches a
+client/model. Existing different fixture bytes are preserved and reported, never
+silently overwritten. Use `--version` to select one or more reviewed rows.
+Missing optional fixtures remain explicit test skips, not runtime unavailability.
+Updating reviewed evidence requires a reviewed manifest change and the same
+behavioral checks; no test downloads or admits a moving latest release implicitly.
+
+The 2026-11-17 offline checks used one isolated CPython 3.15.2 environment with
+pytest 9.2.0, pydantic 2.14.3 and matching pydantic-core 2.50.4. Those versions
+identify the check environment, not additional product requirements. They avoid
+mixing compiled extensions from a different Python interpreter.
+
 A provider package can constrain its own bundled dependencies; that upstream
 packaging detail is not an Orchestrarium runtime-version requirement. A reviewed
 source revision or reproducible test environment records evidence, not an

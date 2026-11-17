@@ -29,9 +29,9 @@ The retained interpreter lifetime remains independent: removing a client does
 not authorize deleting its runtime. Runtime input and notice inventories must
 match the separately qualified evidence record exactly.
 
-## Historical reproducibility record
+## Selected dependency inputs
 
-`locks/linux-x64-cp315.txt` freezes the 40 selected binary wheels actually tested on Linux
+`locks/linux-x64-cp315.txt` selects 40 binary wheels for Linux
 x64 with normal-GIL CPython 3.15.2. Its companion sources JSON records the exact
 wheel URLs and SHA-256 values from the package resolver. This is a platform-specific
 qualification input, not a floating upgrade policy or a universal requirements file.
@@ -58,6 +58,20 @@ inputs are refused rather than allowing aliases to defeat selection. Other
 custom package layouts require separate qualification.
 The selected cryptography wheel has a manylinux_2_34 tag: do not infer an older
 Linux support floor from the Python archive alone. Alpine/musl is not qualified.
+
+## Dependency refresh: 2026-11-17
+
+Both platform inputs select Codex Python SDK 0.169.0, OpenAI API SDK 3.52.0,
+Pydantic 2.14.3 and its exact pydantic-core 2.50.4 dependency. OpenAI Agents SDK
+0.24.0 and MCP 2.3.0 remain current compatible selections. Updated wheel bytes
+were verified against the version-specific PyPI SHA-256 metadata. The deliberately
+external Codex CLI contract above is unchanged. Historical execution evidence
+below describes its recorded versions, not acceptance of these new inputs.
+
+The pydantic-core wheel license bytes are unchanged on both platforms; its new
+SBOM component names, versions and archive hashes were reconciled with retained
+source notices. Unmatched components remain explicitly listed. No full runtime
+bundle rebuild, provider call or blanket license clearance is implied.
 
 ## Evidence and release holds
 
@@ -134,8 +148,8 @@ and [impersonation restoration failure](https://learn.microsoft.com/en-us/window
 ## Version-bound upstream notices
 
 `notices/openai-codex/` supplies the upstream LICENSE and NOTICE for the
-locked Codex 0.163.0 Python SDK whose installed wheel records did not contain
-those files. `source.json` pins the upstream release commit and file digests;
+locked Codex 0.169.0 Python SDK. The original 0.163.0 wheel inventory lacked
+those files; the selected release now has its own verified upstream notice source. `source.json` pins the upstream release commit and file digests;
 the qualification test binds both platform lock versions to that metadata.
 The existing builder copies this directory with `scripts/`, preserving exact
 bytes. No runtime dependency, installer owner or download step is added.
@@ -214,3 +228,31 @@ binary is removed or bypassed to avoid these obligations.
 ## Runtime evidence
 
 Assembly now requires --runtime-evidence with an independently qualified expected record. See [recovery scope and compatibility](runtime-evidence.md); consistency is not provenance or legal clearance.
+
+### Updated Python dependency qualification (2026-11-17)
+
+An isolated Windows CPython 3.15.2 environment installed all 41 entries from the
+Windows lock with `--no-deps --require-hashes --only-binary=:all:` successfully.
+Imports of OpenAI, Agents, MCP and Pydantic, construction of the low-level Codex
+adapter binding, its required public signatures, and explicit external CLI path
+resolution passed with process creation and network connections prohibited by the
+check. No provider was started. This is construction/API qualification, not a live
+Codex session or a rebuilt distribution bundle.
+
+`pip check` returned exit 1 with exactly one missing dependency:
+`openai-codex 0.169.0 requires openai-codex-cli-bin, which is not installed.`
+This distribution deliberately selects the separately managed external executable
+through `CodexConfig.codex_bin`; it is not a complete default upstream pip closure.
+Without that explicit selection the SDK correctly refuses implicit bundled CLI
+resolution. Do not report this result as a clean `pip check`, remove upstream
+metadata, or install the excluded executable merely to hide the distinction.
+
+The upstream dependency is unconditional (`Requires-Dist:
+openai-codex-cli-bin==0.169.0`), not an optional extra. The builder does not install
+packages; it copies the qualified runtime while excluding that CLI package,
+its metadata and entrypoints. An external executable cannot satisfy Python
+package metadata. A complete upstream pip closure therefore requires shipping
+the upstream CLI package (and revisiting the separate-executable distribution
+contract), or an upstream optional dependency. This remains an explicit open
+distribution tradeoff, not a fully resolved dependency closure. Do not fabricate
+a replacement package or edit vendor metadata to make dependency checks pass.

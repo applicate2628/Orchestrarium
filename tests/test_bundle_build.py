@@ -240,9 +240,10 @@ def test_codex_native_notices_are_pinned_but_not_shipped(builder, tmp_path, targ
     import hashlib
     root = SOURCE / "scripts/distribution/notices/openai-codex/native"
     manifest = json.loads((root / "source.json").read_text(encoding="utf-8"))
-    codex = json.loads((root.parent / "source.json").read_text(encoding="utf-8"))
-    assert manifest["upstreamCommit"] == codex["upstreamCommit"]
-    assert manifest["packages"]["openai-codex"] == codex["packages"]["openai-codex"]
+    # Excluded native notices retain their own historical provenance, independent
+    # of the selected Python SDK release.
+    assert len(manifest["upstreamCommit"]) == 40
+    assert manifest["packages"]["openai-codex"] == manifest["packages"]["openai-codex-cli-bin"]
     expected = {"bubblewrap/COPYING"} | {
         f"ripgrep/{platform}/{name}"
         for platform in ("linux-x64", "windows-x64")
@@ -259,7 +260,7 @@ def test_codex_native_notices_are_pinned_but_not_shipped(builder, tmp_path, targ
             assert entry["archivePath"].endswith("/" + Path(name).name)
         else:
             assert entry["url"] == ("https://raw.githubusercontent.com/openai/codex/"
-                + codex["upstreamCommit"] + "/codex-rs/vendor/bubblewrap/COPYING")
+                + manifest["upstreamCommit"] + "/codex-rs/vendor/bubblewrap/COPYING")
     runtime = tmp_path / "runtime"
     interpreter = runtime / builder.TARGETS[target]
     interpreter.parent.mkdir(parents=True)
@@ -336,3 +337,37 @@ def test_unrelated_linked_entry_directory_remains_supported(builder, tmp_path):
     build_synthetic_bundle(builder, source, runtime, output, target='linux-x64', release='development')
     assert (output / 'python/Scripts').is_symlink()
     assert (output / 'python/Scripts/helper').read_bytes() == b'keep'
+
+
+@pytest.mark.parametrize("target,key", [("windows-x64", "wheels"), ("linux-x64", "packages")])
+def test_selected_wheel_locks_match_sources_and_native_notice_inventory(target, key):
+    import re
+    from urllib.parse import urlsplit
+    root = SOURCE / "scripts/distribution"
+    sources = json.loads((root / "locks" / (target + "-cp315.sources.json")).read_text())
+    lines = (root / "locks" / (target + "-cp315.txt")).read_text().splitlines()
+    normalize = lambda name: name.lower().replace("_", "-")
+    pinned = {}
+    for line in lines:
+        if not line or line.startswith("#"):
+            continue
+        match = re.fullmatch(r"([^=]+)==([^ ]+) --hash=sha256:([0-9a-f]{64})", line)
+        assert match, line
+        name, version, digest = match.groups()
+        assert normalize(name) not in pinned
+        pinned[normalize(name)] = (version, digest)
+    selected = {normalize(p["name"]): (p["version"], p["sha256"]) for p in sources[key]}
+    assert len(selected) == len(sources[key])
+    assert pinned == selected
+    assert "openai-codex-cli-bin" not in selected
+    inventory = json.loads((root / "notices/python-rust/source.json").read_text())
+    for package in sources[key]:
+        if normalize(package["name"]) != "pydantic-core":
+            continue
+        filename = urlsplit(package["url"]).path.rsplit("/", 1)[-1]
+        record = inventory["wheels"][target + "/" + filename]
+        assert record["sha256"] == package["sha256"]
+        occurrences = [o for p in inventory["packages"] for o in p["occurrences"]
+                       if o["platform"] == target and o["wheel"].startswith("pydantic_core-")]
+        assert occurrences
+        assert all(o["wheel"] == filename for o in occurrences)
