@@ -54,6 +54,14 @@ class ProducerIntegrationTests(unittest.TestCase):
         self.target = self.root / "target"
         self.target.mkdir()
 
+    def create_symlink(self, link, target, *, target_is_directory=False):
+        try:
+            link.symlink_to(target, target_is_directory=target_is_directory)
+        except OSError as exc:
+            if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+                self.skipTest("Windows host lacks symbolic-link creation privilege (WinError 1314)")
+            raise
+
     def transaction(self, paths, copies=(), link_objects=(), readonly=()):
         return PI._InstallTransaction(paths, enabled=True, copy_paths=tuple(copies),
                                       link_object_paths=tuple(link_objects), readonly_paths=tuple(readonly))
@@ -93,7 +101,7 @@ class ProducerIntegrationTests(unittest.TestCase):
                 selected = [parent]
                 if name == "replacement":
                     logical = capsule / "provider-skills"
-                    logical.symlink_to(parent, target_is_directory=True)
+                    self.create_symlink(logical, parent, target_is_directory=True)
                     alias = PI._InstallTransaction._capture_node(logical)
                     selected.append(logical / "lead" / "old")
                 tx = self.transaction(selected)
@@ -215,7 +223,7 @@ class ProducerIntegrationTests(unittest.TestCase):
                         else:
                             cache = target / "__pycache__"
                             if name == "reparse":
-                                cache.symlink_to(source, target_is_directory=True)
+                                self.create_symlink(cache, source, target_is_directory=True)
                             else:
                                 cache.mkdir()
                                 (cache / ("body.pyc.temporary" if name == "temporary" else "body.pyc")).write_bytes(b"unknown")
@@ -593,7 +601,7 @@ class ProducerIntegrationTests(unittest.TestCase):
         stale_tree.mkdir()
         (stale_tree / "leaf").write_bytes(b"user stale tree")
         link = skills / "agents-link"
-        link.symlink_to(stale_tree.name, target_is_directory=True)
+        self.create_symlink(link, stale_tree.name, target_is_directory=True)
         original = {p: PI._CreateOnlyMutablePath._identity(p) for p in (stale_file, stale_tree, link)}
         with self.transaction([]) as transaction:
             owner = self.owner(transaction)
@@ -610,7 +618,7 @@ class ProducerIntegrationTests(unittest.TestCase):
         referent = self.target / "referent"
         referent.mkdir()
         link = self.target / "agents-stale"
-        link.symlink_to(referent.name, target_is_directory=True)
+        self.create_symlink(link, referent.name, target_is_directory=True)
         original = PI._CreateOnlyMutablePath._identity(link)
         primary = RuntimeError("later")
         transaction = self.transaction([link], link_objects=(link,))
@@ -1055,7 +1063,7 @@ class ProducerIntegrationTests(unittest.TestCase):
         (pack / "CLAUDE.md").write_text("@AGENTS.md\n# Claude Code Pack\n", encoding="utf-8")
         return pack
 
-    def test_codex_document_merge_is_inplace_lf_and_rolls_back_user_bytes(self):
+    def test_codex_document_merge_is_inplace_and_preserves_user_line_endings(self):
         pack = self.documentation_fixture()
         target = self.target / "AGENTS.md"
         original = ("user prefix\r\n" + PI.CODEX_BEGIN + "\r\nold\r\n" + PI.CODEX_END + "\r\nuser tail\r\n").encode()
@@ -1070,7 +1078,8 @@ class ProducerIntegrationTests(unittest.TestCase):
                 current = target.read_bytes()
                 self.assertIn(b"new codex", current)
                 self.assertIn(b"user tail", current)
-                self.assertNotIn(b"\r", current)
+                self.assertTrue(current.startswith(b"user prefix\r\n"))
+                self.assertTrue(current.endswith(b"user tail\r\n"))
                 raise primary
         self.assertIs(primary, caught.exception)
         self.assertEqual(original, target.read_bytes())
@@ -1145,7 +1154,9 @@ class ProducerIntegrationTests(unittest.TestCase):
                     _body, after = body.split(end)
                     self.assertEqual(original, before + after)
                     self.assertEqual(original.count("@AGENTS.md"), text.count("@AGENTS.md"))
-                    self.assertNotIn(b"\r", target.read_bytes())
+                    raw_before, raw_body = target.read_bytes().split(begin.encode())
+                    _raw_managed, raw_after = raw_body.split(end.encode())
+                    self.assertEqual(original.replace("\n", "\r\n").encode(), raw_before + raw_after)
                 changed = text + ("" if text.endswith("\n") else "\n") + "@AGENTS.md\nLater user import.\n"
                 target.write_text(changed)
                 with self.transaction([target, agents]) as transaction:
@@ -1574,7 +1585,11 @@ class ProducerIntegrationTests(unittest.TestCase):
                 real_write(path, content, owner)
                 written.append(path)
                 self.assertEqual(identities[path], PI._CreateOnlyMutablePath._identity(path))
-                self.assertNotIn(b"\r", path.read_bytes())
+                if path == target:
+                    self.assertTrue(path.read_bytes().startswith(b"user prefix\r\n@AGENTS.md\r\n"))
+                    self.assertTrue(path.read_bytes().endswith(b"user tail\r\n"))
+                else:
+                    self.assertTrue(path.read_bytes().endswith(original[path]))
                 if fail_after_first:
                     raise primary
 
@@ -1642,10 +1657,10 @@ class ProducerIntegrationTests(unittest.TestCase):
         selected = storage
         if linked:
             selected = self.root / "selected.json"
-            selected.symlink_to(storage)
+            self.create_symlink(selected, storage)
         if directory_link:
             alias = self.root / "selected-parent"
-            alias.symlink_to(self.target, target_is_directory=True)
+            self.create_symlink(alias, self.target, target_is_directory=True)
             selected = alias / storage.name
         return specs, selected, storage, storage.parent / I.INVENTORY_NAME, original, foreign
 
@@ -1872,7 +1887,7 @@ class ProducerIntegrationTests(unittest.TestCase):
         selected = storage
         if linked:
             selected = self.root / "selected.json"
-            selected.symlink_to(storage)
+            self.create_symlink(selected, storage)
         transaction = self.transaction([storage] + ([selected] if linked else []),
                                        link_objects=(selected,) if linked else ())
         primary = RuntimeError("verify after empty retirement and new registration")

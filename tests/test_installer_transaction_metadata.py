@@ -2761,7 +2761,12 @@ class BytePublicationTests(unittest.TestCase):
 
     def test_legacy_file_link_snapshot_keeps_write_through_selection_and_link_object(self):
         alias = self.root / "alias"
-        alias.symlink_to(self.target.name)
+        try:
+            alias.symlink_to(self.target.name)
+        except OSError as exc:
+            if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+                self.skipTest("Windows host lacks symbolic-link creation privilege (WinError 1314)")
+            raise
         original = alias.lstat().st_ino
         primary = RuntimeError("later")
         with self.assertRaises(RuntimeError) as caught:
