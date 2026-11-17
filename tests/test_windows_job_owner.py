@@ -207,7 +207,8 @@ def test_natural_completion_after_positive_accounting_snapshot_is_not_terminated
         process.close()
 
 
-def test_direct_exit_still_reaps_job_descendant(tmp_path: Path) -> None:
+@pytest.mark.parametrize("presentation", ["default", "hidden"])
+def test_direct_exit_still_reaps_job_descendant(tmp_path: Path, presentation: str) -> None:
     """Direct-process exit must never stand in for an empty Job."""
     job = importlib.import_module("scripts.process_supervision.windows_job")
     marker = tmp_path / "descendant.pid"
@@ -222,6 +223,7 @@ def test_direct_exit_still_reaps_job_descendant(tmp_path: Path) -> None:
         argv=(sys.executable, "-c", code, str(marker)),
         cwd=str(tmp_path),
         environment=dict(os.environ),
+        presentation=presentation,
     )
     fds = (
         process.take_stdin_fd(), process.take_stdout_fd(),

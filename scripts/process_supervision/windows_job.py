@@ -128,6 +128,8 @@ class WindowsKernelV1:
     INFINITE = 0xFFFFFFFF
     HANDLE_FLAG_INHERIT = 1
     STARTF_USESTDHANDLES = 0x100
+    STARTF_USESHOWWINDOW = 0x1
+    SW_HIDE = 0
     CREATE_SUSPENDED = 0x4
     CREATE_UNICODE_ENVIRONMENT = 0x400
     EXTENDED_STARTUPINFO_PRESENT = 0x80000
@@ -403,6 +405,7 @@ class WindowsJobOwnerV1:
         stdin: Literal["pipe", "null"] = "pipe",
         stdout: Literal["pipe", "null"] = "pipe",
         stderr: Literal["pipe", "null"] = "pipe",
+        presentation: Literal["default", "hidden"] = "default",
         create_gate: Callable[[Callable[[], bool]], bool] | None = None,
         before_resume: Callable[[], None] | None = None,
         coordinator: WindowsInheritanceCoordinatorV1 | None = None,
@@ -413,7 +416,8 @@ class WindowsJobOwnerV1:
         import msvcrt
         if not os.path.isabs(executable) or not argv or argv[0] != executable:
             raise WindowsJobError("WJOB-REQUEST", "launch")
-        if any(mode not in ("pipe", "null") for mode in (stdin, stdout, stderr)):
+        if (presentation not in ("default", "hidden")
+                or any(mode not in ("pipe", "null") for mode in (stdin, stdout, stderr))):
             raise WindowsJobError("WJOB-REQUEST", "launch")
         if coordinator is None:
             coordinator = WindowsInheritanceCoordinatorV1()
@@ -479,6 +483,9 @@ class WindowsJobOwnerV1:
             startup = STARTUPINFOEXW()
             startup.StartupInfo.cb = ctypes.sizeof(startup)
             startup.StartupInfo.dwFlags = process._api.STARTF_USESTDHANDLES
+            if presentation == "hidden":
+                startup.StartupInfo.dwFlags |= process._api.STARTF_USESHOWWINDOW
+                startup.StartupInfo.wShowWindow = process._api.SW_HIDE
             startup.StartupInfo.hStdInput = h["stdin_child"]
             startup.StartupInfo.hStdOutput = h["stdout_child"]
             startup.StartupInfo.hStdError = h["stderr_child"]

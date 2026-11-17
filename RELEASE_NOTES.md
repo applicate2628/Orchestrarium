@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-02
+
+- Add a typed initial-presentation option to the shared Windows Job launch owner. Authorized callers can request hidden startup without mutating native call arguments or losing creation-time containment, suspended verification, stdio and settlement. The default remains unchanged; this does not guarantee that an application never shows later UI or authorize starting it. See shared/references/windows-job-presentation.md.
+
 ## 2026-11-01
 
 - Read historically admitted flat backlog records with a single legacy `status: backlog` without rewriting their bytes or inventing activation. The existing audit and generated view label the bounded legacy case explicitly; ambiguous/current-schema records and canonical creation/start checks remain strict, so an old record no longer blocks unrelated valid work merely because its status vocabulary predates the current writer.
