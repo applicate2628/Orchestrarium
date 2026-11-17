@@ -119,7 +119,7 @@ Routing conventions (not persisted as keys):
      - `externalCodexWorkdirMode: neutral`
      - `externalClaudeWorkdirMode: neutral`
      - `externalModelMode: runtime-default`
-     - `externalCodexProfile: gpt-6.1-sol-xhigh`
+     - `externalCodexProfile: gpt-6.2-sol-xhigh`
      - `externalClaudeProfile: opus-xhigh`
    - Accept shorthand answers such as `force`, `external reviewer only`, `opus`, or `defaults for the rest`.
 
