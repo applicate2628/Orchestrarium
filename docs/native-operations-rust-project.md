@@ -142,6 +142,66 @@ Installation of source-only components remains a separate decision. Owner-equiva
 manual execution retains the same guarantees and is not a host-denial bypass.
 
 
+## Progressive reduction of model instructions (SDK to Rust)
+
+Treat instruction-budget reduction as migration of obligations, not text compression
+or an automatic benefit of changing language. The SDK supplies supported session,
+context, event, cancellation and result transport. Existing domain owners retain
+decisions and state; Rust replaces qualified deterministic operations, not the
+Lead's judgment or a second policy engine. The current reminder candidate improves
+runtime packaging only; porting a reminder does not itself reduce rule volume.
+
+| Obligation | Existing owner and planned boundary |
+| --- | --- |
+| Route, role and context selection | The existing resolver/dispatch validates supported choices; SDK adapters bind the selected context/session and report actual capabilities. The Lead chooses task fit. |
+| Task/run lifecycle, ownership and review state | `mutate-work-item.py`, `agent-run-ledger.py`, `review_loop_state.py` and the existing reducer retain their distinct state and recovery contracts. Structural validation does not establish substantive completion. |
+| Configuration and artifact shape | Existing resolver and validators own precedence, schema and compatibility checks; a qualified Rust replacement preserves those contracts. |
+| Installed-file ownership and recovery | The existing installer owns plan/apply/readback and rollback. SDK events do not create installation authority. |
+| Publication and process effects | Existing publication owners retain authority/currentness checks. Process supervision retains its actual containment/settlement boundary, separately from SDK-created child ownership. |
+
+These are the owners mapped above, not newly implemented guarantees. For each
+bounded slice, extend its existing work-plan entry with the source obligation,
+affected consumers, current owner, replacement/interception boundary, verification
+and uncovered routes, and the exact procedural text eligible for retirement.
+This is review evidence, not a new tracker, runtime gate or parallel rules registry.
+
+Proceed through the supported SDK bindings first, then the independently admitted
+Rust slices under O0--O6. SDK completion does not require finishing Rust. Remove
+procedural duplicates only for consumers whose actual path is covered and verified;
+retain the concise obligation and necessary instructions for unsupported hosts.
+Update the owning shared source and affected provider projections together, not
+one provider's text by analogy. Keep a practical recovery path if a mechanism is
+unavailable, without bypassing mandatory safety or permission controls.
+
+Verification covers accepted and rejected inputs, direct and alternate supported
+entrypoints, stale bindings, interruption/retry and recovery where relevant.
+A callable SDK thread API does not prove interception of native subagent actions.
+Distinguish runtime enforcement, advisory checks and remaining model instructions;
+never advertise a model reminder as a hard guarantee.
+
+Localize file-identity mismatches, checker failures and timeouts to the affected
+operation and its dependent effects; do not turn them into a global stop until a
+new release. Preserve owned state, diagnose and repair the responsible mechanism,
+reconcile uncertain effects before retry, and continue independent admitted work.
+For genuine safety or authority failures, retain the required hold on the affected
+effect; a broken checker is neither permission to bypass it nor a reason to abandon
+all work. Regression evidence includes an injected mismatch/checker failure,
+continued independent work, preserved state, and successful authorized recovery
+without duplicate effects. Timeout budgets need an operation-specific basis, not
+a fixed arbitrary limit or an unbounded retry loop.
+
+Retain model guidance for interpreting intent, architectural tradeoffs, choosing
+skills and context, semantic review, prioritization and honest user explanation.
+Runtime can validate required fields and provenance, but not prove that a rationale
+or review is substantively correct. This migration adds no arbitrary depth, time
+or count limits, approval stages or provider-name bans; existing mandatory controls
+and route-specific provider boundaries remain with their owners.
+
+Measure authored and composed instruction size alongside retained obligations,
+coverage and maintenance burden, rather than chase an invented token quota.
+A slice is complete when its own replacement and consumer checks pass and its
+eligible duplicate instructions are retired; do not wait for a whole-product port.
+
 ## Candidate first vertical slice: mcp-usage-reminder
 
 Source: [canonical entrypoint](https://github.com/applicate2628/Orchestrarium/blob/317e1448a020aeaa58f65aaceb180e835741d6de/scripts/universal-hooks/scripts/mcp-usage-reminder.py),
