@@ -259,6 +259,7 @@ class Control:
     )
     kimi_effort: str = "high"
     user_approved_launch: bool = False
+    astra_task_authorization: dict | None = None
     provider_flags: list[str] = field(default_factory=list)
 
 
@@ -2914,6 +2915,7 @@ def parse_control(
         "--capture-max-bytes": "capture_max_bytes",
         "--kimi-capabilities-file": "kimi_capabilities_file",
         "--kimi-effort": "kimi_effort",
+        "--astra-task-authorization-json": "astra_task_authorization",
     }
     if external:
         value_flags.update(
@@ -2959,6 +2961,10 @@ def parse_control(
                 parsed_value = int(value)
                 if parsed_value <= 0:
                     raise ValueError(f"{token} must be a positive integer")
+            elif attr == "astra_task_authorization":
+                parsed_value = json.loads(value)
+                if type(parsed_value) is not dict:
+                    raise ValueError("Astra task authorization must be an object")
             elif attr == "kimi_effort":
                 if provider != "kimi" or value not in {"high", "max"}:
                     raise ValueError("E_KIMI_EFFORT_INVALID")
@@ -3144,7 +3150,7 @@ def resolved_profile(
         return [], "kimi-code/k3", kimi_effort
     if not flags:
         flags = (
-            ["--model", "gpt-6.1-sol", "-c", "model_reasoning_effort=xhigh"]
+            ["--model", "gpt-6.2-sol", "-c", "model_reasoning_effort=xhigh"]
             if provider == "codex"
             else [
                 "-p",
@@ -3173,7 +3179,7 @@ def resolved_profile(
         raise
     if not model or not effort:
         example = (
-            "--model gpt-6.1-sol -c model_reasoning_effort=xhigh"
+            "--model gpt-6.2-sol -c model_reasoning_effort=xhigh"
             if provider == "codex"
             else "-p --output-format text --model opus --effort xhigh"
         )
@@ -8013,7 +8019,9 @@ def _qualify_managed_model_launch(provider: str, selected: PolicyBoundLaunch, *,
         return
     reason = _load_model_launch_policy(runtime_namespace=runtime_namespace).qualify_launch(
         provider, selected.model, selected.effort,
-        user_approved_launch=selected.control.user_approved_launch)
+        user_approved_launch=selected.control.user_approved_launch,
+        task_class=selected.control.task_class,
+        astra_task_authorization=selected.control.astra_task_authorization)
     if reason is not None:
         raise ValueError("E_MODEL_LAUNCH_POLICY_DENIED: " + reason)
 

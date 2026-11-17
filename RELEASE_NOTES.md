@@ -4,6 +4,10 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-17
 
+- Task-first routing now favors Sol 6.2 for ordinary implementation, Luna Extra high for bounded mechanics and Terra 6.1 High for fitting bounded/repository/visual work. Astra High/Extra high can use genuine task-scoped approval for scientific formulation, complex audit, architecture and security, including covered repeats; Max and separate launch/spending permissions remain protected. Substantive results now require a proportionate nonauthor check, not only critical results, without adding duplicate review loops.
+
+- Production Codex routing advances factory GPT-6.1 Sol and GPT-6 Astra models to their GPT-6.2 versions with unchanged role efforts and launch rules. Existing 6.1 Sol external profile settings migrate to the same effort on 6.2; Terra, Luna, unrelated settings and the main-session model remain untouched.
+
 - Replace logging-only bug-investigation gates with evidence matched to the hypothesis: deterministic source/tests where sufficient, native/runtime checks for runtime claims, and explicit diagnostic observer-effect/privacy handling. Repeated neighboring regressions pause speculative changes only to the affected mechanism while safe diagnosis and independent work continue; shared governance, live role guidance and provider projection integrity remain aligned.
 
 - Release the newly acquired ledger lock and descriptor when writing its owner metadata fails, across ordinary writes and recovery writes. Partial writes are completed and observed replacement owners are preserved. Under the existing cooperative locking contract, a transient metadata-write error no longer leaves that work item stuck behind our abandoned lock; uncertain identity or close outcomes remain explicit recovery cases.

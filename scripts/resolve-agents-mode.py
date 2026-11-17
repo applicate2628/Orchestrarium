@@ -60,7 +60,7 @@ _MECHANICAL_EXECUTION_CONTRACT_V1 = {
     "ambiguity": "abort",
     "fallback": "none",
     "objectiveOracle": "caller-required",
-    "defaultEffort": "high",
+    "defaultEffort": "xhigh",
     "allowedCallerEfforts": list(_LUNA_ALLOWED_REASONING_EFFORTS),
     "scout": {
         "status": "native-required-when-feature-enabled",
@@ -1749,6 +1749,7 @@ def resolve_ordinary_native_dispatch(
     approved_execution_scope: Any,
     user_approved_max: bool = False,
     user_approved_launch: bool = False,
+    astra_task_authorization: dict | None = None,
 ) -> dict[str, Any]:
     if (
         not isinstance(description, dict)
@@ -1830,7 +1831,8 @@ def resolve_ordinary_native_dispatch(
     try:
         reason = _load_model_launch_policy(getattr(description, "launch_package", None)).qualify_launch(
             "codex", resolved_model, resolved_effort,
-            user_approved_launch=user_approved_launch, user_approved_max=user_approved_max)
+            user_approved_launch=user_approved_launch, user_approved_max=user_approved_max,
+            task_class=description.get("taskClass"), astra_task_authorization=astra_task_authorization)
     except ValueError:
         reason = "selected-companion-unavailable"
     if reason is not None:
@@ -1852,6 +1854,7 @@ def resolve_ordinary_native_dispatch(
         "profession": copy.deepcopy(description["profession"]),
         "callerRationale": caller_rationale,
         "approvedExecutionScope": copy.deepcopy(approved_execution_scope),
+        "astraTaskAuthorization": copy.deepcopy(astra_task_authorization),
         "invocation": invocation,
         "failurePolicy": copy.deepcopy(_ORDINARY_NATIVE_FAILURE_POLICY),
         "fallback": "none",
@@ -2460,6 +2463,7 @@ def main() -> int:
     parser.add_argument("--approved-scope-json")
     parser.add_argument("--user-approved-max", action="store_true")
     parser.add_argument("--user-approved-launch", action="store_true")
+    parser.add_argument("--astra-task-authorization-json", type=json.loads)
     parser.add_argument("--json", action="store_true", help="emit JSON output")
     args = parser.parse_args()
 
@@ -2557,6 +2561,7 @@ def main() -> int:
                 approved_execution_scope=approved_scope,
                 user_approved_max=args.user_approved_max,
                 user_approved_launch=args.user_approved_launch,
+                astra_task_authorization=args.astra_task_authorization_json,
             )
         json.dump(decision, sys.stdout, sort_keys=True, separators=(",", ":"))
         sys.stdout.write("\n")

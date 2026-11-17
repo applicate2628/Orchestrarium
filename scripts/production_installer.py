@@ -618,6 +618,13 @@ UI_CONTINUITY_CONTRACT_TARGET = Path("contracts") / "ui-transition-continuity.md
 CODEX_HOOK_INVENTORY = "codex-hook-inventory.json"
 CODEX_ROLE_MANIFEST = "orchestrarium-role-manifest.json"
 _STOCK_NATIVE_ROLE_CONTRACT_PRIOR_PAIRS = (
+    # Exact previous factory contract for the 6.2 task-first ranking.
+    ((Path("shared") / "role-routing-policy.v1.json", "b3551957c35cc724e905522d0b9ce0044fc050fcbeb2fd9e0893835cca083168"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "fbb6a7dbdb41336a8a82d8adfebbd79b762e5472f98267c30500d0e99c3fd03a")),
+    # Exact pre-6.2 factory contract. Keep the Terra ranking pair last: its
+    # position is the existing control-only migration provenance boundary.
+    ((Path("shared") / "role-routing-policy.v1.json", "fafd37b08375e0d261a57edd06613ab15dcaac9075fc031bf2702b173e6f8cf7"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "2ca416fa4fc2aa93c7fe74dc6db62273d72367a901e0ee260fce55377acb6d77")),
     (
         (Path("shared") / "role-routing-policy.v1.json",
          "b6b76525d5e9d054cf8c1a9d89ea038c42ce8b488a1a835873d6d38f6e5b8bd3"),
@@ -8667,10 +8674,12 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "3e964408acb6fe3ea1ba8a43158927e83b6d23bb121dd34b6b843863caf4a9fd",
     }),
     "backend-engineer": frozenset({
+        "a6e1e0239ef1c6e25b97f932790d56a134612f704824811d99cbe87e661594ca",  # Exact factory role before 6.2 task-first ranking.
         "f3b85eac0023a12de0d529a47766762f5a2ffaeac092c42e9b1b11be6a246c27",
         "38d99e26339cb0942eb66d4062e0de33f085c5b39f445cc358ac217b03010589",
     }),
     "explorer": frozenset({
+        "d57e825cc7155a81d75fe5ed205b2e402bd4a637c785d7f097223e6418700f74",  # Exact factory role before 6.2 task-first ranking.
         "03375f98ee2f442d1b236afce90919547f738348dd77cb9ca67c704e21772172",
         "a98b89ec3c513f8242459adda45808612645ed5f5cb07b9da8839fe66b670e89",
     }),
@@ -8679,10 +8688,12 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "0f26fae798309c1b69f3fe5077196e3e5895211bc661f7575aa683fd01e2225b",
     }),
     "knowledge-archivist": frozenset({
+        "8d148b86cdad5ef415cda74362bb607b700dca3069947bcfb45d5c802233f873",  # Exact factory role before 6.2 task-first ranking.
         "82ff6b4e4cbc433175ae36b23216f001cbec427e341d01b2b01709b25d744e02",
         "8f69d0f67010b77b71c81b77ad74119300ad245061c4363cbcfd2f1d0fab510c",
     }),
     "scientific-software-engineer": frozenset({
+        "d220652c7a880bcdcdd68a57a2f9cfe267014617a668655fe3a27e418709ed16",  # Exact pre-6.2 factory role (adefe904).
         "b4ee95a146843dd06a4470b380d7d263fb5c149edf9b2204c0944090e0d4ba3b",
     }),
     "planner": frozenset({
@@ -8690,18 +8701,24 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "dcde16fa86661eee94b21618fb6320026185ddb425541b15239b4c7d232c4faa",
     }),
     "algorithm-scientist": frozenset({
+        "a20cde75a7e9d1bef8dbb451658fa5341e5ee0e43ee1f89db453ccd2ec2576dd",  # Exact factory role before 6.2 task-first ranking.
+        "81b79398d9b55495cf32925007635b9f688920c75c32b50e4b092d4ef9bd1893",  # Exact pre-6.2 factory role (adefe904).
         "cd2bbbaf5f4173f07bfe18cea39d90dd0cc341630b77b5dac0d82d9f92b57d7e",
         "1bc7c60b30f1bb360a502ee955e41513a80d3e3f9e222e5a673817a7e421c8bd",
     }),
     "architect": frozenset({
+        "278f9311b982844cd0fdd542cf6f3c6fd0ec790bdd5cdf4d09bede1195828ec4",  # Exact pre-6.2 factory role (adefe904).
         "71f3d9e27019de2e133d8947a33cdb69ab38261824fab36bcb18c7f7f3ff0792",
         "bcdd83abcb3e5d99e0dd0963d622b475ea11d450bb16f1af1bc93855891ff4fb",
     }),
     "architecture-reviewer": frozenset({
+        "8ae8704a3f823b74bd5fbc8590fa43c979dbee66e341f1107bedf873b69a2d03",  # Exact pre-6.2 factory role (adefe904).
         "5e404f6643d8992dd7cd4a40e8a5d3ae4f7f388381907aa230b6b0fa15ac458a",
         "239a91ef35b54cc640372132b51662bcbe0da88dded68ff53d339621689df8c3",
     }),
     "computational-scientist": frozenset({
+        "aa94f35c668d62394bd12a27609ead6dd9e042b2e13a82a4b38d693967e98aac",  # Exact factory role before 6.2 task-first ranking.
+        "7731852f496a050f187b11c265943e5b6bc553820acd7d9359769852eb598aea",  # Exact pre-6.2 factory role (adefe904).
         "4169e5ac3442e542b0249879595b6974b78e0924b377613b5b427a6488171901",
         "7ddcfb3afe6d9032d03d3da6468662a961819ceacf5252caccccfc69744cc9d3",
     }),
@@ -8711,6 +8728,7 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "fd846b4791aea45f743661615d913d2f3cc96ee0b86fdb8abe53871b97e3c07c",
     }),
     "worker": frozenset({
+        "cc520f7c717fa1c9c529c07439967b0d8795b130b12073350504fe5ae7acad2c",  # Exact factory role before 6.2 task-first ranking.
         "392be7e7e35a5e76f27c0073c2be0545a1be6aa856753209cb4f8ba95976ce5e",
         "952271e679f9215f039e52377a35100fbc9b2fdb343db17f266c38be8a200815",
         "2d950ebfa4e9cc7293ee32cbc71ad3910fa6938a80a339bbbc3434ecc6c4d860",
@@ -8718,6 +8736,7 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "1b311bd1a413c660382c57df74bdccc016f9b8a919e039efe21f703f0b09e475",
     }),
     "platform-engineer": frozenset({
+        "0bc8c33d45761495089826145a466ab5ced84a7c52e957e22a378ed17cc5da4b",  # Exact factory role before 6.2 task-first ranking.
         "d54979aced93372dd0d20b18f413a472ec5b2f481848609e38045f8ed6a191f0",
         "3e4c199ba984cbfba080249ad28c645ffbf78a08daf8519e0aa058e7f92aaa40",
         "2f62aaf20edd4b30838db3e728d6a907e8f6826620d2eede78c02a1cd0b7a214",
@@ -8725,22 +8744,26 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "e5d44b7fafc7ec8ab3c69b4086bdda5e5430974334f90fc407b5bb78ace8a4cf",
     }),
     "security-engineer": frozenset({
+        "9cce8eb32f8386dba2cbe88ddefd54ff1ee8695956682f0a93ee8194ebcc6513",  # Exact pre-6.2 factory role (adefe904).
         "6e53fa663da8eed31ab4012354ee9bebf24f16ecb9cdaa517a7f196dcfd1969e",
         "aeb2800e4e498ad7d3a63951608e780eb730ef2bd744ff679fee5c697f5d837a",
         "54117decdfcf9bff576e23d31a1dc6aa2d2f4fd0d498820f9c1244b6742f78f9",
         "ceb53c8db3d77f75beea76a9cc27120d7623a60661cca3dac92b01a35ce06a0c",
     }),
     "security-reviewer": frozenset({
+        "3d5b521ee8c6a230e1327cf4cf815b6c9c98f844de0aa985b4e3a7b4cfe3eb6c",  # Exact pre-6.2 factory role (adefe904).
         "f22614caec4561e5cb0833e6264081b42c46570936fe1d2b62e8534c17ee214d",
         "0f9b75713128885b8db86b32a9ecb3e756b0022add169a89fc10d615745445f1",
     }),
     "mechanical-scout": frozenset({
+        "8ed620f22a35d59df3ef2cf64cad73ef8140452253dde49fc32f527000d2bb2e",  # Exact factory role before 6.2 task-first ranking.
         "4521ff3194ed13831214f94ad228c7aa0eba97b6d40bec56e990b3490fdcc672",
         "1d2d6c4fb6463710f8e6cd1bda1738f8230cd7483b9f342f7f0e500e5ac5bb67",
         "7d9c28aeb4471ea63fe733dde320fec3bfa60dcb11cb85404ff2aed2fc6658b5",
         "d384fa021005f10b4b3faf48818a4963ab314689b986a6fbed25b5ad13e66df1",
     }),
     "mechanical-worker": frozenset({
+        "155462c4f5eb5c035254ae50f61469de954c12439ef6289e6bdf74f04cf0999f",  # Exact factory role before 6.2 task-first ranking.
         "8c126a95d35301bd493e3e2f89e4061781aaf28ca4444a3d4a67b1868c4c7568",
         "ccf7633f55389ce826cd848692277b764a559ee0b7bc81402d5657b908165869",
         "6ab77b24305af7c7b8bf8b8661b2abe1a4fa628974eee9da096419deebea39b8",

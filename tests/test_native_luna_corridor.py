@@ -286,12 +286,12 @@ def test_factory_task_defaults_and_configured_tuple_are_explicit(tmp_path: Path)
     controls = {"explicitModelControl": True, "explicitReasoningEffortControl": True}
     args = {"caller_rationale": "synthetic routing check", "approved_execution_scope": {"read": True}}
     for role, task, model, effort in (
-        ("worker", "engineering", "gpt-6.1-terra", "medium"),
-        ("worker", "recovery", "gpt-6.1-sol", "high"),
-        ("platform-engineer", "recovery", "gpt-6.1-sol", "high"),
-        ("analyst", "exploration", "gpt-6.1-terra", "medium"),
-        ("scientific-software-engineer", "engineering", "gpt-6.1-sol", "high"),
-        ("architect", "critical-design", "gpt-6.1-sol", "xhigh"),
+        ("worker", "engineering", "gpt-6.2-sol", "high"),
+        ("worker", "recovery", "gpt-6.2-sol", "high"),
+        ("platform-engineer", "recovery", "gpt-6.2-sol", "high"),
+        ("analyst", "exploration", "gpt-6.1-terra", "high"),
+        ("scientific-software-engineer", "engineering", "gpt-6.2-sol", "high"),
+        ("architect", "critical-design", "gpt-6.2-sol", "xhigh"),
     ):
         desc = resolver.describe_ordinary_native_role_options(role, task, controls, repo_root=root)
         result = resolver.resolve_ordinary_native_dispatch(desc, **args)
@@ -302,15 +302,15 @@ def test_factory_task_defaults_and_configured_tuple_are_explicit(tmp_path: Path)
         assert result["runtimeIdentity"] == "unspecified by runtime"
     path = root / "src.codex/agents/worker.toml"
     factory = path.read_text()
-    previous = factory.replace('model = "gpt-6.1-terra"', 'model = "gpt-6.1-sol"').replace('model_reasoning_effort = "medium"', 'model_reasoning_effort = "high"')
+    previous = factory
     path.write_text('# non-model user setting\nmodel_verbosity = "low"\n' + previous)
     saved = path.read_bytes()
     desc = resolver.describe_ordinary_native_role_options("worker", "engineering", controls, repo_root=root)
     configured_old_tuple = resolver.resolve_ordinary_native_dispatch(desc, **args)
-    assert (configured_old_tuple["resolvedModel"], configured_old_tuple["resolvedEffort"]) == ("gpt-6.1-sol", "high")
+    assert (configured_old_tuple["resolvedModel"], configured_old_tuple["resolvedEffort"]) == ("gpt-6.2-sol", "high")
     assert configured_old_tuple["invocation"]["omitAgentType"] is True
     assert path.read_bytes() == saved
-    path.write_text(factory.replace('model_reasoning_effort = "medium"', 'model_reasoning_effort = "high"'))
+    path.write_text(factory.replace('model = "gpt-6.2-sol"', 'model = "gpt-6.1-terra"'))
     desc = resolver.describe_ordinary_native_role_options("worker", "engineering", controls, repo_root=root)
     configured = resolver.resolve_ordinary_native_dispatch(desc, **args)
     assert (configured["resolvedModel"], configured["resolvedEffort"]) == ("gpt-6.1-terra", "high")
@@ -1831,10 +1831,10 @@ def test_luna_policy_profiles_tasks_and_exclusive_corridors(tmp_path: Path) -> N
     assert policy["taskRoleEligibility"]["mechanical"] == ["mechanical-worker"]
     for role_name in ("mechanical-scout", "mechanical-worker"):
         assert policy["roles"][role_name] == {
-            "defaultProfile": "luna-high",
-            "allowedProfiles": ["luna-high"],
+            "defaultProfile": "luna-xhigh",
+            "allowedProfiles": ["luna-high", "luna-xhigh"],
         }
-    assert policy["mechanicalExecutionContract"]["defaultEffort"] == "high"
+    assert policy["mechanicalExecutionContract"]["defaultEffort"] == "xhigh"
     assert policy["mechanicalExecutionContract"]["allowedCallerEfforts"] == [
         "high",
         "xhigh",
@@ -1875,6 +1875,7 @@ def test_luna_policy_profiles_tasks_and_exclusive_corridors(tmp_path: Path) -> N
         name for name, record in {**policy["roles"], **policy["skillOnlyRoles"]}.items()
         if "luna-xhigh" in record["allowedProfiles"]
     } == {
+        "mechanical-scout", "mechanical-worker",
         "explorer", "analyst", "product-analyst", "worker", "backend-engineer",
         "platform-engineer", "scientific-software-engineer", "knowledge-archivist",
         "frontend-engineer", "qt-ui-engineer", "model-view-engineer", "data-engineer",
@@ -1890,7 +1891,7 @@ def test_luna_policy_profiles_tasks_and_exclusive_corridors(tmp_path: Path) -> N
         "backend-engineer", "platform-engineer", "knowledge-archivist",
         "scientific-software-engineer",
     }
-    assert policy["roles"]["explorer"]["defaultProfile"] == "terra-6.1-medium"
+    assert policy["roles"]["explorer"]["defaultProfile"] == "terra-6.1-high"
     assert luna_profiles.intersection(
         policy["roles"]["explorer"]["allowedProfiles"]
     ) == {"luna-high", "luna-xhigh", "luna-max"}
@@ -1914,8 +1915,8 @@ def test_luna_policy_and_dispatch_are_speed_neutral() -> None:
         assert policy["taskClasses"][task_name]["requiredModelTier"] == "mechanical"
     for role_name in ("mechanical-scout", "mechanical-worker"):
         assert policy["roles"][role_name] == {
-            "defaultProfile": "luna-high",
-            "allowedProfiles": ["luna-high"],
+            "defaultProfile": "luna-xhigh",
+            "allowedProfiles": ["luna-high", "luna-xhigh"],
         }
 
     decision = _resolver_module().resolve_role_dispatch(
@@ -1934,9 +1935,9 @@ def test_luna_policy_and_dispatch_are_speed_neutral() -> None:
         "fallback",
         "executionContract",
     }
-    assert decision["requestedProfile"] == "luna-high"
+    assert decision["requestedProfile"] == "luna-xhigh"
     assert decision["requestedModel"] == "gpt-6-luna"
-    assert decision["requestedEffort"] == "high"
+    assert decision["requestedEffort"] == "xhigh"
     assert decision["fallback"] == "none"
     serialized = json.dumps({"policy": policy, "decision": decision}).casefold()
     for forbidden in ("fast", "priority", "ultrafast"):
@@ -1955,7 +1956,7 @@ def test_luna_mechanical_corridor_is_exactly_restricted_and_exposed(
         "ambiguity": "abort",
         "fallback": "none",
         "objectiveOracle": "caller-required",
-        "defaultEffort": "high",
+        "defaultEffort": "xhigh",
         "allowedCallerEfforts": ["high", "xhigh", "max"],
         "scout": {
             "status": "native-required-when-feature-enabled",
@@ -2765,9 +2766,9 @@ def test_resolve_role_dispatch_policy_only() -> None:
         "stableId": "E_NATIVE_V2_DISABLED",
         "taskClass": "mechanical-read",
         "role": "mechanical-scout",
-        "requestedProfile": "luna-high",
+        "requestedProfile": "luna-xhigh",
         "requestedModel": "gpt-6-luna",
-        "requestedEffort": "high",
+        "requestedEffort": "xhigh",
         "sandbox": "read-only",
         "fallback": "none",
         "executionContract": _policy()["mechanicalExecutionContract"],
@@ -2778,9 +2779,9 @@ def test_resolve_role_dispatch_policy_only() -> None:
         "stableId": None,
         "taskClass": "mechanical-read",
         "role": "mechanical-scout",
-        "requestedProfile": "luna-high",
+        "requestedProfile": "luna-xhigh",
         "requestedModel": "gpt-6-luna",
-        "requestedEffort": "high",
+        "requestedEffort": "xhigh",
         "sandbox": "read-only",
         "fallback": "none",
         "executionContract": _policy()["mechanicalExecutionContract"],

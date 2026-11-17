@@ -21,6 +21,7 @@ options:
   --sdk-review-binding PATH      opt into bounded Windows SDK review; no CLI fallback
 
   --user-approved-launch         caller asserts genuine agreement for this one managed Astra/Max attempt
+  --astra-task-authorization-json <json>  existing Astra high/xhigh task grant (taskClass, scope, approvalReference)
   --ledger PATH                  append the optional terminal ledger event
   -Ledger PATH                   legacy spelling for --ledger
   --ledger-role ROLE             record the ledger execution role

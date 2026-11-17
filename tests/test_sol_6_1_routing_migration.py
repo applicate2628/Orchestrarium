@@ -23,8 +23,8 @@ PRIORS = ROOT / 'tests/fixtures/sol-6-1-priors'
 
 def check_no_flags_codex_uses_sol_6_1_xhigh():
     flags, model, effort = provider_prompt.resolved_profile('codex', [])
-    assert (model, effort) == ('gpt-6.1-sol', 'xhigh')
-    assert flags == ['--model', 'gpt-6.1-sol', '-c', 'model_reasoning_effort=xhigh']
+    assert (model, effort) == ('gpt-6.2-sol', 'xhigh')
+    assert flags == ['--model', 'gpt-6.2-sol', '-c', 'model_reasoning_effort=xhigh']
 
 
 def check_live_native_defaults_preserve_efforts_except_scientific():
@@ -34,7 +34,7 @@ def check_live_native_defaults_preserve_efforts_except_scientific():
         profile = policy['profiles'][policy['roles'][path.stem]['defaultProfile']]
         expected = (None, None) if path.stem == 'default' else (profile['codexModel'], profile['effort'])
         assert (current.get('model'), current.get('model_reasoning_effort')) == expected, path.name
-    assert (policy['profiles'][policy['roles']['scientific-software-engineer']['defaultProfile']]['codexModel'], policy['profiles'][policy['roles']['scientific-software-engineer']['defaultProfile']]['effort']) == ('gpt-6.1-sol', 'high')
+    assert (policy['profiles'][policy['roles']['scientific-software-engineer']['defaultProfile']]['codexModel'], policy['profiles'][policy['roles']['scientific-software-engineer']['defaultProfile']]['effort']) == ('gpt-6.2-sol', 'high')
 
 
 def check_bounded_medium_corridors_preserve_critical_floors():
@@ -162,18 +162,18 @@ class MigrationTests(unittest.TestCase):
         scope = {'authority':'parent-dispatcher-only','allowedTools':[], 'changeSurface':['accepted bounded contract']}
         for role,task in [('explorer','exploration'),('planner','planning'),('worker','engineering'),('scientific-software-engineer','engineering')]:
             description = resolver.describe_ordinary_native_role_options(role,task,host,repo_root=ROOT)
-            selected = resolver.resolve_ordinary_native_dispatch(description,requested_model='gpt-6.1-sol',requested_effort='medium',caller_rationale='Accepted bounded contract with directly testable oracle.',approved_execution_scope=scope)
+            selected = resolver.resolve_ordinary_native_dispatch(description,requested_model='gpt-6.2-sol',requested_effort='medium',caller_rationale='Accepted bounded contract with directly testable oracle.',approved_execution_scope=scope)
             assert selected['status'] == 'resolved', selected
             assert selected['resolvedProfile'] == 'frontier-medium'
             assert selected['fallback'] == 'none'
         description = resolver.describe_ordinary_native_role_options('scientific-software-engineer','engineering',host,repo_root=ROOT)
-        for model,effort in [('gpt-6.1-sol','max'),('gpt-unknown','high')]:
+        for model,effort in [('gpt-6.2-sol','max'),('gpt-unknown','high')]:
             result = resolver.resolve_ordinary_native_dispatch(description,requested_model=model,requested_effort=effort,caller_rationale='Explicit request.',approved_execution_scope=scope)
             assert result['status'] == 'denied'
             assert result['fallback'] == 'none'
         for role,task in [('security-reviewer','critical-security'),('architecture-reviewer','review'),('worker','recovery')]:
             description = resolver.describe_ordinary_native_role_options(role,task,host,repo_root=ROOT)
-            result = resolver.resolve_ordinary_native_dispatch(description,requested_model='gpt-6.1-sol',requested_effort='medium',caller_rationale='Bounded work cannot lower this floor.',approved_execution_scope=scope)
+            result = resolver.resolve_ordinary_native_dispatch(description,requested_model='gpt-6.2-sol',requested_effort='medium',caller_rationale='Bounded work cannot lower this floor.',approved_execution_scope=scope)
             assert result['status'] == 'denied'
             assert result['fallback'] == 'none'
 
@@ -199,8 +199,8 @@ class MigrationTests(unittest.TestCase):
     def test_external_medium_is_not_admitted_by_operator_schema(self):
         schema = json.loads((ROOT/'shared/agents-mode.schema.json').read_text())
         profile = next(row for row in schema['scalarKeys'] if row['name'] == 'externalCodexProfile')
-        assert 'gpt-6.1-sol-medium' not in profile['allowed']
-        assert profile['default'] == 'gpt-6.1-sol-xhigh'
+        assert 'gpt-6.2-sol-medium' not in profile['allowed']
+        assert profile['default'] == 'gpt-6.2-sol-xhigh'
         # Native bounded medium must stay available behind the role/task selector;
         # security/review/recovery negatives are asserted by the selector test above.
         check_bounded_medium_corridors_preserve_critical_floors()
