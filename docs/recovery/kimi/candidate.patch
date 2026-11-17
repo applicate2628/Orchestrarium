@@ -1,0 +1,196 @@
+--- a/scripts/provider_prompt.py
++++ b/scripts/provider_prompt.py
+@@ -258,6 +258,7 @@
+         default_factory=lambda: KimiCapabilitySelectionV1()
+     )
+     kimi_effort: str = "high"
++    kimi_model: str = KIMI_WINDOWS_PROFILE_V1.model
+     user_approved_launch: bool = False
+     provider_flags: list[str] = field(default_factory=list)
+ 
+@@ -953,6 +954,7 @@
+     result_max_bytes: int = RESULT_MAX_BYTES_DEFAULT
+     observed_budget_chars: int | None = None
+     effort: str = "high"
++    model: str = field(default=KIMI_WINDOWS_PROFILE_V1.model, kw_only=True)
+     before_prompt: Callable[[], None] | None = None
+     result_bytes: bytes = field(default=b"", init=False)
+     session_id: str | None = field(default=None, init=False)
+@@ -972,6 +974,7 @@
+     _observations_omitted: bool = field(default=False, init=False)
+ 
+     def __post_init__(self) -> None:
++        _validate_kimi_model(self.model)
+         if (
+             not isinstance(self.prompt_bytes, bytes)
+             or not isinstance(self.cwd, str)
+@@ -1281,6 +1284,17 @@
+                     raise ValueError("E_KIMI_ACP_PROTOCOL")
+                 update_kind = update.get("sessionUpdate")
+                 if update_kind in KIMI_ACP_CONTROL_UPDATES:
++                    if update_kind == "config_option_update" and self.stop_reason is None and (
++                        self.observed_model is not None or self.observed_effort is not None
++                    ):
++                        options = update.get("configOptions")
++                        if not isinstance(options, list):
++                            raise ValueError("E_KIMI_ACP_PROTOCOL")
++                        for key, expected in (("model", self.observed_model),
++                                              ("thinking", self.observed_effort)):
++                            rows = [row for row in options if isinstance(row, dict) and row.get("id") == key]
++                            if len(rows) > 1 or (expected is not None and rows and rows[0].get("currentValue") != expected):
++                                raise ValueError("E_KIMI_ACP_PROTOCOL")
+                     continue
+                 if not collect:
+                     raise ValueError("E_KIMI_ACP_PROTOCOL")
+@@ -1391,7 +1405,7 @@
+                 {
+                     "sessionId": session_id,
+                     "configId": "model",
+-                    "value": KIMI_WINDOWS_PROFILE_V1.model,
++                    "value": self.model,
+                 },
+             )
+             assert model_id is not None
+@@ -1407,7 +1421,7 @@
+             if (
+                 len(model_options) != 1
+                 or model_options[0].get("currentValue")
+-                != KIMI_WINDOWS_PROFILE_V1.model
++                != self.model
+             ):
+                 raise ValueError("E_KIMI_ACP_PROTOCOL")
+             self.observed_model = model_options[0]["currentValue"]
+@@ -1609,9 +1623,12 @@
+         if (
+             self.provider == "kimi"
+             and self.launch_flags == ()
+-            and self.model == "kimi-code/k3"
+             and self.effort in {"high", "max"}
+         ):
++            try:
++                _validate_kimi_model(self.model)
++            except ValueError as exc:
++                raise ValueError("E_EXTERNAL_PROVENANCE_INVALID") from exc
+             return
+         if (
+             frozen != self.launch_flags
+@@ -2914,6 +2931,7 @@
+         "--capture-max-bytes": "capture_max_bytes",
+         "--kimi-capabilities-file": "kimi_capabilities_file",
+         "--kimi-effort": "kimi_effort",
++        "--kimi-model": "kimi_model",
+     }
+     if external:
+         value_flags.update(
+@@ -2959,6 +2977,10 @@
+                 parsed_value = int(value)
+                 if parsed_value <= 0:
+                     raise ValueError(f"{token} must be a positive integer")
++            elif attr == "kimi_model":
++                if provider != "kimi":
++                    raise ValueError("E_KIMI_MODEL_INVALID")
++                parsed_value = _validate_kimi_model(value)
+             elif attr == "kimi_effort":
+                 if provider != "kimi" or value not in {"high", "max"}:
+                     raise ValueError("E_KIMI_EFFORT_INVALID")
+@@ -3133,15 +3155,23 @@
+     return normalize_launch_profile(provider, flags)[0]
+ 
+ 
++def _validate_kimi_model(value: object) -> str:
++    if (not isinstance(value, str) or not value.strip() or value.startswith("-")
++        or not value.isprintable()):
++        raise ValueError("E_KIMI_MODEL_INVALID")
++    return value
++
++
+ def resolved_profile(
+-    provider: str, flags: list[str], *, kimi_effort: str = "high"
++    provider: str, flags: list[str], *, kimi_effort: str = "high",
++    kimi_model: str = KIMI_WINDOWS_PROFILE_V1.model,
+ ) -> tuple[list[str], str, str]:
+     if provider == "kimi":
+         if flags or kimi_effort not in {"high", "max"}:
+             raise ValueError(
+                 "E_KIMI_PROFILE_FIXED: Kimi 1.x accepts no caller-supplied provider flags"
+             )
+-        return [], "kimi-code/k3", kimi_effort
++        return [], _validate_kimi_model(kimi_model), kimi_effort
+     if not flags:
+         flags = (
+             ["--model", "gpt-6.1-sol", "-c", "model_reasoning_effort=xhigh"]
+@@ -3472,7 +3502,7 @@
+         )
+     control, decision = _policy_bound_external_control(provider, control)
+     flags, model, effort = resolved_profile(
+-        provider, control.provider_flags, kimi_effort=control.kimi_effort
++        provider, control.provider_flags, kimi_effort=control.kimi_effort, kimi_model=control.kimi_model
+     )
+     role_provenance = external_role_provenance(control, provider)
+     return PolicyBoundLaunch(
+@@ -7303,10 +7333,12 @@
+         if (
+             payload.get("provider") == "kimi"
+             and payload["launchFlags"] == []
+-            and payload.get("model") == "kimi-code/k3"
+             and payload.get("effort") in {"high", "max"}
+         ):
+-            pass
++            try:
++                _validate_kimi_model(payload.get("model"))
++            except ValueError as exc:
++                raise ValueError("provider result launchFlags mismatch") from exc
+         elif (
+             payload["launchFlags"] != list(frozen)
+             or payload.get("model") != derived_model
+@@ -8039,7 +8071,7 @@
+             operation.consumed = True
+             prevalidated = operation.prevalidated
+             control, _decision = _policy_bound_external_control("kimi", prevalidated.control)
+-            flags, model, effort = resolved_profile("kimi", control.provider_flags, kimi_effort=control.kimi_effort)
++            flags, model, effort = resolved_profile("kimi", control.provider_flags, kimi_effort=control.kimi_effort, kimi_model=control.kimi_model)
+             role_provenance = external_role_provenance(control, "kimi")
+             provenance = prevalidated.provenance
+             if (
+@@ -8068,7 +8100,7 @@
+             control = parse_control(argv, provider=provider)
+             topic = validate_topic(control.topic)
+             flags, model, effort = resolved_profile(
+-                provider, control.provider_flags, kimi_effort=control.kimi_effort
++                provider, control.provider_flags, kimi_effort=control.kimi_effort, kimi_model=control.kimi_model
+             )
+             if control.ledger_closes:
+                 return fail(
+@@ -8178,8 +8210,10 @@
+         print(
+             "usage: invoke-kimi-prompt.py <topic> --prompt-file <path> "
+             "--terminal-receipt <path> --task-class <class> --role <role> "
+-            "[--kimi-capabilities-file <json>] [--user-approved-launch] [wrapper options]\n"
+-            "\nRuns the fixed kimi-code/k3 file-prompt transport. Omitting the "
++            "[--kimi-capabilities-file <json>] [--kimi-model <id>] [--kimi-effort <high|max>] "
++            "[--user-approved-launch] [wrapper options]\n"
++            "\nRuns the Kimi file-prompt transport with an explicitly selected model "
++            "(default: kimi-code/k3) and verified configuration readback. Omitting the "
+             "capabilities file keeps the no-tools, no-subagents profile.\n"
+             "Maintenance diagnostics: --enroll-executable, "
+             "--replace-kimi-enrollment, --verify-enrollment, "
+@@ -8452,6 +8486,7 @@
+                 control.result_max_bytes,
+                 kimi_observed_budget,
+                 effort,
++                model=model,
+                 before_prompt=(lambda: operation.require_current("kimi_prompt")) if operation is not None else None,
+             )
+             if operation is not None:
+--- a/scripts/sdk_execution/kimi.py
++++ b/scripts/sdk_execution/kimi.py
+@@ -74,7 +74,8 @@
+         if (
+             actual != expected or provenance.provider != "kimi"
+             or provenance.actual_execution_path != "direct-external-cli"
+-            or request.model != "kimi-code/k3" or request.effort not in {"high", "max"}
++            or prepared.model != provenance.model or prepared.control.kimi_model != provenance.model
++            or request.effort not in {"high", "max"}
+             or request.cwd != cwd or provenance.effort_mapping_loss != request.effort_mapping_loss
+             or prepared.control.result_max_bytes > request.max_output_bytes
+         ):

@@ -1,0 +1,172 @@
+"""Offline contracts for explicit Kimi model selection and provenance."""
+
+import asyncio
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from tests.test_agent_run_ledger import load_ledger_module, prepare_valid_work_item, run_ledger, run_validator
+from tests.test_kimi_transport import _FakeKimiAcpPeer, _load_owner
+from tests.test_sdk_kimi import adapter, fixtures, offline_owner, owner, prepared
+from sdk_execution.kimi import KimiAdapterError
+
+
+
+def test_kimi_model_choice_is_explicit_and_not_a_fixed_version():
+    owner=_load_owner()
+    control=owner.parse_control(["fixture","--task-class","engineering","--role","backend-engineer","--kimi-model","vendor/future-model"],external=True,provider="kimi")
+    assert control.kimi_model=="vendor/future-model"
+    assert control.provider_flags==[]
+    assert owner.resolved_profile("kimi",[],kimi_model=control.kimi_model)==([],"vendor/future-model","high")
+    assert owner.resolved_profile("kimi",[])==([],"kimi-code/k3","high")
+
+def test_kimi_model_choice_does_not_accept_flags_or_other_providers():
+    owner=_load_owner()
+    for value in ("--danger","x\nmalicious","","   "):
+        with pytest.raises(ValueError):
+            owner.parse_control(["fixture","--task-class","engineering","--role","backend-engineer","--kimi-model",value],external=True,provider="kimi")
+    with pytest.raises(ValueError):
+        owner.parse_control(["fixture","--task-class","engineering","--role","backend-engineer","--kimi-model","vendor/future-model"],external=True,provider="codex")
+
+
+def test_future_model_is_sent_and_read_back_before_prompt():
+    owner=_load_owner()
+    expected="vendor/future-model"
+    peer=_FakeKimiAcpPeer(model_config_result={"configOptions":[{"id":"model","currentValue":expected}]})
+    exchange=owner.KimiAcpOneShotV1(b"safe", "private/run", model=expected)
+    exchange(peer)
+    model_request=next(r for r in peer.requests if r["method"]=="session/set_config_option" and r["params"]["configId"]=="model")
+    assert model_request["params"]["value"]==expected
+    assert exchange.observed_model==expected
+    assert any(r["method"]=="session/prompt" for r in peer.requests)
+
+def test_future_model_mismatch_blocks_prompt():
+    owner=_load_owner()
+    peer=_FakeKimiAcpPeer(model_config_result={"configOptions":[{"id":"model","currentValue":"different"}]})
+    exchange=owner.KimiAcpOneShotV1(b"safe","private/run",model="vendor/future-model")
+    with pytest.raises(ValueError,match="E_KIMI_ACP_PROTOCOL"):
+        exchange(peer)
+    assert all(r["method"]!="session/prompt" for r in peer.requests)
+
+
+def test_future_model_can_be_captured_as_immutable_provenance():
+    owner=_load_owner()
+    p=owner.ExecutionProvenance(work_item="fixture",assigned_internal_role="backend-engineer",provider="kimi",model="vendor/future-model",effort="high",launch_flags=(),artifact_identity="artifact",external_dispatch_id="dispatch",external_evidence_run_id="evidence",effort_mapping_loss="none")
+    assert p.payload()["model"]=="vendor/future-model"
+    with pytest.raises(ValueError):
+        owner.ExecutionProvenance(work_item="fixture",assigned_internal_role="backend-engineer",provider="kimi",model="--bad",effort="high",launch_flags=(),artifact_identity="artifact",external_dispatch_id="dispatch",external_evidence_run_id="evidence",effort_mapping_loss="none")
+
+
+def test_new_kimi_model_keeps_separate_launch_approval(tmp_path,monkeypatch):
+    owner=_load_owner()
+    captured=[]
+    monkeypatch.setattr(owner,"os",SimpleNamespace(**{**vars(owner.os),"name":"nt"}))
+    monkeypatch.setattr(owner.TerminalReceiptV1,"reserve",classmethod(lambda _cls,_path:SimpleNamespace(committed=False,close=lambda:None)))
+    def stop_before_provider(_provider,_argv,_runner,*,prevalidated,reserved_run,**kwargs):
+        captured.append(prevalidated)
+        return 0
+    monkeypatch.setattr(owner,"_launch_with_runner",stop_before_provider)
+    args=["fixture","--terminal-receipt",str(tmp_path/"out.receipt"),"--task-class","review","--role","qa-engineer","--kimi-model","vendor/future-model","--kimi-effort","max"]
+    assert owner.launch("kimi",args)==1 and captured==[]
+    assert owner.launch("kimi",[*args,"--user-approved-launch"])==0
+    p=captured[0]
+    assert p.model=="vendor/future-model"
+    assert p.provenance.model==p.model
+    assert p.effort=="max" and p.flags==()
+
+
+def test_sdk_binds_selected_model_without_fixed_release(tmp_path,monkeypatch):
+    launch,request=prepared(tmp_path,monkeypatch,extra_args=("--kimi-model","vendor/future-model"))
+    runner=adapter(launch)
+    assert request.model=="vendor/future-model"
+    runner._binding(request)
+    from dataclasses import replace
+    with pytest.raises(KimiAdapterError):
+        runner._binding(replace(request,model="other"))
+
+
+def test_future_model_through_offline_existing_owner(tmp_path,monkeypatch):
+    selected="vendor/future-model"
+    launch,request=prepared(tmp_path,monkeypatch,extra_args=("--kimi-model",selected))
+    peer=fixtures._FakeKimiAcpPeer(model_config_result={"configOptions":[{"id":"model","currentValue":selected}]})
+    offline_owner(monkeypatch,tmp_path,peer)
+    result=asyncio.run(adapter(launch).execute(request))
+    import json
+    assert result.status=="completed",result.to_dict()
+    assert json.loads(result.observations[0].payload_json)["model"]==selected
+    receipt=owner.parse_provider_result((tmp_path/"terminal.receipt").read_text())
+    assert receipt["model"]==selected
+    assert any(row["method"]=="session/prompt" for row in peer.requests)
+
+
+def test_ledger_accepts_dynamic_kimi_model_without_unsafe_flags():
+    v=load_ledger_module().load_validator()
+    event={"provider":"kimi","launchFlags":[],"model":"vendor/future-model","effort":"high"}
+    assert v._kimi_empty_flags_resolved_effort(event)
+    for invalid in ("--bad","x\ncontrol","","   "):
+        assert not v._kimi_empty_flags_resolved_effort(dict(event,model=invalid))
+    assert not v._kimi_empty_flags_resolved_effort(dict(event,launchFlags=["--bad"]))
+    assert v._kimi_empty_flags_resolved_effort(dict(event,model="kimi-code/k3"))
+
+
+def test_future_kimi_model_round_trips_ledger(tmp_path):
+    item=prepare_valid_work_item(tmp_path)
+    common=("--role","qa-engineer","--execution-role","external-reviewer","--assigned-role","qa-engineer","--provider","kimi","--model","vendor/future-model","--effort","high","--status","completed","--gate","PASS","--scope","synthetic provider provenance","--artifact","reviews/qa.md","--evidence","command:fixture","--started-at","2026-09-14T10:00:00Z","--updated-at","2026-09-14T10:00:00Z","--launch-flags-json","[]")
+    a=run_ledger(item,"append","--run-id","dispatch-future","--event-kind","launch",*common,"--status","running","--gate","none")
+    assert a.returncode==0,a.stderr
+    b=run_ledger(item,"append","--run-id","evidence-future","--event-kind","terminal","--launch-run-id","dispatch-future","--terminal-class","external-nonauthorizing","--authorizing","false","--actual-execution-path","direct-external-cli","--artifact-identity","sha256:"+"b"*64,"--external-dispatch-id","dispatch-future","--external-evidence-run-id","evidence-future","--effort-mapping-loss","none",*common)
+    assert b.returncode==0,b.stderr
+    result=run_validator(item)
+    assert result.returncode==0,result.stderr
+
+def test_future_kimi_terminal_model_mismatch_is_rejected(tmp_path):
+    item=prepare_valid_work_item(tmp_path)
+    common=("--role","qa-engineer","--execution-role","external-reviewer","--assigned-role","qa-engineer","--provider","kimi","--effort","high","--status","completed","--gate","PASS","--scope","synthetic provider provenance","--artifact","reviews/qa.md","--evidence","command:fixture","--started-at","2026-09-14T10:00:00Z","--updated-at","2026-09-14T10:00:00Z","--launch-flags-json","[]")
+    a=run_ledger(item,"append","--run-id","dispatch-mismatch","--event-kind","launch",*common,"--model","vendor/future-model","--status","running","--gate","none")
+    assert a.returncode==0,a.stderr
+    b=run_ledger(item,"append","--run-id","evidence-mismatch","--event-kind","terminal","--launch-run-id","dispatch-mismatch","--terminal-class","external-nonauthorizing","--authorizing","false","--actual-execution-path","direct-external-cli","--artifact-identity","sha256:"+"b"*64,"--external-dispatch-id","dispatch-mismatch","--external-evidence-run-id","evidence-mismatch","--effort-mapping-loss","none",*common,"--model","vendor/different")
+    assert b.returncode!=0 and "WI-LEDGER-LAUNCH-BINDING" in b.stderr and "differs in model" in b.stderr
+
+
+
+def test_kimi_model_drift_after_readback_blocks_prompt():
+    owner=_load_owner()
+    wanted="vendor/future-model"
+    peer=_FakeKimiAcpPeer(
+        model_config_result={"configOptions":[{"id":"model","currentValue":wanted}]},
+        interleaved_method="session/set_config_option",
+        interleaved_update={"sessionUpdate":"config_option_update","configOptions":[{"id":"model","currentValue":"vendor/other"}]},
+    )
+    exchange=owner.KimiAcpOneShotV1(b"safe","private/run",model=wanted)
+    with pytest.raises(ValueError,match="E_KIMI_ACP_PROTOCOL"):
+        exchange(peer)
+    assert all(x["method"]!="session/prompt" for x in peer.requests)
+
+def test_kimi_model_drift_during_prompt_cannot_pass():
+    owner=_load_owner()
+    wanted="vendor/future-model"
+    update={"sessionUpdate":"config_option_update","configOptions":[{"id":"model","currentValue":"vendor/other"}]}
+    peer=_FakeKimiAcpPeer(model_config_result={"configOptions":[{"id":"model","currentValue":wanted}]},tool_updates=(update,))
+    exchange=owner.KimiAcpOneShotV1(b"safe","private/run",model=wanted)
+    with pytest.raises(ValueError,match="E_KIMI_ACP_PROTOCOL"):
+        exchange(peer)
+    assert any(x["method"]=="session/prompt" for x in peer.requests)
+
+def test_cleanup_update_does_not_retroactively_invalidate_completed_prompt():
+    owner=_load_owner()
+    wanted="vendor/future-model"
+    update={"sessionUpdate":"config_option_update","configOptions":[{"id":"model","currentValue":"vendor/other"}]}
+    peer=_FakeKimiAcpPeer(model_config_result={"configOptions":[{"id":"model","currentValue":wanted}]},interleaved_method="session/close",interleaved_update=update)
+    exchange=owner.KimiAcpOneShotV1(b"safe","private/run",model=wanted)
+    exchange(peer)
+    assert exchange.result_bytes==b"artifact\nGATE: PASS\n" and exchange.protocol_closed
+
+
+def test_current_documentation_describes_selected_model():
+    root = Path(__file__).resolve().parents[1]
+    for relative in ("README.md", "INSTALL.md", "docs/agents-mode-reference.md",
+                     "docs/external-worker-design.md", "docs/provider-runtime-layouts.md"):
+        text = (root / relative).read_text(encoding="utf8")
+        assert "selectable model (default `kimi-code/k3`)" in text
+        assert "fixed `kimi-code/k3`" not in text

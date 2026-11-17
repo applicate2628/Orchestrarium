@@ -1,0 +1,16 @@
+{
+  "source_branch": "sdk-copilot-integration",
+  "source_head": "5f0515accd608fd451ce0840dafe6f266715cfcb",
+  "selected_files": [
+    {
+      "source": "tests/test_kimi_model_selection.py",
+      "source_sha256": "c62c2757eb41a623a25805f8ccbcf6d202da073bed862962ace36eab25b3686a",
+      "artifact_sha256": "ee897644634c06a0778ccc13bd4660cb58b72270d0f79b573c69f9aa624dc852",
+      "transformation": "Five synthetic C-drive absolute run-directory fixtures replaced with relative private/run; source unchanged."
+    },
+    {
+      "source": "tests/test_sdk_usage_observation.py",
+      "sha256": "529b9d127a28218523db08760485539f3ef57e8b74266e86e48da49cb0728e74"
+    }
+  ]
+}

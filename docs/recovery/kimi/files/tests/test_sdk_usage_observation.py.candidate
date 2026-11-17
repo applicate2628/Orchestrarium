@@ -1,0 +1,33 @@
+"""Offline checks for cumulative usage; no provider executable or network."""
+from tests.test_sdk_codex import FakeClient, event, execute, successful_events
+from sdk_execution.coordination_model import normalized_usage_kwargs
+
+
+def test_cumulative_usage_events_are_not_summed_or_double_counted():
+    first = {"inputTokens": 5, "cachedInputTokens": 3, "outputTokens": 2,
+             "reasoningOutputTokens": 1, "totalTokens": 7}
+    final = {"inputTokens": 9, "cachedInputTokens": 4, "outputTokens": 3,
+             "reasoningOutputTokens": 2, "totalTokens": 12}
+    delta = {"inputTokens": 4, "cachedInputTokens": 1, "outputTokens": 1,
+             "reasoningOutputTokens": 1, "totalTokens": 5}
+    def usage(last, total):
+        return event("thread/tokenUsage/updated", {
+            "threadId": "thread-1", "turnId": "turn-1",
+            "tokenUsage": {"last": last, "total": total},
+        })
+    result, _ = execute(FakeClient([usage(first, first), usage(delta, final), *successful_events()]))
+    assert result.status == "completed"
+    assert result.usage["last"] == delta
+    assert result.usage["total"] == final
+    assert result.to_tool_output()["usage"]["total"] == final
+    assert normalized_usage_kwargs(result.usage) == {
+        "requests": 1, "input_tokens": 9, "output_tokens": 3, "total_tokens": 12,
+    }
+
+
+def test_absent_usage_is_retained_as_unknown():
+    result, _ = execute(FakeClient(successful_events()))
+    assert result.status == "completed"
+    assert result.usage is None
+    assert result.to_tool_output()["usage"] is None
+    assert normalized_usage_kwargs(None) == {"requests": 1}
