@@ -15,11 +15,34 @@ To print a proposal without installing anything:
 python install.py --sdk-setup codex --sdk-python .venv-codex/bin/python
 ```
 
+To create or update a selected provider environment through the installer:
+
+```sh
+python install.py --sdk-setup codex --sdk-venv .venv-codex
+python install.py --sdk-setup codex --sdk-venv .venv-codex --apply
+```
+
+The first command is a preview. The explicit apply creates a venv using the
+current supported installer Python, or updates the selected existing venv. It
+runs ordinary official PyPI installation with normal dependencies and then
+`pip check`, returning the actual failure status if any stage fails. Codex's
+normal installation includes its declared CLI package; other vendor runtimes are
+disclosed by the selected proposal. Nothing logs in or calls a model.
+
+The selected interpreter's real environment prefix is checked before pip runs.
+Child processes do not inherit pip/Python install-redirection settings; pip uses
+its isolated mode and the official index, not ambient target/prefix configuration.
+Temporary installation data stays beside the selected environment. A failed
+complete environment can be retried with the same command. An interrupted venv
+creation is retained, never cleared automatically: repair it explicitly or choose
+a new directory. An unrelated non-venv directory is not overwritten. Cleanup
+warnings do not erase the successful installation result.
+
 On Windows select `.venv-codex/Scripts/python.exe` instead. Create/select an
 appropriate separate environment first; the argument identifies its interpreter,
-not the immutable installer-bundle interpreter. The proposal prints the official
-package command and `pip check`. It does not install, log in, register a host,
-change routing or launch a model. A successful package installation alone does
+not the immutable installer-bundle interpreter. The `--sdk-python` proposal prints the official
+package command and `pip check` without executing them. Neither mode registers a
+host, changes routing or launches a model. A successful package installation alone does
 not qualify Orche's adapter or authorize provider quota use. Package resolution
 selects available dependency-compatible releases; adapter/protocol compatibility
 still needs the existing checks, not an assumption that every latest release works.

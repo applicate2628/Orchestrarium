@@ -104,3 +104,137 @@ def test_runtime_disclosures_do_not_claim_binary_free_packages():
     assert "first managed use" in setup_guidance("copilot", "python")
     assert "legacy kimi-cli" in setup_guidance("kimi", "python")
     assert "does not establish compatibility" in setup_guidance("kimi", "python")
+
+
+def fake_venv(directory):
+    from installation.sdk_setup import environment_python
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / 'pyvenv.cfg').write_text('test marker', encoding='utf-8')
+    python = environment_python(directory)
+    python.parent.mkdir(parents=True, exist_ok=True)
+    python.write_text('test placeholder', encoding='utf-8')
+
+
+def test_venv_preview_has_no_effect(tmp_path):
+    from installation.sdk_setup import setup_environment
+    target = tmp_path / 'new env'
+    with patch('subprocess.run', side_effect=AssertionError('preview execution')):
+        assert setup_environment('codex', str(target)) == 0
+    assert not target.exists()
+
+
+def test_apply_isolated_normal_pip_and_same_interpreter(tmp_path, monkeypatch):
+    import os
+    from types import SimpleNamespace
+    from installation.sdk_setup import setup_environment, environment_python
+    target = tmp_path / 'worker env'
+    calls = []
+    for name in ('PIP_TARGET', 'PIP_PREFIX', 'PIP_USER', 'PIP_CONFIG_FILE', 'PYTHONPATH', 'PYTHONHOME'):
+        monkeypatch.setenv(name, 'must-not-inherit')
+    def run(command, *, env, check):
+        calls.append((command, env))
+        if 'venv' in command:
+            fake_venv(target)
+        return SimpleNamespace(returncode=0)
+    with patch('subprocess.run', side_effect=run):
+        assert setup_environment('codex', str(target), apply=True) == 0
+    assert calls[0][0] == [sys.executable, '-I', '-m', 'venv', str(target)]
+    assert calls[1][0][:3] == [str(environment_python(target)), '-I', '-c']
+    assert 'sys.prefix != sys.base_prefix' in calls[1][0][3]
+    assert calls[1][0][-1] == str(target)
+    install = calls[2][0]
+    assert install[:7] == [str(environment_python(target)), '-I', '-m', 'pip', '--isolated', 'install', '--upgrade']
+    assert '--no-deps' not in install and install[-1] == 'openai-codex'
+    assert install[install.index('--index-url') + 1] == 'https://pypi.org/simple'
+    assert calls[3][0][-1] == 'check'
+    env = calls[0][1]
+    assert env['PIP_CONFIG_FILE'] == os.devnull
+    assert not any(key in env for key in ('PIP_TARGET', 'PIP_PREFIX', 'PIP_USER', 'PYTHONPATH', 'PYTHONHOME'))
+    temporary = Path(env['TEMP'])
+    assert temporary.parent == tmp_path and not temporary.exists()
+    assert env['TMP'] == env['TMPDIR'] == str(temporary)
+
+
+def test_existing_selected_venv_reused_and_unrelated_files_preserved(tmp_path):
+    from types import SimpleNamespace
+    from installation.sdk_setup import setup_environment
+    fake_venv(tmp_path)
+    marker = tmp_path / 'important.txt'
+    marker.write_text('keep', encoding='utf-8')
+    with patch('subprocess.run', return_value=SimpleNamespace(returncode=0)) as run:
+        assert setup_environment('claude', str(tmp_path), apply=True) == 0
+    assert len(run.call_args_list) == 3
+    assert marker.read_text(encoding='utf-8') == 'keep'
+
+
+@pytest.mark.parametrize('stage,status', [(0, 3), (1, 2), (2, 7), (3, 1)])
+def test_failure_retains_state_and_returns_stage_status(tmp_path, capsys, stage, status):
+    from types import SimpleNamespace
+    from installation.sdk_setup import setup_environment
+    target = tmp_path / 'worker'
+    calls = []
+    def run(command, *, env, check):
+        index = len(calls)
+        calls.append(command)
+        if index == 0:
+            fake_venv(target)
+        return SimpleNamespace(returncode=status if index == stage else 0)
+    with patch('subprocess.run', side_effect=run):
+        assert setup_environment('codex', str(target), apply=True) == status
+    assert len(calls) == stage + 1
+    assert target.exists() and list(tmp_path.glob('.sdk-setup-*'))
+    assert 'retained' in capsys.readouterr().err
+
+
+def test_foreign_or_partial_directory_never_overwritten(tmp_path):
+    from installation.sdk_setup import setup_environment
+    marker = tmp_path / 'important.txt'
+    marker.write_text('keep', encoding='utf-8')
+    with patch('subprocess.run', side_effect=AssertionError('must not run')):
+        with pytest.raises(ValueError, match='Repair it explicitly'):
+            setup_environment('codex', str(tmp_path), apply=True)
+    assert marker.read_text(encoding='utf-8') == 'keep'
+
+
+def test_grok_apply_does_not_create_environment(tmp_path):
+    from installation.sdk_setup import setup_environment
+    target = tmp_path / 'unused'
+    with patch('subprocess.run', side_effect=AssertionError('must not run')):
+        assert setup_environment('grok', str(target), apply=True) == 2
+    assert not target.exists()
+
+
+def test_temp_creation_failure_returns_error(tmp_path, capsys):
+    from installation.sdk_setup import setup_environment
+    with patch('tempfile.mkdtemp', side_effect=OSError('disk unavailable')):
+        assert setup_environment('codex', str(tmp_path / 'new'), apply=True) == 1
+    assert 'disk unavailable' in capsys.readouterr().err
+
+
+def test_cleanup_failure_does_not_mask_success(tmp_path, capsys):
+    from types import SimpleNamespace
+    from installation.sdk_setup import setup_environment
+    fake_venv(tmp_path)
+    with patch('subprocess.run', return_value=SimpleNamespace(returncode=0)), patch('shutil.rmtree', side_effect=OSError('busy')):
+        assert setup_environment('codex', str(tmp_path), apply=True) == 0
+    assert 'cleanup needs attention' in capsys.readouterr().err
+
+
+def test_apply_only_routes_sdk_owner():
+    installer = load_installer()
+    with patch.object(installer, 'setup_environment', return_value=7) as setup, patch.object(installer, '_run_production', side_effect=AssertionError('host')):
+        assert installer.main(['--sdk-setup', 'codex', '--sdk-venv', 'worker', '--apply']) == 7
+    setup.assert_called_once_with('codex', 'worker', apply=True)
+
+
+@pytest.mark.parametrize('args', [
+    ['--sdk-venv', 'worker'],
+    ['--sdk-setup', 'codex', '--sdk-python', 'python', '--sdk-venv', 'worker'],
+    ['--sdk-setup', 'codex', '--sdk-venv', 'worker', '--uninstall', '--apply'],
+])
+def test_conflicting_apply_arguments_no_effect(args):
+    installer = load_installer()
+    with patch('subprocess.run', side_effect=AssertionError('must not run')):
+        with pytest.raises(SystemExit) as exc:
+            installer.main(args)
+    assert exc.value.code == 2

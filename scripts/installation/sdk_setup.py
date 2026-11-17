@@ -1,4 +1,4 @@
-"""Information-only official agent SDK setup; never installs or starts a provider.
+"""Official agent SDK setup proposals and explicit isolated installation.
 
 This catalog is separate from qualified native host integrations in clients.py.
 Official packages own their dependencies and runtimes. Orchestrarium does not
@@ -8,6 +8,11 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 
 # Ordered for the selected Antigravity-first agent SDK direction, not host routing.
 SDK_PROVIDERS = {
@@ -92,3 +97,85 @@ def setup_guidance(provider: str, python: str | None, *, windows: bool | None = 
         spec["auth"],
     ])
     return "\n".join(lines)
+
+
+def environment_python(directory: Path) -> Path:
+    """Return the platform venv interpreter, without PATH/global fallback."""
+    return directory / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+
+def setup_environment(provider: str, directory: str, *, apply: bool = False) -> int:
+    """Preview or apply an explicitly selected official package installation.
+
+    An existing venv is an explicit user selection, not an Orchestrarium-owned
+    installation. Its unrelated contents are retained; pip owns package upgrades.
+    No worker, authentication or model call is started here.
+    """
+    spec = SDK_PROVIDERS[provider]
+    if spec["package"] is None:
+        print(setup_guidance(provider, None))
+        if apply:
+            print("No verified agent SDK package to install; nothing applied.", file=sys.stderr)
+            return 2
+        return 0
+    if not directory or not directory.strip() or any(c in directory for c in "\r\n\0"):
+        raise ValueError("Specify --sdk-venv with the selected environment directory.")
+    target = Path(directory).expanduser().absolute()
+    python = environment_python(target)
+    existing = target.exists()
+    if existing and (not target.is_dir() or not (target / "pyvenv.cfg").is_file() or not python.is_file()):
+        raise ValueError("Selected existing directory is not a complete Python venv; it was not modified. Repair it explicitly or select a new environment directory.")
+    print(setup_guidance(provider, str(python)), flush=True)
+    print("Base Python for a new environment: " + sys.executable, flush=True)
+    print("This uses the current installer Python, not an automatic Python upgrade.", flush=True)
+    print("Existing selected venv packages may be upgraded by official pip resolution." if existing
+          else "A new isolated Python venv will be created at: " + str(target), flush=True)
+    commands = []
+    if not existing:
+        commands.append([sys.executable, "-I", "-m", "venv", str(target)])
+    verify = ("import os,sys; raise SystemExit(0 if sys.prefix != sys.base_prefix and "
+              "os.path.samefile(sys.prefix, sys.argv[1]) else 2)")
+    commands.extend([
+        [str(python), "-I", "-c", verify, str(target)],
+        [str(python), "-I", "-m", "pip", "--isolated", "install", "--upgrade", "--no-cache-dir",
+         "--disable-pip-version-check", "--index-url", "https://pypi.org/simple", spec["package"]],
+        [str(python), "-I", "-m", "pip", "--isolated", "check"],
+    ])
+    print("Selected operation plan:", flush=True)
+    for command in commands:
+        print(_command(command, windows=os.name == "nt"), flush=True)
+    if not apply:
+        print("Preview only. Add --apply to perform this disclosed SDK/runtime installation.", flush=True)
+        return 0
+    temporary = None
+    success = False
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = Path(tempfile.mkdtemp(prefix=".sdk-setup-", dir=target.parent))
+        environment = {name: value for name, value in os.environ.items()
+                       if not name.upper().startswith("PIP_")
+                       and name.upper() not in {"PYTHONHOME", "PYTHONPATH", "PYTHONUSERBASE", "VIRTUAL_ENV"}}
+        # pip honors os.devnull here even with --isolated: no global/user/site config.
+        environment.update(TEMP=str(temporary), TMP=str(temporary), TMPDIR=str(temporary),
+                           PIP_CONFIG_FILE=os.devnull)
+        for command in commands:
+            status = subprocess.run(command, env=environment, check=False).returncode
+            if status:
+                print(f"SDK setup stopped with exit {status}; the selected environment is retained. Retry a complete venv, or explicitly repair/select a new directory after partial creation.", file=sys.stderr)
+                return status
+        success = True
+        print("Official SDK installation and pip check completed. Selected worker Python: " + str(python), flush=True)
+        print("No worker, authentication or model call was started; adapter compatibility is a separate check.", flush=True)
+        return 0
+    except OSError as exc:
+        print(f"SDK setup could not execute: {exc}. Selected environment retained.", file=sys.stderr)
+        return 1
+    finally:
+        if temporary is not None:
+            if success:
+                try:
+                    shutil.rmtree(temporary)
+                except OSError as exc:
+                    print(f"SDK installation succeeded, but temporary cleanup needs attention: {temporary}: {exc}", file=sys.stderr)
+            else:
+                print("Setup temporary diagnostics retained at: " + str(temporary), file=sys.stderr)

@@ -15,7 +15,7 @@ if str(SCRIPTS) not in sys.path:
 
 from python_installer_bootstrap import ensure_supported_python
 from installation.clients import CLIENTS as CLIENT_CATALOG
-from installation.sdk_setup import SDK_PROVIDERS, setup_guidance
+from installation.sdk_setup import SDK_PROVIDERS, setup_guidance, setup_environment
 
 ensure_supported_python(str(Path(__file__).resolve()))
 
@@ -68,19 +68,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--clients", nargs="+", choices=[name for name, _ in CLIENTS])
     parser.add_argument("--list-clients", action="store_true")
     parser.add_argument("--sdk-setup", choices=tuple(SDK_PROVIDERS),
-                        help="Show official agent SDK installation guidance only; no installation or model launch.")
+                        help="Preview official agent SDK setup; --sdk-venv PATH --apply installs the disclosed package/runtime, never runs models.")
     parser.add_argument("--sdk-python", help="Python executable in the selected worker environment; used only in guidance.")
+    parser.add_argument("--sdk-venv", help="Selected isolated SDK environment; preview by default, --apply installs normally through pip.")
     options, forwarded = parser.parse_known_args(sys.argv[1:] if argv is None else argv)
     if options.sdk_setup is not None:
-        if options.clients is not None or options.list_clients or forwarded:
-            parser.error("SDK setup guidance cannot be combined with client installation/lifecycle options.")
+        if options.clients is not None or options.list_clients or forwarded not in ([], ["--apply"]):
+            parser.error("SDK setup cannot be combined with client installation/lifecycle options.")
+        if options.sdk_venv is not None and options.sdk_python is not None:
+            parser.error("Choose --sdk-venv for managed setup or --sdk-python for commands only, not both.")
+        if forwarded and options.sdk_venv is None:
+            parser.error("SDK --apply requires an explicit --sdk-venv directory.")
         try:
+            if options.sdk_venv is not None:
+                return setup_environment(options.sdk_setup, options.sdk_venv, apply=bool(forwarded))
             print(setup_guidance(options.sdk_setup, options.sdk_python))
         except ValueError as exc:
             parser.error(str(exc))
         return 0
-    if options.sdk_python is not None:
-        parser.error("--sdk-python requires --sdk-setup.")
+    if options.sdk_python is not None or options.sdk_venv is not None:
+        parser.error("--sdk-python and --sdk-venv require --sdk-setup.")
     if options.list_clients:
         _show_clients()
         return 0

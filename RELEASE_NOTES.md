@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-17
 
+- Complete the explicit official agent SDK setup path with selected virtual-environment creation/update, ordinary vendor dependency installation and a real pip check. Preview remains non-mutating; apply isolates installer configuration, verifies the actual interpreter environment and preserves failed installations for diagnosis or retry without starting authentication or model work.
+
 - Separate the base installer from provider agent SDK acquisition: the root installer offers information-only official setup commands with runtime disclosures, while provider environments keep ordinary vendor dependencies and metadata. Antigravity is the selected Lead direction, not Gemini CLI; native host installation and worker activation remain separately qualified. Previous SDK-only bundle inputs are historical, not instructions to slice vendor packages.
 
 - Refresh both platform distribution inputs to Codex Python SDK 0.169.0, OpenAI SDK 3.52.0, Pydantic 2.14.3 and pydantic-core 2.50.4, with exact wheel hashes and matching source notices. Historical CLI notices and runtime evidence remain separate rather than being relabelled as qualification of the updated inputs; no global installation or provider activation is performed.
