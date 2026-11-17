@@ -16,11 +16,15 @@ CONTEXTS = ("copy-close", "scalar-parent-close", "descriptor-read-reset",
 def test_cleanup_cause_expression_preserves_primary(context, kind):
     # Evaluate the production expression itself without impersonating native effects.
     tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
-    matches = [node.args[2] for node in ast.walk(tree)
+    owner = next((node for node in ast.walk(tree)
+                  if isinstance(node, ast.FunctionDef)
+                  and node.name == "_copy_close_failure"), None) if context == "copy-close" else None
+    matches = [node.args[2] for node in ast.walk(owner if owner is not None else tree)
                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                and node.func.id == "_InstallFailure" and len(node.args) >= 3
-               and isinstance(node.args[1], ast.Constant) and node.args[1].value == context]
-    assert len(matches) == 1
+               and (owner is not None or
+                    isinstance(node.args[1], ast.Constant) and node.args[1].value == context)]
+    assert matches
     class Primary(RuntimeError):
         def __bool__(self):
             if kind == "raises":
@@ -28,11 +32,12 @@ def test_cleanup_cause_expression_preserves_primary(context, kind):
             return kind == "ordinary"
     primary = None if kind == "absent" else Primary("body")
     cleanup = OSError("cleanup")
-    expression = ast.Expression(matches[0])
-    actual = eval(compile(expression, str(SOURCE), "eval"), {}, {
-        "primary": primary, "original": primary, "cleanup": cleanup,
-        "reset": cleanup, "failures": [SimpleNamespace(cause=cleanup)]})
-    assert actual is (cleanup if primary is None else primary)
+    for cause in matches:
+        expression = ast.Expression(cause)
+        actual = eval(compile(expression, str(SOURCE), "eval"), {}, {
+            "primary": primary, "original": primary, "cleanup": cleanup,
+            "reset": cleanup, "failures": [SimpleNamespace(cause=cleanup)]})
+        assert actual is (cleanup if primary is None else primary)
 
 
 @pytest.mark.parametrize("kind", ["absent", "ordinary", "false", "raises"])
