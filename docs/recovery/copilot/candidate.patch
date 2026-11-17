@@ -1,0 +1,368 @@
+--- a/scripts/production_installer.py
++++ b/scripts/production_installer.py
+@@ -1973,6 +1973,8 @@
+ 
+ SLICE_A_FAILURE_IDS = frozenset(
+     {
++        "E_COPILOT_CUSTOM_HOME_UNQUALIFIED",
++        "E_COPILOT_HOOKS_UNQUALIFIED",
+         "E_PROVIDER_RECEIPT_DRIFT",
+         "E_PROVIDER_RECEIPT_INVALID",
+         "E_PROVIDER_PAYLOAD_MODIFIED",
+@@ -7293,6 +7295,7 @@
+     "_install_codex_native_roles": ("native-role",),
+     "_merge_codex_agents": ("provider-doc",),
+     "_merge_claude_docs": ("provider-doc",),
++    "_merge_copilot_instructions": ("provider-doc",),
+     "_normalize_agents_mode": ("agents-mode",),
+     "_merge_claude_main_agent_settings": ("claude-main-settings",),
+     "_reclaim_retired": ("retired-reclaim",),
+@@ -7414,7 +7417,7 @@
+ ) -> tuple[_PostMaterializationWriterDestination, ...]:
+     """Enumerate every durable destination written after canonical lead publication."""
+ 
+-    if provider not in {"codex", "claude"}:
++    if provider not in {"codex", "claude", "copilot"}:
+         raise ValueError("E_CANONICAL_LEAD_POSTWRITE: unsupported provider")
+ 
+     records: list[_PostMaterializationWriterDestination] = []
+@@ -7427,6 +7430,16 @@
+                 Path(os.path.abspath(destination)),
+             )
+         )
++
++    if provider == "copilot":
++        if hooks_enabled:
++            raise ValueError("E_COPILOT_HOOKS_UNQUALIFIED")
++        add("lead-receipt", canonical_skills_target / _LEAD_RECEIPT_NAME)
++        add("provider-receipt", target / ".orche-install.v1.json")
++        add("ui-continuity", agents_root / UI_CONTINUITY_CONTRACT_TARGET)
++        add("provider-doc", docs_target)
++        add("agents-mode", mode_target)
++        return tuple(records)
+ 
+     if provider == "claude":
+         for runtime_source, destination in _runtime_file_destinations(
+@@ -7609,6 +7622,10 @@
+     kimi_runtime_binding: Path | None = None,
+ ) -> list[Path]:
+     """Return only paths whose contents this installer can mutate."""
++    if provider == "copilot":
++        return [target / ".orche-install.v1.json", canonical_skills_target,
++                agents_root / UI_CONTINUITY_CONTRACT_TARGET, docs_target,
++                mode_target, mode_target.with_suffix("")]
+     if provider not in {"codex", "claude"}:
+         raise ValueError(f"unsupported provider: {provider}")
+ 
+@@ -10484,6 +10501,79 @@
+     except (OSError, ValueError, UnicodeError):
+         return None  # Unproved global availability keeps standalone local rules.
+     return None
++
++
++def _matching_native_copilot_global_policy(root: Path, target: Path, pack: str) -> bool:
++    """Observe only the matching ordinary default-global instruction file."""
++    try:
++        if os.environ.get("COPILOT_HOME"):
++            return False
++        home = _resolve_global_home() / ".copilot"
++        path = home / "copilot-instructions.md"
++        if Path(os.path.abspath(target)).parent == home or _contains_reparse(path):
++            return False
++        if target.exists() and path.samefile(target):
++            return False  # A hardlink alias must not turn the global body into a reference.
++        before = path.lstat()
++        if not stat.S_ISREG(before.st_mode) or _is_reparse_metadata(before):
++            return False
++        codec = _provider_ownership_module(root)
++        with path.open("rb") as stream:
++            opened = os.fstat(stream.fileno())
++            if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
++                return False
++            payload = stream.read(codec.MAX_BYTES + 1)
++        after = path.lstat()
++        if ((after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
++                != (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
++                or len(payload) > codec.MAX_BYTES):
++            return False
++        text = payload.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
++        configuration = _provider_configuration_module(root)
++        bounds = configuration.owned_block(text, "copilot", _claude_document_context)
++        return bounds is not None and text[bounds[0]:bounds[1]] == pack.rstrip("\n")
++    except (OSError, ValueError, RuntimeError, UnicodeError):
++        return False  # Unproved availability keeps complete project rules.
++
++
++def _merge_copilot_instructions(root: Path, target: Path, dry_run: bool, *,
++                                mutable_owner: _CreateOnlyMutablePath | None = None,
++                                expected_digest: str | None = None,
++                                prefer_global: bool = False) -> None:
++    """Compose source policy through existing document and transaction owners.
++
++    This producer does not choose a destination, enable discovery, register
++    hooks, or admit the client. The scoped lifecycle caller owns those steps
++    and supplies the previous receipt digest for an update.
++    """
++    if not dry_run and (mutable_owner is None or not mutable_owner.transaction.enabled):
++        raise ValueError("Copilot instruction writes require an installation transaction")
++    sources = (root / "shared/AGENTS.shared.md",
++               root / "adapters/copilot/AGENTS.copilot.md")
++    parts = [path.read_text(encoding="utf-8").rstrip() for path in sources]
++    if not all(parts):
++        raise ValueError("Empty Copilot instruction source")
++    payload = "\n\n".join(parts) + "\n"
++    configuration = _provider_configuration_module(root)
++    # Validate the full source frame even when a matching global body is reused.
++    pack = configuration.merge_owned_block(None, "copilot", payload, _claude_document_context)
++    if prefer_global and _matching_native_copilot_global_policy(root, target, pack):
++        payload = (
++            "# Orche project instructions\n"
++            "Client scope: GitHub Copilot and VS Code Local.\n"
++            "Installation mode: global-backed. The complete Orche policy is supplied "
++            "by the matching native default-global Copilot instructions.\n"
++            "Standalone use requires reinstalling with --standalone-instructions. "
++            "Project-specific instructions outside this block are retained.\n"
++        )
++    existing = _read_owned_text(target, mutable_owner, preserve_newlines=True)
++    content = configuration.merge_owned_block(
++        existing, "copilot", payload, _claude_document_context,
++        expected_digest=expected_digest)
++    if dry_run:
++        print(f"    [dry-run] would merge {target}")
++    else:
++        _write_owned_text(target, content, mutable_owner)
+ 
+ 
+ def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *,
+@@ -12016,6 +12106,13 @@
+         configs[native_key] = {
+             "kind": "native-roles", "roles": {item.name: dict(description=item.description, config_file=item.config_file)
+                                                for item in registrations}, "features": owned_features}
++    if provider == "copilot":
++        # Flat Copilot registrations are not Claude/Codex handler groups.
++        # This candidate route has no qualified hook writer and owns no part
++        # of an existing registration, including invalid user JSON.
++        if hooks_enabled:
++            raise _InstallFailure("E_COPILOT_HOOKS_UNQUALIFIED", "capability")
++        return configs
+     current_registration = _read_owned_text(registration, owner)
+     registration_key = registration.relative_to(anchor).as_posix()
+     prior_registration = prior.get(registration_key, {})
+@@ -12178,6 +12275,11 @@
+     if args.apply and not (args.uninstall or args.materialize_legacy_skills):
+         print("FAIL: --apply requires uninstall or legacy materialization", file=sys.stderr)
+         return 2
++    # All lifecycle operations must preserve the same custom-home boundary.
++    if provider == "copilot" and os.environ.get("COPILOT_HOME"):
++        error = _InstallFailure("E_COPILOT_CUSTOM_HOME_UNQUALIFIED", "capability")
++        print(f"FAIL: {_installer_failure_text(error)}", file=sys.stderr)
++        return 1
+     if args.materialize_legacy_skills:
+         try:
+             root = _repo_root(Path(__file__))
+@@ -12218,6 +12320,13 @@
+     source = root / get_client(provider)["source_root"]
+     try:
+         mode, target, project = _target(provider, args)
++        if provider == "copilot":
++            # Candidate-only route: the shipped catalog stays closed until
++            # native capabilities and the complete lifecycle are qualified.
++            if _contains_reparse(target):
++                raise _InstallFailure("E_MUTABLE_PATH_REPARSE", "capability")
++            if not args.no_hypothesis_hook and not os.environ.get("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK"):
++                raise _InstallFailure("E_COPILOT_HOOKS_UNQUALIFIED", "capability")
+         _require_provider_copy_isolation(root, provider, mode, target, project)
+         if (
+             args.enroll_kimi or args.replace_kimi_enrollment
+@@ -12227,7 +12336,7 @@
+             )
+         # Each selected provider owns its installed skill payload. Source stays
+         # canonical in src.codex/skills; no installed peer is a materialization owner.
+-        canonical_agents_root = (target if provider == "claude" else
++        canonical_agents_root = (target if provider in {"claude", "copilot"} else
+             target.parent / ".agents" if mode == "global" else project / ".agents")
+         canonical_agents_authority: Any | None = None
+         if mode == "global":
+@@ -12266,6 +12375,16 @@
+                 if codex_agents_authority is not None
+                 else target / "agents"
+             )
++        elif provider == "copilot":
++            agents_root = target
++            skills_target = canonical_skills_target
++            docs_target = target / "copilot-instructions.md"
++            installed_hook_root = skills_target / "lead"
++            registration = target / "hooks" / "orchestrarium.json"
++            source_tree = root / "src.codex" / "skills"
++            target_tree = skills_target
++            mode_target = target / ".agents-mode.yaml"
++            normalize_provider = "shared"
+         else:
+             agents_root = target
+             docs_target = target / "CLAUDE.md"
+@@ -12431,6 +12550,13 @@
+                 target / "config.toml",
+                 prior_factory_pair=prior_factory_pair,
+             )
++        elif provider == "copilot":
++            canonical_plan = _preflight_canonical_skills(
++                source_tree, canonical_skills_target, root=root,
++                global_install=mode == "global",
++                replace_unreceipted_lead_sha256=args.replace_unreceipted_lead_sha256,
++                replace_unreceipted_skill_sha256=tuple(args.replace_unreceipted_skill_sha256),
++            )
+         assert canonical_plan is not None
+         if args.dry_run and args.replace_unreceipted_lead_sha256 is not None:
+             print("  [dry-run] unreceipted Lead prior "
+@@ -12484,7 +12610,7 @@
+         # Byte producers write ordinary resolved storage; keep a selected leaf
+         # link's existing write-through snapshot and never snapshot an alias as
+         # though its logically named ordinary file were independent storage.
+-        byte_targets = [registration, docs_target]
++        byte_targets = [docs_target] if provider == "copilot" else [registration, docs_target]
+         if provider == "claude":
+             byte_targets.append(docs_target.parent / "AGENTS.md")
+         byte_pointer_objects = tuple(logical for logical in byte_targets if logical.is_symlink())
+@@ -12569,7 +12695,9 @@
+                 _provider_ownership_module(root).decode_record(
+                     ownership_before.encode("utf-8"), provider,
+                     "global" if mode == "global" else "project")
+-            config_paths = {docs_target, mode_target, registration}
++            config_paths = {docs_target, mode_target}
++            if provider != "copilot":
++                config_paths.add(registration)
+             if provider == "claude":
+                 config_paths.add(target / "AGENTS.md")
+             config_before = {path: _read_owned_text(path, create_only) for path in config_paths}
+@@ -12581,6 +12709,7 @@
+                     expected=codex_native_role_plan.config_selection)
+                 config_before[target / "config.toml"] = (
+                     native_before.decode("utf-8") if native_before is not None else None)
++            previous_record = {}
+             if ownership_before is not None:
+                 previous_record = _provider_ownership_module(root).decode_record(
+                     ownership_before.encode("utf-8"), provider,
+@@ -12604,6 +12733,10 @@
+                         current = configuration.block_digest(text, spec["blockKind"], _claude_document_context)
+                         if current is not None and current != spec["sha256"]:
+                             raise ValueError("E_PROVIDER_CONFIG_MODIFIED: " + relative)
++            copilot_instruction_digest = None
++            if provider == "copilot":
++                relative = docs_target.relative_to(mutable_anchor).as_posix()
++                copilot_instruction_digest = previous_record.get("configs", {}).get(relative, {}).get("sha256")
+             claude_agents_owner: _CreateOnlyMutablePath | None = None
+             claude_skills_owner: _CreateOnlyMutablePath | None = None
+             claude_commands_owner: _CreateOnlyMutablePath | None = None
+@@ -12673,7 +12806,7 @@
+             _install_ui_continuity_contract(
+                 root, canonical_agents_root, args.dry_run, mutable_owner=canonical_skills_owner
+             )
+-            if provider == "codex":
++            if provider in {"codex", "copilot"}:
+                 _normalize_agents_mode(
+                     root,
+                     root / "shared" / "agents-mode.defaults.yaml",
+@@ -12763,7 +12896,7 @@
+                 )
+             helper_target = (
+                 skills_target / "lead" / "scripts"
+-                if provider == "codex"
++                if provider in {"codex", "copilot"}
+                 else target_tree / "scripts"
+             )
+             if provider == "codex":
+@@ -12809,9 +12942,13 @@
+                 )
+                 _merge_codex_agents(root, source, docs_target, args.dry_run, mutable_owner=create_only,
+                                     prefer_global=mode != "global" and not args.standalone_instructions)
++            elif provider == "copilot":
++                _merge_copilot_instructions(root, docs_target, args.dry_run,
++                                           mutable_owner=create_only, expected_digest=copilot_instruction_digest,
++                                           prefer_global=mode != "global" and not args.standalone_instructions)
+             else:
+                 _merge_claude_docs(root, source, docs_target, args.dry_run, mutable_owner=create_only)
+-            if provider != "codex":
++            if provider == "claude":
+                 _normalize_agents_mode(
+                     root,
+                     root / "shared" / "agents-mode.defaults.yaml",
+@@ -12868,9 +13005,9 @@
+                     )
+             else:
+                 missing = _verify_files(
+-                    source_tree if provider == "codex" else source / "agents",
+-                    target_tree if provider == "codex" else target / "agents",
+-                    {
++                    source_tree if provider in {"codex", "copilot"} else source / "agents",
++                    target_tree if provider in {"codex", "copilot"} else target / "agents",
++                    set() if provider == "copilot" else {
+                         marker
+                         for marker, *_rest in _hook_specs(
+                             provider, installed_hook_root
+@@ -12939,6 +13076,7 @@
+             reclaimed = _reclaim_retired(
+                 target if provider == "claude" else agents_root,
+                 (
++                    {} if provider == "copilot" else
+                     {**_CLAUDE_RETIRED_PS1, **_CLAUDE_RETIRED_SH}
+                     if provider == "claude"
+                     else {
+--- a/scripts/installation/uninstall.py
++++ b/scripts/installation/uninstall.py
+@@ -117,7 +117,7 @@
+                 after = None
+             if after != payload:
+                 config_effects.append((relative, payload, after))
+-        if provider == "codex" and scope == "global" and any(
++        if provider in {"codex", "copilot"} and scope == "global" and any(
+             relative in backend.get_client(provider)["documents"]["global"]
+             for relative, _before, _after in config_effects
+         ):
+--- a/scripts/resolve-agents-mode.py
++++ b/scripts/resolve-agents-mode.py
+@@ -20,6 +20,7 @@
+ PROVIDER_DIRS = {
+     "codex": ".agents",
+     "claude": ".claude",
++    "copilot": ".github",
+ }
+ REMOVED_EXTERNAL_PROVIDERS = frozenset({"gemini", "qwen"})
+ EXTERNAL_DISPATCH_PROVIDERS = ("kimi", "grok")
+@@ -2292,6 +2293,8 @@
+     home: Path,
+ ) -> Path:
+     candidates = (
++        (project_root, (".github", "skills", "lead", "scripts"), "project"),
++        (home, (".copilot", "skills", "lead", "scripts"), "global"),
+         (
+             project_root,
+             (".agents", "skills", "lead", "scripts"),
+@@ -2393,6 +2396,8 @@
+         )
+     if provider not in PROVIDER_DIRS:
+         raise ValueError(f"unsupported agents-mode provider: {provider}")
++    if provider == "copilot" and os.environ.get("COPILOT_HOME"):
++        raise ValueError("E_COPILOT_CUSTOM_HOME_UNQUALIFIED")
+     values: dict[str, Any] = {}
+     sources: dict[str, dict[str, str]] = {}
+     reserve_resolver_layers: list[tuple[str, Any]] = []
+--- a/scripts/provider_prompt.py
++++ b/scripts/provider_prompt.py
+@@ -5484,6 +5484,7 @@
+             matches = []
+             for is_claude, candidate in ((False, home / '.agents/skills/lead/scripts/provider_prompt.py'),
+                     (False, home / '.claude/skills/lead/scripts/provider_prompt.py'),
++                    (False, home / '.copilot/skills/lead/scripts/provider_prompt.py'),
+                     (True, home / '.claude/agents/scripts/provider_prompt.py')):
+                 try:
+                     if script.samefile(candidate) and script.resolve(strict=True) == candidate.resolve(strict=True):
+@@ -5506,7 +5507,8 @@
+             # The transport and canonical helper belong to the same client.
+             # Another client's package is never a missing-helper fallback.
+             claude_root = scope_script.parents[2] if claude else None
+-            secondary_canonical = not claude and scope_script.parts[-5].casefold() == '.claude'
++            secondary_canonical = (not claude and scope_script.parts[-5].casefold()
++                                   in {'.claude', '.copilot', '.github'})
+             canonical_root = (claude_root / 'skills' if claude
+                               else scope_script.parents[2] if secondary_canonical
+                               else scope_script.parents[3])

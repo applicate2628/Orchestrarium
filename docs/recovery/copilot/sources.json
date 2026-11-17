@@ -1,0 +1,30 @@
+{
+  "source_branch": "sdk-copilot-integration",
+  "source_head": "5f0515accd608fd451ce0840dafe6f266715cfcb",
+  "selected_files": [
+    {
+      "source": "adapters/copilot/AGENTS.copilot.md",
+      "sha256": "e48a2aa67d4fd5b8ba622279d3cf17955bd5796325157cab183c42481ccd6eae"
+    },
+    {
+      "source": "tests/test_copilot_instruction_producer.py",
+      "sha256": "481b3de5eb27b5c597afdf586b32a21437ca2ffaf2ed938dff792d0255db2bd3"
+    },
+    {
+      "source": "tests/test_copilot_offline_install.py",
+      "sha256": "60fa12acdfae2e2a101026c1857b87ef38d1bb8f036a0d9dc6ebf0152fb57b27"
+    },
+    {
+      "source": "tests/test_copilot_global_policy_reuse.py",
+      "sha256": "d32dc57ea7a9c92f2a8a224e9a5b9977e1dd7ec9f3032e9157f9f85ec2e27d9c"
+    },
+    {
+      "source": "tests/test_copilot_runtime_roots.py",
+      "sha256": "b089c41e8ccb1b598dd9e8e69316ee735e3da983b0dea65eb1d615dfd6f37cff"
+    },
+    {
+      "source": "tests/test_client_target_resolution.py",
+      "sha256": "f5f70e5768b7bd7d0c46c53c84a8f4f0b56d814236b17a41ead0aabc9f3f3672"
+    }
+  ]
+}

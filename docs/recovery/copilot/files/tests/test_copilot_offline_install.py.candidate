@@ -1,0 +1,194 @@
+from pathlib import Path
+import hashlib
+import pytest
+from _module_loading_support import load_module
+
+ROOT = Path(__file__).resolve().parents[1]
+INSTALL = load_module(ROOT / "scripts/production_installer.py", "copilot_offline_install_tests")
+
+
+@pytest.fixture
+def candidate(monkeypatch, tmp_path):
+    assert "copilot" not in INSTALL.INSTALL_CLIENTS
+    client = {
+        "id": "copilot", "source_root": "adapters/copilot", "provider_root": ".copilot", "project_root": ".github",
+        "roots": (".copilot", ".github"),
+        "scope_roots": {"global": (".copilot",), "project": (".github",)},
+        "payload_roots": (".copilot/skills", ".copilot/contracts", ".github/skills", ".github/contracts"),
+        "documents": {"global": {".copilot/copilot-instructions.md": "copilot"},
+                      "project": {".github/copilot-instructions.md": "copilot"}},
+        "mode_file": {"global": ".copilot/.agents-mode.yaml", "project": ".github/.agents-mode.yaml"},
+        "native_config": None, "default_agent_key": None, "legacy_shared_roots": (),
+    }
+    monkeypatch.setitem(INSTALL.INSTALL_CLIENTS, "copilot", client)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.delenv("COPILOT_HOME", raising=False)
+    monkeypatch.delenv("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK", raising=False)
+    return tmp_path
+
+
+@pytest.mark.parametrize("scope,folder", [("global", ".copilot"), ("project", ".github")])
+def test_offline_full_materialization_and_selected_uninstall(candidate, scope, folder):
+    base = candidate
+    target = base / folder
+    other = base / (".github" if folder == ".copilot" else ".copilot")
+    other.mkdir()
+    peer = other / "copilot-instructions.md"
+    peer.write_bytes(b"Untouched other scope\r\n")
+    if scope == "project":
+        from test_copilot_instruction_producer import produce
+        produce(peer)
+    peer_before = peer.read_bytes()
+    foreign_hook = target / "hooks/orchestrarium.json"
+    if scope == "project":
+        foreign_hook.parent.mkdir(parents=True)
+        foreign_hook.write_bytes(b"{ user-owned unfinished JSON\r\n")
+    args = ["--global"] if scope == "global" else ["--target", str(base), "--allow-unsafe-target"]
+    args += ["--no-hypothesis-hook"]
+    assert INSTALL.install("copilot", args + ["--dry-run"]) == 0
+    assert target.exists() == (scope == "project")
+    assert INSTALL.install("copilot", args) == 0
+    codec = INSTALL._provider_ownership_module(ROOT)
+    receipt = target / codec.RECEIPT_NAME
+    before = receipt.read_bytes()
+    record = codec.decode_record(before, "copilot", scope)
+    assert record["files"]
+    assert all(path.startswith(folder + "/") for path in record["files"])
+    for path, expected in record["files"].items():
+        assert hashlib.sha256((base / path).read_bytes()).hexdigest() == expected
+    assert (target / "skills/lead/SKILL.md").is_file()
+    assert (target / "skills/lead/scripts/process_supervision/windows_job.py").is_file()
+    lead = target / "skills/lead"
+    runtime = load_module(lead / "scripts/provider_prompt.py", "installed_copilot_" + scope)
+    binding = runtime._ledger_helper_binding()
+    assert binding is not None and binding.helper.samefile(lead / "scripts/agent-run-ledger.py")
+    binding.assert_current()
+    resolver = load_module(lead / "scripts/resolve-agents-mode.py", "installed_copilot_resolver_" + scope)
+    project = base if scope == "project" else base / "unrelated-workspace"
+    assert resolver._installed_external_policy_root(lead / "scripts/resolve-agents-mode.py", project, base) == lead
+    assert (target / "copilot-instructions.md").read_text(encoding="utf-8").count("# Shared Governance") == (0 if scope == "project" else 1)
+    for path in ["settings.json", "CLAUDE.md", "AGENTS.md", "agents", "commands"]:
+        assert not (target / path).exists()
+    assert not (base / ".agents").exists()
+    assert not (base / ".codex").exists()
+    assert INSTALL.install("copilot", args) == 0
+    assert receipt.read_bytes() == before
+    if scope == "project":
+        assert INSTALL.install("copilot", args + ["--standalone-instructions"]) == 0
+        assert b"# Shared Governance" in (target / "copilot-instructions.md").read_bytes()
+    assert INSTALL.install("copilot", args + ["--uninstall", "--apply"]) == 0
+    assert not (target / "skills/lead/SKILL.md").exists()
+    assert peer.read_bytes() == peer_before
+    if scope == "project":
+        assert foreign_hook.read_bytes() == b"{ user-owned unfinished JSON\r\n"
+    else:
+        assert not (target / "hooks").exists()
+
+
+def test_unqualified_hooks_refuse_before_any_output(candidate, capsys):
+    assert INSTALL.install("copilot", ["--global"]) == 1
+    assert "E_COPILOT_HOOKS_UNQUALIFIED" in capsys.readouterr().err
+    assert not (candidate / ".copilot").exists()
+
+
+def test_custom_home_refuses_without_silently_using_default(candidate, monkeypatch, capsys):
+    custom = candidate / "custom"
+    monkeypatch.setenv("COPILOT_HOME", str(custom))
+    assert INSTALL.install("copilot", ["--global", "--no-hypothesis-hook"]) == 1
+    assert "E_COPILOT_CUSTOM_HOME_UNQUALIFIED" in capsys.readouterr().err
+    assert not custom.exists()
+    assert not (candidate / ".copilot").exists()
+
+
+def test_disabled_hooks_do_not_parse_or_adopt_foreign_registration(candidate):
+    target = candidate / ".copilot"
+    registration = target / "hooks/orchestrarium.json"
+    registration.parent.mkdir(parents=True)
+    original = b"{ user-owned unfinished JSON\r\n"
+    registration.write_bytes(original)
+    document = target / "copilot-instructions.md"
+    mode = target / ".agents-mode.yaml"
+    transaction = INSTALL._InstallTransaction([document, mode], enabled=False)
+    owner = INSTALL._CreateOnlyMutablePath(candidate, transaction, dry_run=True)
+    result = INSTALL._capture_provider_configs(ROOT, "copilot", "global", target,
+        candidate, owner, {document: None, mode: None}, {}, document, mode,
+        registration, target / "skills/lead", False)
+    assert result == {}
+    assert registration.read_bytes() == original
+
+
+def test_unqualified_global_root_link_refuses_before_staging(candidate, monkeypatch, capsys):
+    target = candidate / ".copilot"
+    original = INSTALL._contains_reparse
+    monkeypatch.setattr(INSTALL, "_contains_reparse", lambda path: Path(path) == target or original(path))
+    reached = []
+    monkeypatch.setattr(INSTALL, "_preflight_canonical_skills", lambda *a, **k: reached.append(True))
+    assert INSTALL.install("copilot", ["--global", "--no-hypothesis-hook"]) == 1
+    assert "E_MUTABLE_PATH_REPARSE" in capsys.readouterr().err
+    assert reached == [] and not target.exists()
+
+
+def test_actual_global_provider_link_is_preserved(candidate, capsys):
+    backing = candidate / "backing"
+    backing.mkdir()
+    marker = backing / "user.txt"
+    marker.write_bytes(b"preserve linked user data")
+    target = candidate / ".copilot"
+    try:
+        target.symlink_to(backing, target_is_directory=True)
+    except OSError as error:
+        pytest.skip("native directory symlink unavailable: " + str(error))
+    assert INSTALL.install("copilot", ["--global", "--no-hypothesis-hook"]) == 1
+    assert "E_MUTABLE_PATH_REPARSE" in capsys.readouterr().err
+    assert target.is_symlink()
+    assert list(backing.iterdir()) == [marker]
+    assert marker.read_bytes() == b"preserve linked user data"
+
+
+def test_custom_home_global_uninstall_never_uses_default(candidate, monkeypatch, capsys):
+    assert INSTALL.install("copilot", ["--global", "--no-hypothesis-hook"]) == 0
+    default = candidate / ".copilot"
+    marker = default / "user-marker.txt"
+    marker.write_bytes(b"retain default installation\n")
+    # Preserve the whole default tree, even if the native configuration changes.
+    before = {p.relative_to(default).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+              for p in default.rglob("*") if p.is_file()}
+    monkeypatch.setenv("COPILOT_HOME", str(candidate / "custom"))
+    assert INSTALL.install("copilot", ["--global", "--uninstall", "--apply"]) == 1
+    error = capsys.readouterr().err
+    assert "E_COPILOT_CUSTOM_HOME_UNQUALIFIED" in error and "context=capability" in error
+    assert str(candidate) not in error
+    assert {p.relative_to(default).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in default.rglob("*") if p.is_file()} == before
+    assert not (candidate / "custom").exists()
+
+
+def test_custom_home_project_uninstall_refuses_overlap(candidate, monkeypatch, capsys):
+    project = candidate / "project"
+    project.mkdir()
+    args = ["--target", str(project), "--allow-unsafe-target", "--no-hypothesis-hook"]
+    assert INSTALL.install("copilot", args) == 0
+    target = project / ".github"
+    before = {p.relative_to(target).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+              for p in target.rglob("*") if p.is_file()}
+    monkeypatch.setenv("COPILOT_HOME", str(target))
+    assert INSTALL.install("copilot", args + ["--uninstall", "--apply"]) == 1
+    error = capsys.readouterr().err
+    assert "E_COPILOT_CUSTOM_HOME_UNQUALIFIED" in error and "context=capability" in error
+    assert str(candidate) not in error
+    assert {p.relative_to(target).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in target.rglob("*") if p.is_file()} == before
+
+@pytest.mark.parametrize("operation", [[], ["--uninstall", "--apply"], ["--materialize-legacy-skills"]])
+def test_custom_home_refuses_before_target_or_lifecycle_loading(candidate, monkeypatch, capsys, operation):
+    monkeypatch.setenv("COPILOT_HOME", str(candidate / "private-custom-home"))
+    def unexpected(*args, **kwargs):
+        raise AssertionError("target or lifecycle owner must not be called")
+    monkeypatch.setattr(INSTALL, "_target", unexpected)
+    monkeypatch.setattr(INSTALL, "_load_module_from_path", unexpected)
+    assert INSTALL.install("copilot", ["--global", *operation]) == 1
+    error = capsys.readouterr().err
+    assert "E_COPILOT_CUSTOM_HOME_UNQUALIFIED" in error and "context=capability" in error
+    assert str(candidate) not in error
+    assert not (candidate / ".copilot").exists()

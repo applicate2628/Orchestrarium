@@ -1,0 +1,59 @@
+from pathlib import Path
+import pytest
+from _module_loading_support import load_module
+from test_provider_owned_ledger_binding import package
+from test_provider_prompt_relocation import _load_owner
+
+ROOT = Path(__file__).resolve().parents[1]
+RESOLVER = load_module(ROOT / "scripts/resolve-agents-mode.py", "copilot_runtime_root_resolver")
+
+
+def fixture(tmp_path, monkeypatch, scope):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    home.mkdir(); project.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    selected = (home / ".copilot" if scope == "global" else project / ".github") / "skills/lead"
+    for owner in (selected, home / ".agents/skills/lead", project / ".agents/skills/lead",
+                  home / ".claude/skills/lead", project / ".claude/skills/lead"):
+        package(owner)
+    (selected / "scripts/resolve-agents-mode.py").write_bytes((ROOT / "scripts/resolve-agents-mode.py").read_bytes())
+    (selected / "shared/role-routing-policy.v1.json").write_bytes((ROOT / "shared/role-routing-policy.v1.json").read_bytes())
+    return home, project, selected
+
+
+@pytest.mark.parametrize("scope", ["global", "project"])
+def test_ledger_uses_executing_copilot_package_without_peer_fallback(tmp_path, monkeypatch, scope):
+    home, project, selected = fixture(tmp_path, monkeypatch, scope)
+    module = _load_owner(selected / "scripts/provider_prompt.py", "copilot_owned_ledger_" + scope)
+    binding = module._ledger_helper_binding()
+    assert binding is not None
+    assert binding.helper.samefile(selected / "scripts/agent-run-ledger.py")
+    binding.assert_current()
+    (selected / "scripts/agent-run-ledger.py").unlink()
+    assert module.ledger_helper() is None
+    with pytest.raises(FileNotFoundError):
+        binding.assert_current()
+
+
+@pytest.mark.parametrize("scope", ["global", "project"])
+def test_external_policy_root_uses_actual_copilot_resolver(tmp_path, monkeypatch, scope):
+    home, project, selected = fixture(tmp_path, monkeypatch, scope)
+    executing = selected / "scripts/resolve-agents-mode.py"
+    assert RESOLVER._installed_external_policy_root(executing, project, home) == selected
+    (selected / "shared/role-routing-policy.v1.json").unlink()
+    with pytest.raises(ValueError):
+        RESOLVER._installed_external_policy_root(executing, project, home)
+
+
+def test_copilot_named_project_root_is_not_default_global_authority(tmp_path, monkeypatch):
+    home, project, selected = fixture(tmp_path, monkeypatch, "global")
+    foreign = project / ".copilot/skills/lead"
+    package(foreign)
+    module = _load_owner(foreign / "scripts/provider_prompt.py", "copilot_foreign_scope")
+    assert module.ledger_helper() is None
+    copied = foreign / "scripts/resolve-agents-mode.py"
+    copied.write_bytes((ROOT / "scripts/resolve-agents-mode.py").read_bytes())
+    (foreign / "shared/role-routing-policy.v1.json").write_bytes((ROOT / "shared/role-routing-policy.v1.json").read_bytes())
+    with pytest.raises(ValueError, match="missing or ambiguous"):
+        RESOLVER._installed_external_policy_root(copied, project, home)

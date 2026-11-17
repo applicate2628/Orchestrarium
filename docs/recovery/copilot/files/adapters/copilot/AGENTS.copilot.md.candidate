@@ -1,0 +1,43 @@
+# Copilot and VS Code Local Platform Rules
+
+This addendum applies only to GitHub Copilot and Visual Studio Code (VS Code)
+Local agent sessions. Use the shared governance above with the capabilities and
+permissions of the actual active session. A model name, endpoint or API key does
+not select a host runtime, tool schema, permission grant or execution route.
+
+- Use the actual exposed tool names and argument schemas. Do not translate a
+  terminal tool to Bash or PowerShell merely from its name or hook launcher.
+- Shared role names identify responsibilities. They do not establish native
+  subagent availability or authorize a model call. Keep user approval and quota
+  restrictions when choosing an execution route.
+- Respect workspace trust, disabled instruction or hook settings, and native
+  approval prompts. An installed file or receipt proves neither that rules were
+  loaded nor that a hook ran or blocked a tool.
+- Use the effective discovered skill source. Preserve higher-priority user or
+  other-client skills; report shadowing instead of overwriting them to force
+  precedence. Installed copies are outputs, not a second canonical role catalog.
+- Keep external execution, state changes and publication under their existing
+  shared owners. The selected model and this addendum confer no extra authority.
+
+## Effective agents-mode settings
+
+Resolve settings per key in this order: project `.github/.agents-mode.yaml`,
+project legacy `.github/.agents-mode`, user `.copilot/.agents-mode.yaml`, user
+legacy `.copilot/.agents-mode`, shared user `.agents-mode.yaml`, then canonical
+shared defaults. Do not substitute `.agents`, `.codex` or `.claude` settings.
+Reads do not authorize generating or rewriting a missing local configuration.
+Project-supplied executable wrapper settings retain the existing first-use
+confirmation boundary; another client's global configuration is not confirmation.
+
+This candidate supports only the default home layout. Report a configured
+`COPILOT_HOME` as unqualified rather than silently selecting default-home files.
+Configuration namespace `copilot` does not authorize a model launch or Codex-native
+dispatch. The source resolver can diagnose these layers; its installed general
+configuration command and the Codex-specific scalar reminder are not a qualified
+Copilot runtime entrypoint.
+
+## Terms and Abbreviations
+
+- API: application programming interface used to access a model or service.
+- Host runtime: the application that owns the session, tools and approvals.
+- Hook: a host-invoked event handler, separate from instruction-file discovery.

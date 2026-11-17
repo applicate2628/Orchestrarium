@@ -1,0 +1,118 @@
+from pathlib import Path
+import pytest
+from test_copilot_instruction_producer import INSTALL, CONFIG, ROOT, produce
+
+
+@pytest.fixture
+def scope(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("COPILOT_HOME", raising=False)
+    global_file = home / ".copilot/copilot-instructions.md"
+    project_file = tmp_path / "project/.github/copilot-instructions.md"
+    global_file.parent.mkdir(); project_file.parent.mkdir(parents=True)
+    return global_file, project_file
+
+
+def publish(target, *, prefer_global=True, expected=None):
+    with INSTALL._InstallTransaction([target], enabled=True) as transaction:
+        owner = INSTALL._CreateOnlyMutablePath(target.parent, transaction, dry_run=False)
+        INSTALL._merge_copilot_instructions(ROOT, target, False, mutable_owner=owner,
+            expected_digest=expected, prefer_global=prefer_global)
+        transaction.commit()
+
+
+def test_matching_default_global_policy_avoids_duplicate_project_body(scope):
+    global_file, project_file = scope
+    produce(global_file)
+    global_before = global_file.read_bytes()
+    user = b"User project rules\r\n"
+    project_file.write_bytes(user)
+    publish(project_file)
+    current = project_file.read_bytes()
+    assert b"Installation mode: global-backed" in current
+    assert b"# Shared Governance" not in current
+    assert b"Copilot" in current and b"Local" in current
+    assert current.endswith(user)
+    assert global_file.read_bytes() == global_before
+
+
+@pytest.mark.parametrize("state", ["missing", "edited", "invalid-utf8", "directory", "other-client"])
+def test_unproved_global_policy_keeps_complete_project_instructions(scope, state):
+    global_file, project_file = scope
+    if state == "directory":
+        global_file.mkdir()
+    elif state != "missing":
+        produce(global_file)
+        raw = global_file.read_bytes()
+        if state == "edited": raw = raw.replace(b"# Shared Governance", b"# User changed governance", 1)
+        elif state == "invalid-utf8": raw = b"\xffinvalid"
+        else:
+            raw = raw.replace(CONFIG.MARKERS["copilot"][0].encode(), CONFIG.MARKERS["codex"][0].encode())
+            raw = raw.replace(CONFIG.MARKERS["copilot"][1].encode(), CONFIG.MARKERS["codex"][1].encode())
+        global_file.write_bytes(raw)
+    publish(project_file)
+    assert b"# Shared Governance" in project_file.read_bytes()
+    assert b"Installation mode: global-backed" not in project_file.read_bytes()
+
+
+def test_global_update_never_replaces_its_own_complete_policy(scope):
+    global_file, _ = scope
+    produce(global_file)
+    before = global_file.read_bytes()
+    digest = CONFIG.block_digest(before.decode(), "copilot", INSTALL._claude_document_context)
+    publish(global_file, expected=digest)
+    assert global_file.read_bytes() == before
+
+
+def test_explicit_standalone_keeps_full_project_policy(scope):
+    global_file, project_file = scope
+    produce(global_file)
+    publish(project_file, prefer_global=False)
+    assert b"# Shared Governance" in project_file.read_bytes()
+
+
+def test_custom_home_never_proves_default_global_reuse(scope, monkeypatch):
+    global_file, project_file = scope
+    produce(global_file)
+    monkeypatch.setenv("COPILOT_HOME", str(global_file.parent / "different"))
+    publish(project_file)
+    assert b"# Shared Governance" in project_file.read_bytes()
+
+
+def test_same_file_alias_never_turns_global_policy_into_a_self_reference(scope):
+    global_file, project_file = scope
+    produce(global_file)
+    before = global_file.read_bytes()
+    try:
+        project_file.hardlink_to(global_file)
+    except OSError as error:
+        pytest.skip("hardlink unavailable: " + str(error))
+    digest = CONFIG.block_digest(before.decode(), "copilot", INSTALL._claude_document_context)
+    publish(project_file, expected=digest)
+    assert global_file.read_bytes() == before
+    assert project_file.read_bytes() == before
+
+
+def test_receipted_global_backed_project_replays_and_recovers_standalone(scope):
+    global_file, project_file = scope
+    produce(global_file)
+    publish(project_file)
+    before = project_file.read_bytes()
+    digest = CONFIG.block_digest(before.decode(), "copilot", INSTALL._claude_document_context)
+    publish(project_file, expected=digest)
+    assert project_file.read_bytes() == before
+    global_file.unlink()
+    publish(project_file, expected=digest)
+    assert b"# Shared Governance" in project_file.read_bytes()
+
+
+def test_dry_run_matching_global_reuse_leaves_project_absent(scope):
+    global_file, project_file = scope
+    produce(global_file)
+    before = global_file.read_bytes()
+    INSTALL._merge_copilot_instructions(ROOT, project_file, True, prefer_global=True)
+    assert not project_file.exists()
+    assert global_file.read_bytes() == before

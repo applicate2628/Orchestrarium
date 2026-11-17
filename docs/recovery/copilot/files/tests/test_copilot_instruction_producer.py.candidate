@@ -1,0 +1,158 @@
+from pathlib import Path
+import pytest
+from _module_loading_support import load_module
+
+ROOT = Path(__file__).resolve().parents[1]
+INSTALL = load_module(ROOT / "scripts/production_installer.py", "copilot_instruction_producer_tests")
+CONFIG = INSTALL._provider_configuration_module(ROOT)
+
+
+def produce(target, *, expected=None, commit=True):
+    with INSTALL._InstallTransaction([target], enabled=True) as transaction:
+        owner = INSTALL._CreateOnlyMutablePath(target.parent, transaction, dry_run=False)
+        INSTALL._merge_copilot_instructions(ROOT, target, False, mutable_owner=owner,
+                                           expected_digest=expected)
+        if commit:
+            transaction.commit()
+
+
+@pytest.mark.parametrize("scope", [".copilot", ".github"])
+def test_composes_real_shared_source_and_only_copilot_addendum(tmp_path, scope):
+    target = tmp_path / scope / "copilot-instructions.md"
+    target.parent.mkdir()
+    user = "# User \u4e2d\u6587\r\nKeep exactly.\r\n"
+    target.write_bytes(user.encode())
+    produce(target)
+    text = target.read_bytes().decode()
+    assert text.endswith(user)
+    shared = (ROOT / "shared/AGENTS.shared.md").read_text(encoding="utf-8").rstrip()
+    addon = (ROOT / "adapters/copilot/AGENTS.copilot.md").read_text(encoding="utf-8").rstrip()
+    assert shared + "\n\n" + addon + "\n" in text
+    assert text.count("# Shared Governance") == 1
+    assert "# Codex Platform Rules" not in text
+    assert CONFIG.block_digest(text, "copilot", INSTALL._claude_document_context)
+    assert "copilot" not in INSTALL.INSTALL_CLIENTS
+
+
+def test_replay_requires_receipt_and_preserves_exact_user_bytes(tmp_path):
+    target = tmp_path / "copilot-instructions.md"
+    target.write_bytes(b"User prefix\r\n")
+    produce(target)
+    before = target.read_bytes()
+    digest = CONFIG.block_digest(before.decode(), "copilot", INSTALL._claude_document_context)
+    produce(target, expected=digest)
+    assert target.read_bytes() == before
+    with pytest.raises(ValueError, match="Unowned or modified"):
+        produce(target)
+    assert target.read_bytes() == before
+
+
+def test_user_edit_is_not_replaced(tmp_path):
+    target = tmp_path / "copilot-instructions.md"
+    produce(target)
+    original = target.read_bytes()
+    digest = CONFIG.block_digest(original.decode(), "copilot", INSTALL._claude_document_context)
+    edited = original.replace(b"# Shared Governance", b"# My governance", 1)
+    target.write_bytes(edited)
+    with pytest.raises(ValueError, match="Unowned or modified"):
+        produce(target, expected=digest)
+    assert target.read_bytes() == edited
+
+
+@pytest.mark.parametrize("exists", [False, True])
+def test_uncommitted_transaction_restores_beforeimage(tmp_path, exists):
+    target = tmp_path / "copilot-instructions.md"
+    before = b"User\r\n" if exists else None
+    if before is not None:
+        target.write_bytes(before)
+    with pytest.raises(INSTALL._InstallFailure, match="E_INSTALL_TRANSACTION_UNCOMMITTED"):
+        produce(target, commit=False)
+    assert (target.read_bytes() if target.exists() else None) == before
+
+
+def test_dry_run_does_not_create_target_or_parent(tmp_path):
+    target = tmp_path / "absent" / "copilot-instructions.md"
+    INSTALL._merge_copilot_instructions(ROOT, target, True)
+    assert not target.parent.exists()
+
+
+def test_apply_requires_existing_transaction_owner(tmp_path):
+    target = tmp_path / "copilot-instructions.md"
+    with pytest.raises(ValueError, match="transaction"):
+        INSTALL._merge_copilot_instructions(ROOT, target, False)
+    assert not target.exists()
+
+
+@pytest.mark.parametrize("scope,folder", [("global", ".copilot"), ("project", ".github")])
+def test_real_receipt_capture_and_public_uninstall_preserve_other_scope(tmp_path, monkeypatch, scope, folder):
+    # A temporary catalog fixture exercises the actual owners without admitting
+    # this unfinished client in the shipped catalog.
+    provider = "fixture-copilot"
+    client = {
+        "id": provider, "provider_root": ".copilot", "project_root": ".github",
+        "roots": (".copilot", ".github"),
+        "scope_roots": {"global": (".copilot",), "project": (".github",)},
+        "payload_roots": (".copilot/skills", ".github/skills"),
+        "documents": {"global": {".copilot/copilot-instructions.md": "copilot"},
+                      "project": {".github/copilot-instructions.md": "copilot"}},
+        "mode_file": {"global": ".copilot/.agents-mode.yaml", "project": ".github/.agents-mode.yaml"},
+        "native_config": None, "default_agent_key": None,
+        "legacy_shared_roots": (),
+    }
+    monkeypatch.setitem(INSTALL.INSTALL_CLIENTS, provider, client)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    selected = tmp_path / folder
+    selected.mkdir()
+    target = selected / "copilot-instructions.md"
+    mode = selected / ".agents-mode.yaml"
+    registration = selected / "hooks" / "orchestrarium.json"
+    codec = INSTALL._provider_ownership_module(ROOT)
+    receipt = selected / codec.RECEIPT_NAME
+    user = "# User \u4e2d\u6587\r\nKeep bytes.\r\n".encode()
+    target.write_bytes(user)
+    other = tmp_path / (".github" if folder == ".copilot" else ".copilot")
+    other.mkdir()
+    neighbor = other / "copilot-instructions.md"
+    neighbor.write_bytes(b"Other scope user rules\r\n")
+
+    def publish(*, fail=False):
+        with INSTALL._InstallTransaction([target, receipt, mode, registration], enabled=True) as transaction:
+            owner = INSTALL._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            previous = INSTALL._read_owned_text(receipt, owner)
+            prior = codec.decode_record(previous.encode(), provider, scope) if previous else {"configs": {}}
+            relative = target.relative_to(tmp_path).as_posix()
+            digest = prior["configs"].get(relative, {}).get("sha256")
+            config_before = {path: INSTALL._read_owned_text(path, owner, preserve_newlines=True)
+                             for path in (target, mode, registration)}
+            INSTALL._merge_copilot_instructions(ROOT, target, False, mutable_owner=owner,
+                                               expected_digest=digest)
+            INSTALL._record_provider_install(ROOT, provider, scope, selected, tmp_path,
+                transaction, owner, previous, config_before, target, mode, registration,
+                selected / "skills/lead", False)
+            if fail:
+                raise RuntimeError("fixture failure after receipt write")
+            transaction.commit()
+
+    publish()
+    before = (target.read_bytes(), receipt.read_bytes(), neighbor.read_bytes())
+    record = codec.decode_record(before[1], provider, scope)
+    assert record["files"] == {}
+    assert record["configs"][target.relative_to(tmp_path).as_posix()]["sha256"] == CONFIG.block_digest(
+        before[0].decode(), "copilot", INSTALL._claude_document_context)
+    publish()
+    assert (target.read_bytes(), receipt.read_bytes(), neighbor.read_bytes()) == before
+    with pytest.raises(RuntimeError, match="fixture failure after receipt write"):
+        publish(fail=True)
+    assert (target.read_bytes(), receipt.read_bytes(), neighbor.read_bytes()) == before
+    args = ["--global"] if scope == "global" else ["--target", str(tmp_path), "--allow-unsafe-target"]
+    assert INSTALL.install(provider, args + ["--uninstall"]) == 0
+    assert (target.read_bytes(), receipt.read_bytes(), neighbor.read_bytes()) == before
+    assert INSTALL.install(provider, args + ["--uninstall", "--apply"]) == 0
+    assert target.read_bytes().endswith(user)
+    assert b"# Shared Governance" not in target.read_bytes()
+    assert neighbor.read_bytes() == before[2]
+    assert codec.decode_record(receipt.read_bytes(), provider, scope)["configs"] == {}
+    after = (target.read_bytes(), receipt.read_bytes(), neighbor.read_bytes())
+    assert INSTALL.install(provider, args + ["--uninstall", "--apply"]) == 0
+    assert (target.read_bytes(), receipt.read_bytes(), neighbor.read_bytes()) == after

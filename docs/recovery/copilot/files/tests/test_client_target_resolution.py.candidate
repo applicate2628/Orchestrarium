@@ -1,0 +1,51 @@
+"""Client-selected install roots must not be inferred from the vendor name."""
+from argparse import Namespace
+from pathlib import Path
+import pytest
+from _module_loading_support import load_module
+
+ROOT = Path(__file__).resolve().parents[1]
+INSTALLER = load_module(ROOT / "scripts/production_installer.py", "client_target_tests")
+
+def args(*, global_install=False, target=None, allow_unsafe_target=False):
+    return Namespace(global_install=global_install, target=target,
+                     allow_unsafe_target=allow_unsafe_target)
+
+@pytest.mark.parametrize("provider", ["codex", "claude"])
+@pytest.mark.parametrize("global_install", [False, True])
+def test_existing_client_roots_unchanged(tmp_path, monkeypatch, provider, global_install):
+    monkeypatch.setattr(INSTALLER, "_resolve_global_home", lambda: tmp_path)
+    monkeypatch.setattr(INSTALLER, "_git_root", lambda: tmp_path)
+    mode, target, project = INSTALLER._target(provider, args(global_install=global_install))
+    assert target == tmp_path / ("." + provider)
+    assert mode == ("global" if global_install else "repo")
+    assert project == (None if global_install else tmp_path)
+
+@pytest.mark.parametrize("global_install, expected", [(True, ".copilot"), (False, ".github")])
+def test_catalog_selects_scope_without_enabling_new_host(tmp_path, monkeypatch, global_install, expected):
+    monkeypatch.setattr(INSTALLER, "get_client",
+                        lambda _: {"provider_root": ".copilot", "project_root": ".github"})
+    monkeypatch.setattr(INSTALLER, "_resolve_global_home", lambda: tmp_path)
+    monkeypatch.setattr(INSTALLER, "_git_root", lambda: tmp_path)
+    mode, target, project = INSTALLER._target("fixture-host", args(global_install=global_install))
+    assert target == tmp_path / expected
+    assert project == (None if global_install else tmp_path)
+
+@pytest.mark.parametrize("direct", [False, True])
+def test_custom_target_uses_project_root_once(tmp_path, monkeypatch, direct):
+    monkeypatch.setattr(INSTALLER, "get_client",
+                        lambda _: {"provider_root": ".copilot", "project_root": ".github"})
+    given = tmp_path / ".github" if direct else tmp_path
+    mode, target, project = INSTALLER._target(
+        "fixture-host", args(target=str(given), allow_unsafe_target=True))
+    assert (mode, target, project) == ("target", tmp_path / ".github", tmp_path)
+
+def test_unknown_client_stays_unqualified(tmp_path):
+    with pytest.raises(ValueError, match="No qualified host-install adapter"):
+        INSTALLER._target("unknown-host", args(target=str(tmp_path), allow_unsafe_target=True))
+
+def test_custom_target_still_requires_opt_in(tmp_path, monkeypatch):
+    monkeypatch.setattr(INSTALLER, "get_client",
+                        lambda _: {"provider_root": ".copilot", "project_root": ".github"})
+    with pytest.raises(ValueError, match="unsafe custom target"):
+        INSTALLER._target("fixture-host", args(target=str(tmp_path)))
