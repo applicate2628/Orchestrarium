@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-17
 
+- Refresh the SDK transport source manifest after the captured-state and callback fixes. Claude installation and transport validation now receive the corrected SDK sources instead of refusing them as digest drift; source integrity checks remain strict.
+
 - Explicitly selected installer updates now preserve exact receipt bytes, including original line endings, and finalize linked instruction files by their logical ownership keys. This prevents false receipt-drift failures and external-storage path errors; exact receipt replacement and final source checks also detect changes during publication without altering ordinary update or canonical ownership behavior.
 
 - Explicit selected Codex document updates now preserve the same qualified global-policy reuse as ordinary installation. A separate witness tracks the actual visible native policy and rechecks override priority, home selection and exact content before and after applying the update; standalone/global modes and the strict two-source route remain unchanged.

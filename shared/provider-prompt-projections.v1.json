@@ -74,7 +74,7 @@
     },
     "sdk_execution/codex.py": {
       "source": "scripts/sdk_execution/codex.py",
-      "sha256": "18af833cb7188860725424deb493eabba8ac98696ec383200e9fcb4aed4fb2a8",
+      "sha256": "87425bf7accab1c1f6ce63673ba7c44fe05e022508bc1ddaf0e436ead5b02279",
       "destination": "scripts/sdk_execution/codex.py"
     },
     "sdk_execution/codex_tools.py": {
@@ -94,7 +94,7 @@
     },
     "sdk_execution/coordinator.py": {
       "source": "scripts/sdk_execution/coordinator.py",
-      "sha256": "0042dba7c9190a85d58c719f104722902ad489236e1e6cd9cb09eac36b35167c",
+      "sha256": "3b2f2438281f7a2c229933ba20d3aef42d3dc160463f8c59d4264c3402e659fe",
       "destination": "scripts/sdk_execution/coordinator.py"
     },
     "sdk_execution/coordination.py": {
@@ -124,7 +124,7 @@
     },
     "sdk_execution/kimi.py": {
       "source": "scripts/sdk_execution/kimi.py",
-      "sha256": "dbb87eff6527c62ea0ac6b3dc694ab121d42b2ad9a68a2f14569554cc07ffd9c",
+      "sha256": "da009249f01e894e720fea255e2f453bf854a086deff8afc0b33be0dc60b8cd9",
       "destination": "scripts/sdk_execution/kimi.py"
     },
     "sdk_execution/mimo.py": {
