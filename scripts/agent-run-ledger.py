@@ -529,6 +529,46 @@ def _noncanonical_fail(failure_id: str, message: str) -> None:
     )
 
 
+def _create_ledger_lock(lock_path: Path) -> int:
+    """Acquire one cooperative lock; unwind failed metadata acquisition.
+
+    As with normal release, live holders must not be replaced concurrently. The
+    identity check rejects observed replacement; it is not atomic reclamation
+    against another actor replacing the path between observation and unlink.
+    """
+    fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    acquired = None
+    try:
+        acquired = os.fstat(fd)
+        metadata = f"pid={os.getpid()} at={utc_timestamp()}\n".encode()
+        offset = 0
+        while offset < len(metadata):
+            written = os.write(fd, metadata[offset:])
+            if written <= 0:
+                raise OSError("ledger lock metadata write made no progress")
+            offset += written
+        return fd
+    except BaseException as error:
+        # Windows requires closing before unlink. If close or identity acquisition
+        # is uncertain, preserve the path rather than removing an unproven lock.
+        try:
+            os.close(fd)
+        except BaseException as cleanup:
+            error.add_note(f"ledger lock descriptor cleanup: {cleanup}")
+        else:
+            if acquired is not None:
+                try:
+                    current = lock_path.lstat()
+                    if (stat.S_ISREG(current.st_mode) and
+                            (current.st_dev, current.st_ino) == (acquired.st_dev, acquired.st_ino)):
+                        lock_path.unlink()
+                except FileNotFoundError:
+                    pass
+                except BaseException as cleanup:
+                    error.add_note(f"ledger lock path cleanup: {cleanup}")
+        raise
+
+
 @contextmanager
 def ledger_write_lock(item: Path):
     """The existing per-item writer lock, reusable by the lifecycle owner."""
@@ -537,8 +577,7 @@ def ledger_write_lock(item: Path):
     lock_fd = None
     for _attempt in range(50):
         try:
-            lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(lock_fd, f"pid={os.getpid()} at={utc_timestamp()}\n".encode())
+            lock_fd = _create_ledger_lock(lock_path)
             break
         except FileExistsError:
             time.sleep(0.1)
@@ -1612,8 +1651,7 @@ def _append_event_transaction(
     lock_fd = None
     for _attempt in range(50):  # ~5s bounded retry
         try:
-            lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(lock_fd, f"pid={os.getpid()} at={utc_timestamp()}\n".encode())
+            lock_fd = _create_ledger_lock(lock_path)
             break
         except FileExistsError:
             time.sleep(0.1)
@@ -2185,8 +2223,7 @@ def _commit_recovery_append(
     lock_fd = None
     for _attempt in range(50):
         try:
-            lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(lock_fd, f"pid={os.getpid()} at={utc_timestamp()}\n".encode())
+            lock_fd = _create_ledger_lock(lock_path)
             break
         except FileExistsError:
             time.sleep(0.1)

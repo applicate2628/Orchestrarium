@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-17
 
+- Release the newly acquired ledger lock and descriptor when writing its owner metadata fails, across ordinary writes and recovery writes. Partial writes are completed and observed replacement owners are preserved. Under the existing cooperative locking contract, a transient metadata-write error no longer leaves that work item stuck behind our abandoned lock; uncertain identity or close outcomes remain explicit recovery cases.
+
 - Let the Codex SDK review caller explicitly select a fresh session or hand over selected task evidence through binding version 3. The choice is retained in the admitted request and result; no conversation history is imported automatically, existing bindings stay fresh, and unsupported continuation modes are not silently substituted.
 
 - Record the approved PR19 completion plan for multivendor SDK execution and scoped child-Lead sessions. The plan separates native subagents from external SDK sessions, preserves provider-specific authorization and capability limits, and defines implementation and acceptance work without presenting the current Codex review baseline as full runtime readiness.
