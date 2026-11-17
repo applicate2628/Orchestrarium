@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-17
 
+- Expand the Rust workflow design across existing domain owners, scoped recovery, resource settlement and skill maintenance. Record installer process-loss evidence gaps, batch diagnostics and partial-setup recovery separately from already implemented behavior; no new scheduler, cleanup daemon or global stop is introduced.
+
 - Extend the native Rust proposal with staged SDK-to-Rust instruction reduction: move only covered deterministic obligations into their existing owners, retain semantic guidance and unsupported-host instructions, and retire procedural duplicates after verification. Planning only; no runtime activation or live rule removal.
 
 - Installer file writes now record successful ordinary POSIX permission changes before readback, preserving rollback ownership if that observation fails. Publication recovery keeps both the original publication error and a later bookkeeping error instead of hiding either; existing reservation and fresh-directory publication paths remain unchanged.

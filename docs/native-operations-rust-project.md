@@ -202,6 +202,168 @@ coverage and maintenance burden, rather than chase an invented token quota.
 A slice is complete when its own replacement and consumer checks pass and its
 eligible duplicate instructions are retired; do not wait for a whole-product port.
 
+## Workflow automation target and phased design
+
+This is a design proposal for review, not completion or activation of the Rust
+runtime. The target is less repeated procedural work, shorter model instructions,
+and recoverable local failures. Keep the existing SDK coordinator and domain
+owners. A future UI consumes their state; it is not another source of truth.
+Do not make unrelated work wait for a monolithic Rust rewrite.
+
+### Responsibility and migration slices
+
+| Slice | Existing source owner | Rust responsibility | SDK / Lead responsibility | Focused acceptance |
+| --- | --- | --- | --- | --- |
+| Configuration and dispatch | `resolve-agents-mode.py`, `model_routing/launch_policy.py` | Deterministic precedence, role/capability compatibility and bounded input validation | SDK reports real capabilities; Lead chooses suitable role, route, context and effort under current authority | Invalid combinations rejected; existing permitted combinations retained; no fallback spending or account switch |
+| Current plan and evidence | `docs/stale-plan-readmission.md`, existing handoff and review owners | Validate known revision/owner/evidence bindings and classify affected stale dependencies | Lead/Architect decide whether requirements or architecture changed; lack of a change marker is not proof of freshness | Changed relevant premise invalidates dependent evidence only; unchanged work continues; neighboring implementation is considered without automatic age veto |
+| Work-item and review lifecycle | `mutate-work-item.py`, `agent-run-ledger.py`, `review_loop_state.py`, `solution_attempt/reducer.py` | Preserve typed transitions, identity, replay/conflict handling and each owner's recovery/readback | Lead supplies substantive acceptance and ownership decisions; SDK sessions do not own archive state | Replay does not duplicate effects; concurrent ownership conflict preserves both parties' work; restart resumes known intent; structural PASS is not completion |
+| Skills and rule delivery | Shared governance, canonical skills and existing installer/projection validators | Check selected resource identity, projections and supported deterministic contracts | Lead selects relevant skills and restores missing governing context | No duplicate canon, stale projection or missing obligation; no count-based skill quota; changed instructions affect only actual consumers |
+| Install and managed files | `production_installer.py` and its existing domain helpers | Qualified plan/apply/repair/rollback and installed readback | SDK does not authorize installation; user/host trust remains with its current owner | Preserve user content and rollback evidence on partial writes/close errors; distinguish wrong version from corrupt/missing content |
+| Execution resources | Existing process supervisor and provider adapters | Own native-created handles/children, platform containment, cancellation and settlement | SDK owns its created sessions/children through supported controls; native provider descendants require actual capability evidence | Partial spawn/cancel/timeout closes acquired resources; independent tasks survive; no PID/name-wide termination; no success from an unconfirmed exit |
+| Publication | Existing policy, complete Git-object scanner and publication gate | Port deterministic checks and identity/currentness mechanisms independently | Existing authority and review remain separate from a clean scan | No incomplete range credited clean; genuine findings hold only dependent publication; checker defects have diagnostic and repair paths |
+| Transfer and residue | Existing transfer, artifact-disposition, cleanup coordinator and creator owners | Qualified inventory/integrity and selected owner-bound settlement operations | Lead classifies required results; cleanup remains coordination, not a universal deleter | Preserve unique/uncommitted/unpushed/user data; move only proved disposable material to designated trash; unknown items remain preserved and scoped |
+
+Paths in this table refer to the owner map above and existing source tree, not
+permission to move all implementations at once. A port does not activate source-only
+stores or unsupported routes. Existing state formats remain with their domain owners;
+use typed calls where they remove duplication without erasing an isolation boundary.
+Do not add a scheduler, universal transaction manager, blanket policy engine,
+resident cleanup daemon or second persistent ledger for this program.
+
+### Failure and recovery contract
+
+At each actual effect boundary preserve the operation identity, affected scope,
+current outcome, diagnostic cause, reconciliation action and next permitted action
+in the existing result/status contract. Distinguish rejection before effects,
+failure after partial effects, unknown outcome and verified success. Extend a
+schema only where its existing contract cannot express a needed distinction.
+
+Read-only aggregate diagnostics must not become a global dispatch gate. In the
+current work-item checker, aging and blocked dependencies include advisory or
+informational results; preserve their meaning. A corrupt unrelated item must not
+prevent inspecting or repairing that item or executing an independent admitted
+task. Refuse only mutations whose required inputs cannot be trusted; do not invent
+missing history to make an audit pass.
+
+A mismatch invalidates only evidence depending on that exact identity, not every
+task or check in the repository. A transient connection failure can be retried
+after current-state reconciliation; an explicit authorization denial is not
+retried through another shell, account or transport. A checker implementation
+defect is work for its owner, not a permanent project prohibition. Preserve
+required publication/security holds while repairing the checker; continue safe
+nondependent implementation and tests. Do not discard a good result because a
+later reporting or cleanup step failed; retain both the result and unsettled duty.
+
+Budget every actual bounded operation from its contract, measured work and risk.
+Inventory existing round/retry, parser, output, memory and time limits before
+porting: identify their source and purpose, and separately propose removal or
+correction of unsupported constraints. Do not copy a constant as architectural
+truth, silently relax a protection, or disguise a changed limit as behavior parity.
+Prefer bounded incremental consumption and backpressure to unbounded buffering;
+a budget exhaustion records the unfinished scope instead of a fabricated PASS.
+
+Inspection and owner-bound reconciliation remain reachable before validation of a
+broken state. Unsupported schemas may be inspected without mutation; preserve
+actual receipts and bytes rather than rewrite history. Keep project topology and
+derived README generation with the existing lifecycle owner. A stale historical
+review or ledger diagnostic is not a current veto without an affected obligation.
+
+Later workflow helpers may bind PR-bot work to the exact repository, head, review
+thread and permitted cursor, and validate changed-material skill/MCP evidence.
+They consume the existing bot and freshness protocols, not another polling loop.
+Read-only metrics may report overhead, residue and instruction size; missing
+telemetry is not permission to stop an otherwise admissible operation.
+
+### Concrete audit follow-ups
+
+- Installer exception rollback is not proof of recovery after process loss. Current
+  in-memory transaction mapping needs a bounded design for the minimal durable
+  phase/identity evidence needed to reconcile an interrupted owned effect. Start
+  with read-only reconciliation and protect user changes; uncertain state holds
+  only the affected mutation. Prove actual process-loss recovery separately from
+  managed-exception tests, without asserting that data loss has been observed.
+- Batch planning/dry-run must report each independent target rather than hide later
+  results after one target fails. Preserve mutation ordering and existing rollback
+  semantics; separate partial diagnostic results from all-target success.
+- An incomplete dependency environment must be distinguishable from an owned
+  completed setup and an unrelated user environment. Reconcile its exact selected
+  identity and completion evidence before repair; do not overwrite a user
+  environment or silently reuse partial setup as success.
+- The SDK ledger audit found metadata-write failure after lock acquisition could
+  leave the selected item's descriptor/lock unsettled. Consume the independently
+  owned correction rather than duplicate it. The native port must close acquired
+  resources on every exit, handle partial writes, preserve the primary failure,
+  and leave replaced or foreign lock identities untouched. Crash recovery needs
+  proof of inactive ownership; a stale-looking path is not takeover authority.
+- Existing review-round/retry caps and parser-size constants need the risk/source
+  classification above. Their presence in Python alone is not a reason to impose
+  them on every future workflow or to remove them without understanding the owner.
+
+These are scoped follow-ups and evidence gaps, not claims that all corresponding
+repairs have shipped. Consume separately owned fixes when received rather than
+reimplement them in this branch.
+
+### Resource settlement and skill audit
+
+At creation, bind disposable resources to their producing operation using existing
+custody evidence. On success, failure, cancellation and interruption, preserve
+durable results first, then settle owned handles/processes, temporary outputs and
+unused worktrees through their respective owners. Release in-memory buffers and
+subscriptions on all exits. Cleanup failure must not overwrite the primary error.
+Settlement still runs through the existing owner if result serialization or
+persistence fails. Retain acquired outcomes incrementally, report unavailable
+evidence, and never discard the only surviving copy of a result or recovery input.
+
+Use the current `post-spawn-cleanup` and `repo-cleanup` contracts, not a new
+machine-wide sweep. Recheck exact ownership and active use before action; a PID,
+name, age or directory label alone is not ownership. Preserve shared/borrowed
+processes, unknown files, unique commits, uncommitted changes and recovery payloads.
+Temporary worktree retirement requires verified durable Git custody and released
+ownership; it never implies deleting the branch. Trash must contain no required
+result or live recovery material. Permanent deletion requires its own existing
+authorization, and a RAM-disk placement does not waive that requirement.
+
+Audit each affected skill with the same migration: keep semantic guidance, replace
+covered mechanical instructions with the owning operation, and remove stale
+duplicates rather than layering exceptions. Check for universal stop language,
+unsupported numeric thresholds, mandatory ceremony without risk basis, duplicated
+canonical text, and provider-specific behavior presented as universal. Preserve
+actual mandatory safety/authority controls. Unknown residue holds its destructive
+action; it does not automatically stop unrelated delivery. A cleanup report must
+not claim whole-host cleanliness from a selected-resource check.
+
+### Delivery sequence and review loop
+
+1. Reconcile the accepted SDK/Rust boundaries and map the relevant obligations,
+   owners and consumers in this existing plan. Separate existing behavior,
+   proposed semantic improvements and unsupported capabilities.
+2. Finish the selected SDK contracts and verify their input/session/result bindings.
+   These provide integration seams, not proof that every native action is intercepted.
+3. Execute one admitted O0--O5 deterministic slice with its causal tests and existing
+   packaging/installer path. The reminder remains a candidate; select a slice for
+   demonstrated maintenance benefit, not a promise to port everything.
+4. Proceed through pure validation/reducers, then state/resource/install operations
+   according to dependency and risk. Publication and transfer retain separate
+   qualification. Independent slices may proceed in isolated ownership lanes.
+5. For each covered consumer, shorten the corresponding procedures in shared rules,
+   skills and projections together, preserving semantic obligations and unsupported
+   consumer guidance. Read back the actual delivered instruction composition.
+6. Review the final candidate across architecture, failure/resource lifetime,
+   authority/data preservation, compatibility and skill economy. Fix concrete
+   findings and re-review affected deltas; do not restart unrelated passed scopes.
+   Unresolved semantic choices return to their owner, not an automatic new gate.
+7. Keep verified changes committed and published in the existing PR scope.
+   Production cutover/installation remains a separate admitted effect. Record
+   remaining unsupported targets and cleanup duties without calling them success.
+
+Each slice reuses the relevant current test families (work-item/ledger/review,
+installer transactions, process supervision, publication, scratch lifecycle and
+cleanup) and adds only missing native cases. Include failure injection for resource
+creation, partial write, stale identity, checker failure, timeout, restart and
+concurrent updates. Verify independent progress alongside dependent holds, and
+recovery without duplicate effects. Test actual claimed platform boundaries;
+stubs and source checks are not installed or provider-native acceptance.
+
 ## Candidate first vertical slice: mcp-usage-reminder
 
 Source: [canonical entrypoint](https://github.com/applicate2628/Orchestrarium/blob/317e1448a020aeaa58f65aaceb180e835741d6de/scripts/universal-hooks/scripts/mcp-usage-reminder.py),
