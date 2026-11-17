@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-17
 
+- Add an explicit whole-workspace write contract and Codex Worker adapter using the existing lifecycle. It checks effective roots, network and temporary-directory exclusions before the turn, retains role/approval boundaries, and rejects uncertain resume. This offline adapter increment does not activate public writes: runtime custody and receiving qualification remain separate.
+
 - Connect read-only Codex Consultant task execution through the existing launch, process and receiving owners with explicit `--sdk-task-binding`. Consultant evidence retains its role and never becomes a review verdict or closure; review flags remain review-only, and receiving failure preserves diagnostics without relaunch. This is offline-qualified source integration, not installation or live acceptance.
 
 - Add a typed task-evidence contract and a read-only Codex Consultant adapter using the existing execution lifecycle. Advisory results no longer need a fabricated review verdict. The initial adapter increment retained Reviewer-only admission until the separate public Consultant integration above. Worker write permissions are unchanged, and legacy review serialization stays compatible.

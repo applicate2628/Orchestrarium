@@ -173,6 +173,8 @@ def validate_admitted_request(request: ExecutionRequest, selection: Any) -> None
     """Check exact current common-governance input, without changing admission."""
     if type(request) not in {ExecutionRequest, CoordinationInferenceRequest}:
         raise RuntimeBindingError("admitted_execution_request_required")
+    if request.write_workspace is not None:
+        raise RuntimeBindingError("worker_runtime_receiving_not_qualified")
     if type(request) is CoordinationInferenceRequest:
         if (selection.auth_mode != "codex-auth-file"
             or selection.config_overrides != CODEX_BOUNDED_REVIEW_OVERRIDES
@@ -199,6 +201,8 @@ def selected_sdk_execution(request: ExecutionRequest, selection: Any) -> dict[st
     Adapter results retain their observed version metadata separately. Version
     labels are provenance, not admission constraints or compatibility promises.
     """
+    if request.write_workspace is not None:
+        raise RuntimeBindingError("worker_runtime_receiving_not_qualified")
     runtime_selection_from_dict(request.provider, selection.to_dict())
     if request.provider == "codex":
         adapter, sandbox, approval = "openai-codex", "read-only", "deny_all"
@@ -338,6 +342,8 @@ def _require_authority(authority: Callable[[ExecutionRequest, str], None], reque
 
 def execution_role(request: ExecutionRequest) -> str:
     """Project provenance for the already validated operation, not permission."""
+    if request.write_workspace is not None:
+        raise RuntimeBindingError("worker_runtime_receiving_not_qualified")
     if type(request) is CoordinationInferenceRequest:
         return "main"
     if type(request) is not ExecutionRequest:

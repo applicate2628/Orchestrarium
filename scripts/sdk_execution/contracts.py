@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import asdict, dataclass, field, fields
-from pathlib import PurePosixPath
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
 
@@ -66,16 +66,31 @@ class ExecutionRequest:
     max_events: int = 4096
     context_mode: str = "fresh"
     result_kind: str = field(default="review", kw_only=True)
+    write_workspace: str | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         for field in fields(self):
-            if field.name not in {"scope", "max_output_bytes", "max_events"}:
+            if field.name not in {"scope", "max_output_bytes", "max_events", "write_workspace"}:
                 _text(getattr(self, field.name), field.name, 262_144 if field.name == "prompt" else 4096)
         if self.result_kind not in {"review", "task"}:
             raise ValueError("unsupported result kind")
-        # Only this implemented adapter currently consumes task-kind evidence.
-        # Expand with the next qualified adapter, not by relabeling a review.
-        if self.result_kind == "task" and (self.provider, self.role) != ("codex", "consultant"):
+        if self.write_workspace is not None:
+            _text(self.write_workspace, "write workspace")
+            # This is the whole workspace write boundary, not a file allowlist.
+            # Lexical checks are portable; runtime owns resolved identity,
+            # reparse/custody checks and the actual authorization before effects.
+            path = (PureWindowsPath(self.write_workspace)
+                    if PureWindowsPath(self.write_workspace).drive or "\\" in self.write_workspace
+                    else PurePosixPath(self.write_workspace))
+            if (not path.is_absolute() or ".." in path.parts
+                    or str(path) != self.write_workspace or "\0" in self.write_workspace
+                    or self.write_workspace != self.cwd):
+                raise ValueError("write workspace must be normalized absolute cwd")
+            if self.provider != "codex" or self.result_kind != "task":
+                raise ValueError("write workspace requires Codex task contract")
+            # Role eligibility belongs to the existing taxonomy/adapter owner,
+            # not a second worker role list in this portable value codec.
+        elif self.result_kind == "task" and (self.provider, self.role) != ("codex", "consultant"):
             raise ValueError("task adapter combination not implemented")
         if self.context_mode not in {"fresh", "handoff"}:
             raise ValueError("unsupported context mode")
@@ -111,6 +126,8 @@ class ExecutionRequest:
             result.pop("context_mode")
         if self.result_kind == "review":
             result.pop("result_kind")
+        if self.write_workspace is None:
+            result.pop("write_workspace")
         return result
 
     @classmethod
@@ -120,6 +137,8 @@ class ExecutionRequest:
             value = {**value, "context_mode": "fresh"}
         if isinstance(value, dict) and "result_kind" not in value:
             value = {**value, "result_kind": "review"}
+        if isinstance(value, dict) and "write_workspace" not in value:
+            value = {**value, "write_workspace": None}
         data = dict(_keys(value, {field.name for field in fields(cls)}))
         if not isinstance(data["scope"], list):
             raise ValueError("scope must be a list")

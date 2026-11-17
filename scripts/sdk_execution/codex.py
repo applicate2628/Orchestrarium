@@ -1,4 +1,4 @@
-"""Explicit read-only Codex SDK adapter, qualified only with an owned worker.
+"""Explicit Codex SDK adapters, qualified only within their owned execution scope.
 
 API evidence: openai/codex 83086188ae0614bd882818ff1aa23f3194962012,
 published SDK/runtime 0.163.0, client.py and generated/v2_all.py verified
@@ -222,7 +222,8 @@ class CodexReviewAdapter:
         return validate_review(text, request=request)
 
     def _check_item(self, item):
-        pass
+        if item.get("type") == "fileChange":
+            raise AdapterError("read_only_file_change")
 
     def _make_result(self, **values):
         return ExecutionResult(**values)
@@ -303,6 +304,19 @@ class CodexReviewAdapter:
             self._cancel_acknowledged = True
         return CancelReceipt(run_id, True, True, thread_id, turn_id)
 
+    def _sandbox_mode(self, request):
+        return "read-only"
+
+    def _sandbox_policy(self, request):
+        return {"type": "readOnly", "networkAccess": False}
+
+    def _sandbox_config(self, request):
+        return {}
+
+    def _sandbox_matches(self, request, sandbox):
+        return (isinstance(sandbox, dict) and sandbox.get("type") == "readOnly"
+                and sandbox.get("networkAccess") is False)
+
     def _profile(self, request: ExecutionRequest, response: dict[str, Any]) -> None:
         sandbox = response.get("sandbox")
         if (
@@ -312,9 +326,7 @@ class CodexReviewAdapter:
             or response.get("cwd") != request.cwd
             or response.get("approvalPolicy") != "never"
             or response.get("approvalsReviewer") != "user"
-            or not isinstance(sandbox, dict)
-            or sandbox.get("type") != "readOnly"
-            or sandbox.get("networkAccess") is not False
+            or not self._sandbox_matches(request, sandbox)
         ):
             raise AdapterError("observed_profile_mismatch")
 
@@ -439,8 +451,6 @@ class CodexReviewAdapter:
                 if final_items[item_id] != item:
                     raise AdapterError("contradictory_duplicate_item")
                 return
-            if item.get("type") == "fileChange":
-                raise AdapterError("read_only_file_change")
             if item.get("type") == "commandExecution":
                 # A completed event/history item must describe a terminal command,
                 # not merely arrive inside a terminal protocol envelope.
@@ -520,8 +530,8 @@ class CodexReviewAdapter:
             mcp_configuration = self._mcp_configuration(binding, request)
             settings = {
                 "approvalPolicy": "never", "approvalsReviewer": "user",
-                "sandbox": "read-only", "cwd": request.cwd, "model": request.model,
-                "modelProvider": "openai", "config": {"model_reasoning_effort": request.effort, **mcp_configuration},
+                "sandbox": self._sandbox_mode(request), "cwd": request.cwd, "model": request.model,
+                "modelProvider": "openai", "config": {"model_reasoning_effort": request.effort, **mcp_configuration, **self._sandbox_config(request)},
             }
             self._authority(request, "resume" if resume else "thread_start")
             started = _object(client.thread_resume(resume[0], settings) if resume else client.thread_start(settings))
@@ -535,7 +545,7 @@ class CodexReviewAdapter:
             metadata_json = json_text({
                 "schemaVersion": 1, "adapter": "openai-codex", "sdkVersion": binding.sdk_version,
                 "runtimeVersion": runtime, "model": request.model, "effort": request.effort,
-                "sandboxMode": "read-only", "approvalPolicy": "deny_all", "accountBinding": request.account_binding,
+                "sandboxMode": self._sandbox_mode(request), "approvalPolicy": "deny_all", "accountBinding": request.account_binding,
             })
             if resume:
                 self._turn_id = resume[1]
@@ -554,7 +564,7 @@ class CodexReviewAdapter:
                 response = _object(client.turn_start(self._thread_id, request.prompt, {
                     "approvalPolicy": "never", "approvalsReviewer": "user",
                     "cwd": request.cwd, "model": request.model, "effort": request.effort,
-                    "sandboxPolicy": {"type": "readOnly", "networkAccess": False},
+                    "sandboxPolicy": self._sandbox_policy(request),
                     "outputSchema": self._output_schema(request),
                 }))
                 # Public turn_start preserves events received before this response.
@@ -661,7 +671,7 @@ class CodexReviewAdapter:
 
 class CodexConsultantAdapter(CodexReviewAdapter):
     def _validate_output_kind(self, request):
-        if request.role != "consultant" or request.result_kind != "task":
+        if request.role != "consultant" or request.result_kind != "task" or request.write_workspace is not None:
             raise AdapterError("consultant_task_request_required")
 
     async def reconcile(self, *args, **kwargs):
@@ -675,3 +685,116 @@ class CodexConsultantAdapter(CodexReviewAdapter):
 
     def _make_result(self, **values):
         return ExecutionResult(task=values.pop("review"), **values)
+
+
+class CodexWorkerAdapter(CodexConsultantAdapter):
+    """Explicit whole-workspace writes; runtime receiving is a separate increment.
+
+    Native workspaceWrite implicitly includes cwd. This is not a file allowlist,
+    an authorization source, or proof of OS confinement. The Host still qualifies
+    the native runtime and keeps its credentials, ledger and custody outside the
+    writable workspace before allowing any client effects.
+    """
+    def _validate_output_kind(self, request):
+        if request.result_kind != "task" or request.write_workspace is None:
+            raise AdapterError("worker_write_task_required")
+        import provider_prompt
+        _roles, _reviewers, workers, _unsupported = provider_prompt._external_role_taxonomy()
+        if request.role not in workers:
+            raise AdapterError("worker_role_required")
+        if self._mcp_scope.servers:
+            raise AdapterError("worker_external_tools_not_qualified")
+        self._current_workspace(request)
+
+    def _check_item(self, item):
+        if item.get("type") == "fileChange":
+            if item.get("status") not in ("completed", "failed", "declined"):
+                raise AdapterError("invalid_terminal_file_change_status")
+            if type(item.get("changes")) is not list:
+                raise AdapterError("invalid_file_change_evidence")
+            for change in item["changes"]:
+                if (type(change) is not dict or type(change.get("diff")) is not str
+                        or type(change.get("path")) is not str or not change["path"]
+                        or type(change.get("kind")) is not dict):
+                    raise AdapterError("invalid_file_change_evidence")
+                kind = change["kind"]
+                if kind.get("type") not in {"add", "delete", "update"}:
+                    raise AdapterError("invalid_file_change_evidence")
+                self._reported_write_path(change["path"])
+                if kind["type"] == "update":
+                    if "move_path" not in kind or (kind["move_path"] is not None and type(kind["move_path"]) is not str):
+                        raise AdapterError("invalid_file_change_evidence")
+                    if kind["move_path"] is not None:
+                        self._reported_write_path(kind["move_path"])
+
+    def _reported_write_path(self, path):
+        # Reject contradictory reported scope, not a substitute for native
+        # enforcement or independent inspection of the actual filesystem diff.
+        import os
+        try:
+            root = os.path.normcase(self._request.write_workspace)
+            target = os.path.normcase(os.path.abspath(os.path.join(root, path)))
+            if not path or "\0" in path or target == root or os.path.commonpath((root, target)) != root:
+                raise ValueError()
+        except (ValueError, TypeError):
+            raise AdapterError("file_change_outside_workspace") from None
+
+    def _current_workspace(self, request):
+        import os
+        from pathlib import Path
+        import provider_prompt
+        try:
+            root = Path(request.write_workspace)
+            provider_prompt.validate_no_reparse_components(root)
+            resolved = root.resolve(strict=True)
+            if not root.is_dir() or os.path.normcase(str(resolved)) != os.path.normcase(request.write_workspace):
+                raise ValueError()
+            info = root.stat()
+            return (info.st_dev, info.st_ino)
+        except (OSError, ValueError, TypeError):
+            raise AdapterError("worker_workspace_unavailable") from None
+
+    def _authority(self, request, effect):
+        current = self._current_workspace(request)
+        # Capture only after the shared lifecycle consumes the operation. A
+        # rejected second execute must not overwrite the active identity.
+        with self._lock:
+            if not hasattr(self, "_workspace_identity"):
+                self._workspace_identity = current
+            elif current != self._workspace_identity:
+                raise AdapterError("worker_workspace_changed")
+        super()._authority(request, effect)
+
+    def _sandbox_mode(self, request):
+        return "workspace-write"
+
+    def _sandbox_policy(self, request):
+        return {"type": "workspaceWrite", "writableRoots": [], "networkAccess": False,
+                "excludeTmpdirEnvVar": True, "excludeSlashTmp": True}
+
+    def _sandbox_config(self, request):
+        return {"sandbox_workspace_write.writable_roots": [],
+                "sandbox_workspace_write.network_access": False,
+                "sandbox_workspace_write.exclude_tmpdir_env_var": True,
+                "sandbox_workspace_write.exclude_slash_tmp": True}
+
+    def _sandbox_matches(self, request, sandbox):
+        # Native requirements/profiles can override requested configuration. Never
+        # start a turn if the observed policy adds an unapproved root or access.
+        import os
+        expected = self._sandbox_policy(request)
+        if (type(sandbox) is not dict or set(sandbox) != set(expected)
+                or sandbox["type"] != "workspaceWrite"
+                or sandbox["networkAccess"] is not False
+                or sandbox["excludeTmpdirEnvVar"] is not True
+                or sandbox["excludeSlashTmp"] is not True
+                or type(sandbox["writableRoots"]) is not list):
+            return False
+        # Some native profiles materialize the implicit cwd in this projection.
+        # That grants no additional access; any other root must be refused.
+        return all(type(root) is str and os.path.normcase(root) == os.path.normcase(request.write_workspace)
+                   for root in sandbox["writableRoots"])
+
+    async def reconcile(self, *args, **kwargs):
+        # A partial write is evidence to reconcile, never an automatic replay.
+        raise AdapterError("worker_resume_not_qualified")

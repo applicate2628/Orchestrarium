@@ -307,6 +307,42 @@ or provider call follows merely from selecting a binding. Worker write/tool scop
 and other provider task adapters remain later slices, without a second ledger or
 permission owner.
 
+### Whole-workspace Worker adapter increment
+
+An explicit immutable `write_workspace` is a whole-directory write boundary,
+not a permission derived from the free-text task `scope`. It must be a normalized
+absolute path equal to `cwd`. The existing taxonomy identifies Worker professions;
+Reviewer, Consultant and coordination operations do not inherit this capability.
+The same request hash binds the selected workspace and result-kind when an owner
+uses the request. Omitted write scope keeps existing read-only wire values stable.
+
+The Worker adapter reuses the current Codex lifecycle with approval escalation
+denied and no external MCP tools. It requests `workspace-write`, no additional
+roots, network disabled and both native temporary-root exclusions. It verifies
+the effective thread policy before the turn, then sends the same turn policy.
+The native projection may explicitly include the already-authorized cwd, but not
+another root. Missing exclusions or wider native profile requirements stop this
+operation before its turn. Workspace identity is rechecked before effects; this
+cooperative consistency check is not a hostile filesystem race-proof sandbox.
+
+Official source at [Codex commit 69231e1](https://github.com/openai/codex/tree/69231e119bfca0b14453515e97d99688ce1c47c9)
+(`codex-rs/protocol/src/protocol.rs`, `core/src/config/mod.rs`, and
+`app-server/src/request_processors/thread_processor.rs`) establishes that
+workspace-write implicitly includes cwd and that explicit permission profiles can
+ignore legacy configuration. Therefore configuration alone is not enforcement.
+OS enforcement and installed-runtime behavior still need separately authorized
+qualification; offline fake-client tests prove contract handling only.
+
+This increment does not activate a public write route. Existing runtime admission
+rejects write-bearing requests until its custody and receiving integration is
+qualified: the writable workspace must not contain the ledger, credentials,
+trusted runtime or receiving artifacts. That check belongs to existing runtime
+admission, not a new permission store. Startup/hook trust remains its current
+owner. A TaskResult reports evidence, not proof of accepted writes or completed
+review. On interrupted/uncertain execution, retain evidence and inspect actual
+changes; do not auto-replay, roll back, or delete work. Worker resume is not yet
+qualified. Other read-only routes remain available.
+
 ### Ordered implementation slices
 
 1. **Official setup and selected environment.** Finish explicit apply, normal

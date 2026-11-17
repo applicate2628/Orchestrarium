@@ -27,7 +27,7 @@ class CoordinationInferenceRequest(ExecutionRequest):
         # Validate base fields as the exact existing type; its validator iterates
         # dataclass fields and must not mistake new optional metadata for text.
         ExecutionRequest(**{f.name: getattr(self, f.name) for f in fields(ExecutionRequest)})
-        if self.provider != "codex" or self.role != "lead":
+        if self.provider != "codex" or self.role != "lead" or self.write_workspace is not None:
             raise ValueError("explicit Codex coordination operation required")
         for value in (self.operation_id, self.admitted_request_id,
                       self.outer_budget_id, self.inner_budget_id):
@@ -50,6 +50,8 @@ class CoordinationInferenceRequest(ExecutionRequest):
 
     @classmethod
     def from_dict(cls, value: object) -> CoordinationInferenceRequest:
+        if type(value) is dict and "write_workspace" not in value:
+            value = {**value, "write_workspace": None}
         if type(value) is dict and "result_kind" not in value:
             value = {**value, "result_kind": "review"}
         if type(value) is dict and "context_mode" not in value:
