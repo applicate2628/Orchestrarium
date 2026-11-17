@@ -2772,6 +2772,19 @@ class _InstallTransaction:
         return dependency
 
     @staticmethod
+    def _copy_close_failure(path, primary, cleanup, *, context="copy-close"):
+        """Add one close failure without dropping the copy's existing evidence."""
+        prior = primary if isinstance(primary, _InstallFailure) else None
+        members = () if prior is None else prior.members
+        return _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", context,
+            primary if primary is not None else cleanup,
+            members=members + (_RollbackFailureMember("backup", -1, str(path),
+                "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
+                cause_exception=cleanup),),
+            recovery_path=None if prior is None else prior.recovery_path,
+            unresolved_paths=() if prior is None else prior.unresolved_paths)
+
+    @staticmethod
     @contextmanager
     def _copy_reference(path: Path, expected: _PhysicalNode, *, writable=False,
                         metadata_only=False):
@@ -2807,10 +2820,7 @@ class _InstallTransaction:
             try:
                 os.close(descriptor)
             except OSError as cleanup:
-                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "copy-close", cleanup if primary is None else primary,
-                    members=(_RollbackFailureMember("backup", -1, str(path),
-                             "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
-                             cause_exception=cleanup),)) from primary
+                raise _InstallTransaction._copy_close_failure(path, primary, cleanup) from primary
 
     def _acquire_copy_metadata(self, path, metadata, descriptor, bound):
         participant = self._copy_metadata.get(path)
@@ -2819,13 +2829,21 @@ class _InstallTransaction:
         if descriptor is None and bound is None:
             # POSIX observation binds a no-follow descriptor before hashing.
             descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            primary = None
             try:
                 actual = os.fstat(descriptor)
                 if (actual.st_dev, actual.st_ino, actual.st_mode) != (metadata.st_dev, metadata.st_ino, metadata.st_mode):
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: copy metadata acquisition")
                 image = self._read_copy_metadata(actual, descriptor, None)
+            except BaseException as error:
+                primary = error
+                raise
             finally:
-                os.close(descriptor)
+                try:
+                    os.close(descriptor)
+                except OSError as cleanup:
+                    raise _InstallTransaction._copy_close_failure(
+                        path, primary, cleanup, context="copy-metadata-close") from primary
         else:
             image = self._read_copy_metadata(metadata, descriptor, bound)
         participant.before = participant.current = image
@@ -3526,6 +3544,7 @@ class _InstallTransaction:
                     if hashlib.sha256(payload).hexdigest() != entry["before_node"].data:
                         raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar inverse input")
                     descriptor = os.open(path, os.O_RDWR | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0))
+                    primary = None
                     try:
                         current = self._scalar_descriptor_node(path, descriptor, entry["origin"])
                         if current != entry["current_node"]:
@@ -3533,8 +3552,31 @@ class _InstallTransaction:
                         self._write_owned_file(path, descriptor, (payload,),
                             lambda member, node: self._advance(member, {member: node}), entry["before_node"].data,
                             initial_state=current)
+                    except BaseException as error:
+                        primary = error
+                        raise
                     finally:
-                        os.close(descriptor)
+                        try:
+                            os.close(descriptor)
+                        except OSError as cleanup:
+                            paths, members, errors = self._settlement_failure(
+                                cleanup, "snapshot", ordinal, path, "E_ROLLBACK_RESTORE_FAILED",
+                                (path,), participant="scalar")
+                            if primary is not None:
+                                prior_paths, prior_members, prior_errors = self._settlement_failure(
+                                    primary, "snapshot", ordinal, path, "E_ROLLBACK_RESTORE_FAILED",
+                                    participant="scalar")
+                                paths = prior_paths + paths
+                                members = prior_members + members
+                                errors = _merge_copy_setter_operation_errors(prior_errors, errors)
+                            prior = primary if isinstance(primary, _InstallFailure) else None
+                            raise _InstallFailure(
+                                "E_ROLLBACK_SETTLEMENT_FAILED", "scalar-close",
+                                primary if primary is not None else cleanup,
+                                members=tuple(members),
+                                recovery_path=None if prior is None else prior.recovery_path,
+                                unresolved_paths=tuple(dict.fromkeys(paths)),
+                                retained_errors=errors) from primary
                     self._assert_scalar_binding(entry)
                 entry["consumed"] = True
             except BaseException as error:
@@ -3565,15 +3607,20 @@ class _InstallTransaction:
         """Move only known physical references; logical historical paths stay fixed."""
         def moved(path):
             return target / path.relative_to(source) if path == source or source in path.parents else path
-        self._copy_current = {moved(path): metadata for path, metadata in self._copy_current.items()}
+        copy_current = {moved(path): metadata for path, metadata in self._copy_current.items()}
         relocated = self._relocate(image, source, target)
+        copy_updates = []
         for selected, participant in self._copy_metadata.items():
             if selected == source or source in selected.parents:
-                participant.current = None
+                copy_updates.append((participant, None))
             if selected in relocated:
                 with self._copy_reference(selected, relocated[selected]) as (descriptor, bound):
                     metadata = self._read_copy_metadata(os.fstat(descriptor), descriptor, bound)
-                self._copy_current[selected] = participant.current = metadata
+                copy_current[selected] = metadata
+                copy_updates.append((participant, metadata))
+        self._copy_current = copy_current
+        for participant, metadata in copy_updates:
+            participant.current = metadata
         for entry in self._entries:
             if entry["kind"] == "scalar":
                 entry["current_path"] = moved(entry["current_path"])
@@ -4033,6 +4080,32 @@ class _InstallTransaction:
                                 str(cleanup), participant="effect", cause_exception=cleanup),)) from primary
                 raise
 
+    def _receiving_failure(self, primary: BaseException, secondary: BaseException,
+                           path: Path) -> _InstallFailure:
+        """Retain both failures without replacing the publication's evidence."""
+        paths, members, errors = self._settlement_failure(
+            secondary, "snapshot", -1, path, "E_ROLLBACK_SETTLEMENT_FAILED",
+            (path,), participant="effect")
+        if isinstance(secondary, _InstallFailure):
+            if secondary.members:
+                members.append(_RollbackFailureMember(
+                    "snapshot", -1, str(path), secondary.stable_id, str(secondary.cause),
+                    _copy_setter_detail(secondary),
+                    secondary if _copy_setter_operation_errors(secondary) else None,
+                    "effect", cause_exception=secondary))
+            if secondary.recovery_path is not None:
+                paths.append(secondary.recovery_path)
+        recovery = None
+        if isinstance(primary, _InstallFailure):
+            members = list(primary.members) + members
+            paths = list(primary.unresolved_paths) + paths
+            recovery = primary.recovery_path
+        return _InstallFailure(
+            "E_ROLLBACK_SETTLEMENT_FAILED", "transaction", primary,
+            members=tuple(members), recovery_path=recovery,
+            unresolved_paths=tuple(dict.fromkeys(paths)), retained_errors=errors)
+
+
     def _publish_retained(self, source: Path, target: Path, *,
                           effect: _DeclaredPathEffect | None = None,
                           migration: _SliceAMigratedFileRecord | None = None,
@@ -4068,14 +4141,18 @@ class _InstallTransaction:
             try:
                 supported = (self._native_publish_no_replace(source, target, parent_descriptors=parent_descriptors)
                              if parent_descriptors is not None else self._native_publish_no_replace(source, target))
-            except BaseException:
+            except BaseException as primary:
                 try:
-                    metadata = target.lstat()
-                    moved_root = (metadata.st_dev, metadata.st_ino) == before[source].python_identity[:2]
-                    if moved_root and self._image_matches(source, {}):
-                        self._moved(source, target, before, effect, migration)
-                except FileNotFoundError:
-                    pass
+                    try:
+                        metadata = target.lstat()
+                    except FileNotFoundError:
+                        metadata = None
+                    if metadata is not None:
+                        moved_root = (metadata.st_dev, metadata.st_ino) == before[source].python_identity[:2]
+                        if moved_root and self._image_matches(source, {}):
+                            self._moved(source, target, before, effect, migration)
+                except BaseException as receiving:
+                    raise self._receiving_failure(primary, receiving, target) from primary
                 raise
             if supported:
                 self._moved(source, target, before, effect, migration)
@@ -4327,8 +4404,12 @@ class _InstallTransaction:
                 if fsync != "best-effort":
                     raise
         if mode is not None:
+            def record_mode(identity):
+                nonlocal node
+                node = replace(node, python_identity=identity)
+                record(target, node)
             changed = self._chmod_owned(target, node.python_identity, mode, descriptor=descriptor,
-                                        native_proof=node.native_proof)
+                                        native_proof=node.native_proof, on_mode_set=record_mode)
             node = replace(node, python_identity=changed)
             record(target, node)
         if digest.hexdigest() != expected_digest:
@@ -4516,7 +4597,8 @@ class _InstallTransaction:
     @staticmethod
     def _chmod_owned(path: Path, before: tuple[int, int, int, int], requested: int,
                      *, descriptor: int | None = None,
-                     native_proof: _NativeNodeProof | None = None) -> tuple[int, int, int, int]:
+                     native_proof: _NativeNodeProof | None = None,
+                     on_mode_set=None) -> tuple[int, int, int, int]:
         """Project this platform's chmod producer result before accepting readback."""
         expected = _InstallTransaction._chmod_identity(before, requested)
         if _CreateOnlyMutablePath._identity(path) != before:
@@ -4544,6 +4626,11 @@ class _InstallTransaction:
             path.chmod(requested)
         else:
             os.fchmod(descriptor, stat.S_IMODE(requested))
+            # Ordinary permission bits have a known successful setter image.
+            # Special bits may be stripped by the OS and still require readback.
+            if on_mode_set is not None and not (
+                    (before[2] | requested) & (stat.S_ISUID | stat.S_ISGID | stat.S_ISVTX)):
+                on_mode_set(expected)
         actual = _CreateOnlyMutablePath._identity(path)
         if actual != expected:
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal permission transition")
@@ -6392,7 +6479,12 @@ class _CreateOnlyMutablePath:
                     record(path, node)
                 elif existing is None:
                     outgoing = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o666)
-                    resources.callback(os.close, outgoing)
+                    def close_outgoing(_type, primary, _traceback):
+                        try:
+                            os.close(outgoing)
+                        except OSError as cleanup:
+                            raise _InstallTransaction._copy_close_failure(path, primary, cleanup) from primary
+                    resources.push(close_outgoing)
                     target_bound = None
                     node = self.transaction._capture_node(path, descriptor=outgoing, kind="file",
                                                           data=hashlib.sha256(b"").hexdigest())
@@ -6562,21 +6654,39 @@ class _CreateOnlyMutablePath:
         self.transaction.assert_effect_current(effect)
         if effect.before:
             before_move = dict(effect.actual)
+            primary = None
             try:
                 self.transaction._publish_retained(path, effect.retained, effect=effect, migration=migration)
+            except BaseException as exc:
+                primary = exc
+                raise
             finally:
-                retained = self.transaction._relocate(before_move, path, effect.retained)
-                if (self.transaction._image_matches(effect.retained, retained)):
-                    self.transaction.retained_replacement(effect, before_move)
+                try:
+                    retained = self.transaction._relocate(before_move, path, effect.retained)
+                    if self.transaction._image_matches(effect.retained, retained):
+                        self.transaction.retained_replacement(effect, before_move)
+                except BaseException as receiving:
+                    if primary is None:
+                        raise
+                    raise self.transaction._receiving_failure(primary, receiving, effect.retained) from primary
         self._final_absence(path)
         published = None
+        primary = None
         try:
             published = self.transaction._publish_retained(prepared, path, effect=effect, migration=migration)
+        except BaseException as exc:
+            primary = exc
+            raise
         finally:
-            if published is not None:
-                self.transaction.published_replacement(effect, published)
-            elif (self.transaction._image_matches(path, effect.proposed)):
-                self.transaction.published_replacement(effect)
+            try:
+                if published is not None:
+                    self.transaction.published_replacement(effect, published)
+                elif self.transaction._image_matches(path, effect.proposed):
+                    self.transaction.published_replacement(effect)
+            except BaseException as receiving:
+                if primary is None:
+                    raise
+                raise self.transaction._receiving_failure(primary, receiving, path) from primary
 
     @_InstallTransaction.direct_writer
     def remove_exact_file(self, relative: Path, expected_digest: str) -> Path:
@@ -6614,12 +6724,21 @@ class _CreateOnlyMutablePath:
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: armed retention source")
         self.transaction.assert_effect_current(effect)
         before_move = dict(effect.actual)
+        primary = None
         try:
             self.transaction._publish_retained(path, effect.retained, effect=effect)
+        except BaseException as exc:
+            primary = exc
+            raise
         finally:
-            retained = self.transaction._relocate(before_move, path, effect.retained)
-            if (self.transaction._image_matches(effect.retained, retained)):
-                self.transaction.retained_replacement(effect, before_move)
+            try:
+                retained = self.transaction._relocate(before_move, path, effect.retained)
+                if self.transaction._image_matches(effect.retained, retained):
+                    self.transaction.retained_replacement(effect, before_move)
+            except BaseException as receiving:
+                if primary is None:
+                    raise
+                raise self.transaction._receiving_failure(primary, receiving, effect.retained) from primary
         return path
 
     def migrate_exact_file(

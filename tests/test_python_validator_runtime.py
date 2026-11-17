@@ -2591,3 +2591,83 @@ def test_manual_transfer_standalone_source_preserves_local_body_contract(tmp_pat
         maintainer_only_shared_reference_names=frozenset(), utility_skills=frozenset(),
         curated_role_skills=frozenset(), root=root)
     assert result.errors == 0
+
+@pytest.mark.parametrize("validator", VALIDATORS)
+@pytest.mark.parametrize("operation", (
+    "check_agent_run_ledger_contract", "check_arch_layering_slices",
+))
+def test_declared_behavioral_source_gates_are_selected_exactly_once(
+    validator: Path, operation: str,
+) -> None:
+    module = _load(validator, f"behavioral_source_gate_{validator.parent.parent.name}_{operation}")
+    declared = tuple(action for action in module._DECLARED_ACTIONS if action[0] == operation)
+    assert len(declared) == 1
+    selected = tuple(
+        (scope, action) for scope, group in module.ACTIONS
+        for action in group if action[0] == operation
+    )
+    scope = "dev_repo_monorepo" if operation == "check_agent_run_ledger_contract" else "dev_repo"
+    assert selected == ((scope, declared[0]),)
+
+
+@pytest.mark.parametrize("provider,validator", tuple(zip(("codex", "claude"), VALIDATORS)))
+@pytest.mark.parametrize("kind", ("monorepo", "export", "installed"))
+def test_behavioral_source_gate_applicability_uses_detected_layout(
+    tmp_path: Path, provider: str, validator: Path, kind: str,
+) -> None:
+    module = _load(validator, f"behavioral_layout_{provider}_{kind}")
+    extractor = _load(ROOT / "scripts/extract-provider-branch.py", f"gate_export_{provider}_{kind}")
+    root = tmp_path / kind
+    if kind == "installed":
+        files = (
+            {".agents/skills/lead/SKILL.md": "fixture", ".codex/AGENTS.md": "fixture"}
+            if provider == "codex"
+            else {".claude/agents/lead.md": "fixture", ".claude/AGENTS.md": "fixture"}
+        )
+        script = root / (".agents/skills/lead/scripts/validate-skill-pack.py" if provider == "codex"
+                         else ".claude/agents/scripts/validate-skill-pack.py")
+    else:
+        files = {
+            "shared/AGENTS.shared.md": "fixture shared policy",
+            "src.codex/AGENTS.codex.md": "fixture Codex addendum",
+            "adapters/claude/CLAUDE.md": "fixture Claude entrypoint",
+            "src.codex/skills/lead/SKILL.md": "fixture canonical skill",
+            "src.codex/agents/orchestrarium-role-manifest.json": "{}",
+            "src.codex/skills/lead/scripts/validate-skill-pack.py": "",
+            "adapters/claude/agents/scripts/validate-skill-pack.py": "",
+        }
+        if kind == "export":
+            files = {path: body for path, body in files.items()
+                     if extractor.include_from_main(path, provider)}
+            assert not extractor.include_from_main("tests/fixtures/agent-run-ledger/example.json", provider)
+        script = root / validator.relative_to(ROOT)
+    for relative, body in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    script.parent.mkdir(parents=True, exist_ok=True)
+    layout = module._ENGINE.detect_layout(script, provider, root)
+    assert layout.root == root.resolve()
+    assert layout.dev_repo is (kind != "installed")
+    if provider == "claude" and kind == "export":
+        assert not layout.standalone  # Canonical body ownership is unchanged.
+        assert layout.skills == root / "src.codex/skills"
+    assert not (root / "tests").exists()  # Missing fixtures must not disable a monorepo gate.
+    selected = tuple(module._ENGINE._applicable_actions(module.ACTIONS, layout))
+    for operation, expected in (
+        ("check_agent_run_ledger_contract", kind == "monorepo"),
+        ("check_arch_layering_slices", kind != "installed"),
+    ):
+        matches = tuple(action for action in selected if action[0] == operation)
+        assert len(matches) == int(expected)
+
+
+@pytest.mark.parametrize("validator", VALIDATORS)
+def test_state_contract_declarations_have_source_scope(validator: Path) -> None:
+    module = _load(validator, f"state_contract_registration_{validator.parent.parent.name}")
+    declarations = module._SOURCE_STATE_CONTRACT_ACTIONS
+    assert len(declarations) == (5 if module.PROVIDER == "codex" else 12)
+    for declaration in declarations:
+        registrations = tuple(scope for scope, group in module.ACTIONS
+                              for action in group if action == declaration)
+        assert registrations == ("dev_repo",), declaration

@@ -28,3 +28,6 @@ RELEASE_NOTES.md text eol=lf
 
 # This source-format regression checks its own checkout bytes.
 /tests/test_codex_skill_catalog_budget.py text eol=lf
+
+# The frozen migration baseline is verified against its exact approved bytes.
+/tests/fixtures/legacy-obligation-migration/baseline.json -text

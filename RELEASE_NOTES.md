@@ -11,6 +11,13 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 - SDK selected updates now prepare and bind the exact requested replacements before comparing the previous provider receipt. Only proven selected logical keys and current modified-Lead witnesses are exempt from old payload hashes, so explicit authorized replacement works while unrelated modified files and receipt drift remain protected.
 
 - SDK execution now interprets detached captured Codex observations, owns the admitted resume snapshot before asynchronous restoration, and rejects asynchronous or unacknowledged Kimi evidence callbacks. This prevents mutable provider data and incomplete recording from changing already accepted orchestration state; no provider is launched or newly admitted by these changes.
+- Installer file writes now record successful ordinary POSIX permission changes before readback, preserving rollback ownership if that observation fails. Publication recovery keeps both the original publication error and a later bookkeeping error instead of hiding either; existing reservation and fresh-directory publication paths remain unchanged.
+
+- Installer rollback now keeps the original scalar restore failure when closing its descriptor also fails, including recovery details. Move metadata is recorded only after all destination observations succeed, so failed observations leave the rollback journal unchanged. Existing shared-container retention and reservation relocation remain intact.
+
+- Preserve the original copy failure and its existing recovery evidence when a source, fresh target, or metadata descriptor also fails to close. Successful copy ordering and timestamp restoration qualification remain unchanged.
+
+- Restored source-only ledger, state-schema, and architecture-layering checks that were declared but omitted from the Python pack validators. Preserve the byte-pinned migration baseline during Git checkout so Windows newline conversion cannot invalidate its approved digest. Ledger fixture checks run only in the full monorepo, not provider exports or installed packs; existing governance limits and installed validation remain unchanged. Reconciled all 19 architecture role slices with the current shared reference before refreshing its review stamp; both complete source pack validators pass.
 
 ## 2026-11-16
 

@@ -47,8 +47,10 @@ class SelectedReceiptCompositionTests(unittest.TestCase):
             transaction = SimpleNamespace(_original={target: original}, _expected={target: current},
                 _temporary=None, _migration_retention=(), _effects=(), paths=(target,), _slice_a_created=())
             owner = SimpleNamespace(dry_run=False, transaction=transaction, anchor=anchor,
-                replace_file_atomic=Mock(), create_file=Mock())
-            selected = SimpleNamespace(owner=owner)
+                replace_file_atomic=Mock(), replace_exact_file=Mock(), create_file=Mock())
+            selected = SimpleNamespace(owner=owner, path=anchor / selected_path)
+            stored = [before]
+            owner.replace_exact_file.side_effect = lambda relative, sha, data: stored.__setitem__(0, data)
             outcome = SimpleNamespace(path=selected_path, kind="file", after=b"selected replacement")
             payload = ownership.serialize_record(dict(schema=ownership.SCHEMA, provider="claude",
                 scope="project", files={skill_path:digest(b"old skill"), selected_path:digest(outcome.after)},
@@ -57,7 +59,7 @@ class SelectedReceiptCompositionTests(unittest.TestCase):
                 receipt_before=before, items={"agents/reviewer.md":selected},
                 received={"agents/reviewer.md":new_selected} if complete else {}, outcomes=(outcome,), payload=payload)
             configs = {".claude/CLAUDE.md":dict(kind="block",blockKind="claude",sha256="b"*64)}
-            with patch.object(backend,"_read_owned_text",return_value=before.decode()), \
+            with patch.object(backend,"_read_owned_text",side_effect=lambda *a, **k: stored[0].decode()), \
                  patch.object(backend,"_capture_provider_configs",return_value=configs), \
                  patch.object(backend,"_assert_selected_replacement") as verify:
                 call = lambda: backend._record_provider_install(ROOT,"claude","project",target,anchor,
@@ -67,11 +69,16 @@ class SelectedReceiptCompositionTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         call()
                     owner.replace_file_atomic.assert_not_called()
+                    owner.replace_exact_file.assert_not_called()
                     return
                 call()
-                verify.assert_called_once_with(selected,owner,new_selected,"claude")
-            owner.replace_file_atomic.assert_called_once()
-            result = ownership.decode_record(owner.replace_file_atomic.call_args.args[1],"claude","project")
+                self.assertEqual(verify.call_count, 2)
+                verify.assert_called_with(selected,owner,new_selected,"claude")
+            owner.replace_file_atomic.assert_not_called()
+            owner.replace_exact_file.assert_called_once()
+            self.assertEqual(owner.replace_exact_file.call_args.args[:2],
+                             (batch.receipt.relative_to(anchor), digest(before)))
+            result = ownership.decode_record(owner.replace_exact_file.call_args.args[2],"claude","project")
             self.assertEqual(result["layout"],ownership.LAYOUT)
             self.assertEqual(result["files"],{skill_path:digest(b"new skill"),selected_path:digest(outcome.after)})
             self.assertEqual(result["configs"],configs)
