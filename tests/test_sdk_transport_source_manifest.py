@@ -1,16 +1,17 @@
 """Keep the published transport manifest usable without launching a provider."""
 import copy
-import importlib.util
 import json
 from pathlib import Path
 import tempfile
 import unittest
 
+from _module_loading_support import load_module
+
 ROOT = Path(__file__).resolve().parents[1]
-SPEC = importlib.util.spec_from_file_location(
-    "sdk_transport_manifest_validator", ROOT / "scripts/validate-provider-prompt-projections.py")
-VALIDATOR = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(VALIDATOR)
+VALIDATOR = load_module(
+    ROOT / "scripts/validate-provider-prompt-projections.py",
+    "sdk_transport_manifest_validator",
+)
 MANIFEST = ROOT / "shared/provider-prompt-projections.v1.json"
 
 
