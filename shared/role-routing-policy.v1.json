@@ -22,13 +22,13 @@
       "modelTier": "mechanical",
       "effort": "high",
       "codexModel": "gpt-6-luna",
-      "useCriteria": "Named mechanical roles require their exact caller contract. For policy-admitted ordinary exploration/engineering, prefer supervised Luna/high when expected time to a verified useful result, including verification, correction and supervision, favors it; retain profession and independent gates. Pilot evidence does not establish general speed or coding quality."
+      "useCriteria": "Explicit lower-effort choice for fully specified bounded work; Extra high is the factory default. Named mechanical roles retain their exact caller contracts and no decision authority."
     },
     "luna-xhigh": {
       "modelTier": "mechanical",
       "effort": "xhigh",
       "codexModel": "gpt-6-luna",
-      "useCriteria": "Explicit supervised ordinary exploration/engineering for bounded tasks whose interacting constraints or multi-step reasoning justify extra effort by expected time to a verified useful result, including corrections and supervision. Retain profession, scope and independent gates. No default promotion, protected-task admission, forced High failure, universal local quality/speed claim or named-mechanical corridor change."
+      "useCriteria": "Default for exact mechanical work and a candidate for supervised bounded work with an objective oracle. No task-selection or acceptance authority; no mandatory cheaper-model trial."
     },
     "balanced-medium": {
       "modelTier": "balanced",
@@ -52,7 +52,7 @@
       "modelTier": "frontier",
       "effort": "high",
       "codexModel": "gpt-6.2-sol",
-      "useCriteria": "Difficult multi-step work requiring strong engineering reasoning."
+      "useCriteria": "Primary ordinary coding and implementation candidate. Compare total cost of a verified result, including rework, rather than token price alone."
     },
     "frontier-xhigh": {
       "modelTier": "frontier",
@@ -70,7 +70,7 @@
       "modelTier": "apex",
       "effort": "max",
       "codexModel": "gpt-6.2-sol",
-      "useCriteria": "Exact legacy Sol Max, individually agreed; exceptional supplemental science prefers Terra Max."
+      "useCriteria": "Explicit Sol Max choice with separate exact-launch user agreement. Not an automatic substitute for Astra or a prerequisite before choosing Astra."
     },
     "astra-low": {
       "modelTier": "apex",
@@ -88,13 +88,13 @@
       "modelTier": "apex",
       "effort": "high",
       "codexModel": "gpt-6.2-astra",
-      "useCriteria": "Difficult or high-risk work needing deeper verification."
+      "useCriteria": "Preferred scientific formulation candidate and eligible for complex substantive audits, architecture and security when the authorized task warrants it. Scoped task authorization may cover retries; provider, spending and Max approvals remain separate."
     },
     "astra-xhigh": {
       "modelTier": "apex",
       "effort": "xhigh",
       "codexModel": "gpt-6.2-astra",
-      "useCriteria": "Demanding work with a recorded caller escalation rationale."
+      "useCriteria": "Select when scientific formulation, complex audit, architecture or security needs additional reasoning. Same scoped task authorization boundary as Astra High; no automatic promotion or unbounded spending grant."
     },
     "astra-max": {
       "modelTier": "apex",
@@ -106,13 +106,13 @@
       "modelTier": "balanced",
       "effort": "medium",
       "codexModel": "gpt-6.1-terra",
-      "useCriteria": "Routine ordinary producer candidate when actual task fit favors Medium."
+      "useCriteria": "Explicit legacy lower-effort choice, not the factory recommendation. Compare against Terra High and Sol on the actual task."
     },
     "terra-6.1-high": {
       "modelTier": "balanced",
       "effort": "high",
       "codexModel": "gpt-6.1-terra",
-      "useCriteria": "Additional ordinary reasoning when actual task fit justifies High over Medium."
+      "useCriteria": "Task-specific candidate for bounded verifiable work, repository comprehension, visual tasks and selected physics checks. Not a mandatory first rung or a general science/coding superiority claim."
     },
     "terra-6.1-xhigh": {
       "modelTier": "balanced",
@@ -124,7 +124,7 @@
       "modelTier": "balanced",
       "effort": "max",
       "codexModel": "gpt-6.1-terra",
-      "useCriteria": "Individually agreed ordinary Max; supplemental science retains primary Sol and independent acceptance."
+      "useCriteria": "Individually agreed supplemental Max choice when task evidence justifies it; preserve independent scientific acceptance. No automatic alternative to Astra."
     },
     "luna-max": {
       "modelTier": "mechanical",
@@ -194,24 +194,24 @@
   },
   "roles": {
     "mechanical-scout": {
-      "defaultProfile": "luna-high",
-      "allowedProfiles": ["luna-high"]
+      "defaultProfile": "luna-xhigh",
+      "allowedProfiles": ["luna-high", "luna-xhigh"]
     },
     "mechanical-worker": {
-      "defaultProfile": "luna-high",
-      "allowedProfiles": ["luna-high"]
+      "defaultProfile": "luna-xhigh",
+      "allowedProfiles": ["luna-high", "luna-xhigh"]
     },
     "default": {
       "defaultProfile": "frontier-xhigh",
       "allowedProfiles": ["terra-6.1-high", "terra-6.1-xhigh", "balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-max"]
     },
     "explorer": {
-      "defaultProfile": "terra-6.1-medium",
+      "defaultProfile": "terra-6.1-high",
       "previousFactoryProfile": "frontier-high",
       "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "luna-max", "terra-6.1-max"]
     },
     "worker": {
-      "defaultProfile": "terra-6.1-medium",
+      "defaultProfile": "frontier-high",
       "previousFactoryProfile": "frontier-high",
       "taskDefaultProfiles": {"recovery": "frontier-high"},
       "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
@@ -219,7 +219,7 @@
     "analyst": {
       "defaultProfile": "terra-6.1-high",
       "previousFactoryProfile": "frontier-high",
-      "taskDefaultProfiles": {"exploration": "terra-6.1-medium"},
+      "taskDefaultProfiles": {"exploration": "terra-6.1-high"},
       "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
     },
     "planner": {
@@ -236,11 +236,11 @@
       "allowedProfiles": ["frontier-xhigh", "sol-5.6-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max"]
     },
     "algorithm-scientist": {
-      "defaultProfile": "frontier-xhigh",
+      "defaultProfile": "astra-high",
       "allowedProfiles": ["frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max"]
     },
     "computational-scientist": {
-      "defaultProfile": "frontier-xhigh",
+      "defaultProfile": "astra-high",
       "allowedProfiles": ["frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max"]
     },
     "security-engineer": {
@@ -252,12 +252,12 @@
       "allowedProfiles": ["frontier-xhigh", "sol-5.6-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max"]
     },
     "backend-engineer": {
-      "defaultProfile": "terra-6.1-medium",
+      "defaultProfile": "frontier-high",
       "previousFactoryProfile": "frontier-high",
       "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
     },
     "platform-engineer": {
-      "defaultProfile": "terra-6.1-medium",
+      "defaultProfile": "frontier-high",
       "previousFactoryProfile": "frontier-high",
       "taskDefaultProfiles": {"recovery": "frontier-high"},
       "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
@@ -268,7 +268,7 @@
       "allowedProfiles": ["terra-6.1-high", "terra-6.1-xhigh", "balanced-high", "frontier-high", "frontier-xhigh", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-max"]
     },
     "knowledge-archivist": {
-      "defaultProfile": "terra-6.1-medium",
+      "defaultProfile": "terra-6.1-high",
       "previousFactoryProfile": "frontier-medium",
       "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "luna-max", "terra-6.1-max"]
     },
@@ -358,7 +358,7 @@
     "ambiguity": "abort",
     "fallback": "none",
     "objectiveOracle": "caller-required",
-    "defaultEffort": "high",
+    "defaultEffort": "xhigh",
     "allowedCallerEfforts": ["high", "xhigh", "max"],
     "scout": {
       "status": "native-required-when-feature-enabled",
