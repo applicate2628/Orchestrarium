@@ -19,7 +19,7 @@ def launch_requirements(provider: str, model: str, effort: str) -> tuple[str | N
             return "luna-minimum-high", False
         if model in {"gpt-6.1-terra", "gpt-5.6-terra"} and effort not in {"medium", "high", "xhigh", "max"}:
             return "terra-minimum-medium", False
-    return None, (provider == "codex" and model == "gpt-6-astra") or effort == "max"
+    return None, (provider == "codex" and model in {"gpt-6-astra", "gpt-6.2-astra"}) or effort == "max"
 
 
 def qualify_launch(provider: str, model: str, effort: str, *,

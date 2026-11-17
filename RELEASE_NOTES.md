@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-17
 
+- Production Codex routing advances factory GPT-6.1 Sol and GPT-6 Astra models to their GPT-6.2 versions with unchanged role efforts and launch rules. Existing 6.1 Sol external profile settings migrate to the same effort on 6.2; Terra, Luna, unrelated settings and the main-session model remain untouched.
+
 - Installer file writes now record successful ordinary POSIX permission changes before readback, preserving rollback ownership if that observation fails. Publication recovery keeps both the original publication error and a later bookkeeping error instead of hiding either; existing reservation and fresh-directory publication paths remain unchanged.
 
 - Installer rollback now keeps the original scalar restore failure when closing its descriptor also fails, including recovery details. Move metadata is recorded only after all destination observations succeed, so failed observations leave the rollback journal unchanged. Existing shared-container retention and reservation relocation remain intact.

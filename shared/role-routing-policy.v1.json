@@ -45,19 +45,19 @@
     "frontier-medium": {
       "modelTier": "frontier",
       "effort": "medium",
-      "codexModel": "gpt-6.1-sol",
+      "codexModel": "gpt-6.2-sol",
       "useCriteria": "Explicit bounded work with an accepted, directly testable contract; not critical review, security, or recovery."
     },
     "frontier-high": {
       "modelTier": "frontier",
       "effort": "high",
-      "codexModel": "gpt-6.1-sol",
+      "codexModel": "gpt-6.2-sol",
       "useCriteria": "Difficult multi-step work requiring strong engineering reasoning."
     },
     "frontier-xhigh": {
       "modelTier": "frontier",
       "effort": "xhigh",
-      "codexModel": "gpt-6.1-sol",
+      "codexModel": "gpt-6.2-sol",
       "useCriteria": "Demanding work with caller-justified additional reasoning."
     },
     "sol-5.6-xhigh": {
@@ -69,37 +69,37 @@
     "apex-max": {
       "modelTier": "apex",
       "effort": "max",
-      "codexModel": "gpt-6.1-sol",
+      "codexModel": "gpt-6.2-sol",
       "useCriteria": "Exact legacy Sol Max, individually agreed; exceptional supplemental science prefers Terra Max."
     },
     "astra-low": {
       "modelTier": "apex",
       "effort": "low",
-      "codexModel": "gpt-6-astra",
+      "codexModel": "gpt-6.2-astra",
       "useCriteria": "Bounded clear work with an accepted directly testable contract."
     },
     "astra-medium": {
       "modelTier": "apex",
       "effort": "medium",
-      "codexModel": "gpt-6-astra",
+      "codexModel": "gpt-6.2-astra",
       "useCriteria": "Explicit exception for difficult unknown-model research, conflicting assumptions, or costly latent error; direct selection allowed without an automatic ladder."
     },
     "astra-high": {
       "modelTier": "apex",
       "effort": "high",
-      "codexModel": "gpt-6-astra",
+      "codexModel": "gpt-6.2-astra",
       "useCriteria": "Difficult or high-risk work needing deeper verification."
     },
     "astra-xhigh": {
       "modelTier": "apex",
       "effort": "xhigh",
-      "codexModel": "gpt-6-astra",
+      "codexModel": "gpt-6.2-astra",
       "useCriteria": "Demanding work with a recorded caller escalation rationale."
     },
     "astra-max": {
       "modelTier": "apex",
       "effort": "max",
-      "codexModel": "gpt-6-astra",
+      "codexModel": "gpt-6.2-astra",
       "useCriteria": "Maximum Astra effort only with explicit user approval."
     },
     "terra-6.1-medium": {
