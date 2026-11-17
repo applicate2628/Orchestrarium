@@ -434,11 +434,12 @@ would erase the alias evidence that the inventory needs. This preserves the
 same policy and trust owners rather than introducing a second SDK-specific one.
 
 The strict UTF-8 JSON binding is bounded to 65,536 bytes. Version 1 contains
-exactly the following fields; version 2 additionally requires `installedHookRoot`:
+exactly the following fields; version 2 additionally requires `installedHookRoot`.
+Version 3 additionally selects context as described below:
 
 | Field | Meaning |
 |---|---|
-| `schemaVersion` | Integer `1` or `2`; repository-local binding schema, not SDK version. |
+| `schemaVersion` | Integer `1`, `2` or `3`; repository-local binding schema, not SDK version. |
 | `accountBinding` | Nonsecret identifier for the selected existing account. |
 | `expectedAccountEmail` | Existing account email for auth-file verification, or null where the selected auth mode permits it; not a credential. |
 | `coordinatorBinding` | Existing Host/session binding label; does not start a coordinator. |
@@ -454,6 +455,21 @@ No package is inferred from hook commands. The immutable runtime selection and r
 and the existing hook-health owner validates it via `--installed-root`. This is
 selection, not consent or native hook qualification. Version 1 remains closed and
 does not accept this additional field.
+
+Version 3 requires `contextMode` (`fresh` or `handoff`) and
+`contextHandoff` (null for fresh, nonempty selected task evidence for handoff).
+It also includes `installedHookRoot`, allowing null for the existing default
+hook-selection route. The same binding byte limit applies; no new context cap
+is introduced. Fresh review receives the explicit task prompt, requirements and
+artifact evidence without importing the author's private conversation. Handoff
+appends only the supplied text before ordinary governance framing and admission;
+it does not clone native history, import files or grant authority. The immutable
+execution request/result records `context_mode`, included in the existing request
+hash. Canonical serialization omits the default `fresh` value to preserve
+previously retained request commitments; absent means fresh, never inherited. Version 1/2 retain fresh behavior. This increment does not implement
+new-turn resume/fork in the public review bridge; requesting either is rejected,
+not converted to fresh. Existing interrupted-turn reconciliation is unchanged.
+The remaining provider-specific context modes in the roadmap remain unfinished.
 
 The binding cannot select extra tools, arbitrary launch flags or endpoints. This
 bridge selects an empty Model Context Protocol (MCP) tool scope and fixed startup

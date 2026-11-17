@@ -32,6 +32,11 @@ SDK evidence remains nonauthorizing. A runtime-confirmed preworker failure expor
 selected-only blocked evidence. An uncertain post-worker failure must not become
 that no-worker result or trigger automatic replay; receiving failure remains open.
 
+Binding version 3 explicitly selects fresh review or selected-context handoff.
+Supply only authorized task evidence; handoff is not native history cloning.
+The choice stays bound to the existing request/result, without adding authority.
+Versions 1/2 remain fresh; public new-turn resume/fork is not yet implemented.
+
 ## Canonical config
 
 The project-local config file is:

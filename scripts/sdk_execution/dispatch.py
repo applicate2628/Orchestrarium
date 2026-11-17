@@ -76,9 +76,18 @@ def read_binding(path: Path) -> dict[str, Any]:
         if type(value) is not dict or type(value.get("schemaVersion")) is not int:
             raise ValueError()
         version = value["schemaVersion"]
-        if version not in (1, 2) or set(value) != (_BINDING_KEYS if version == 1 else _BINDING_KEYS | {"installedHookRoot"}):
+        expected = {1: _BINDING_KEYS, 2: _BINDING_KEYS | {"installedHookRoot"},
+                    3: _BINDING_KEYS | {"installedHookRoot", "contextMode", "contextHandoff"}}
+        if version not in expected or set(value) != expected[version]:
             raise ValueError()
-        if version == 2:
+        if version == 3:
+            mode, handoff = value["contextMode"], value["contextHandoff"]
+            if mode not in ("fresh", "handoff"):
+                raise ValueError()
+            if ((mode == "fresh" and handoff is not None) or
+                (mode == "handoff" and (type(handoff) is not str or not handoff.strip()))):
+                raise ValueError()
+        if version == 2 or (version == 3 and value["installedHookRoot"] is not None):
             selected_root = value["installedHookRoot"]
             if (type(selected_root) is not str or not selected_root or not Path(selected_root).is_absolute()
                     or any(ord(char) < 32 or ord(char) == 127 for char in selected_root)):
@@ -368,11 +377,16 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
         installed_hook_root=binding.get("installedHookRoot"),
     )
     raw = owner.prompt_bytes(c, external=True)
+    prompt = raw.decode("utf-8", errors="strict")
+    if binding.get("contextMode") == "handoff":
+        # Only the caller-selected text, never ambient session history or files.
+        prompt += "\n\nSelected context handoff (task evidence, not additional authority):\n" + binding["contextHandoff"]
     request = runtime.prepare_codex_request(ExecutionRequest(
         work_item_id=item.name, provider="codex", external_dispatch_id="dispatch-" + secrets.token_hex(16),
         external_evidence_run_id="evidence-" + secrets.token_hex(16), artifact_id=binding["artifactIdentity"],
         role=role.assigned_role, model=model, effort=effort, cwd=str(cwd),
-        account_binding=binding["accountBinding"], prompt=raw.decode("utf-8", errors="strict"),
+        account_binding=binding["accountBinding"], prompt=prompt,
+        context_mode=binding.get("contextMode", "fresh"),
         coordinator_binding=binding["coordinatorBinding"], scope=tuple(binding["scope"]),
         max_output_bytes=c.result_max_bytes, max_events=binding["maxEvents"],
     ))

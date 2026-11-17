@@ -10,6 +10,10 @@ This file keeps only Codex-specific runtime and repository concretization for th
 
 Apply the shared **Context handoff economy** owner. Native role TOML files already reference AGENTS and the selected role instead of embedding the full corpus; preserve that thin overlay. Do not assume that an inherited skills catalog proves a loaded skill body, or that a new thread has the parent's full history. Use the supported invocation's actual context contract, supply missing instructions when uncertain, and send only changed task requirements on follow-up. This is dispatch guidance, not a new host setting or proof of token savings. Global/project automatic AGENTS concatenation remains a separate installation/loading compatibility question; never omit standalone project governance merely because a global file exists.
 
+The review binding can explicitly select fresh context or a handoff of selected
+task evidence; neither mode imports the parent conversation. See the owning
+SDK binding contract for current supported modes and continuation limitations.
+
 ### Explicit Codex SDK review integration
 
 The repository-local `--sdk-review-binding` opt-in uses the official Python Codex

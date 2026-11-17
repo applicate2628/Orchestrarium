@@ -50,6 +50,8 @@ class CoordinationInferenceRequest(ExecutionRequest):
 
     @classmethod
     def from_dict(cls, value: object) -> CoordinationInferenceRequest:
+        if type(value) is dict and "context_mode" not in value:
+            value = {**value, "context_mode": "fresh"}
         if type(value) is not dict or set(value) != {f.name for f in fields(cls)}:
             raise ValueError("invalid coordination request fields")
         if type(value["scope"]) is not list:

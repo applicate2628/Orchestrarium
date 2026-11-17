@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-17
 
+- Let the Codex SDK review caller explicitly select a fresh session or hand over selected task evidence through binding version 3. The choice is retained in the admitted request and result; no conversation history is imported automatically, existing bindings stay fresh, and unsupported continuation modes are not silently substituted.
+
 - Record the approved PR19 completion plan for multivendor SDK execution and scoped child-Lead sessions. The plan separates native subagents from external SDK sessions, preserves provider-specific authorization and capability limits, and defines implementation and acceptance work without presenting the current Codex review baseline as full runtime readiness.
 
 - Complete the explicit official agent SDK setup path with selected virtual-environment creation/update, ordinary vendor dependency installation and a real pip check. Preview remains non-mutating; apply isolates installer configuration, verifies the actual interpreter environment and preserves failed installations for diagnosis or retry without starting authentication or model work.

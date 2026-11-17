@@ -64,11 +64,14 @@ class ExecutionRequest:
     scope: tuple[str, ...]
     max_output_bytes: int = 1_048_576
     max_events: int = 4096
+    context_mode: str = "fresh"
 
     def __post_init__(self) -> None:
         for field in fields(self):
             if field.name not in {"scope", "max_output_bytes", "max_events"}:
                 _text(getattr(self, field.name), field.name, 262_144 if field.name == "prompt" else 4096)
+        if self.context_mode not in {"fresh", "handoff"}:
+            raise ValueError("unsupported context mode")
         if self.provider not in {"codex", "claude", "kimi", "grok", "minimax", "mimo"}:
             raise ValueError("invalid provider")
         if self.external_dispatch_id == self.external_evidence_run_id:
@@ -96,10 +99,16 @@ class ExecutionRequest:
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
         result["scope"] = list(self.scope)
+        # Omission is the canonical fresh spelling, preserving retained request hashes.
+        if self.context_mode == "fresh":
+            result.pop("context_mode")
         return result
 
     @classmethod
     def from_dict(cls, value: object) -> ExecutionRequest:
+        # Older serialized requests predate explicit context selection and were fresh.
+        if isinstance(value, dict) and "context_mode" not in value:
+            value = {**value, "context_mode": "fresh"}
         data = dict(_keys(value, {field.name for field in fields(cls)}))
         if not isinstance(data["scope"], list):
             raise ValueError("scope must be a list")

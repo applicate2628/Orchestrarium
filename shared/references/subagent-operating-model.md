@@ -4,6 +4,11 @@ This file is the canonical shared core for the repository's subagent operating m
 
 Visual companion remains pack-local: use the corresponding `operating-model-diagram.md` next to the pack-local addendum.
 
+Context selection is a dispatch decision, not extra authority. A fresh review
+receives explicit requirements/artifacts/evidence without the author's private
+conversation; a handoff transfers only selected authorized context, not cloned
+history. The provider addendum identifies implemented modes and remaining gaps.
+
 ### Optional SDK execution representation
 
 The source-mode SDK integration retains this methodology and its existing admission,
