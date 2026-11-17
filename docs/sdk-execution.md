@@ -1,10 +1,11 @@
 # Optional software development kit (SDK) execution implementation
 
 This branch implements part of the SDK integration project separately from Rust/npm.
-The current acceptance scope is full qualification of the selected Codex review
-route and offline adapter checks for the other providers. Broader SDK-1 through
-SDK-4 roadmap items, including live Grok account/tool enforcement and receiving,
-remain outside that adapter-only acceptance. A synthetic Codex success does not
+The implemented and historically qualified scope is the selected Codex review
+route plus offline adapter checks for other providers. This is not the complete
+multivendor SDK target. The completion roadmap below records the current PR19
+integration outcome and remaining work, including provider execution and receiving;
+the historical adapter-only acceptance does not close that broader outcome. A synthetic Codex success does not
 qualify live execution or activate a default route; the optional outer Agents
 workflow remains separate from this Host-led path.
 Existing host-led Codex/Claude command-line interface (CLI) execution remains the
@@ -14,6 +15,377 @@ qualification claim. The historical installed Windows success and receiving-coll
 checks and the bounded live Codex review passed on October 25; the outer Agents
 cycle passed on October 26. Their exact evidence boundaries are recorded below.
 These results do not enable a default route or qualify arbitrary general use.
+
+## PR19 completion roadmap, 2026-11-17
+
+**Status: approved by Dmitry on 2026-11-17; implementation remains incomplete.**
+The approved target is a working multivendor SDK integration in this pull request
+(PR), not merely a setup menu or the existing Codex review slice. This completion
+scope replaces the earlier Codex-only/stub-only plan. Approval permits staged
+implementation, but does not upgrade old test results or authorize quota-consuming
+provider calls, external reviews, bots or GitHub Actions.
+Already-authorized bounded work retains its own scope. Rust remains a separate
+implementation line, not a prerequisite for finishing this SDK work.
+
+### Shared design
+
+- Keep one dispatch, process supervisor, ledger and permission owner. Provider
+  adapters translate supported requests/events/results into those existing
+  contracts; they do not create a second scheduler, policy system or ledger.
+- Separate the native Lead session from a programmatically invoked worker.
+  Any suitable provider may be Lead; Antigravity (AGY) is not the exclusive Lead.
+  The selected AGY and Claude subscription integrations are Lead-only: another
+  provider does not invoke them as workers. Their own native subagents remain
+  available. This project integration boundary is not a blanket claim about all
+  access methods: do not transfer subscription restrictions to official API
+  access. Copilot and other providers may serve the roles supported and permitted
+  by the actual product, authorization method and applicable terms. Future
+  selection interfaces must express that route-specific capability distinction,
+  preserve permitted choices and avoid provider-name bans. These are target
+  contracts, not claims that the corresponding adapters are already qualified.
+- Install each official vendor agent SDK through its supported package route in
+  the selected environment. A vendor-supplied runtime remains a vendor dependency;
+  Orchestrarium does not repackage it. Do not force a model API SDK into an agent
+  integration merely because it is available.
+- Compatibility follows required capabilities/protocols and actual package
+  dependencies, not an invented requirement for matching SDK/CLI version labels.
+  Preserve existing working legacy routes until their replacement actually works.
+- Installing a package, making a route callable, proving execution and choosing a
+  default route are distinct results. Credentials, account selection and spending
+  remain with their existing owners; no silent paid or alternate-account fallback.
+
+### Execution route and context chosen before every delegation
+
+The Lead first reads the relevant skill and retains that skill's workflow owner.
+When delegation is useful, use a suitable native subagent by default. Select an
+optional external SDK session when the task actually needs supported programmatic
+session control or a permitted external provider/reviewer; name that need in the
+existing dispatch record. SDK is a transport/execution option, not a claim of
+better reasoning or a replacement for the skill. This selection is not a new
+approval stage: existing vendor, role, account, data-sharing and spending rules
+still apply. An external independent reviewer remains distinct from an
+implementation worker, with the proper nonauthoring role and context.
+
+For the PR-review-bot example below, the Lead follows the existing skill; a native
+subagent may do suitable local work, while an optional SDK executor may perform
+an authorized correction or independent external review. Neither route replaces
+GitHub API state/thread operations, starts a second bot loop, or gains authority
+merely because the SDK can issue a call. Do not mandate SDK use when the native
+route already satisfies the task.
+
+Before each delegation, the Lead deliberately selects the context mode for that
+task: a fresh independent session, native fork/inheritance when the runtime
+supports it, resume of a correctly bound existing session, or explicit handoff of
+the necessary authorized context. This is the Lead's decision, not a fixed global
+mode, a question to the user or a new permission gate.
+
+Native subagent inheritance is not interchangeable with an external SDK resume
+or handoff. Never claim that a handoff clones hidden history. Resume preserves
+the correct provider/account/session binding; handoff supplies selected task
+requirements, decisions, artifacts and relevant evidence without an unrequested
+cross-provider history export. A fresh independent review does not inherit the
+author's private working conversation, but still receives the explicit
+requirements, reviewed artifact and relevant evidence.
+
+Use the adapter's actual capabilities; surface an unsupported mode rather than
+silently substituting one. Record the selected mode and session lineage in the
+existing launch record, not a second session store. Verify fresh-review isolation,
+correct resume, explicit-handoff contents and wrong-session/account/provider
+refusal through the owning contract. These tests do not authorize model calls.
+
+### Independent multi-Lead sessions and depth
+
+Approved target: the root Lead can split genuinely independent outcomes
+into separate sessions, each with a scoped child Lead and its own delegation.
+Assign exclusive ownership and expected integration results before dispatch.
+The existing shared Lead/lifecycle contract currently reserves dispatch and
+lifecycle writing to the root main conversation. Implementing scoped child Leads
+therefore includes an explicit, reviewed change to that existing owner contract:
+root-global coordination and final acceptance stay with the root; a child may
+delegate and record outcomes only within its assigned scope, not mutate root or
+sibling lifecycle, acquire new grants or declare global completion. Do not
+silently bypass the current root-only contract by relabeling a worker as Lead.
+Use separate Git worktrees and pull requests when the change is independently
+reviewable and needs isolation; do not create a PR for every small task or split
+one atomic change into competing edits. Existing suitable PRs remain reusable.
+The root retains overall integration, conflict resolution and final acceptance.
+Keep this session/task contract independent of a specific IDE (integrated
+development environment), with control available from supported native Claude
+or Codex Leads through the same owners. A future interface may project
+Todo/In progress/In review/Done and observed usage from existing task/execution
+records, without a second state store or invented usage totals. This is an
+architecture provision, not a request to implement a new interface in this plan.
+A Git worktree separates working files, not permissions, processes or secrets;
+it is not a security sandbox.
+
+Keep two depth controls distinct. Orchestrarium can enforce the hierarchy of
+sessions it actually creates, using existing dispatch/session lineage; native
+subagent depth belongs to the selected vendor runtime. Make configuration
+explicit with units (child-Lead/session levels versus native subagent levels)
+and ownership. Do not invent a universal numeric ceiling, silently interpret
+an unavailable vendor control as enforced, or promise control over hidden
+vendor descendants. The root applies the selected authorized resource/scope
+policy; any bound needs its actual rationale rather than a convenience constant.
+
+Depth capability findings (source review, not Orchestrarium runtime acceptance):
+
+| Runtime surface | Confirmed control and boundary |
+|---|---|
+| Codex 0.169 native V1 | `agents.max_depth` applies to V1; [release source](https://github.com/openai/codex/blob/rust-v0.169.0/codex-rs/config/src/config_toml.rs#L695-L705). |
+| Codex 0.169 native V2 | The same `agents.max_depth` is explicitly ignored. Instructions alone must not be reported as an enforced depth cap. |
+| Claude native subagents | [Official nested-subagent documentation](https://code.claude.com/docs/en/sub-agents#let-subagents-spawn-their-own-subagents) documents `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`; qualify the selected runtime/version and actual enforcement before claiming it works through this adapter. |
+| AGY SDK subagents | [Official SDK types](https://github.com/google-antigravity/antigravity-sdk-python/blob/main/google/antigravity/types.py) expose `CapabilitiesConfig.max_subagent_depth`, `enable_subagents` and `allowed_subagents`. This is an SDK surface, not proof of control over every native AGY Lead session. |
+| Copilot, Kimi, Grok | Comparable native-depth enforcement is not established by this research; expose that fact instead of inheriting another provider's claim. |
+
+Native-subagent control is also capability-specific, not implied by SDK session
+creation. Represent configuration, observation, steering, cancellation and depth
+as separate capabilities, rather than one misleading supports-subagents flag:
+
+| SDK surface | What is documented; what still needs qualification |
+|---|---|
+| Codex Python 0.169 / app-server | [Client source](https://github.com/openai/codex/blob/rust-v0.169.0/sdk/python/src/openai_codex/client.py) provides generic thread list/read/resume/fork and turn steer/interrupt. [App-server docs](https://learn.chatgpt.com/docs/app-server) expose subagent source filtering and experimental parent/ancestor filters. Targeting a live native child through this adapter needs qualification; session fork is not proof of a dedicated native-child spawn operation. |
+| Claude Agent SDK | [Subagent docs](https://code.claude.com/docs/en/agent-sdk/subagents) describe agent definitions and model-driven Agent-tool invocation/resume; the [Python interface](https://code.claude.com/docs/en/agent-sdk/python) exposes `stop_task(task_id)` for background tasks. Bind versions and actual task identity; this is not a universal direct child-spawn/control API shared by all vendors. |
+| AGY SDK | [Subagent docs](https://antigravity.google/docs/sdk/subagents) expose subagent configuration. [Conversation source](https://github.com/google-antigravity/antigravity-sdk-python/blob/main/google/antigravity/conversation/conversation.py) exposes session messaging, steps and current-turn cancellation. A public child-ID spawn/list/steer/cancel interface was not established in this review; do not label it impossible, or pretend parent-turn cancellation is child-specific control. |
+
+Distinguish requested depth, effective depth and enforcement (runtime,
+instruction-only or unsupported) through the existing selected-route contract.
+Creating a new root SDK session must not reset Orchestrarium's logical task depth.
+Reconcile an uncertain/repeated create request against its existing
+task/session/branch/PR binding before creating another, rather than duplicating
+sessions or PRs. Use native vendor defaults honestly; do not invent a cross-vendor
+number or mislabel those defaults as an Orchestrarium guarantee.
+
+A child Lead chooses native or external execution and context before each of its
+own delegations, using the same skill, role, access and permission owners as the
+root. The intended mechanism is programmatic session creation through an official
+SDK or supported agent protocol, not a new CLI-to-CLI wrapper. An official SDK
+may internally launch its vendor runtime; that does not make it Orchestrarium
+repackaging the runtime. Legal eligibility still depends on the exact provider,
+product, credentials/access method and applicable terms: an SDK's technical
+ability to create a session is not authorization to use consumer credentials.
+Do not launder a prohibited route through a child Lead. Existing permitted
+mechanisms are not categorically banned merely because a parent is an agent.
+
+The [Orca orchestration reference](https://orca.dev/docs/cli/orchestration)
+provides an experimental example of coordinator/task/worker sessions, child
+worktrees and configured worker nesting. At reviewed commit `651f2efa`,
+[Orca's depth configuration](https://github.com/stablyai/orca/blob/651f2efaa9502568b311babf9d14ac655a6444bd/src/shared/orchestration/workers/nested-worker-depth.ts)
+and [dispatch evaluation](https://github.com/stablyai/orca/blob/651f2efaa9502568b311babf9d14ac655a6444bd/src/main/runtime/orchestration/db/dispatch-creator-evaluation.ts)
+control Orca-owned dispatch lineage, not native Codex/Claude descendant trees.
+Do not copy Orca's numeric default or infer vendor-native enforcement from it.
+This is design evidence, not a dependency or proof that Orchestrarium controls
+native vendor subagents. Reuse existing
+Orchestrarium owners rather than importing a second coordinator or approval loop.
+Acceptance covers independent ownership, child-result integration, conflicting
+changes, cancellation/uncertain children and the distinction between configured
+and actually enforced hierarchy/native depth.
+
+### Official access terms and project choices
+
+Reviewed official sources on 2026-11-17; recheck the applicable product and access
+method when implementing or using a route. This plan is not a legal determination.
+
+- **Antigravity consumer access:** [Terms, section 6](https://antigravity.google/terms)
+  prohibit third-party software access, including the stated OAuth example.
+  The [official FAQ](https://antigravity.google/docs/faq), under "Can I use
+  Antigravity CLI headless mode in third-party coding agents or automate account
+  switching?", distinguishes direct scripting/continuous integration from wrapping
+  the CLI inside third-party agents/apps under consumer plans. The terms separately
+  identify Enterprise/API agreements. Do not infer that consumer credentials
+  authorize an external worker, or transfer the consumer restriction automatically
+  to a separately contracted API route.
+- **Claude authentication:** [Legal and compliance: authentication and credential
+  use](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use)
+  disallows third-party applications offering Claude.ai login or routing the
+  listed subscription credentials on users' behalf; developer products use the
+  supported API/cloud path. The same official page's "Can customers offer Claude
+  Code in their products?" section permits the described end-user sign-in to
+  unmodified hosted Claude Code. Consequently, this plan's subscription
+  **Lead-only** choice is an Orchestrarium integration boundary, not a claim that
+  Anthropic universally prohibits all orchestration or all hosting.
+  [Consumer Terms, section 3(7)](https://www.anthropic.com/legal/consumer-terms)
+  restrict automated access with explicit exceptions for an Anthropic API key or
+  other express permission; do not omit those exceptions.
+  [Commercial Terms, section A.1](https://www.anthropic.com/legal/commercial-terms)
+  cover the separate product/end-user route subject to their conditions.
+- **Separate AGY SDK access:** the [official SDK quickstart](https://antigravity.google/docs/sdk/overview#quickstart)
+  uses `GEMINI_API_KEY`; [Gemini Enterprise setup](https://antigravity.google/docs/sdk/overview#gemini-enterprise)
+  uses its cloud authorization route. Neither is authorization to wrap a consumer
+  subscription CLI. Assess these worker routes under their own applicable terms.
+- **Programmatic child sessions:** the [official Codex Python SDK](https://github.com/openai/codex/blob/main/sdk/python/README.md)
+  documents thread creation and Codex/ChatGPT authentication reuse. The
+  [Claude Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview)
+  distinguishes its supported internal Claude Code runtime from authorization:
+  integrations use API/cloud access or an applicable approved arrangement, not
+  an inferred right to reuse consumer login. AGY SDK sessions use the API or
+  enterprise route cited above. A child Lead role does not change these access
+  requirements. Keep the hosted unchanged-Claude-Code exception separate; it
+  does not automatically qualify an unattended third-party SDK integration.
+- For other routes, preserve the official package/protocol and check the terms
+  governing the selected account/product. A license to install an SDK is not
+  permission to reuse a subscription credential, invoke a model or spend quota.
+  Unknown access eligibility remains explicit; do not turn it into a blanket
+  provider restriction or an unsupported permission.
+
+### Current baseline and remaining provider work
+
+Published baseline for this roadmap: `23da8dba`. Subsequent changes must update
+their own evidence below or in the existing PR description rather than relabel
+historical results as fresh acceptance.
+
+| Surface | Implemented or observed baseline | Remaining outcome in PR19 |
+|---|---|---|
+| Common execution | Existing shared dispatch/supervisor/ledger; SDK worker uses the invoking Python interpreter. | Exercise the same lifecycle, events, receipt and cancellation owners for each supported provider/role; retain main regressions. |
+| Codex | Explicit Windows read-only external-reviewer bridge; historical bounded native evidence below. | Complete official selected-environment setup and current runtime checks, then integrate the additional intended roles through the common mechanism. |
+| Claude | SDK worker factory/adapter and offline checks; native Lead is a different boundary. | Complete the public execution path and receiving with the provider-supported programmatic access method; do not wrap a subscription CLI as a third-party worker. |
+| Antigravity | Official setup direction; no implemented AGY runtime adapter in the current SDK execution factory. | Implement Lead/session integration and native subagent handoff; separately qualify any admitted programmatic worker route. |
+| Copilot | Setup direction; existing integration candidates are not a callable SDK execution route. | Reconcile reusable candidate work, implement the common adapter and verify supported Lead/worker/reviewer roles without provider-name role bans. |
+| Kimi | Existing ACP boundary is separate from the current SDK factory. | Reconcile the supported Kimi runtime with the official agent integration; do not silently substitute the older Python runtime or a model API for the chosen route. |
+| Grok | Candidate protocol support is not live-qualified execution. | Integrate the official Grok Build Agent Client Protocol (ACP) route, including account/tool enforcement and result receiving; do not invent a separate vendor SDK or substitute the xAI model API. |
+
+### Approved role/access acceptance scope
+
+This approved target matrix is not an existing capability claim.
+Lead is the owner of an orchestration scope, not an authentication mechanism.
+It may run in a user-owned native session or an explicitly permitted SDK-created
+child session. Worker, Reviewer and Consultant are separate task roles entering
+the common execution contract. A role label never changes access eligibility.
+
+| Provider/access route | Approved roles to finish | Entry and acceptance boundary |
+|---|---|---|
+| Codex, supported official agent access | Lead, Worker, Reviewer, Consultant | Native Lead integration plus public programmatic routes; Reviewer-only is not completion. |
+| Claude consumer subscription | Lead, with vendor-native subagents | User-owned native session; no external-worker wrapper. |
+| Claude official API/cloud | SDK-created Lead, Worker, Reviewer, Consultant | Official programmatic route; account and quota authorization are separate from implementing the adapter. |
+| AGY consumer subscription | Lead, with vendor-native subagents | User-owned native session; no external-worker wrapper. |
+| AGY official SDK/API/enterprise | SDK-created Lead, Worker, Reviewer, Consultant | Official non-consumer access and its applicable contract, not consumer-token reuse. |
+| Copilot, supported official SDK access | Lead, Worker, Reviewer, Consultant | Native Lead integration and SDK execution without artificial provider-name role restrictions. |
+| Kimi, supported official agent access | Lead, Worker, Reviewer, Consultant | Select the compatible supported runtime/protocol before implementation; no silent legacy-runtime substitution. |
+| Grok Build, supported ACP access | Lead, Worker, Reviewer, Consultant | Native Lead integration and official ACP execution; model API is not a substitute. |
+
+Approved target platforms are Windows, macOS and Linux where the selected vendor
+officially supports the route. Current containment and public Codex bridge
+evidence is Windows-only; this is an implementation gap, not an approved reduction
+of the target. Specify and implement the missing supported-platform execution
+owners and verify them natively. Record any vendor-unsupported combination as a
+specific external limitation for approval, not an invented general platform ban.
+A provider lacking a promised native role or access capability is an unresolved
+target requiring plan reconciliation, not a passing stub or automatic scope cut.
+
+For every included route, completion means its actual public/native entry,
+authorized real execution and received result are demonstrated; focused negative
+and cancellation checks preserve ownership and report uncertain outcomes honestly.
+Record the commit, runtime/access method, platform, scenario and result. Local
+fakes, setup success and unavailable live runs do not complete that route.
+One unresolved provider does not stop independent ready implementation.
+
+### Ordered implementation slices
+
+1. **Official setup and selected environment.** Finish explicit apply, normal
+   vendor dependency installation and package consistency checks. The existing
+   entrypoint and supervised worker must use the selected interpreter. Test
+   invalid targets, ambient installer-variable isolation and recovery after a
+   partial environment/install failure. Ownership: the existing SDK integration
+   and installer lanes; coordinate shared-file changes before parallel work.
+2. **Programmatic external SDK execution.** Extend the existing dispatch and
+   execution owners so the Lead can start an external task through the selected
+   official SDK (or the vendor-supported agent protocol), observe streaming
+   events, request cancellation and receive a validated common typed result
+   envelope plus the existing terminal receipt. This normalization preserves
+   provider provenance and raw evidence; it does not imply provider-native JSON
+   answers or fabricate a structured review verdict from CLI/ACP output.
+   Provider-native structured output is used only where supported. Where
+   supported, resume the correctly bound
+   external session/job; an explicit context handoff is not native resume.
+   Before each call, the Lead chooses fresh independent execution versus
+   supported continuation or explicit handoff, according to the task and actual
+   adapter capabilities. Keep execution work distinct from independent review.
+   Native vendor subagents are a separate mechanism, not evidence that these
+   external calls work. Do not promise streaming, resume or cancellation semantics
+   that the selected vendor does not support: expose the concrete capability and
+   outcome, with no silent substitution or inferred history clone.
+   The existing permission owner selects capabilities for the actual role/access
+   route: a Worker may write only within its authorized workspace/tool scope;
+   Reviewer and read-only Consultant routes retain their nonmutating scope.
+   Verify admitted writes, rejected forbidden writes/tools and role switching
+   without stale write permission. Preserve success, failure, uncertain outcomes,
+   settlement and main regressions without a second ledger or blind replay.
+   Extend the same session lineage for approved independent child-Lead sessions
+   and their selected hierarchy limits; propagate role/access/context decisions
+   without pretending native-provider depth is controlled by that lineage.
+3. **Provider vertical slices.** Complete each approved route in the role/access
+   matrix end to end. For programmatic roles, wire the public call to the real
+   provider adapter: request/role/access selection, start or supported resume,
+   stream/event mapping, cancellation and structured result/receipt receiving.
+   Exercise task execution and independent review as distinct use cases, with
+   the selected fresh/continuation/handoff mode carried to the real adapter.
+   For native Lead integrations, use the user-owned session and vendor-native
+   subagents; do not implement a Lead-only subscription route as an external
+   worker. Independent adapter work may run in parallel after shared interfaces
+   are agreed; one owner edits each shared boundary. Reconcile existing
+   candidates before implementing missing behavior. Record unsupported or
+   unqualified capabilities explicitly, not as stub successes or blanket claims
+   that every SDK offers the same session controls.
+4. **External-call and cross-provider acceptance.** Through public entrypoints,
+   verify an allowed external task and a fresh independent review; a supported
+   resume with correct session/account/provider binding; an explicit handoff
+   carrying only selected authorized context; streaming/event mapping and a
+   validated result. Verify cancellation and its actual terminal/unknown outcome,
+   interrupted streams, unsupported modes and forbidden role/access combinations.
+   Check that a suitable native-subagent task is not unnecessarily routed through
+   an external SDK, that a justified external route preserves the skill's owner,
+   and that independent review is not silently assigned to its implementation
+   author. Unsupported SDK capabilities must not trigger an unapproved fallback.
+   Fresh review receives requirements/artifact/evidence without the author's
+   private working conversation. Preserve permissions, resource ownership and
+   receipts across these cases and the selected supported platforms.
+   For child-Lead work, verify disjoint ownership, integration/conflict handling
+   and cleanup/cancellation without touching another session's resources.
+   A fresh SDK root must preserve logical task depth and root identity; a child
+   cannot exceed inherited authorized scope or mutate root/sibling lifecycle.
+   Check these through the existing session/permission owners, not a second store.
+   Check the actual native depth capability for each selected runtime; unsupported
+   enforcement must remain visible rather than reported as a passing cap.
+   A concrete integration scenario is the existing `github-pr-review-bot` cycle:
+   optionally delegate an authorized correction or fresh independent review to
+   an SDK executor, then return its result to the owning skill. The skill and
+   GitHub API remain responsible for PR state and review threads; the SDK does
+   not replace them or authorize a bot run, continuous integration (CI) or
+   quota-consuming model calls. Verify that the result remains bound to the
+   reviewed PR revision, that stale results are not applied to a newer revision,
+   and that correction/review results do not themselves mutate or close threads.
+   Use local contract fixtures unless a real external run is separately authorized.
+   Run free local/contract checks first. Actual external model calls and quota
+   use require applicable user authorization; mocks, package installation and
+   native subagent runs do not qualify external SDK execution. Record unrun live
+   checks precisely and continue independent ready work.
+5. **Finish the existing PR.** Reconcile code, this roadmap, tests and the PR
+   description against the final commit. Update affected shared and pack
+   Lead/lifecycle and external-dispatch contracts, agents-mode schema/reference, installer
+   propagation, README/INSTALL and release notes under their existing owners.
+   AGY remains a distinct identity; do not revive the removed Gemini scalar or
+   leave installed contracts contradicting implemented SDK capabilities. A
+   retained legacy default is distinct from SDK availability and need not be
+   widened merely to match the provider matrix. Commit and push coherent authorized
+   slices to the existing PR branch. Report implemented routes, observed runs and
+   remaining limitations separately. Merge and global installation are subsequent
+   delivery actions, not prerequisites for a working PR implementation.
+
+### Current execution state
+
+The information-only setup baseline was followed by published setup apply/recovery
+in commit `ee794cf2`; the approved plan baseline is `264f629d`, which also corrects test
+module registration. Setup now creates/updates the selected virtual environment,
+installs ordinary vendor dependencies and runs pip check while preserving failures
+for diagnosis or retry. These are installer implementation results, not proof of
+model execution or complete provider-role support. Actual native startup evidence
+and full-suite outcomes retain their own exact recorded scope; this roadmap does
+not claim an all-green runtime acceptance. Full multivendor execution remains
+unfinished; neither plan entries nor setup catalog entries mark it done.
+
+Continue with the next incomplete slice, not another unchanged broad audit.
+Use this section and the existing PR for the completion state; do not create a
+competing tracker or impose arbitrary run counts, time limits or new approval
+stages. Preserve actual permissions, required checks and justified safety bounds.
 
 ## Provider installation boundary
 
@@ -302,12 +674,16 @@ SDK project draft's requirement to pin tested SDK/CLI combinations.
 
 Provisioning and complete native qualification remain separate from API checks.
 This branch performs no implicit package install, upgrade, downgrade,
-authentication, credential copying or provider activation. The user-selected
-execution route is subscription-backed; a separate API account/billing lane is
-not a prerequisite and must not be silently introduced. Direct Codex SDK uses
-the existing Codex login. Any optional outer Agents Model needs an explicitly
-supported subscription-compatible binding before use; no OAuth token extraction
-or private API bridge is implied by its injectable Model interface.
+authentication, credential copying or provider activation. For the explicitly
+selected Codex review baseline described here, the execution route uses the
+existing Codex login; a separate API account/billing lane is not a prerequisite
+for that route and must not be silently introduced. This is not an access
+guarantee for every provider in the approved multivendor roadmap. Claude, AGY
+and other API/cloud routes follow their own role/access matrix and applicable
+vendor terms, without an implicit billing or authentication fallback. Any
+optional outer Agents Model used with this Codex subscription baseline needs an
+explicitly supported subscription-compatible binding before use; no OAuth token
+extraction or private API bridge is implied by its injectable Model interface.
 
 ## Typed observations and applicable semantic checks
 
@@ -364,14 +740,14 @@ real temporary config/role/manifest bytes and both accepted and drift-denied
 routing outcomes through runtime composition; it does not claim the external
 runtime can never write its own state.
 
-## Current completion and adapter-only acceptance scope
+## Historical adapter-only acceptance scope, 2026-10-24
 
-As confirmed by the user on 2026-10-24, Codex is the full end-to-end completion
-priority, including integration with the existing orchestrator owners. Claude,
-Kimi, Grok, MiniMax and MiMo are limited to adapters and offline protocol/contract
-verification for this task. Real model calls for those providers are outside the
-current acceptance scope; their missing live qualification must not block Codex
-completion or be worked around by buying API access or changing authentication.
+This dated acceptance explains the evidence below; it does not complete or narrow
+the approved PR19 completion roadmap. Codex was the end-to-end priority with
+existing orchestrator owners. Claude, Kimi, Grok, MiniMax and MiMo were limited to
+adapters and offline protocol checks for that historical slice. Missing live
+qualification cannot be worked around by buying API access or changing
+authentication without the applicable authorization.
 Do not describe offline support as live-qualified support. Existing closed live
 gates remain closed until later authorization. This scope does not waive
 capability, account, tool-policy, receiving or process-settlement checks for

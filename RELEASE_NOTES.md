@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-17
 
+- Record the approved PR19 completion plan for multivendor SDK execution and scoped child-Lead sessions. The plan separates native subagents from external SDK sessions, preserves provider-specific authorization and capability limits, and defines implementation and acceptance work without presenting the current Codex review baseline as full runtime readiness.
+
 - Complete the explicit official agent SDK setup path with selected virtual-environment creation/update, ordinary vendor dependency installation and a real pip check. Preview remains non-mutating; apply isolates installer configuration, verifies the actual interpreter environment and preserves failed installations for diagnosis or retry without starting authentication or model work.
 
 - Separate the base installer from provider agent SDK acquisition: the root installer offers information-only official setup commands with runtime disclosures, while provider environments keep ordinary vendor dependencies and metadata. Antigravity is the selected Lead direction, not Gemini CLI; native host installation and worker activation remain separately qualified. Previous SDK-only bundle inputs are historical, not instructions to slice vendor packages.
