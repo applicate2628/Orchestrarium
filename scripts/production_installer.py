@@ -2678,6 +2678,19 @@ class _InstallTransaction:
         return dependency
 
     @staticmethod
+    def _copy_close_failure(path, primary, cleanup, *, context="copy-close"):
+        """Add one close failure without dropping the copy's existing evidence."""
+        prior = primary if isinstance(primary, _InstallFailure) else None
+        members = () if prior is None else prior.members
+        return _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", context,
+            primary if primary is not None else cleanup,
+            members=members + (_RollbackFailureMember("backup", -1, str(path),
+                "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
+                cause_exception=cleanup),),
+            recovery_path=None if prior is None else prior.recovery_path,
+            unresolved_paths=() if prior is None else prior.unresolved_paths)
+
+    @staticmethod
     @contextmanager
     def _copy_reference(path: Path, expected: _PhysicalNode, *, writable=False,
                         metadata_only=False):
@@ -2713,10 +2726,7 @@ class _InstallTransaction:
             try:
                 os.close(descriptor)
             except OSError as cleanup:
-                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "copy-close", cleanup if primary is None else primary,
-                    members=(_RollbackFailureMember("backup", -1, str(path),
-                             "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
-                             cause_exception=cleanup),)) from primary
+                raise _InstallTransaction._copy_close_failure(path, primary, cleanup) from primary
 
     def _acquire_copy_metadata(self, path, metadata, descriptor, bound):
         participant = self._copy_metadata.get(path)
@@ -2725,13 +2735,21 @@ class _InstallTransaction:
         if descriptor is None and bound is None:
             # POSIX observation binds a no-follow descriptor before hashing.
             descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            primary = None
             try:
                 actual = os.fstat(descriptor)
                 if (actual.st_dev, actual.st_ino, actual.st_mode) != (metadata.st_dev, metadata.st_ino, metadata.st_mode):
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: copy metadata acquisition")
                 image = self._read_copy_metadata(actual, descriptor, None)
+            except BaseException as error:
+                primary = error
+                raise
             finally:
-                os.close(descriptor)
+                try:
+                    os.close(descriptor)
+                except OSError as cleanup:
+                    raise _InstallTransaction._copy_close_failure(
+                        path, primary, cleanup, context="copy-metadata-close") from primary
         else:
             image = self._read_copy_metadata(metadata, descriptor, bound)
         participant.before = participant.current = image
@@ -6288,7 +6306,12 @@ class _CreateOnlyMutablePath:
                     record(path, node)
                 elif existing is None:
                     outgoing = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o666)
-                    resources.callback(os.close, outgoing)
+                    def close_outgoing(_type, primary, _traceback):
+                        try:
+                            os.close(outgoing)
+                        except OSError as cleanup:
+                            raise _InstallTransaction._copy_close_failure(path, primary, cleanup) from primary
+                    resources.push(close_outgoing)
                     target_bound = None
                     node = self.transaction._capture_node(path, descriptor=outgoing, kind="file",
                                                           data=hashlib.sha256(b"").hexdigest())
