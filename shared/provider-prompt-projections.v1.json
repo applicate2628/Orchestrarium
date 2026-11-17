@@ -4,12 +4,12 @@
   "files": {
     "model_routing/launch_policy.py": {
       "source": "scripts/model_routing/launch_policy.py",
-      "sha256": "d0a826b83c40394c4a26576b4f1841239685215dd9dcfde7a38e7310b5c2e081",
+      "sha256": "056e286a9fc3514d3432f8bc8a9a741c2aaf559d15a056995bc2f9fc5d8ecda9",
       "destination": "scripts/model_routing/launch_policy.py"
     },
     "provider_prompt.py": {
       "source": "scripts/provider_prompt.py",
-      "sha256": "ea6db1aa65dee02a835eb6b35119d10fca707de666899cfb79b1ba1fc09ab11b",
+      "sha256": "b4f96334b2e6ca1b51024d719f11faa8accd3c301ebc62b3ca126c6688f024e1",
       "destination": "scripts/provider_prompt.py"
     },
     "process_supervision/process_runner.py": {
@@ -19,7 +19,7 @@
     },
     "invoke-codex-prompt.py": {
       "source": "scripts/invoke-codex-prompt.py",
-      "sha256": "52ce79e75504427dbb52cb3a3d9ab6c46d9dfed8ddd3108307723d8705a7ecea",
+      "sha256": "7d299266a49c629aeaa1d2571fc0d5c063051c3c3ade99884443f795f333a5e6",
       "destination": "scripts/invoke-codex-prompt.py"
     },
     "invoke-claude-prompt.py": {

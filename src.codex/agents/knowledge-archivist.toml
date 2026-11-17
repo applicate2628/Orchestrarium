@@ -1,7 +1,7 @@
 name = "knowledge-archivist"
 description = "Canonical documentation and lifecycle registry specialist."
 model = "gpt-6.1-terra"
-model_reasoning_effort = "medium"
+model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 developer_instructions = """
 Treat AGENTS.md as the base contract and activate $knowledge-archivist.
