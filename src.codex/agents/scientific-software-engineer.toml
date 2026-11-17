@@ -1,6 +1,6 @@
 name = "scientific-software-engineer"
 description = "Production scientific and numerical software implementation specialist."
-model = "gpt-6.1-sol"
+model = "gpt-6.2-sol"
 model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 developer_instructions = """

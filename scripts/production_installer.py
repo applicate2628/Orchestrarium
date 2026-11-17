@@ -557,6 +557,10 @@ UI_CONTINUITY_CONTRACT_TARGET = Path("contracts") / "ui-transition-continuity.md
 CODEX_HOOK_INVENTORY = "codex-hook-inventory.json"
 CODEX_ROLE_MANIFEST = "orchestrarium-role-manifest.json"
 _STOCK_NATIVE_ROLE_CONTRACT_PRIOR_PAIRS = (
+    # Exact pre-6.2 factory contract. Keep the Terra ranking pair last: its
+    # position is the existing control-only migration provenance boundary.
+    ((Path("shared") / "role-routing-policy.v1.json", "fafd37b08375e0d261a57edd06613ab15dcaac9075fc031bf2702b173e6f8cf7"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "2ca416fa4fc2aa93c7fe74dc6db62273d72367a901e0ee260fce55377acb6d77")),
     (
         (Path("shared") / "role-routing-policy.v1.json",
          "b6b76525d5e9d054cf8c1a9d89ea038c42ce8b488a1a835873d6d38f6e5b8bd3"),
@@ -8526,6 +8530,7 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "8f69d0f67010b77b71c81b77ad74119300ad245061c4363cbcfd2f1d0fab510c",
     }),
     "scientific-software-engineer": frozenset({
+        "d220652c7a880bcdcdd68a57a2f9cfe267014617a668655fe3a27e418709ed16",  # Exact pre-6.2 factory role (adefe904).
         "b4ee95a146843dd06a4470b380d7d263fb5c149edf9b2204c0944090e0d4ba3b",
     }),
     "planner": frozenset({
@@ -8533,18 +8538,22 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "dcde16fa86661eee94b21618fb6320026185ddb425541b15239b4c7d232c4faa",
     }),
     "algorithm-scientist": frozenset({
+        "81b79398d9b55495cf32925007635b9f688920c75c32b50e4b092d4ef9bd1893",  # Exact pre-6.2 factory role (adefe904).
         "cd2bbbaf5f4173f07bfe18cea39d90dd0cc341630b77b5dac0d82d9f92b57d7e",
         "1bc7c60b30f1bb360a502ee955e41513a80d3e3f9e222e5a673817a7e421c8bd",
     }),
     "architect": frozenset({
+        "278f9311b982844cd0fdd542cf6f3c6fd0ec790bdd5cdf4d09bede1195828ec4",  # Exact pre-6.2 factory role (adefe904).
         "71f3d9e27019de2e133d8947a33cdb69ab38261824fab36bcb18c7f7f3ff0792",
         "bcdd83abcb3e5d99e0dd0963d622b475ea11d450bb16f1af1bc93855891ff4fb",
     }),
     "architecture-reviewer": frozenset({
+        "8ae8704a3f823b74bd5fbc8590fa43c979dbee66e341f1107bedf873b69a2d03",  # Exact pre-6.2 factory role (adefe904).
         "5e404f6643d8992dd7cd4a40e8a5d3ae4f7f388381907aa230b6b0fa15ac458a",
         "239a91ef35b54cc640372132b51662bcbe0da88dded68ff53d339621689df8c3",
     }),
     "computational-scientist": frozenset({
+        "7731852f496a050f187b11c265943e5b6bc553820acd7d9359769852eb598aea",  # Exact pre-6.2 factory role (adefe904).
         "4169e5ac3442e542b0249879595b6974b78e0924b377613b5b427a6488171901",
         "7ddcfb3afe6d9032d03d3da6468662a961819ceacf5252caccccfc69744cc9d3",
     }),
@@ -8568,12 +8577,14 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "e5d44b7fafc7ec8ab3c69b4086bdda5e5430974334f90fc407b5bb78ace8a4cf",
     }),
     "security-engineer": frozenset({
+        "9cce8eb32f8386dba2cbe88ddefd54ff1ee8695956682f0a93ee8194ebcc6513",  # Exact pre-6.2 factory role (adefe904).
         "6e53fa663da8eed31ab4012354ee9bebf24f16ecb9cdaa517a7f196dcfd1969e",
         "aeb2800e4e498ad7d3a63951608e780eb730ef2bd744ff679fee5c697f5d837a",
         "54117decdfcf9bff576e23d31a1dc6aa2d2f4fd0d498820f9c1244b6742f78f9",
         "ceb53c8db3d77f75beea76a9cc27120d7623a60661cca3dac92b01a35ce06a0c",
     }),
     "security-reviewer": frozenset({
+        "3d5b521ee8c6a230e1327cf4cf815b6c9c98f844de0aa985b4e3a7b4cfe3eb6c",  # Exact pre-6.2 factory role (adefe904).
         "f22614caec4561e5cb0833e6264081b42c46570936fe1d2b62e8534c17ee214d",
         "0f9b75713128885b8db86b32a9ecb3e756b0022add169a89fc10d615745445f1",
     }),
