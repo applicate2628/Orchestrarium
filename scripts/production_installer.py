@@ -11137,7 +11137,8 @@ def _native_codex_default_home() -> Path | None:
         return None
 
 
-def _matching_native_codex_global_policy(root: Path, target: Path, pack: str) -> str | None:
+def _matching_native_codex_global_policy(root: Path, target: Path, pack: str, *,
+                                         return_path: bool = False) -> str | Path | None:
     """Reuse only the current visible native global block, never a task marker."""
     try:
         explicit = os.environ.get("CODEX_HOME")
@@ -11167,7 +11168,7 @@ def _matching_native_codex_global_policy(root: Path, target: Path, pack: str) ->
                 continue
             bounds = configuration.owned_block(text, "codex", _claude_document_context)
             if bounds is not None and text[bounds[0]:bounds[1]] == pack.rstrip("\n"):
-                return name
+                return path if return_path else name
             return None  # A nonempty override hides the base, even if it differs.
     except (OSError, ValueError, UnicodeError):
         return None  # Unproved global availability keeps standalone local rules.
@@ -11219,13 +11220,8 @@ def _codex_document_payload(shared_text: str, codex_text: str) -> str:
     return shared_text.rstrip() + "\n\n" + codex_text.rstrip() + "\n"
 
 
-def _prepare_codex_agents(root: Path, source: Path, target: Path, *,
-                         mutable_owner: _CreateOnlyMutablePath | None = None,
-                         project_scope: bool = False, prefer_global: bool = False) -> _DocumentResult:
-    """Read exact inputs and propose Codex text without writing or claiming ownership."""
-    pack = (CODEX_BEGIN + "\n" + _codex_document_payload(
-        (root / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8"),
-        (source / "AGENTS.codex.md").read_text(encoding="utf-8")) + CODEX_END + "\n")
+def _codex_instruction_pack(root: Path, target: Path, shared_text: str, codex_text: str, *, prefer_global: bool):
+    pack = CODEX_BEGIN + "\n" + _codex_document_payload(shared_text, codex_text) + CODEX_END + "\n"
     global_source = _matching_native_codex_global_policy(root, target, pack) if prefer_global else None
     if global_source is not None:
         pack = (
@@ -11240,6 +11236,16 @@ def _prepare_codex_agents(root: Path, source: Path, target: Path, *,
         print(f"  Instructions layout: global-backed ({global_source}); full local copy omitted")
     elif prefer_global:
         print("  Instructions layout: standalone (matching native global policy not established)")
+    return pack, global_source
+
+
+def _prepare_codex_agents(root: Path, source: Path, target: Path, *,
+                         mutable_owner: _CreateOnlyMutablePath | None = None,
+                         project_scope: bool = False, prefer_global: bool = False) -> _DocumentResult:
+    """Read exact inputs and propose Codex text without writing or claiming ownership."""
+    pack, _global_source = _codex_instruction_pack(
+        root, target, (root / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8"),
+        (source / "AGENTS.codex.md").read_text(encoding="utf-8"), prefer_global=prefer_global)
     existing = _read_owned_text(target, mutable_owner, preserve_newlines=True)
     scope = "project" if project_scope else "global"
     logical_path = "AGENTS.md" if project_scope else ".codex/AGENTS.md"
@@ -13080,6 +13086,14 @@ class _SelectedSource:
 
 
 @dataclass(frozen=True)
+class _SelectedGlobalPolicy:
+    root: Path
+    document: Path
+    pack: str
+    source: _SelectedSource
+
+
+@dataclass(frozen=True)
 class _SelectedReplacement:
     owner: _CreateOnlyMutablePath
     sources: tuple[_SelectedSource, ...]
@@ -13089,6 +13103,7 @@ class _SelectedReplacement:
     after: bytes
     digest: str
     parents: tuple[tuple[Path, tuple[int, int, int, int]], ...]
+    global_policy: _SelectedGlobalPolicy | None = None
 
 
 @dataclass(frozen=True)
@@ -13235,7 +13250,7 @@ def _prepare_receipted_claude_instructions(
 
 def _prepare_selected_codex_document(
     grant: tuple[str, tuple[int, int]], root: Path, source: Path, target: Path,
-    document: Path, scope: str, owner: _CreateOnlyMutablePath,
+    document: Path, scope: str, owner: _CreateOnlyMutablePath, *, prefer_global: bool = False,
 ) -> _SelectedProviderUpdates:
     digest, span = grant
     transaction = owner.transaction
@@ -13250,12 +13265,26 @@ def _prepare_selected_codex_document(
     # Match the existing source read_text view; witnesses retain exact raw bytes.
     texts = tuple(item.raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
                   for item in sources)
-    payload = _codex_document_payload(*texts)
+    pack, global_source = _codex_instruction_pack(root, document, *texts, prefer_global=prefer_global)
+    global_policy = None
+    if global_source is not None:
+        full_pack = CODEX_BEGIN + "\n" + _codex_document_payload(*texts) + CODEX_END
+        global_path = _matching_native_codex_global_policy(root, document, full_pack + "\n", return_path=True)
+        if global_path is None or global_path.name != global_source:
+            raise _selected_error("codex", "global source")
+        witness = _capture_selected_source(global_path, transaction)
+        text = witness.raw.decode("utf-8").replace("\r\n", "\n")
+        bounds = _provider_configuration_module(root).owned_block(text, "codex", _markdown_document_context)
+        if bounds is None or text[bounds[0]:bounds[1]] != full_pack:
+            raise _selected_error("codex", "global source changed")
+        global_policy = _SelectedGlobalPolicy(root, document, full_pack + "\n", witness)
+    payload = pack[len(CODEX_BEGIN) + 1:-(len(CODEX_END) + 1)]
     after = _render_selected_document(
         before.decode("utf-8"), "codex", payload, _markdown_document_context,
         document_digest=digest, span=span).encode("utf-8")
     key = "AGENTS.md" if scope == "project" else ".codex/AGENTS.md"
-    selected = _SelectedReplacement(owner, sources, path, before_node, before, after, digest, parents)
+    selected = _SelectedReplacement(owner, sources, path, before_node, before, after, digest, parents,
+                                    global_policy=global_policy)
     outcome = _ReceiptOutcome(key, "block", before, after, intent="replace",
                               adoption_sha256=digest, adoption_span=span)
     return _prepare_selected_provider_updates(
@@ -13267,6 +13296,16 @@ def _assert_selected_sources(selected: _SelectedReplacement, owner: _CreateOnlyM
     for source in selected.sources:
         if owner.transaction._image_file_bytes(source.path, source.node) != source.raw:
             raise _selected_error(provider, "source")
+    policy = selected.global_policy
+    if policy is not None:
+        # A byte witness alone cannot detect a newly shadowing override or a
+        # changed native home. Re-resolve the same visible policy on every check.
+        current = _matching_native_codex_global_policy(
+            policy.root, policy.document, policy.pack, return_path=True)
+        if (current != policy.source.path
+                or owner.transaction._image_file_bytes(
+                    policy.source.path, policy.source.node) != policy.source.raw):
+            raise _selected_error(provider, "global source selection")
 
 
 def _assert_selected_replacement(
@@ -13962,7 +14001,8 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             selected_updates = (
                 _prepare_selected_codex_document(
                     document_grant, root, source, target, docs_target,
-                    "global" if mode == "global" else "project", create_only)
+                    "global" if mode == "global" else "project", create_only,
+                    prefer_global=mode != "global" and not args.standalone_instructions)
                 if document_grant is not None else instruction_updates)
             if ownership_before is not None:
                 previous_record = _provider_ownership_module(root).decode_record(

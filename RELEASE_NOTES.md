@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-17
 
+- Explicit selected Codex document updates now preserve the same qualified global-policy reuse as ordinary installation. A separate witness tracks the actual visible native policy and rechecks override priority, home selection and exact content before and after applying the update; standalone/global modes and the strict two-source route remain unchanged.
+
 - SDK selected updates now prepare and bind the exact requested replacements before comparing the previous provider receipt. Only proven selected logical keys and current modified-Lead witnesses are exempt from old payload hashes, so explicit authorized replacement works while unrelated modified files and receipt drift remain protected.
 
 - SDK execution now interprets detached captured Codex observations, owns the admitted resume snapshot before asynchronous restoration, and rejects asynchronous or unacknowledged Kimi evidence callbacks. This prevents mutable provider data and incomplete recording from changing already accepted orchestration state; no provider is launched or newly admitted by these changes.
