@@ -326,3 +326,43 @@ def test_dispatch_rejects_change_of_launch_agreement_projection(tmp_path, monkey
     operation.prevalidated.control.user_approved_launch = False
     with pytest.raises(dispatch.DispatchError, match="INVOCATION_NOT_CURRENT"):
         operation.assert_current(operation.request, "sdk_prepare")
+
+
+def scoped_astra_operation(tmp_path, monkeypatch):
+    return prepare(tmp_path, monkeypatch, task_class="review",
+                   astra_task_authorization={"taskClass": "review", "scope": "fixture review",
+                                             "approvalReference": "fixture-existing-approval"},
+                   provider_flags=["--model", "gpt-6.2-astra", "-c", "model_reasoning_effort=high"])
+
+
+@pytest.mark.parametrize("field,value", [("scope", "another valid scope"),
+                                          ("approvalReference", "another approval")])
+def test_prepared_sdk_rejects_changed_valid_astra_grant(tmp_path, monkeypatch, field, value):
+    operation = scoped_astra_operation(tmp_path, monkeypatch)
+    operation._consumed = True
+    operation.prevalidated.control.astra_task_authorization[field] = value
+    with pytest.raises(dispatch.DispatchError, match="INVOCATION_NOT_CURRENT"):
+        operation.assert_current(operation.request, "sdk_prepare")
+    assert operation._stage == 0
+
+
+def test_prepared_sdk_rejects_reclassification_with_matching_replacement_grant(tmp_path, monkeypatch):
+    operation = scoped_astra_operation(tmp_path, monkeypatch)
+    operation._consumed = True
+    operation.prevalidated.control.task_class = "critical-design"
+    operation.prevalidated.control.astra_task_authorization["taskClass"] = "critical-design"
+    with pytest.raises(dispatch.DispatchError, match="INVOCATION_NOT_CURRENT"):
+        operation.assert_current(operation.request, "sdk_prepare")
+    assert operation._stage == 0
+
+
+def test_prepared_sdk_accepts_equivalent_grant_and_rejects_revocation(tmp_path, monkeypatch):
+    operation = scoped_astra_operation(tmp_path, monkeypatch)
+    operation._consumed = True
+    control = operation.prevalidated.control
+    control.astra_task_authorization = dict(reversed(list(control.astra_task_authorization.items())))
+    operation.assert_current(operation.request, "sdk_prepare")
+    control.astra_task_authorization = None
+    with pytest.raises(dispatch.DispatchError, match="INVOCATION_NOT_CURRENT"):
+        operation.assert_current(operation.request, "sdk_launch_admission")
+    assert operation._stage == 1

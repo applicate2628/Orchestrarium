@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-17
 
+- Retain the selected task class and a detached snapshot of task-scoped Astra authorization through each prepared SDK invocation. Changing a valid grant after preparation now stops that affected invocation before its next effect; equivalent grant values remain compatible, and ordinary permission checks and independent work are unchanged.
+
 - Task-first routing now favors Sol 6.2 for ordinary implementation, Luna Extra high for bounded mechanics and Terra 6.1 High for fitting bounded/repository/visual work. Astra High/Extra high can use genuine task-scoped approval for scientific formulation, complex audit, architecture and security, including covered repeats; Max and separate launch/spending permissions remain protected. Substantive results now require a proportionate nonauthor check, not only critical results, without adding duplicate review loops.
 
 - Production Codex routing advances factory GPT-6.1 Sol and GPT-6 Astra models to their GPT-6.2 versions with unchanged role efforts and launch rules. Existing 6.1 Sol external profile settings migrate to the same effort on 6.2; Terra, Luna, unrelated settings and the main-session model remain untouched.

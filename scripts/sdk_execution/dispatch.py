@@ -145,7 +145,8 @@ class CodexReviewDispatch:
         return (str(c.ledger), c.ledger_role, c.ledger_role_explicit, c.ledger_lane,
                 c.ledger_artifact, tuple(c.ledger_closes), c.ledger_max_events,
                 c.ledger_max_bytes, c.timeout_secs, c.result_max_bytes, c.capture_max_bytes,
-                tuple(c.provider_flags), str(c.terminal_receipt), c.user_approved_launch)
+                tuple(c.provider_flags), str(c.terminal_receipt), c.user_approved_launch,
+                c.task_class, json_text(c.astra_task_authorization))
 
     def assert_current(self, request, effect):
         with self._lock:
