@@ -699,7 +699,7 @@ class CopyMetadataTests(unittest.TestCase):
         dispose = transaction._dispose_node
 
         def fail_after_one(path, expected):
-            quarantine = effect.quarantine if effect is not None else None
+            quarantine = (effect.quarantine or unit) if effect is not None else None
             if quarantine is not None and path.parent == quarantine and path.name in selected_names:
                 if partial.get("completed") is None:
                     partial["beforeKeys"] = dict(transaction._copy_current)
@@ -742,7 +742,9 @@ class CopyMetadataTests(unittest.TestCase):
                                       mtime_ns=participant.before.mtime_ns + 1_000_000_000)
                     set_times = PI._WindowsBoundNode.set_copy_times
                     def wrong_time_assignment(bound, atime, mtime):
-                        return set_times(bound, atime, mtime + 100)
+                        # Omit the assignment observation: an actual unknown setter effect.
+                        set_times(bound, atime, mtime + 100)
+                        return None
                     with patch.object(PI._WindowsBoundNode, "set_copy_times", wrong_time_assignment):
                         with self.assertRaisesRegex(ValueError, "unknown copy setter effect"):
                             transaction._apply_copy_metadata(sibling, node, desired,
@@ -753,11 +755,20 @@ class CopyMetadataTests(unittest.TestCase):
         self.assertIn("failed", partial)
         self.assertIsNotNone(partial["nativeProof"])
         self.assertNotIn(partial["completed"], partial["currentKeys"])
-        for member in (first, second, third):
-            self.assertEqual(transaction._expected[container][member].native_proof, original[member].native_proof)
-        self.assertEqual(first.read_bytes(), b"old a\n")
-        self.assertEqual(second.read_bytes(), b"old b\n")
-        self.assertEqual(third.read_bytes(), b"old c\n")
+        # Direct disposal may fail before restoring the retained original.
+        # Quarantine disposal happens after restoration. Both must preserve the
+        # original objects, their physical identities and their exact bytes.
+        if effect.retained_state is not None:
+            self.assertTrue(transaction._image_matches(effect.retained, effect.retained_state))
+            self.assertFalse(effect.settled)
+            for member, payload in ((first, b"old a\n"), (second, b"old b\n"), (third, b"old c\n")):
+                retained = effect.retained / member.relative_to(unit)
+                self.assertEqual(effect.retained_state[retained].native_proof, original[member].native_proof)
+                self.assertEqual(retained.read_bytes(), payload)
+        else:
+            for member, payload in ((first, b"old a\n"), (second, b"old b\n"), (third, b"old c\n")):
+                self.assertEqual(transaction._expected[container][member].native_proof, original[member].native_proof)
+                self.assertEqual(member.read_bytes(), payload)
         self.assertIsNotNone(caught.exception.recovery_path)
         self.assertTrue(caught.exception.recovery_path.exists())
         self.assertTrue(any(member.cause_exception is cleanup for member in caught.exception.members))
@@ -2937,18 +2948,18 @@ class CreatedDirectorySnapshotHandoffTests(unittest.TestCase):
                          sorted((row.leaf_path for row in directories), key=lambda path: len(path.parts), reverse=True))
         self.assertFalse(list(self.root.glob("orchestrarium-install-transaction-*")))
 
-    def refusal_after_children_settle(self, mutate, *, preexisting=False):
-        if preexisting:
-            self.absent.mkdir()
+    def refusal_with_container_fault(self, mutate):
         safe = self.root / "safe"
         safe.write_bytes(b"original sibling")
         transaction = PI._InstallTransaction([self.absent, safe], enabled=True)
-        settle = transaction._settle_snapshots
-        def at_snapshot(unresolved):
+        # Fault after file/effect settlement, before any directory inverse.
+        # Snapshot restoration now runs after owned child directories settle.
+        settle = transaction._settle_container_inverses
+        def before_container_inverses(unresolved, scalar_directories):
             self.assertTrue(all(effect.settled for effect in transaction._effects))
             mutate(transaction)
-            return settle(unresolved)
-        with patch.object(transaction, "_settle_snapshots", at_snapshot):
+            return settle(unresolved, scalar_directories)
+        with patch.object(transaction, "_settle_container_inverses", before_container_inverses):
             with self.assertRaises(PI._InstallFailure) as caught:
                 with transaction:
                     owner = self.populate(transaction)
@@ -2962,29 +2973,44 @@ class CreatedDirectorySnapshotHandoffTests(unittest.TestCase):
             self.assertTrue(caught.exception.recovery_path.exists())
         return transaction
 
-    def test_missing_or_duplicate_creator_proof_refuses(self):
-        for degradation in ("missing", "duplicate"):
-            with self.subTest(degradation=degradation):
-                def mutate(transaction):
-                    row = next(row for row in transaction._slice_a_created if row.leaf_path == self.absent)
-                    if degradation == "missing":
-                        transaction._slice_a_created.remove(row)
-                    else:
-                        transaction._slice_a_created.append(row)
-                self.refusal_after_children_settle(mutate)
-                # Each finite fixture belongs to this test, including deliberately foreign objects.
-                for path in sorted(self.absent.rglob("*"), key=lambda path: len(path.parts), reverse=True):
-                    path.rmdir()
-                self.absent.rmdir()
+    def test_missing_creator_proof_refuses_parent_inverse(self):
+        def mutate(transaction):
+            row = next(row for row in transaction._slice_a_created if row.leaf_path == self.absent)
+            transaction._slice_a_created.remove(row)
+        self.refusal_with_container_fault(mutate)
 
-    def test_wrong_parent_binding_refuses_before_any_directory_inverse(self):
+    def test_duplicate_creator_proof_cannot_remove_foreign_replacement(self):
+        foreign = self.root / "foreign-preallocated"
+        foreign.mkdir()
+        (foreign / "sentinel").write_bytes(b"foreign payload")
+        foreign_identity = foreign.stat().st_ino
+        rollback = PI._CreateOnlyMutablePath.rollback_created
+        installed = []
+        def after_inverse(owner, record):
+            result = rollback(owner, record)
+            if record.leaf_path == self.absent and not installed:
+                self.assertFalse(self.absent.exists())
+                foreign.rename(self.absent)
+                installed.append(self.absent.stat().st_ino)
+            return result
+        def duplicate(transaction):
+            row = next(row for row in transaction._slice_a_created if row.leaf_path == self.absent)
+            self.assertNotEqual(row.leaf_identity[1], foreign_identity)
+            transaction._slice_a_created.append(row)
+        with patch.object(PI._CreateOnlyMutablePath, "rollback_created", after_inverse):
+            self.refusal_with_container_fault(duplicate)
+        self.assertEqual(installed, [foreign_identity])
+        self.assertEqual(self.absent.stat().st_ino, foreign_identity)
+        self.assertEqual((self.absent / "sentinel").read_bytes(), b"foreign payload")
+
+    def test_wrong_parent_binding_refuses_parent_after_owned_children_settle(self):
         def mutate(transaction):
             transaction._slice_a_created = [PI.replace(row, parent_identity=(row.parent_identity[0],
                 row.parent_identity[1] + 1, *row.parent_identity[2:])) if row.leaf_path == self.absent
                 else row for row in transaction._slice_a_created]
-        transaction = self.refusal_after_children_settle(mutate)
-        self.assertTrue(all(not row.consumed for row in transaction._slice_a_created if row.kind == "directory"))
-        self.assertTrue((self.absent / "nested/deeper").is_dir())
+        transaction = self.refusal_with_container_fault(mutate)
+        self.assertTrue(all(not row.consumed for row in transaction._slice_a_created if row.leaf_path == self.absent))
+        self.assertFalse((self.absent / "nested").exists())
 
     def test_missing_native_creator_proof_refuses_on_native_host(self):
         def mutate(transaction):
@@ -2993,8 +3019,8 @@ class CreatedDirectorySnapshotHandoffTests(unittest.TestCase):
                 self.skipTest("current host does not supply native creator proof")
             transaction._slice_a_created = [PI.replace(record, native_proof=None)
                 if record is row else record for record in transaction._slice_a_created]
-        transaction = self.refusal_after_children_settle(mutate)
-        self.assertTrue(all(not row.consumed for row in transaction._slice_a_created if row.kind == "directory"))
+        transaction = self.refusal_with_container_fault(mutate)
+        self.assertTrue(all(not row.consumed for row in transaction._slice_a_created if row.leaf_path == self.absent))
 
     def test_foreign_empty_replacement_is_preserved(self):
         identities = []
@@ -3002,7 +3028,7 @@ class CreatedDirectorySnapshotHandoffTests(unittest.TestCase):
             self.absent.rename(self.root / "displaced")
             self.absent.mkdir()
             identities.append(self.absent.stat().st_ino)
-        self.refusal_after_children_settle(mutate)
+        self.refusal_with_container_fault(mutate)
         self.assertEqual(self.absent.stat().st_ino, identities[0])
         self.assertTrue((self.root / "displaced/nested/deeper").is_dir())
 
@@ -3017,7 +3043,7 @@ class CreatedDirectorySnapshotHandoffTests(unittest.TestCase):
             identities.append(self.absent.stat().st_ino)
             # Even a matching current census cannot replace the original creator proof.
             transaction._advance(self.absent, transaction._observe(self.absent))
-        self.refusal_after_children_settle(mutate)
+        self.refusal_with_container_fault(mutate)
         self.assertEqual((self.absent / "nested").stat().st_ino, identities[0])
         self.assertEqual(self.absent.stat().st_ino, identities[1])
         self.assertTrue((self.absent / "nested/deeper").is_dir())
@@ -3033,20 +3059,42 @@ class CreatedDirectorySnapshotHandoffTests(unittest.TestCase):
                         member.write_bytes(b"foreign participant")
                     # Degraded bookkeeping must not manufacture creator authority.
                     transaction._advance(member, transaction._observe(member))
-                self.refusal_after_children_settle(mutate)
+                self.refusal_with_container_fault(mutate)
                 self.assertTrue(member.exists())
                 for path in sorted(self.absent.rglob("*"), key=lambda path: len(path.parts), reverse=True):
                     path.rmdir() if path.is_dir() else path.unlink()
                 self.absent.rmdir()
 
-    def test_unsettled_descendant_effect_cannot_be_handed_off(self):
-        def mutate(transaction):
-            transaction._effects[0].settled = False  # Missing positive settlement proof.
-        transaction = self.refusal_after_children_settle(mutate)
+    def test_unsettled_descendant_blocks_enclosing_directory_inverses(self):
+        safe = self.root / "safe"
+        safe.write_bytes(b"original sibling")
+        transaction = PI._InstallTransaction([self.absent, safe], enabled=True)
+        member = self.absent / "nested/deeper/member"
+        with self.assertRaises(PI._InstallFailure) as caught:
+            with transaction:
+                owner = self.populate(transaction)
+                owner.write_file(Path("safe"), b"changed sibling")
+                member.write_bytes(b"foreign participant")
+                raise self.primary
+        self.assertIs(caught.exception.cause, self.primary)
+        self.assertEqual(member.read_bytes(), b"foreign participant")
+        self.assertEqual(safe.read_bytes(), b"original sibling")
+        self.assertTrue(caught.exception.members)
         self.assertTrue(all(not row.consumed for row in transaction._slice_a_created if row.kind == "directory"))
 
-    def test_preexisting_snapshot_keeps_its_existing_refusal(self):
-        self.refusal_after_children_settle(lambda transaction: None, preexisting=True)
+    def test_preexisting_snapshot_restores_after_owned_children_settle(self):
+        self.absent.mkdir()
+        (self.absent / "user-note").write_bytes(b"preexisting user content")
+        before = PI._InstallTransaction._observe(self.absent)
+        transaction = PI._InstallTransaction([self.absent], enabled=True)
+        with self.assertRaises(RuntimeError) as caught:
+            with transaction:
+                self.populate(transaction)
+                raise self.primary
+        self.assertIs(caught.exception, self.primary)
+        self.assertEqual(PI._InstallTransaction._observe(self.absent), before)
+        self.assertTrue(all(row.consumed for row in transaction._slice_a_created))
+        self.assertIsNone(transaction._temporary)
 
     def test_reparse_residual_is_preserved_and_target_untouched(self):
         target = self.root / "target"
@@ -3063,7 +3111,7 @@ class CreatedDirectorySnapshotHandoffTests(unittest.TestCase):
             leaf.rmdir()
             leaf.symlink_to(target, target_is_directory=True)
             transaction._advance(leaf, transaction._observe(leaf))
-        self.refusal_after_children_settle(mutate)
+        self.refusal_with_container_fault(mutate)
         self.assertTrue((self.absent / "nested/deeper").is_symlink())
         self.assertEqual((target / "sentinel").read_bytes(), b"target")
 
@@ -3086,7 +3134,8 @@ class ExpectedImageAndTypedSettlementTests(unittest.TestCase):
         dispose = transaction._dispose_node
         def after_retirement(blocked=None, *, records=None):
             result = settle(blocked, records=records)
-            if records and all(row.kind == "directory" for row in records) and result == ([], [], ()):
+            if (records and any(row.kind == "directory" and row.leaf_path == self.absent for row in records)
+                    and result == ([], [], ())):
                 self.assertEqual(transaction._expected[self.absent], {})
                 self.absent.write_bytes(b"foreign bytes must not be read")
                 identities.append(self.absent.stat().st_ino)
