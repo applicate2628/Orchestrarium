@@ -1438,6 +1438,13 @@ as release blockers:
 | Deferred: non-Codex workers and sessions | Non-Codex worker/runtime, account/tool enforcement, receiving and broader native session qualification beyond the selected originating Lead-to-Codex handoff. | Retain existing implementations and offline evidence without claiming live success. Not a first-version blocker under the revised decision. |
 | Deferred: wider platforms | Intended macOS/Linux SDK process custody and lifecycle qualification. | Windows success does not qualify POSIX or promise an operating-system sandbox. Preserve the exact platform evidence gaps. |
 
+The installed AGY package now has an explicit Consultant fresh/version-3 and
+continuation/version-5 operating path in its Lead skill and installation guide.
+An installed-entrypoint streaming fixture crosses the real Codex adapter, frame
+codec, scanner and canonical receiving for both turns and rejects duplicate
+consumption. Its SDK peer, process custody and hook-health probe are synthetic:
+this is not evidence that an actual AGY/Gemini Lead session invoked the route.
+
 Active SDK implementation owner: the existing PR19 lane. Shared main routing and
 global installation changes belong to their existing separate owner and are
 integrated by revision, not overwritten. Current managed Codex families are

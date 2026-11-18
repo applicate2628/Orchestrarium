@@ -45,6 +45,24 @@ Offline installed-path coverage includes Reviewer, read-only Consultant and
 scoped Worker; real AGY-to-Codex native execution requires its own qualification. Do not call
 the same-provider AGY consumer session as an external worker.
 
+## Read-only external Consultant and continuation
+
+For advice rather than a review verdict, use the same managed entrypoint with
+`--sdk-task-binding` version 3, `contextMode: fresh`, and `--ledger-role consultant`.
+Use the existing admitted binding and context-handoff contract; do not generate
+permission or account claims from this example. Keep model/effort and spending
+approval explicit. The returned task artifact and terminal receipt are
+nonauthorizing evidence for the native Lead to inspect, not automatic task closure.
+
+To continue that Codex session, use version 5 with `contextMode: continuation`
+and `predecessorEvidenceRunId` from its completed canonical Consultant receipt.
+Read the exact artifact/ledger through the existing owner after interruption;
+do not use an unreceived result or manually copied thread ID as a predecessor.
+The single-successor claim prevents replay. A fresh alternative after an unknown
+outcome needs its own applicable permission. This is an external Codex session,
+not an AGY-native subagent, and the native Lead remains responsible for receiving
+and applying the result. Offline bridge tests do not establish native AGY launch.
+
 ## Scoped external Worker
 
 Use the same entrypoint with `--sdk-task-binding` version 4 and a canonical Worker

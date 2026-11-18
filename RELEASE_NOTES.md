@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Document the native AGY Lead's explicit read-only Codex Consultant fresh/continuation route and cover its installed entrypoint through streaming and canonical receiving with synthetic peers. This closes an offline integration gap without claiming a real originating Lead invocation.
+
 - Synchronize SDK delivery with the merged Windows replacement-security fix and refresh the two source-manifest digests for the already reviewed owner-attribution and safe-diagnostic changes, preserving the existing transport inventory and validation.
 
 - Narrow first-version SDK acceptance to a native Lead of another provider delegating to Codex through the existing SDK route and receiving its result. Keep non-Codex implementations and broader platform qualification deferred, and distinguish the direct native Codex proof from the originating Lead handoff.

@@ -183,6 +183,28 @@ an isolated installed Reviewer path with a synthetic native peer, not a live AGY
 session, all Codex roles, or native acceptance. See the
 [provider access matrix](docs/provider-access-policy.md) for account boundaries.
 
+### Read-only external Codex Consultant
+
+For advisory tasks, the native Lead uses the same installed entrypoint with
+`--sdk-task-binding` version 3, `contextMode: "fresh"`, and
+`--ledger-role consultant` instead of the review selector. Retain the existing
+prompt, model/effort, work-item and terminal-receipt arguments; select read-only
+sandboxing and the actual authorized account. See the
+[SDK execution contract](docs/sdk-execution.md) for the complete binding schema.
+
+To continue after a completed canonical result, use binding version 5 with
+`contextMode: "continuation"` and `predecessorEvidenceRunId` from that result's
+canonical evidence run. The shared owner restores and checks the received native
+session context; do not copy a thread identifier into an invented receipt, replay
+a completed turn or silently substitute a fresh session after an uncertain result.
+The returned evidence remains nonauthorizing and must be read by the originating Lead.
+
+Installed-path streaming tests exercise the actual installed entrypoint, Codex
+adapter, scanner and canonical receiving with a synthetic SDK peer and process
+boundary. They do not prove that a real AGY/Gemini Lead has invoked the route.
+That originating-session check is distinct from the bounded direct native Codex
+fresh/continuation proof and needs its own permitted execution.
+
 ### Scoped external Codex Worker
 
 The same managed entrypoint supports the existing `--sdk-task-binding` version 4
