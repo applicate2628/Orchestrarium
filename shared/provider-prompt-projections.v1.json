@@ -80,7 +80,7 @@
     "sdk_execution/copilot.py": {
       "source": "scripts/sdk_execution/copilot.py",
       "destination": "scripts/sdk_execution/copilot.py",
-      "sha256": "72cb250e7ef31ad81f1d9153124391e6ac6de38a3ea925f27ccd65be433449a3"
+      "sha256": "f39765230d208333d9319c9d88103288e07225acf4a50bf81435dd94d1bdd807"
     },
     "sdk_execution/codex.py": {
       "source": "scripts/sdk_execution/codex.py",
@@ -110,7 +110,7 @@
     "sdk_execution/coordination.py": {
       "source": "scripts/sdk_execution/coordination.py",
       "destination": "scripts/sdk_execution/coordination.py",
-      "sha256": "23f6e2eee5195fe1b326b98d5cbb4f95e6f9e6698d8ee136213b0cf13ffe3611"
+      "sha256": "0d8f583b06ed47c9afe86c9c9b3b0784870a1d8bda3499455c27150ae30f92d0"
     },
     "sdk_execution/coordination_codex.py": {
       "source": "scripts/sdk_execution/coordination_codex.py",
@@ -125,7 +125,7 @@
     "sdk_execution/coordination_receiving.py": {
       "source": "scripts/sdk_execution/coordination_receiving.py",
       "destination": "scripts/sdk_execution/coordination_receiving.py",
-      "sha256": "cbd7a18c87dafc742edd1a3b36b0a607f2dc9433b1411891d7c17ac365c3e35c"
+      "sha256": "82f59b74e1107a9a2f42fee7f390350556f7aca82f034e880f9eb130349d65ce"
     },
     "sdk_execution/grok.py": {
       "source": "scripts/sdk_execution/grok.py",
@@ -155,11 +155,11 @@
     "sdk_execution/runtime.py": {
       "source": "scripts/sdk_execution/runtime.py",
       "destination": "scripts/sdk_execution/runtime.py",
-      "sha256": "20f1fb0e45df608742130f2747fcc6912dfc6de275c45e813ecd384630fa87b1"
+      "sha256": "10818d6c32ad4f441cef85ce9138460d6c03b294c9d44d8b8fd497dea9e30ac1"
     },
     "sdk_execution/worker.py": {
       "source": "scripts/sdk_execution/worker.py",
-      "sha256": "00e5133f49cbb7c7320f0fc19fd6a9847975cbbe216a3cecf7b1e98b40cc1059",
+      "sha256": "e6aecfc3071d1b0241fa81bad8addb86347286315e9225fbf77175107a99c374",
       "destination": "scripts/sdk_execution/worker.py"
     }
   }

@@ -271,7 +271,7 @@ def validate_admitted_request(request: ExecutionRequest, selection: Any) -> None
     _require_runtime_result_route(request)
     if request.write_workspace is not None:
         validate_worker_custody(request, selection)
-    if type(request) is CoordinationInferenceRequest:
+    if type(request) is CoordinationInferenceRequest and request.provider == "codex":
         if (selection.auth_mode != "codex-auth-file"
             or selection.config_overrides != CODEX_BOUNDED_REVIEW_OVERRIDES
             or selection.mcp_scope.servers):
@@ -631,7 +631,7 @@ def _received_native_context(request, selection, predecessor_evidence_run_id, *,
     from .receiving import review_artifact_target
     validate_admitted_request(request, selection)
     coordination = type(request) is CoordinationInferenceRequest and request.child_choice_json is not None and request.decision_session_mode == "native-persistent"
-    if (request.provider != "codex" or (not coordination and (request.role != "consultant" or request.result_kind != "task"))
+    if ((request.provider not in {"codex", "copilot"} if coordination else request.provider != "codex") or (not coordination and (request.role != "consultant" or request.result_kind != "task"))
             or request.write_workspace is not None or selection.expected_launch_sha256 is not None):
         raise RuntimeBindingError("received_continuation_predecessor_required")
     if events is None:
@@ -644,7 +644,7 @@ def _received_native_context(request, selection, predecessor_evidence_run_id, *,
     if len(launches) != 1:
         raise RuntimeBindingError("continuation_receipt_changed")
     launch = launches[0]
-    expected = {"workItem": request.work_item_id, "provider": "codex", "model": request.model,
+    expected = {"workItem": request.work_item_id, "provider": request.provider, "model": request.model,
         "effort": request.effort, "scope": list(request.scope), "assignedRole": "lead" if coordination else "consultant",
         "executionRole": "main" if coordination else "consultant", "actualExecutionPath": "direct-external-sdk"}
     selected = launch.get("sdkExecution")
@@ -1299,10 +1299,15 @@ def publish_child_assignment(*, root_selection, root_authority, selections, chil
     parent=_load_child_assignment(root_selection,parent_child_id) if parent_child_id is not None else None
     depth=1 if parent is None else parent.task_depth+1
     if parent is not None and max_task_depth is None:max_task_depth=parent.max_task_depth
+    from .copilot import CopilotRuntimeSelection
     if decision_selection is None:
-        decision_selection=replace(root_selection,work_item=str(child),expected_launch_sha256=None,config_overrides=CODEX_BOUNDED_REVIEW_OVERRIDES)
-    if (type(decision_selection) is not CodexRuntimeSelection or decision_selection.work_item!=str(child)
-        or decision_selection.expected_launch_sha256 is not None or decision_selection.config_overrides!=CODEX_BOUNDED_REVIEW_OVERRIDES):
+        options={"work_item":str(child),"expected_launch_sha256":None}
+        if type(root_selection) is CodexRuntimeSelection:
+            options["config_overrides"]=CODEX_BOUNDED_REVIEW_OVERRIDES
+        decision_selection=replace(root_selection,**options)
+    if (type(decision_selection) not in {CodexRuntimeSelection, CopilotRuntimeSelection}
+        or decision_selection.work_item!=str(child) or decision_selection.expected_launch_sha256 is not None
+        or (type(decision_selection) is CodexRuntimeSelection and decision_selection.config_overrides!=CODEX_BOUNDED_REVIEW_OVERRIDES)):
         raise RuntimeBindingError('child_decision_runtime_invalid')
     decision_digest=hashlib.sha256(json_text(decision_selection.to_dict()).encode()).hexdigest()
     value=ChildLeadAssignment(child_id,coordinator_binding,str(child),tuple(scope),tuple(catalog),tuple(required_request_ids),
@@ -1825,7 +1830,7 @@ class ChildLeadAuthority:
         elif intent['action'] not in {'finish','cancel'} or intent['request_id'] is not None:
             raise RuntimeBindingError('child_received_intent_invalid')
         _,context=prepare_environment(worker._selection,worker._environment)
-        failure=_owner().provider_output_safety_scan_terminal('codex',context.needles,
+        failure=_owner().provider_output_safety_scan_terminal(request.provider,context.needles,
             stdout=json_text({'terminal':terminal,'artifact':document}).encode(),stderr=b'',serialized_line=False)
         if failure is not None:raise RuntimeBindingError(failure)
         return intent

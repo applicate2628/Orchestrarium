@@ -35,7 +35,7 @@ MAX_FRAME_BYTES = MAX_STDIN_BYTES
 AUTHORITY_EFFECTS = frozenset({
     "start", "client_start", "thread_start", "turn_start", "resume", "reconcile",
     "connect", "query", "tool", "account",
-    "copilot_start", "copilot_client_create", "copilot_session_create",
+    "copilot_start", "copilot_client_create", "copilot_session_create", "copilot_session_resume", "copilot_session_history",
     "copilot_profile_before", "copilot_send", "copilot_profile_after", "copilot_result",
 })
 

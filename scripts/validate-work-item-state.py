@@ -418,16 +418,24 @@ def validate_sdk_execution(
     if writing != ("writeWorkspaceSha256" in value) or (writing and value["schemaVersion"] not in {1, 2}):
         raise ValueError("sdkExecution workspace binding does not match its sandbox")
     if value["schemaVersion"] in {3, 5} and (
-        provider != "codex" or value["outerBudgetBinding"] == value["innerBudgetBinding"]
+        (provider != "codex" and not (provider == "copilot" and value["schemaVersion"] == 5))
+        or value["outerBudgetBinding"] == value["innerBudgetBinding"]
     ):
-        raise ValueError("coordination inference requires Codex and distinct turn reservations")
+        raise ValueError("coordination inference requires a supported scoped provider and distinct turn reservations")
     if {"continuationSourceSha256", "forkSourceSha256"} <= value.keys():
         raise ValueError("native context source modes are mutually exclusive")
     persistent=(value.get("schemaVersion")==5 and value.get("decisionSessionMode")=="native-persistent" and "childAssignmentSha256" in value)
     if ("decisionSessionMode" in value)!=("childAssignmentSha256" in value) or (("decisionSessionMode" in value or "childAssignmentSha256" in value) and not persistent):
         raise ValueError("persistent child session requires selected assignment binding")
-    if ({"continuationSourceSha256", "forkSourceSha256"} & value.keys()) and (provider != "codex" or value["sandboxMode"] != "read-only" or (value["schemaVersion"] not in {1, 2} and not persistent) or (persistent and "forkSourceSha256" in value)):
-        raise ValueError("continuation metadata requires Codex read-only execution")
+    if {"continuationSourceSha256", "forkSourceSha256"} & value.keys():
+        codex_context = (provider == "codex" and value["sandboxMode"] == "read-only"
+                         and (value["schemaVersion"] in {1, 2} or persistent)
+                         and not (persistent and "forkSourceSha256" in value))
+        copilot_context = (provider == "copilot" and value["sandboxMode"] == "tool-restricted-read-only"
+                           and "forkSourceSha256" not in value
+                           and (value["schemaVersion"] == 1 or persistent))
+        if not (codex_context or copilot_context):
+            raise ValueError("continuation metadata requires a supported read-only native context")
     if value["schemaVersion"] in {3, 5} and value["operationKind"] != {
         3: "coordination-inference", 5: "scoped-child-coordination"}[value["schemaVersion"]]:
         raise ValueError("coordination operation kind does not match selected schema")
@@ -447,7 +455,7 @@ def _validate_sdk_event(event: Mapping[str, object], errors: list[str]) -> None:
     except ValueError as exc:
         fail(errors, f"{run_id}: {exc}")
     selected = event.get("sdkExecution")
-    if event.get("provider") == "copilot" and type(selected) is dict:
+    if event.get("provider") == "copilot" and type(selected) is dict and selected.get("schemaVersion") != 5:
         try:
             import provider_prompt
             _roles, reviewers, workers, _unsupported = provider_prompt._external_role_taxonomy()
@@ -483,7 +491,7 @@ def _validate_sdk_event(event: Mapping[str, object], errors: list[str]) -> None:
             fail(errors, f"{run_id}: continuation requires selected Consultant provenance")
     if type(selected) is dict and selected.get("schemaVersion") in {3, 5}:
         if any(event.get(k) != expected for k, expected in
-               (("provider", "codex"), ("role", "lead"), ("executionRole", "main"),
+               (("role", "lead"), ("executionRole", "main"),
                 ("assignedRole", "lead"), ("gate", "none"))):
             fail(errors, f"{run_id}: coordination inference requires its nonauthorizing main/lead operation binding")
     if event.get("schemaVersion") != 2 or event.get("actualExecutionPath") != "direct-external-sdk":
@@ -5365,8 +5373,9 @@ def _validate_event_fields(
                 fail(errors, f"{run_id}: external terminal requires a direct external execution path")
             selected_sdk = event.get("sdkExecution")
             coordination_actor = (
-                sdk_route and event.get("provider") == "codex"
-                and type(selected_sdk) is dict and selected_sdk.get("schemaVersion") in {3, 5}
+                sdk_route and type(selected_sdk) is dict
+                and (event.get("provider") == "codex" and selected_sdk.get("schemaVersion") in {3, 5}
+                     or event.get("provider") == "copilot" and selected_sdk.get("schemaVersion") == 5)
                 and selected_sdk.get("operationKind") == {3:"coordination-inference",5:"scoped-child-coordination"}.get(selected_sdk.get("schemaVersion"))
                 and event.get("role") == event.get("assignedRole") == "lead"
                 and event.get("gate") == "none"

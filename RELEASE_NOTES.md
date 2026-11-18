@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- A draft candidate connects explicitly selected Copilot decision sessions to the existing scoped child-Lead lifecycle. The full end-to-end lifecycle check remains pending; this is not a completed acceptance. Native session continuation checks observed completed-turn history, while canonical claims and received-intent recovery prevent automatic replay after interruption. Task permissions and independent acceptance remain separate; this does not install a runtime, authorize model use or control native subagents.
+
 - Copilot SDK Worker can use explicitly admitted Host file tools in a separate workspace through existing permissions and canonical receiving. The shared file-path/custody checks are reused rather than approving native write requests broadly; shell and unselected tools stay unavailable. Partial effects remain observable, with no automatic replay or OS-sandbox claim.
 
 - The existing Copilot SDK entrypoint now accepts explicit prompt-only Reviewer bindings as well as Consultant tasks. It reuses canonical review schemas and receiving while keeping review evidence nonauthorizing: even PASS does not close work-item obligations. Failed Copilot acquisition now exports retained nonauthorizing evidence through the existing terminal path without authorizing skipped effects. The shared full-event schema also recognizes the already supported Copilot provider, matching canonical runtime validation. No new launch authority, installation or native qualification is implied.

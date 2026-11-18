@@ -16,13 +16,13 @@ def coordination_terminal_payload(request, observation, *, output_context, admit
     process = _require_sdk_process_settlement(observation)
     if observation.runtime_selection_json is None:
         raise ValueError("coordination runtime commitment unavailable")
-    selection = runtime_selection_from_dict("codex", strict_json(observation.runtime_selection_json))
+    selection = runtime_selection_from_dict(request.provider, strict_json(observation.runtime_selection_json))
     selected = selected_sdk_execution(request, selection)
     if admitted_sdk_execution != selected or selected["schemaVersion"] != (5 if request.child_choice_json is not None else 3):
         raise ValueError("coordination launch commitment mismatch")
     owner = _provider_owner()
     validator = owner._ledger_owner().load_validator()
-    validator.validate_sdk_execution(selected, provider="codex", model=request.model, effort=request.effort)
+    validator.validate_sdk_execution(selected, provider=request.provider, model=request.model, effort=request.effort)
     complete = (
         process.outcome == "success" and process.failure_id is None
         and process.target_exit_code == 0 and not process.timed_out and not process.cancelled
@@ -30,10 +30,11 @@ def coordination_terminal_payload(request, observation, *, output_context, admit
         and observation.protocol_error is None and observation.unavailable_reason is None
         and observation.cancel is None and result.status == "completed"
         and result.intent_json is not None and result.execution_error is None and result.capture_error is None
+        and result.cleanup_error is None and result.protocol_closed
     )
     reported = result.sdk_execution
     try:
-        validator.validate_sdk_execution(reported, provider="codex", model=request.model, effort=request.effort)
+        validator.validate_sdk_execution(reported, provider=request.provider, model=request.model, effort=request.effort)
     except ValueError:
         complete = False
     else:
@@ -62,7 +63,7 @@ def coordination_terminal_payload(request, observation, *, output_context, admit
     # uses common identity/resultText fields only to bind artifact and terminal.
     payload = {
         "schema": "orchestrarium.coordination-inference.v1",
-        "provider": "codex", "model": request.model, "effort": request.effort,
+        "provider": request.provider, "model": request.model, "effort": request.effort,
         "resultText": json_text(content), "status": "completed" if complete else "blocked", "gate": "none",
         "authorizing": False, "closesRunIds": [], "terminalClass": "external-nonauthorizing",
         "actualExecutionPath": "direct-external-sdk", "workItem": request.work_item_id,
@@ -72,7 +73,7 @@ def coordination_terminal_payload(request, observation, *, output_context, admit
         "effortMappingLoss": request.effort_mapping_loss, "sdkExecution": selected,
     }
     failure = owner.provider_output_safety_scan_terminal(
-        "codex", output_context.needles, stdout=json_text(payload).encode(), stderr=b"", serialized_line=False)
+        request.provider, output_context.needles, stdout=json_text(payload).encode(), stderr=b"", serialized_line=False)
     if failure is not None:
         raise ValueError(failure)
     return payload

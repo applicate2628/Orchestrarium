@@ -98,7 +98,7 @@
         "external-brigade",
         "none"
       ],
-      "$comment": "Exactly ONE main-conversation identity: 'main' (the main conversation, which also holds the Lead role). Current recovery state — Task, Current step, Last result, Next action, and staged lifecycle fields — is owned by status.md, not executionRole; its older 'orchestration: light|full-lead' scalar remains legacy-compatible. Ledgers written before 2026-07-11 may carry the legacy value 'lead'; readers map it to 'main' (see scripts/validate-work-item-state.py LEGACY_EXECUTION_ROLES). New writes must use 'main'."
+      "$comment": "Exactly ONE main-conversation identity: 'main' (the main conversation, which also holds the Lead role). Current recovery state \u2014 Task, Current step, Last result, Next action, and staged lifecycle fields \u2014 is owned by status.md, not executionRole; its older 'orchestration: light|full-lead' scalar remains legacy-compatible. Ledgers written before 2026-07-11 may carry the legacy value 'lead'; readers map it to 'main' (see scripts/validate-work-item-state.py LEGACY_EXECUTION_ROLES). New writes must use 'main'."
     },
     "assignedRole": {
       "type": "string"
@@ -604,12 +604,6 @@
           },
           "then": {
             "properties": {
-              "adapter": {
-                "const": "openai-codex"
-              },
-              "sandboxMode": {
-                "const": "read-only"
-              },
               "schemaVersion": {
                 "enum": [
                   1,
@@ -632,6 +626,34 @@
                     "decisionSessionMode",
                     "childAssignmentSha256"
                   ]
+                }
+              }
+            ],
+            "anyOf": [
+              {
+                "properties": {
+                  "adapter": {
+                    "const": "openai-codex"
+                  },
+                  "sandboxMode": {
+                    "const": "read-only"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "adapter": {
+                    "const": "microsoft-copilot-sdk"
+                  },
+                  "sandboxMode": {
+                    "const": "tool-restricted-read-only"
+                  },
+                  "schemaVersion": {
+                    "enum": [
+                      1,
+                      5
+                    ]
+                  }
                 }
               }
             ]
@@ -709,7 +731,8 @@
               "schemaVersion": {
                 "enum": [
                   1,
-                  2
+                  2,
+                  5
                 ]
               },
               "sandboxMode": {
@@ -718,7 +741,6 @@
                   "tool-restricted-workspace-write"
                 ]
               },
-              "continuationSourceSha256": false,
               "forkSourceSha256": false
             },
             "allOf": [
@@ -746,6 +768,34 @@
                 }
               }
             ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "schemaVersion": {
+                "const": 5
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "adapter": {
+                "enum": [
+                  "openai-codex",
+                  "microsoft-copilot-sdk"
+                ]
+              },
+              "sandboxMode": {
+                "enum": [
+                  "read-only",
+                  "tool-restricted-read-only"
+                ]
+              },
+              "approvalPolicy": {
+                "const": "deny_all"
+              }
+            }
           }
         }
       ]
@@ -2101,6 +2151,47 @@
           },
           "authorizing": {
             "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "sdkExecution"
+        ],
+        "properties": {
+          "sdkExecution": {
+            "required": [
+              "schemaVersion"
+            ],
+            "properties": {
+              "schemaVersion": {
+                "const": 5
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "role": {
+            "const": "lead"
+          },
+          "executionRole": {
+            "const": "main"
+          },
+          "assignedRole": {
+            "const": "lead"
+          },
+          "provider": {
+            "enum": [
+              "codex",
+              "copilot"
+            ]
+          },
+          "gate": {
+            "const": "none"
           }
         }
       }

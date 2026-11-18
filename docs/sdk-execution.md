@@ -340,8 +340,9 @@ a filesystem sandbox; each selected executor retains its own real permissions.
    outcomes for recovery rather than automatically repeating a model invocation.
 
 Root explicitly selects `decision_session_mode`: `fresh-handoff` preserves
-separate SDK decision sessions; `native-persistent` uses one actual Codex native
-thread across new decision turns. Legacy assignments retain `fresh-handoff`.
+separate SDK decision sessions; `native-persistent` uses one actual provider-native session across new decision
+turns. Codex uses its native thread; Copilot uses the separately documented
+Copilot scoped child decision session below. Legacy assignments retain `fresh-handoff`.
 There is no automatic switch to a fresh thread when persistence or recovery fails.
 Both modes keep the same Root-controlled catalog, Host permissions and independent acceptance.
 
@@ -515,7 +516,7 @@ historical results as fresh acceptance.
 | Codex | Explicit Windows Reviewer, Consultant and scoped Worker source bridges; offline qualification and historical bounded native evidence below. | Qualify current installed/native execution; extend Consultant continuation to remaining child-Lead/session/platform outcomes through the common mechanism. |
 | Claude | SDK Host API and explicit scoped Worker command-line route, plus prompt-only Consultant and Reviewer routes, exact receiving and offline checks; native Lead is a different boundary. | Qualify current native execution and complete child-Lead/session outcomes using official API/cloud access; do not wrap a subscription CLI as a third-party worker. |
 | Antigravity | Official setup direction; no implemented AGY runtime adapter in the current SDK execution factory. | Implement Lead/session integration and native subagent handoff; separately qualify any admitted programmatic worker route. |
-| Copilot | Explicit public fresh Consultant/Reviewer and scoped Worker over the official Python SDK and canonical Windows receiving; source/offline qualification only. | Complete supported Lead roles and session lifecycle; qualify the current installed runtime without provider-name role bans. |
+| Copilot | Explicit public fresh Consultant/Reviewer and scoped Worker; scoped child decision sessions through the existing Host lifecycle and canonical Windows receiving. Source/offline qualification only. | Qualify the current installed runtime and native session lifecycle; remaining native Lead/subagent integration must use verified vendor capabilities. |
 | Kimi | Existing ACP boundary is separate from the current SDK factory. | Reconcile the supported Kimi runtime with the official agent integration; do not silently substitute the older Python runtime or a model API for the chosen route. |
 | Grok | Candidate protocol support is not live-qualified execution. | Integrate the official Grok Build Agent Client Protocol (ACP) route, including account/tool enforcement and result receiving; do not invent a separate vendor SDK or substitute the xAI model API. |
 
@@ -596,6 +597,43 @@ Source evidence: [official custom Tool and result interfaces](https://github.com
 [session tool selection](https://github.com/microsoft/copilot-sdk/blob/3ce61458503b6b27ebd1f674a980f4d9596d9b22/python/copilot/client.py),
 and [typed permission/event data](https://github.com/microsoft/copilot-sdk/blob/3ce61458503b6b27ebd1f674a980f4d9596d9b22/python/copilot/_generated/session_events.py).
 This source integration is not installed or live-provider qualification.
+
+### Copilot scoped child decision sessions
+
+Current candidate evidence: 73 independent bounded checks pass, including the
+corrected late-activity negative oracle. The full child-ledger/archive end-to-end
+check has not completed and is under diagnosis. This increment is
+retained in the draft PR for review, not declared a completed Lead acceptance.
+
+The existing Host composition admits Copilot decision inference through
+`ChildLeadCoordinator`, not a second Lead loop or a new command-line Lead flag.
+Root retains the child assignment, current permissions, task admission and
+canonical receiving. The decision session is tool-free; actual task execution
+continues through separately admitted executors. It cannot grant itself Worker
+access, approve a result, close another scope or start vendor-native subagents.
+
+Root explicitly chooses `fresh-handoff` or `native-persistent` for the child.
+Persistent mode uses the official session resume operation with pending-work
+continuation and transcript recovery disabled. The predecessor comes from
+canonical received evidence, not an arbitrary caller-supplied session ID.
+Before a new send, the adapter checks the recorded completed turn against the
+actual session history. The native turn identity must be observed in provider
+message and turn-end events; a local request ID or an idle notification is not
+substituted for it. Uncertain or newer native work is inspected rather than
+silently replayed, forked or replaced with a fresh session.
+
+The existing first-decision and single-successor claims, received-intent recovery
+and child lifecycle owners remain in use. A restart consumes an already received
+decision before requesting another one. Disconnection preserves the vendor's
+session history but does not prove operating-system process settlement. Current
+profile, authentication-context and permissions checks still apply on each turn.
+This source integration neither qualifies an installed runtime nor promises
+control of Copilot's native subagent depth.
+
+Official interface evidence: [resume-session options](https://github.com/microsoft/copilot-sdk/blob/3ce61458503b6b27ebd1f674a980f4d9596d9b22/python/copilot/client.py),
+[session event history and disconnect](https://github.com/microsoft/copilot-sdk/blob/3ce61458503b6b27ebd1f674a980f4d9596d9b22/python/copilot/session.py),
+and [message and turn event types](https://github.com/microsoft/copilot-sdk/blob/3ce61458503b6b27ebd1f674a980f4d9596d9b22/python/copilot/_generated/session_events.py).
+These source contracts are distinct from native acceptance.
 
 ### Approved role/access acceptance scope
 

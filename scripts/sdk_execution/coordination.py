@@ -47,9 +47,16 @@ class CoordinationInferenceRequest(ExecutionRequest):
             # This exact coordination type owns Lead continuation eligibility.
             # Generic ExecutionRequest must not acquire that authority.
             base.update(native_continuation=None, context_mode="fresh")
+        if self.provider == "copilot":
+            if (self.child_choice_json is None or self.role != "lead" or self.write_workspace is not None
+                    or self.result_kind != "review" or self.tool_profile != "default"):
+                raise ValueError("explicit scoped Copilot coordination required")
+            # Validate common fields using the existing read-only Copilot profile;
+            # only this exact typed operation owns the decision output/profile.
+            base.update(tool_profile="prompt-only", role="external-reviewer")
         ExecutionRequest(**base)
-        if self.provider != "codex" or self.role != "lead" or self.write_workspace is not None:
-            raise ValueError("explicit Codex coordination operation required")
+        if self.provider not in {"codex", "copilot"} or self.role != "lead" or self.write_workspace is not None:
+            raise ValueError("explicit supported coordination operation required")
         for value in (self.operation_id, self.admitted_request_id,
                       self.outer_budget_id, self.inner_budget_id):
             _text(value)

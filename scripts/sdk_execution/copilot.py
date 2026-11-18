@@ -20,6 +20,7 @@ from types import SimpleNamespace
 from ._async import drain_owned
 from .contracts import CancelReceipt, ExecutionRequest, ExecutionResult, Observation, json_text, strict_json, task_schema, validate_task, review_schema, validate_review
 from .receiving import scan_execution_output
+from .coordination import CoordinationInferenceRequest, CoordinationInferenceResult, intent_schema, validate_intent
 
 
 class CopilotError(ValueError):
@@ -89,6 +90,12 @@ FILE_TOOLS = {"orchestrarium_read":"Read", "orchestrarium_write":"Write", "orche
 
 def validate_copilot_request(request):
     """Reuse the canonical role taxonomy, not a provider-specific profession list."""
+    if type(request) is CoordinationInferenceRequest:
+        if (request.provider != "copilot" or request.child_choice_json is None
+                or request.role != "lead" or request.write_workspace is not None
+                or request.tool_profile != "default" or request.result_kind != "review"):
+            raise CopilotError("copilot_request_unsupported")
+        return
     if (type(request) is not ExecutionRequest or request.provider != "copilot"
             or request.context_mode != "fresh"):
         raise CopilotError("copilot_request_unsupported")
@@ -354,11 +361,61 @@ class CopilotExecutor:
         self._request_abort()
         return CancelReceipt(run_id,True,False,error="copilot_cancellation_not_terminal_evidence")
 
+    async def _native_tip(self, request, *, expected_turn=None, final_event=None):
+        """Inspect actual chronological provider events, never caller turn labels."""
+        await self._current(request, "copilot_session_history")
+        if self._cancel_requested: raise asyncio.CancelledError()
+        events = await self._session.get_events()
+        if type(events) is not list:
+            raise CopilotError("copilot_history_unavailable")
+        # The official API returns lifetime history. Do not turn this request's
+        # event-capture budget into a cumulative session lifetime limit. History
+        # is inspected, not retained/exported as a new observation payload.
+        tip = active = None
+        final_seen = final_event is None
+        for event in events:
+            if getattr(event, "agent_id", None) or getattr(getattr(event, "data", None), "parent_tool_call_id", None): continue
+            kind = getattr(event, "type", None)
+            kind = getattr(kind, "value", kind)
+            data = getattr(event, "data", None)
+            if kind == "assistant.turn_end":
+                turn = getattr(data, "turn_id", None)
+                if not isinstance(turn, str) or not turn.strip():
+                    raise CopilotError("copilot_turn_identity_unavailable")
+                if active != turn:
+                    raise CopilotError("copilot_native_tip_changed")
+                tip, active = turn, None
+            elif kind == "assistant.turn_start":
+                turn = getattr(data, "turn_id", None)
+                if not isinstance(turn, str) or not turn.strip() or active is not None:
+                    raise CopilotError("copilot_native_tip_changed")
+                tip, active = None, turn
+            elif kind == "assistant.message":
+                if getattr(data, "turn_id", None) != active or active is None:
+                    raise CopilotError("copilot_native_tip_changed")
+                tip = None
+            elif kind in {"session.idle", "assistant.idle"} and getattr(data, "aborted", False):
+                tip = None
+            elif (isinstance(kind, str) and kind.startswith("assistant.") and kind not in {"assistant.usage", "assistant.idle"}) or kind in {
+                          "user.message", "pending_messages.modified", "abort", "session.error",
+                          "session.snapshot_rewind", "session.context_cleared"}:
+                tip = None
+            if final_event is not None and kind == "assistant.message":
+                final_seen = (getattr(event, "id", None) is not None
+                    and getattr(event, "id", None) == getattr(final_event, "id", None)
+                    and getattr(data, "turn_id", None) == getattr(final_event.data, "turn_id", None)
+                    and getattr(data, "content", None) == getattr(final_event.data, "content", None))
+        wanted = expected_turn if final_event is None else getattr(final_event.data, "turn_id", None)
+        if (not isinstance(wanted, str) or not wanted.strip() or tip != wanted or not final_seen):
+            raise CopilotError("copilot_native_tip_changed")
+        return tip
+
     async def _execute(self, request):
         evidence_result = None
         error = cleanup_error = None
         provider_status = None
-        session_id = None
+        session_id = native_turn_id = None
+        coordination = type(request) is CoordinationInferenceRequest
         unsubscribe = None
         closed = False
         try:
@@ -393,9 +450,9 @@ class CopilotExecutor:
                     github={"token":self._token,"use_logged_in_user":False})
                 await self._client.start()
                 if self._cancel_requested: raise asyncio.CancelledError()
-                await self._current(request,"copilot_session_create")
+                await self._current(request,"copilot_session_resume" if request.native_continuation is not None else "copilot_session_create")
                 if self._cancel_requested: raise asyncio.CancelledError()
-                self._session = await self._client.create_session(model=request.model,
+                options = dict(model=request.model,
                     working_directory=request.cwd,enable_config_discovery=False,
                     system_message={"mode":"append","content":self._instructions},
                     tools=self._file_tools(sdk) if request.write_workspace is not None else {"available_tools":[]},permissions={"on_request":permission if request.write_workspace is not None else deny},
@@ -405,9 +462,19 @@ class CopilotExecutor:
                     skills={"enabled":False,"directories":[],"included_builtin_skills":[]},
                     mcp={"servers":{},"enable_apps":False},
                     execution={"autopilot":{"continuation_enabled":False}})
+                if request.native_continuation is None:
+                    self._session = await self._client.create_session(**options)
+                else:
+                    self._session = await self._client.resume_session(
+                        request.native_continuation.native_thread_id,
+                        continue_pending_work=False, allow_transcript_recovery=False, **options)
                 session_id = getattr(self._session,"session_id",None)
                 if not isinstance(session_id,str) or not session_id.strip() or len(session_id.encode()) > 4096:
                     raise CopilotError("copilot_session_identity_unavailable")
+                if request.native_continuation is not None:
+                    if session_id != request.native_continuation.native_thread_id:
+                        raise CopilotError("copilot_session_identity_changed")
+                    await self._native_tip(request, expected_turn=request.native_continuation.native_turn_id)
                 unsubscribe = self._session.on(self._event)
                 if self._cancel_requested: raise asyncio.CancelledError()
                 await self._profile(request,"copilot_profile_before")
@@ -416,18 +483,26 @@ class CopilotExecutor:
                 if self._cancel_requested: raise asyncio.CancelledError()
                 event = await self._session.send_and_wait(request.prompt,
                     source=sdk.AgentMessageSource(request.coordinator_binding),
-                    response_schema=(task_schema if request.result_kind == "task" else review_schema)(request),timeout=self._timeout)
+                    response_schema=(intent_schema if coordination else task_schema if request.result_kind == "task" else review_schema)(request),timeout=self._timeout)
                 if event is None: raise CopilotError("copilot_terminal_unavailable")
                 kind = getattr(event,"type",None)
                 if getattr(kind,"value",kind) != "assistant.message": raise CopilotError("copilot_terminal_type_mismatch")
-                if getattr(event,"agent_id",None): raise CopilotError("copilot_child_output_not_terminal")
+                if (getattr(event,"agent_id",None)
+                        or getattr(getattr(event,"data",None),"parent_tool_call_id",None)):
+                    raise CopilotError("copilot_child_output_not_terminal")
                 content = getattr(getattr(event,"data",None),"content",None)
                 if not isinstance(content,str) or not content.strip(): raise CopilotError("copilot_terminal_unavailable")
                 if len(content.encode()) > request.max_output_bytes: raise CopilotError("copilot_capture_limit")
                 # Preserve bounded acquired text even when the result codec rejects it.
                 self._retain_content(content,"copilot.assistant.message")
-                evidence_result = (validate_task if request.result_kind == "task" else validate_review)(
-                    strict_json(content,max_bytes=request.max_output_bytes),request=request)
+                if coordination:
+                    evidence_result = validate_intent(content, request)
+                    native_turn_id = await self._native_tip(request, final_event=event)
+                    if request.native_continuation is not None and native_turn_id == request.native_continuation.native_turn_id:
+                        raise CopilotError("copilot_turn_not_new")
+                else:
+                    evidence_result = (validate_task if request.result_kind == "task" else validate_review)(
+                        strict_json(content,max_bytes=request.max_output_bytes),request=request)
                 provider_status = "completed"
                 await self._profile(request,"copilot_profile_after")
         except asyncio.CancelledError:
@@ -465,17 +540,23 @@ class CopilotExecutor:
         if metadata is not None and request.write_workspace is not None:
             import hashlib
             metadata["writeWorkspaceSha256"] = hashlib.sha256(request.write_workspace.encode("utf-8")).hexdigest()
-        result = ExecutionResult(request,status,provider_status=provider_status,
+        if metadata is not None and request.native_continuation is not None:
+            metadata["continuationSourceSha256"] = request.native_continuation.source_sha256
+        values = dict(provider_status=provider_status,
             sdk_execution_json=json_text(metadata) if metadata is not None else None,
-            native_thread_id=session_id,
-            task=evidence_result if request.result_kind == "task" else None,
-            review=evidence_result if request.result_kind == "review" else None,
-            observations=tuple(self._observations),
-            execution_error=error,cleanup_error=cleanup_error,protocol_closed=closed)
+            native_thread_id=session_id, native_turn_id=native_turn_id,
+            observations=tuple(self._observations), execution_error=error,
+            cleanup_error=cleanup_error, protocol_closed=closed)
+        if coordination:
+            result = CoordinationInferenceResult(request, status, intent_json=evidence_result, **values)
+        else:
+            result = ExecutionResult(request, status,
+                task=evidence_result if request.result_kind == "task" else None,
+                review=evidence_result if request.result_kind == "review" else None, **values)
         self.execution_result = result
         # Observations are retained privately on refusal, but never returned unscanned.
         import provider_prompt as owner
-        evidence = json_text({"native_thread_id":result.native_thread_id,
+        evidence = json_text({"native_thread_id":result.native_thread_id, "native_turn_id":result.native_turn_id,
             "observations":[item.to_dict() for item in result.observations]})
         failure = owner.provider_output_safety_scan_terminal("copilot",self._output.needles,
             stdout=evidence.encode("utf-8"),stderr=b"")
