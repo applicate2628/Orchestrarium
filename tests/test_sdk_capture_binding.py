@@ -13,7 +13,7 @@ def test_actual_capture_binding_precedes_runner_and_execution(tmp_path,monkeypat
         def close(self):
             return SimpleNamespace(outcome="closed",failure_id=None,unsettled_run_token_sha256=())
     class Operation:
-        request=SimpleNamespace(write_workspace=str(tmp_path/"workspace"))
+        request=SimpleNamespace(provider="codex",write_workspace=str(tmp_path/"workspace"))
         recovery_max_bytes=100
         def bind_capture_directory(self,path):
             assert path.parent==tmp_path/"capture" and path.is_dir()
@@ -35,7 +35,7 @@ def test_actual_capture_binding_precedes_runner_and_execution(tmp_path,monkeypat
 @pytest.mark.parametrize("mode",["missing","denied"])
 def test_unbound_worker_never_constructs_runner(tmp_path,monkeypatch,mode):
     class Operation:
-        request=SimpleNamespace(write_workspace=str(tmp_path/"workspace"))
+        request=SimpleNamespace(provider="codex",write_workspace=str(tmp_path/"workspace"))
         def execute(self,*args): pytest.fail("worker executed before capture custody")
     operation=Operation()
     if mode=="denied":

@@ -157,7 +157,7 @@ def test_consultant_cancels_only_its_owned_turn():
     asyncio.run(scenario())
 
 
-def test_claude_task_codec_is_additive_but_runtime_stays_unqualified():
+def test_claude_task_codec_is_additive_and_runtime_requires_selection():
     from sdk_execution import runtime
     from sdk_execution.claude import create_claude_adapter
     req = task_request(provider="claude")
@@ -166,10 +166,14 @@ def test_claude_task_codec_is_additive_but_runtime_stays_unqualified():
                              task=validate_task(task_payload(), request=req))
     assert ExecutionResult.from_dict(result.to_dict()) == result
     assert result.to_tool_output()["authoritative"] is False
-    for callback in (lambda:runtime.validate_admitted_request(req,None),
-                     lambda:runtime.selected_sdk_execution(req,None),
-                     lambda:runtime.execution_role(req)):
-        with pytest.raises(ValueError, match="claude_task_runtime_receiving_not_qualified"):
+    assert runtime.execution_role(req) == "consultant"
+    # Role provenance is not a runtime selection or permission. Invalid selected
+    # fields still fail before admission, metadata creation or factory effects.
+    from types import SimpleNamespace
+    unsupported = SimpleNamespace(to_dict=lambda: {})
+    for callback in (lambda: runtime.validate_admitted_request(req, unsupported),
+                     lambda: runtime.selected_sdk_execution(req, unsupported)):
+        with pytest.raises(ValueError, match="invalid_runtime_selection_fields"):
             callback()
 
     with pytest.raises(ValueError, match="claude_request_required"):

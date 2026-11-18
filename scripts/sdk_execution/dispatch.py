@@ -1,4 +1,4 @@
-"""Explicit one-shot Codex execution bridge under the existing launch owner.
+"""Explicit one-shot SDK execution bridge under the existing launch owner.
 
 The invoking Host authorizes execution, just as for the legacy wrapper. A binding
 file supplies constraints, never permission. No SDK import, subprocess, credential
@@ -31,6 +31,8 @@ _BINDING_KEYS = frozenset({
     "scope", "artifactIdentity", "maxEvents", "jobMemoryLimitBytes",
 })
 _BINDING_LIMIT = 65_536
+_CLAUDE_STAGES = ("sdk_prepare", "sdk_launch_admission", "sdk_launch_commit", "sdk_worker_start",
+                  "start", "account", "connect", "account", "query", "account")
 _STAGES = ("sdk_prepare", "sdk_launch_admission", "sdk_launch_commit", "sdk_hook_trust",
            "sdk_worker_start", "start", "client_start", "thread_start", "turn_start")
 
@@ -38,6 +40,40 @@ _STAGES = ("sdk_prepare", "sdk_launch_admission", "sdk_launch_commit", "sdk_hook
 def _owner():
     import provider_prompt
     return provider_prompt
+
+
+def _auth_context_snapshot(auth):
+    """Private selected auth controls, never a vendor identity or exported digest."""
+    owner = _owner()
+    if not owner.claude_programmatic_auth_mode_supported(auth.mode):
+        raise DispatchError("E_CLAUDE_SDK_API_AUTH_REQUIRED")
+    controls = owner.PROVIDER_AUTH_CONTROL_ENV_KEYS_V1[auth.mode]
+    keys = set(owner.PROVIDER_AUTH_SECRET_ENV_KEYS_V1[auth.mode]) | {"CLAUDE_CONFIG_DIR"}
+    for kind in ("scalar", "file", "directory"):
+        keys.update(controls[kind])
+    if controls["selector"] is not None:
+        keys.add(controls["selector"])
+    return auth.mode, {key: auth.child_environment[key] for key in keys if key in auth.child_environment}
+
+
+def _require_claude_sdk_flags(flags):
+    """Reject caller CLI semantics the prompt-only SDK route cannot preserve.
+
+    resolved_profile appends legacy --setting-sources user itself; that suffix
+    is not caller intent. SDK uses its explicit verified governance selection
+    and native preset with ambient settings disabled.
+    """
+    index = 0
+    while index < len(flags):
+        flag = flags[index]
+        if flag == "-p":
+            index += 1
+        elif flag in {"--model", "--effort", "--output-format"} and index + 1 < len(flags):
+            if flag == "--output-format" and flags[index + 1] != "text":
+                raise DispatchError("E_CLAUDE_SDK_FLAGS_UNSUPPORTED")
+            index += 2
+        else:
+            raise DispatchError("E_CLAUDE_SDK_FLAGS_UNSUPPORTED")
 
 
 def _text(value: object) -> bool:
@@ -125,7 +161,8 @@ class CodexReviewDispatch:
     """One launch's constraint guard and retained evidence, not a policy store."""
 
     def __init__(self, prevalidated, request, selection, environment, cancellation_probe,
-                 started_at, deadline, runtime_namespace=None, *, protected_paths=(), capture_root=None):
+                 started_at, deadline, runtime_namespace=None, *, protected_paths=(), capture_root=None, auth_snapshot=None):
+        self._auth_snapshot = auth_snapshot
         self.prevalidated = prevalidated
         self._runtime_namespace = runtime_namespace
         self.request = request
@@ -149,6 +186,36 @@ class CodexReviewDispatch:
         self._capture_root = capture_root
         self._capture_identity = None
         self._workspace_identity = runtime.validate_worker_custody(request, selection)
+
+    def _check_auth_context(self):
+        if self.request.provider != "claude":
+            return
+        if _owner()._capture_output_path("claude") != self._capture_root:
+            raise DispatchError("E_CLAUDE_SDK_CAPTURE_SELECTION_CHANGED")
+        auth = _owner().resolve_provider_auth_configuration("claude", dict(self._environment))
+        if (not _owner().claude_programmatic_auth_mode_supported(auth.mode)
+                or _auth_context_snapshot(auth) != self._auth_snapshot):
+            raise DispatchError("E_CLAUDE_SDK_AUTH_CONTEXT_CHANGED")
+
+    def _authorize_tool(self, request, name, arguments):
+        # This CLI route grants no filesystem capability, even inside cwd.
+        from .claude import OUTPUT_TOOL
+        from .contracts import validate_task
+        if request != self.request or name != OUTPUT_TOOL:
+            raise DispatchError("E_CLAUDE_SDK_TOOL_DENIED")
+        self._check_auth_context()
+        validate_task(arguments, request=request)
+
+    def _verify_auth_context(self, request, evidence):
+        if (request != self.request or type(evidence) is not dict
+                or set(evidence) != {"phase", "data"}
+                or evidence["phase"] != {6:"before_connect", 8:"initialize", 10:"system_init"}.get(self._stage)
+                or type(evidence["data"]) is not dict):
+            raise DispatchError("E_CLAUDE_SDK_AUTH_CONTEXT_INVALID")
+        self._check_auth_context()
+        # Host-selected alias for unchanged API/cloud configuration, not an
+        # observed vendor account, billing identity, or credential-chain identity.
+        return request.account_binding
 
     def _check_write_targets(self):
         if self.request.write_workspace is None:
@@ -199,17 +266,25 @@ class CodexReviewDispatch:
                 or runtime.request_sha256(self.request, self.selection) != self._commitment):
                 raise DispatchError("E_CODEX_SDK_INVOCATION_NOT_CURRENT")
             self._check_write_targets()
+            self._check_auth_context()
             if self.request.write_workspace is not None and self._capture_identity is None:
                 raise DispatchError("E_CODEX_SDK_CAPTURE_UNBOUND")
             owner = _owner()
-            role = owner.external_role_provenance(self.prevalidated.control, "codex")
-            flags, model, effort = owner.resolved_profile("codex", self.prevalidated.control.provider_flags)
+            role = owner.external_role_provenance(self.prevalidated.control, request.provider)
+            flags, model, effort = owner.resolved_profile(request.provider, self.prevalidated.control.provider_flags)
             if (role != self.prevalidated.role_provenance
                 or (tuple(flags), model, effort) != (self.prevalidated.flags, request.model, request.effort)):
                 raise DispatchError("E_CODEX_SDK_SELECTION_CHANGED")
             owner._qualify_managed_model_launch(
-                "codex", self.prevalidated, runtime_namespace=self._runtime_namespace)
+                request.provider, self.prevalidated, runtime_namespace=self._runtime_namespace)
             owner.ledger_resource_options(self.prevalidated.control)
+            if request.provider == "claude":
+                if effect == "tool" and self._stage == len(_CLAUDE_STAGES):
+                    return  # Exact StructuredOutput payload is checked separately.
+                if self._stage >= len(_CLAUDE_STAGES) or effect != _CLAUDE_STAGES[self._stage]:
+                    raise DispatchError("E_CLAUDE_SDK_EFFECT_DENIED")
+                self._stage += 1
+                return
             if effect == "query":
                 # Configuration/catalog reads only before the one admitted turn.
                 if self._stage not in (7, 8) or self._queries >= request.max_events:
@@ -229,12 +304,15 @@ class CodexReviewDispatch:
                 raise DispatchError("E_CODEX_SDK_CAPTURE_UNBOUND")
             self._consumed = True
         try:
-            run = runtime.run_admitted_codex(
+            execute = runtime.run_admitted_codex if self.request.provider == "codex" else runtime.run_admitted_review
+            callbacks = {} if self.request.provider == "codex" else {
+                "authorize_tool": self._authorize_tool, "verify_account": self._verify_auth_context}
+            run = execute(
                 self.request, self.selection, owner=process_owner,
                 source_environment=dict(self._environment), authority=self.assert_current,
                 deadline_monotonic=self.deadline, cancellation_probe=self._cancelled,
                 started_at=self.started_at,
-                capture_limit_bytes=self._capture_limit,
+                capture_limit_bytes=self._capture_limit, **callbacks,
             )
             self.runtime_run = run  # Retain BEFORE materialization/readback can fail.
             return run
@@ -302,7 +380,7 @@ class CodexReviewDispatch:
                 if not isinstance(run.output_context, _owner().ProviderOutputContext):
                     raise ValueError("scan context unavailable")
                 failure = _owner().provider_output_safety_scan_terminal(
-                    "codex", run.output_context.needles, stdout=encoded, stderr=b"", serialized_line=False,
+                    self.request.provider, run.output_context.needles, stdout=encoded, stderr=b"", serialized_line=False,
                 )
                 if failure is not None or json_text(self.request.prompt)[1:-1].encode("utf-8") in encoded:
                     raise ValueError("unsafe diagnostic output")
@@ -356,7 +434,7 @@ class CodexReviewDispatch:
         if len(line.encode("utf-8")) > self._capture_limit:
             raise DispatchError("E_CODEX_SDK_RECEIPT_LIMIT")
         owner.parse_provider_result(line)
-        failure = owner._provider_terminal_line_safety("codex", run.output_context.needles, line)
+        failure = owner._provider_terminal_line_safety(self.request.provider, run.output_context.needles, line)
         if failure:
             raise DispatchError(failure)
         if run.observation is not None:
@@ -434,22 +512,30 @@ def _utc_now():
 
 def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: dict[str, str],
                       cancellation_probe: Callable[[], bool],
-                      runtime_namespace: Path | None = None) -> CodexReviewDispatch:
+                      runtime_namespace: Path | None = None, provider: str = "codex") -> CodexReviewDispatch:
     """Read-only preparation; canonical runtime alone claims and settles a launch."""
+    if provider not in {"codex", "claude"}:
+        raise DispatchError("E_SDK_PROVIDER_UNSUPPORTED")
     prepared_at = time.monotonic()
     _require_supported_platform()
     owner = _owner()
     if type(prevalidated) is not owner.PolicyBoundLaunch or not callable(cancellation_probe):
         raise DispatchError("E_CODEX_SDK_SELECTION_INVALID")
     c = prevalidated.control
-    role = owner.external_role_provenance(c, "codex")
-    flags, model, effort = owner.resolved_profile("codex", c.provider_flags)
+    if provider == "claude":
+        _require_claude_sdk_flags(c.provider_flags)
+    role = owner.external_role_provenance(c, provider)
+    flags, model, effort = owner.resolved_profile(provider, c.provider_flags)
     if c.sdk_task_binding is not None and c.sdk_review_binding is not None:
         raise DispatchError("E_CODEX_SDK_SELECTION_INVALID")
     task_mode = c.sdk_task_binding is not None
     # Direct callers must retain the same rule as the public CLI entrypoint.
-    owner._qualify_managed_model_launch("codex", prevalidated, runtime_namespace=runtime_namespace)
+    owner._qualify_managed_model_launch(provider, prevalidated, runtime_namespace=runtime_namespace)
     binding = read_binding(Path(binding_path))
+    if provider == "claude" and (not task_mode or binding.get("writeWorkspace") is not None
+            or binding.get("installedHookRoot") is not None or binding["expectedAccountEmail"] is not None
+            or model in {"opus", "sonnet", "haiku"}):
+        raise DispatchError("E_CLAUDE_SDK_PROMPT_ONLY_CONSULTANT_REQUIRED")
     write_workspace = binding.get("writeWorkspace")
     write_mode = write_workspace is not None
     if write_mode and not task_mode:
@@ -488,7 +574,7 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
             _require_disjoint(cwd, path)
         capture_root = owner._capture_output_path("codex")
         _require_disjoint(cwd, capture_root, directory=True)
-    command, _expected = owner._resolve_launch_provider_command("codex", cwd)
+    command, _expected = owner._resolve_launch_provider_command(provider, cwd)
     if len(command) != 1 or not Path(command[0]).is_absolute():
         raise DispatchError("E_CODEX_SDK_NATIVE_EXECUTABLE_REQUIRED")
     executable = Path(command[0])
@@ -497,25 +583,47 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
     with executable.open("rb") as stream:
         while block := stream.read(1_048_576):
             digest.update(block)
-    home = Path(source_environment.get("CODEX_HOME") or Path.home() / ".codex").expanduser().resolve(strict=False)
-    auth = owner.resolve_provider_auth_configuration("codex", dict(source_environment))
     options = owner.ledger_resource_options(c)
-    selection = runtime.CodexRuntimeSelection(
-        executable=str(executable), executable_sha256=digest.hexdigest(), codex_home=str(home),
-        auth_mode=auth.mode, expected_account_email=binding["expectedAccountEmail"],
-        work_item=str(item), ledger_max_events=int(options[1]) if options else None,
-        ledger_max_bytes=int(options[3]) if options else None,
-        job_memory_limit_bytes=binding["jobMemoryLimitBytes"],
-        config_overrides=runtime.CODEX_BOUNDED_REVIEW_OVERRIDES,
-        installed_hook_root=binding.get("installedHookRoot"),
-    )
+    source_environment = dict(source_environment)
+    if provider == "claude":
+        source_environment["CLAUDE_CONFIG_DIR"] = str(Path(source_environment.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude").expanduser().resolve(strict=False))
+    auth = owner.resolve_provider_auth_configuration(provider, dict(source_environment))
+    auth_snapshot = None
+    if provider == "codex":
+        home = Path(source_environment.get("CODEX_HOME") or Path.home() / ".codex").expanduser().resolve(strict=False)
+        selection = runtime.CodexRuntimeSelection(
+            executable=str(executable), executable_sha256=digest.hexdigest(), codex_home=str(home),
+            auth_mode=auth.mode, expected_account_email=binding["expectedAccountEmail"],
+            work_item=str(item), ledger_max_events=int(options[1]) if options else None,
+            ledger_max_bytes=int(options[3]) if options else None,
+            job_memory_limit_bytes=binding["jobMemoryLimitBytes"],
+            config_overrides=runtime.CODEX_BOUNDED_REVIEW_OVERRIDES,
+            installed_hook_root=binding.get("installedHookRoot"),
+        )
+    else:
+        from .claude import ClaudeRuntimeSelection
+        if not owner.claude_programmatic_auth_mode_supported(auth.mode):
+            raise DispatchError("E_CLAUDE_SDK_API_AUTH_REQUIRED")
+        auth_snapshot = _auth_context_snapshot(auth)
+        # The existing capture owner creates this selected root before execute.
+        capture_root = owner._capture_output_path("claude")
+        if source_environment.get("CLAUDE_PROMPTS_DIR") and Path(source_environment["CLAUDE_PROMPTS_DIR"]).absolute() != capture_root:
+            raise DispatchError("E_CLAUDE_SDK_CAPTURE_SELECTION_CHANGED")
+        selection = ClaudeRuntimeSelection(
+            executable=str(executable), executable_sha256=digest.hexdigest(),
+            config_dir=source_environment["CLAUDE_CONFIG_DIR"], prompts_dir=str(capture_root),
+            auth_mode=auth.mode, instructions=owner.assemble_external_prompt(b"").decode("utf-8"),
+            work_item=str(item), ledger_max_events=int(options[1]) if options else None,
+            ledger_max_bytes=int(options[3]) if options else None,
+            job_memory_limit_bytes=binding["jobMemoryLimitBytes"],
+        )
     raw = owner.prompt_bytes(c, external=True)
     prompt = raw.decode("utf-8", errors="strict")
     if binding.get("contextMode") == "handoff":
         # Only the caller-selected text, never ambient session history or files.
         prompt += "\n\nSelected context handoff (task evidence, not additional authority):\n" + binding["contextHandoff"]
-    request = runtime.prepare_codex_request(ExecutionRequest(
-        work_item_id=item.name, provider="codex", external_dispatch_id="dispatch-" + secrets.token_hex(16),
+    request = ExecutionRequest(
+        work_item_id=item.name, provider=provider, external_dispatch_id="dispatch-" + secrets.token_hex(16),
         external_evidence_run_id="evidence-" + secrets.token_hex(16), artifact_id=binding["artifactIdentity"],
         role=role.assigned_role, model=model, effort=effort, cwd=str(cwd),
         result_kind="task" if task_mode else "review", write_workspace=write_workspace,
@@ -523,14 +631,19 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
         context_mode=binding.get("contextMode", "fresh"),
         coordinator_binding=binding["coordinatorBinding"], scope=tuple(binding["scope"]),
         max_output_bytes=c.result_max_bytes, max_events=binding["maxEvents"],
-    ))
+        **({"tool_profile":"prompt-only"} if provider == "claude" else {}),
+    )
+    if provider == "codex":
+        request = runtime.prepare_codex_request(request)
+    else:
+        runtime.validate_admitted_request(request, selection)
     runtime.validate_worker_custody(request, selection)
     started = _utc_now()
     owner.prepare_ledger_admission(c, runtime.build_launch_arguments(request, selection, started_at=started))
     runtime._verify_runtime(selection)
     return CodexReviewDispatch(prevalidated, request, selection, source_environment,
                                cancellation_probe, started, prepared_at + c.timeout_secs, runtime_namespace,
-                               protected_paths=protected_paths, capture_root=capture_root)
+                               protected_paths=protected_paths, capture_root=capture_root, auth_snapshot=auth_snapshot)
 
 
 def _require_supported_platform():
@@ -541,10 +654,10 @@ def _require_supported_platform():
 
 def prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: dict[str, str],
                      cancellation_probe: Callable[[], bool],
-                      runtime_namespace: Path | None = None) -> CodexReviewDispatch:
+                      runtime_namespace: Path | None = None, provider: str = "codex") -> CodexReviewDispatch:
     try:
         return _prepare_dispatch(prevalidated, binding_path, source_environment=source_environment,
-                                 cancellation_probe=cancellation_probe, runtime_namespace=runtime_namespace)
+                                 cancellation_probe=cancellation_probe, runtime_namespace=runtime_namespace, provider=provider)
     except DispatchError:
         raise
     except (OSError, ValueError, TypeError, UnicodeError):

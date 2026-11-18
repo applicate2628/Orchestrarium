@@ -84,6 +84,7 @@ def test_sdk_receiving_occurs_only_after_runner_close(tmp_path, monkeypatch, clo
             events.append("close")
             return SimpleNamespace(outcome="closed" if closed else "failed-unsettled", failure_id=None if closed else "failure", unsettled_run_token_sha256=() if closed else ("run",))
     class Operation:
+        request = SimpleNamespace(provider="codex", write_workspace=None)
         recovery_max_bytes = 100
         def execute(self, process_owner):
             events.append("execute")
@@ -109,6 +110,7 @@ def test_sdk_uncertain_execution_never_falls_back_to_cli(tmp_path, monkeypatch):
             events.append("close")
             return SimpleNamespace(outcome="closed", failure_id=None, unsettled_run_token_sha256=())
     class Operation:
+        request = SimpleNamespace(provider="codex", write_workspace=None)
         def execute(self, process_owner):
             raise RuntimeError("uncertain process outcome")
         def receive(self):
@@ -125,6 +127,7 @@ def test_sdk_close_interrupt_preserves_acquired_diagnostics(tmp_path, monkeypatc
         def close(self):
             raise KeyboardInterrupt()
     class Operation:
+        request = SimpleNamespace(provider="codex", write_workspace=None)
         recovery_max_bytes = 100
         def execute(self, process_owner):
             return object()  # Bound RuntimeRun serialization belongs to operation.
@@ -149,6 +152,7 @@ def test_sdk_incomplete_diagnostic_write_reports_retained_directory(tmp_path, mo
                 raise KeyboardInterrupt()
             return SimpleNamespace(outcome="closed", failure_id=None, unsettled_run_token_sha256=())
     class Operation:
+        request = SimpleNamespace(provider="codex", write_workspace=None)
         recovery_max_bytes = 100
         def execute(self, process_owner):
             return object()

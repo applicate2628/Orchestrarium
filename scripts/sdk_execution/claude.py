@@ -56,8 +56,8 @@ class ClaudeRuntimeSelection:
     instructions: str
     prompts_dir: str
     work_item: str
-    ledger_max_events: int
-    ledger_max_bytes: int
+    ledger_max_events: int | None
+    ledger_max_bytes: int | None
     job_memory_limit_bytes: int
     expected_launch_sha256: str | None = None
 
@@ -72,7 +72,12 @@ class ClaudeRuntimeSelection:
                 continue
             if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
                 raise AdapterError("explicit_runtime_digest_required")
-        for name in ("ledger_max_events", "ledger_max_bytes", "job_memory_limit_bytes"):
+        # Paired omitted ledger caps stay omitted; the canonical locked ledger
+        # owner derives finite admission from the selected inputs.
+        budgets = ("job_memory_limit_bytes",)
+        if self.ledger_max_events is not None or self.ledger_max_bytes is not None:
+            budgets += ("ledger_max_events", "ledger_max_bytes")
+        for name in budgets:
             if type(getattr(self, name)) is not int or getattr(self, name) <= 0:
                 raise AdapterError("explicit_positive_resource_budget_required")
         if type(self.auth_mode) is not str or not self.auth_mode:
@@ -230,6 +235,7 @@ def create_claude_adapter(request: ExecutionRequest, sink: Any, selection: Claud
         await sink.authorize(value, "account", {"kind": "account", "evidence": evidence})
         # The parent account owner, not apiKeySource/config presence, established
         # this exact admitted nonsecret alias before sending its one-use grant.
+        # The alias does not itself prove a vendor-observed account identity.
         return request.account_binding
 
     adapter_type = ClaudeConsultantAdapter if request.result_kind == "task" else ClaudeReviewAdapter
@@ -278,8 +284,11 @@ class ClaudeReviewAdapter:
     checks the exact tool arguments/path under that owner's current data permissions.
     Policy, tool and account callbacks all await the parent owner on the SDK loop;
     the Codex blocking-thread bridge must not be used here.
-    load_instructions supplies current common governance AND Claude-specific rules;
-    filesystem settings are disabled, so this payload must not omit project rules.
+    For the full Host tool profile, load_instructions supplies selected common,
+    Claude and project rules; filesystem settings are disabled. The prompt-only
+    CLI profile instead supplies the verified common capsule plus explicit task
+    context and the native preset. It cannot perform repository operations or
+    claim that ambient project rules were loaded.
     The existing private capture owner transports it in an append-only system
     prompt file while preserving the native claude_code system-prompt preset.
 
@@ -290,9 +299,11 @@ class ClaudeReviewAdapter:
     usage field is a pricing lookup identity, not an alias-authorization owner.
 
     verify_account runs before connection and again on public initialization data.
-    It must establish the admitted account/billing lane using the existing owner's
-    evidence, not infer account identity from apiKeySource. The SDK has no dedicated
-    public account/read API. Only the verified nonsecret binding is recorded here.
+    It must bind the selected, admitted auth context using the existing owner's
+    evidence, not infer account identity from apiKeySource or an arbitrary alias.
+    The SDK has no dedicated public account/read API. The recorded nonsecret
+    binding is auth-context provenance, not proof of person or billing identity;
+    a Host may independently establish stronger identity with its own evidence.
     record is the existing admitted evidence sink, not a new ledger/trace destination.
     """
 
@@ -396,7 +407,7 @@ class ClaudeReviewAdapter:
             if event not in {"PreToolUse", "PostToolUse", "PostToolUseFailure"}:
                 raise AdapterError("unsupported_hook")
             name, arguments, call_id = data.get("tool_name"), data.get("tool_input"), data.get("tool_use_id")
-            if (name not in OBSERVED_TOOLS or not isinstance(arguments, dict)
+            if (name not in self._observed_tools() or not isinstance(arguments, dict)
                 or not isinstance(call_id, str) or not call_id
                 or (tool_use_id is not None and call_id != tool_use_id)):
                 raise AdapterError("unadmitted_tool_call")
@@ -440,6 +451,12 @@ class ClaudeReviewAdapter:
                 }, "continue_": False, "stopReason": self._hook_error}
             return {"continue_": False, "stopReason": self._hook_error}
 
+    def _read_tools(self) -> tuple[str, ...]:
+        return () if self._request.tool_profile == "prompt-only" else READ_TOOLS
+
+    def _observed_tools(self) -> tuple[str, ...]:
+        return (*self._read_tools(), OUTPUT_TOOL)
+
     def _options(self, instruction_path: str) -> dict[str, Any]:
         return {
             "model": self._request.model, "effort": self._request.effort,
@@ -450,8 +467,8 @@ class ClaudeReviewAdapter:
             # prescribes file transport for large prompts. A custom/file system
             # prompt would replace, rather than append to, the native defaults.
             "extra_args": {"append-system-prompt-file": instruction_path},
-            "tools": list(READ_TOOLS), "allowed_tools": [], "permission_mode": "default",
-            "disallowed_tools": ["Bash", "Write", "Edit", "NotebookEdit", "Agent", "Task", "WebFetch", "WebSearch"],
+            "tools": list(self._read_tools()), "allowed_tools": [], "permission_mode": "default",
+            "disallowed_tools": ["Bash", "Write", "Edit", "NotebookEdit", "Agent", "Task", "WebFetch", "WebSearch"] + (list(READ_TOOLS) if self._request.tool_profile == "prompt-only" else []),
             "mcp_servers": {}, "strict_mcp_config": True, "setting_sources": [],
             "skills": [], "plugins": [], "agents": {}, "add_dirs": [],
             "fallback_model": None, "continue_conversation": False, "resume": None,
@@ -547,7 +564,7 @@ class ClaudeReviewAdapter:
             if "claude_code_version" in info:
                 initialized_version = _version_metadata(info["claude_code_version"], "runtime")
             await self._account("initialize", info)
-            await self._capture("account/verified", {"accountBinding": request.account_binding})
+            await self._capture("auth-context/verified", {"accountBinding": request.account_binding})
             await self._capture("query/start", {"session_id": self._session_id, "prompt_id": self._prompt_id})
 
             async def prompt() -> AsyncIterator[dict[str, Any]]:
@@ -591,7 +608,7 @@ class ClaudeReviewAdapter:
                     if (init.get("model") != request.model or init.get("cwd") != request.cwd
                         or init.get("permissionMode") != "default"
                         or not isinstance(init.get("tools"), list)
-                        or set(init["tools"]) not in (set(READ_TOOLS), set(OBSERVED_TOOLS))
+                        or set(init["tools"]) not in (set(self._read_tools()), set(self._observed_tools()))
                         or init.get("mcp_servers") != [] or init.get("skills") != [] or init.get("plugins") != []):
                         raise AdapterError("observed_profile_mismatch")
                     await self._account("system_init", init)
@@ -654,7 +671,7 @@ class ClaudeReviewAdapter:
                         raise AdapterError("unadmitted_injected_turn")
                     for block in data.get("content", []) if isinstance(data.get("content"), list) else []:
                         if block.get("type") == "ToolUseBlock":
-                            if block.get("name") not in OBSERVED_TOOLS or not isinstance(block.get("id"), str):
+                            if block.get("name") not in self._observed_tools() or not isinstance(block.get("id"), str):
                                 raise AdapterError("unadmitted_tool_call")
                             message_tools.add(block["id"])
                 elif kind == "RateLimitEvent":

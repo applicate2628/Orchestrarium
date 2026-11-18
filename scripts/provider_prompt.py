@@ -2995,7 +2995,7 @@ def parse_control(
         index += 1
     if result.sdk_review_binding is not None and result.sdk_task_binding is not None:
         raise ValueError("E_SDK_BINDING_KIND_CONFLICT")
-    if result.sdk_task_binding is not None and provider != "codex":
+    if result.sdk_task_binding is not None and provider not in {"codex", "claude"}:
         raise ValueError("E_SDK_TASK_PROVIDER_REQUIRED")
     if result.sdk_review_binding is not None and provider != "codex":
         raise ValueError("E_SDK_REVIEW_PROVIDER_REQUIRED")
@@ -7994,7 +7994,7 @@ def _launch_sdk_review(operation, reserved_run: ReservedExternalRunV1, *, cancel
     """Keep SDK receiving separate from the CLI terminal/ledger finalizer."""
     recovery = None
     try:
-        lifecycle = reserved_run.acquire_capture("codex", "sdk-review")
+        lifecycle = reserved_run.acquire_capture(operation.request.provider, "sdk-review")
         reserved_run.mark_initialized(lifecycle)
         # The actual acquired namespace, not a guessed future capture path, is
         # bound before any SDK worker or process runner can be constructed.
@@ -8165,7 +8165,7 @@ def launch(
             from sdk_execution.dispatch import prepare_dispatch
             cancellation = threading.Event()
             sdk_operation = prepare_dispatch(
-                prevalidated, sdk_binding,
+                prevalidated, sdk_binding, provider=provider,
                 source_environment=dict(os.environ), cancellation_probe=cancellation.is_set,
                 runtime_namespace=runtime_namespace,
             )

@@ -9,7 +9,7 @@
     },
     "provider_prompt.py": {
       "source": "scripts/provider_prompt.py",
-      "sha256": "033e3ddfa559802f780544b9c4c3de9a7bd950a2e30f7ba4b7ac7f340519db22",
+      "sha256": "75cd9dac94cd41f028cfe290fb84208fb112da836b7a930f25b41c0bc094a4ee",
       "destination": "scripts/provider_prompt.py"
     },
     "process_supervision/process_runner.py": {
@@ -69,7 +69,7 @@
     },
     "sdk_execution/claude.py": {
       "source": "scripts/sdk_execution/claude.py",
-      "sha256": "3793abf473ae970cd078ddea4b96c9c0f004320b354b5f14b1cf852c9ddb2065",
+      "sha256": "c3ac4d0f6fd0d34c8a5b8dae52aea557e8469088f029c270ec8712e9c0c18559",
       "destination": "scripts/sdk_execution/claude.py"
     },
     "sdk_execution/codex.py": {
@@ -85,12 +85,12 @@
     "sdk_execution/dispatch.py": {
       "source": "scripts/sdk_execution/dispatch.py",
       "destination": "scripts/sdk_execution/dispatch.py",
-      "sha256": "129088ed516fbc53ef5e52d277720d60cdcb7f0b63aaabebd1ca6989ea77e99b"
+      "sha256": "9f8bd8126f4aa822885966de347603cdf0972f49c33734d2dfb3375061b73b75"
     },
     "sdk_execution/contracts.py": {
       "source": "scripts/sdk_execution/contracts.py",
       "destination": "scripts/sdk_execution/contracts.py",
-      "sha256": "77ba93c806577194035abe43a4e86e299eb0e9475fce2e84e9c443dfd6471e78"
+      "sha256": "7d9dbfa8d734a6f10007775276f98a8844a0dae4d81ffd06ad3b743d44d72cd4"
     },
     "sdk_execution/coordinator.py": {
       "source": "scripts/sdk_execution/coordinator.py",
@@ -100,7 +100,7 @@
     "sdk_execution/coordination.py": {
       "source": "scripts/sdk_execution/coordination.py",
       "destination": "scripts/sdk_execution/coordination.py",
-      "sha256": "a1889aae6b7dba51fb38cd907b0c62e846623cb8c10adb7f3f6b6af359f70184"
+      "sha256": "728fa3594c3e0f9ca1c50155c8a8eaa00e2c447fb48a6fcf3de2d5316ade549f"
     },
     "sdk_execution/coordination_codex.py": {
       "source": "scripts/sdk_execution/coordination_codex.py",

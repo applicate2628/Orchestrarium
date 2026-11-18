@@ -66,12 +66,20 @@ class ExecutionRequest:
     max_events: int = 4096
     context_mode: str = "fresh"
     result_kind: str = field(default="review", kw_only=True)
+    tool_profile: str = field(default="default", kw_only=True)
     write_workspace: str | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         for field in fields(self):
             if field.name not in {"scope", "max_output_bytes", "max_events", "write_workspace"}:
                 _text(getattr(self, field.name), field.name, 262_144 if field.name == "prompt" else 4096)
+        if self.tool_profile not in {"default", "prompt-only"}:
+            raise ValueError("unsupported tool profile")
+        if self.tool_profile == "prompt-only" and (
+            self.provider != "claude" or self.role != "consultant"
+            or self.result_kind != "task" or self.write_workspace is not None
+        ):
+            raise ValueError("prompt-only profile requires read-only Claude Consultant")
         if self.result_kind not in {"review", "task"}:
             raise ValueError("unsupported result kind")
         if self.write_workspace is not None:
@@ -126,6 +134,8 @@ class ExecutionRequest:
             result.pop("context_mode")
         if self.result_kind == "review":
             result.pop("result_kind")
+        if self.tool_profile == "default":
+            result.pop("tool_profile")
         if self.write_workspace is None:
             result.pop("write_workspace")
         return result
@@ -135,6 +145,8 @@ class ExecutionRequest:
         # Older serialized requests predate explicit context selection and were fresh.
         if isinstance(value, dict) and "context_mode" not in value:
             value = {**value, "context_mode": "fresh"}
+        if isinstance(value, dict) and "tool_profile" not in value:
+            value = {**value, "tool_profile": "default"}
         if isinstance(value, dict) and "result_kind" not in value:
             value = {**value, "result_kind": "review"}
         if isinstance(value, dict) and "write_workspace" not in value:

@@ -402,12 +402,46 @@ This preserves the current callback contract, not a new universal account probe.
 The tool callback checks exact tool arguments under the Host's current access.
 Read-only tools do not constitute operating-system containment.
 
-The command-line `--sdk-task-binding` selector remains Codex-only: the CLI does not
-yet supply the Claude Host policy context. This is a missing CLI adaptation, not
-a prohibition on the integrated Python route. Receiving failures retain the
-acquired RuntimeRun; repair/reconcile evidence instead of repeating execution.
-Synthetic factory/executor checks do not establish native acceptance or authorize
-account/quota use. Actual provider execution remains separately permissioned.
+### Claude prompt-only command-line integration
+
+The existing Claude wrapper accepts `--sdk-task-binding PATH` for Consultant
+advice with an explicit concrete model identifier, `--ledger-role consultant`,
+and the existing ledger/artifact/terminal-receipt controls. The task binding is
+constraints, not launch or spending permission. Review binding, write workspace,
+and Codex hook/account-email settings do not become Claude capabilities.
+
+The CLI selects `tool_profile: prompt-only`: the request hash commits this
+capability, while omission preserves the historical Host profile and wire format.
+No Read, Glob, Grep, shell, network-tool, subagent or MCP capability is granted;
+only schema-validated StructuredOutput is accepted. Supply relevant code,
+artifacts and project constraints explicitly in the prompt file or chosen handoff.
+The verified shared governance frame and native Claude preset are retained;
+ambient project instruction files are not silently loaded or claimed as context.
+Caller tool, permission and settings flags are not silently discarded: unsupported
+SDK capability overrides are rejected during preparation. The legacy resolver
+appends its own user-settings transport suffix; the SDK instead uses the verified
+instruction capsule with native preset and disables ambient settings.
+The existing Host API can still use its separately admitted read-only tools.
+
+The CLI uses the existing auth resolver and the explicitly selected API/cloud
+environment. `accountBinding` labels this selected auth context, not an observed
+person or billing account. Auth-context checks compare the retained selection
+without exporting credentials or their hashes. A cloud credential chain can
+refresh its tokens; this is not proof of unchanged cloud principal identity.
+Subscription override and implicit provider fallback remain unavailable here.
+This introduces no new account service or identity probe.
+
+[Official Python SDK options](https://code.claude.com/docs/en/agent-sdk/python)
+and [permission behavior](https://code.claude.com/docs/en/agent-sdk/permissions)
+distinguish available tools from auto-approval. This route configures the tool
+set, checks observed initialization and applies existing hooks; it does not
+mistake an empty allowed-tools list for containment. Offline fixtures are not
+native SDK or operating-system acceptance.
+
+Receiving failures retain the acquired RuntimeRun; repair/reconcile evidence
+instead of repeating execution. Actual provider execution remains separately
+permissioned. No installation, sign-in or model call is implied by this source
+integration.
 
 ### Ordered implementation slices
 
