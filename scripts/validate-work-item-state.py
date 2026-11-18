@@ -423,8 +423,6 @@ def validate_sdk_execution(
         or value["outerBudgetBinding"] == value["innerBudgetBinding"]
     ):
         raise ValueError("coordination inference requires a supported scoped provider and distinct turn reservations")
-    if provider == "claude" and "decisionSessionMode" in value:
-        raise ValueError("Claude scoped decisions require fresh handoff")
     if {"continuationSourceSha256", "forkSourceSha256"} <= value.keys():
         raise ValueError("native context source modes are mutually exclusive")
     persistent=(value.get("schemaVersion")==5 and value.get("decisionSessionMode")=="native-persistent" and "childAssignmentSha256" in value)
@@ -443,7 +441,7 @@ def validate_sdk_execution(
                            and (value["schemaVersion"] in {1, 2} or persistent))
         claude_context = (provider == "claude" and value["sandboxMode"] == "tool-restricted-read-only"
                           and "forkSourceSha256" not in value
-                          and value["schemaVersion"] in {1, 2})
+                          and (value["schemaVersion"] in {1, 2} or persistent))
         if not (codex_context or copilot_context or claude_context):
             raise ValueError("continuation metadata requires a supported read-only native context")
     if value["schemaVersion"] in {3, 5} and value["operationKind"] != {

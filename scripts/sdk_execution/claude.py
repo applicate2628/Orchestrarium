@@ -467,7 +467,7 @@ class ClaudeReviewAdapter:
                 if data["prompt_id"] != self._prompt_id:
                     raise AdapterError("native_prompt_mismatch")
                 self._observed_prompt = True
-                if self._request.role == "consultant" and self._request.result_kind == "task" and self._config_dir is not None:
+                if self._transcript_enabled() and self._config_dir is not None:
                     path = data.get("transcript_path")
                     if isinstance(path, str) and path:
                         if self._transcript_path not in (None, path):
@@ -530,6 +530,10 @@ class ClaudeReviewAdapter:
                     "permissionDecisionReason": self._hook_error,
                 }, "continue_": False, "stopReason": self._hook_error}
             return {"continue_": False, "stopReason": self._hook_error}
+
+    def _transcript_enabled(self) -> bool:
+        return ((self._request.role == "consultant" and self._request.result_kind == "task")
+            or (type(self._request) is CoordinationInferenceRequest and self._request.decision_session_mode == "native-persistent"))
 
     def _available_tools(self) -> tuple[str, ...]:
         return () if self._request.tool_profile == "prompt-only" else READ_TOOLS
@@ -821,7 +825,7 @@ class ClaudeReviewAdapter:
             status = "failed" if provider_status == "failed" else "incomplete"
         # A successful fresh answer remains usable if optional durable evidence is
         # unavailable. Only a complete, post-disconnect native snapshot is resumable.
-        if (status == "completed" and request.role == "consultant" and request.result_kind == "task"
+        if (status == "completed" and self._transcript_enabled()
                 and request.write_workspace is None and self._config_dir is not None
                 and self._stop_observed and self._transcript_path is not None):
             try:
@@ -841,16 +845,16 @@ class ClaudeReviewAdapter:
 
 
 class ClaudeCoordinationAdapter(ClaudeReviewAdapter):
-    """Fresh scoped child decision through the same API/cloud evidence lifecycle."""
+    """Scoped child decision through the same API/cloud evidence lifecycle."""
 
     def _validate_output_kind(self, request: ExecutionRequest) -> None:
         if (type(request) is not CoordinationInferenceRequest
                 or request.child_choice_json is None or request.role != "lead"
                 or request.result_kind != "review" or request.tool_profile != "default"
-                or request.write_workspace is not None or request.context_mode != "fresh"
-                or request.decision_session_mode != "fresh-handoff"
-                or request.native_continuation is not None):
-            raise AdapterError("fresh_scoped_coordination_required")
+                or request.write_workspace is not None
+                or (request.decision_session_mode == "fresh-handoff" and (request.context_mode != "fresh"
+                    or request.native_continuation is not None))):
+            raise AdapterError("scoped_coordination_required")
 
     def _available_tools(self) -> tuple[str, ...]:
         return ()
@@ -863,8 +867,8 @@ class ClaudeCoordinationAdapter(ClaudeReviewAdapter):
 
     def _make_result(self, **values: Any) -> CoordinationInferenceResult:
         intent = values.pop("review")
-        # The existing provider echo confirms the prompt UUID for this fresh
-        # operation. It is not a persisted-session tip or resume capability.
+        # Provider echo confirms prompt correlation, not a native turn tip.
+        # Persistent receiving separately requires the sealed transcript snapshot.
         return CoordinationInferenceResult(
             intent_json=intent, **values,
         )

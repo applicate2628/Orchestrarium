@@ -46,7 +46,7 @@ def test_fresh_scoped_intent_uses_actual_claude_lifecycle_without_task_tools():
 
 
 @pytest.mark.parametrize("changes", [
-    {"decision_session_mode": "native-persistent"},
+    {"decision_session_mode": "native-persistent", "context_mode": "fork"},
     {"child_choice_json": None}, {"context_mode": "handoff"},
     {"role": "consultant"}, {"tool_profile": "prompt-only"},
 ])

@@ -547,8 +547,7 @@
               },
               "approvalPolicy": {
                 "const": "deny_unadmitted"
-              },
-              "decisionSessionMode": false
+              }
             }
           }
         },
@@ -679,7 +678,8 @@
                   "schemaVersion": {
                     "enum": [
                       1,
-                      2
+                      2,
+                      5
                     ]
                   }
                 }

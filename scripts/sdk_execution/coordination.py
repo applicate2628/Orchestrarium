@@ -40,6 +40,8 @@ class CoordinationInferenceRequest(ExecutionRequest):
             if self.context_mode == "continuation":
                 if type(prior) is not NativeContinuation:
                     raise ValueError("persistent decision predecessor required")
+                if (prior.transcript_json is not None) != (self.provider == "claude"):
+                    raise ValueError("provider transcript commitment mismatch")
                 if {self.external_dispatch_id, self.external_evidence_run_id} & {prior.prior_dispatch_id, prior.prior_evidence_run_id}:
                     raise ValueError("continuation requires new execution identities")
             elif prior is not None:
@@ -50,9 +52,9 @@ class CoordinationInferenceRequest(ExecutionRequest):
         if self.provider == "claude":
             if (self.child_choice_json is None or self.role != "lead" or self.write_workspace is not None
                     or self.result_kind != "review" or self.tool_profile != "default"
-                    or self.decision_session_mode != "fresh-handoff" or self.context_mode != "fresh"
-                    or self.native_continuation is not None):
-                raise ValueError("explicit fresh scoped Claude coordination required")
+                    or (self.decision_session_mode == "fresh-handoff" and (self.context_mode != "fresh"
+                        or self.native_continuation is not None))):
+                raise ValueError("explicit scoped Claude coordination required")
         if self.provider == "copilot":
             if (self.child_choice_json is None or self.role != "lead" or self.write_workspace is not None
                     or self.result_kind != "review" or self.tool_profile != "default"):

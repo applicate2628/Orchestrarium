@@ -1329,8 +1329,6 @@ def publish_child_assignment(*, root_selection, root_authority, selections, chil
         or decision_selection.work_item!=str(child) or decision_selection.expected_launch_sha256 is not None
         or (type(decision_selection) is CodexRuntimeSelection and decision_selection.config_overrides!=CODEX_BOUNDED_REVIEW_OVERRIDES)):
         raise RuntimeBindingError('child_decision_runtime_invalid')
-    if type(decision_selection) is ClaudeRuntimeSelection and decision_session_mode != "fresh-handoff":
-        raise RuntimeBindingError("claude_fresh_child_decision_required")
     decision_digest=hashlib.sha256(json_text(decision_selection.to_dict()).encode()).hexdigest()
     value=ChildLeadAssignment(child_id,coordinator_binding,str(child),tuple(scope),tuple(catalog),tuple(required_request_ids),
         tuple(lifecycle_permissions),depth,parent_child_id,max_task_depth,'',decision_digest,decision_session_mode,goal,context)

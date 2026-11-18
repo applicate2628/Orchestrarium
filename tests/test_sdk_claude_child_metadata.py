@@ -1,4 +1,4 @@
-"""Claude scoped fresh handoff metadata, never persistent-session authority."""
+"""Claude scoped decision metadata, with immutable persistent assignment binding."""
 import jsonschema
 import pytest
 from test_sdk_copilot_child_metadata import selected as copilot_selected
@@ -27,7 +27,6 @@ def test_claude_fresh_scoped_profile_and_full_launch():
 
 
 @pytest.mark.parametrize("change", [
-    {"decisionSessionMode":"native-persistent", "childAssignmentSha256":"c"*64},
     {"continuationSourceSha256":"d"*64}, {"forkSourceSha256":"d"*64},
     {"sandboxMode":"tool-restricted-workspace-write", "writeWorkspaceSha256":"d"*64},
     {"approvalPolicy":"deny_all"},

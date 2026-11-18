@@ -50,10 +50,18 @@ def coordination_terminal_payload(request, observation, *, output_context, admit
         prior=request.native_continuation
         if prior is not None and (result.native_thread_id!=prior.native_thread_id or result.native_turn_id==prior.native_turn_id):
             complete=False
+        snapshots = []
+        if request.provider == "claude":
+            snapshots = [strict_json(o.payload_json) for o in result.observations if o.kind == "native_transcript"]
+            if len(snapshots) != 1:
+                complete = False
         if complete:
             from .runtime import continuation_context_sha256
             content["native_continuation"]={"schema_version":2,"thread_id":result.native_thread_id,
                 "turn_id":result.native_turn_id,"context_sha256":continuation_context_sha256(request,selection),"session_depth":0}
+            if request.provider == "claude":
+                from .contracts import validate_transcript_snapshot
+                content["native_continuation"].update(schema_version=3, transcript=validate_transcript_snapshot(snapshots[0]))
     if request.child_choice_json is not None and request.decision_session_mode=="fresh-handoff":
         from .runtime import fresh_decision_context_sha256
         content["fresh_decision"]={"schema_version":1,
