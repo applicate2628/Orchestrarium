@@ -1341,7 +1341,8 @@
           "provider": {
             "enum": [
               "codex",
-              "claude"
+              "claude",
+              "copilot"
             ]
           },
           "eventKind": {

@@ -2996,11 +2996,11 @@ def parse_control(
         index += 1
     if result.sdk_review_binding is not None and result.sdk_task_binding is not None:
         raise ValueError("E_SDK_BINDING_KIND_CONFLICT")
-    if provider == "copilot" and result.sdk_task_binding is None:
-        raise ValueError("E_COPILOT_SDK_TASK_BINDING_REQUIRED")
+    if provider == "copilot" and result.sdk_task_binding is None and result.sdk_review_binding is None:
+        raise ValueError("E_COPILOT_SDK_BINDING_REQUIRED")
     if result.sdk_task_binding is not None and provider not in {"codex", "claude", "copilot"}:
         raise ValueError("E_SDK_TASK_PROVIDER_REQUIRED")
-    if result.sdk_review_binding is not None and provider not in {"codex", "claude"}:
+    if result.sdk_review_binding is not None and provider not in {"codex", "claude", "copilot"}:
         raise ValueError("E_SDK_REVIEW_PROVIDER_REQUIRED")
     if result.result_max_bytes > RESULT_MAX_BYTES_HARD:
         raise ValueError(
@@ -7286,9 +7286,12 @@ def _validate_sdk_result_binding(payload: dict[str, object]) -> None:
         raise ValueError("provider result SDK identities must be distinct")
     execution_role = payload.get("executionRole")
     selected = payload["sdkExecution"]
-    if payload.get("provider") == "copilot" and (
-            execution_role != "consultant" or selected.get("schemaVersion") != 2):
-        raise ValueError("provider result Copilot SDK Consultant binding mismatch")
+    if payload.get("provider") == "copilot":
+        _roles, reviewers, _workers, _unsupported = _external_role_taxonomy()
+        valid_role = ((execution_role == "consultant" and payload.get("assignedRole") == "consultant")
+                      or (execution_role == "external-reviewer" and payload.get("assignedRole") in reviewers))
+        if not valid_role or selected.get("schemaVersion") != 2:
+            raise ValueError("provider result Copilot SDK role binding mismatch")
     if execution_role in {"consultant", "external-worker"}:
         primary = payload.get("primaryOutcome")
         _roles, _reviewers, workers, _unsupported = _external_role_taxonomy()

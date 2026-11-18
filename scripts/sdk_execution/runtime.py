@@ -239,6 +239,9 @@ def validate_worker_custody(request: ExecutionRequest, selection: Any, *, expect
 
 def _require_runtime_result_route(request: ExecutionRequest) -> None:
     # Evidence/admission compatibility is separate from enabling a live factory.
+    if request.provider == "copilot":
+        from .copilot import validate_copilot_request
+        validate_copilot_request(request)
     if request.provider == "claude" and request.result_kind == "task":
         _roles, _reviewers, workers, _unsupported = _owner()._external_role_taxonomy()
         if (type(request) is not ExecutionRequest or

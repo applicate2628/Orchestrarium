@@ -302,6 +302,12 @@ class CodexReviewDispatch:
                 request.provider, self.prevalidated, runtime_namespace=self._runtime_namespace)
             owner.ledger_resource_options(self.prevalidated.control)
             if request.provider == "copilot":
+                # Export retained evidence after any admitted adapter phase,
+                # including partial/failed acquisition. This terminal-only
+                # transition never authorizes a skipped native effect or replay.
+                if effect == "copilot_result" and _COPILOT_STAGES.index("copilot_start") < self._stage < len(_COPILOT_STAGES):
+                    self._stage = len(_COPILOT_STAGES)
+                    return
                 if self._stage >= len(_COPILOT_STAGES) or effect != _COPILOT_STAGES[self._stage]:
                     raise DispatchError("E_COPILOT_SDK_EFFECT_DENIED")
                 self._stage += 1
@@ -563,7 +569,7 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
     if provider == "claude" and (binding.get("installedHookRoot") is not None or binding["expectedAccountEmail"] is not None
             or model in {"opus", "sonnet", "haiku"}):
         raise DispatchError("E_CLAUDE_SDK_PROMPT_ONLY_REQUIRED")
-    if provider == "copilot" and (not task_mode or role.assigned_role != "consultant"
+    if provider == "copilot" and ((task_mode and role.assigned_role != "consultant")
             or binding.get("contextMode", "fresh") != "fresh" or binding.get("writeWorkspace") is not None
             or binding.get("installedHookRoot") is not None or binding["expectedAccountEmail"] is not None):
         raise DispatchError("E_COPILOT_SDK_PROMPT_ONLY_REQUIRED")

@@ -8,7 +8,7 @@ def test_explicit_sdk_task_selector_and_profile():
     assert owner.resolved_profile("copilot",["--model","selected-model","--effort","high"]) == (
         ["--model","selected-model","--effort","high"],"selected-model","high")
 
-@pytest.mark.parametrize("args",[[],["--sdk-review-binding","binding.json"]])
+@pytest.mark.parametrize("args",[[]])
 def test_copilot_cannot_fall_back_to_legacy_cli(args):
     with pytest.raises(ValueError):
         owner.parse_control(["topic",*args],provider="copilot")
@@ -49,7 +49,7 @@ def test_copilot_canonical_parser_receives_selected_sdk_not_cli_flags():
     assert owner.parse_provider_result(encode(owner,data))==data
 
 @pytest.mark.parametrize("changes",[
-    {"executionRole":"external-reviewer","assignedRole":"qa-engineer"},
+    {"executionRole":"external-reviewer","assignedRole":"consultant"},
     {"launchFlags":["--model","selected-model"]},
     {"authorizing":True},
 ])
@@ -64,5 +64,5 @@ def test_public_entrypoint_refuses_legacy_before_any_native_effect(tmp_path):
     script=Path(__file__).resolve().parents[1]/"scripts/invoke-copilot-prompt.py"
     result=subprocess.run([sys.executable,str(script),"topic"],cwd=tmp_path,capture_output=True,text=True)
     assert result.returncode != 0
-    assert "E_COPILOT_SDK_TASK_BINDING_REQUIRED" in result.stdout+result.stderr
+    assert "E_COPILOT_SDK_BINDING_REQUIRED" in result.stdout+result.stderr
     assert list(tmp_path.iterdir())==[]

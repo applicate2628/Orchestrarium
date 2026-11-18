@@ -1,4 +1,4 @@
-"""Fresh prompt-only Copilot Consultant through the official Python SDK.
+"""Fresh prompt-only Copilot evidence through the official Python SDK.
 
 Source: microsoft/copilot-sdk, 3ce61458503b6b27ebd1f674a980f4d9596d9b22,
 python/copilot/{client,session,_mode}.py. Source evidence is not installed/native
@@ -18,7 +18,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from ._async import drain_owned
-from .contracts import CancelReceipt, ExecutionRequest, ExecutionResult, Observation, json_text, strict_json, task_schema, validate_task
+from .contracts import CancelReceipt, ExecutionRequest, ExecutionResult, Observation, json_text, strict_json, task_schema, validate_task, review_schema, validate_review
 from .receiving import scan_execution_output
 
 
@@ -80,6 +80,19 @@ class CopilotRuntimeSelection:
         if type(value) is not dict or set(value) != set(cls.__dataclass_fields__):
             raise CopilotError("invalid_runtime_selection_fields")
         return cls(**value)
+
+
+def validate_copilot_request(request):
+    """Reuse the canonical role taxonomy, not a provider-specific profession list."""
+    if (type(request) is not ExecutionRequest or request.provider != "copilot"
+            or request.tool_profile != "prompt-only" or request.context_mode != "fresh"
+            or request.write_workspace is not None):
+        raise CopilotError("copilot_request_unsupported")
+    import provider_prompt as owner
+    _roles, reviewers, _workers, _unsupported = owner._external_role_taxonomy()
+    if ((request.result_kind == "task" and request.role != "consultant")
+            or (request.result_kind == "review" and request.role not in reviewers)):
+        raise CopilotError("copilot_request_unsupported")
 
 
 class CopilotExecutor:
@@ -205,11 +218,7 @@ class CopilotExecutor:
         self._observed_profile = (profile.model_id,profile.reasoning_effort)
 
     async def execute(self, request):
-        if (type(request) is not ExecutionRequest or request.provider != "copilot"
-            or request.role != "consultant" or request.result_kind != "task"
-            or request.tool_profile != "prompt-only" or request.context_mode != "fresh"
-            or request.write_workspace is not None):
-            raise CopilotError("copilot_request_unsupported")
+        validate_copilot_request(request)
         if self._request is not None:
             raise CopilotError("operation_already_consumed")
         self._request = request
@@ -231,7 +240,7 @@ class CopilotExecutor:
         return CancelReceipt(run_id,True,False,error="copilot_cancellation_not_terminal_evidence")
 
     async def _execute(self, request):
-        task_result = None
+        evidence_result = None
         error = cleanup_error = None
         provider_status = None
         session_id = None
@@ -277,7 +286,7 @@ class CopilotExecutor:
                 if self._cancel_requested: raise asyncio.CancelledError()
                 event = await self._session.send_and_wait(request.prompt,
                     source=sdk.AgentMessageSource(request.coordinator_binding),
-                    response_schema=task_schema(request),timeout=self._timeout)
+                    response_schema=(task_schema if request.result_kind == "task" else review_schema)(request),timeout=self._timeout)
                 if event is None: raise CopilotError("copilot_terminal_unavailable")
                 kind = getattr(event,"type",None)
                 if getattr(kind,"value",kind) != "assistant.message": raise CopilotError("copilot_terminal_type_mismatch")
@@ -285,9 +294,10 @@ class CopilotExecutor:
                 content = getattr(getattr(event,"data",None),"content",None)
                 if not isinstance(content,str) or not content.strip(): raise CopilotError("copilot_terminal_unavailable")
                 if len(content.encode()) > request.max_output_bytes: raise CopilotError("copilot_capture_limit")
-                # Preserve bounded acquired text even when the task codec rejects it.
+                # Preserve bounded acquired text even when the result codec rejects it.
                 self._retain_content(content,"copilot.assistant.message")
-                task_result = validate_task(strict_json(content,max_bytes=request.max_output_bytes),request=request)
+                evidence_result = (validate_task if request.result_kind == "task" else validate_review)(
+                    strict_json(content,max_bytes=request.max_output_bytes),request=request)
                 provider_status = "completed"
                 await self._profile(request,"copilot_profile_after")
         except asyncio.CancelledError:
@@ -313,7 +323,7 @@ class CopilotExecutor:
                     except Exception: cleanup_error = "copilot_cleanup_failed"
             closed = self._client is not None and cleanup_error is None
         error = error or self._event_error
-        status = "interrupted" if self._cancel_requested else "completed" if task_result is not None and not error and not cleanup_error else "incomplete"
+        status = "interrupted" if self._cancel_requested else "completed" if evidence_result is not None and not error and not cleanup_error else "incomplete"
         metadata = None
         if self._observed_profile is not None:
             metadata = {"schemaVersion":1,"adapter":"microsoft-copilot-sdk",
@@ -322,7 +332,10 @@ class CopilotExecutor:
                 "accountBinding":request.account_binding}
         result = ExecutionResult(request,status,provider_status=provider_status,
             sdk_execution_json=json_text(metadata) if metadata is not None else None,
-            native_thread_id=session_id,task=task_result,observations=tuple(self._observations),
+            native_thread_id=session_id,
+            task=evidence_result if request.result_kind == "task" else None,
+            review=evidence_result if request.result_kind == "review" else None,
+            observations=tuple(self._observations),
             execution_error=error,cleanup_error=cleanup_error,protocol_closed=closed)
         self.execution_result = result
         # Observations are retained privately on refusal, but never returned unscanned.

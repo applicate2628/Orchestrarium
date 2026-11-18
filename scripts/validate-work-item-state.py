@@ -447,12 +447,17 @@ def _validate_sdk_event(event: Mapping[str, object], errors: list[str]) -> None:
         fail(errors, f"{run_id}: {exc}")
     selected = event.get("sdkExecution")
     if event.get("provider") == "copilot" and type(selected) is dict:
-        if (selected.get("schemaVersion") != 2
-                or event.get("role") != "consultant"
-                or event.get("executionRole") != "consultant"
-                or event.get("assignedRole") != "consultant"
-                or event.get("gate") != "none"):
-            fail(errors, f"{run_id}: Copilot requires selected nonauthorizing Consultant provenance")
+        try:
+            import provider_prompt
+            _roles, reviewers, _workers, _unsupported = provider_prompt._external_role_taxonomy()
+            lane = event.get("executionRole")
+            valid_role = ((lane == "consultant" and event.get("assignedRole") == "consultant"
+                           and event.get("gate") == "none")
+                          or (lane == "external-reviewer" and event.get("assignedRole") in reviewers))
+            if selected.get("schemaVersion") != 2 or event.get("role") != lane or not valid_role:
+                raise ValueError("Copilot requires selected nonauthorizing Consultant or Reviewer provenance")
+        except (ValueError, ImportError) as exc:
+            fail(errors, f"{run_id}: {exc}")
     if type(selected) is dict and selected.get("sandboxMode") in {"workspace-write", "tool-restricted-workspace-write"}:
         try:
             # Reuse the canonical role owner rather than another role allowlist.

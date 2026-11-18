@@ -146,9 +146,8 @@ class ExecutionRequest:
             raise ValueError("unsupported context mode")
         if self.provider not in {"codex", "claude", "kimi", "grok", "minimax", "mimo", "copilot"}:
             raise ValueError("invalid provider")
-        if self.provider == "copilot" and (self.role != "consultant" or self.result_kind != "task"
-                or self.tool_profile != "prompt-only" or self.context_mode != "fresh"):
-            raise ValueError("Copilot currently implements fresh prompt-only Consultant tasks")
+        if self.provider == "copilot" and (self.tool_profile != "prompt-only" or self.context_mode != "fresh"):
+            raise ValueError("Copilot currently implements fresh prompt-only evidence")
         if self.external_dispatch_id == self.external_evidence_run_id:
             raise ValueError("dispatch and evidence identities must differ")
         if not isinstance(self.scope, tuple) or not 1 <= len(self.scope) <= 128:

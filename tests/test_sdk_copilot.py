@@ -113,7 +113,7 @@ def test_prompt_only_success_uses_exact_provisioned_runtime_and_structured_resul
     assert executor.execution_result is result
 
 
-@pytest.mark.parametrize('changes',[{'result_kind':'review'},{'role':'backend-engineer'},{'tool_profile':'default'},{'context_mode':'handoff'}])
+@pytest.mark.parametrize('changes',[{'result_kind':'unsupported'},{'role':'backend-engineer'},{'tool_profile':'default'},{'context_mode':'handoff'}])
 def test_unsupported_current_contract_is_explicit(changes):
     with pytest.raises(ValueError):request(**changes)
 

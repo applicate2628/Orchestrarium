@@ -515,7 +515,7 @@ historical results as fresh acceptance.
 | Codex | Explicit Windows Reviewer, Consultant and scoped Worker source bridges; offline qualification and historical bounded native evidence below. | Qualify current installed/native execution; extend Consultant continuation to remaining child-Lead/session/platform outcomes through the common mechanism. |
 | Claude | SDK Host API and explicit scoped Worker command-line route, plus prompt-only Consultant and Reviewer routes, exact receiving and offline checks; native Lead is a different boundary. | Qualify current native execution and complete child-Lead/session outcomes using official API/cloud access; do not wrap a subscription CLI as a third-party worker. |
 | Antigravity | Official setup direction; no implemented AGY runtime adapter in the current SDK execution factory. | Implement Lead/session integration and native subagent handoff; separately qualify any admitted programmatic worker route. |
-| Copilot | Explicit public fresh prompt-only Consultant over the official Python SDK and canonical Windows receiving; source/offline qualification only. | Complete supported Lead/worker/reviewer roles and session lifecycle; qualify the current installed runtime without provider-name role bans. |
+| Copilot | Explicit public fresh prompt-only Consultant and Reviewer over the official Python SDK and canonical Windows receiving; source/offline qualification only. | Complete supported Lead/worker roles and session lifecycle; qualify the current installed runtime without provider-name role bans. |
 | Kimi | Existing ACP boundary is separate from the current SDK factory. | Reconcile the supported Kimi runtime with the official agent integration; do not silently substitute the older Python runtime or a model API for the chosen route. |
 | Grok | Candidate protocol support is not live-qualified execution. | Integrate the official Grok Build Agent Client Protocol (ACP) route, including account/tool enforcement and result receiving; do not invent a separate vendor SDK or substitute the xAI model API. |
 
@@ -530,13 +530,20 @@ acceptance. The vendor documents automatic runtime download on first use;
 an already provisioned binary. Setup alone neither activates the executor nor
 qualifies an installed SDK/runtime.
 
-### Explicit Copilot Consultant execution
+### Explicit Copilot read-only execution
 
 `scripts/invoke-copilot-prompt.py` is a thin entry to the existing public launch
 owner. It accepts an explicit `--sdk-task-binding` (versions 1-3), concrete
 `--model` and `--effort`, and `--ledger-role consultant` for one fresh,
 prompt-only task. These flags select SDK configuration, not invented native CLI
 arguments. There is no legacy CLI fallback, automatic install or retry.
+
+The mutually exclusive `--sdk-review-binding` selects a fresh prompt-only
+Reviewer with a canonical reviewer profession and the existing review schema.
+Task and review responses are not interchangeable. A validated PASS is retained
+as external, nonauthorizing review evidence; it cannot close work-item obligations
+or replace the required independent owner verdict. Both routes reuse the same
+Host, runtime, permission, process and receiving owners.
 
 The Host selects an already provisioned runtime with `COPILOT_CLI_PATH`, an
 explicit `COPILOT_BASE_DIRECTORY`, and capture storage through
@@ -548,7 +555,7 @@ The delegated message is agent-originated, and actual model/effort are read back
 before and after the turn. Unsupported roles remain implementation work, not a
 permanent provider-name restriction.
 
-Canonical receiving validates the task, selected/observed metadata, evidence
+Canonical receiving validates the task or review, selected/observed metadata, evidence
 and process receipt before recording the existing ledger artifact. Genuine
 unobserved Copilot version fields are omitted, never fabricated. The selected
 authentication context is not proof of account identity. SDK cleanup alone still

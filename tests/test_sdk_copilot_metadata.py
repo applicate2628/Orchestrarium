@@ -44,7 +44,7 @@ def test_adapter_cannot_be_relabelled_as_another_provider(provider):
     with pytest.raises(ValueError): validate(metadata(),provider)
 
 @pytest.mark.parametrize("role,assigned,gate",[
-    ("external-reviewer","qa-engineer","none"),
+    ("external-reviewer","consultant","none"),
     ("external-worker","backend-engineer","none"),
     ("consultant","consultant","PASS"),
 ])

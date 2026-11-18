@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- The existing Copilot SDK entrypoint now accepts explicit prompt-only Reviewer bindings as well as Consultant tasks. It reuses canonical review schemas and receiving while keeping review evidence nonauthorizing: even PASS does not close work-item obligations. Failed Copilot acquisition now exports retained nonauthorizing evidence through the existing terminal path without authorizing skipped effects. The shared full-event schema also recognizes the already supported Copilot provider, matching canonical runtime validation. No new launch authority, installation or native qualification is implied.
+
 - Copilot Consultant now has an explicit SDK-only public entrypoint and canonical receiving through the existing Windows launch, process and ledger owners. Exact runtime selection, private authentication, current permissions and actual model/effort readback remain checked; SDK cleanup does not self-attest OS settlement. Offline tests do not qualify an installed runtime or native execution.
 
 - An explicitly supplied Copilot SDK runtime can serve a fresh prompt-only Consultant task through the common coordinator interface. The adapter keeps Host permission checks, structured task validation and cleanup evidence separate from account verification and operating-system containment; it does not install a runtime or activate public routing.
