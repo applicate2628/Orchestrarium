@@ -3,9 +3,10 @@
 This branch implements part of the SDK integration project separately from Rust/npm.
 Implemented source routes now include Codex, official Claude API and Copilot
 execution with canonical receiving, plus scoped child-Lead session coordination.
-Current successful qualification remains offline; the November 18 native acceptance
-attempt below did not complete. Older bounded native evidence applies only to
-its recorded revisions and routes. This is not the complete
+The November 18 bounded native Codex read-only Consultant fresh/continuation pair
+completed on the recorded implementation revision below. Other current routes remain
+offline or unqualified; older native evidence applies only to its recorded revisions
+and routes. This is not the complete
 multivendor SDK target. The completion roadmap below records the current PR19
 integration outcome and remaining work, including provider execution and receiving;
 the historical adapter-only acceptance does not close that broader outcome. A synthetic Codex success does not
@@ -1427,7 +1428,7 @@ wholly unfinished features. Continue only the following unresolved outcomes:
 | Provider routes | Remaining supported AGY native lifecycle/result qualification beyond startup, advisory hooks and explicit Root association; Kimi installed/native qualification of its reconciled Kimi Code ACP owner; Grok Build ACP actual runtime, account/tool enforcement and canonical receiving. | Use confirmed official capabilities and the existing owners. Do not turn subscription Lead routes into third-party workers. |
 | Session coverage | Remaining provider-native continuation and native Lead/subagent integration where the official runtime exposes a qualified integration surface. Host recovery of newly committed fresh decisions is implemented separately and is not native resume. | Existing Codex/Claude/Copilot child coordination is not missing. Host lineage/depth does not prove control of vendor-internal subagents. |
 | Platform coverage | POSIX platform containment/custody and lifecycle qualification for intended macOS/Linux routes. | Windows offline results do not qualify POSIX or prove an OS sandbox. |
-| Current native acceptance | Install/inspect the selected current payload and exercise admitted real provider routes and recovery. | Not yet successfully qualified. The November 18 attempts below have not established successful canonical receiving; installation and quota-consuming calls retain their separate authorization. Offline peers are not native acceptance. |
+| Current native acceptance | Install/inspect the selected current payload and exercise admitted real provider routes and recovery. | The November 18 Codex read-only Consultant fresh/continuation pair has bounded native qualification. Other routes remain open; the prior failed attempt is retained with an explicit blocked settlement. Installation and quota-consuming calls retain separate authorization. Offline peers are not native acceptance. |
 | PR delivery | Keep main policy/regression fixes, this roadmap, source projections and PR description synchronized; complete unresolved acceptance. | PR remains draft, unmerged and not globally installed. No automatic model selection, budget policy or Actions run is implied. |
 
 Active SDK implementation owner: the existing PR19 lane. Shared main routing and
@@ -1674,6 +1675,31 @@ when recognized, a literal `safetyFailureCode`. Unknown exception text and raw
 payload remain excluded; `restorableObservation` and `replayAuthorized` remain
 false. This diagnostic improvement does not retroactively recover the failed
 receiving or qualify native fresh/continuation acceptance.
+
+### November 18 successful bounded Codex pair
+
+After the failed attempts, a separately authorized fresh read-only Consultant turn
+and its same-session continuation completed on implementation revision
+`85003a3945cae73ff2dcb22afd056867c21a3f89`. Exactly two model calls were made in
+this pair, with no third inference or retry. Both canonical receipts are completed,
+non-authorizing Consultant evidence with verified artifact size and SHA-256.
+
+- The reported profile is `gpt-6.2-sol` / `medium`, read-only sandbox and
+  `deny_all` approvals, official Python SDK 0.170.0 and existing CLI 0.169.0.
+  The selected route uses the existing ChatGPT subscription with default service
+  tier, not Fast; the working global installation was not changed.
+- Fresh and continuation retain the same native thread, context digest and session
+  depth, with distinct turn identifiers. Continuation recalled the marker from the
+  first turn. Both provider-result receipts report successful exit, complete cleanup,
+  zero cleanup issues and no timeout or cancellation.
+- A new local readback process verified the canonical pair and unchanged ledger
+  without another provider invocation. The existing ledger owner subsequently settled
+  the earlier rejected attempt as blocked, bound to its exact original launch digest,
+  without an artifact or reconstructed provider result. Whole-work-item validation
+  and final local pair readback then passed; the earlier failed validation is retained.
+
+This qualifies only the recorded Windows Codex Consultant fresh/continuation path,
+not every provider, Worker, reviewer, platform, account arrangement or future revision.
 
 ### Corrected acceptance harness: offline verification
 

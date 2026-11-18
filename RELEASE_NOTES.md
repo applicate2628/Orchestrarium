@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Record a bounded native Codex read-only Consultant fresh/continuation success on the verified implementation revision, with canonical receipt and local restart readback evidence. Preserve the earlier failed attempt and the remaining broader SDK acceptance gaps.
+
 - Add an offline Codex streaming-to-receiving regression covering the normal event budget, canonical continuation handoff and secret rejection, plus a separately verified operator-harness smoke. These synthetic checks do not upgrade the incomplete live acceptance.
 
 - Preserve a closed diagnostic reason and recognized safety-check code when SDK recovery must omit unsafe output, so receiving failures can be investigated without retaining secrets, raw protocol or exception text. This does not relax output scanning or turn diagnostic records into replay or reconciliation authority.
