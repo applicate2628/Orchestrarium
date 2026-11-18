@@ -1,6 +1,6 @@
 # Orche
 
-![Orche mascot](assets/branding/orche.png)
+<img src="assets/branding/orche.png" alt="Orche, the winged green mascot" width="160" height="148">
 
 Orche is the workflow pack formerly named Orchestrarium. The repository URL and
 existing technical ownership/receipt identifiers remain compatible; branding
