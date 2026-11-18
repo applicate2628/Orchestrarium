@@ -201,14 +201,22 @@ def validate_config(path: str, spec: object, provider: str, scope: str) -> None:
                 or type(spec["members"]) is not dict or type(spec["entries"]) is not list):
             raise ValueError("Invalid owned JSON projection")
         if path.endswith("/hooks.json"):
-            if set(spec["members"]) != {"orchestrarium-session-start"} or spec["entries"]:
+            keys = set(spec["members"])
+            if not keys or not keys <= {"orchestrarium-session-start", "orchestrarium-machine-local-path"} or spec["entries"]:
                 raise ValueError("Invalid owned named hook")
-            block = spec["members"]["orchestrarium-session-start"]
-            if type(block) is not dict or set(block) != {"SessionStart"} or type(block["SessionStart"]) is not list or len(block["SessionStart"]) != 1:
-                raise ValueError("Invalid owned SessionStart hook")
-            handler = block["SessionStart"][0]
-            if type(handler) is not dict or set(handler) != {"type", "command"} or handler["type"] != "command" or type(handler["command"]) is not str or not handler["command"]:
-                raise ValueError("Invalid owned SessionStart handler")
+            for name, block in spec["members"].items():
+                event = "SessionStart" if name == "orchestrarium-session-start" else "PreToolUse"
+                if type(block) is not dict or set(block) != {event} or type(block[event]) is not list or len(block[event]) != 1:
+                    raise ValueError("Invalid owned hook event")
+                handler = block[event][0]
+                if event == "PreToolUse":
+                    if (type(handler) is not dict or set(handler) != {"matcher", "hooks"}
+                            or handler["matcher"] != "^(write_to_file|replace_file_content)$"
+                            or type(handler["hooks"]) is not list or len(handler["hooks"]) != 1):
+                        raise ValueError("Invalid owned tool matcher")
+                    handler = handler["hooks"][0]
+                if type(handler) is not dict or set(handler) != {"type", "command"} or handler["type"] != "command" or type(handler["command"]) is not str or not handler["command"]:
+                    raise ValueError("Invalid owned hook handler")
         elif spec["members"] or len(spec["entries"]) != 1:
             raise ValueError("Invalid owned discovery entry")
         for entry in spec["entries"]:

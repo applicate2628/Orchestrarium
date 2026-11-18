@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Antigravity pre-write hooks now reuse the shared machine-local-path AUDIT rule for documented write and replacement payloads. Warnings examine new content without treating removed text or descriptions as writes, preserve native approvals and remain nonblocking on diagnostic failure. Existing startup registrations upgrade through the same ownership checks; unrelated hooks remain untouched.
+
 - Antigravity native sessions gain a separate startup projection through the common ownership-aware installer: shared governance, a distinct Lead skill and a SessionStart context hook. Project/global discovery preserves Codex skills and unrelated hooks; update and removal retain existing ownership checks. This is instruction integration, not native permission enforcement, SDK worker execution or live acceptance.
 
 - Kimi execution tracks model/thinking configuration updates throughout its ACP exchange, including changes returned by later setters. A drift cannot be hidden by stale initial readback or a later restoration; acquired output and cleanup remain available without reconfiguration or repeated model calls. Initial sequential setup and unrelated configuration options stay supported.

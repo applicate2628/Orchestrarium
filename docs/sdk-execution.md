@@ -705,8 +705,14 @@ and [SessionStart contract](https://antigravity.google/docs/hooks/#sessionstart)
 define the native integration points. Managed subtree names are Orche's local
 convention. Injected instructions are not enforced permissions, lifecycle
 receipts, native subagent qualification or evidence that a live session loaded
-them. Tool/lifecycle event hooks and native subagent handoff remain outstanding;
-this source path must not be reported as complete AGY SDK execution support.
+them. A bounded PreToolUse advisory reuses the canonical machine-local-path AUDIT
+classifier for the documented `write_to_file` and `replace_file_content` payloads.
+It inspects only new content, not descriptions or removed text. Native `allow`
+with a reason does not bypass approval; no `auto_approve` or permission override
+is emitted. Unknown/malformed inputs and internal diagnostic failures remain
+nonblocking. Multi-edit chunk decoding, other tool/lifecycle hooks and native
+subagent handoff remain outstanding; this source path must not be reported as
+complete AGY SDK execution support.
 
 Offline verification covers both isolated project and fake-home global installation,
 preview, repeat update, execution of the registered SessionStart command and

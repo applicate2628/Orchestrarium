@@ -16,7 +16,8 @@ The Python-owned `invoke-claude-prompt.py` transport (also exposed through the t
 The selected native session can receive shared governance through the installed
 SessionStart hook and discover a separate Lead skill/rule. The common installer
 preserves other clients and user customizations. This is not a wrapper around a
-consumer subscription CLI, nor permission to start a provider. Native tool/lifecycle
+consumer subscription CLI, nor permission to start a provider. A narrow native pre-write advisory uses the shared machine-local-path AUDIT
+classifier without granting permission or blocking execution. Remaining tool/lifecycle
 hooks, subagent receiving and separately admitted SDK/API routes retain their
 own implementation and qualification boundaries. See [installation scope](../INSTALL.md#antigravity-native-startup).
 

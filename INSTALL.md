@@ -101,8 +101,14 @@ hooks and user-modified content remain outside this ownership.
 
 The hook reads instructions from its installed directory, not paths supplied
 in the incoming event. Its documented native output supplies context, not
-permission or task-completion evidence. Other event hooks, native subagent
-handoff and installed/live behavior remain separate qualification work.
+permission or task-completion evidence. A named PreToolUse registration also applies the existing machine-local-path
+AUDIT rule to `write_to_file.CodeContent` and
+`replace_file_content.ReplacementContent`. Findings return native `allow` with
+an advisory reason, never `auto_approve`, permission overrides or a task gate.
+Scratch targets and placeholder paths retain the shared policy. Unknown or
+malformed input and internal diagnostic failures leave native execution unchanged.
+Multi-edit chunk decoding, other event hooks, native subagent handoff and
+installed/live behavior remain separate qualification work.
 Official contracts: [discovery](https://antigravity.google/docs/customization-discovery/)
 and [hooks](https://antigravity.google/docs/hooks/). The vendor discovery paths
 are distinct from Orche's chosen managed subtree and ownership identifiers.
