@@ -1414,6 +1414,30 @@ existing owner and recheck current PR state immediately before any authorized
 application/publication/thread action. Offline fixtures demonstrate this contract,
 not a live bot review or an atomic hosted transaction.
 
+### First-version owned Python delivery
+
+Use the existing distribution builder and retained launcher for Orchestrarium-owned
+Python hooks and orchestration entrypoints, rather than the operator's Python or
+ambient PATH. Provider SDK dependencies remain in separate official environments;
+create those environments through the retained interpreter using the existing SDK
+setup owner. Do not add SDK packages to the qualified base runtime.
+
+Portable bundle inputs and operator prompts must not embed a workstation's Python
+location. A client requiring an absolute hook registration still receives a
+locally resolved interpreter/script identity. Such generated registrations and
+trust state are machine-local outputs, not shared configuration templates. A
+changed identity requires the client's normal trust flow; neither PATH fallback
+nor copying trust from another machine proves admission.
+
+The Wave user-operated handoff stopped before the Codex worker because the shared
+installed hook registration selected an absent interpreter. The failed attempt
+remains preserved and is not successful SDK or originating-Lead acceptance.
+Do not automatically retry it or rewrite shared registrations as part of an offline check.
+
+The bounded retained-runtime evidence at source `7075132c` is recorded in the
+[distribution qualification record](../scripts/distribution/README.md#windows-pristine-base-and-hook-registration-checkpoint).
+It does not qualify global rollout, native hook trust or the real AGY-to-Codex handoff.
+
 ### Current execution state
 
 Completed source/offline milestones include setup apply/recovery; Codex public

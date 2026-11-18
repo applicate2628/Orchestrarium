@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Specify the existing retained-Python route for first-version owned hooks and orchestration, with separate provider environments derived from that base. Record isolated Windows assembly, relocation and hook-registration evidence without presenting it as global rollout, client trust or a successful native Lead handoff.
+
 - Resolve Windows system directories through the operating system rather than assuming the system drive, preserving explicit command-processor selection and refusing Bash candidates when the Windows root cannot be established. Update operator examples to use selected project/client locations and a caller-selected FFmpeg command. These portability fixes do not migrate shared hook registrations or qualify a shipped Python runtime.
 
 - Document the native AGY Lead's explicit read-only Codex Consultant fresh/continuation route and cover its installed entrypoint through streaming and canonical receiving with synthetic peers. This closes an offline integration gap without claiming a real originating Lead invocation.

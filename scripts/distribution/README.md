@@ -113,6 +113,36 @@ bundle rebuild, provider call or blanket license clearance is implied.
   for diagnosis; no pack installer starts until assembly completes. Existing retained
   releases are not garbage-collected because registered hooks can still use them.
 
+## Windows pristine base and hook registration checkpoint
+
+At source `7075132c` on 2026-11-18, the existing distribution owners assembled and
+retained a pristine CPython 3.15.2 Windows x64 base from the already pinned upstream
+archive (`02e532b60e720aa3d77e757c349ae9cc945441c05851fa646336fc9ff0403041`).
+All 2,271 extracted regular files matched the archive. The base-layout guard and
+exact runtime/notice inventories passed; no third-party SDK packages were added.
+This proves consistency with the pinned input, not publisher authentication or
+complete license clearance.
+
+- Actual retained Python starts after the acquisition directory is moved, with
+  empty PATH and deliberately invalid PYTHONHOME/PYTHONPATH; stdlib imports pass.
+- Twelve Codex and thirteen Claude owned hooks are generated through the existing
+  registration helper using the retained interpreter. Static hook health passes.
+  These are not full Codex/Claude installer, native hook firing or trust checks.
+- The actual public retained launcher installs the Antigravity project payload:
+  all three owned hooks select retained Python. Foreign Claude/Antigravity handler
+  and setting values remain intact; whole-file byte identity is not claimed.
+- A modified executable registration is rejected as a missing recognized hook.
+  The valid Codex configuration stays byte-identical across the static check.
+  This negative proves refusal, not reproduction of Wave's exact diagnostic.
+- A separate standard venv created from retained Python reports that retained
+  runtime as its base prefix without ambient Python settings. No provider SDK was
+  installed into that venv, and no provider/model call was made.
+
+Independent review accepted these bounded results. Keep retained Python in place
+while installed hooks or derived environments refer to it. No live global hooks,
+shared configuration, client trust or security settings were changed. Wave/Comet
+rollout and the originating Lead-to-Codex handoff remain separate work; do not
+repair shared generated registrations by substituting one workstation's Python.
 ## Local ownership and runtime lifetime
 
 Apply requires an explicit first launcher option: `--retain-to ABSOLUTE_DIRECTORY`
