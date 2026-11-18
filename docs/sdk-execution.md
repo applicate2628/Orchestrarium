@@ -515,7 +515,7 @@ historical results as fresh acceptance.
 | Codex | Explicit Windows Reviewer, Consultant and scoped Worker source bridges; offline qualification and historical bounded native evidence below. | Qualify current installed/native execution; extend Consultant continuation to remaining child-Lead/session/platform outcomes through the common mechanism. |
 | Claude | SDK Host API and explicit scoped Worker command-line route, plus prompt-only Consultant and Reviewer routes, exact receiving and offline checks; native Lead is a different boundary. | Qualify current native execution and complete child-Lead/session outcomes using official API/cloud access; do not wrap a subscription CLI as a third-party worker. |
 | Antigravity | Official setup direction; no implemented AGY runtime adapter in the current SDK execution factory. | Implement Lead/session integration and native subagent handoff; separately qualify any admitted programmatic worker route. |
-| Copilot | Explicit public fresh prompt-only Consultant and Reviewer over the official Python SDK and canonical Windows receiving; source/offline qualification only. | Complete supported Lead/worker roles and session lifecycle; qualify the current installed runtime without provider-name role bans. |
+| Copilot | Explicit public fresh Consultant/Reviewer and scoped Worker over the official Python SDK and canonical Windows receiving; source/offline qualification only. | Complete supported Lead roles and session lifecycle; qualify the current installed runtime without provider-name role bans. |
 | Kimi | Existing ACP boundary is separate from the current SDK factory. | Reconcile the supported Kimi runtime with the official agent integration; do not silently substitute the older Python runtime or a model API for the chosen route. |
 | Grok | Candidate protocol support is not live-qualified execution. | Integrate the official Grok Build Agent Client Protocol (ACP) route, including account/tool enforcement and result receiving; do not invent a separate vendor SDK or substitute the xAI model API. |
 
@@ -565,6 +565,37 @@ sandbox. Offline integration evidence is not installed/native acceptance.
 
 API reference: [official Python client and session interfaces at the reviewed source](https://github.com/microsoft/copilot-sdk/tree/3ce61458503b6b27ebd1f674a980f4d9596d9b22/python/copilot).
 The source revision is evidence for API shape, not an installed-version pin.
+
+### Copilot scoped Host file tools
+
+The explicit version-4 task binding admits a canonical Worker profession and a
+separate write workspace through the existing public dispatch and custody owners.
+Worker uses official custom-tool definitions for Host-owned Read, Write and Edit,
+not guessed vendor builtin schemas. Their repository-owned names are
+`orchestrarium_read`, `orchestrarium_write` and `orchestrarium_edit`.
+The SDK tool allowlist contains exactly those definitions; native builtins, shell, Model Context Protocol servers and
+ambient skills remain unavailable in this slice.
+
+Each effect retains the existing current Host permission checks and shared
+workspace/control-path admission immediately before local UTF-8 file I/O. The Host
+rejects escapes, reparse/symlink aliases, write hardlinks, writes to control
+paths, and access to protected runtime, ledger and capture paths. Tool data is bounded by the admitted request,
+and returned content is scanned before transmission. Write/Edit are not marked
+idempotent and an interrupted operation is not automatically replayed. These are
+application-level file-tool checks, not atomic filesystem confinement or an OS
+sandbox; partial work must be retained and inspected rather than called complete.
+
+The official permission callback alone is not treated as complete filesystem
+coverage: native write requests can contain multiple before/after file paths,
+and callback coverage/order is not inferred. Custom handlers own the actual
+effects and recheck current authority independently. Selected metadata therefore
+uses `tool-restricted-workspace-write`, `deny_unadmitted` and the existing workspace
+digest. Consultant and Reviewer remain prompt-only and nonauthorizing.
+
+Source evidence: [official custom Tool and result interfaces](https://github.com/microsoft/copilot-sdk/blob/3ce61458503b6b27ebd1f674a980f4d9596d9b22/python/copilot/tools.py)
+[session tool selection](https://github.com/microsoft/copilot-sdk/blob/3ce61458503b6b27ebd1f674a980f4d9596d9b22/python/copilot/client.py),
+and [typed permission/event data](https://github.com/microsoft/copilot-sdk/blob/3ce61458503b6b27ebd1f674a980f4d9596d9b22/python/copilot/_generated/session_events.py).
+This source integration is not installed or live-provider qualification.
 
 ### Approved role/access acceptance scope
 

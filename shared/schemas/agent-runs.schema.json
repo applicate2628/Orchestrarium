@@ -713,15 +713,39 @@
                 ]
               },
               "sandboxMode": {
-                "const": "tool-restricted-read-only"
+                "enum": [
+                  "tool-restricted-read-only",
+                  "tool-restricted-workspace-write"
+                ]
               },
-              "approvalPolicy": {
-                "const": "deny_all"
-              },
-              "writeWorkspaceSha256": false,
               "continuationSourceSha256": false,
               "forkSourceSha256": false
-            }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "sandboxMode": {
+                      "const": "tool-restricted-read-only"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "approvalPolicy": {
+                      "const": "deny_all"
+                    }
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "approvalPolicy": {
+                      "const": "deny_unadmitted"
+                    }
+                  }
+                }
+              }
+            ]
           }
         }
       ]

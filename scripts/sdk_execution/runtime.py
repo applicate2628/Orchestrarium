@@ -17,7 +17,9 @@ import inspect
 import math
 import sys
 import os
-from pathlib import Path
+import ntpath
+import stat
+from pathlib import Path, PureWindowsPath
 import re
 import threading
 import time
@@ -184,7 +186,7 @@ def _worker_authority_roots(provider="codex") -> tuple[Path, ...]:
              Path(sys.executable).parent,
              Path(sys.prefix), Path(sys.base_prefix)]
     # Top-level discovery does not import or launch the provider package.
-    spec = importlib.util.find_spec({"codex": "openai_codex", "claude": "claude_agent_sdk"}[provider])
+    spec = importlib.util.find_spec({"codex": "openai_codex", "claude": "claude_agent_sdk", "copilot": "copilot"}[provider])
     if spec is not None:
         if spec.origin and spec.origin not in {"built-in", "frozen"}:
             roots.append(Path(spec.origin).parent)
@@ -201,7 +203,8 @@ def validate_worker_custody(request: ExecutionRequest, selection: Any, *, expect
     if request.write_workspace is None:
         return None
     from .claude import ClaudeRuntimeSelection
-    expected = {"codex": CodexRuntimeSelection, "claude": ClaudeRuntimeSelection}.get(request.provider)
+    from .copilot import CopilotRuntimeSelection
+    expected = {"codex": CodexRuntimeSelection, "claude": ClaudeRuntimeSelection, "copilot": CopilotRuntimeSelection}.get(request.provider)
     if type(selection) is not expected:
         raise RuntimeBindingError("worker_runtime_selection_required")
     execution_role(request)
@@ -214,11 +217,13 @@ def validate_worker_custody(request: ExecutionRequest, selection: Any, *, expect
                 or os.path.normcase(str(resolved)) != os.path.normcase(request.write_workspace)):
             raise ValueError("noncanonical workspace")
         protected = [Path(selection.work_item), Path(selection.executable).parent,
-                     *(_worker_authority_roots() if request.provider == "codex" else _worker_authority_roots("claude"))]
+                     *(_worker_authority_roots() if request.provider == "codex" else _worker_authority_roots(request.provider))]
         if request.provider == "codex":
             protected.append(Path(selection.codex_home))
             if selection.installed_hook_root is not None:
                 protected.append(Path(selection.installed_hook_root))
+        elif request.provider == "copilot":
+            protected.append(Path(selection.base_directory))
         else:
             protected.extend((Path(selection.config_dir), Path(selection.prompts_dir)))
         for path in protected:
@@ -303,7 +308,7 @@ def selected_sdk_execution(request: ExecutionRequest, selection: Any) -> dict[st
     elif request.provider == "claude":
         adapter, sandbox, approval = "claude-agent-sdk", ("tool-restricted-workspace-write" if request.write_workspace is not None else "tool-restricted-read-only"), "deny_unadmitted"
     elif request.provider == "copilot":
-        adapter, sandbox, approval = "microsoft-copilot-sdk", "tool-restricted-read-only", "deny_all"
+        adapter, sandbox, approval = "microsoft-copilot-sdk", ("tool-restricted-workspace-write" if request.write_workspace is not None else "tool-restricted-read-only"), ("deny_unadmitted" if request.write_workspace is not None else "deny_all")
     else:
         raise RuntimeBindingError("unsupported_runtime_provider")
     value = {
@@ -461,7 +466,7 @@ def execution_role(request: ExecutionRequest) -> str:
     """Project provenance for the already validated operation, not permission."""
     _require_runtime_result_route(request)
     if request.write_workspace is not None:
-        if type(request) is not ExecutionRequest or request.provider not in {"codex", "claude"} or request.result_kind != "task":
+        if type(request) is not ExecutionRequest or request.provider not in {"codex", "claude", "copilot"} or request.result_kind != "task":
             raise RuntimeBindingError("worker_task_request_required")
         _roles, _reviewers, workers, _unsupported = _owner()._external_role_taxonomy()
         if request.role not in workers:
@@ -893,6 +898,10 @@ def run_admitted_review(
                for callback in (authorize_tool, verify_account)):
             raise RuntimeBindingError("existing_claude_tool_and_account_owners_required")
 
+    if request.provider == "copilot" and request.write_workspace is not None:
+        if not callable(authorize_tool) or inspect.iscoroutinefunction(authorize_tool):
+            raise RuntimeBindingError("existing_copilot_tool_owner_required")
+
     def require_live_request() -> None:
         validate_worker_custody(request, selection, expected_identity=workspace_identity)
         cancelled = cancellation_probe()
@@ -947,7 +956,7 @@ def run_admitted_review(
         assert_current_launch(current, admitted, effect)
         _require_authority(authority, current, effect)
         if context is not None:
-            if request.provider != "claude" or type(context) is not dict:
+            if request.provider not in {"claude", "copilot"} or type(context) is not dict:
                 raise RuntimeBindingError("unexpected_authority_context")
             if effect == "tool" and set(context) == {"kind", "name", "arguments"} and context["kind"] == "tool":
                 if type(context["name"]) is not str or type(context["arguments"]) is not dict:
@@ -1041,6 +1050,9 @@ class SdkReviewExecutor:
             for callback in (self._authorize_tool, self._verify_account)
         ):
             raise RuntimeBindingError("existing_claude_tool_and_account_owners_required")
+        if request.provider == "copilot" and request.write_workspace is not None:
+            if not callable(self._authorize_tool) or inspect.iscoroutinefunction(self._authorize_tool):
+                raise RuntimeBindingError("existing_copilot_tool_owner_required")
         return request
 
     def _current(self, request: ExecutionRequest, effect: str) -> None:
@@ -1913,3 +1925,140 @@ class ChildLeadAuthority:
             except Exception:
                 self.cancellation_receipts[key]={'requested':True,'acknowledged':False,'error':'cancel_owner_failed'}
         return {'status':'revoked','receipts':dict(self.cancellation_receipts)}
+
+
+def authorize_workspace_file_tool(request, selection, name, arguments, *, expected_identity, protected_paths=()):
+    """Authorize one native file-tool input, not atomic OS confinement.
+
+    The caller retains workspace identity and control paths. Checks describe the
+    current filesystem only; no handles are transferred to the vendor tool.
+    """
+    import provider_prompt as owner
+    if request.write_workspace is None or expected_identity is None:
+        raise RuntimeBindingError("worker_file_authority_required")
+    validate_worker_custody(request, selection, expected_identity=expected_identity)
+    required = {
+        "Read": {"file_path"}, "Write": {"file_path", "content"},
+        "Edit": {"file_path", "old_string", "new_string"},
+        "Glob": {"pattern"}, "Grep": {"pattern"},
+    }
+    optional = {
+        "Read": {"offset", "limit", "pages"}, "Write": set(), "Edit": {"replace_all"},
+        "Glob": {"path"},
+        "Grep": {"path", "glob", "type", "output_mode", "-i", "-n", "-B", "-A", "-C", "context", "-o", "head_limit", "offset", "multiline"},
+    }
+    if (name not in required or type(arguments) is not dict
+            or not required[name].issubset(arguments) or set(arguments) - required[name] - optional[name]):
+        raise RuntimeBindingError("invalid_file_tool_arguments")
+    for key, value in arguments.items():
+        if value is None and key in optional[name]:
+            continue
+        if key in {"replace_all", "-i", "-n", "-o", "multiline"}:
+            valid = type(value) is bool
+        elif key in {"offset", "limit", "-B", "-A", "-C", "context", "head_limit"}:
+            valid = type(value) is int and value >= 0
+        else:
+            valid = type(value) is str
+        if not valid:
+            raise RuntimeBindingError("invalid_file_tool_arguments")
+    if arguments.get("output_mode") not in (None, "content", "files_with_matches", "count"):
+        raise RuntimeBindingError("invalid_file_tool_arguments")
+    root = Path(request.write_workspace)
+    control_names = {".git", ".agents", ".codex", ".claude"}
+    protected = tuple(Path(p).resolve(strict=False) for p in protected_paths)
+
+    def checked_path(raw, *, absolute):
+        if type(raw) is not str or not raw or any(ord(c) < 32 for c in raw):
+            raise RuntimeBindingError("invalid_file_tool_path")
+        if raw.startswith("~"):
+            raise RuntimeBindingError("file_tool_path_alias")
+        path = Path(raw)
+        if absolute and not path.is_absolute():
+            raise RuntimeBindingError("absolute_file_tool_path_required")
+        if ".." in path.parts:
+            raise RuntimeBindingError("file_tool_path_escape")
+        if not path.is_absolute():
+            path = root / path
+        if os.name == "nt":
+            if raw.startswith(("\\\\", "//")) or not path.drive or len(path.drive) != 2:
+                raise RuntimeBindingError("file_tool_path_alias")
+            for part in path.parts[1:]:
+                # Prefer the native naming owner; older supported Python uses
+                # pathlib for device names plus invalid-character checks.
+                reserved = getattr(ntpath, "isreserved", None)
+                if (reserved(part) if reserved is not None else
+                        (PureWindowsPath(part).is_reserved()
+                         or any(c in part for c in ':*?"<>|') or part.endswith((".", " ")))):
+                    raise RuntimeBindingError("file_tool_path_alias")
+        if not path.is_absolute():
+            path = root / path
+        owner.validate_no_reparse_components(path)
+        resolved = path.resolve(strict=False)
+        if os.path.normcase(str(path)) != os.path.normcase(str(resolved)):
+            raise RuntimeBindingError("file_tool_path_alias")
+        if not resolved.is_relative_to(root):
+            raise RuntimeBindingError("file_tool_path_escape")
+        if name in {"Write", "Edit"} and any(part.casefold() in control_names for part in resolved.relative_to(root).parts):
+            raise RuntimeBindingError("file_tool_protected_path")
+        if any(resolved == p or resolved.is_relative_to(p) for p in protected):
+            raise RuntimeBindingError("file_tool_protected_path")
+        return resolved
+
+    def ordinary(path, *, write=False, missing=False):
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            if not missing:
+                raise RuntimeBindingError("file_tool_target_missing") from None
+            ancestor = path.parent
+            while not ancestor.exists():
+                ancestor = ancestor.parent
+            owner.validate_no_reparse_components(ancestor)
+            if not ancestor.is_dir():
+                raise RuntimeBindingError("file_tool_target_not_ordinary")
+            return None
+        if owner._metadata_is_reparse(info) or stat.S_ISLNK(info.st_mode):
+            raise RuntimeBindingError("file_tool_path_alias")
+        if not stat.S_ISREG(info.st_mode) and not stat.S_ISDIR(info.st_mode):
+            raise RuntimeBindingError("file_tool_target_not_ordinary")
+        if write and stat.S_ISREG(info.st_mode) and info.st_nlink != 1:
+            raise RuntimeBindingError("file_tool_write_alias")
+        return info
+
+    try:
+        if name in {"Read", "Write", "Edit"}:
+            target = checked_path(arguments["file_path"], absolute=True)
+            info = ordinary(target, write=name != "Read", missing=name == "Write")
+            if info is not None and not stat.S_ISREG(info.st_mode):
+                raise RuntimeBindingError("file_tool_target_not_file")
+        else:
+            target = checked_path(arguments.get("path") or str(root), absolute=False)
+            for pattern in ([arguments["pattern"]] if name == "Glob" else [arguments.get("glob")]):
+                if pattern is not None and (not pattern or pattern.startswith(("/", "\\", "~"))
+                        or ":" in pattern or ".." in re.split(r"[\\/]", pattern)):
+                    raise RuntimeBindingError("file_tool_pattern_escape")
+                if pattern is not None:
+                    # Support ordinary native wildcard patterns and simple
+                    # extension/name alternatives, not path-producing expansion.
+                    reduced = re.sub(r"\{[A-Za-z0-9_-]+(?:,[A-Za-z0-9_-]+)+\}", "safe", pattern)
+                    if any(char in reduced for char in "{}()"):
+                        raise RuntimeBindingError("file_tool_pattern_expansion_unsupported")
+            info = ordinary(target)
+            if name == "Glob" and not stat.S_ISDIR(info.st_mode):
+                raise RuntimeBindingError("file_tool_search_directory_required")
+            if stat.S_ISDIR(info.st_mode):
+                # Native glob/regex semantics remain vendor-owned. Validate all
+                # reachable entries, not a guessed Python glob result subset.
+                pending = [target]
+                while pending:
+                    directory = pending.pop()
+                    for entry in directory.iterdir():
+                        path = checked_path(str(entry), absolute=True)
+                        item = ordinary(path)
+                        if stat.S_ISDIR(item.st_mode):
+                            pending.append(path)
+        validate_worker_custody(request, selection, expected_identity=expected_identity)
+    except RuntimeBindingError:
+        raise
+    except (OSError, ValueError):
+        raise RuntimeBindingError("file_tool_authority_unavailable") from None

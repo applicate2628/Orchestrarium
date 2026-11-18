@@ -182,7 +182,7 @@ def terminal_payload(request: ExecutionRequest, observation: Any, *, output_cont
     )
     if request.write_workspace is not None:
         if (selected_config.get("schemaVersion") != 2
-                or selected_config.get("sandboxMode") != {"codex":"workspace-write", "claude":"tool-restricted-workspace-write"}[request.provider]
+                or selected_config.get("sandboxMode") != {"codex":"workspace-write", "claude":"tool-restricted-workspace-write", "copilot":"tool-restricted-workspace-write"}[request.provider]
                 or selected_config.get("writeWorkspaceSha256") != hashlib.sha256(request.write_workspace.encode("utf-8")).hexdigest()
                 or request.cwd != request.write_workspace):
             raise ValueError("SDK write workspace commitment mismatch")

@@ -221,6 +221,11 @@ class CodexReviewDispatch:
         if request != self.request:
             raise DispatchError("E_CLAUDE_SDK_TOOL_DENIED")
         self._check_auth_context()
+        if request.provider == "copilot":
+            if request.write_workspace is None: raise DispatchError("E_COPILOT_SDK_TOOL_DENIED")
+            runtime.authorize_workspace_file_tool(request,self.selection,name,arguments,
+                expected_identity=self._workspace_identity,protected_paths=self._protected_paths)
+            return
         if name == OUTPUT_TOOL:
             (validate_task if request.result_kind == "task" else validate_review)(arguments, request=request)
         elif request.write_workspace is not None:
@@ -302,6 +307,9 @@ class CodexReviewDispatch:
                 request.provider, self.prevalidated, runtime_namespace=self._runtime_namespace)
             owner.ledger_resource_options(self.prevalidated.control)
             if request.provider == "copilot":
+                if (effect == "tool" and request.write_workspace is not None
+                        and self._stage == _COPILOT_STAGES.index("copilot_send") + 1):
+                    return  # Exact Host file arguments are checked by the tool owner.
                 # Export retained evidence after any admitted adapter phase,
                 # including partial/failed acquisition. This terminal-only
                 # transition never authorizes a skipped native effect or replay.
@@ -341,6 +349,8 @@ class CodexReviewDispatch:
             execute = runtime.run_admitted_codex if self.request.provider == "codex" else runtime.run_admitted_review
             callbacks = {} if self.request.provider != "claude" else {
                 "authorize_tool": self._authorize_tool, "verify_account": self._verify_auth_context}
+            if self.request.provider == "copilot" and self.request.write_workspace is not None:
+                callbacks = {"authorize_tool":self._authorize_tool}
             run = execute(
                 self.request, self.selection, owner=process_owner,
                 source_environment=dict(self._environment), authority=self.assert_current,
@@ -569,8 +579,8 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
     if provider == "claude" and (binding.get("installedHookRoot") is not None or binding["expectedAccountEmail"] is not None
             or model in {"opus", "sonnet", "haiku"}):
         raise DispatchError("E_CLAUDE_SDK_PROMPT_ONLY_REQUIRED")
-    if provider == "copilot" and ((task_mode and role.assigned_role != "consultant")
-            or binding.get("contextMode", "fresh") != "fresh" or binding.get("writeWorkspace") is not None
+    if provider == "copilot" and ((task_mode and binding.get("writeWorkspace") is None and role.assigned_role != "consultant")
+            or binding.get("contextMode", "fresh") != "fresh"
             or binding.get("installedHookRoot") is not None or binding["expectedAccountEmail"] is not None):
         raise DispatchError("E_COPILOT_SDK_PROMPT_ONLY_REQUIRED")
     write_workspace = binding.get("writeWorkspace")

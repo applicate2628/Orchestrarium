@@ -125,7 +125,7 @@ class ExecutionRequest:
                     or str(path) != self.write_workspace or "\0" in self.write_workspace
                     or self.write_workspace != self.cwd):
                 raise ValueError("write workspace must be normalized absolute cwd")
-            if self.provider not in {"codex", "claude"} or self.result_kind != "task":
+            if self.provider not in {"codex", "claude", "copilot"} or self.result_kind != "task":
                 raise ValueError("write workspace requires implemented task contract")
             # Role eligibility belongs to the existing taxonomy/adapter owner,
             # not a second worker role list in this portable value codec.
@@ -146,8 +146,8 @@ class ExecutionRequest:
             raise ValueError("unsupported context mode")
         if self.provider not in {"codex", "claude", "kimi", "grok", "minimax", "mimo", "copilot"}:
             raise ValueError("invalid provider")
-        if self.provider == "copilot" and (self.tool_profile != "prompt-only" or self.context_mode != "fresh"):
-            raise ValueError("Copilot currently implements fresh prompt-only evidence")
+        if self.provider == "copilot" and (self.tool_profile != ("default" if self.write_workspace is not None else "prompt-only") or self.context_mode != "fresh"):
+            raise ValueError("Copilot requires fresh prompt-only evidence or scoped default-profile tasks")
         if self.external_dispatch_id == self.external_evidence_run_id:
             raise ValueError("dispatch and evidence identities must differ")
         if not isinstance(self.scope, tuple) or not 1 <= len(self.scope) <= 128:

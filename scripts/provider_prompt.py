@@ -7287,9 +7287,10 @@ def _validate_sdk_result_binding(payload: dict[str, object]) -> None:
     execution_role = payload.get("executionRole")
     selected = payload["sdkExecution"]
     if payload.get("provider") == "copilot":
-        _roles, reviewers, _workers, _unsupported = _external_role_taxonomy()
+        _roles, reviewers, workers, _unsupported = _external_role_taxonomy()
         valid_role = ((execution_role == "consultant" and payload.get("assignedRole") == "consultant")
-                      or (execution_role == "external-reviewer" and payload.get("assignedRole") in reviewers))
+                      or (execution_role == "external-reviewer" and payload.get("assignedRole") in reviewers)
+                      or (execution_role == "external-worker" and payload.get("assignedRole") in workers))
         if not valid_role or selected.get("schemaVersion") != 2:
             raise ValueError("provider result Copilot SDK role binding mismatch")
     if execution_role in {"consultant", "external-worker"}:
@@ -7302,7 +7303,7 @@ def _validate_sdk_result_binding(payload: dict[str, object]) -> None:
         mode_matches = (provider in consultant_modes
                         and selected.get("sandboxMode") == consultant_modes[provider]
                         if execution_role == "consultant" else
-                        provider in {"codex", "claude"} and selected.get("sandboxMode") == {"codex":"workspace-write", "claude":"tool-restricted-workspace-write"}[provider]
+                        provider in {"codex", "claude", "copilot"} and selected.get("sandboxMode") == {"codex":"workspace-write", "claude":"tool-restricted-workspace-write", "copilot":"tool-restricted-workspace-write"}[provider]
                         and selected.get("schemaVersion") == 2)
         if (not role_matches or not mode_matches
                 or payload.get("gate") != "none"

@@ -118,7 +118,7 @@ def test_junction_search_refused_without_symlink_privilege(case, tmp_path):
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows compatibility naming")
 def test_reserved_names_supported_python_fallback(case, monkeypatch):
-    import sdk_execution.claude as adapter
+    import sdk_execution.runtime as adapter
     native_reserved = adapter.ntpath.isreserved
     class LegacyWindowsPath(adapter.PureWindowsPath):
         def is_reserved(self):

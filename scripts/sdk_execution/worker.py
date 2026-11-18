@@ -50,7 +50,7 @@ def authority_context(request: ExecutionRequest, effect: str, context: object) -
         if effect == "account":
             raise ValueError("account authority requires evidence context")
         return None
-    if request.provider != "claude" or type(context) is not dict:
+    if request.provider not in {"claude", "copilot"} or type(context) is not dict:
         raise ValueError("unsupported authority context")
     if effect == "tool":
         if (set(context) != {"kind", "name", "arguments"} or context["kind"] != "tool"

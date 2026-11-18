@@ -28,9 +28,11 @@ class CopilotError(ValueError):
 
 def _load_sdk():
     from copilot import CopilotClient, RuntimeConnection, AgentMessageSource
-    from copilot.rpc import PermissionDecisionReject
+    from copilot.rpc import PermissionDecisionReject, PermissionDecisionApproveOnce
+    from copilot.tools import Tool, ToolResult
     return SimpleNamespace(CopilotClient=CopilotClient, RuntimeConnection=RuntimeConnection,
-        AgentMessageSource=AgentMessageSource, PermissionDecisionReject=PermissionDecisionReject)
+        AgentMessageSource=AgentMessageSource, PermissionDecisionReject=PermissionDecisionReject,
+        PermissionDecisionApproveOnce=PermissionDecisionApproveOnce, Tool=Tool, ToolResult=ToolResult)
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,15 +84,21 @@ class CopilotRuntimeSelection:
         return cls(**value)
 
 
+FILE_TOOLS = {"orchestrarium_read":"Read", "orchestrarium_write":"Write", "orchestrarium_edit":"Edit"}
+
+
 def validate_copilot_request(request):
     """Reuse the canonical role taxonomy, not a provider-specific profession list."""
     if (type(request) is not ExecutionRequest or request.provider != "copilot"
-            or request.tool_profile != "prompt-only" or request.context_mode != "fresh"
-            or request.write_workspace is not None):
+            or request.context_mode != "fresh"):
         raise CopilotError("copilot_request_unsupported")
     import provider_prompt as owner
-    _roles, reviewers, _workers, _unsupported = owner._external_role_taxonomy()
-    if ((request.result_kind == "task" and request.role != "consultant")
+    _roles, reviewers, workers, _unsupported = owner._external_role_taxonomy()
+    if request.write_workspace is not None:
+        if request.role not in workers or request.result_kind != "task" or request.tool_profile != "default":
+            raise CopilotError("copilot_request_unsupported")
+    elif (request.tool_profile != "prompt-only"
+            or (request.result_kind == "task" and request.role != "consultant")
             or (request.result_kind == "review" and request.role not in reviewers)):
         raise CopilotError("copilot_request_unsupported")
 
@@ -103,7 +111,7 @@ class CopilotExecutor:
     Missing runtime/SDK does not install, download or select an alternate route.
     """
     def __init__(self, *, runtime_path, base_directory, environment, github_token,
-                 assert_current, output_context, timeout_seconds, cleanup_timeout_seconds, sdk=None, instructions=""):
+                 assert_current, output_context, timeout_seconds, cleanup_timeout_seconds, sdk=None, instructions="", authorize_tool=None, worker_selection=None):
         import provider_prompt as owner
         self._runtime = Path(runtime_path)
         self._base = Path(base_directory)
@@ -130,6 +138,12 @@ class CopilotExecutor:
         self._authority = assert_current
         if type(instructions) is not str: raise CopilotError("copilot_invalid_instructions")
         self._instructions = instructions
+        self._authorize_tool = authorize_tool
+        self._worker_selection = worker_selection
+        self._workspace_identity = None
+        self._tool_calls = set()
+        self._tools_closed = False
+        self._tool_lock = asyncio.Lock()
         self._output = owner.ProviderOutputContext(tuple(dict.fromkeys((*output_context.needles,github_token.encode("utf-8")))))
         self._timeout, self._cleanup_timeout = timeout_seconds, cleanup_timeout_seconds
         self._sdk = sdk
@@ -204,7 +218,8 @@ class CopilotExecutor:
         elif kind == "session.error":
             self._event_error = "copilot_session_failed"
         elif isinstance(kind,str) and kind.startswith("tool.execution"):
-            self._event_error = "copilot_unexpected_tool"
+            if self._request.write_workspace is None or (getattr(data,"tool_name",None) is not None and data.tool_name not in FILE_TOOLS):
+                self._event_error = "copilot_unexpected_tool"
         if not self._event_error and kind in {"assistant.message","assistant.message_delta"}:
             self._retain_content(content or delta,"copilot.assistant.message")
         if self._event_error: self._request_abort()
@@ -217,10 +232,110 @@ class CopilotExecutor:
             raise CopilotError("copilot_profile_mismatch")
         self._observed_profile = (profile.model_id,profile.reasoning_effort)
 
+    async def _authorize_file(self,name,arguments):
+        from .runtime import authorize_workspace_file_tool
+        if self._tools_closed or self._event_error or name not in FILE_TOOLS or type(arguments) is not dict:
+            raise CopilotError("copilot_invalid_file_tool")
+        arguments = dict(arguments)
+        fields={"Read":{"file_path"},"Write":{"file_path","content"},"Edit":{"file_path","old_string","new_string"}}[FILE_TOOLS[name]]
+        if set(arguments)!=fields or any(type(value) is not str for value in arguments.values()):
+            raise CopilotError("copilot_invalid_file_arguments")
+        if len(json_text(arguments).encode("utf-8")) > self._request.max_output_bytes:
+            raise CopilotError("copilot_capture_limit")
+        await self._current(self._request,"tool")
+        if self._cancel_requested or self._tools_closed or self._event_error: raise CopilotError("copilot_cancelled")
+        answer=self._authorize_tool(self._request,FILE_TOOLS[name],dict(arguments))
+        if inspect.isawaitable(answer): answer=await answer
+        if answer is not None: raise CopilotError("copilot_invalid_tool_authority")
+        if self._cancel_requested or self._tools_closed or self._event_error: raise CopilotError("copilot_cancelled")
+        authorize_workspace_file_tool(self._request,self._worker_selection,FILE_TOOLS[name],arguments,
+            expected_identity=self._workspace_identity)
+
+    def _file_tools(self,sdk):
+        definitions=[]
+        for name,operation in FILE_TOOLS.items():
+            keys={"Read":["file_path"],"Write":["file_path","content"],"Edit":["file_path","old_string","new_string"]}[operation]
+            async def handler(invocation,selected=name):
+                async with self._tool_lock:
+                    return await self._file_effect(sdk,selected,invocation)
+            definitions.append(sdk.Tool(name=name,description="Scoped Host " + operation + " of one UTF-8 file",
+                handler=handler,parameters={"type":"object","additionalProperties":False,
+                    "required":keys,"properties":{key:{"type":"string"} for key in keys}},
+                skip_permission=False,overrides_built_in_tool=False,idempotent=False))
+        return {"available_tools":list(FILE_TOOLS),"definitions":definitions}
+
+    async def _file_effect(self,sdk,name,invocation):
+        import provider_prompt as owner
+        effect_started=False
+        try:
+            if (invocation.tool_name != name or invocation.session_id != self._session.session_id
+                    or getattr(invocation,"agent_id",None) or not invocation.tool_call_id
+                    or invocation.tool_call_id in self._tool_calls):
+                raise CopilotError("copilot_invalid_tool_invocation")
+            self._tool_calls.add(invocation.tool_call_id)
+            self._event_count += 1
+            if self._event_count > self._request.max_events:
+                self._event_error="copilot_capture_limit"
+                self._request_abort()
+                raise CopilotError("copilot_capture_limit")
+            if type(invocation.arguments) is not dict: raise CopilotError("copilot_invalid_file_arguments")
+            arguments=dict(invocation.arguments)
+            await self._authorize_file(name,arguments)
+            target=Path(arguments["file_path"])
+            operation=FILE_TOOLS[name]
+            limit=self._request.max_output_bytes
+            text=""
+            if operation in {"Read","Edit"}:
+                with target.open("rb") as stream: raw=stream.read(limit+1)
+                if len(raw)>limit: raise CopilotError("copilot_capture_limit")
+                text=raw.decode("utf-8",errors="strict")
+            if operation == "Read":
+                if owner.credential_scan_terminal(self._output.needles,stdout=text.encode("utf-8"),stderr=b""):
+                    raise CopilotError("copilot_file_credential_refused")
+                result_text=text
+            else:
+                content=arguments["content"] if operation=="Write" else None
+                if operation=="Edit":
+                    old=arguments["old_string"]
+                    if not old or text.count(old)!=1: raise CopilotError("copilot_edit_match_required")
+                    content=text.replace(old,arguments["new_string"],1)
+                encoded=content.encode("utf-8")
+                if len(encoded)>limit: raise CopilotError("copilot_capture_limit")
+                # Recheck current scope immediately before I/O, not OS-atomic confinement.
+                from .runtime import authorize_workspace_file_tool
+                authorize_workspace_file_tool(self._request,self._worker_selection,operation,arguments,
+                    expected_identity=self._workspace_identity)
+                if self._cancel_requested or self._tools_closed or self._event_error: raise CopilotError("copilot_cancelled")
+                effect_started=True
+                target.parent.mkdir(parents=True,exist_ok=True)
+                authorize_workspace_file_tool(self._request,self._worker_selection,operation,arguments,
+                    expected_identity=self._workspace_identity)
+                with target.open("wb") as stream: stream.write(encoded)
+                result_text="File effect completed."
+            self._output_bytes += len(result_text.encode("utf-8"))
+            if self._output_bytes > limit:
+                self._event_error="copilot_capture_limit"
+                self._request_abort()
+                raise CopilotError("copilot_capture_limit")
+            self._retain_content(json_text({"tool":name,"status":"completed"}),"copilot.host_tool")
+            return sdk.ToolResult(text_result_for_llm=result_text,result_type="success")
+        except Exception:
+            if effect_started:
+                self._event_error="copilot_file_effect_may_be_partial"
+                self._request_abort()
+            status="effect_may_be_partial" if effect_started else "effect_not_started"
+            self._retain_content(json_text({"tool":name,"status":status}),"copilot.host_tool")
+            return sdk.ToolResult(text_result_for_llm=status,result_type="failure",error="copilot_file_effect_failed")
+
     async def execute(self, request):
         validate_copilot_request(request)
         if self._request is not None:
             raise CopilotError("operation_already_consumed")
+        if request.write_workspace is not None:
+            from .runtime import validate_worker_custody
+            if not callable(self._authorize_tool) or type(self._worker_selection) is not CopilotRuntimeSelection:
+                raise CopilotError("copilot_worker_authority_required")
+            self._workspace_identity = validate_worker_custody(request,self._worker_selection)
         self._request = request
         await self._current(request,"copilot_start")
         task = asyncio.create_task(self._execute(request))
@@ -250,7 +365,22 @@ class CopilotExecutor:
             async with asyncio.timeout(self._timeout):
                 if self._cancel_requested: raise asyncio.CancelledError()
                 sdk = self._sdk or _load_sdk()
-                def deny(_request,_invocation):
+                def deny(value,invocation):
+                    self._event_error = "copilot_unexpected_permission_request"
+                    self._request_abort()
+                    return sdk.PermissionDecisionReject(feedback="Prompt-only operation has no tool authority")
+                async def permission(value,invocation):
+                    if request.write_workspace is not None:
+                        try:
+                            if (getattr(value,"kind",None) != "custom-tool"
+                                    or getattr(value,"managed_approval_required",False)
+                                    or invocation.get("managed_settings_enabled",False)
+                                    or invocation.get("session_id") != self._session.session_id):
+                                raise CopilotError("copilot_permission_denied")
+                            await self._authorize_file(getattr(value,"tool_name",None),getattr(value,"args",None))
+                            return sdk.PermissionDecisionApproveOnce()
+                        except Exception:
+                            return sdk.PermissionDecisionReject(feedback="File effect is not admitted")
                     self._event_error = "copilot_unexpected_permission_request"
                     self._request_abort()
                     return sdk.PermissionDecisionReject(feedback="Prompt-only operation has no tool authority")
@@ -268,7 +398,7 @@ class CopilotExecutor:
                 self._session = await self._client.create_session(model=request.model,
                     working_directory=request.cwd,enable_config_discovery=False,
                     system_message={"mode":"append","content":self._instructions},
-                    tools={"available_tools":[]},permissions={"on_request":deny},
+                    tools=self._file_tools(sdk) if request.write_workspace is not None else {"available_tools":[]},permissions={"on_request":permission if request.write_workspace is not None else deny},
                     inference={"reasoning_effort":request.effort},
                     instructions={"skip_custom_instructions":True,"on_demand_discovery":False,"directories":[]},
                     hooks={"enable_repository_hooks":False,"directories":[]},
@@ -310,6 +440,7 @@ class CopilotExecutor:
         except Exception:
             error = "copilot_sdk_failed"
         finally:
+            self._tools_closed = True
             if error or self._cancel_requested or self._event_error:
                 self._request_abort()
             if self._abort_task is not None and not await drain_owned(self._abort_task):
@@ -328,8 +459,12 @@ class CopilotExecutor:
         if self._observed_profile is not None:
             metadata = {"schemaVersion":1,"adapter":"microsoft-copilot-sdk",
                 "model":self._observed_profile[0],"effort":self._observed_profile[1],
-                "sandboxMode":"tool-restricted-read-only","approvalPolicy":"deny_all",
+                "sandboxMode":"tool-restricted-workspace-write" if request.write_workspace is not None else "tool-restricted-read-only",
+                "approvalPolicy":"deny_unadmitted" if request.write_workspace is not None else "deny_all",
                 "accountBinding":request.account_binding}
+        if metadata is not None and request.write_workspace is not None:
+            import hashlib
+            metadata["writeWorkspaceSha256"] = hashlib.sha256(request.write_workspace.encode("utf-8")).hexdigest()
         result = ExecutionResult(request,status,provider_status=provider_status,
             sdk_execution_json=json_text(metadata) if metadata is not None else None,
             native_thread_id=session_id,
@@ -365,9 +500,14 @@ def create_copilot_adapter(request, sink, selection):
         assert_current_launch(value, selection, effect)
         await sink.authorize(value,effect)
 
+    async def tool(value,name,arguments):
+        if value != request: raise CopilotError("worker_request_binding_mismatch")
+        assert_current_launch(value,selection,"tool")
+        await sink.authorize(value,"tool",{"kind":"tool","name":name,"arguments":arguments})
+
     return CopilotExecutor(runtime_path=selection.executable,
         base_directory=selection.base_directory, environment=environment,
         github_token=environment["COPILOT_GITHUB_TOKEN"], assert_current=current,
         output_context=output_context, timeout_seconds=selection.timeout_seconds,
         cleanup_timeout_seconds=selection.cleanup_timeout_seconds,
-        instructions=selection.instructions)
+        instructions=selection.instructions,authorize_tool=tool,worker_selection=selection)

@@ -408,6 +408,7 @@ def validate_sdk_execution(
             ("codex", "openai-codex", "workspace-write", "deny_all"),
             ("claude", "claude-agent-sdk", "tool-restricted-read-only", "deny_unadmitted"),
             ("copilot", "microsoft-copilot-sdk", "tool-restricted-read-only", "deny_all"),
+            ("copilot", "microsoft-copilot-sdk", "tool-restricted-workspace-write", "deny_unadmitted"),
             ("claude", "claude-agent-sdk", "tool-restricted-workspace-write", "deny_unadmitted"),
         )
     )
@@ -449,13 +450,16 @@ def _validate_sdk_event(event: Mapping[str, object], errors: list[str]) -> None:
     if event.get("provider") == "copilot" and type(selected) is dict:
         try:
             import provider_prompt
-            _roles, reviewers, _workers, _unsupported = provider_prompt._external_role_taxonomy()
+            _roles, reviewers, workers, _unsupported = provider_prompt._external_role_taxonomy()
             lane = event.get("executionRole")
             valid_role = ((lane == "consultant" and event.get("assignedRole") == "consultant"
                            and event.get("gate") == "none")
-                          or (lane == "external-reviewer" and event.get("assignedRole") in reviewers))
+                          or (lane == "external-reviewer" and event.get("assignedRole") in reviewers)
+                          or (lane == "external-worker" and event.get("assignedRole") in workers
+                              and event.get("gate") == "none"
+                              and selected.get("sandboxMode") == "tool-restricted-workspace-write"))
             if selected.get("schemaVersion") != 2 or event.get("role") != lane or not valid_role:
-                raise ValueError("Copilot requires selected nonauthorizing Consultant or Reviewer provenance")
+                raise ValueError("Copilot requires selected nonauthorizing role provenance")
         except (ValueError, ImportError) as exc:
             fail(errors, f"{run_id}: {exc}")
     if type(selected) is dict and selected.get("sandboxMode") in {"workspace-write", "tool-restricted-workspace-write"}:
