@@ -7656,7 +7656,8 @@ def finalize_reserved_run_once(
 def _qualify_managed_model_launch(provider: str, selected: PolicyBoundLaunch, *,
                                   runtime_namespace: Path | None = None) -> None:
     """Use actual assigned-role provenance, not filename, flags or a guessed role."""
-    if selected.role_provenance.assigned_role == "none":
+    # Low is excluded for every Orchestrarium launch, including direct-user lanes.
+    if selected.role_provenance.assigned_role == "none" and selected.effort != "low":
         return
     reason = _load_model_launch_policy(runtime_namespace=runtime_namespace).qualify_launch(
         provider, selected.model, selected.effort,
