@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-18
+
+- The Rust migration plan now explicitly retains GUI-independent functional operations and replaceable clients through the shared architecture contract, with headless and client-replacement acceptance scoped to each migration slice. No Rust implementation or activation is claimed.
+
 ## 2026-11-17
 
 - Inventory the full tracked Python/hook migration surface across native and SDK snapshots, retain each canonical owner and useful oracle, and map prior incidents to differential regression and scoped cutover/recovery. Record upstream library candidates and license boundaries without claiming a completed native port.

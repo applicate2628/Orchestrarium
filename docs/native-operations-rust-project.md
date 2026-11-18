@@ -99,6 +99,26 @@ boundaries; implementation admission fixes names and layout:
   verification, and preview-only cleanup. Freeze and receiver restore remain with
   their workflow owners; this adds neither automatic restore/deletion nor live takeover.
 
+## GUI-independent functional boundary
+
+Apply the shared **State-synchronization ownership** rule and its
+[architecture acceptance](https://github.com/applicate2628/Orchestrarium/blob/63f355253d66f9c319904214ff419d857666df6c/shared/references/architecture-layering-hygiene.md#gui-independent-functional-boundary)
+to the native operations and to projects developed under this workflow. Keep the
+Rust operation owners callable without a GUI; the existing CLI/module contract
+serves SDK callers and any replaceable future presentation client. Do not add a
+daemon, network service or wrapper solely to express this boundary. UI-specific
+rendering remains presentation-only; functional operations, results, errors,
+cancellation and mandatory decisions retain a headless route and their existing
+authority/lifecycle owners.
+
+For each admitted migration slice, qualify its functional scenarios without a GUI
+package or display/event loop, then exercise the same contract with a substitute
+client. Where applicable, disconnect/reconnect the client without duplicating an
+operation or losing its current state. Existing parity tests still own semantics
+and safety; record any untested scope or explicitly requested, concretely justified
+exception in the same slice evidence. This is planned acceptance, not evidence of
+implemented Rust code or a new gate blocking independent work.
+
 ## State, process and cutover ownership
 
 Dependencies run from adapters to existing domain owners to pure decisions/platform
