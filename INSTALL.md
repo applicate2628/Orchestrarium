@@ -246,6 +246,30 @@ and unrelated settings are preserved. A partially preserved payload returns stat
 No record means no inferred deletion authority. The bundled interpreter is retained;
 automatic last-consumer runtime reclamation is not implemented.
 
+### Machine-local hook registration
+
+For a Codex installation whose hook configuration is a leaf symlink into shared
+storage, the optional `--localize-hook-file` flag composes localization with the
+normal installer transaction. Preview that same installation with `--dry-run`
+first. Use the retained bundle entrypoint so subsequent owned registrations use
+its Python, not an interpreter found on the host PATH.
+
+The phase requires an existing installation record matching the selected owned
+handlers and script digests. It preserves the entire configuration byte-for-byte,
+including foreign entries, replaces only the local link with an ordinary file,
+and retains the original link object. The shared referent is never rewritten.
+Any previous local inventory is retained separately rather than reused as trust;
+normal installation owns the resulting local registration and inventory update.
+Linked parent directories and unresolved ownership need a separately reviewed
+migration, not inferred adoption by hook name.
+
+An ordinary failed transaction restores the original local link and inventory.
+Observed later edits are preserved for recovery, not overwritten by rollback.
+Retained recovery objects are not permission to overwrite a subsequently changed
+configuration. Localization alone neither repairs a stale interpreter command
+nor grants native hook trust, and it does not qualify a live provider call.
+Shared skill/agent trees and other clients are outside this flag's scope.
+
 ### Legacy shared skill links
 
 Explicit migration is separate from installation. Preview selected known legacy

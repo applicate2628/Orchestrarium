@@ -135,8 +135,17 @@ complete license clearance.
   The valid Codex configuration stays byte-identical across the static check.
   This negative proves refusal, not reproduction of Wave's exact diagnostic.
 - A separate standard venv created from retained Python reports that retained
-  runtime as its base prefix without ambient Python settings. No provider SDK was
-  installed into that venv, and no provider/model call was made.
+  runtime as its base prefix without ambient Python settings. The initial probe
+  preceded SDK installation. A later isolated run of the existing official setup
+  installed `openai-codex` and its required `openai-codex-cli-bin`, both 0.170.0;
+  package dependency checking and SDK import passed. No CLI/model was launched.
+- At the recorded measurement, the complete provider environment had 1,274 files totaling 608,340,413 logical
+  bytes. The retained base had 2,631 files totaling 75,861,937 bytes, giving
+  684,202,350 bytes together, excluding client files, backups and logs. Estimated
+  4-KiB file allocation is 693,112,832 bytes; this is not a universal disk minimum.
+  Transient installation peak was not captured. Setup places temporary files beside
+  the selected venv: a RAM-drive test environment also places those temporary files
+  there, but must be rebuilt after RAM loss while its retained base stays durable.
 
 Independent review accepted these bounded results. Keep retained Python in place
 while installed hooks or derived environments refer to it. No live global hooks,

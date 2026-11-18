@@ -763,6 +763,8 @@ def _parser(provider: str) -> argparse.ArgumentParser:
     modes.add_argument("--global", "-Global", dest="global_install", action="store_true")
     modes.add_argument("--target", "-Target")
     parser.add_argument("--force", "-Force", action="store_true")
+    parser.add_argument("--localize-hook-file", action="store_true",
+                        help="Codex: localize a receipted hook-file leaf link within this install transaction; preserve exact bytes and original link")
     parser.add_argument("--uninstall", action="store_true", help="Preview selected-current owned content removal")
     parser.add_argument("--apply", action="store_true", help="Apply the reviewed uninstall selection")
     parser.add_argument("--uninstall-selection", metavar="SHA256", help="Exact current selection from uninstall preview")
@@ -12482,6 +12484,162 @@ RETIRED_HOOK_SPECS = (
 
 
 @dataclass(frozen=True)
+class _HookFileLocalization:
+    anchor: Path
+    registration: Path
+    source: Path
+    original: _PhysicalNode
+    payload: bytes
+    dependencies: tuple[tuple[Path, str], ...]
+    dependency_nodes: tuple[tuple[Path, _PhysicalNode], ...]
+    backup: Path
+    inventory: Path
+    inventory_backup: Path
+
+
+def _plan_hook_file_localization(root: Path, provider: str, anchor: Path, scope: str):
+    """Select an exact managed leaf; never infer ownership from a script basename."""
+    if provider != "codex":
+        raise ValueError("E_HOOK_LOCALIZATION_UNRESOLVED: Codex receipt owner required")
+    anchor = Path(os.path.abspath(anchor))
+    client = get_client(provider)
+    registration = anchor / client["registration"]
+    if _contains_reparse(registration.parent):
+        raise ValueError("E_HOOK_LOCALIZATION_UNRESOLVED: linked parent")
+    if not registration.is_symlink():
+        raise ValueError("E_HOOK_LOCALIZATION_UNRESOLVED: selected leaf is not a symlink")
+    original = _InstallTransaction._capture_node(registration)
+    source = registration.resolve(strict=True)
+    if _contains_reparse(source) or not source.is_file():
+        raise ValueError("E_HOOK_LOCALIZATION_UNRESOLVED: ordinary referent required")
+    source_node = _InstallTransaction._capture_node(source)
+    with _InstallTransaction._copy_reference(source, source_node) as (fd, _bound):
+        payload = _InstallTransaction._descriptor_bytes(fd, path=source)
+    if hashlib.sha256(payload).hexdigest() != source_node.data:
+        raise ValueError("E_HOOK_LOCALIZATION_DRIFT: referent bytes")
+    ownership = _provider_ownership_module(root)
+    receipt = anchor / client["provider_root"] / ownership.RECEIPT_NAME
+    if _contains_reparse(receipt):
+        raise ValueError("E_HOOK_LOCALIZATION_UNRESOLVED: ordinary receipt required")
+    receipt_node = _InstallTransaction._capture_node(receipt)
+    with _InstallTransaction._copy_reference(receipt, receipt_node) as (fd, _bound):
+        receipt_bytes = _InstallTransaction._descriptor_bytes(fd, path=receipt)
+    record = ownership.decode_record(receipt_bytes, provider, scope)
+    selection = record.get("configs", {}).get(client["registration"], {})
+    handlers = selection.get("handlers", [])
+    if selection.get("kind") != "hooks" or not handlers:
+        raise ValueError("E_HOOK_LOCALIZATION_UNRESOLVED: managed hook receipt required")
+    specs = {marker: (script, event, matcher) for marker, script, event, matcher
+             in _hook_specs(provider, anchor / client["canonical_runtime"])}
+    health = _hook_health_module(root)
+    targets = {marker: {str(specs[marker][0])} for marker in {row["marker"] for row in handlers}
+               if marker in specs}
+    observed = [dict(event=event, marker=invocation.marker,
+                     context={key: value for key, value in group.items() if key != "hooks"}, handler=handler)
+                for event, _gi, _hi, group, handler, invocation in health._owned_records(
+                    json.loads(payload), set(targets), provider,
+                    "windows" if os.name == "nt" else "posix", targets)]
+    dependency_nodes = [(source, source_node), (receipt, receipt_node)]
+    dependencies = [(source, hashlib.sha256(payload).hexdigest()),
+                    (receipt, hashlib.sha256(receipt_bytes).hexdigest())]
+    for row in handlers:
+        if observed.count(row) != 1 or row["marker"] not in specs:
+            raise ValueError("E_HOOK_LOCALIZATION_UNRESOLVED: exact managed invocation mismatch")
+        script = specs[row["marker"]][0]
+        digest = record["files"].get(script.relative_to(anchor).as_posix())
+        if digest is None or _contains_reparse(script) or _file_sha256(script) != digest:
+            raise ValueError("E_HOOK_LOCALIZATION_UNRESOLVED: managed script digest")
+        script_node = _InstallTransaction._capture_node(script)
+        with _InstallTransaction._copy_reference(script, script_node) as (fd, _bound):
+            if hashlib.sha256(_InstallTransaction._descriptor_bytes(fd, path=script)).hexdigest() != digest:
+                raise ValueError("E_HOOK_LOCALIZATION_DRIFT: managed script bytes")
+        dependencies.append((script, digest))
+        dependency_nodes.append((script, script_node))
+    if not _InstallTransaction._point_matches(registration, original) or registration.resolve(strict=True) != source:
+        raise ValueError("E_HOOK_LOCALIZATION_DRIFT: link")
+    inventory = registration.parent / health.INVENTORY_NAME
+    backup = registration.with_name(registration.name + ".orche-localization-link")
+    inventory_backup = inventory.with_name(inventory.name + ".orche-localization-prior")
+    for path in (backup, inventory_backup):
+        if os.path.lexists(path):
+            raise ValueError("E_HOOK_LOCALIZATION_UNRESOLVED: retained backup collision")
+    if _contains_reparse(inventory) or inventory.exists() and not inventory.is_file():
+        raise ValueError("E_HOOK_LOCALIZATION_UNRESOLVED: local inventory type")
+    return _HookFileLocalization(anchor, registration, source, original, payload,
+        tuple(dict(dependencies).items()), tuple(dict(dependency_nodes).items()), backup, inventory, inventory_backup)
+
+
+def _apply_hook_file_localization(plan: _HookFileLocalization, transaction: _InstallTransaction,
+                                  owner: _CreateOnlyMutablePath) -> None:
+    """Compose in the install transaction; failure restores link, not its referent."""
+    dependencies = []
+    for path, digest in plan.dependencies:
+        node = _admitted_mutation_image(transaction, path).get(path)
+        if (node is None or node.kind != "file" or node.data != digest
+                or node != dict(plan.dependency_nodes)[path]):
+            raise ValueError("E_HOOK_LOCALIZATION_DRIFT: selected dependency identity")
+        with transaction._copy_reference(path, node) as (fd, _bound):
+            if hashlib.sha256(transaction._descriptor_bytes(fd, path=path)).hexdigest() != digest:
+                raise ValueError("E_HOOK_LOCALIZATION_DRIFT: selected bytes")
+        if path == plan.source:
+            read_owner = owner if path.is_relative_to(owner.anchor) else _CreateOnlyMutablePath(
+                path.parent, transaction, dry_run=owner.dry_run)
+            dependency = transaction.bind_readonly_path(read_owner, path)
+            transaction.assert_readonly_path(dependency, check_content=True)
+            dependencies.append(dependency)
+    original = _admitted_mutation_image(transaction, plan.registration)
+    if (original != {plan.registration: plan.original}
+            or not transaction._image_matches(plan.registration, original)
+            or plan.registration.resolve(strict=True) != plan.source):
+        raise ValueError("E_HOOK_LOCALIZATION_DRIFT: selected link")
+    if owner.dry_run:
+        return
+    with transaction.direct_operation():
+        staged = {}
+        def record(path, node):
+            nonlocal temporary
+            temporary = path
+            staged[path] = node
+            transaction._advance(path, {path: node})
+        temporary = None
+        primary = None
+        try:
+            temporary, _node = transaction._prepare_payload_file(plan.registration.parent,
+                ".orchestrarium-hook-local-", plan.payload, record, mode=None, fsync="required")
+            effect = transaction.arm_replacement(plan.registration, temporary, owner,
+                retained_destination=plan.backup, preserve_on_commit=True)
+            effect.readonly_dependencies = tuple(dependencies)
+            owner._replace_prepared(plan.registration, temporary, effect=effect)
+            staged.clear()
+            if plan.inventory.exists():
+                inventory_image = _admitted_mutation_image(transaction, plan.inventory)
+                owner.retain_path(plan.inventory.relative_to(owner.anchor), inventory_image,
+                    retained_destination=plan.inventory_backup, preserve_on_commit=True)
+            for dependency in dependencies:
+                transaction.assert_readonly_path(dependency, check_content=True)
+        except BaseException as error:
+            primary = error
+            raise
+        finally:
+            if staged and temporary is not None and temporary.exists():
+                owner._settle_prepared(temporary, staged, primary)
+
+
+def _localize_hook_file(root: Path, provider: str, anchor: Path, scope: str, *, apply: bool):
+    """Same phase as normal install, exposed to isolated transaction tests."""
+    plan = _plan_hook_file_localization(root, provider, anchor, scope)
+    paths = [plan.registration, plan.backup, plan.inventory, plan.inventory_backup,
+             *(path for path, _digest in plan.dependencies)]
+    with _InstallTransaction(paths, enabled=apply, link_object_paths=(plan.registration,),
+            readonly_paths=(plan.source,)) as transaction:
+        owner = _CreateOnlyMutablePath(plan.anchor, transaction, dry_run=not apply)
+        _apply_hook_file_localization(plan, transaction, owner)
+        if apply:
+            transaction.commit()
+    return dict(status="localized" if apply else "preview", link_backup=str(plan.backup))
+
+
+@dataclass(frozen=True)
 class _HookConfigInput:
     """Read-only input for H's existing Path-like JSON loader, from bound bytes."""
     target: Path
@@ -13177,6 +13335,10 @@ def _record_provider_install(root, provider, mode, target, anchor, transaction, 
     for path, node in current.items():
         if path in selected_paths or temporary(path) or node.kind != "file" or not any(path == base or base in path.parents for base in transaction.paths):
             continue
+        if not path.is_relative_to(anchor):
+            if any(path == selected or selected in path.parents for selected in transaction._readonly_paths):
+                continue  # Explicit external read dependencies are not provider-owned payloads.
+            raise ValueError("E_PROVIDER_RECEIPT_INVALID: external mutation image")
         relative = path.relative_to(anchor).as_posix()
         parts = relative.split("/")
         if not any(relative.startswith(prefix + "/") for prefix in payload_roots) or "__pycache__" in parts:
@@ -13779,6 +13941,9 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
+    if args.localize_hook_file and (provider != "codex" or args.uninstall or args.materialize_legacy_skills):
+        print("FAIL: hook localization composes only with Codex installation", file=sys.stderr)
+        return 2
     if args.uninstall_selection is not None and not args.uninstall:
         print("FAIL: --uninstall-selection requires --uninstall", file=sys.stderr)
         return 1
@@ -13968,6 +14133,9 @@ def install(provider: str, argv: list[str] | None = None) -> int:
         codex_post_tree_runtime: tuple[tuple[Path, Path], ...] = ()
         codex_role_manifest: dict[str, Any] | None = None
         codex_native_role_plan: _CodexNativeRolesPlan | None = None
+        hook_localization = (_plan_hook_file_localization(root, provider,
+            target.parent if mode == "global" else project, "global" if mode == "global" else "project")
+            if args.localize_hook_file else None)
         codex_hook_inventory = registration.parent / CODEX_HOOK_INVENTORY
         if provider == "codex":
             codex_role_manifest = _source_codex_role_manifest(
@@ -14095,6 +14263,8 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             print("  [dry-run] unreceipted non-Lead priors "
                   f"{', '.join(sorted(args.replace_unreceipted_skill_sha256))}: "
                   f"{len(args.replace_unreceipted_skill_sha256) + 1} replacements")
+        if hook_localization is not None:
+            codex_hook_inventory = hook_localization.inventory
         transaction_paths = _installer_mutation_paths(
             provider=provider,
             source=source,
@@ -14191,6 +14361,10 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             transaction_paths.append(target / _PROVIDER_RECEIPT_NAME)
         elif fresh_receipt is not None:
             transaction_paths.append(fresh_receipt)
+        if hook_localization is not None:
+            transaction_paths.extend([hook_localization.backup, hook_localization.inventory_backup,
+                                      *(path for path, _digest in hook_localization.dependencies)])
+            readonly_transport_paths += (hook_localization.source,)
         transaction = _InstallTransaction(
             transaction_paths,
             enabled=not args.dry_run,
@@ -14224,6 +14398,9 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     create_only = _CreateOnlyMutablePath.bind_or_create_anchor(
                         mutable_anchor, transaction, admitted_parent=admitted_parent,
                         parent_state=parent_state, dry_run=False)
+            if hook_localization is not None:
+                _apply_hook_file_localization(hook_localization, transaction, create_only)
+                print("  Hook file localized" if not args.dry_run else "  [dry-run] hook file localization selected")
             receipt_path = target / ".orche-install.v1.json"
             create_only.destination(receipt_path.relative_to(create_only.anchor))
             if receipt_path.exists() and receipt_path.stat().st_size > 4 * 1024 * 1024:

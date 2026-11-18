@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Add an explicit Codex hook-file localization phase to the normal installer transaction for verified managed registrations. Preserve shared configuration and foreign hooks, retain the original local link for recovery, and invalidate only the prior local inventory; this prepares machine-local runtime updates without granting trust or treating localization as a completed runtime repair.
+
 - Specify the existing retained-Python route for first-version owned hooks and orchestration, with separate provider environments derived from that base. Record isolated Windows assembly, relocation and hook-registration evidence without presenting it as global rollout, client trust or a successful native Lead handoff.
 
 - Resolve Windows system directories through the operating system rather than assuming the system drive, preserving explicit command-processor selection and refusing Bash candidates when the Windows root cannot be established. Update operator examples to use selected project/client locations and a caller-selected FFmpeg command. These portability fixes do not migrate shared hook registrations or qualify a shipped Python runtime.
