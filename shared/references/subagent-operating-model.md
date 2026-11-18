@@ -988,6 +988,12 @@ assignment. The Host rechecks the assignment and exact request bindings before
 effects and uses existing execution, ledger receiving and lifecycle owners.
 Neither a role label, descriptive scope text nor a permissive model response is
 a grant. New tasks outside the catalog remain proposals for Root admission.
+Root-published decisions may add concrete admitted requests to the effective
+catalog without rewriting the base assignment. Persist proposal/admission identity
+and exact request provenance through the existing artifact/ledger owners; a child
+proposal or callback approval boolean is not authority. Unknown admission holds
+only dependent work, and does not imply a mandatory human approval for routine
+work already within the Root's permissions.
 
 Root and sibling items cannot be selected by a child lifecycle argument. Actual
 close still requires canonical child outcome and independent acceptance under the

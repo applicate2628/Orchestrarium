@@ -53,6 +53,11 @@ def coordination_terminal_payload(request, observation, *, output_context, admit
             from .runtime import continuation_context_sha256
             content["native_continuation"]={"schema_version":2,"thread_id":result.native_thread_id,
                 "turn_id":result.native_turn_id,"context_sha256":continuation_context_sha256(request,selection),"session_depth":0}
+    if complete and request.child_choice_json is not None:
+        intent=strict_json(result.intent_json)
+        if intent["action"]=="propose":
+            content["child_proposal"]={"assignment_sha256":strict_json(request.child_choice_json)["assignment_sha256"],
+                "proposal":intent["proposal"]}
     # This is not a provider-review envelope or a verdict. The existing receiver
     # uses common identity/resultText fields only to bind artifact and terminal.
     payload = {

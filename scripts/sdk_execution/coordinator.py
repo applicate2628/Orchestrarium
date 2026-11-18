@@ -416,7 +416,12 @@ class ChildLeadCoordinator:
         if type(completed) is not dict or type(received) is not dict or set(received) != set(completed):
             raise CoordinatorBindingError("canonical child receipt projection unavailable")
         catalog = []
-        for request_id in assignment.request_ids:
+        catalog_ids = (tuple(key for key,_ in self._authority.child_catalog(assignment))
+                       if callable(getattr(self._authority,"child_catalog",None)) else assignment.request_ids)
+        bound_ids = (set(self._authority.child_bound_request_ids(assignment))
+                     if callable(getattr(self._authority,"child_bound_request_ids",None)) else set(catalog_ids))
+        catalog_ids = tuple(key for key in catalog_ids if key in bound_ids)
+        for request_id in catalog_ids:
             request = self._authority.resolve(request_id)
             if type(request) is not ExecutionRequest:
                 raise CoordinatorBindingError("child catalog request unavailable")
@@ -424,16 +429,20 @@ class ChildLeadCoordinator:
                 "request_sha256": hashlib.sha256(json_text(request.to_dict()).encode()).hexdigest(),
                 "role": request.role, "scope": list(request.scope), "prompt": request.prompt})
         value = {"assignment_sha256": assignment.assignment_sha256, "catalog": catalog,
-            "required_request_ids": list(assignment.required_request_ids),
+            "required_request_ids": [key for key in (self._authority.child_required_request_ids(assignment)
+                if callable(getattr(self._authority,"child_required_request_ids",None)) else assignment.required_request_ids) if key in bound_ids],
             "completed_request_ids": sorted(completed),
             "received_results": [{"request_id": key, "result": received[key]} for key in sorted(received)],
             "unavailable_results": [{"request_id": key, "result": attempted[key]} for key in sorted(set(attempted)-set(completed))]}
+        if callable(getattr(self._authority,"proposal_results",None)):
+            outcomes=self._authority.proposal_results(assignment)
+            value["proposal_results"]=[{"proposal_id":key,"result":outcomes[key]} for key in sorted(outcomes)]
         encoded = json_text(value)
         validate_child_choice(encoded)
         return encoded
 
     async def run(self):
-        from .runtime import SdkCoordinationWorker, SdkReviewExecutor
+        from .runtime import SdkCoordinationWorker, SdkReviewExecutor, RuntimeBindingError
         from .coordination import validate_intent, validate_child_choice
         from .contracts import strict_json
         if self._used:
@@ -447,8 +456,15 @@ class ChildLeadCoordinator:
                 state = validate_child_choice(projection)
                 completed_ids = set(state["completed_request_ids"])
                 unavailable_ids = {row["request_id"] for row in state["unavailable_results"]}
-                pending_ids = set(assignment.request_ids) - completed_ids - unavailable_ids
-                if not pending_ids and set(assignment.required_request_ids) - completed_ids:
+                pending_ids = {row["request_id"] for row in state["catalog"]} - completed_ids - unavailable_ids
+                pending_proposals=[row for row in state.get("proposal_results",[]) if row["result"]["status"]=="pending"]
+                unbound = [row for row in state.get("proposal_results",[]) if row["result"]["status"]=="accepted" and row["result"].get("required", True)
+                           and row["result"]["request_id"] not in {item["request_id"] for item in state["catalog"]}]
+                if not pending_ids and unbound:
+                    return {"status":"needs-host-refresh", "child_id":assignment.child_id}
+                if not pending_ids and pending_proposals:
+                    return {"status":"needs-admission","child_id":assignment.child_id,"proposals":pending_proposals}
+                if not pending_ids and set(state["required_request_ids"]) - completed_ids:
                     return {"status": "needs-reconciliation", "child_id": assignment.child_id,
                             "unavailable_results": state["unavailable_results"]}
                 self._current(assignment, "child_decision_prepare")
@@ -475,8 +491,32 @@ class ChildLeadCoordinator:
                     self.active_executor = None
                     intent = strict_json(validate_intent(observation.result.intent_json, decision_request))
                 self._current(assignment, "child_decision_received")
-                if self._projection(assignment) != projection:
-                    raise CoordinatorBindingError("child state changed during decision")
+                if intent["action"] == "propose":
+                    # This is data, not delegation or lifecycle authority. The
+                    # owner verifies the actual received source and records its
+                    # canonical disposition, including duplicate submissions.
+                    self._authority.submit_child_proposal(assignment, worker, intent["proposal"])
+                    continue
+                current_projection = self._projection(assignment)
+                if current_projection != projection:
+                    previous_state = strict_json(projection)
+                    current_state = strict_json(current_projection)
+                    comparable = dict(current_state)
+                    if "proposal_results" in previous_state and "proposal_results" in comparable:
+                        comparable["proposal_results"] = previous_state["proposal_results"]
+                    if comparable != previous_state:
+                        raise CoordinatorBindingError("child state changed during decision")
+                    # Only canonical Root admission outcomes changed. Existing
+                    # bound task identity/status is unchanged; its ordinary
+                    # current-authority and atomic claim still guard execution.
+                    if intent["action"] == "finish":
+                        rows = current_state.get("proposal_results", [])
+                        pending = [row for row in rows if row["result"]["status"] == "pending"]
+                        if pending:
+                            return {"status":"needs-admission", "child_id":assignment.child_id, "proposals":pending}
+                        if any(row["result"]["status"] == "accepted" and row["result"].get("required", True) and row["result"]["request_id"] not in
+                               {item["request_id"] for item in current_state["catalog"]} for row in rows):
+                            return {"status":"needs-host-refresh", "child_id":assignment.child_id}
                 if intent["action"] == "cancel":
                     return await self._authority.cancel_child(assignment)
                 if intent["action"] == "finish":
@@ -507,6 +547,10 @@ class ChildLeadCoordinator:
                 self._current(assignment, "child_result_received")
                 if request_id not in self._authority.attempted_requests(assignment):
                     raise CoordinatorBindingError("child execution has no canonical attempted receipt")
+        except RuntimeBindingError as error:
+            if str(error) != "child_catalog_refresh_required":
+                raise
+            return {"status":"needs-host-refresh", "child_id":assignment.child_id}
         except asyncio.CancelledError:
             # Concrete executor cancellation drains its owned process before
             # this lifecycle owner settles or preserves the uncertain child.

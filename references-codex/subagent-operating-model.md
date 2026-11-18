@@ -69,7 +69,11 @@ native thread and starts a new turn; its evidence and single-successor claims us
 the existing ledger. Recovery first resolves saved decisions without replaying
 attempted tasks. This does not control native subagent depth or authorize tools
 inside the decision turn. Root/sibling mutation and global acceptance remain
-outside the child assignment; offline coverage is not native qualification.
+outside the child assignment; offline coverage is not native qualification. Dynamic
+proposals return to existing Root admission. Root-published additive receipts may
+extend the effective catalog while its native session remains bound to the original
+assignment; preserve pending/rejected outcomes and avoid duplicate admission or
+execution after restart.
 
 ## Codex-specific runtime notes
 

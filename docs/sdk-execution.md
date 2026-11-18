@@ -330,7 +330,8 @@ a filesystem sandbox; each selected executor retains its own real permissions.
    received-state projection. A model response cannot manufacture an admitted
    request, choose another work-item or grant itself broader access.
 3. Run the coordinator. Each decision selects an available admitted request,
-   requests child completion, or requests cancellation. The Host performs effects
+   proposes a new task for Root admission, requests child completion, or requests
+   cancellation. The Host performs effects
    through the existing executors, receiving and lifecycle owners. A declared
    success in model text does not satisfy independent review or close gates.
 4. After interruption, reconstruct from the same assignment and canonical ledger,
@@ -341,7 +342,7 @@ Root explicitly selects `decision_session_mode`: `fresh-handoff` preserves
 separate SDK decision sessions; `native-persistent` uses one actual Codex native
 thread across new decision turns. Legacy assignments retain `fresh-handoff`.
 There is no automatic switch to a fresh thread when persistence or recovery fails.
-Both modes keep the same catalog, Host permissions and independent acceptance.
+Both modes keep the same Root-controlled catalog, Host permissions and independent acceptance.
 
 The official Codex Python SDK exposes `thread_resume` and `turn_start`
 ([reviewed client source, v0.169.0](https://github.com/openai/codex/blob/rust-v0.169.0/sdk/python/src/openai_codex/client.py)).
@@ -365,9 +366,52 @@ cannot silently create parallel native threads for the same session. Unknown or
 blocked decisions are retained for reconciliation, not used as continuation
 receipts. Child finish/cancel still goes through existing lifecycle owners.
 
-This does **not** provide provider-native child-agent steering or dynamic admission
-of arbitrary new work. Requests outside the catalog return to Root admission.
-The separate Consultant fork mechanism does not grant child-Lead authority.
+### Dynamic child tasks through Root admission
+
+This additive route starts from an existing Root child assignment with its seed
+admitted task catalog. It does not yet redesign empty-catalog child creation or
+supply a generic Root task synthesizer. A child can propose a task without granting
+itself execution rights. The proposal contains a stable proposal identity and task intent (role, prompt and descriptive
+scope), not an executable provider/model/budget/write-permission selection.
+The actual Root Host admits and registers a concrete immutable request with its
+runtime selection through the existing authority.
+`runtime.publish_child_task_admission` publishes an accepted request/selection
+binding or a declined outcome for the received proposal. Publishing the admission
+records the exact proposal-to-request binding in Root's existing artifact/ledger;
+a model-supplied approval flag or a callback return is not that evidence.
+
+Accepted additions extend the effective catalog without rewriting the original
+assignment or changing its native conversation identity. Declined and unresolved
+proposals remain visible in received state. The first canonical received proposal
+owns its identity: identical duplicates do not create another task, and later
+conflicting payloads cannot overwrite that proposal or its Root admission. Their
+original decision evidence is retained without suspending unrelated catalog work. Recovery reuses the same proposal and
+admission identity rather than silently repeating admission or native inference;
+new admitted tasks retain the existing execution claim and lifecycle checks.
+A proposal already received in a canonical decision artifact survives a crash
+before explicit submission, in either session mode. Root-required accepted
+additions participate in child completion criteria; they are not forgotten when
+the original catalog is done. An explicitly optional addition remains optional,
+including after Host restart. Independent ready tasks can proceed while a proposal awaits Root's
+decision, but pending admission is not silently treated as rejected or complete.
+If Root accepts a task while an existing task is running, the accepted receipt
+does not invalidate that task's unchanged authority. The Host supplies the new
+concrete request/selection/executor at a coordination boundary. Until then, known
+ready tasks may continue; `needs-host-refresh` describes the missing binding for
+the addition, not a blanket suspension or permission to manufacture an executor.
+
+The current Root authority resolves and checks requests; it does not include a
+generic automatic task synthesizer. This integration therefore supports a durable
+machine handoff: inspect the pending proposal, let the existing Root Host publish
+its decision, then resume child execution with the admitted request and executor.
+`needs-admission` does not by itself mean a new mandatory question to the user.
+Root can perform already authorized routine admission programmatically; existing
+user permissions still govern consequential actions and model spending. Do not
+claim that an automatic Root decision policy was installed by this interface.
+
+This does **not** provide provider-native child-agent steering or allow a child
+to admit arbitrary new work. The separate Consultant fork mechanism does not
+grant child-Lead authority.
 Installed/native qualification still requires authorized provider execution;
 offline tests exercise the real Host chain with a simulated native boundary and
 must not be presented as installed or live acceptance.

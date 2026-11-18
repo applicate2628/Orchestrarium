@@ -655,6 +655,7 @@ def _received_native_context(request, selection, predecessor_evidence_run_id, *,
     document = strict_json(content.decode("utf-8"), max_bytes=size)
     document_keys = ({"operation","evidence","process","reported_sdk_configuration","native_continuation"} if coordination
         else {"task","reported_sdk_configuration","native_continuation"})
+    if coordination and type(document) is dict and "child_proposal" in document:document_keys.add("child_proposal")
     if type(document) is not dict or set(document) != document_keys:
         raise RuntimeBindingError("continuation_durable_provenance_required")
     native = document["native_continuation"]
@@ -1277,6 +1278,90 @@ def publish_child_assignment(*, root_selection, root_authority, selections, chil
     return _load_child_assignment(root_selection,child_id)
 
 
+def _child_artifact_document(selection,row):
+    from .contracts import strict_json
+    from .receiving import review_artifact_target
+    size=row.get("artifactSizeBytes")
+    if type(size) is not int or size<=0 or not _sha256(row.get("artifactRevision")):
+        raise RuntimeBindingError("child_receipt_invalid")
+    path=review_artifact_target(selection.work_item,row.get("artifact",""))
+    with path.open("rb") as stream:
+        before=os.fstat(stream.fileno())
+        if before.st_size!=size:raise RuntimeBindingError("child_receipt_changed")
+        raw=stream.read(size+1)
+    after=path.stat()
+    if len(raw)!=size or (before.st_dev,before.st_ino)!=(after.st_dev,after.st_ino) or hashlib.sha256(raw).hexdigest()!=row["artifactRevision"]:
+        raise RuntimeBindingError("child_receipt_changed")
+    return strict_json(raw.decode(),max_bytes=size)
+
+
+def publish_child_task_admission(*,authority,proposal_id,accepted,artifact,started_at,
+        request_id=None,selection=None,required=True):
+    """Trusted Root publishes its concrete admission, not a model permission."""
+    from .receiving import review_artifact_target
+    if type(authority) is not ChildLeadAuthority or type(accepted) is not bool or type(required) is not bool:
+        raise RuntimeBindingError("child_task_admission_invalid")
+    assignment=authority.resolve_child(authority._child_id)
+    authority.assert_child_current(assignment,"child_task_admission")
+    proposal=authority.proposal_results(assignment).get(proposal_id)
+    if proposal is None:raise RuntimeBindingError("child_proposal_unavailable")
+    digest=None
+    if accepted:
+        if type(request_id) is not str or not request_id:raise RuntimeBindingError("child_task_admission_invalid")
+        request=authority._root_authority.resolve(request_id)
+        validate_admitted_request(request,selection)
+        _require_authority(authority._root_authority.assert_current,request,"child_task_admission")
+        if (selection.work_item!=assignment.child_work_item or request.coordinator_binding!=assignment.coordinator_binding
+            or not set(request.scope)<=set(assignment.scope) or not set(request.scope)<=set(proposal["proposal"]["scope"])):
+            raise RuntimeBindingError("child_task_scope_mismatch")
+        digest=request_sha256(request,selection)
+        if request_id in dict(assignment.catalog):raise RuntimeBindingError("child_task_already_assigned")
+    elif request_id is not None or selection is not None:
+        raise RuntimeBindingError("child_rejection_has_request")
+    doc={"schemaVersion":1,"assignment_sha256":assignment.assignment_sha256,"proposal_id":proposal_id,
+        "proposal_sha256":hashlib.sha256(json_text(proposal["proposal"]).encode()).hexdigest(),
+        "source_evidence_id":proposal["source_evidence_id"],"status":"accepted" if accepted else "rejected",
+        "request_id":request_id,"request_sha256":digest,"required":required if accepted else False}
+    if proposal["status"]!="pending":
+        if proposal["admission"]!=doc:raise RuntimeBindingError("child_proposal_already_decided")
+        return proposal
+    root_selection=authority._root_selection
+    content=(json_text(doc)+"\n").encode()
+    target=review_artifact_target(root_selection.work_item,artifact)
+    if not os.path.lexists(target):
+        with _owner().TerminalReceiptV1.reserve(target) as receipt:receipt.commit(content)
+    # Reconcile only exact currently admitted bytes; never overwrite an orphan.
+    expected_artifact={"artifact":artifact,"artifactSizeBytes":len(content),"artifactRevision":hashlib.sha256(content).hexdigest()}
+    if _child_artifact_document(root_selection,expected_artifact)!=doc:raise RuntimeBindingError("child_admission_artifact_changed")
+    writer,validator,budget=_ledger(root_selection)
+    identity=hashlib.sha256(json_text([assignment.assignment_sha256,proposal_id]).encode()).hexdigest()
+    event=_child_record(writer,validator,root_selection,run_id="child-admission-"+identity,
+        artifact=artifact,content=content,scope="child-task-admission:"+assignment.assignment_sha256,instant=started_at)
+    def append(previous):
+        errors=[];rows=validator.load_jsonl(Path(root_selection.work_item)/"agent-runs.jsonl",errors,source_bytes=previous.encode(),ledger_resource_budget=budget)
+        if errors:raise RuntimeBindingError("child_ledger_invalid")
+        _load_child_assignment(root_selection,assignment.child_id,events=rows)
+        if _child_artifact_document(root_selection,expected_artifact)!=doc:raise RuntimeBindingError("child_admission_artifact_changed")
+        prior=authority._proposal_results(assignment,root_events=rows).get(proposal_id)
+        if prior is None or prior["status"]!="pending" or prior["proposal"]!=proposal["proposal"]:
+            raise RuntimeBindingError("child_proposal_already_decided")
+        if accepted:
+            current=authority._root_authority.resolve(request_id)
+            if request_sha256(current,selection)!=digest:raise RuntimeBindingError("child_task_admission_changed")
+            _require_authority(authority._root_authority.assert_current,current,"child_task_admission_commit")
+            if any(v["status"]=="accepted" and v["request_id"]==request_id for v in authority._proposal_results(assignment,root_events=rows).values()):
+                raise RuntimeBindingError("child_task_already_assigned")
+        return event
+    try:
+        writer._append_event_transaction(Path(root_selection.work_item),validator,append,ledger_resource_budget=budget)
+    except Exception:
+        # A lost acknowledgement is not a second admission. Read canonical outcome.
+        current=authority.proposal_results(assignment).get(proposal_id)
+        if current is None or current.get("admission")!=doc:raise
+        return current
+    return authority.proposal_results(assignment)[proposal_id]
+
+
 class ChildLeadAuthority:
     """Scoped facade over existing Root admission, runtime, ledger and lifecycle."""
     def __init__(self, *, root_authority, root_selection, child_id, selections,
@@ -1287,12 +1372,101 @@ class ChildLeadAuthority:
         self._repository_root=Path(repository_root).resolve(strict=True)
         self.cancellation_receipts={}
         assignment=self.resolve_child(child_id)
-        if set(self._selections)!=set(assignment.request_ids):raise RuntimeBindingError('child_catalog_mismatch')
+        if not set(assignment.request_ids)<=set(self._selections)<=set(dict(self.child_catalog(assignment))):raise RuntimeBindingError('child_catalog_mismatch')
         lifecycle=_ledger(self._root_selection)[1].load_lifecycle_owner()
         category,slug=lifecycle._canonical_category('work-item:'+Path(assignment.child_work_item).name)
         expected=lifecycle._work_items_root(self._repository_root)/'active'/slug
         if expected.resolve()!=Path(assignment.child_work_item).resolve():
             raise RuntimeBindingError('child_repository_identity_mismatch')
+
+    def _proposal_results(self,assignment,*,root_events=None):
+        from .coordination import validate_task_proposal
+        result={}
+        # Completed received decisions are the pending-data owner in both modes.
+        selection=replace(self._root_selection,work_item=assignment.child_work_item)
+        _,item=self._actual_item(assignment)
+        selection=replace(selection,work_item=str(item))
+        if os.path.lexists(item/"agent-runs.jsonl"):
+            _,_,events=_events(selection)
+            for row in events:
+                selected=row.get("sdkExecution",{})
+                if (row.get("eventKind")!="terminal" or row.get("status")!="completed"
+                    or selected.get("schemaVersion")!=5 or selected.get("operationKind")!="scoped-child-coordination"):
+                    continue
+                doc=_child_artifact_document(selection,row)
+                binding=doc.get("child_proposal")
+                if binding is None:continue
+                if type(binding) is not dict or set(binding)!={"assignment_sha256","proposal"}:
+                    raise RuntimeBindingError("child_proposal_receipt_invalid")
+                if binding["assignment_sha256"]!=assignment.assignment_sha256:continue
+                proposal=validate_task_proposal(binding["proposal"])
+                intent=doc.get("evidence",{}).get("intent",{})
+                launches=[e for e in events if e.get("runId")==row.get("launchRunId")]
+                if (len(launches)!=1 or launches[0].get("sdkExecution")!=selected
+                    or row.get("executionRole")!="main" or row.get("assignedRole")!="lead" or row.get("gate")!="none"
+                    or row.get("authorizing") is not False or row.get("closesRunIds")!=[]
+                    or intent.get("action")!="propose" or intent.get("proposal")!=proposal
+                    or intent.get("child_choice_sha256")!=selected.get("childChoiceSha256")):
+                    raise RuntimeBindingError("child_proposal_receipt_invalid")
+                key=proposal["proposal_id"]
+                if key in result:
+                    # The first canonical append owns the identity. Later model
+                    # data cannot replace it or veto unrelated admitted work.
+                    if result[key]["proposal"]!=proposal:
+                        result[key].setdefault("rejected_duplicates",[]).append({"source_evidence_id":row["runId"],
+                            "proposal_sha256":hashlib.sha256(json_text(proposal).encode()).hexdigest(),"reason":"proposal_identity_reused"})
+                    continue
+                result[key]={"proposal":proposal,"status":"pending","request_id":None,"required":False,
+                    "source_evidence_id":row["runId"],"admission":None}
+        if root_events is None:root_events=_events(self._root_selection)[2]
+        for row in root_events:
+            if row.get("scope")!=["child-task-admission:"+assignment.assignment_sha256]:continue
+            doc=_child_artifact_document(self._root_selection,row)
+            fields={"schemaVersion","assignment_sha256","proposal_id","proposal_sha256","source_evidence_id","status","request_id","request_sha256","required"}
+            if (type(doc) is not dict or set(doc)!=fields or type(doc["schemaVersion"]) is not int or doc["schemaVersion"]!=1
+                or doc["assignment_sha256"]!=assignment.assignment_sha256 or type(doc["proposal_id"]) is not str
+                or type(doc["status"]) is not str or doc["status"] not in {"accepted","rejected"}
+                or type(doc["required"]) is not bool
+                or any(row.get(k)!=v for k,v in {"role":"lead","eventKind":"standalone","status":"completed","gate":"none"}.items())):
+                raise RuntimeBindingError("child_task_admission_invalid")
+            prior=result.get(doc["proposal_id"])
+            if (prior is None or prior["status"]!="pending" or doc["source_evidence_id"]!=prior["source_evidence_id"]
+                or doc["proposal_sha256"]!=hashlib.sha256(json_text(prior["proposal"]).encode()).hexdigest()):
+                raise RuntimeBindingError("child_task_admission_unbound")
+            if doc["status"]=="accepted":
+                if type(doc["request_id"]) is not str or not doc["request_id"] or not _sha256(doc["request_sha256"]):
+                    raise RuntimeBindingError("child_task_admission_invalid")
+            elif doc["request_id"] is not None or doc["request_sha256"] is not None or doc["required"]:
+                raise RuntimeBindingError("child_task_admission_invalid")
+            result[doc["proposal_id"]]={**prior,"status":doc["status"],"request_id":doc["request_id"],"required":doc["required"],"admission":doc}
+        return result
+
+    def proposal_results(self,assignment):
+        if assignment!=self.resolve_child(assignment.child_id):raise RuntimeBindingError("child_assignment_changed")
+        return self._proposal_results(assignment)
+
+    def child_catalog(self,assignment):
+        rows=list(assignment.catalog)
+        rows.extend((v["request_id"],v["admission"]["request_sha256"]) for v in self.proposal_results(assignment).values() if v["status"]=="accepted")
+        if len({r[0] for r in rows})!=len(rows):raise RuntimeBindingError("child_task_identity_reused")
+        return tuple(rows)
+
+    def child_bound_request_ids(self,assignment):
+        # Availability is not permission: the full canonical catalog stays required.
+        return tuple(key for key,_digest in self.child_catalog(assignment) if key in self._selections)
+
+    def child_required_request_ids(self,assignment):
+        return (*assignment.required_request_ids,*(v["request_id"] for v in self.proposal_results(assignment).values() if v["status"]=="accepted" and v["required"]))
+
+    def submit_child_proposal(self,assignment,worker,proposal):
+        # Receiving already durably recorded this data; no second pending store.
+        self.assert_child_current(assignment,"child_proposal")
+        found=self.proposal_results(assignment).get(proposal["proposal_id"])
+        if found is None:raise RuntimeBindingError("child_proposal_not_received")
+        if found["proposal"]!=proposal and not any(row["proposal_sha256"]==hashlib.sha256(json_text(proposal).encode()).hexdigest()
+                for row in found.get("rejected_duplicates",[])):
+            raise RuntimeBindingError("child_proposal_not_received")
+        return found
 
     def resolve_child(self,child_id):
         if child_id!=self._child_id:raise RuntimeBindingError('another_child_assignment')
@@ -1308,12 +1482,13 @@ class ChildLeadAuthority:
         _,item=self._actual_item(assignment)
         if effect not in {'finish','recovery','result'} and item.resolve()!=Path(assignment.child_work_item).resolve():
             raise RuntimeBindingError('child_work_item_not_active')
-        for request_id in assignment.request_ids:
+        catalog=dict(self.child_catalog(assignment))
+        for request_id in self._selections:
             request=self._root_authority.resolve(request_id)
             selection=self._selections[request_id]
             if (selection.work_item!=assignment.child_work_item or request.coordinator_binding!=assignment.coordinator_binding
                 or not set(request.scope)<=set(assignment.scope)
-                or request_sha256(request,selection)!=dict(assignment.catalog)[request_id]):
+                or request_sha256(request,selection)!=catalog[request_id]):
                 raise RuntimeBindingError('child_catalog_changed')
             _require_authority(self._root_authority.assert_current,request,effect)
 
@@ -1323,16 +1498,17 @@ class ChildLeadAuthority:
             current=self._root_authority.resolve(request_id)
             if current!=self._decision_requests[request_id]:raise RuntimeBindingError('child_decision_changed')
             return current
-        if request_id not in assignment.request_ids:raise RuntimeBindingError('unassigned_child_request')
+        catalog=dict(self.child_catalog(assignment))
+        if request_id not in catalog:raise RuntimeBindingError('unassigned_child_request')
+        if request_id not in self._selections:raise RuntimeBindingError('child_catalog_refresh_required')
         request=self._root_authority.resolve(request_id)
-        if request_sha256(request,self._selections[request_id])!=dict(assignment.catalog)[request_id]:
+        if request_sha256(request,self._selections[request_id])!=catalog[request_id]:
             raise RuntimeBindingError('child_catalog_changed')
         return request
 
     def assert_current(self,request,effect):
         assignment=self.resolve_child(self._child_id)
         self.assert_child_current(assignment,effect)
-        admitted=any(self.resolve(i)==request for i in assignment.request_ids)
         if type(request) is CoordinationInferenceRequest:
             admitted=any(self.resolve(i)==request for i in self._decision_workers)
             _require_authority(self._root_authority.assert_current,request,effect)
@@ -1343,15 +1519,19 @@ class ChildLeadAuthority:
                     source,document,_terminal=tip
                     if request.native_continuation!=source:raise RuntimeBindingError("child_native_tip_changed")
                     intent=document["evidence"]["intent"]
-                    if intent["action"]!="execute" or intent["request_id"] not in self.attempted_requests(assignment):
+                    if intent["action"]=="propose":
+                        if intent["proposal"]["proposal_id"] not in self.proposal_results(assignment):raise RuntimeBindingError("child_received_intent_pending")
+                    elif intent["action"]!="execute" or intent["request_id"] not in self.attempted_requests(assignment):
                         raise RuntimeBindingError("child_received_intent_pending")
+        else:
+            admitted=any(self.resolve(i)==request for i in self._selections)
         if 'delegate' not in assignment.lifecycle_permissions or not admitted:
             raise RuntimeBindingError('child_delegation_not_admitted')
 
     def attach_executors(self,executors):
         if self._executors is not None:raise RuntimeBindingError('child_executors_already_bound')
         assignment=self.resolve_child(self._child_id)
-        if set(executors)!=set(assignment.request_ids):raise RuntimeBindingError('child_executor_catalog_mismatch')
+        if set(executors)!=set(self._selections):raise RuntimeBindingError('child_executor_catalog_mismatch')
         for key,value in executors.items():
             if type(value) is not SdkReviewExecutor or value._authority is not self or value._selection!=self._selections[key] or value._request_id!=key:
                 raise RuntimeBindingError('child_executor_authority_mismatch')
@@ -1452,13 +1632,16 @@ class ChildLeadAuthority:
         if request.native_continuation!=source:raise RuntimeBindingError('child_native_tip_changed')
         from .coordination import child_choice_sha256
         evidence=document['evidence'];intent=evidence['intent']
-        if (type(intent) is not dict or set(intent)!={'operation_id','child_choice_sha256','action','request_id'}
+        if (type(intent) is not dict or set(intent)-{'proposal'}!={'operation_id','child_choice_sha256','action','request_id'}
             or intent['operation_id']!=evidence.get('operation_id')
             or intent['child_choice_sha256']!=terminal['sdkExecution']['childChoiceSha256']):
             raise RuntimeBindingError('child_received_intent_invalid')
         if intent['action']=='execute':
-            if intent['request_id'] not in assignment.request_ids:raise RuntimeBindingError('child_received_intent_invalid')
+            if intent['request_id'] not in dict(self.child_catalog(assignment)):raise RuntimeBindingError('child_received_intent_invalid')
             if intent['request_id'] in self.attempted_requests(assignment):return None
+        elif intent['action']=='propose':
+            if intent.get('proposal',{}).get('proposal_id') in self.proposal_results(assignment):return None
+            raise RuntimeBindingError('child_proposal_not_received')
         elif intent['action'] not in {'finish','cancel'} or intent['request_id'] is not None:
             raise RuntimeBindingError('child_received_intent_invalid')
         _,context=prepare_environment(worker._selection,worker._environment)
@@ -1480,7 +1663,7 @@ class ChildLeadAuthority:
         if previous is not None and previous is not worker:raise RuntimeBindingError('child_decision_already_bound')
         _,context=prepare_environment(worker._selection,worker._environment)
         projection=json.loads(choice_json)
-        handoff=json_text({key:projection[key] for key in ("received_results","unavailable_results")})
+        handoff=json_text({key:projection[key] for key in ("received_results","unavailable_results","proposal_results") if key in projection})
         failure=_owner().provider_output_safety_scan_terminal(request.provider,context.needles,stdout=handoff.encode(),stderr=b"",serialized_line=False)
         if failure is not None:raise RuntimeBindingError(failure)
         self._decision_workers[worker._request_id]=worker
@@ -1515,8 +1698,9 @@ class ChildLeadAuthority:
     def receive_child_result(self,assignment):
         self.assert_child_current(assignment,'finish')
         if 'finish' not in assignment.lifecycle_permissions:raise RuntimeBindingError('child_finish_not_admitted')
-        if not set(assignment.required_request_ids)<=self.completed_requests(assignment).keys():
+        if not set(self.child_required_request_ids(assignment))<=self.completed_requests(assignment).keys():
             raise RuntimeBindingError('child_required_results_pending')
+        if any(v['status']=='pending' for v in self.proposal_results(assignment).values()):raise RuntimeBindingError('child_proposals_pending')
         self.received_context(assignment)
         lifecycle,item=self._actual_item(assignment)
         # Existing close owns all gates, open launches, artifacts, dispositions,

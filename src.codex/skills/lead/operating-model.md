@@ -673,7 +673,7 @@ Public launchers retain their selected lexical script argument before importing 
 ### Scoped child coordination boundary
 
 Root retains global admission, integration and final acceptance. The explicitly
-admitted SDK child coordinator selects only its immutable request catalog and
+admitted SDK child coordinator selects only its Root-admitted request catalog and
 child lifecycle intents; existing Host execution/receiving/lifecycle owners check
 the current recorded assignment before effects. Descriptive scope is not a file
 sandbox. Child outcomes require independent acceptance and cannot close Root or
@@ -687,3 +687,11 @@ requesting another decision. Never manufacture a fresh session as automatic
 recovery, replay an attempted catalog task, or treat session persistence as broader
 permission. The existing SDK execution runbook owns the concrete native route and
 its qualification limits.
+
+Dynamic task proposals are data for the existing Root admission owner, not
+self-issued permission. Root-published admission receipts may extend the effective
+catalog while preserving the immutable assignment and native session. Restore
+pending/declined proposals from canonical evidence and continue independent ready
+work; use the same request identity for execution rather than replaying admission
+or creating duplicate tasks. A machine needs-admission handoff does not introduce
+a new mandatory human-approval gate for already authorized routine work.
