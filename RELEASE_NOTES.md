@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Exercise the installed AGY-to-Codex scoped Worker route through existing custody and receiving, including protected control-plane refusal and retained failure/no-replay handling; document write-workspace topology without claiming native sandbox acceptance.
+
 - Refine the official provider access matrix: distinguish interactive agent-issued Kimi calls from non-interactive automation, document Claude approval exceptions and AGY API/ACP boundaries, and use current Grok entitlement language.
 
 - The Antigravity Lead package can invoke the existing explicit Codex SDK review bridge from its own managed runtime. Shared dispatch, permissions, lifecycle and canonical receiving remain the owners; missing AGY components do not silently select a neighboring Codex pack. The installed skill documents the external-review path without granting launch authority, copying vendor dependencies or claiming native acceptance.

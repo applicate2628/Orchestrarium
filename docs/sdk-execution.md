@@ -707,10 +707,19 @@ The installed Lead skill describes the explicit invocation and evidence path;
 the existing version-1 review contract. A binding, copied payload or available
 command is not permission to spend quota or execute. The actual external Codex
 result remains nonauthorizing, distinct from native AGY subagents and AGY hook
-advisories. Offline installed-path coverage includes Reviewer and read-only
-Consultant; file presence does not qualify other provider/role combinations.
+advisories. Offline installed-path coverage includes Reviewer, read-only
+Consultant and scoped Worker; file presence does not qualify other providers.
 Installed-path offline checks use a synthetic native boundary, not a real AGY
 session or Codex model invocation. Native acceptance remains separately authorized.
+
+The same owned runtime also carries the existing version-4 scoped Worker route.
+Its write workspace equals cwd and is disjoint from the managed runtime and
+protected control-plane inputs/captures. A project-wide workspace containing the
+managed installation is not an admitted write boundary. Task receiving remains
+nonauthorizing; interrupted writes are not automatically replayed. See the
+[Worker usage](../INSTALL.md#scoped-external-codex-worker) for the existing
+contract and capture topology. Offline synthetic results do not prove native
+file writes or operating-system confinement.
 
 ### Current baseline and remaining provider work
 
@@ -723,7 +732,7 @@ checkpoints below retain their original scope; they are not fresh acceptance.
 | Common execution | Existing shared dispatch/supervisor/ledger; SDK worker uses the invoking Python interpreter. | Exercise the same lifecycle, events, receipt and cancellation owners for each supported provider/role; retain main regressions. |
 | Codex | Explicit Windows Reviewer, Consultant and scoped Worker source bridges; offline qualification and historical bounded native evidence below. | Qualify the current installed/native routes and remaining platform behavior. Consultant durable continuation/fork and scoped child-Lead coordination are already implemented; do not rebuild them as outstanding work. |
 | Claude | SDK Host API and explicit scoped Worker command-line route, prompt-only Consultant/Reviewer, and scoped fresh/persistent child decisions through existing Root/receiving owners. Native subscription Lead is a different boundary. | Qualify current native execution and remaining supported persistent session outcomes using official API/cloud access; do not wrap a subscription CLI as a third-party worker. |
-| Antigravity | Native startup projection through the common installer: distinct Lead skill/rule and SessionStart shared-governance context. No AGY runtime adapter in the SDK execution factory. | Complete native tool/lifecycle hooks and subagent handoff where supported; qualify installed/native behavior and separately admitted programmatic workers. |
+| Antigravity | Native Lead startup skill/rule/SessionStart, advisory write and command hooks, and its own installed shared Codex SDK runtime. Reviewer, read-only Consultant and scoped Worker reuse existing dispatch/custody/receiving; no separate AGY SDK adapter. | Complete remaining supported native lifecycle/subagent handoff and live qualification. Synthetic installed-path checks are not AGY session or OS sandbox acceptance. |
 | Copilot | Explicit public Consultant (fresh and received-predecessor continuation), fresh Reviewer and scoped Worker; scoped child decision sessions through the existing Host lifecycle and canonical Windows receiving. Source/offline qualification only. | Qualify the current installed runtime and native session lifecycle; remaining native Lead/subagent integration must use verified vendor capabilities. |
 | Kimi | Current Kimi Code ACP owner, configuration-currentness handling and canonical receiving; private global tool policy is independent of agent-profile discovery. | Qualify the installed native runtime and remaining supported integrations. Do not substitute archived kimi-cli/kimi-sdk, an unqualified kimi-agent-sdk, or a model API. |
 | Grok | Candidate protocol support is not live-qualified execution. | Integrate the official Grok Build Agent Client Protocol (ACP) route, including account/tool enforcement and result receiving; do not invent a separate vendor SDK or substitute the xAI model API. |
@@ -1255,7 +1264,7 @@ wholly unfinished features. Continue only the following unresolved outcomes:
 
 | Next outcome | Concrete remaining work | Verification/delivery boundary |
 |---|---|---|
-| Provider routes | AGY native tool/lifecycle hooks and subagent handoff beyond implemented startup projection; reconcile Kimi's supported agent runtime; Grok Build ACP actual runtime, account/tool enforcement and canonical receiving. | Use confirmed official capabilities and the existing owners. Do not turn subscription Lead routes into third-party workers. |
+| Provider routes | Remaining supported AGY native lifecycle/subagent handoff beyond startup and advisory hooks; Kimi installed/native qualification of its reconciled Kimi Code ACP owner; Grok Build ACP actual runtime, account/tool enforcement and canonical receiving. | Use confirmed official capabilities and the existing owners. Do not turn subscription Lead routes into third-party workers. |
 | Session coverage | Remaining provider-native continuation and native Lead/subagent integration where the official runtime exposes a qualified integration surface. Host recovery of newly committed fresh decisions is implemented separately and is not native resume. | Existing Codex/Claude/Copilot child coordination is not missing. Host lineage/depth does not prove control of vendor-internal subagents. |
 | Platform coverage | POSIX platform containment/custody and lifecycle qualification for intended macOS/Linux routes. | Windows offline results do not qualify POSIX or prove an OS sandbox. |
 | Current native acceptance | Install/inspect the selected current payload and exercise admitted real provider routes and recovery. | Not yet performed for this HEAD. Installation and quota-consuming calls retain their separate authorization; offline peers are not native acceptance. |

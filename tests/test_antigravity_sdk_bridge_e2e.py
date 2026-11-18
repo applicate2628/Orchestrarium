@@ -148,3 +148,98 @@ def test_installed_agy_consultant_uses_task_receiving_without_review_authority(i
     assert [row["eventKind"] for row in rows] == ["launch", "terminal"]
     assert rows[-1]["gate"] == "none" and rows[-1]["authorizing"] is False
     assert len(requests) == 1 and requests[0][0].result_kind == "task"
+
+
+def worker_source(project, monkeypatch, *, overlap=False):
+    item, receipt, artifact, captures, argv = existing.setup_source(project, monkeypatch)
+    workspace = project / "src"
+    workspace.mkdir()
+    native = project / "native-runtime"
+    native.mkdir()
+    executable = native / "synthetic-codex.exe"
+    (project / "synthetic-codex.exe").rename(executable)
+    monkeypatch.setenv("CODEX_BIN", str(executable))
+    captures.mkdir()
+    workspace = project if overlap else workspace
+    monkeypatch.chdir(workspace)
+    argv[argv.index("--sdk-review-binding")] = "--sdk-task-binding"
+    argv[argv.index("--ledger-role") + 1] = "backend-engineer"
+    binding = Path(argv[argv.index("--sdk-task-binding") + 1])
+    data = json.loads(binding.read_text())
+    data.update(schemaVersion=4, installedHookRoot=None, contextMode="fresh",
+                contextHandoff=None, writeWorkspace=str(workspace))
+    binding.write_text(json.dumps(data))
+    return item, receipt, artifact, captures, argv, workspace
+
+
+def worker_result(request, observed):
+    """Synthetic native result, not proof of filesystem writes or OS confinement."""
+    import hashlib
+    from sdk_execution.contracts import ExecutionResult, TaskResult, json_text
+    observed.update(sandboxMode="workspace-write",
+        writeWorkspaceSha256=hashlib.sha256(request.write_workspace.encode()).hexdigest())
+    return ExecutionResult(request=request, status="completed", provider_status="completed",
+        native_thread_id="synthetic-worker-thread", native_turn_id="synthetic-worker-turn",
+        protocol_closed=True, sdk_execution_json=json_text(observed), task=TaskResult(
+            request.external_evidence_run_id, request.artifact_id, request.role,
+            "Synthetic scoped Worker evidence; no native writes were performed."))
+
+
+@pytest.mark.parametrize("collision", [False, True])
+def test_installed_agy_worker_receiving_and_no_replay(installed_bridge, monkeypatch, capsys, collision):
+    import hashlib
+    project, target, owner = installed_bridge
+    item, receipt, artifact, captures, argv, workspace = worker_source(project, monkeypatch)
+    effects, requests, hooks = existing.native_boundary(monkeypatch, artifact,
+        receiving_collision=collision, result_factory=worker_result)
+    code = existing.entrypoint()(argv)
+    output = capsys.readouterr()
+    assert code == (1 if collision else 0), output.err
+    assert effects == list(existing.EFFECTS) and len(requests) == len(hooks) == 1
+    request, selection = requests[0]
+    assert request.cwd == request.write_workspace == str(workspace)
+    assert request.role == "backend-engineer" and request.result_kind == "task"
+    from sdk_execution import runtime
+    assert Path(runtime.__file__).is_relative_to(target)
+    selected = runtime.selected_sdk_execution(request, runtime.runtime_selection_from_dict("codex", selection))
+    assert selected["sandboxMode"] == "workspace-write"
+    assert selected["writeWorkspaceSha256"] == hashlib.sha256(str(workspace).encode()).hexdigest()
+    ledger = item / "agent-runs.jsonl"
+    rows = [json.loads(line) for line in ledger.read_text().splitlines()]
+    if collision:
+        assert [row["eventKind"] for row in rows] == ["launch"]
+        assert "E_SDK_REVIEW_RECEIVING_UNCONFIRMED" in output.err
+        assert receipt.read_bytes() == b"" and output.out == ""
+        assert artifact.read_text() == "independent concurrent owner; must remain untouched"
+        files = list(captures.rglob("sdk-recovery.json"))
+        assert len(files) == 1
+        diagnostic = json.loads(files[0].read_text())
+        assert diagnostic["externalDispatchId"] == request.external_dispatch_id
+        assert diagnostic["authorizing"] is False
+        assert diagnostic["replayAuthorized"] is False and diagnostic["restorableObservation"] is False
+    else:
+        payload = owner.parse_provider_result(output.out)
+        assert payload["status"] == "completed" and payload["gate"] == "none"
+        assert payload["authorizing"] is False
+        assert json.loads(payload["resultText"])["task"]["role"] == "backend-engineer"
+        assert receipt.read_text() == output.out and artifact.read_text() == payload["resultText"] + "\n"
+        assert [row["eventKind"] for row in rows] == ["launch", "terminal"]
+        assert rows[-1]["authorizing"] is False and rows[-1]["gate"] == "none"
+        assert not list(captures.iterdir())
+    before = {path: path.read_bytes() for path in (receipt, artifact, ledger)}
+    assert existing.entrypoint()(argv) == 1
+    capsys.readouterr()
+    assert len(requests) == 1
+    assert before == {path: path.read_bytes() for path in before}
+    assert list(workspace.iterdir()) == []  # Synthetic boundary did not perform writes.
+
+
+def test_installed_agy_worker_project_wide_control_plane_overlap_is_rejected(installed_bridge, monkeypatch, capsys):
+    project, _, _ = installed_bridge
+    item, receipt, artifact, captures, argv, workspace = worker_source(project, monkeypatch, overlap=True)
+    _, requests, _ = existing.native_boundary(monkeypatch, artifact, result_factory=worker_result)
+    assert existing.entrypoint()(argv) == 1
+    output = capsys.readouterr()
+    assert not requests and not receipt.exists() and not artifact.exists()
+    assert not (item / "agent-runs.jsonl").exists()
+    assert "CUSTODY" in output.err or "protected" in output.err

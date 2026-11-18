@@ -147,6 +147,24 @@ an isolated installed Reviewer path with a synthetic native peer, not a live AGY
 session, all Codex roles, or native acceptance. See the
 [provider access matrix](docs/provider-access-policy.md) for account boundaries.
 
+### Scoped external Codex Worker
+
+The same managed entrypoint supports the existing `--sdk-task-binding` version 4
+contract and a canonical Worker profession, such as `backend-engineer`.
+Set `writeWorkspace` to the exact absolute working directory. Use a task worktree
+or source subtree separate from the installed AGY control plane; do not make the
+entire project writable when it contains the managed package. Keep the binding,
+prompt, terminal receipt, ledger, credentials and `CODEX_PROMPTS_DIR` capture
+directory outside that write workspace. These are existing custody checks, not
+new AGY permissions. The Host must already authorize the actual write task.
+
+A received task result is nonauthorizing evidence, not proof that file changes
+were accepted. Inspect and review actual changes before completion. If execution
+or receiving is interrupted, preserve evidence and use existing recovery rather
+than automatically repeating a possibly completed write. Installed-path offline
+checks use a synthetic native result and do not establish OS sandbox enforcement
+or real model file writes. Native qualification remains separate.
+
 ## Selected-client copies and uninstall
 
 Codex is the primary host. The common installer lifecycle serves the qualified

@@ -41,6 +41,18 @@ Receive the actual terminal artifact through the same canonical ledger owner;
 an external PASS remains nonauthorizing evidence. Preserve acquired output and
 existing recovery/no-replay behavior if interrupted. An advisory hook result,
 role label, copied receipt or successful process start does not close a task.
-Offline installed-path coverage includes Reviewer and read-only Consultant;
-other roles and real AGY-to-Codex native execution require their own qualification. Do not call
+Offline installed-path coverage includes Reviewer, read-only Consultant and
+scoped Worker; real AGY-to-Codex native execution requires its own qualification. Do not call
 the same-provider AGY consumer session as an external worker.
+
+## Scoped external Worker
+
+Use the same entrypoint with `--sdk-task-binding` version 4 and a canonical Worker
+profession for an already authorized write task. Its `writeWorkspace` must equal
+the exact cwd and remain disjoint from this managed package, credentials, ledger,
+binding, prompt, terminal receipt and capture directory. Select task worktree or
+source-subtree boundaries rather than making the control plane writable. Keep
+`CODEX_PROMPTS_DIR` outside the workspace. These existing custody checks do not
+grant permission. Review actual file changes independently: a task result is not
+proof of accepted writes or native sandbox enforcement. Preserve diagnostics and
+do not automatically replay an interrupted write.
