@@ -7313,6 +7313,17 @@ def _resolve_global_home() -> Path:
 
 
 def _target(provider: str, args: argparse.Namespace) -> tuple[str, Path, Path | None]:
+    if provider == "antigravity":
+        if args.global_install:
+            return "global", _resolve_global_home() / ".gemini/config/orchestrarium-antigravity", None
+        project = (Path(os.path.abspath(os.path.expandvars(os.path.expanduser(args.target))))
+                   if args.target else _git_root())
+        if args.target and not args.allow_unsafe_target:
+            raise ValueError("unsafe custom target denied; use --allow-unsafe-target to override")
+        target = project / ".agents/orchestrarium-antigravity"
+        if _contains_reparse(target):
+            raise ValueError("refusing reparse-point target path")
+        return "target" if args.target else "repo", target, project
     suffix = f".{provider}"
     if args.global_install:
         mode = "global"
@@ -13656,6 +13667,14 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             return operation.run(sys.modules[__name__], root, provider, args)
         except (OSError, RuntimeError, ValueError) as exc:
             print(f"FAIL: uninstall preserved unverified state: {_installer_failure_text(exc)}", file=sys.stderr)
+            return 1
+    if provider == "antigravity":
+        try:
+            root = _repo_root(Path(__file__))
+            projection = _load_module_from_path("orche_antigravity_projection", root / "scripts/installation/antigravity.py")
+            return projection.run(sys.modules[__name__], root, args)
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"FAIL: Antigravity projection: {_installer_failure_text(exc)}", file=sys.stderr)
             return 1
     if args.replace_claude_instruction and provider != "claude":
         print("FAIL: E_CLAUDE_INSTRUCTION_SELECTION_INVALID: Claude only", file=sys.stderr)

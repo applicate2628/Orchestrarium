@@ -33,7 +33,7 @@ CLIENTS = tuple((name, spec["label"]) for name, spec in CLIENT_CATALOG.items())
 def _show_clients() -> None:
     print("Orche — choose client integrations")
     for index, (name, label) in enumerate(CLIENTS, 1):
-        detected = "command detected" if shutil.which(name) else "command not detected"
+        detected = "command detected" if shutil.which(CLIENT_CATALOG[name].get("command", name)) else "command not detected"
         print(f"  [ ] {index}) {label} ({name}; {detected})")
     print("Detection is informational; installation does not log in or run models.")
 
@@ -102,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         selected = tuple(name for name, _ in CLIENTS if name in options.clients)
         return _run_selected(selected, forwarded)
     if not sys.stdin.isatty():
-        print("No interactive terminal: specify --clients codex and/or claude. Nothing applied.", file=sys.stderr)
+        print("No interactive terminal: specify --clients " + " | ".join(name for name, _ in CLIENTS) + ". Nothing applied.", file=sys.stderr)
         return 2
     _show_clients()
     try:
@@ -112,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
         tokens = choice.replace(",", " ").split()
         if choice in ("a", "all"):
             selected = tuple(name for name, _ in CLIENTS)
-        elif tokens and all(token in {"1", "2"} for token in tokens):
+        elif tokens and all(token in {str(index) for index in range(1, len(CLIENTS) + 1)} for token in tokens):
             selected = tuple(name for index, (name, _) in enumerate(CLIENTS, 1) if str(index) in tokens)
         else:
             print("Invalid selection. Nothing applied.", file=sys.stderr)

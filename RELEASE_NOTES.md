@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Antigravity native sessions gain a separate startup projection through the common ownership-aware installer: shared governance, a distinct Lead skill and a SessionStart context hook. Project/global discovery preserves Codex skills and unrelated hooks; update and removal retain existing ownership checks. This is instruction integration, not native permission enforcement, SDK worker execution or live acceptance.
+
 - Kimi execution tracks model/thinking configuration updates throughout its ACP exchange, including changes returned by later setters. A drift cannot be hidden by stale initial readback or a later restoration; acquired output and cleanup remain available without reconfiguration or repeated model calls. Initial sequential setup and unrelated configuration options stay supported.
 
 - Scoped Claude child Leads can retain their native conversation across admitted decisions through existing transcript custody and Root coordination. Restart first recovers already received intent without inference, then resumes the exact transcript for a new decision; task and successor claims prevent replay. No new session store, subscription worker, automatic model launch or OS-lock guarantee is introduced.

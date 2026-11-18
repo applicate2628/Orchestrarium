@@ -111,6 +111,8 @@ def _run_owned_copies(backend, root: Path, provider: str, args) -> int:
             elif spec["kind"] == "native-roles":
                 after = configuration.remove_native_roles(payload, spec["roles"])
                 after = configuration.remove_native_features(after, spec.get("features", {}))
+            elif spec["kind"] == "json-projection":
+                after = configuration.json_projection(payload, spec, None)
             elif spec["kind"] == "hooks":
                 after = _remove_hooks(backend, root, json.loads(text), spec, provider, scope, anchor, codec)
             else:

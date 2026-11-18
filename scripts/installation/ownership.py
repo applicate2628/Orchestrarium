@@ -40,6 +40,8 @@ def validate_path(value: object, provider: str, scope: str) -> str:
         if type(roots) not in (tuple, list) or any(type(root) is not str for root in roots):
             raise ValueError("Invalid installation scope roots")
     allowed = len(parts) > 1 and parts[0] in roots
+    if "scope_prefixes" in client:
+        allowed = value.startswith(client["scope_prefixes"][scope]) or value in client["projection_configs"][scope]
     if value in client["documents"][scope]:
         allowed = True
     if not allowed or parts[-1].casefold() == RECEIPT_NAME:
@@ -193,7 +195,32 @@ def validate_config(path: str, spec: object, provider: str, scope: str) -> None:
         raise ValueError("Invalid owned configuration")
     client = get_client(provider)
     kind = spec.get("kind")
-    if kind == "created-file":
+    if kind == "json-projection":
+        if (path not in client.get("projection_configs", {}).get(scope, ())
+                or set(spec) != {"kind", "members", "entries"}
+                or type(spec["members"]) is not dict or type(spec["entries"]) is not list):
+            raise ValueError("Invalid owned JSON projection")
+        if path.endswith("/hooks.json"):
+            if set(spec["members"]) != {"orchestrarium-session-start"} or spec["entries"]:
+                raise ValueError("Invalid owned named hook")
+            block = spec["members"]["orchestrarium-session-start"]
+            if type(block) is not dict or set(block) != {"SessionStart"} or type(block["SessionStart"]) is not list or len(block["SessionStart"]) != 1:
+                raise ValueError("Invalid owned SessionStart hook")
+            handler = block["SessionStart"][0]
+            if type(handler) is not dict or set(handler) != {"type", "command"} or handler["type"] != "command" or type(handler["command"]) is not str or not handler["command"]:
+                raise ValueError("Invalid owned SessionStart handler")
+        elif spec["members"] or len(spec["entries"]) != 1:
+            raise ValueError("Invalid owned discovery entry")
+        for entry in spec["entries"]:
+            if type(entry) is not dict or set(entry) != {"path"} or type(entry["path"]) is not str:
+                raise ValueError("Invalid discovery path")
+            base = client["scope_prefixes"][scope].rstrip("/")
+            if scope == "global":
+                base = PurePosixPath(base).name
+            expected = base + ("/skills" if path.endswith("/skills.json") else "/rules")
+            if entry["path"] != expected:
+                raise ValueError("Discovery entry outside selected managed projection")
+    elif kind == "created-file":
         if (path not in fresh_control_paths(provider, scope)
             or set(spec) != {"kind", "sha256"}
             or type(spec["sha256"]) is not str or not _HASH.fullmatch(spec["sha256"])):

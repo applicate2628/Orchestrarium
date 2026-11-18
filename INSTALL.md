@@ -59,11 +59,11 @@ The distribution launcher remains the base installer, not a provider worker.
 Never pip-install into the qualified immutable bundle runtime: use the separate
 provider environment so existing runtime evidence and retention remain valid.
 
-Antigravity (AGY) is the selected primary Lead direction, not Gemini CLI. This
-choice does not pretend that a new native-host installer or live SDK route is
-already qualified. A native Lead's own session/subagents, an installed agent SDK,
-and a programmatically invoked worker are distinct. The qualified host catalog
-and existing worker admission/account boundaries remain unchanged. In particular,
+Antigravity (AGY) is a native Lead direction, not Gemini CLI. The bounded
+[startup projection](#antigravity-native-startup) is separate from a live SDK
+execution route. A native Lead's own session/subagents, an installed agent SDK,
+and a programmatically invoked worker are distinct. Existing worker admission
+and account boundaries remain unchanged. In particular,
 Claude workers retain the official API/cloud credential boundary, not a wrapper
 around a native Lead's subscription session.
 
@@ -72,6 +72,40 @@ Python agent SDK depends on legacy `kimi-cli`; it is not asserted compatible wit
 the separate newer Kimi Code CLI. Grok's ACP (Agent Client Protocol) integration
 with Grok Build is not relabelled as a standalone Grok-branded agent SDK. Ordinary
 LLM API clients are not substitutes for agent SDKs in this workflow.
+
+## Antigravity native startup
+
+This source integration uses the existing installer transaction and ownership
+receipt. It projects shared governance, an AGY-specific addendum, the distinct
+`orchestrarium-lead` skill, an always-on rule and a `SessionStart` context hook.
+It does not install or start Antigravity, log in, call a model, enforce native
+tool permissions, or receive native subagent execution results.
+
+```sh
+python scripts/install-client.py --client antigravity --target /path/to/project --allow-unsafe-target --dry-run
+python scripts/install-client.py --client antigravity --target /path/to/project --allow-unsafe-target
+python scripts/install-client.py --client antigravity --global --dry-run
+```
+
+Omitting `--dry-run` applies the selected installation. Repeating the same
+command updates owned content; changed or unknown payloads are preserved rather
+than overwritten. Removal uses the same entry point with `--uninstall` for a
+preview and `--uninstall --apply` to remove verified owned content.
+
+Project payloads live under `.agents/orchestrarium-antigravity/`; global payloads
+live under `~/.gemini/config/orchestrarium-antigravity/`. Additive `skills.json`
+and `rules.json` entries discover only that projection. A named
+`orchestrarium-session-start` entry in the neighboring `hooks.json` registers
+its Python hook. Codex `.agents/skills/lead`, other discovery entries, unrelated
+hooks and user-modified content remain outside this ownership.
+
+The hook reads instructions from its installed directory, not paths supplied
+in the incoming event. Its documented native output supplies context, not
+permission or task-completion evidence. Other event hooks, native subagent
+handoff and installed/live behavior remain separate qualification work.
+Official contracts: [discovery](https://antigravity.google/docs/customization-discovery/)
+and [hooks](https://antigravity.google/docs/hooks/). The vendor discovery paths
+are distinct from Orche's chosen managed subtree and ownership identifiers.
 
 ## Selected-client copies and uninstall
 
@@ -143,8 +177,8 @@ The common root selector supports `--list-clients` and explicit `--clients codex
 claude`, followed by the existing installer flags. Without an explicit selection
 an interactive console offers multiple selection, the real installer dry-run and
 confirmation. Noninteractive input without `--clients` refuses without applying;
-blank/invalid menu input does not silently select every client. Only currently
-supported Codex and Claude pack integrations are listed.
+blank/invalid menu input does not silently select every client. The catalog distinguishes Codex and Claude packs from the bounded Antigravity
+startup integration; listing a client does not qualify every execution route.
 
 Local bundle assembly is implemented by `scripts/distribution/build.py`. Supply a
 previously qualified Python tree and its runtime-evidence record, an absent output directory

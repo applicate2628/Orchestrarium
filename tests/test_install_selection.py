@@ -41,7 +41,7 @@ def test_noninteractive_without_selection_has_no_effect(installer, monkeypatch):
     assert not calls
 
 
-@pytest.mark.parametrize('choice', ['q', '', '3', '999', '1,garbage'])
+@pytest.mark.parametrize('choice', ['q', '', '0', '999', '1,garbage'])
 def test_cancel_or_invalid_selection_never_expands_scope(installer, monkeypatch, choice):
     module, calls = installer
     answer(monkeypatch, choice)
@@ -211,3 +211,20 @@ def test_implicit_lifecycle_preview_keeps_existing_stop_order(installer, monkeyp
     monkeypatch.setattr(module, "_run_production", lambda name, args: calls.append((name, list(args))) or 2)
     assert module.main(["--clients", "codex", "claude", "--uninstall"]) == 2
     assert calls == [("codex", ["--uninstall"])]
+
+
+def test_new_client_preserves_existing_menu_order_and_is_selectable(installer, monkeypatch):
+    module, calls = installer
+    assert [name for name, _ in module.CLIENTS] == ["codex", "claude", "antigravity"]
+    answer(monkeypatch, "3")
+    assert module.main(["--dry-run"]) == 0
+    assert calls == [("antigravity", ["--dry-run"])]
+
+
+def test_client_detection_uses_declared_native_command(installer, monkeypatch):
+    module, calls = installer
+    checked = []
+    monkeypatch.setattr(module.shutil, "which", lambda command: checked.append(command))
+    assert module.main(["--list-clients"]) == 0
+    assert checked == ["codex", "claude", "agy"]
+    assert not calls
