@@ -770,6 +770,40 @@ first-text boundary; they are not a real model or native parser acceptance run.
 
 Pinned sources: [leading slash parser](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-shell/src/session/slash_authority.rs#L41-L55), [human intent resolution](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-shell/src/session/slash_commands.rs#L1556-L1566), and [ACP turn ordering](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-shell/src/session/acp_session_impl/turn.rs#L627-L756).
 
+### Grok native tool-policy integration boundary
+
+Source inspection at the pinned Grok Build revision distinguishes native policy
+support from a qualified per-process integration. An ACP `_meta.agentProfile`
+is not a general deny-all control: `tools: []` inherits the toolset,
+`disallowedTools` matches exact full or short tool names rather than wildcards,
+and an unknown allowlist entry can retain the full toolset. Therefore neither
+`disallowedTools: ["*"]` nor a finite list of currently known tools establishes
+a future-safe prompt-only boundary. See the [profile matching owner](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-agent/src/config.rs#L1204-L1215)
+and [tool-list filtering](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-agent/src/tool_list.rs).
+
+An empty curated toolset with default injection disabled is rejected by the
+[builder](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-agent/src/builder.rs#L751-L760).
+A model-specific strict harness can also take precedence over the supplied
+[ACP profile](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-shell/src/agent/mvp_agent/agent_ops.rs#L3902-L3935).
+The internal session allowlist can constrain local and hosted tools, but its
+profile fields are not deserializable; this audit did not establish a public ACP
+setter for that clamp. Skill discovery and MCP profile controls alone do not
+replace the missing general tool boundary.
+
+Native permission configuration does support `[permission] deny = ["*"]`
+through the existing user-home configuration and permission manager. This is
+different from the profile's exact-name denylist. The [permission configuration
+resolver](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-permission-rules/src/resolution.rs)
+and [policy evaluator](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-permission-rules/src/policy.rs)
+provide that native mechanism. However, a safe per-process overlay preserving
+the selected authentication home has not been established for `agent stdio`.
+The top-level CLI deny option is not forwarded by the inspected
+[agent-command owner](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-pager-bin/src/main.rs#L1224-L1356).
+Changing `GROK_HOME` or copying credentials is not an implemented workaround.
+Hosted tool policy and canonical receiving still need their own qualified
+integration. These are specific gaps in this adapter's prompt-only contract,
+not a blanket prohibition on Grok or a claim that its native policy is absent.
+
 ### Current baseline and remaining provider work
 
 This matrix describes the current source contract. Exact published HEAD and
