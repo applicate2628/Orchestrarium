@@ -1,23 +1,64 @@
 # Orchestrarium
 
-<img src="assets/branding/orche.png" alt="Orche, the winged green mascot" width="160" height="148">
+<img src="assets/branding/orche.png" alt="Little Orche, the small winged green mascot" width="160" height="152">
 
-Optional local distribution assembly is documented in [the distribution guide](scripts/distribution/README.md). It binds the supplied runtime to its exact notice inventory before producing a bundle, and packages this existing installer without changing its ownership or provider policies. Windows build and bounded Codex/Claude project receiving are recorded in [runtime evidence](scripts/distribution/runtime-evidence.md); local directory projections use native junctions without privilege elevation. Historical SDK recovery evidence is not acceptance of this layout.
+**A workflow pack for coordinated AI development.** The current project is
+Orchestrarium; its mascot is Little Orche. The planned Orche rebrand follows
+the SDK and Rust transitions and is not part of this release.
 
-A cross-provider agent orchestration monorepo that keeps the production Codex and Claude Code lines aligned on one shared governance and reference core.
+Orchestrarium helps a leading assistant divide work, assign suitable specialist roles,
+keep authors and reviewers separate, and carry verified results through to
+delivery. Shared rules provide a common workflow; each supported client keeps
+its own runtime conventions. Rules and role selection do not grant permission
+to launch models or spend quota.
 
-Codex native roles use the task and role selector, with Terra for suitable ordinary work and Sol for science. Named Luna mechanical roles have a separate supervised corridor; ordinary eligible producer roles can use `luna-high` or `luna-xhigh`. Explicit user controls, host restrictions, independent reviews and per-attempt Astra or Max consent remain binding. See [Codex platform rules](src.codex/AGENTS.codex.md) and [installation details](INSTALL.md) for role, migration and runtime contracts.
+## Start here
 
-- `src.codex/` — the production Codex provider-pack source
-- `src.claude/` — the production Claude Code provider-pack source
+- **Install or update:** [installation guide](INSTALL.md).
+- **Understand the workflow:** [documentation index](docs/README.md).
+- **Work on the project:** [maintainer starting point](docs/new-session-guide.md).
+- **See released changes:** [release notes](RELEASE_NOTES.md).
 
-The provider lines share one governance model and role vocabulary, while each keeps the runtime structure expected by its own provider. The root router installs Codex, Claude, or both. The removed Gemini and Qwen provider values are retained only as fail-closed migration identifiers; they are not install or execution routes.
+## Current release and SDK development
 
-Warning: Orchestrarium is optimized for maximum execution effectiveness and low orchestration drag rather than for minimum token spend. On large tasks, multi-opinion review lanes, or aggressive external fan-out, usage can rise quickly and consume a substantial token budget in a short time.
+| | Current `main` | SDK development in [PR #19](https://github.com/applicate2628/Orchestrarium/pull/19) |
+| --- | --- | --- |
+| Availability | The production source described by this README and its installation guide. | A separate, unmerged development branch; not the current globally installed release. |
+| Clients and layout | Codex and Claude Code packs share governance. Their source remains in `src.codex/` and `src.claude/`. | Work toward a common core with client adapters, including Antigravity integration. Its changed paths do not apply to `main`. |
+| Delegation | Existing role selection and execution routes, with their documented permissions and platform limits. | Optional SDK (Software Development Kit) execution and child-session coordination are being developed and checked. They are not enabled by this README. |
+| Evidence | Use the current installation guide and source contracts for the operation being performed. | Offline checks do not establish live provider or platform acceptance. Read the PR's current evidence and remaining limits before testing. |
 
-New maintenance sessions should start with [`docs/new-session-guide.md`](docs/new-session-guide.md). It records the source-first rule for this monorepo: tracked Orchestrarium source is canon, while `~/.codex/`, `~/.claude/`, project `.agents/`, and project `.claude/` are installed runtime outputs that should not be patched as the durable fix before the source owner is updated.
+The SDK branch is not a reason to reinstall or migrate a working setup early.
+This page does not announce SDK release readiness or enable quota-consuming runs.
 
-For a repository transfer, `$manual-repo-transfer` defaults to a verified Git clone plus only the required current local-state overlay; ignored `work-items/` is not in the clone. Direct transfers can preserve unfinished work without requiring cleanup or publication. When cleanup is explicitly requested, `$repo-cleanup` and the transfer owner apply their existing separate contracts. Offline or full recovery is an explicit alternative.
+### Roles, models and cost
+
+The leading assistant chooses each Codex task's model and reasoning effort through the existing
+role selector; a role name alone is not a fixed model assignment. Current user
+settings, supported model options and permissions still apply. Authors and
+reviewers remain separate. See [Codex platform rules](src.codex/AGENTS.codex.md)
+for the maintained routing contract rather than a second model ranking here.
+
+Parallel work and independent reviews can consume substantial tokens. Orchestrarium
+prioritizes effective execution, not the lowest possible spend. Selecting a
+route does not authorize a model launch, external review or paid operation.
+
+### Maintainer notes
+
+The repository source is authoritative; installed files are runtime outputs.
+Start maintenance with [the source-first guide](docs/new-session-guide.md).
+The root installer currently selects Codex, Claude, or both. Removed Gemini and
+Qwen values are migration identifiers, not supported installation or execution
+routes.
+
+For repository transfer, `$manual-repo-transfer` uses a verified Git clone plus
+only the required current local-state overlay; ignored `work-items/` is not
+included in a clone. Cleanup is a separate explicitly requested operation.
+
+Optional distribution assembly is documented in [the distribution guide](scripts/distribution/README.md).
+It binds the supplied runtime to its notice inventory; it does not change
+provider permissions. [Runtime evidence](scripts/distribution/runtime-evidence.md)
+records the bounded packaging checks, not general SDK acceptance.
 
 ## WARNING: Claude external authentication
 
