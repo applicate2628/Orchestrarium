@@ -444,3 +444,77 @@ def test_sdk_model_policy_keeps_provider_and_existing_approval_boundaries(
         with pytest.raises(BindingReached):
             dispatch.prepare_dispatch(selected, tmp_path / "not-read.json", provider=provider,
                                       source_environment={}, cancellation_probe=lambda: False)
+
+
+@pytest.mark.parametrize("phase,expected,code", [
+    ("serialize", "candidate_serialization_failed", None),
+    ("context", "scan_context_unavailable", None),
+    ("result", "result_scan_failed", "E_EXTERNAL_PROVIDER_MACHINE_PATH_ECHO"),
+    ("candidate", "candidate_scan_failed", "E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"),
+    ("candidate_unknown", "candidate_scan_failed", None),
+    ("exception", "result_scan_failed", None),
+    ("prompt", "prompt_echo", None),
+    ("prompt_exception", "prompt_check_failed", None),
+])
+def test_recovery_omission_has_closed_reason_without_payload(tmp_path, monkeypatch, phase, expected, code):
+    from test_sdk_receiving import synthetic_observation
+    operation = prepare(tmp_path, monkeypatch)
+    observation = synthetic_observation(monkeypatch, operation.request)
+    if phase == "prompt":
+        original_result_dict = type(observation.result).to_dict
+        monkeypatch.setattr(type(observation.result), "to_dict",
+                            lambda result: {**original_result_dict(result), "native_result_text": operation.request.prompt})
+    context = object() if phase == "context" else owner.ProviderOutputContext(())
+    operation.runtime_run = runtime.RuntimeRun(operation.request, operation.selection, context, observation)
+    untrusted_payload = "untrusted-exception-payload-do-not-export"
+    if phase == "prompt_exception":
+        original = dispatch.json_text
+        def fail_prompt(value):
+            if value == operation.request.prompt:
+                raise RuntimeError(untrusted_payload)
+            return original(value)
+        monkeypatch.setattr(dispatch, "json_text", fail_prompt)
+    elif phase == "serialize":
+        original = dispatch.json_text
+        def fail_candidate(value):
+            if type(value) is dict and set(value) == {"protocolError", "cancel", "result"}:
+                raise RuntimeError(untrusted_payload)
+            return original(value)
+        monkeypatch.setattr(dispatch, "json_text", fail_candidate)
+    elif phase in {"result", "exception"}:
+        def fail_result(*args):
+            raise ValueError(code if phase == "result" else untrusted_payload)
+        monkeypatch.setattr(receiving, "scan_execution_output", fail_result)
+    elif phase in {"candidate", "candidate_unknown"}:
+        monkeypatch.setattr(receiving, "scan_execution_output", lambda *args: None)
+        monkeypatch.setattr(owner, "provider_output_safety_scan_terminal",
+                            lambda *args, **kwargs: code if phase == "candidate" else untrusted_payload)
+    payload = operation.recovery_bytes()
+    record = json.loads(payload)
+    assert record["unsafeOutputOmitted"] is True
+    assert record["omissionReason"] == expected
+    if code is None:
+        assert "safetyFailureCode" not in record
+    else:
+        assert record["safetyFailureCode"] == code
+    assert "decodedResult" not in record
+    assert record["restorableObservation"] is False and record["replayAuthorized"] is False
+    assert untrusted_payload.encode() not in payload
+    assert operation.request.prompt.encode() not in payload
+
+
+def test_recovery_known_scanner_reason_and_normal_compatibility(tmp_path, monkeypatch):
+    from test_sdk_receiving import synthetic_observation
+    operation = prepare(tmp_path, monkeypatch)
+    observation = synthetic_observation(monkeypatch, operation.request, usage={"unsafe": "fixture-secret"})
+    operation.runtime_run = runtime.RuntimeRun(operation.request, operation.selection,
+                                               owner.ProviderOutputContext((b"fixture-secret",)), observation)
+    unsafe = json.loads(operation.recovery_bytes())
+    assert unsafe["omissionReason"] == "result_scan_failed"
+    assert unsafe["safetyFailureCode"] == "E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+    safe_observation = synthetic_observation(monkeypatch, operation.request)
+    operation.runtime_run = runtime.RuntimeRun(operation.request, operation.selection,
+                                               owner.ProviderOutputContext(()), safe_observation)
+    safe = json.loads(operation.recovery_bytes())
+    assert "decodedResult" in safe
+    assert not ({"omissionReason", "safetyFailureCode", "unsafeOutputOmitted"} & set(safe))

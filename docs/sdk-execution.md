@@ -1427,7 +1427,7 @@ wholly unfinished features. Continue only the following unresolved outcomes:
 | Provider routes | Remaining supported AGY native lifecycle/result qualification beyond startup, advisory hooks and explicit Root association; Kimi installed/native qualification of its reconciled Kimi Code ACP owner; Grok Build ACP actual runtime, account/tool enforcement and canonical receiving. | Use confirmed official capabilities and the existing owners. Do not turn subscription Lead routes into third-party workers. |
 | Session coverage | Remaining provider-native continuation and native Lead/subagent integration where the official runtime exposes a qualified integration surface. Host recovery of newly committed fresh decisions is implemented separately and is not native resume. | Existing Codex/Claude/Copilot child coordination is not missing. Host lineage/depth does not prove control of vendor-internal subagents. |
 | Platform coverage | POSIX platform containment/custody and lifecycle qualification for intended macOS/Linux routes. | Windows offline results do not qualify POSIX or prove an OS sandbox. |
-| Current native acceptance | Install/inspect the selected current payload and exercise admitted real provider routes and recovery. | Not yet successfully qualified. The November 18 Codex attempt below did not complete; installation and quota-consuming calls retain their separate authorization. Offline peers are not native acceptance. |
+| Current native acceptance | Install/inspect the selected current payload and exercise admitted real provider routes and recovery. | Not yet successfully qualified. The November 18 attempts below have not established successful canonical receiving; installation and quota-consuming calls retain their separate authorization. Offline peers are not native acceptance. |
 | PR delivery | Keep main policy/regression fixes, this roadmap, source projections and PR description synchronized; complete unresolved acceptance. | PR remains draft, unmerged and not globally installed. No automatic model selection, budget policy or Actions run is implied. |
 
 Active SDK implementation owner: the existing PR19 lane. Shared main routing and
@@ -1611,7 +1611,7 @@ is registered in the source installer payload. The historical installed check
 verified source and installed-file hashes together; subsequent changes must retain
 their own source, installer and shared-owner regression evidence.
 
-### November 18 current Codex acceptance attempt
+### November 18 current Codex acceptance attempts
 
 The implementation tree `095ef6a2fc24db696c49e0c394dc8af35a3ace59` was exercised
 through the actual public read-only Consultant path, without a GUI or changes to
@@ -1647,6 +1647,33 @@ instead of overriding it with 100; the original failed binding remains unchanged
 Successful fresh/continuation acceptance is still outstanding and requires its
 own authorized calls. This result does not qualify other roles, providers,
 platforms, cancellation scenarios or full SDK delivery.
+
+A separately authorized subsequent fresh turn used implementation `889918b3`
+and the existing observation-budget default. After a narrowly approved repair of
+its isolated test workspace, the public worker exited successfully and its process
+resources settled, but receiving rejected the result with
+`E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO`. Official metadata-only thread listing and
+readback, scoped to the selected account, exact workspace and attempt time,
+identified one completed turn. Safe local diagnosis established no match against
+actual authentication-secret needles: the generic credential-label detector had
+matched the test's public memory marker followed by punctuation after `token:`.
+This was a lexical false positive caused by the acceptance prompt, not evidence
+of an authentication-secret leak or provider failure. The credential guard was
+not weakened; the next prepared test uses neutral marker wording.
+
+The wrapper retained only scanned diagnostics and process/stream digests; the
+unsafe protocol payload and original creator-owned observation cannot be restored
+from that record. The Consultant adapter does not currently support reconciliation
+of this failed receiving through `thread/read`. Thus native completion is observed,
+but a completed canonical predecessor is still absent and continuation was not
+started. Readback performed no new inference. Do not reinterpret the remaining
+continuation permission as permission to launch another fresh turn.
+
+Future diagnostic omission records retain only a closed `omissionReason` and,
+when recognized, a literal `safetyFailureCode`. Unknown exception text and raw
+payload remain excluded; `restorableObservation` and `replayAuthorized` remain
+false. This diagnostic improvement does not retroactively recover the failed
+receiving or qualify native fresh/continuation acceptance.
 
 ### Verified native evidence and subsequent changes
 

@@ -426,19 +426,45 @@ class CodexReviewDispatch:
                 # Protocol observations are not a safe provider result projection.
                 del candidate["result"]["observations"]
                 candidate["result"]["observationsOmitted"] = "protocol-may-contain-prompt-or-secrets"
+            # Only closed local categories may survive a failed safety scan.
+            # Exception text, arbitrary scanner values and payload remain private.
+            safety_codes = {
+                code: code for code in (
+                    "E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO",
+                    "E_EXTERNAL_PROVIDER_MACHINE_PATH_ECHO",
+                    "E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE",
+                )
+            }
+            omission_reason = "candidate_serialization_failed"
+            safety_code = None
             try:
                 encoded = json_text(candidate).encode("utf-8")
-                if observation.result is not None:
-                    receiving.scan_execution_output(observation.result, run.output_context)
+                omission_reason = "scan_context_unavailable"
                 if not isinstance(run.output_context, _owner().ProviderOutputContext):
                     raise ValueError("scan context unavailable")
+                omission_reason = "result_scan_failed"
+                if observation.result is not None:
+                    receiving.scan_execution_output(observation.result, run.output_context)
+                omission_reason = "candidate_scan_failed"
                 failure = _owner().provider_output_safety_scan_terminal(
                     self.request.provider, run.output_context.needles, stdout=encoded, stderr=b"", serialized_line=False,
                 )
-                if failure is not None or json_text(self.request.prompt)[1:-1].encode("utf-8") in encoded:
+                if failure is not None:
+                    if type(failure) is str:
+                        safety_code = safety_codes.get(failure)
                     raise ValueError("unsafe diagnostic output")
-            except Exception:
+                omission_reason = "prompt_check_failed"
+                if json_text(self.request.prompt)[1:-1].encode("utf-8") in encoded:
+                    omission_reason = "prompt_echo"
+                    raise ValueError("unsafe diagnostic output")
+            except Exception as exc:
                 record["unsafeOutputOmitted"] = True
+                record["omissionReason"] = omission_reason
+                if (omission_reason in {"result_scan_failed", "candidate_scan_failed"}
+                    and type(exc) is ValueError and len(exc.args) == 1 and type(exc.args[0]) is str):
+                    safety_code = safety_code or safety_codes.get(exc.args[0])
+                if safety_code is not None:
+                    record["safetyFailureCode"] = safety_code
             else:
                 record["decodedResult"] = candidate
         payload = (json_text(record) + "\n").encode("utf-8")
