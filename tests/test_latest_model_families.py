@@ -59,6 +59,23 @@ class LatestFamiliesTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "model-generation-not-admitted"):
                 provider_prompt._qualify_managed_model_launch("codex", selected)
 
+    def test_direct_and_assigned_external_lanes_reject_low(self):
+        from scripts import provider_prompt
+        control = provider_prompt.Control()
+        control.user_approved_launch = True
+        for assigned in ("none", "qa-engineer"):
+            for model in CURRENT_CODEX_FAMILY_MODELS:
+                selected = provider_prompt.PolicyBoundLaunch(
+                    control, "audit", (), model, "low",
+                    provider_prompt.ExternalRoleProvenance(assigned, "external-reviewer"), None)
+                with self.assertRaisesRegex(ValueError, "low-not-admitted"):
+                    provider_prompt._qualify_managed_model_launch("codex", selected)
+        # Existing direct-user non-Low behavior remains unchanged.
+        selected = provider_prompt.PolicyBoundLaunch(
+            control, "audit", (), "custom-model", "medium",
+            provider_prompt.ExternalRoleProvenance("none", "external-reviewer"), None)
+        provider_prompt._qualify_managed_model_launch("codex", selected)
+
     def test_native_discovery_excludes_retired_choices(self):
         import importlib.util
         import sys
@@ -79,6 +96,36 @@ class LatestFamiliesTests(unittest.TestCase):
                     requested_model="gpt-5.6-sol", requested_effort="xhigh",
                     caller_rationale="retired negative", approved_execution_scope={"read": True}, user_approved_launch=True)
                 self.assertEqual(rejected["status"], "denied", (role, task, rejected))
+
+    def test_removing_low_preserves_other_profiles_defaults_and_task_eligibility(self):
+        policy = json.loads((ROOT / "shared/role-routing-policy.v1.json").read_bytes())
+        prior_dir = ROOT / "tests/fixtures/native-luna-policy-priors/no-low-previous"
+        prior = json.loads((prior_dir / "role-routing-policy.v1.json").read_bytes())
+        self.assertEqual(policy["profiles"], {k: v for k, v in prior["profiles"].items() if v["effort"] != "low"})
+        self.assertEqual(policy["taskRoleEligibility"], prior["taskRoleEligibility"])
+        for catalog in ("roles", "skillOnlyRoles"):
+            for name, role in policy[catalog].items():
+                self.assertEqual(role["defaultProfile"], prior[catalog][name]["defaultProfile"])
+                self.assertEqual(role["allowedProfiles"],
+                    [x for x in prior[catalog][name]["allowedProfiles"] if x != "astra-low"])
+        pair = tuple((Path("shared") / name, hashlib.sha256((prior_dir / name).read_bytes()).hexdigest())
+                     for name in ("role-routing-policy.v1.json", "orchestrarium-role-manifest.json"))
+        self.assertIn(pair, installer._STOCK_NATIVE_ROLE_CONTRACT_PRIOR_PAIRS)
+
+    def test_low_absent_from_catalogue_and_rejected_for_all_current_families(self):
+        policy = json.loads((ROOT / "shared/role-routing-policy.v1.json").read_bytes())
+        self.assertNotIn("low", policy["effortOrder"])
+        self.assertTrue(all(p["effort"] != "low" for p in policy["profiles"].values()))
+        self.assertTrue(all(t["requiredEffort"] != "low" for t in policy["taskClasses"].values()))
+        for model in CURRENT_CODEX_FAMILY_MODELS:
+            self.assertEqual(qualify_launch("codex", model, "low",
+                user_approved_launch=True, user_approved_max=True), "low-not-admitted")
+        for provider in ("claude", "kimi", "custom"):
+            self.assertEqual(qualify_launch(provider, "custom", "low",
+                user_approved_launch=True), "low-not-admitted")
+        for effort in ("medium", "high", "xhigh", "max"):
+            self.assertIsNone(qualify_launch("codex", "gpt-6.2-sol", effort,
+                user_approved_launch=True, user_approved_max=True))
 
     def test_prior_stock_pair_preserved_for_safe_install_migration(self):
         prior = ROOT / "tests/fixtures/native-luna-policy-priors/latest-family-previous"

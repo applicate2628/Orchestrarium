@@ -1,8 +1,10 @@
 # Optional software development kit (SDK) execution implementation
 
 This branch implements part of the SDK integration project separately from Rust/npm.
-The implemented and historically qualified scope is the selected Codex review
-route plus offline adapter checks for other providers. This is not the complete
+Implemented source routes now include Codex, official Claude API and Copilot
+execution with canonical receiving, plus scoped child-Lead session coordination.
+Current qualification is offline; older bounded native evidence applies only to
+its recorded revisions and routes. This is not the complete
 multivendor SDK target. The completion roadmap below records the current PR19
 integration outcome and remaining work, including provider execution and receiving;
 the historical adapter-only acceptance does not close that broader outcome. A synthetic Codex success does not
@@ -16,7 +18,7 @@ checks and the bounded live Codex review passed on October 25; the outer Agents
 cycle passed on October 26. Their exact evidence boundaries are recorded below.
 These results do not enable a default route or qualify arbitrary general use.
 
-## PR19 completion roadmap, 2026-11-17
+## PR19 completion roadmap, updated 2026-11-18
 
 **Status: approved by Dmitry on 2026-11-17; implementation remains incomplete.**
 The approved target is a working multivendor SDK integration in this pull request
@@ -506,14 +508,14 @@ method when implementing or using a route. This plan is not a legal determinatio
 
 ### Current baseline and remaining provider work
 
-Published baseline for this roadmap: `23da8dba`. Subsequent changes must update
-their own evidence below or in the existing PR description rather than relabel
-historical results as fresh acceptance.
+This matrix describes the current source contract. Exact published HEAD and
+verification counts are recorded in the existing PR description. Historical
+checkpoints below retain their original scope; they are not fresh acceptance.
 
 | Surface | Implemented or observed baseline | Remaining outcome in PR19 |
 |---|---|---|
 | Common execution | Existing shared dispatch/supervisor/ledger; SDK worker uses the invoking Python interpreter. | Exercise the same lifecycle, events, receipt and cancellation owners for each supported provider/role; retain main regressions. |
-| Codex | Explicit Windows Reviewer, Consultant and scoped Worker source bridges; offline qualification and historical bounded native evidence below. | Qualify current installed/native execution; extend Consultant continuation to remaining child-Lead/session/platform outcomes through the common mechanism. |
+| Codex | Explicit Windows Reviewer, Consultant and scoped Worker source bridges; offline qualification and historical bounded native evidence below. | Qualify the current installed/native routes and remaining platform behavior. Consultant durable continuation/fork and scoped child-Lead coordination are already implemented; do not rebuild them as outstanding work. |
 | Claude | SDK Host API and explicit scoped Worker command-line route, plus prompt-only Consultant and Reviewer routes, exact receiving and offline checks; native Lead is a different boundary. | Qualify current native execution and complete child-Lead/session outcomes using official API/cloud access; do not wrap a subscription CLI as a third-party worker. |
 | Antigravity | Official setup direction; no implemented AGY runtime adapter in the current SDK execution factory. | Implement Lead/session integration and native subagent handoff; separately qualify any admitted programmatic worker route. |
 | Copilot | Explicit public fresh Consultant/Reviewer and scoped Worker; scoped child decision sessions through the existing Host lifecycle and canonical Windows receiving. Source/offline qualification only. | Qualify the current installed runtime and native session lifecycle; remaining native Lead/subagent integration must use verified vendor capabilities. |
@@ -1031,20 +1033,37 @@ not a live bot review or an atomic hosted transaction.
 
 ### Current execution state
 
-The information-only setup baseline was followed by published setup apply/recovery
-in commit `ee794cf2`; the approved plan baseline is `264f629d`, which also corrects test
-module registration. Setup now creates/updates the selected virtual environment,
-installs ordinary vendor dependencies and runs pip check while preserving failures
-for diagnosis or retry. These are installer implementation results, not proof of
-model execution or complete provider-role support. Actual native startup evidence
-and full-suite outcomes retain their own exact recorded scope; this roadmap does
-not claim an all-green runtime acceptance. Full multivendor execution remains
-unfinished; neither plan entries nor setup catalog entries mark it done.
+Completed source/offline milestones include setup apply/recovery; Codex public
+Reviewer/Consultant/scoped Worker, durable Consultant continuation/fork; official
+Claude API public Reviewer/Consultant/scoped Worker; Copilot public
+Reviewer/Consultant/scoped Worker and scoped fresh/persistent child decisions.
+The existing Root admission, dynamic task proposal/explicit decision recovery,
+canonical receiving, closure and PR-result-currentness owners remain in use.
+Copilot crossed offline tests exercise actual Host/ledger/archive lifecycle with
+synthetic provider/process peers. Paired module-generation reuse removes repeated
+owner compilation without caching mutable permissions, grants or ledger state.
 
-Continue with the next incomplete slice, not another unchanged broad audit.
-Use this section and the existing PR for the completion state; do not create a
-competing tracker or impose arbitrary run counts, time limits or new approval
-stages. Preserve actual permissions, required checks and justified safety bounds.
+The ordered slices above remain the acceptance specification, not a queue of
+wholly unfinished features. Continue only the following unresolved outcomes:
+
+| Next outcome | Concrete remaining work | Verification/delivery boundary |
+|---|---|---|
+| Provider routes | AGY native Lead/session integration; reconcile Kimi's supported agent runtime; Grok Build ACP actual runtime, account/tool enforcement and canonical receiving. | Use confirmed official capabilities and the existing owners. Do not turn subscription Lead routes into third-party workers. |
+| Session coverage | Remaining provider-native continuation and native Lead/subagent integration where supported, including Claude API session outcomes. | Existing Codex/Copilot child coordination is not missing. Host lineage/depth does not prove control of vendor-internal subagents. |
+| Platform coverage | POSIX platform containment/custody and lifecycle qualification for intended macOS/Linux routes. | Windows offline results do not qualify POSIX or prove an OS sandbox. |
+| Current native acceptance | Install/inspect the selected current payload and exercise admitted real provider routes and recovery. | Not yet performed for this HEAD. Installation and quota-consuming calls retain their separate authorization; offline peers are not native acceptance. |
+| PR delivery | Keep main policy/regression fixes, this roadmap, source projections and PR description synchronized; complete unresolved acceptance. | PR remains draft, unmerged and not globally installed. No automatic model selection, budget policy or Actions run is implied. |
+
+Active SDK implementation owner: the existing PR19 lane. Shared main routing and
+global installation changes belong to their existing separate owner and are
+integrated by revision, not overwritten. Current managed Codex families are
+Luna 6, Terra 6.1, Sol 6.2 and Astra 6.2; Low is excluded by the shared owner.
+A native-acceptance wait must not block independent source work.
+
+The historical setup checkpoints were `ee794cf2` and `264f629d`; their package
+checks are not model-execution proof. Exact earlier evidence remains below.
+Use this roadmap and the existing PR, not a competing tracker. Do not repeat
+unchanged broad audits or add arbitrary run counts, time limits or approval stages.
 
 ## Provider installation boundary
 
