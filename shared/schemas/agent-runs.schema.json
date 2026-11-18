@@ -98,7 +98,7 @@
         "external-brigade",
         "none"
       ],
-      "$comment": "Exactly ONE main-conversation identity: 'main' (the main conversation, which also holds the Lead role). Current recovery state — Task, Current step, Last result, Next action, and staged lifecycle fields — is owned by status.md, not executionRole; its older 'orchestration: light|full-lead' scalar remains legacy-compatible. Ledgers written before 2026-07-11 may carry the legacy value 'lead'; readers map it to 'main' (see scripts/validate-work-item-state.py LEGACY_EXECUTION_ROLES). New writes must use 'main'."
+      "$comment": "Exactly ONE main-conversation identity: 'main' (the main conversation, which also holds the Lead role). Current recovery state \u2014 Task, Current step, Last result, Next action, and staged lifecycle fields \u2014 is owned by status.md, not executionRole; its older 'orchestration: light|full-lead' scalar remains legacy-compatible. Ledgers written before 2026-07-11 may carry the legacy value 'lead'; readers map it to 'main' (see scripts/validate-work-item-state.py LEGACY_EXECUTION_ROLES). New writes must use 'main'."
     },
     "assignedRole": {
       "type": "string"
@@ -411,6 +411,13 @@
           "maxLength": 64,
           "pattern": "^[0-9a-f]{64}$",
           "$comment": "SHA-256 of exact canonical request write_workspace UTF-8. Binds workspace without exporting a machine path; not permission or containment evidence."
+        },
+        "continuationSourceSha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "$comment": "Exact prior received native-turn linkage digest; selected request commitment and canonical one-use launch claim remain authoritative."
         }
       },
       "$comment": "Exact SDK configuration, not permission or qualification evidence. Version 1 retains historical version-bearing metadata. Version 2 records only admitted controls and the request commitment, never fabricating SDK/runtime versions before startup; actual observed versions are retained in the scanned, artifact-bound review evidence. All tokens are bounded 128-character ASCII; version metadata additionally permits standard build/epoch markers. Codex read-only names its OS sandbox; Claude tool-restricted modes do not claim OS isolation; admitted Host tool callbacks own path permissions. Approval-policy labels are not blanket tool denials. Workspace-write adds its exact writeWorkspaceSha256 binding; selected v2 remains request-bound and observed v1 remains evidence only.",
@@ -448,7 +455,10 @@
           "then": {
             "properties": {
               "sandboxMode": {
-                "enum": ["tool-restricted-read-only", "tool-restricted-workspace-write"]
+                "enum": [
+                  "tool-restricted-read-only",
+                  "tool-restricted-workspace-write"
+                ]
               },
               "approvalPolicy": {
                 "const": "deny_unadmitted"
@@ -485,7 +495,10 @@
           "if": {
             "properties": {
               "sandboxMode": {
-                "enum": ["workspace-write", "tool-restricted-workspace-write"]
+                "enum": [
+                  "workspace-write",
+                  "tool-restricted-workspace-write"
+                ]
               }
             }
           },
@@ -505,6 +518,29 @@
           "else": {
             "properties": {
               "writeWorkspaceSha256": false
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "continuationSourceSha256"
+            ]
+          },
+          "then": {
+            "properties": {
+              "adapter": {
+                "const": "openai-codex"
+              },
+              "sandboxMode": {
+                "const": "read-only"
+              },
+              "schemaVersion": {
+                "enum": [
+                  1,
+                  2
+                ]
+              }
             }
           }
         }

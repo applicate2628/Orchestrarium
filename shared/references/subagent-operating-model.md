@@ -979,6 +979,18 @@ local form. Reuse creates an explicit dependency on that global installation,
 not a guarantee that a neighboring file will be read. Client-specific selection,
 updates and removal belong to the existing installer and its ownership receipts.
 
+## Native task continuation
+
+A native continuation starts a new admitted turn on an actually observed prior
+session. It is neither fresh independent review nor rereading/replaying an old
+turn. Preserve the existing request, selected runtime/account/scope and receiving
+owners; bind new operation identities to verified predecessor evidence. Use the
+existing work-item ledger transaction for single-successor consumption, not a
+parallel session store. Unknown outcomes require reconciliation, not automatic
+replay; this affects the selected chain, not unrelated authorized tasks.
+A Host-only retained-result implementation does not imply durable restart or
+child-Lead authority. Those routes require their own completed owner integration.
+
 ## Explicit Worker file effects
 
 A public SDK Worker route may implement its existing Host tool authorization

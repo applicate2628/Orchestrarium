@@ -87,7 +87,7 @@ def _require_call(method: object, *args: object, **kwargs: object) -> None:
         raise AdapterError("incompatible_sdk_api") from exc
 
 
-def _require_client_api(client: object, *, resume: bool) -> None:
+def _require_client_api(client: object, *, resume: bool, continuation: bool = False) -> None:
     # Validate consumed call shapes, including cleanup, without invoking methods.
     calls = [
         ("start", (), {}), ("initialize", (), {}),
@@ -95,14 +95,15 @@ def _require_client_api(client: object, *, resume: bool) -> None:
         ("turn_interrupt", ("thread", "turn"), {}),
         ("unregister_turn_notifications", ("turn",), {}), ("close", (), {}),
     ]
-    if resume:
+    if resume or continuation:
         calls.extend([
             ("thread_resume", ("thread", {}), {}),
             ("thread_read", ("thread",), {"include_turns": True}),
         ])
-    else:
+    if not resume:
+        if not continuation:
+            calls.append(("thread_start", ({},), {}))
         calls.extend([
-            ("thread_start", ({},), {}),
             ("turn_start", ("thread", "input", {}), {}),
             ("next_turn_notification", ("turn",), {}),
         ])
@@ -244,6 +245,8 @@ class CodexReviewAdapter:
         if not isinstance(request, ExecutionRequest) or request.provider != "codex":
             raise AdapterError("unsupported_provider")
         self._validate_output_kind(request)
+        if resume is not None and request.native_continuation is not None:
+            raise AdapterError("reconciliation_is_not_continuation")
         with self._lock:
             if self._used:
                 raise AdapterError("operation_already_consumed")
@@ -417,6 +420,7 @@ class CodexReviewAdapter:
             raise AdapterError("mcp_scope_mismatch") from None
 
     def _execute(self, request: ExecutionRequest, resume: tuple[str, str] | None) -> ExecutionResult:
+        continuation = request.native_continuation
         observations: list[Observation] = []
         total_bytes = 0
         status, review, usage = "incomplete", None, None
@@ -518,7 +522,7 @@ class CodexReviewAdapter:
             client = binding.client
             self._client = client
             _version_metadata(binding.sdk_version, "invalid_sdk_version")
-            _require_client_api(client, resume=resume is not None)
+            _require_client_api(client, resume=resume is not None, continuation=continuation is not None)
             _require_call(binding.read_configuration, {})
             _require_call(binding.list_mcp_status, {})
             self._authority(request, "client_start")
@@ -536,11 +540,15 @@ class CodexReviewAdapter:
                 "sandbox": self._sandbox_mode(request), "cwd": request.cwd, "model": request.model,
                 "modelProvider": "openai", "config": {"model_reasoning_effort": request.effort, **mcp_configuration, **self._sandbox_config(request)},
             }
-            self._authority(request, "resume" if resume else "thread_start")
-            started = _object(client.thread_resume(resume[0], settings) if resume else client.thread_start(settings))
-            started = capture("thread/resume" if resume else "thread/start", started)
+            resumed_thread = resume[0] if resume else continuation.native_thread_id if continuation else None
+            self._authority(request, "resume" if resumed_thread else "thread_start")
+            started = _object(client.thread_resume(resumed_thread, settings) if resumed_thread else client.thread_start(settings))
+            if continuation:
+                # The resumed session's prior conversation is not a new output artifact.
+                started = {**started, "thread": {"id": _object(started.get("thread")).get("id")}}
+            started = capture("thread/resume" if resumed_thread else "thread/start", started)
             self._thread_id = _identifier(_object(started.get("thread")).get("id"))
-            if resume and self._thread_id != resume[0]:
+            if resumed_thread and self._thread_id != resumed_thread:
                 raise AdapterError("native_thread_mismatch")
             self._profile(request, started)
             self._verify_mcp_inventory(binding, request)
@@ -550,6 +558,7 @@ class CodexReviewAdapter:
                 "runtimeVersion": runtime, "model": request.model, "effort": request.effort,
                 "sandboxMode": self._sandbox_mode(request), "approvalPolicy": "deny_all", "accountBinding": request.account_binding,
                 **self._sandbox_metadata(request),
+                **({"continuationSourceSha256": continuation.source_sha256} if continuation else {}),
             })
             if resume:
                 self._turn_id = resume[1]
@@ -564,6 +573,23 @@ class CodexReviewAdapter:
                     raise AdapterError("prior_turn_not_reconciled")
                 terminal({"threadId": self._thread_id, "turn": turns[0]})
             else:
+                if continuation:
+                    self._authority(request, "reconcile")
+                    history = _object(client.thread_read(self._thread_id, include_turns=True))
+                    thread = _object(history.get("thread"))
+                    turns = thread.get("turns")
+                    if (thread.get("id") != self._thread_id or type(turns) is not list or not turns
+                            or any(type(t) is not dict or t.get("status") not in {"completed", "failed", "interrupted"} for t in turns)
+                            or turns[-1].get("id") != continuation.native_turn_id
+                            or turns[-1].get("status") != "completed" or turns[-1].get("error") is not None
+                            or sum(t.get("id") == continuation.native_turn_id for t in turns) != 1):
+                        raise AdapterError("continuation_predecessor_not_current_terminal")
+                    # Do not re-export the prior private history as current evidence.
+                    capture("continuation/verified", {"threadId": self._thread_id,
+                            "priorTurnId": continuation.native_turn_id,
+                            "sourceSha256": continuation.source_sha256})
+                    if self._cancel_requested:
+                        raise AdapterError("cancelled_before_turn_start")
                 self._authority(request, "turn_start")
                 response = _object(client.turn_start(self._thread_id, request.prompt, {
                     "approvalPolicy": "never", "approvalsReviewer": "user",
@@ -572,7 +598,10 @@ class CodexReviewAdapter:
                     "outputSchema": self._output_schema(request),
                 }))
                 # Public turn_start preserves events received before this response.
-                self._turn_id = _identifier(_object(response.get("turn")).get("id"))
+                new_turn_id = _identifier(_object(response.get("turn")).get("id"))
+                if continuation and new_turn_id == continuation.native_turn_id:
+                    raise AdapterError("continuation_reused_prior_turn")
+                self._turn_id = new_turn_id
                 capture("turn/start", response)
                 if self._cancel_requested:
                     self._cancel(request.run_id)

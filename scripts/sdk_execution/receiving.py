@@ -152,10 +152,10 @@ def terminal_payload(request: ExecutionRequest, observation: Any, *, output_cont
     process = _require_sdk_process_settlement(observation)
     task_result = request.result_kind == "task"
     claude_bound = request.provider == "claude" and (task_result or request.tool_profile == "prompt-only")
-    if claude_bound and (type(admitted_sdk_execution) is not dict
+    if (claude_bound or request.native_continuation is not None) and (type(admitted_sdk_execution) is not dict
             or admitted_sdk_execution.get("schemaVersion") != 2
             or "requestSha256" not in admitted_sdk_execution):
-        raise ValueError("SDK Claude selected profile requires admitted request commitment")
+        raise ValueError("SDK selected profile requires admitted request commitment")
     evidence = result.task if task_result else result.review
     complete = not (
         process.outcome != "success" or process.failure_id is not None
@@ -165,6 +165,9 @@ def terminal_payload(request: ExecutionRequest, observation: Any, *, output_cont
         or result.execution_error is not None or result.capture_error is not None
         or observation.protocol_error is not None
     )
+    if request.native_continuation is not None:
+        complete = complete and (result.native_thread_id == request.native_continuation.native_thread_id
+            and bool(result.native_turn_id) and result.native_turn_id != request.native_continuation.native_turn_id)
     if request.write_workspace is not None and admitted_sdk_execution is None:
         raise ValueError("SDK writes require admitted request commitment")
     selected_config = admitted_sdk_execution if admitted_sdk_execution is not None else result.sdk_execution

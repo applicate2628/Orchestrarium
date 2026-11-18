@@ -300,6 +300,8 @@ def selected_sdk_execution(request: ExecutionRequest, selection: Any) -> dict[st
     }
     if request.write_workspace is not None:
         value["writeWorkspaceSha256"] = hashlib.sha256(request.write_workspace.encode("utf-8")).hexdigest()
+    if request.native_continuation is not None:
+        value["continuationSourceSha256"] = request.native_continuation.source_sha256
     if type(request) is CoordinationInferenceRequest:
         value.update(schemaVersion=3, operationKind="coordination-inference",
                      innerRequestSha256=request.inner_request_sha256,
@@ -465,7 +467,7 @@ def build_launch_arguments(request: ExecutionRequest, selection: Any, *, started
     return arguments
 
 
-def claim_launch(request: ExecutionRequest, selection: Any, *, authority: Callable[[ExecutionRequest, str], None], started_at: str):
+def claim_launch(request: ExecutionRequest, selection: Any, *, authority: Callable[[ExecutionRequest, str], None], started_at: str, previous_run=None, previous_terminal=None):
     """Produce one launch atomically; an unresolved prior launch is never replayed."""
     if selection.expected_launch_sha256 is not None:
         raise RuntimeBindingError("new_launch_selection_required")
@@ -484,6 +486,11 @@ def claim_launch(request: ExecutionRequest, selection: Any, *, authority: Callab
                   source_bytes=previous.encode("utf-8"), ledger_resource_budget=budget) if previous else [])
         if errors or any(e.get("runId") in {request.external_dispatch_id, request.external_evidence_run_id} for e in events):
             raise RuntimeBindingError("existing_launch_is_not_replay_authority")
+        if request.native_continuation is not None:
+            _validate_continuation(request, selection, previous_run, previous_terminal, events=events)
+            source = selected_sdk_execution(request, selection)["continuationSourceSha256"]
+            if any(e.get("eventKind") == "launch" and e.get("sdkExecution", {}).get("continuationSourceSha256") == source for e in events):
+                raise RuntimeBindingError("continuation_predecessor_already_consumed")
         _require_authority(authority, request, "sdk_launch_commit")
         return event
 
@@ -562,6 +569,71 @@ class RuntimeRun:
     launch_error: str | None = None
 
 
+def _validate_continuation(request, selection, previous_run, previous_terminal, *, events=None):
+    """Consume received in-process evidence, never a caller-supplied session ID."""
+    from .contracts import NativeContinuation
+    from .receiving import terminal_payload, review_artifact_target
+    if type(previous_run) is not RuntimeRun or type(previous_terminal) is not dict:
+        raise RuntimeBindingError("received_continuation_predecessor_required")
+    prior = previous_run.request
+    if (prior.provider != "codex" or prior.result_kind != "task" or prior.role != "consultant"
+            or prior.write_workspace is not None or previous_run.observation is None):
+        raise RuntimeBindingError("continuation_predecessor_kind_mismatch")
+    for name in ("work_item_id", "provider", "role", "model", "effort", "cwd", "account_binding", "coordinator_binding", "scope", "write_workspace", "tool_profile"):
+        if getattr(request, name) != getattr(prior, name):
+            raise RuntimeBindingError("continuation_scope_changed")
+    left, right = selection.to_dict(), previous_run.selection.to_dict()
+    left.pop("expected_launch_sha256", None); right.pop("expected_launch_sha256", None)
+    if left != right or selection.expected_launch_sha256 is not None:
+        raise RuntimeBindingError("continuation_selection_changed")
+    if ({request.external_dispatch_id, request.external_evidence_run_id} & {prior.external_dispatch_id, prior.external_evidence_run_id}
+            or request.artifact_id == prior.artifact_id):
+        raise RuntimeBindingError("continuation_requires_new_operation")
+    selected = selected_sdk_execution(prior, previous_run.selection)
+    payload = terminal_payload(prior, previous_run.observation, output_context=previous_run.output_context, admitted_sdk_execution=selected)
+    result = previous_run.observation.result
+    if payload["status"] != "completed" or not result.native_thread_id or not result.native_turn_id:
+        raise RuntimeBindingError("continuation_predecessor_not_completed")
+    expected = NativeContinuation(prior.external_dispatch_id, prior.external_evidence_run_id,
+        selected["requestSha256"], result.native_thread_id, result.native_turn_id)
+    if request.native_continuation != expected:
+        raise RuntimeBindingError("continuation_observed_binding_mismatch")
+    if events is None:
+        _writer, _validator, events = _events(previous_run.selection)
+    terminals = [e for e in events if e.get("runId") == prior.external_evidence_run_id and e.get("launchRunId") == prior.external_dispatch_id]
+    launches = [e for e in events if e.get("runId") == prior.external_dispatch_id and e.get("eventKind") == "launch"]
+    if (len(terminals) != 1 or terminals[0] != previous_terminal or len(launches) != 1
+            or launches[0].get("sdkExecution") != selected or previous_terminal.get("sdkExecution") != selected
+            or previous_terminal.get("status") != "completed" or previous_terminal.get("gate") != "none"):
+        raise RuntimeBindingError("continuation_receipt_changed")
+    artifact = review_artifact_target(selection.work_item, previous_terminal["artifact"])
+    content = (payload["resultText"] + "\n").encode()
+    resolved = artifact.resolve(strict=True)
+    with artifact.open("rb") as stream:
+        identity = os.fstat(stream.fileno())
+        observed = stream.read(len(content) + 1)
+        current = artifact.stat()
+    if (observed != content or artifact.resolve(strict=True) != resolved
+            or (identity.st_dev, identity.st_ino) != (current.st_dev, current.st_ino)
+            or previous_terminal.get("artifactRevision") != hashlib.sha256(content).hexdigest()
+            or previous_terminal.get("artifactSizeBytes") != len(content)):
+        raise RuntimeBindingError("continuation_artifact_changed")
+    return expected
+
+
+def prepare_continuation_request(request, selection, previous_run, previous_terminal):
+    """Bind a new admitted Consultant task to one actually received native turn."""
+    from .contracts import NativeContinuation
+    if type(previous_run) is not RuntimeRun or previous_run.observation is None or previous_run.observation.result is None:
+        raise RuntimeBindingError("received_continuation_predecessor_required")
+    prior, result = previous_run.request, previous_run.observation.result
+    bound = replace(request, context_mode="continuation", native_continuation=NativeContinuation(
+        prior.external_dispatch_id, prior.external_evidence_run_id,
+        request_sha256(prior, previous_run.selection), result.native_thread_id, result.native_turn_id))
+    _validate_continuation(bound, selection, previous_run, previous_terminal)
+    return bound
+
+
 def _settle_before_worker_failure(request: ExecutionRequest, selection: Any, *, started_at: str) -> dict[str, object]:
     """Record known no-worker failure, without inventing observed SDK metadata."""
     writer, _validator, _budget = _ledger(selection)
@@ -625,6 +697,7 @@ def run_admitted_review(
     capture_limit_bytes: int = MAX_STDIN_BYTES,
     authorize_tool: Callable[[ExecutionRequest, str, dict[str, Any]], None] | None = None,
     verify_account: Callable[[ExecutionRequest, dict[str, Any]], str] | None = None,
+    previous_run=None, previous_terminal=None,
 ) -> RuntimeRun:
     """Complete explicit parent launch through the fixed worker, without activation.
 
@@ -648,6 +721,8 @@ def run_admitted_review(
     if selection.expected_launch_sha256 is not None:
         raise RuntimeBindingError("existing_launch_is_not_replay_authority")
     validate_admitted_request(request, selection)
+    if request.native_continuation is not None:
+        _validate_continuation(request, selection, previous_run, previous_terminal)
     workspace_identity = validate_worker_custody(request, selection)
     if request.provider == "claude":
         if any(not callable(callback) or inspect.iscoroutinefunction(callback)
@@ -672,7 +747,7 @@ def run_admitted_review(
     environment, output_context = prepare_environment(selection, source_environment)
     _verify_runtime(selection)
     require_live_request()
-    admitted = claim_launch(effective, selection, authority=authority, started_at=started_at)
+    admitted = claim_launch(effective, selection, authority=authority, started_at=started_at, previous_run=previous_run, previous_terminal=previous_terminal)
     try:
         # The trust probe is itself a native runtime operation. Claim first so
         # replayed launches cannot trigger even this provider startup effect.
@@ -747,6 +822,7 @@ class SdkReviewExecutor:
         cancellation_probe: Callable[[], bool], started_at: str,
         authorize_tool: Callable[[ExecutionRequest, str, dict[str, Any]], None] | None = None,
         verify_account: Callable[[ExecutionRequest, dict[str, Any]], str] | None = None,
+        previous_run=None, previous_terminal=None,
     ) -> None:
         if not isinstance(request_id, str) or not request_id or any(
             not callable(getattr(authority, name, None)) or inspect.iscoroutinefunction(getattr(authority, name, None))
@@ -755,6 +831,7 @@ class SdkReviewExecutor:
             raise RuntimeBindingError("existing_request_authority_owner_required")
         if type(source_environment) is not dict or not callable(cancellation_probe):
             raise RuntimeBindingError("explicit_environment_and_cancellation_probe_required")
+        self._previous_run, self._previous_terminal = previous_run, previous_terminal
         self._request_id, self._authority, self._selection = request_id, authority, selection
         self._process_owner, self._environment = process_owner, dict(source_environment)
         self._artifact, self._deadline, self._external_cancel, self._started_at = artifact, deadline_monotonic, cancellation_probe, started_at
@@ -775,6 +852,8 @@ class SdkReviewExecutor:
         if type(request) is not self._operation_request_type:
             raise RuntimeBindingError("executor_operation_kind_mismatch")
         validate_admitted_request(request, self._selection)
+        if request.native_continuation is not None:
+            _validate_continuation(request, self._selection, self._previous_run, self._previous_terminal)
         if type(self._process_owner) is not ProcessRunnerV1:
             raise RuntimeBindingError("existing_process_owner_required")
         if type(self._deadline) not in {int, float} or not math.isfinite(self._deadline):
@@ -821,6 +900,7 @@ class SdkReviewExecutor:
             deadline_monotonic=self._deadline, cancellation_probe=self._cancelled,
             started_at=self._started_at, authorize_tool=self._authorize_tool,
             verify_account=self._verify_account,
+            **({"previous_run": self._previous_run, "previous_terminal": self._previous_terminal} if request.native_continuation is not None else {}),
         )
         self.runtime_run = run  # Retain before receiving can fail.
         if run.observation is None:

@@ -50,6 +50,8 @@ class CoordinationInferenceRequest(ExecutionRequest):
 
     @classmethod
     def from_dict(cls, value: object) -> CoordinationInferenceRequest:
+        if type(value) is dict and "native_continuation" not in value:
+            value = {**value, "native_continuation": None}
         if type(value) is dict and "tool_profile" not in value:
             value = {**value, "tool_profile": "default"}
         if type(value) is dict and "write_workspace" not in value:

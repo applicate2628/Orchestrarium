@@ -407,6 +407,8 @@ def validate_sdk_execution(
         provider != "codex" or value["outerBudgetBinding"] == value["innerBudgetBinding"]
     ):
         raise ValueError("coordination inference requires Codex and distinct turn reservations")
+    if "continuationSourceSha256" in value and (provider != "codex" or value["sandboxMode"] != "read-only" or value["schemaVersion"] not in {1, 2}):
+        raise ValueError("continuation metadata requires Codex read-only execution")
     return dict(value)
 
 
@@ -436,6 +438,9 @@ def _validate_sdk_event(event: Mapping[str, object], errors: list[str]) -> None:
                 raise ValueError("workspace-write requires selected worker provenance and gate none")
         except (ValueError, ImportError) as exc:
             fail(errors, f"{run_id}: {exc}")
+    if type(selected) is dict and "continuationSourceSha256" in selected:
+        if selected.get("schemaVersion") != 2 or event.get("executionRole") != "consultant" or event.get("assignedRole") != "consultant" or event.get("gate") != "none":
+            fail(errors, f"{run_id}: continuation requires selected Consultant provenance")
     if type(selected) is dict and selected.get("schemaVersion") == 3:
         if any(event.get(k) != expected for k, expected in
                (("provider", "codex"), ("role", "lead"), ("executionRole", "main"),

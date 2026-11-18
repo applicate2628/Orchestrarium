@@ -93,6 +93,60 @@ existing launch record, not a second session store. Verify fresh-review isolatio
 correct resume, explicit-handoff contents and wrong-session/account/provider
 refusal through the owning contract. These tests do not authorize model calls.
 
+### Native Consultant continuation through the Host
+
+The existing Host executor can explicitly continue a received read-only Codex
+Consultant task. This is `context_mode: continuation`, not a fresh independent
+review, a text handoff, a fork, or reconciliation of an old turn. The caller
+supplies the actual retained predecessor `RuntimeRun` and received terminal;
+thread/turn identifiers copied into an arbitrary request are not sufficient.
+The receiving owner verifies the original sealed observation, canonical artifact
+and ledger readback. A new admitted request uses distinct dispatch/evidence/
+artifact identities, retaining the work item, scope, selected runtime, workspace
+and account/access context under the current Host's permissions. API-key mode
+readback is not proof of a person or billing-account identity.
+
+Prepare the next request with the existing governance/admission owners, then
+bind its continuation with the existing runtime helper:
+
+```python
+continued = runtime.prepare_continuation_request(
+    prepared_next_request, next_selection,
+    previous_executor.runtime_run, previous_executor.terminal,
+)
+```
+
+The existing authority must resolve and authorize `continued`. Construct the next
+`SdkReviewExecutor` with its normal process/environment/resource arguments plus
+`previous_run=previous_executor.runtime_run` and
+`previous_terminal=previous_executor.terminal`; its normal `execute(continued)`
+performs the claimed operation. `next_selection` is a fresh launch selection,
+not the predecessor's already-consumed `expected_launch_sha256`. The helper does
+not grant execution authority or invoke a provider.
+
+The predecessor linkage is part of the request commitment and selected launch
+provenance. The existing ledger transaction atomically consumes that predecessor
+for one successor within the same work-item chain; no second session store or
+universal depth ceiling is introduced. The native adapter resumes the observed
+thread, verifies that the predecessor is its last completed turn, and starts one
+new turn with the new prompt and current admitted controls. A different thread,
+stale/active tip or reused turn identifier cannot be received as this continuation.
+The normal cancellation, process settlement and nonauthorizing receiving owners
+remain in effect. This does not lock unrelated native callers outside the Host's
+work-item/session ownership; callers must preserve that existing exclusivity.
+
+A successful received successor can become the next predecessor. An uncertain
+launch, cancellation or failed preparation does not authorize automatic reuse
+of a consumed predecessor. Retain evidence and reconcile through the existing
+owner; an independently admitted fresh task remains available. There is no
+implicit rollback or model replay, and this local hold does not stop other work.
+
+This first route is Host-only and read-only Consultant. The public binding does
+not accept bare native session IDs, and continuation after losing the retained
+sealed result is not yet implemented. Durable restart, other role/provider
+continuation, native fork and scoped child-Lead lifecycle remain roadmap work,
+not prohibited product roles. Offline fixtures do not constitute a native run.
+
 ### Independent multi-Lead sessions and depth
 
 Approved target: the root Lead can split genuinely independent outcomes
@@ -236,7 +290,7 @@ historical results as fresh acceptance.
 | Surface | Implemented or observed baseline | Remaining outcome in PR19 |
 |---|---|---|
 | Common execution | Existing shared dispatch/supervisor/ledger; SDK worker uses the invoking Python interpreter. | Exercise the same lifecycle, events, receipt and cancellation owners for each supported provider/role; retain main regressions. |
-| Codex | Explicit Windows Reviewer, Consultant and scoped Worker source bridges; offline qualification and historical bounded native evidence below. | Complete current installed/native qualification and intended child-Lead/session/platform outcomes through the common mechanism. |
+| Codex | Explicit Windows Reviewer, Consultant and scoped Worker source bridges; offline qualification and historical bounded native evidence below. | Qualify current installed/native execution; extend the Host Consultant continuation to durable/public and remaining child-Lead/session/platform outcomes through the common mechanism. |
 | Claude | SDK Host API and explicit scoped Worker command-line route, plus prompt-only Consultant and Reviewer routes, exact receiving and offline checks; native Lead is a different boundary. | Qualify current native execution and complete child-Lead/session outcomes using official API/cloud access; do not wrap a subscription CLI as a third-party worker. |
 | Antigravity | Official setup direction; no implemented AGY runtime adapter in the current SDK execution factory. | Implement Lead/session integration and native subagent handoff; separately qualify any admitted programmatic worker route. |
 | Copilot | Setup direction; existing integration candidates are not a callable SDK execution route. | Reconcile reusable candidate work, implement the common adapter and verify supported Lead/worker/reviewer roles without provider-name role bans. |

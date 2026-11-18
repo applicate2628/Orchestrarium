@@ -1092,12 +1092,12 @@ def test_obligations_json_incomplete_acquisition_is_null(tmp_path, suffix, cause
     assert any(cause in value for value in payload["diagnostics"])
 
 
-def test_load_jsonl_count_limit_records_incomplete_in_same_pass(tmp_path, monkeypatch):
+def test_load_jsonl_count_limit_records_incomplete_in_same_pass(tmp_path):
     module = load_validator_module()
-    monkeypatch.setattr(module, "MAX_LEDGER_EVENTS", 1)
     observed = []
     errors = []
-    events = module.load_jsonl(tmp_path / "unused", errors, source_bytes=b'{}\n{}\n', ledger_acquisition_complete_out=observed)
+    events = module.load_jsonl(tmp_path / "unused", errors, source_bytes=b'{}\n{}\n', ledger_acquisition_complete_out=observed,
+        ledger_resource_budget=module.LedgerResourceBudgetV1(1, 6))
     assert events == [] and observed == [False]
     assert any("bounded event count" in value for value in errors)
 
@@ -1225,12 +1225,12 @@ def test_selected_api_read_failure_is_not_successful_empty_acquisition(tmp_path,
     item, captured = _selection_revise_fixture(tmp_path)
     selected = item / "agent-runs.jsonl"
     selected.write_bytes(captured)
-    original = module.read_ledger_bytes
+    original = module._read_ledger_image
     def fail_selected(path, *args, **kwargs):
-        if path == selected:
+        if path == selected and kwargs.get("source_bytes") is None:
             raise OSError("controlled selected acquisition failure")
         return original(path, *args, **kwargs)
-    monkeypatch.setattr(module, "read_ledger_bytes", fail_selected)
+    monkeypatch.setattr(module, "_read_ledger_image", fail_selected)
     acquired = []
     errors = module.validate_work_item(item, ledger_acquisition_complete_out=acquired)
     assert any("cannot read ledger:" in value and "controlled selected acquisition failure" in value for value in errors)
@@ -1281,14 +1281,14 @@ def test_archive_authority_preserves_migrated_review_and_neutral_settlement(tmp_
     ]
     rows = list(module._runtime_rows_from_events(events))
     rows[1] = replace(rows[1], epoch="migration-replaced")
-    masks = module._derive_authority_masks(rows, [True] * 3, tmp_path, policy="archive")
+    masks = module._derive_authority_masks(rows, [True] * 3, tmp_path, policy="archive", _definition="current")
     assert masks[0].launch_eligible
     assert tuple(vars(masks[1]).values()) == (False, False, True, False, False)
     assert masks[2].terminal_eligible
-    assert masks == module._derive_authority_masks(rows, [True] * 3, tmp_path)
+    assert masks == module._derive_authority_masks(rows, [True] * 3, tmp_path, _definition="current")
     assert not any(
         any(vars(mask).values())
-        for mask in module._derive_authority_masks(rows, [False] * 3, tmp_path, policy="archive")
+        for mask in module._derive_authority_masks(rows, [False] * 3, tmp_path, policy="archive", _definition="current")
     )
 
 
@@ -1300,8 +1300,8 @@ def test_archive_authority_has_no_historical_uplift(tmp_path, epoch):
         module._runtime_rows_from_events([event])[0], epoch=epoch,
         authority=module.LedgerAuthorityV1(True, True, True, True, True),
     )
-    assert module._derive_authority_masks([row], [False], tmp_path)[0].launch_eligible
-    archive_mask = module._derive_authority_masks([row], [False], tmp_path, policy="archive")[0]
+    assert module._derive_authority_masks([row], [False], tmp_path, _definition="historical")[0].launch_eligible
+    archive_mask = module._derive_authority_masks([row], [False], tmp_path, policy="archive", _definition="current")[0]
     assert not any(vars(archive_mask).values())
 
 

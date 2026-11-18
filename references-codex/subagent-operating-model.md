@@ -43,6 +43,13 @@ result without releasing it for application or rerunning the model. This adds
 no GitHub requirement to unrelated tasks and no SDK permission to publish or
 resolve threads; see the canonical PR-bot skill/protocol for hosted-state actions.
 
+The Codex Host has an explicit read-only Consultant continuation route over a
+verified received predecessor. It resumes the observed thread and starts a new
+turn, with single-successor consumption in the existing work-item ledger. This
+is not independent-review context, interrupted-turn replay, public restart, or
+child-Lead permission. Retain original outcomes and reconcile uncertainty through
+the same owners; API-key mode readback does not establish an account identity.
+
 ## Codex-specific runtime notes
 
 - Mechanical-plan filesystem preflight is a repo-local check, not host containment. An explicitly observed exact root may be located on an ordinary mounted volume; native identity is rechecked across its ancestor chain. Detected descendant mounts and all links/junctions/reparse points remain refused. Python documents that [os.path.ismount](https://docs.python.org/3/library/os.path.html#os.path.ismount) cannot reliably detect same-filesystem bind mounts and also treats Linux btrfs subvolumes as mount points. No stronger mount-detection guarantee is claimed; caller authority and host restrictions remain independent.

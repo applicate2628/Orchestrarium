@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Codex Hosts can continue a received read-only Consultant task as a new native turn, using verified predecessor evidence and the existing ledger single-successor claim. This preserves context without replaying an uncertain old turn; public restart and child-Lead authority remain separate work, and native execution still requires its normal authorization.
+
 - SDK execution now rechecks the existing Host authority before releasing a received result. PR-bot handoffs bind the exact hosted revision, retain stale evidence without replay, and leave publication/thread actions with their existing owners; unrelated SDK tasks do not acquire a GitHub requirement.
 
 - The explicit Claude SDK Worker task route now connects the existing Host file-tool authorization to the admitted workspace and protected control paths. Ordinary project context stays readable, while file writes retain custody and independent receiving checks; Reviewer/Consultant remain prompt-only. This source integration is not an OS sandbox or live-provider qualification.

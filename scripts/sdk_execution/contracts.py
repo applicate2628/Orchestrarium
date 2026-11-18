@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import PurePosixPath, PureWindowsPath
@@ -48,6 +49,36 @@ def json_text(value: object) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class NativeContinuation:
+    """Prior received native turn identity, not permission to resume it."""
+    prior_dispatch_id: str
+    prior_evidence_run_id: str
+    prior_request_sha256: str
+    native_thread_id: str
+    native_turn_id: str
+
+    def __post_init__(self):
+        for item in fields(self):
+            _text(getattr(self, item.name), item.name)
+        if (len(self.prior_request_sha256) != 64
+                or any(c not in "0123456789abcdef" for c in self.prior_request_sha256)):
+            raise ValueError("invalid continuation predecessor digest")
+        if self.prior_dispatch_id == self.prior_evidence_run_id:
+            raise ValueError("distinct continuation predecessor identities required")
+
+    def to_dict(self):
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value):
+        return cls(**_keys(value, {item.name for item in fields(cls)}))
+
+    @property
+    def source_sha256(self):
+        return hashlib.sha256(json_text(self.to_dict()).encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
 class ExecutionRequest:
     work_item_id: str
     provider: str
@@ -68,10 +99,11 @@ class ExecutionRequest:
     result_kind: str = field(default="review", kw_only=True)
     tool_profile: str = field(default="default", kw_only=True)
     write_workspace: str | None = field(default=None, kw_only=True)
+    native_continuation: NativeContinuation | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         for field in fields(self):
-            if field.name not in {"scope", "max_output_bytes", "max_events", "write_workspace"}:
+            if field.name not in {"scope", "max_output_bytes", "max_events", "write_workspace", "native_continuation"}:
                 _text(getattr(self, field.name), field.name, 262_144 if field.name == "prompt" else 4096)
         if self.tool_profile not in {"default", "prompt-only"}:
             raise ValueError("unsupported tool profile")
@@ -99,7 +131,18 @@ class ExecutionRequest:
             # not a second worker role list in this portable value codec.
         elif self.result_kind == "task" and (self.provider not in {"codex", "claude"} or self.role != "consultant"):
             raise ValueError("task adapter combination not implemented")
-        if self.context_mode not in {"fresh", "handoff"}:
+        if self.native_continuation is not None:
+            if (type(self.native_continuation) is not NativeContinuation
+                    or self.context_mode != "continuation" or self.provider != "codex"
+                    or self.role != "consultant" or self.result_kind != "task"
+                    or self.write_workspace is not None or self.tool_profile != "default"):
+                raise ValueError("native continuation requires read-only Codex Consultant")
+            prior = self.native_continuation
+            if {self.external_dispatch_id, self.external_evidence_run_id} & {prior.prior_dispatch_id, prior.prior_evidence_run_id}:
+                raise ValueError("continuation requires new execution identities")
+        elif self.context_mode == "continuation":
+            raise ValueError("native continuation binding required")
+        if self.context_mode not in {"fresh", "handoff", "continuation"}:
             raise ValueError("unsupported context mode")
         if self.provider not in {"codex", "claude", "kimi", "grok", "minimax", "mimo"}:
             raise ValueError("invalid provider")
@@ -137,6 +180,8 @@ class ExecutionRequest:
             result.pop("tool_profile")
         if self.write_workspace is None:
             result.pop("write_workspace")
+        if self.native_continuation is None:
+            result.pop("native_continuation")
         return result
 
     @classmethod
@@ -150,7 +195,11 @@ class ExecutionRequest:
             value = {**value, "result_kind": "review"}
         if isinstance(value, dict) and "write_workspace" not in value:
             value = {**value, "write_workspace": None}
+        if isinstance(value, dict) and "native_continuation" not in value:
+            value = {**value, "native_continuation": None}
         data = dict(_keys(value, {field.name for field in fields(cls)}))
+        if data["native_continuation"] is not None:
+            data["native_continuation"] = NativeContinuation.from_dict(data["native_continuation"])
         if not isinstance(data["scope"], list):
             raise ValueError("scope must be a list")
         data["scope"] = tuple(data["scope"])
