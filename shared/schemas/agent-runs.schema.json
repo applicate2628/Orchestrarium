@@ -667,6 +667,22 @@
                     ]
                   }
                 }
+              },
+              {
+                "properties": {
+                  "adapter": {
+                    "const": "claude-agent-sdk"
+                  },
+                  "sandboxMode": {
+                    "const": "tool-restricted-read-only"
+                  },
+                  "schemaVersion": {
+                    "enum": [
+                      1,
+                      2
+                    ]
+                  }
+                }
               }
             ]
           }

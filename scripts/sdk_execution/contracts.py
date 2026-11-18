@@ -48,6 +48,24 @@ def json_text(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True)
 
 
+def validate_transcript_snapshot(value):
+    """Opaque native transcript commitment, not an interpreted native turn tip."""
+    value = _keys(value, {"path", "sha256", "size", "file_identity", "root_identity"})
+    path = PurePosixPath(_text(value["path"], "transcript path"))
+    if path.is_absolute() or ".." in path.parts or str(path) != value["path"] or "\\" in value["path"] or ":" in value["path"]:
+        raise ValueError("invalid transcript path")
+    if type(value["size"]) is not int or value["size"] <= 0:
+        raise ValueError("invalid transcript size")
+    digest = value["sha256"]
+    if type(digest) is not str or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+        raise ValueError("invalid transcript digest")
+    for name in ("file_identity", "root_identity"):
+        identity = value[name]
+        if type(identity) is not list or len(identity) != 2 or any(type(v) is not int or v < 0 for v in identity):
+            raise ValueError("invalid transcript identity")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class NativeContinuation:
     """Prior received native turn identity, not permission to resume it."""
@@ -56,10 +74,14 @@ class NativeContinuation:
     prior_request_sha256: str
     native_thread_id: str
     native_turn_id: str
+    transcript_json: str | None = None
 
     def __post_init__(self):
         for item in fields(self):
-            _text(getattr(self, item.name), item.name)
+            if item.name != "transcript_json":
+                _text(getattr(self, item.name), item.name)
+        if self.transcript_json is not None:
+            validate_transcript_snapshot(strict_json(self.transcript_json, max_bytes=16384))
         if (len(self.prior_request_sha256) != 64
                 or any(c not in "0123456789abcdef" for c in self.prior_request_sha256)):
             raise ValueError("invalid continuation predecessor digest")
@@ -67,10 +89,15 @@ class NativeContinuation:
             raise ValueError("distinct continuation predecessor identities required")
 
     def to_dict(self):
-        return asdict(self)
+        value = asdict(self)
+        if self.transcript_json is None:
+            value.pop("transcript_json")
+        return value
 
     @classmethod
     def from_dict(cls, value):
+        if isinstance(value, dict) and "transcript_json" not in value:
+            value = {**value, "transcript_json": None}
         return cls(**_keys(value, {item.name for item in fields(cls)}))
 
     @property
@@ -133,12 +160,14 @@ class ExecutionRequest:
             raise ValueError("task adapter combination not implemented")
         if self.native_continuation is not None:
             if (type(self.native_continuation) is not NativeContinuation
-                    or self.context_mode not in {"continuation", "fork"} or self.provider not in {"codex", "copilot"}
+                    or self.context_mode not in {"continuation", "fork"} or self.provider not in {"codex", "copilot", "claude"}
                     or self.role != "consultant" or self.result_kind != "task" or self.write_workspace is not None
-                    or self.tool_profile != ("prompt-only" if self.provider == "copilot" else "default")
-                    or (self.provider == "copilot" and self.context_mode != "continuation")):
+                    or (self.provider != "claude" and self.tool_profile != ("prompt-only" if self.provider == "copilot" else "default"))
+                    or (self.provider in {"copilot", "claude"} and self.context_mode != "continuation")):
                 raise ValueError("native continuation requires an implemented read-only Consultant route")
             prior = self.native_continuation
+            if (prior.transcript_json is not None) != (self.provider == "claude"):
+                raise ValueError("provider transcript commitment mismatch")
             if {self.external_dispatch_id, self.external_evidence_run_id} & {prior.prior_dispatch_id, prior.prior_evidence_run_id}:
                 raise ValueError("continuation requires new execution identities")
         elif self.context_mode in {"continuation", "fork"}:
@@ -185,6 +214,8 @@ class ExecutionRequest:
             result.pop("write_workspace")
         if self.native_continuation is None:
             result.pop("native_continuation")
+        else:
+            result["native_continuation"] = self.native_continuation.to_dict()
         return result
 
     @classmethod

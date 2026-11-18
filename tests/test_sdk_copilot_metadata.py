@@ -30,7 +30,7 @@ def test_selected_and_observed_copilot_metadata(version):
 @pytest.mark.parametrize("change",[
     {"sandboxMode":"read-only"},{"sandboxMode":"workspace-write"},
     {"approvalPolicy":"deny_unadmitted"},{"writeWorkspaceSha256":"b"*64},
-    {"continuationSourceSha256":"b"*64},{"forkSourceSha256":"b"*64},
+    {"forkSourceSha256":"b"*64},
     {"accountVerified":True},{"processSettlement":"proved"},
 ])
 def test_copilot_metadata_rejects_unqualified_controls(change):

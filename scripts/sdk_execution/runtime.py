@@ -646,7 +646,7 @@ def _received_native_context(request, selection, predecessor_evidence_run_id, *,
     from .receiving import review_artifact_target
     validate_admitted_request(request, selection)
     coordination = type(request) is CoordinationInferenceRequest and request.child_choice_json is not None and request.decision_session_mode == "native-persistent"
-    if ((request.provider not in {"codex", "copilot"}) or (not coordination and (request.role != "consultant" or request.result_kind != "task"))
+    if ((request.provider not in {"codex", "copilot", "claude"}) or (not coordination and (request.role != "consultant" or request.result_kind != "task"))
             or request.write_workspace is not None or selection.expected_launch_sha256 is not None):
         raise RuntimeBindingError("received_continuation_predecessor_required")
     if events is None:
@@ -702,8 +702,9 @@ def _received_native_context(request, selection, predecessor_evidence_run_id, *,
     native = document["native_continuation"]
     keys = {"schema_version", "thread_id", "turn_id", "context_sha256"}
     if (type(native) is not dict or type(native.get("schema_version")) is not int
-            or native["schema_version"] not in {1, 2}
-            or set(native) != (keys if native["schema_version"] == 1 else keys | {"session_depth"})
+            or native["schema_version"] not in {1, 2, 3}
+            or (native["schema_version"] == 3) != (request.provider == "claude")
+            or set(native) != (keys if native["schema_version"] == 1 else keys | {"session_depth"} | ({"transcript"} if native["schema_version"] == 3 else set()))
             or native["context_sha256"] != continuation_context_sha256(request, selection)):
         raise RuntimeBindingError("continuation_scope_changed")
     depth = native.get("session_depth")
@@ -720,7 +721,8 @@ def _received_native_context(request, selection, predecessor_evidence_run_id, *,
             or {k:v for k,v in reported.items() if k not in {"schemaVersion", "sdkVersion", "runtimeVersion"}}
             != {k:v for k,v in selected.items() if k not in selected_only}):
         raise RuntimeBindingError("continuation_receipt_changed")
-    source=NativeContinuation(launch["runId"], terminal["runId"], selected["requestSha256"], native["thread_id"], native["turn_id"])
+    source=NativeContinuation(launch["runId"], terminal["runId"], selected["requestSha256"], native["thread_id"], native["turn_id"],
+        json_text(native["transcript"]) if request.provider == "claude" else None)
     return (source,depth,document,terminal) if with_document else (source,depth)
 
 
@@ -741,7 +743,7 @@ def native_session_depth(request, selection):
 
 def prepare_received_continuation_request(request, selection, *, predecessor_evidence_run_id, context_mode="continuation"):
     """Prepare a new task from durable received evidence, without model effects."""
-    if context_mode not in {"continuation", "fork"} or (request.provider == "copilot" and context_mode != "continuation"):
+    if context_mode not in {"continuation", "fork"} or (request.provider in {"copilot", "claude"} and context_mode != "continuation"):
         raise RuntimeBindingError("invalid_native_context_mode")
     source = _received_continuation_source(request, selection, predecessor_evidence_run_id)
     return replace(request, context_mode=context_mode, native_continuation=source)
@@ -751,7 +753,7 @@ def _validate_continuation(request, selection, previous_run, previous_terminal, 
     """Consume retained or durable received evidence, never an unverified session ID."""
     from .contracts import NativeContinuation
     from .receiving import terminal_payload, review_artifact_target
-    if previous_run is None and previous_terminal is None:
+    if request.provider == "claude" or (previous_run is None and previous_terminal is None):
         expected = _received_continuation_source(request, selection,
             request.native_continuation.prior_evidence_run_id, events=events)
         if request.native_continuation != expected:
@@ -811,6 +813,8 @@ def prepare_continuation_request(request, selection, previous_run, previous_term
     if type(previous_run) is not RuntimeRun or previous_run.observation is None or previous_run.observation.result is None:
         raise RuntimeBindingError("received_continuation_predecessor_required")
     prior, result = previous_run.request, previous_run.observation.result
+    if request.provider == "claude":
+        return prepare_received_continuation_request(request, selection, predecessor_evidence_run_id=prior.external_evidence_run_id)
     bound = replace(request, context_mode="continuation", native_continuation=NativeContinuation(
         prior.external_dispatch_id, prior.external_evidence_run_id,
         request_sha256(prior, previous_run.selection), result.native_thread_id, result.native_turn_id))

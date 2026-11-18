@@ -595,9 +595,9 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
     write_workspace = binding.get("writeWorkspace")
     write_mode = write_workspace is not None
     continuation_mode = binding.get("contextMode") in {"continuation", "fork"}
-    if continuation_mode and (provider not in {"codex", "copilot"} or not task_mode or write_mode
+    if continuation_mode and (provider not in {"codex", "copilot", "claude"} or not task_mode or write_mode
                               or role.assigned_role != "consultant" or role.execution_role != "consultant"
-                              or (provider == "copilot" and binding["contextMode"] != "continuation")):
+                              or (provider in {"copilot", "claude"} and binding["contextMode"] != "continuation")):
         raise DispatchError("E_CODEX_SDK_CONTINUATION_ROUTE_UNSUPPORTED")
     if write_mode and not task_mode:
         raise DispatchError("E_CODEX_SDK_REVIEW_ONLY")

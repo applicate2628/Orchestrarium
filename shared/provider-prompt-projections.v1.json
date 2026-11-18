@@ -74,7 +74,7 @@
     },
     "sdk_execution/claude.py": {
       "source": "scripts/sdk_execution/claude.py",
-      "sha256": "57af9436c1d88a8a46e02121c80c0eed0a305715b62d638f951e1edfff07de8c",
+      "sha256": "332e83ea65dd48db6d343acb4be406cab8e2e3d61c63617bd6f3d621ab047a94",
       "destination": "scripts/sdk_execution/claude.py"
     },
     "sdk_execution/copilot.py": {
@@ -95,12 +95,12 @@
     "sdk_execution/dispatch.py": {
       "source": "scripts/sdk_execution/dispatch.py",
       "destination": "scripts/sdk_execution/dispatch.py",
-      "sha256": "f87d1eddf2ce23cae964a49efb03fb846dea068aab35c987d7f7dd4ad20923b1"
+      "sha256": "ac86291ae07ea1261c25772e2040ddf55450dba06f78b717e983dc2bc4c0f337"
     },
     "sdk_execution/contracts.py": {
       "source": "scripts/sdk_execution/contracts.py",
       "destination": "scripts/sdk_execution/contracts.py",
-      "sha256": "1357c2a09c67123a95f2ec9763af2af43fc9593baf328911223a317b634c1229"
+      "sha256": "5c101249b5b385c822d2b4ccb7549278b2b4877f9d51232f2869e2c14cb9a450"
     },
     "sdk_execution/coordinator.py": {
       "source": "scripts/sdk_execution/coordinator.py",
@@ -149,13 +149,13 @@
     },
     "sdk_execution/receiving.py": {
       "source": "scripts/sdk_execution/receiving.py",
-      "sha256": "10330beaebd924c2728dc9318da442ab75b36054c6f41d9ff5ce0980186852ac",
+      "sha256": "c09dbbd612bbcc4921d02f3529f78b2d65924efeb684eaa9df99da0ed489f06f",
       "destination": "scripts/sdk_execution/receiving.py"
     },
     "sdk_execution/runtime.py": {
       "source": "scripts/sdk_execution/runtime.py",
       "destination": "scripts/sdk_execution/runtime.py",
-      "sha256": "d73f8944f0f9e998728e4fc14d604daad624cb3ceec5eef8b60f58e2b7823916"
+      "sha256": "ef139e492d9b5979a708fdbc42bc408e4fddc1991e236ec836ea7afffbabc56d"
     },
     "sdk_execution/worker.py": {
       "source": "scripts/sdk_execution/worker.py",

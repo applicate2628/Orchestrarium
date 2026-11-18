@@ -260,14 +260,22 @@ def terminal_payload(request: ExecutionRequest, observation: Any, *, output_cont
         # The durable artifact, whose exact bytes are bound by the terminal,
         # retains observed versions separately from selected launch controls.
         result_content = {"task" if task_result else "review": result_content, "reported_sdk_configuration": result.sdk_execution}
-        if (task_result and request.provider in {"codex", "copilot"} and request.role == "consultant"
+        if (task_result and request.provider in {"codex", "copilot", "claude"} and request.role == "consultant"
                 and request.write_workspace is None and selected_config["schemaVersion"] == 2
                 and result.native_thread_id and result.native_turn_id):
             from .runtime import continuation_context_sha256, native_session_depth
+            snapshots = [strict_json(o.payload_json) for o in result.observations if o.kind == "native_transcript"] if request.provider == "claude" else []
             result_content["native_continuation"] = {"schema_version": 2,
                 "session_depth": native_session_depth(request, selection),
                 "thread_id": result.native_thread_id, "turn_id": result.native_turn_id,
                 "context_sha256": continuation_context_sha256(request, selection)}
+            if request.provider == "claude":
+                if len(snapshots) == 1:
+                    from .contracts import validate_transcript_snapshot
+                    result_content["native_continuation"].update(schema_version=3,
+                        transcript=validate_transcript_snapshot(snapshots[0]))
+                else:
+                    del result_content["native_continuation"]
     payload: dict[str, object] = {
         "schema": "orchestrarium.provider-result.v3", "provider": request.provider,
         "model": request.model, "effort": request.effort,

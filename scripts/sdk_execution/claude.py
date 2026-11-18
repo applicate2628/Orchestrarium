@@ -104,6 +104,61 @@ class ClaudeRuntimeSelection:
         return cls(**value)
 
 
+def transcript_snapshot(config_dir: str, transcript_path: str, *, expected=None):
+    """Snapshot one observed native file, never search by session ID or read its text.
+
+    Rechecks narrow the pathname race; this is not an exclusive OS writer lease.
+    """
+    import provider_prompt as owner
+    from .contracts import validate_transcript_snapshot
+    root, target = Path(config_dir), Path(transcript_path)
+    owner.validate_no_reparse_components(root)
+    owner.validate_no_reparse_components(target)
+    resolved_root = root.resolve(strict=True)
+    resolved = target.resolve(strict=True)
+    if not target.is_absolute() or resolved == resolved_root:
+        raise AdapterError("transcript_custody_mismatch")
+    relative = resolved.relative_to(resolved_root).as_posix()
+    root_stat = root.stat()
+    digest = hashlib.sha256()
+    with target.open("rb") as stream:
+        before = os.fstat(stream.fileno())
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            raise AdapterError("transcript_custody_mismatch")
+        remaining = before.st_size
+        while remaining:
+            block = stream.read(min(1048576, remaining))
+            if not block:
+                raise AdapterError("transcript_changed")
+            digest.update(block)
+            remaining -= len(block)
+        if stream.read(1):
+            raise AdapterError("transcript_changed")
+        after = os.fstat(stream.fileno())
+    owner.validate_no_reparse_components(root)
+    owner.validate_no_reparse_components(target)
+    current, current_root = target.stat(), root.stat()
+    fingerprint = lambda v: (v.st_dev, v.st_ino, v.st_size, v.st_mtime_ns, v.st_ctime_ns)
+    if (fingerprint(before) != fingerprint(after) or fingerprint(after)[:4] != fingerprint(current)[:4]
+            or (root_stat.st_dev, root_stat.st_ino) != (current_root.st_dev, current_root.st_ino)
+            or target.resolve(strict=True) != resolved or root.resolve(strict=True) != resolved_root):
+        raise AdapterError("transcript_changed")
+    snapshot = validate_transcript_snapshot({"path": relative, "sha256": digest.hexdigest(),
+        "size": before.st_size, "file_identity": [before.st_dev, before.st_ino],
+        "root_identity": [root_stat.st_dev, root_stat.st_ino]})
+    if expected is not None and snapshot != expected:
+        raise AdapterError("transcript_changed")
+    return snapshot
+
+
+def continuation_transcript_path(config_dir, source):
+    from .contracts import strict_json, validate_transcript_snapshot
+    snapshot = validate_transcript_snapshot(strict_json(source.transcript_json, max_bytes=16384))
+    target = Path(config_dir).joinpath(*snapshot["path"].split("/"))
+    transcript_snapshot(config_dir, str(target), expected=snapshot)
+    return str(target)
+
+
 class ClaudeClientProtocol(Protocol):
     async def connect(self) -> None: ...
     async def get_server_info(self) -> dict[str, Any] | None: ...
@@ -257,7 +312,7 @@ def create_claude_adapter(request: ExecutionRequest, sink: Any, selection: Claud
         client_factory=lambda options: _official_client_binding(options, cli_path=selection.executable),
         assert_current=current, authorize_tool=tool,
         load_instructions=lambda _value: selection.instructions,
-        verify_account=account, record=sink.record,
+        verify_account=account, record=sink.record, config_dir=selection.config_dir,
     )
 
 
@@ -328,6 +383,7 @@ class ClaudeReviewAdapter:
         load_instructions: Callable[[ExecutionRequest], str],
         verify_account: Callable[[ExecutionRequest, dict[str, Any]], Awaitable[str]],
         record: Callable[[Observation], Awaitable[None]],
+        config_dir: str | None = None,
     ) -> None:
         if any(not callable(value) for value in (
             client_factory, assert_current, authorize_tool, load_instructions, verify_account, record,
@@ -336,6 +392,9 @@ class ClaudeReviewAdapter:
         self._factory, self._assert_current = client_factory, assert_current
         self._authorize_tool, self._instructions = authorize_tool, load_instructions
         self._verify_account, self._record = verify_account, record
+        self._config_dir = config_dir
+        self._transcript_path = None
+        self._stop_observed = False
         self._request: ExecutionRequest | None = None
         self._client: ClaudeClientProtocol | None = None
         self._session_id: str | None = None
@@ -408,6 +467,12 @@ class ClaudeReviewAdapter:
                 if data["prompt_id"] != self._prompt_id:
                     raise AdapterError("native_prompt_mismatch")
                 self._observed_prompt = True
+                if self._request.role == "consultant" and self._request.result_kind == "task" and self._config_dir is not None:
+                    path = data.get("transcript_path")
+                    if isinstance(path, str) and path:
+                        if self._transcript_path not in (None, path):
+                            raise AdapterError("transcript_path_changed")
+                        self._transcript_path = path
             if data.get("effort") is not None:
                 if not isinstance(data["effort"], dict) or data["effort"].get("level") != self._request.effort:
                     raise AdapterError("observed_effort_mismatch")
@@ -415,6 +480,7 @@ class ClaudeReviewAdapter:
             if data.get("agent_id") is not None:
                 raise AdapterError("unadmitted_subagent")
             if event == "Stop":
+                self._stop_observed = data.get("prompt_id") == self._prompt_id
                 if data.get("background_tasks") or data.get("session_crons"):
                     raise AdapterError("unsettled_session_work")
                 return {}
@@ -477,7 +543,7 @@ class ClaudeReviewAdapter:
     def _options(self, instruction_path: str) -> dict[str, Any]:
         return {
             "model": self._request.model, "effort": self._request.effort,
-            "cwd": self._request.cwd, "session_id": self._session_id,
+            "cwd": self._request.cwd, "session_id": None if self._request.native_continuation else self._session_id,
             "system_prompt": {"type": "preset", "preset": "claude_code", "snapshot": False},
             # The public SDK extra_args seam passes this documented native flag.
             # Claude Code CHANGELOG 2.1.281 (65823ec0034ed0aa0266bc43903fefd3ff94a327)
@@ -488,7 +554,8 @@ class ClaudeReviewAdapter:
             "disallowed_tools": [name for name in (*READ_TOOLS, "Bash", "Write", "Edit", "NotebookEdit", "Agent", "Task", "WebFetch", "WebSearch") if name not in self._available_tools()],
             "mcp_servers": {}, "strict_mcp_config": True, "setting_sources": [],
             "skills": [], "plugins": [], "agents": {}, "add_dirs": [],
-            "fallback_model": None, "continue_conversation": False, "resume": None,
+            "fallback_model": None, "continue_conversation": False,
+            "resume": continuation_transcript_path(self._config_dir, self._request.native_continuation) if self._request.native_continuation else None,
             "verbatim_prompts": True, "include_partial_messages": True,
             "max_buffer_size": self._request.max_output_bytes,
             "output_format": {"type": "json_schema", "schema": self._output_schema(self._request)},
@@ -518,7 +585,8 @@ class ClaudeReviewAdapter:
             raise AdapterError("operation_already_consumed")
         self._validate_output_kind(request)
         self._used, self._request = True, request
-        self._session_id, self._prompt_id = str(uuid4()), str(uuid4())
+        self._session_id = request.native_continuation.native_thread_id if request.native_continuation else str(uuid4())
+        self._prompt_id = str(uuid4())
         task = asyncio.create_task(self._execute())
         try:
             return await asyncio.shield(task)
@@ -570,6 +638,8 @@ class ClaudeReviewAdapter:
             sdk_version = _version_metadata(binding.sdk_version, "sdk")
             _require_client_api(binding.client)
             await self._authority("connect")
+            if request.native_continuation:
+                continuation_transcript_path(self._config_dir, request.native_continuation)
             await self._client.connect()
             self._connected = True
             info = await self._client.get_server_info()
@@ -639,6 +709,7 @@ class ClaudeReviewAdapter:
                         "runtimeVersion": runtime_version, "model": request.model, "effort": request.effort,
                         **self._sandbox_metadata(), "approvalPolicy": "deny_unadmitted",
                         "accountBinding": request.account_binding,
+                        **({"continuationSourceSha256": request.native_continuation.source_sha256} if request.native_continuation else {}),
                     })
                 elif kind == "ResultMessage":
                     if not init_seen or data.get("session_id") != self._session_id:
@@ -748,6 +819,18 @@ class ClaudeReviewAdapter:
         if (execution_error not in (None, "cancelled_before_effect")
             or self._capture_error or cleanup_error):
             status = "failed" if provider_status == "failed" else "incomplete"
+        # A successful fresh answer remains usable if optional durable evidence is
+        # unavailable. Only a complete, post-disconnect native snapshot is resumable.
+        if (status == "completed" and request.role == "consultant" and request.result_kind == "task"
+                and request.write_workspace is None and self._config_dir is not None
+                and self._stop_observed and self._transcript_path is not None):
+            try:
+                snapshot = transcript_snapshot(self._config_dir, self._transcript_path)
+                await self._capture("native_transcript", snapshot)
+            except Exception:
+                # No transcript payload or raw I/O exception is exported.
+                if self._capture_error:
+                    status = "incomplete"
         return self._make_result(
             request=request, status=status, provider_status=provider_status,
             native_thread_id=self._session_id, native_turn_id=self._prompt_id,

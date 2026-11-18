@@ -130,6 +130,46 @@ one task execution. Exact revision and final review are recorded in the PR.
 Official reference: [Claude Agent SDK Python public interface](https://github.com/anthropics/claude-agent-sdk-python/tree/163f50ed56fa8c3fd9346148b6e56e7696794b58).
 The reference documents SDK operations, not an installed-version requirement.
 
+### Claude Consultant transcript continuation
+
+A read-only Claude Consultant task can retain a completed native transcript in
+its selected private configuration directory and bind its exact path, byte count
+and digest to the existing canonical result artifact. Version-5 task admission
+selects that received predecessor by evidence-run identity, not a caller-supplied
+session ID or transcript path. Historical results without this custody evidence
+remain readable but do not gain continuation authority.
+
+After restart, the existing runtime checks the predecessor, current context and
+permissions through the existing single-successor claim. The adapter verifies the
+unchanged transcript before SDK resume and uses its exact observed absolute path;
+it does not search for a session, truncate history, substitute a fresh call or
+replay a completed operation. Complete Result and Stop correlation establish the
+received answer; the transcript snapshot supplies continuity evidence, not a
+fabricated provider-native completed-turn ID.
+
+The official API/cloud credential boundary, prompt-only tool scope and explicit
+startup controls are reapplied. Subscription sessions, Worker/Reviewer continuation,
+conversation fork and persistent child-Lead decisions are not enabled by this
+Consultant route. Changed or missing evidence refuses only the affected resume;
+other separately admitted work retains its existing path.
+
+Snapshot currentness checks are not an operating-system exclusive lock against
+an external writer between a check and provider consumption. The route requires
+Host-owned private configuration custody; it does not claim universal process
+isolation. Source/offline verification is separate from installed/native acceptance.
+
+The crossed offline test exercises actual public version-5 admission, factory,
+sealed worker frames and canonical receiving with synthetic provider/process peers:
+fresh result, restart, exact-path resume, successor receipt and refusal of a second
+successor without another native query or ledger append. It passed in 23.90 seconds
+with all eight relevant source hashes unchanged. Independent bounded checks cover
+29 distinct cases, including metadata and legacy wire compatibility. This does
+not establish installed or real-provider behavior.
+
+Official sources: [absolute transcript-path resume](https://code.claude.com/docs/en/sessions#resume-a-session)
+and [SDK resume argument forwarding](https://github.com/anthropics/claude-agent-sdk-python/blob/163f50ed56fa8c3fd9346148b6e56e7696794b58/src/claude_agent_sdk/_internal/transport/subprocess_cli.py).
+The referenced source is capability evidence, not an enforced package-version pin.
+
 ### Recovering received fresh decisions
 
 The existing child authority can recover a completed, received but unapplied
@@ -1141,7 +1181,8 @@ not a live bot review or an atomic hosted transaction.
 
 Completed source/offline milestones include setup apply/recovery; Codex public
 Reviewer/Consultant/scoped Worker, durable Consultant continuation/fork; official
-Claude API public Reviewer/Consultant/scoped Worker and fresh child decisions; Copilot public
+Claude API public Reviewer/Consultant/scoped Worker, Consultant transcript continuation
+and fresh child decisions; Copilot public
 Reviewer/Consultant/scoped Worker and scoped fresh/persistent child decisions.
 The existing Root admission, dynamic task proposal/explicit decision recovery,
 canonical receiving, closure and PR-result-currentness owners remain in use.
@@ -1155,7 +1196,7 @@ wholly unfinished features. Continue only the following unresolved outcomes:
 | Next outcome | Concrete remaining work | Verification/delivery boundary |
 |---|---|---|
 | Provider routes | AGY native Lead/session integration; reconcile Kimi's supported agent runtime; Grok Build ACP actual runtime, account/tool enforcement and canonical receiving. | Use confirmed official capabilities and the existing owners. Do not turn subscription Lead routes into third-party workers. |
-| Session coverage | Remaining provider-native continuation and native Lead/subagent integration where supported, including Claude API durable continuation beyond its implemented fresh child decisions. Host recovery of newly committed fresh decisions is implemented separately and is not native resume. | Existing Codex/Copilot child coordination is not missing. Host lineage/depth does not prove control of vendor-internal subagents. |
+| Session coverage | Remaining provider-native continuation and native Lead/subagent integration where supported, including persistent Claude child decisions beyond Consultant continuation. Host recovery of newly committed fresh decisions is implemented separately and is not native resume. | Existing Codex/Copilot child coordination is not missing. Host lineage/depth does not prove control of vendor-internal subagents. |
 | Platform coverage | POSIX platform containment/custody and lifecycle qualification for intended macOS/Linux routes. | Windows offline results do not qualify POSIX or prove an OS sandbox. |
 | Current native acceptance | Install/inspect the selected current payload and exercise admitted real provider routes and recovery. | Not yet performed for this HEAD. Installation and quota-consuming calls retain their separate authorization; offline peers are not native acceptance. |
 | PR delivery | Keep main policy/regression fixes, this roadmap, source projections and PR description synchronized; complete unresolved acceptance. | PR remains draft, unmerged and not globally installed. No automatic model selection, budget policy or Actions run is implied. |
@@ -1261,10 +1302,10 @@ The remaining provider-specific context modes in the roadmap remain unfinished.
 Version 5 has the version-3 keys plus `predecessorEvidenceRunId`. It requires
 `contextMode: continuation` or `fork`, `contextHandoff: null` and a nonempty predecessor
 terminal evidence-run ID in the selected work item. It is supported only by
-`--sdk-task-binding` with read-only Codex Consultant task mode. Review, Worker,
-Claude and the older binding versions do not gain continuation through this field.
-The runtime derives the native IDs from verified received evidence, not from this
-JSON input. The new launch uses distinct dispatch, evidence and output artifact
+`--sdk-task-binding` with read-only Consultant task mode: Codex supports
+continuation and fork; Copilot and Claude support continuation only. Review, Worker and the
+older binding versions do not gain continuation through this field. The runtime
+derives native identity from verified received evidence, not from this JSON input. The new launch uses distinct dispatch, evidence and output artifact
 identities; reusing the predecessor or completed operation is not a retry path.
 
 The binding cannot select extra tools, arbitrary launch flags or endpoints. This
