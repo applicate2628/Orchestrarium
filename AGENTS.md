@@ -10,6 +10,8 @@ At the start of a new maintenance session, read [`docs/new-session-guide.md`](do
 
 When working inside this monorepo itself, do not assume that a missing local `.agents/` tree means the Codex install is broken. Maintainers may intentionally rely on the global Codex install under `~/.codex/` while editing the installer source. If `.agents/.agents-mode.yaml` is absent here, ordinary reads should fall back to `~/.codex/.agents-mode.yaml` before treating the state as missing. Create a repo-local install only when the user explicitly wants one, and explain that it should be created by the installer rather than ad hoc file creation.
 
+Before selecting or changing a provider connection, consult the dated [provider access reference](docs/provider-access-policy.md). It distinguishes official permissions and restrictions from unclear cases and project implementation choices; it does not replace current account, spending or safety requirements.
+
 ## Codex-side maintenance
 
 When maintaining the Codex side of this monorepo or shared repo-local governance:

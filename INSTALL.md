@@ -107,6 +107,13 @@ AUDIT rule to `write_to_file.CodeContent` and
 an advisory reason, never `auto_approve`, permission overrides or a task gate.
 Scratch targets and placeholder paths retain the shared policy. Unknown or
 malformed input and internal diagnostic failures leave native execution unchanged.
+The separate `run_command` advisory reuses the shared stray-artifact AUDIT
+classifier with the documented Bash `CommandLine` and actual tool `Cwd`. It
+warns about unrequested worktrees, mangled redirects and undirected build/log
+artifacts at a confirmed repository root; it never executes the inspected
+command. Existing directory-change, directed-output and requested-isolation
+exceptions are unchanged. Missing/relative cwd cannot be replaced by the hook
+process cwd or a workspace guess to claim a repository-root finding.
 Multi-edit chunk decoding, other event hooks, native subagent handoff and
 installed/live behavior remain separate qualification work.
 Official contracts: [discovery](https://antigravity.google/docs/customization-discovery/)

@@ -41,21 +41,24 @@ def test_installed_pretool_audit_upgrade_recovery_and_preservation(tmp_path):
     # Construct an explicit historical startup-only fixture from actual installed
     # bytes and the real ownership codec, not a fabricated execution receipt.
     legacy = json.loads(hooks.read_text())
-    legacy.pop(MEMBER)
+    hook_record = record["configs"][".agents/hooks.json"]
+    for name in list(hook_record["members"]):
+        if name != "orchestrarium-session-start":
+            legacy.pop(name)
+            hook_record["members"].pop(name)
     hooks.write_text(json.dumps(legacy))
-    record["configs"][".agents/hooks.json"]["members"].pop(MEMBER)
     retained = tmp_path / "retained-new-payloads"
-    for relative in ("runtime/pre_tool_use.py", "runtime/shared/hooks/check-machine-local-path.py",
-                     "runtime/shared/scripts/hook_common.py"):
-        source = managed / relative
-        destination = retained / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        source.rename(destination)
-        record["files"].pop(source.relative_to(project).as_posix())
-    assert set(record["files"]) == {
+    historical_files = {
         ".agents/orchestrarium-antigravity/" + name for name in (
             "runtime/session_start.py", "skills/orchestrarium-lead/SKILL.md",
             "rules/orchestrarium.md", "AGENTS.antigravity.md", "AGENTS.shared.md")}
+    for relative in set(record["files"]) - historical_files:
+        source = project / relative
+        destination = retained / source.relative_to(managed)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        source.rename(destination)
+        record["files"].pop(relative)
+    assert set(record["files"]) == historical_files
     assert set(record["configs"]) == {".agents/hooks.json", ".agents/skills.json", ".agents/rules.json"}
     assert set(record["configs"][".agents/hooks.json"]["members"]) == {"orchestrarium-session-start"}
     receipt.write_bytes(OWNER.serialize_record(record, "antigravity", "project"))

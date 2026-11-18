@@ -645,50 +645,17 @@ must not be presented as installed or live acceptance.
 
 ### Official access terms and project choices
 
-Reviewed official sources on 2026-11-17; recheck the applicable product and access
-method when implementing or using a route. This plan is not a legal determination.
+The [provider access reference](provider-access-policy.md) owns the dated, official-source
+matrix for Codex, Claude, Antigravity, Kimi Code and Grok Build. Read it for the
+selected product, authentication and usage arrangement before implementation or use.
+This plan owns project scope and technical qualification, not a parallel legal table.
 
-- **Antigravity consumer access:** [Terms, section 6](https://antigravity.google/terms)
-  prohibit third-party software access, including the stated OAuth example.
-  The [official FAQ](https://antigravity.google/docs/faq), under "Can I use
-  Antigravity CLI headless mode in third-party coding agents or automate account
-  switching?", distinguishes direct scripting/continuous integration from wrapping
-  the CLI inside third-party agents/apps under consumer plans. The terms separately
-  identify Enterprise/API agreements. Do not infer that consumer credentials
-  authorize an external worker, or transfer the consumer restriction automatically
-  to a separately contracted API route.
-- **Claude authentication:** [Legal and compliance: authentication and credential
-  use](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use)
-  disallows third-party applications offering Claude.ai login or routing the
-  listed subscription credentials on users' behalf; developer products use the
-  supported API/cloud path. The same official page's "Can customers offer Claude
-  Code in their products?" section permits the described end-user sign-in to
-  unmodified hosted Claude Code. Consequently, this plan's subscription
-  **Lead-only** choice is an Orchestrarium integration boundary, not a claim that
-  Anthropic universally prohibits all orchestration or all hosting.
-  [Consumer Terms, section 3(7)](https://www.anthropic.com/legal/consumer-terms)
-  restrict automated access with explicit exceptions for an Anthropic API key or
-  other express permission; do not omit those exceptions.
-  [Commercial Terms, section A.1](https://www.anthropic.com/legal/commercial-terms)
-  cover the separate product/end-user route subject to their conditions.
-- **Separate AGY SDK access:** the [official SDK quickstart](https://antigravity.google/docs/sdk/overview#quickstart)
-  uses `GEMINI_API_KEY`; [Gemini Enterprise setup](https://antigravity.google/docs/sdk/overview#gemini-enterprise)
-  uses its cloud authorization route. Neither is authorization to wrap a consumer
-  subscription CLI. Assess these worker routes under their own applicable terms.
-- **Programmatic child sessions:** the [official Codex Python SDK](https://github.com/openai/codex/blob/main/sdk/python/README.md)
-  documents thread creation and Codex/ChatGPT authentication reuse. The
-  [Claude Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview)
-  distinguishes its supported internal Claude Code runtime from authorization:
-  integrations use API/cloud access or an applicable approved arrangement, not
-  an inferred right to reuse consumer login. AGY SDK sessions use the API or
-  enterprise route cited above. A child Lead role does not change these access
-  requirements. Keep the hosted unchanged-Claude-Code exception separate; it
-  does not automatically qualify an unattended third-party SDK integration.
-- For other routes, preserve the official package/protocol and check the terms
-  governing the selected account/product. A license to install an SDK is not
-  permission to reuse a subscription credential, invoke a model or spend quota.
-  Unknown access eligibility remains explicit; do not turn it into a blanket
-  provider restriction or an unsupported permission.
+The approved role/access table below records selected implementation routes. Its
+Claude/AGY consumer Lead-only choices and AGY non-consumer SDK scope are project
+boundaries, not universal vendor prohibitions. In particular, current public AGY
+SDK/ACP documentation leaves external consumer-quota orchestration unclear, and
+Kimi's interactive subscription allowance does not cover unattended batch workers.
+No role label, package licence or successful test grants account or spending authority.
 
 ### Antigravity native startup projection
 
@@ -710,7 +677,12 @@ classifier for the documented `write_to_file` and `replace_file_content` payload
 It inspects only new content, not descriptions or removed text. Native `allow`
 with a reason does not bypass approval; no `auto_approve` or permission override
 is emitted. Unknown/malformed inputs and internal diagnostic failures remain
-nonblocking. Multi-edit chunk decoding, other tool/lifecycle hooks and native
+nonblocking. The documented Bash `run_command` path also delegates to the
+existing stray-artifact command audit with exact `CommandLine`/`Cwd`. It preserves
+shared worktree, mangled-redirect and confirmed-root artifact checks plus their
+existing exemptions; it does not execute the proposed command. Only an absolute
+tool cwd can qualify the root-dependent checks, never a guessed workspace or
+hook-process cwd. Multi-edit chunk decoding, other tool/lifecycle hooks and native
 subagent handoff remain outstanding; this source path must not be reported as
 complete AGY SDK execution support.
 

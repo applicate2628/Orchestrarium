@@ -14,9 +14,13 @@ Use the project's existing lifecycle and evidence owners where installed and
 qualified. If they are unavailable, state the specific missing integration;
 do not fabricate records or substitute another provider's runtime. This pack
 does not install Codex tools, start external workers, or create SDK sessions.
-Consumer subscription access is a native Lead route, not authority to automate
-third-party programmatic workers. Such workers require their separately admitted
-official API or enterprise access and the user's applicable launch approval.
+Using an Antigravity consumer session as the native Lead does not authorize
+another application to consume Antigravity subscription access as its programmatic
+worker. This is distinct from the Lead delegating to an external provider through
+that recipient's officially supported access route, such as Codex SDK/app-server
+with the user's eligible ChatGPT account. The external agent is not an Antigravity-
+native subagent. Assess the exact product, authentication and usage arrangement;
+preserve provider terms, user permissions and spending authority.
 
 ## Terms and Abbreviations
 - Lead: the coordinator retaining admission, integration and acceptance duties.

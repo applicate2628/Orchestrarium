@@ -202,7 +202,7 @@ def validate_config(path: str, spec: object, provider: str, scope: str) -> None:
             raise ValueError("Invalid owned JSON projection")
         if path.endswith("/hooks.json"):
             keys = set(spec["members"])
-            if not keys or not keys <= {"orchestrarium-session-start", "orchestrarium-machine-local-path"} or spec["entries"]:
+            if not keys or not keys <= {"orchestrarium-session-start", "orchestrarium-machine-local-path", "orchestrarium-stray-artifact"} or spec["entries"]:
                 raise ValueError("Invalid owned named hook")
             for name, block in spec["members"].items():
                 event = "SessionStart" if name == "orchestrarium-session-start" else "PreToolUse"
@@ -211,7 +211,7 @@ def validate_config(path: str, spec: object, provider: str, scope: str) -> None:
                 handler = block[event][0]
                 if event == "PreToolUse":
                     if (type(handler) is not dict or set(handler) != {"matcher", "hooks"}
-                            or handler["matcher"] != "^(write_to_file|replace_file_content)$"
+                            or handler["matcher"] != ("^run_command$" if name == "orchestrarium-stray-artifact" else "^(write_to_file|replace_file_content)$")
                             or type(handler["hooks"]) is not list or len(handler["hooks"]) != 1):
                         raise ValueError("Invalid owned tool matcher")
                     handler = handler["hooks"][0]

@@ -4,6 +4,10 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Antigravity command hooks reuse the shared stray-artifact AUDIT checks for native Bash commands, using the tool's actual working directory rather than guessing from the hook process. Worktree, redirect and build-output warnings keep their existing exemptions, do not execute the proposed command and do not override native approvals. Installed ownership preserves earlier startup/write hooks and unrelated customizations.
+
+- Provider access now has one dated, source-linked reference for Codex, Claude, Antigravity, Kimi Code and Grok Build, linked from repository-local rules and the SDK plan. It separates supported connections, explicit restrictions and unresolved subscription cases from adapter readiness, avoiding both invented provider bans and unsupported permission claims.
+
 - Kimi Code ACP no longer relies on a generated agent override beside capture files, which native discovery could miss when the task uses another working directory. The existing private global tool policy remains the upper bound across discovered profiles; task cwd and provider permissions stay unchanged. This removes a misleading profile-selection assumption without blocking ordinary tasks or switching to an archived SDK.
 
 - Antigravity pre-write hooks now reuse the shared machine-local-path AUDIT rule for documented write and replacement payloads. Warnings examine new content without treating removed text or descriptions as writes, preserve native approvals and remain nonblocking on diagnostic failure. Existing startup registrations upgrade through the same ownership checks; unrelated hooks remain untouched.

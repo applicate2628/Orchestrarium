@@ -26,10 +26,11 @@ def run(backend, root: Path, args) -> int:
     config = backend._provider_configuration_module(root)
     source = root / "adapters/antigravity"
     payloads = {target / name: (source / name).read_bytes() for name in (
-        "runtime/session_start.py", "runtime/pre_tool_use.py", "skills/orchestrarium-lead/SKILL.md",
+        "runtime/session_start.py", "runtime/pre_tool_use.py", "runtime/command_advisory.py", "skills/orchestrarium-lead/SKILL.md",
         "rules/orchestrarium.md", "AGENTS.antigravity.md")}
     payloads[target / "AGENTS.shared.md"] = (root / "shared/AGENTS.shared.md").read_bytes()
-    for relative in ("hooks/check-machine-local-path.py", "scripts/hook_common.py"):
+    for relative in ("hooks/check-machine-local-path.py", "hooks/check-no-trash-in-repo.py",
+                     "scripts/hook_common.py", "scripts/git_push_gate_preflight.py"):
         payloads[target / "runtime/shared" / relative] = (root / "scripts/universal-hooks" / relative).read_bytes()
     base = target.parent
     discovery_base = target.relative_to(anchor).as_posix() if project is not None else target.name
@@ -37,11 +38,15 @@ def run(backend, root: Path, args) -> int:
     command = backend._hook_health_module(root).serialize_windows_hook_command(argv) if os.name == "nt" else shlex.join(argv)
     tool_argv = [sys.executable, str(target / "runtime/pre_tool_use.py")]
     tool_command = backend._hook_health_module(root).serialize_windows_hook_command(tool_argv) if os.name == "nt" else shlex.join(tool_argv)
+    audit_argv = [sys.executable, str(target / "runtime/command_advisory.py")]
+    audit_command = backend._hook_health_module(root).serialize_windows_hook_command(audit_argv) if os.name == "nt" else shlex.join(audit_argv)
     specs = {
         base / "hooks.json": {"kind": "json-projection", "members": {
             "orchestrarium-session-start": {"SessionStart": [{"type": "command", "command": command}]},
             "orchestrarium-machine-local-path": {"PreToolUse": [{"matcher": "^(write_to_file|replace_file_content)$",
-                "hooks": [{"type": "command", "command": tool_command}]}]}}, "entries": []},
+                "hooks": [{"type": "command", "command": tool_command}]}]},
+            "orchestrarium-stray-artifact": {"PreToolUse": [{"matcher": "^run_command$",
+                "hooks": [{"type": "command", "command": audit_command}]}]}}, "entries": []},
         base / "skills.json": {"kind": "json-projection", "members": {}, "entries": [{"path": discovery_base + "/skills"}]},
         base / "rules.json": {"kind": "json-projection", "members": {}, "entries": [{"path": discovery_base + "/rules"}]},
     }
