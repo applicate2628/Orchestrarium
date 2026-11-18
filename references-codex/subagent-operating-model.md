@@ -36,6 +36,13 @@ checks each file operation against its admitted workspace and protected control
 paths; Reviewer and Consultant command-line routes remain prompt-only. This does not enable a subscription CLI worker or a default-route
 change. See the shared guarantee distinction and SDK implementation boundary.
 
+For a PR-bot SDK handoff, the existing Host authority binds the hosted revision
+and checks it again before the executor releases received output (`executor_result`).
+A failed currentness check retains execution history and the original runtime
+result without releasing it for application or rerunning the model. This adds
+no GitHub requirement to unrelated tasks and no SDK permission to publish or
+resolve threads; see the canonical PR-bot skill/protocol for hosted-state actions.
+
 ## Codex-specific runtime notes
 
 - Mechanical-plan filesystem preflight is a repo-local check, not host containment. An explicitly observed exact root may be located on an ordinary mounted volume; native identity is rechecked across its ancestor chain. Detected descendant mounts and all links/junctions/reparse points remain refused. Python documents that [os.path.ismount](https://docs.python.org/3/library/os.path.html#os.path.ismount) cannot reliably detect same-filesystem bind mounts and also treats Linux btrfs subvolumes as mount points. No stronger mount-detection guarantee is claimed; caller authority and host restrictions remain independent.

@@ -601,6 +601,24 @@ integration.
    remaining limitations separately. Merge and global installation are subsequent
    delivery actions, not prerequisites for a working PR implementation.
 
+### PR-task result currentness
+
+The optional `github-pr-review-bot` handoff uses the existing request/artifact
+identity and Host authority, not a new GitHub controller or review loop. For a
+PR-related task, the Host binds repository, PR, full hosted head and findings,
+then re-reads that head at `executor_result` immediately before the executor
+returns received output. Non-PR tasks keep their own currentness contract and
+need no GitHub state. The generic SDK callback does not itself query GitHub.
+
+If current authority fails after receiving, the acquired `runtime_run` and
+`terminal` remain available, including the original result. No tool-visible
+`execution_result` is released. Completed ledger history describes execution,
+not permission to apply an old patch; it is not rewritten. The consumed operation
+cannot silently run again. A caller must reconcile stale evidence through its
+existing owner and recheck current PR state immediately before any authorized
+application/publication/thread action. Offline fixtures demonstrate this contract,
+not a live bot review or an atomic hosted transaction.
+
 ### Current execution state
 
 The information-only setup baseline was followed by published setup apply/recovery
@@ -624,9 +642,10 @@ Use the [official agent SDK setup proposal](../INSTALL.md#official-agent-sdk-set
 
 ## Explicit Codex review opt-in (repository-local contract)
 
-The existing provider-prompt entrypoint accepts `--sdk-review-binding <path>` only
-for a Codex `external-reviewer` invocation. Omission keeps the legacy route. Other
-providers and worker/consultant roles are not migrated by this option. The same
+This Codex subsection describes `--sdk-review-binding <path>` for an explicit
+Codex `external-reviewer` invocation. The separately documented Claude review and
+`--sdk-task-binding` routes retain their own contracts. Omission keeps the legacy
+route; this review option does not silently migrate a worker/consultant task. The same
 invoking Host (the existing orchestration session) remains the authorization
 owner; the binding file supplies constraints, not permission, a transferable grant,
 a new coordinator or an automatic retry. No outer Agents model loop is started.

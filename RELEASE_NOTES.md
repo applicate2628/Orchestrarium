@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- SDK execution now rechecks the existing Host authority before releasing a received result. PR-bot handoffs bind the exact hosted revision, retain stale evidence without replay, and leave publication/thread actions with their existing owners; unrelated SDK tasks do not acquire a GitHub requirement.
+
 - The explicit Claude SDK Worker task route now connects the existing Host file-tool authorization to the admitted workspace and protected control paths. Ordinary project context stays readable, while file writes retain custody and independent receiving checks; Reviewer/Consultant remain prompt-only. This source integration is not an OS sandbox or live-provider qualification.
 
 - Add scoped Claude Worker execution to the existing Python Host SDK integration. Write/Edit requests require the current Host tool authority and shared protected-state custody; exact task/workspace provenance remains nonauthorizing. The recorded tool-restricted write mode does not claim an operating-system sandbox, and the public CLI stays prompt-only until its file-effect owner is integrated.

@@ -846,6 +846,10 @@ class SdkReviewExecutor:
         # rejected content must never become coordinator output.
         from .receiving import scan_execution_output
         scan_execution_output(result, run.output_context)
+        # Receiving preserves historical execution evidence, not permission to
+        # apply it now. Reconsult the existing owner before exposing the result.
+        # On denial the retained run/terminal stay intact; no automatic replay.
+        self._current(request, "executor_result")
         self.execution_result = result
         return result
 
