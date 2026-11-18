@@ -569,17 +569,109 @@ class RuntimeRun:
     launch_error: str | None = None
 
 
+_CONTINUATION_CONTEXT_FIELDS = ("work_item_id", "provider", "role", "model", "effort", "cwd",
+    "account_binding", "coordinator_binding", "scope", "write_workspace", "tool_profile")
+
+
+def continuation_context_sha256(request, selection):
+    """Consistency commitment, not account identity or permission to launch."""
+    controls = {name: getattr(request, name) for name in _CONTINUATION_CONTEXT_FIELDS}
+    runtime = selection.to_dict()
+    runtime.pop("expected_launch_sha256", None)
+    return hashlib.sha256(json_text({"controls": controls, "runtime": runtime}).encode()).hexdigest()
+
+
+def _received_continuation_source(request, selection, predecessor_evidence_run_id, *, events=None):
+    """Read an already received artifact; do not reconstruct a process observation."""
+    from .contracts import NativeContinuation, strict_json
+    from .receiving import review_artifact_target
+    validate_admitted_request(request, selection)
+    if (request.provider != "codex" or request.role != "consultant" or request.result_kind != "task"
+            or request.write_workspace is not None or selection.expected_launch_sha256 is not None):
+        raise RuntimeBindingError("received_continuation_predecessor_required")
+    if events is None:
+        _writer, _validator, events = _events(selection)
+    terminals = [e for e in events if e.get("runId") == predecessor_evidence_run_id]
+    if len(terminals) != 1:
+        raise RuntimeBindingError("continuation_receipt_changed")
+    terminal = terminals[0]
+    launches = [e for e in events if e.get("runId") == terminal.get("launchRunId")]
+    if len(launches) != 1:
+        raise RuntimeBindingError("continuation_receipt_changed")
+    launch = launches[0]
+    expected = {"workItem": request.work_item_id, "provider": "codex", "model": request.model,
+        "effort": request.effort, "scope": list(request.scope), "assignedRole": "consultant",
+        "executionRole": "consultant", "actualExecutionPath": "direct-external-sdk"}
+    selected = launch.get("sdkExecution")
+    if (launch.get("eventKind") != "launch" or terminal.get("eventKind") != "terminal"
+            or terminal.get("status") != "completed" or terminal.get("gate") != "none"
+            or any(launch.get(k) != v or terminal.get(k) != v for k,v in expected.items())
+            or type(selected) is not dict or selected.get("schemaVersion") != 2
+            or not _sha256(selected.get("requestSha256")) or terminal.get("sdkExecution") != selected
+            or launch.get("externalEvidenceRunId") != predecessor_evidence_run_id
+            or terminal.get("externalEvidenceRunId") != predecessor_evidence_run_id
+            or launch.get("externalDispatchId") != launch.get("runId")
+            or terminal.get("externalDispatchId") != launch.get("runId")
+            or terminal.get("artifactIdentity") != launch.get("artifactIdentity")):
+        raise RuntimeBindingError("continuation_receipt_changed")
+    if ({request.external_dispatch_id, request.external_evidence_run_id} & {launch["runId"], terminal["runId"]}
+            or request.artifact_id == terminal.get("artifactIdentity")):
+        raise RuntimeBindingError("continuation_requires_new_operation")
+    size = terminal.get("artifactSizeBytes")
+    if type(size) is not int or size <= 0 or not _sha256(terminal.get("artifactRevision")):
+        raise RuntimeBindingError("continuation_artifact_changed")
+    artifact = review_artifact_target(selection.work_item, terminal.get("artifact", ""))
+    resolved = artifact.resolve(strict=True)
+    # The existing validated receipt supplies the exact read bound, not a new cap.
+    with artifact.open("rb") as stream:
+        identity = os.fstat(stream.fileno())
+        if identity.st_size != size:
+            raise RuntimeBindingError("continuation_artifact_changed")
+        content = stream.read(size + 1)
+        current = artifact.stat()
+    if (len(content) != size or artifact.resolve(strict=True) != resolved
+            or (identity.st_dev, identity.st_ino) != (current.st_dev, current.st_ino)
+            or hashlib.sha256(content).hexdigest() != terminal["artifactRevision"]):
+        raise RuntimeBindingError("continuation_artifact_changed")
+    document = strict_json(content.decode("utf-8"), max_bytes=size)
+    if type(document) is not dict or set(document) != {"task", "reported_sdk_configuration", "native_continuation"}:
+        raise RuntimeBindingError("continuation_durable_provenance_required")
+    native = document["native_continuation"]
+    if (type(native) is not dict or set(native) != {"schema_version", "thread_id", "turn_id", "context_sha256"}
+            or type(native["schema_version"]) is not int or native["schema_version"] != 1
+            or native["context_sha256"] != continuation_context_sha256(request, selection)):
+        raise RuntimeBindingError("continuation_scope_changed")
+    reported = document["reported_sdk_configuration"]
+    if (type(reported) is not dict or reported.get("schemaVersion") != 1
+            or {k:v for k,v in reported.items() if k not in {"schemaVersion", "sdkVersion", "runtimeVersion"}}
+            != {k:v for k,v in selected.items() if k not in {"schemaVersion", "requestSha256"}}):
+        raise RuntimeBindingError("continuation_receipt_changed")
+    return NativeContinuation(launch["runId"], terminal["runId"], selected["requestSha256"], native["thread_id"], native["turn_id"])
+
+
+def prepare_received_continuation_request(request, selection, *, predecessor_evidence_run_id):
+    """Prepare a new task from durable received evidence, without model effects."""
+    source = _received_continuation_source(request, selection, predecessor_evidence_run_id)
+    return replace(request, context_mode="continuation", native_continuation=source)
+
+
 def _validate_continuation(request, selection, previous_run, previous_terminal, *, events=None):
-    """Consume received in-process evidence, never a caller-supplied session ID."""
+    """Consume retained or durable received evidence, never an unverified session ID."""
     from .contracts import NativeContinuation
     from .receiving import terminal_payload, review_artifact_target
+    if previous_run is None and previous_terminal is None:
+        expected = _received_continuation_source(request, selection,
+            request.native_continuation.prior_evidence_run_id, events=events)
+        if request.native_continuation != expected:
+            raise RuntimeBindingError("continuation_observed_binding_mismatch")
+        return expected
     if type(previous_run) is not RuntimeRun or type(previous_terminal) is not dict:
         raise RuntimeBindingError("received_continuation_predecessor_required")
     prior = previous_run.request
     if (prior.provider != "codex" or prior.result_kind != "task" or prior.role != "consultant"
             or prior.write_workspace is not None or previous_run.observation is None):
         raise RuntimeBindingError("continuation_predecessor_kind_mismatch")
-    for name in ("work_item_id", "provider", "role", "model", "effort", "cwd", "account_binding", "coordinator_binding", "scope", "write_workspace", "tool_profile"):
+    for name in _CONTINUATION_CONTEXT_FIELDS:
         if getattr(request, name) != getattr(prior, name):
             raise RuntimeBindingError("continuation_scope_changed")
     left, right = selection.to_dict(), previous_run.selection.to_dict()

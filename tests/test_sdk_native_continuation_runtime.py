@@ -61,9 +61,10 @@ def test_artifact_changed_after_preparation_blocks_atomic_claim(tmp_path,monkeyp
     with pytest.raises(ValueError):claim(req,selection,run,terminal)
 
 
-def test_raw_linkage_without_received_run_cannot_claim(tmp_path,monkeypatch):
+def test_raw_linkage_cannot_override_durable_received_native_identity(tmp_path,monkeypatch):
     req,selection,run,terminal=prepare(tmp_path,monkeypatch)
-    with pytest.raises(ValueError,match='predecessor_required'):claim(req,selection,None,None)
+    forged=replace(req,native_continuation=replace(req.native_continuation,native_thread_id='invented-thread'))
+    with pytest.raises(ValueError,match='observed_binding_mismatch'):claim(forged,selection,None,None)
 
 
 def test_receipt_copy_cannot_change_prior_status(tmp_path,monkeypatch):

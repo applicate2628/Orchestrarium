@@ -46,8 +46,10 @@ resolve threads; see the canonical PR-bot skill/protocol for hosted-state action
 The Codex Host has an explicit read-only Consultant continuation route over a
 verified received predecessor. It resumes the observed thread and starts a new
 turn, with single-successor consumption in the existing work-item ledger. This
-is not independent-review context, interrupted-turn replay, public restart, or
-child-Lead permission. Retain original outcomes and reconcile uncertainty through
+is not independent-review context, interrupted-turn replay or child-Lead permission.
+Public task binding version 5 selects a prior evidence run, and the existing
+canonical received artifact/ledger restores native identity after restart. No
+arbitrary native IDs or reconstructed in-memory seals are accepted. Retain original outcomes and reconcile uncertainty through
 the same owners; API-key mode readback does not establish an account identity.
 
 ## Codex-specific runtime notes

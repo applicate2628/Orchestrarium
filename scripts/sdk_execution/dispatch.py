@@ -114,7 +114,8 @@ def read_binding(path: Path) -> dict[str, Any]:
         version = value["schemaVersion"]
         expected = {1: _BINDING_KEYS, 2: _BINDING_KEYS | {"installedHookRoot"},
                     3: _BINDING_KEYS | {"installedHookRoot", "contextMode", "contextHandoff"},
-                    4: _BINDING_KEYS | {"installedHookRoot", "contextMode", "contextHandoff", "writeWorkspace"}}
+                    4: _BINDING_KEYS | {"installedHookRoot", "contextMode", "contextHandoff", "writeWorkspace"},
+                    5: _BINDING_KEYS | {"installedHookRoot", "contextMode", "contextHandoff", "predecessorEvidenceRunId"}}
         if version not in expected or set(value) != expected[version]:
             raise ValueError()
         if version in (3, 4):
@@ -124,7 +125,11 @@ def read_binding(path: Path) -> dict[str, Any]:
             if ((mode == "fresh" and handoff is not None) or
                 (mode == "handoff" and (type(handoff) is not str or not handoff.strip()))):
                 raise ValueError()
-        if version == 2 or (version in (3, 4) and value["installedHookRoot"] is not None):
+        if version == 5:
+            if (value["contextMode"] != "continuation" or value["contextHandoff"] is not None
+                    or not _text(value["predecessorEvidenceRunId"])):
+                raise ValueError()
+        if version == 2 or (version in (3, 4, 5) and value["installedHookRoot"] is not None):
             selected_root = value["installedHookRoot"]
             if (type(selected_root) is not str or not selected_root or not Path(selected_root).is_absolute()
                     or any(ord(char) < 32 or ord(char) == 127 for char in selected_root)):
@@ -176,6 +181,8 @@ class CodexReviewDispatch:
         self._consumed = False
         self._finished = False
         self._stage = 0
+        self._stages = (_STAGES[:-2] + ("resume", "reconcile", "turn_start")
+                        if request.native_continuation is not None else _STAGES)
         self._queries = 0
         self._controls = self._control_snapshot()
         self._artifact = prevalidated.control.ledger_artifact
@@ -296,7 +303,7 @@ class CodexReviewDispatch:
                 if self._stage not in (7, 8) or self._queries >= request.max_events:
                     raise DispatchError("E_CODEX_SDK_EFFECT_DENIED")
                 self._queries += 1
-            elif self._stage >= len(_STAGES) or effect != _STAGES[self._stage]:
+            elif self._stage >= len(self._stages) or effect != self._stages[self._stage]:
                 raise DispatchError("E_CODEX_SDK_EFFECT_DENIED")
             else:
                 self._stage += 1
@@ -543,6 +550,10 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
         raise DispatchError("E_CLAUDE_SDK_PROMPT_ONLY_REQUIRED")
     write_workspace = binding.get("writeWorkspace")
     write_mode = write_workspace is not None
+    continuation_mode = binding.get("contextMode") == "continuation"
+    if continuation_mode and (provider != "codex" or not task_mode or write_mode
+                              or role.assigned_role != "consultant" or role.execution_role != "consultant"):
+        raise DispatchError("E_CODEX_SDK_CONTINUATION_ROUTE_UNSUPPORTED")
     if write_mode and not task_mode:
         raise DispatchError("E_CODEX_SDK_REVIEW_ONLY")
     expected_role = ("external-worker" if write_mode else "consultant") if task_mode else "external-reviewer"
@@ -633,13 +644,17 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
         role=role.assigned_role, model=model, effort=effort, cwd=str(cwd),
         result_kind="task" if task_mode else "review", write_workspace=write_workspace,
         account_binding=binding["accountBinding"], prompt=prompt,
-        context_mode=binding.get("contextMode", "fresh"),
+        # The receiving owner, not raw binding text, constructs native linkage.
+        context_mode="fresh" if continuation_mode else binding.get("contextMode", "fresh"),
         coordinator_binding=binding["coordinatorBinding"], scope=tuple(binding["scope"]),
         max_output_bytes=c.result_max_bytes, max_events=binding["maxEvents"],
         **({"tool_profile":"prompt-only"} if provider == "claude" and not write_mode else {}),
     )
     if provider == "codex":
         request = runtime.prepare_codex_request(request)
+        if continuation_mode:
+            request = runtime.prepare_received_continuation_request(
+                request, selection, predecessor_evidence_run_id=binding["predecessorEvidenceRunId"])
     else:
         runtime.validate_admitted_request(request, selection)
     runtime.validate_worker_custody(request, selection)

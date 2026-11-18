@@ -141,11 +141,40 @@ of a consumed predecessor. Retain evidence and reconcile through the existing
 owner; an independently admitted fresh task remains available. There is no
 implicit rollback or model replay, and this local hold does not stop other work.
 
-This first route is Host-only and read-only Consultant. The public binding does
-not accept bare native session IDs, and continuation after losing the retained
-sealed result is not yet implemented. Durable restart, other role/provider
-continuation, native fork and scoped child-Lead lifecycle remain roadmap work,
-not prohibited product roles. Offline fixtures do not constitute a native run.
+The retained-object route remains available. Restart-safe continuation uses the
+same completed Consultant artifact and work-item ledger, not a second session
+store or a reconstructed Python observation seal. Receiving writes a versioned
+receipt with observed native thread/turn identifiers and a digest of the selected
+continuation controls. It does not store another copy of the prompt or credentials.
+The runtime restores by predecessor evidence-run identity, verifies the unique
+completed launch/terminal pair, canonical artifact size/hash and receipt schema,
+and recomputes the control digest against the newly admitted request/selection.
+The atomic launch claim repeats validation before consuming the predecessor.
+This is consistency inside the existing local ledger/artifact trust boundary,
+not protection against an owner rewriting both. Current permissions and the
+native thread-tip check remain separate requirements.
+
+A Python Host can prepare from durable evidence without a retained runtime object:
+
+```python
+continued = runtime.prepare_received_continuation_request(
+    prepared_next_request, next_selection,
+    predecessor_evidence_run_id="prior-terminal-evidence-id",
+)
+```
+
+The current authority still admits `continued`; construct the normal executor
+without `previous_run`/`previous_terminal`. The helper only reads received state.
+
+The public Codex Consultant task binding selects this route with version 5;
+it cannot supply arbitrary native IDs. Reading a receipt after restart does not
+launch or replay its completed turn. A continuation creates one explicitly
+admitted new turn. Repeating a consumed operation, an unresolved predecessor,
+corrupt receipt or drift cannot silently become a new model call. Artifacts
+written before continuation receipts existed remain readable but cannot supply
+restart continuation; an explicitly admitted fresh task/handoff is still usable.
+Other role/provider continuation, native fork and scoped child-Lead lifecycle
+remain roadmap work. Offline fixtures do not constitute native acceptance.
 
 ### Independent multi-Lead sessions and depth
 
@@ -290,7 +319,7 @@ historical results as fresh acceptance.
 | Surface | Implemented or observed baseline | Remaining outcome in PR19 |
 |---|---|---|
 | Common execution | Existing shared dispatch/supervisor/ledger; SDK worker uses the invoking Python interpreter. | Exercise the same lifecycle, events, receipt and cancellation owners for each supported provider/role; retain main regressions. |
-| Codex | Explicit Windows Reviewer, Consultant and scoped Worker source bridges; offline qualification and historical bounded native evidence below. | Qualify current installed/native execution; extend the Host Consultant continuation to durable/public and remaining child-Lead/session/platform outcomes through the common mechanism. |
+| Codex | Explicit Windows Reviewer, Consultant and scoped Worker source bridges; offline qualification and historical bounded native evidence below. | Qualify current installed/native execution; extend Consultant continuation to remaining child-Lead/session/platform outcomes through the common mechanism. |
 | Claude | SDK Host API and explicit scoped Worker command-line route, plus prompt-only Consultant and Reviewer routes, exact receiving and offline checks; native Lead is a different boundary. | Qualify current native execution and complete child-Lead/session outcomes using official API/cloud access; do not wrap a subscription CLI as a third-party worker. |
 | Antigravity | Official setup direction; no implemented AGY runtime adapter in the current SDK execution factory. | Implement Lead/session integration and native subagent handoff; separately qualify any admitted programmatic worker route. |
 | Copilot | Setup direction; existing integration candidates are not a callable SDK execution route. | Reconcile reusable candidate work, implement the common adapter and verify supported Lead/worker/reviewer roles without provider-name role bans. |
@@ -745,7 +774,7 @@ valid only for explicitly selected task-mode Worker roles, never review or advic
 
 | Field | Meaning |
 |---|---|
-| `schemaVersion` | Integer `1`, `2`, `3` or `4`; repository-local binding schema, not SDK version. |
+| `schemaVersion` | Integer `1`, `2`, `3`, `4` or `5`; repository-local binding schema, not SDK version. |
 | `accountBinding` | Nonsecret identifier for the selected existing account. |
 | `expectedAccountEmail` | Existing account email for auth-file verification, or null where the selected auth mode permits it; not a credential. |
 | `coordinatorBinding` | Existing Host/session binding label; does not start a coordinator. |
@@ -773,9 +802,18 @@ it does not clone native history, import files or grant authority. The immutable
 execution request/result records `context_mode`, included in the existing request
 hash. Canonical serialization omits the default `fresh` value to preserve
 previously retained request commitments; absent means fresh, never inherited. Version 1/2 retain fresh behavior. This increment does not implement
-new-turn resume/fork in the public review bridge; requesting either is rejected,
+new-turn resume/fork in the public review bridge; version 5 is Consultant-only. Requesting either in review mode is rejected,
 not converted to fresh. Existing interrupted-turn reconciliation is unchanged.
 The remaining provider-specific context modes in the roadmap remain unfinished.
+
+Version 5 has the version-3 keys plus `predecessorEvidenceRunId`. It requires
+`contextMode: continuation`, `contextHandoff: null` and a nonempty predecessor
+terminal evidence-run ID in the selected work item. It is supported only by
+`--sdk-task-binding` with read-only Codex Consultant task mode. Review, Worker,
+Claude and the older binding versions do not gain continuation through this field.
+The runtime derives the native IDs from verified received evidence, not from this
+JSON input. The new launch uses distinct dispatch, evidence and output artifact
+identities; reusing the predecessor or completed operation is not a retry path.
 
 The binding cannot select extra tools, arbitrary launch flags or endpoints. This
 bridge selects an empty Model Context Protocol (MCP) tool scope and fixed startup

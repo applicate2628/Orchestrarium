@@ -988,8 +988,13 @@ owners; bind new operation identities to verified predecessor evidence. Use the
 existing work-item ledger transaction for single-successor consumption, not a
 parallel session store. Unknown outcomes require reconciliation, not automatic
 replay; this affects the selected chain, not unrelated authorized tasks.
-A Host-only retained-result implementation does not imply durable restart or
-child-Lead authority. Those routes require their own completed owner integration.
+Durable continuation derives session identity from the existing canonical received
+artifact and its exact ledger commitment, not caller-supplied native IDs or a
+fabricated in-memory observation. Revalidate current context/permissions and the
+predecessor inside the existing atomic claim. A retained old result or restart
+never authorizes replay. Missing legacy receipts affect only that continuation;
+independent admitted fresh/handoff work remains available. Durable continuation
+does not grant child-Lead authority or control unrelated native clients.
 
 ## Explicit Worker file effects
 

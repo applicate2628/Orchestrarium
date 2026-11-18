@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Codex Consultant tasks can explicitly continue after a Host restart using a received artifact and ledger identity through task binding version 5. The native turn is new, old completed turns are not replayed, and corrupt or legacy missing receipts do not masquerade as resumable sessions. Existing current authorization and single-successor claims remain authoritative.
+
 - Codex Hosts can continue a received read-only Consultant task as a new native turn, using verified predecessor evidence and the existing ledger single-successor claim. This preserves context without replaying an uncertain old turn; public restart and child-Lead authority remain separate work, and native execution still requires its normal authorization.
 
 - SDK execution now rechecks the existing Host authority before releasing a received result. PR-bot handoffs bind the exact hosted revision, retain stale evidence without replay, and leave publication/thread actions with their existing owners; unrelated SDK tasks do not acquire a GitHub requirement.
