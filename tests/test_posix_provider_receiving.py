@@ -112,11 +112,41 @@ class PosixProviderReceivingTests(unittest.TestCase):
 
     def receive_selected_nonlead_upgrade(self, provider="codex", *, extra=()):
         import json
-        skills = self.home / ".agents/skills"
+        ownership = self.module._provider_ownership_module(ROOT)
+        client = ownership.get_client(provider)
+        skills = (self.home / client["canonical_runtime"]).parent
         receipt = skills / ".orchestrarium-nonlead-skills-receipt.v1.json"
         saved = self.root / "prior-nonlead-receipt.json"
+        # Unreceipted adoption requires absence of the whole nonlead receipt.
+        # Sibling ownership remains recorded in the aggregate provider receipt.
         receipt.rename(saved)
         selected = skills / "knowledge-archivist"
+        # Reconstruct an unowned selected skill, not a modified owned payload.
+        # Keep every aggregate sibling and configuration claim unchanged.
+        aggregate = self.home / client["provider_root"] / ownership.RECEIPT_NAME
+        prior = ownership.decode_record(aggregate.read_bytes(), provider, "global")
+        (self.root / "prior-provider-receipt.json").write_bytes(aggregate.read_bytes())
+        prefix = selected.relative_to(self.home).as_posix()
+        def selected_member(path):
+            return path == prefix or path.startswith(prefix + "/")
+        remaining = {path: digest for path, digest in prior["files"].items()
+                     if not selected_member(path)}
+        self.assertLess(len(remaining), len(prior["files"]))
+        record = dict(prior, files=remaining)
+        if "directories" in record:
+            record["directories"] = [path for path in prior["directories"]
+                                     if not selected_member(path)]
+        control = receipt.relative_to(self.home).as_posix()
+        record["files"].pop(control, None)
+        aggregate.write_bytes(ownership.serialize_record(record, provider, "global"))
+        readback = ownership.decode_record(aggregate.read_bytes(), provider, "global")
+        self.assertFalse(any(selected_member(path) for path in readback["files"]))
+        self.assertEqual({path: digest for path, digest in readback["files"].items()
+                          if path != control},
+                         {path: digest for path, digest in prior["files"].items()
+                          if path != control and not selected_member(path)})
+        self.assertFalse(receipt.exists())
+        self.assertNotIn(control, readback["files"])
         selected_file = selected / "SKILL.md"
         expected = (ROOT / "src.codex/skills/knowledge-archivist/SKILL.md").read_bytes()
         selected_file.write_bytes(expected + b"\nFixture legacy content\n")

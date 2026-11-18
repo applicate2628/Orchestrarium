@@ -1364,6 +1364,43 @@ checks are not model-execution proof. Exact earlier evidence remains below.
 Use this roadmap and the existing PR, not a competing tracker. Do not repeat
 unchanged broad audits or add arbitrary run counts, time limits or approval stages.
 
+### Native Linux qualification checkpoint (2026-11-18)
+
+The source checkpoint `50f8c526` was exercised on an existing Ubuntu/WSL Linux
+runtime with Python 3.14.4 and pytest 9.2.0, without provider/model calls or new
+package installation. The process-group suite has **26 distinct passing tests
+and one Windows-only skip** across the original run and its nonoverlapping
+continuation. This includes actual isolated project/global installer checks;
+it is not SDK process-custody or live-provider acceptance.
+
+The first file-descriptor capture run encountered a reproducible temporary-file
+truncate failure on the Windows-backed filesystem. Standard pytest system
+capture avoided that harness issue. Receiving checks used an ext4 snapshot of
+all 1,334 tracked source files, verified byte-for-byte against the checkpoint,
+with existing dependencies reused and production sources unchanged. These
+filesystem/capture details qualify the evidence; they are not product timeouts
+or permission-policy changes.
+
+Initial receiving results were two passes and three failures. Two failures
+identified stale fixture assumptions: the Claude skill root was hardcoded to
+the Codex layout, and an allegedly unreceipted selected skill still had aggregate
+ownership. The fixture now uses the existing client catalog and reconstructs
+unreceipted adoption under both receipt owners, preserving aggregate sibling
+and configuration claims. Changed payload bytes are not blessed by a new owned
+digest. The two corrected cases passed in 76.02 seconds (79.60-second harness) on the final fixture,
+with all snapshot sources unchanged during the run. Together with the two
+unaffected initial passes, four of the five receiving cases are established;
+the native Codex hooks case below remains unqualified, not skipped or passed.
+
+The remaining Codex hooks check lacks a native Codex executable and reports
+`CODEX_HOOK_LIST_UNAVAILABLE`; it is not substituted with a fake executable or
+counted as a pass. The SDK process owner still has its explicit POSIX custody
+qualification gap. A separate held-descriptor execution experiment was rejected
+by the execution environment and stopped; that does not establish a general
+Linux failure or qualify the missing custody mechanism. No macOS qualification,
+OS sandbox guarantee, global SDK installation or live-provider acceptance is
+implied by these Linux installer and process-group checks.
+
 ## Provider installation boundary
 
 Use the [official agent SDK setup proposal](../INSTALL.md#official-agent-sdk-setup) in a separate provider environment. Orche does not repackage provider SDKs or CLI binaries. Ordinary vendor installation may supply its own runtime and retains complete original metadata/dependencies. Launch the existing SDK entrypoint with that environment's Python; the supervised worker uses the same interpreter. The base distribution launcher remains installer-only. Historical SDK-only bundle and `--no-deps` qualification below is preserved evidence, not the current installation recommendation. No source fixture or package install activates a live route.
