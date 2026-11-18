@@ -2,6 +2,13 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-18
+
+- Reconciled the remaining product plan with delivered model-routing changes and
+  the approved SDK completion roadmap. Current SDK work is no longer mixed with
+  optional future 2.0 outcomes or repeated completed ranking work; distribution,
+  native Rust operations and separate installer acceptance retain their owners.
+
 ## 2026-10-26
 
 - Finish the npm/Rust review split by updating the remaining roadmap to reference their separate main-based PRs. No implementation or new dependency between the projects is introduced.

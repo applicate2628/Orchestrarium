@@ -1,9 +1,45 @@
 # Orchestrarium 2.0 product plan
 
-Status: remaining 2.0 product scope after extracting npm distribution and
-native operations into independent projects; reconciled 2026-10-23 against main
-`84eefb6bbeec9ebbe032f00788f249ae59da05b5`. This is not an implemented release,
-a measured improvement, or permission to run providers, spend funds, or publish.
+Status: remaining product directions, reconciled on 2026-11-18 against main
+`0486a9993cba4eb10fb19c9f3f4cc5a743c15e52` and the approved PR19 completion
+roadmap. The October design below retains conditional future outcomes, not a
+checklist of prerequisites for SDK completion. This is not an implemented 2.0
+release, a measured improvement, or permission to launch providers or publish.
+
+## Current delivery order and completed work
+
+1. Finish the approved multivendor SDK scope in [PR19](https://github.com/applicate2628/Orchestrarium/pull/19).
+   Its `docs/sdk-execution.md` owns the implementation roadmap and current evidence;
+   [PR18](https://github.com/applicate2628/Orchestrarium/pull/18) retains the design,
+   not a competing implementation checklist. Current source/offline results are
+   distinct from native provider acceptance and installation. Do not reopen
+   implemented SDK contracts as research into an absent adapter or Model backend.
+2. Reconcile the delivery dependency contract in [PR17](https://github.com/applicate2628/Orchestrarium/pull/17),
+   then qualify its separately admitted payload and channels. SDK owns required
+   dependencies; distribution delivers the qualified payload. This is not a
+   second installer or a blanket prerequisite for PR19 implementation.
+3. After SDK acceptance, select one native operation under [PR21](https://github.com/applicate2628/Orchestrarium/pull/21).
+   Preserve its frozen inventories and reconcile subsequent source changes before
+   implementation. Migrate rules and hooks only with covered consumers and
+   incident regressions; an affected failure must not stop independent work.
+
+Task-first ranking and scoped Astra authorization (PR43), latest confirmed model
+families only (PR44), and exclusion of Low for every active choice (PR45) are
+merged source changes, not remaining 2.0 implementation. The current Codex families
+are Luna 6, Terra 6.1, Sol 6.2 and Astra 6.2. Existing role/task/host/approval
+controls still apply. Do not substitute old examples or historical profiles for
+the live policy. Completed routing changes do not prove a full comparative
+quality/cost audit: outcome 4 below remains separate evidence work.
+
+The role-lifecycle remainder (outcome 2), conditional comparison mechanism
+(outcome 3), stopped cross-host continuation (outcome 6) and optional named
+preferences (outcome 7) remain independently scoped future outcomes. They do not
+block current SDK delivery without an identified dependency. Rule-volume reduction
+belongs to the successive SDK/Rust transitions, not a new pre-SDK rewrite.
+
+The existing PR31 Windows replacement-security correction remains a separate
+installer acceptance item; its source review, native fixtures and actual installed
+receiving must not be conflated with SDK or model-ranking completion.
 
 ## Goal and boundary
 
@@ -164,7 +200,8 @@ state manager or make all distribution work depend on outcome 2.
 
 ### 3. Task-specific exact-profile choice and complementary work
 
-**Status:** remaining design outcome; existing admission and scheduling are implemented.
+**Status:** implemented task-first admission/routing foundation; a further measured
+comparison mechanism remains conditional, not a replacement ranking project.
 **Owner:** Lead, with any comparison extension at the existing resolver caller seam.
 
 Compare already-admitted exact model/effort choices for a concrete task, and compare
@@ -343,9 +380,10 @@ and actual task outcomes; settle each retained 2.0 outcome as delivered, deferre
 with owner/next step, or explicitly retired with rationale. Outcomes 1 and 5 remain
 externally owned, not unfinished 2.0 obligations. A plan or comparator alone is not
 2.0.
-The separate Claude current-version research in PR #16 is outside this 2.0 package.
-Do not absorb its work or make it a release dependency without an identified shared
-contract; consume accepted findings through their existing owners when relevant.
+Historical Claude research PR16 and instruction-preservation PR15 are closed,
+without a GitHub merge record. That disposition alone proves neither delivery nor
+absence of their corrections. Any concrete remaining defect belongs to its current
+source owner, not a revived research project or an automatic 2.0 prerequisite.
 
 Current-source reconciliation, not a claim about PR merge state or installed behavior:
 - [b719ef77](https://github.com/applicate2628/Orchestrarium/commit/b719ef77bd2ebfad44daa7088c71595c9825403b)
@@ -358,10 +396,11 @@ Current-source reconciliation, not a claim about PR merge state or installed beh
   unifies current decision admission and native normalization custody. Reuse these
   owner-level corrections, not new parallel guards or a new state engine. Their scoped
   checks do not prove universal agent enforcement or installed receiving.
-PR #15's instruction-preservation status is not established by those commits; verify
-its own correction before claiming it landed. Keep any remaining repair with its
-existing owner, not duplicated under native-role lifecycle. The known Kimi comment
-drift likewise remains an owner-scoped correction.
+Those historical commits do not establish every later installer correction or
+current installed behavior. The Kimi comment drift noted above is still present
+in main's defaults at the reconciliation revision; retain that small owner-scoped
+documentation correction rather than claiming it completed or expanding it into a
+new provider project.
 
 ## Design economy and verification
 
