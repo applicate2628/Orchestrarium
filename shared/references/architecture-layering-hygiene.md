@@ -83,6 +83,46 @@ already does so, keep it. If no whole-level responsibility exists, preserve the
 simple local representation. This sharpens M and the shared General-case rule;
 it does not create another workflow stage. [spine: General-case over local symptoms]
 
+
+## GUI-independent functional boundary
+
+This applies to projects developed under the workflow and to Orchestrarium itself.
+The shared **State-synchronization ownership** rule owns the requirement: all
+functional operations remain callable without a graphical user interface (GUI),
+and a frontend can be replaced through a clear common contract without rewriting
+the domain implementation. Reuse an adequate existing public module, function or
+command-line interface; this does not require a server, network protocol, daemon,
+plugin framework or interface wrapper. A boundary earns its place by owning this
+accepted independence and replaceability requirement.
+
+Keep validation, business decisions, persistence and functional lifecycle with
+their existing backend owners, not widgets, view models or GUI callbacks. The GUI
+may collect inputs, render results and own visual interactions; layout, animation
+and other presentation-only behavior need not have a headless equivalent.
+Functional input/output, errors, cancellation and required user decisions must
+have a usable non-GUI path under the same permissions and safety guarantees. A
+backend may request a decision through its existing caller contract; a missing
+display is neither approval nor a reason to block unrelated authorized work.
+
+OWNER: the existing functional/domain contract owner. At the ordinary design and
+review step identify the callable operations and dependency direction, not another
+tracker or approval stage. A justified exception needs an explicit user request,
+its concrete reason, affected scope and consequence in that same design record;
+convenience or an unavailable GUI is not implicit permission to couple the core.
+
+PROBE: use the existing test/build facility to exercise the admitted functional
+scenarios with the GUI package and display/event loop absent; compare results,
+errors, authorization and lifecycle with the same operations through a client.
+Replace the frontend with a simple test caller at the common boundary and verify
+that no domain rewrite or duplicate mutation is required. For applicable running
+operations, verify client disconnect/reconnect or replacement preserves the owned
+work and current status rather than silently restarting it. Name any untested
+functional scenario or justified UI-specific exception; an import grep alone
+does not prove functional coverage. Dependencies must point from presentation
+toward the functional contract, never require GUI state to perform domain work.
+These are ordinary architecture/acceptance checks, not a new universal runtime
+gate. [spine: State-synchronization ownership, Readability]
+
 ## A. Generalization & scaling
 
 **A1 — Ownership follows the dependency graph, not a name or level label.** A capability is owned by

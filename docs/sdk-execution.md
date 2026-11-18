@@ -35,6 +35,16 @@ implementation line, not a prerequisite for finishing this SDK work.
 - Keep one dispatch, process supervisor, ledger and permission owner. Provider
   adapters translate supported requests/events/results into those existing
   contracts; they do not create a second scheduler, policy system or ledger.
+- Apply the shared State-synchronization ownership and
+  [GUI-independent functional boundary](../shared/references/architecture-layering-hygiene.md#gui-independent-functional-boundary)
+  to Orchestrarium itself and projects governed by this workflow. SDK contracts,
+  dispatch and receiving remain usable without a GUI; a future graphical client
+  is a replaceable consumer of those same owners, not their lifecycle or
+  authority owner. Qualify functional operations through the existing headless
+  entry points, and client replacement/reconnection without duplicate effects;
+  visual presentation remains UI-specific. Existing provider authentication and
+  mandatory approvals still apply. This is a design/acceptance requirement, not
+  a claim of complete runtime qualification.
 - Separate the native Lead session from a programmatically invoked worker.
   Any suitable provider may be Lead; Antigravity (AGY) is not the exclusive Lead.
   The selected AGY and Claude subscription integrations are Lead-only: another
