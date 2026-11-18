@@ -129,7 +129,7 @@
     },
     "sdk_execution/grok.py": {
       "source": "scripts/sdk_execution/grok.py",
-      "sha256": "64cc9fdc43bc0ef7e7e6c7bc05fdff061eed3e239caa0315482e9e4328f4fe59",
+      "sha256": "606c703a9ca35739ea0cd19073055e85a46482104b6d89aa4354e1101dac2d9e",
       "destination": "scripts/sdk_execution/grok.py"
     },
     "sdk_execution/kimi.py": {

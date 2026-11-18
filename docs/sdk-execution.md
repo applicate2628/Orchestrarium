@@ -736,6 +736,24 @@ do not establish account identity, internal tool enforcement or native acceptanc
 and do not activate a public Grok worker. The current official source baseline is
 [Grok Build `2bdd1d6a`](https://github.com/xai-org/grok-build/tree/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8).
 
+### Grok native authentication evidence
+
+The official `authenticate` response can include optional `_meta.auth_mode`.
+The exchange records the selected ACP auth method separately from the observed
+native mode (`WebLogin`, `Oidc`, `External` or `ApiKey`). Neither is an account
+identity. Missing, malformed or future mode values remain unknown without a new
+launch gate. Account identity remains unknown; email, team, subscription and raw
+authentication metadata are not copied into terminal evidence.
+
+This is bounded protocol evidence, not native account qualification or public
+route activation. Successful process settlement still cannot replace the missing
+canonical Grok receiving owner; its diagnostic is `grok_receiving_unavailable`.
+Actual protocol/process failures retain precedence. Internal tool enforcement
+and admitted native execution remain separate unresolved outcomes.
+
+The source contract is [AuthMeta](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-login/src/meta.rs)
+and the [authenticate response producer](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-shell/src/agent/mvp_agent/mod.rs).
+
 ### Current baseline and remaining provider work
 
 This matrix describes the current source contract. Exact published HEAD and

@@ -96,7 +96,7 @@ def test_config_readback_text_and_close_are_not_account_or_process_settlement():
     assert result.status == "incomplete"
     assert result.to_tool_output()["process_settlement"] == "not_established"
     observed = json.loads(result.observations[-1].payload_json)["observed"]
-    assert observed == {"model": "grok-fixture", "effort": "high", "account": None}
+    assert observed == {"model": "grok-fixture", "effort": "high", "account": None, "auth_mode": None}
 
 
 import pytest

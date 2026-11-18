@@ -27,6 +27,7 @@ class GrokAcpExchange:
         self.assert_current = assert_current
         self.session_id = None
         self.observed_model = self.observed_effort = None
+        self.observed_auth_mode = None
         self.stop_reason = None
         self.protocol_closed = False
         self._next_id = 0
@@ -182,7 +183,13 @@ class GrokAcpExchange:
                 isinstance(item, dict) and item.get("id") == self.auth_method for item in methods
             ) != 1:
                 raise GrokAcpError("grok_auth_method_unavailable")
-            self._rpc(channel, "authenticate", {"methodId": self.auth_method, "_meta": {"headless": True}})
+            authenticated = self._rpc(channel, "authenticate", {"methodId": self.auth_method, "_meta": {"headless": True}})
+            # Official AuthMeta.auth_mode is Debug AuthMode, not an account ID
+            # or the selected ACP method. Export only known nonpersonal values.
+            meta = authenticated.get("_meta")
+            mode = meta.get("auth_mode") if isinstance(meta, dict) else None
+            if isinstance(mode, str) and mode in {"WebLogin", "Oidc", "External", "ApiKey"}:
+                self.observed_auth_mode = mode
             created = self._rpc(channel, "session/new", {"cwd": request.cwd, "mcpServers": []})
             session_id = created.get("sessionId")
             if not isinstance(session_id, str) or not session_id.strip() or len(session_id.encode()) > 4096:
@@ -221,8 +228,10 @@ class GrokAcpExchange:
                     self.protocol_closed = False
         error = error or self._profile_error
         observation = Observation(0, "grok.acp.terminal", json_text({
-            "selected": {"model": request.model, "effort": request.effort, "account": request.account_binding},
-            "observed": {"model": self.observed_model, "effort": self.observed_effort, "account": None},
+            "selected": {"model": request.model, "effort": request.effort, "account": request.account_binding,
+                         "auth_method": self.auth_method},
+            "observed": {"model": self.observed_model, "effort": self.observed_effort, "account": None,
+                         "auth_mode": self.observed_auth_mode},
         }))
         observations = (observation,) if len(observation.payload_json.encode()) <= request.max_output_bytes else ()
         return ExecutionResult(request, "interrupted" if self._cancel.is_set() or self.stop_reason == "cancelled" else "incomplete", provider_status={"end_turn": "completed", "cancelled": "interrupted", "refusal": "failed"}.get(self.stop_reason),
@@ -334,11 +343,12 @@ class GrokAcpAdapter:
             stream.truncated or stream.observed_bytes != stream.persisted_bytes for stream in (process.stdout, process.stderr)
         ) else result.capture_error
         process_error = "grok_process_failed" if process.failure_id or process.target_exit_code != 0 or not process.stdin.complete else None
-        # No ACP account readback or durable Grok receiving owner is implemented.
+        # Optional native auth-mode evidence is not account identity or durable receiving.
+        # The canonical Grok receiving owner remains unimplemented.
         # A successful prompt/clean process is useful evidence, NOT a complete run.
         result = replace(result, cleanup_error=("grok_process_settlement_unavailable" if not settled else
                                         None if result.protocol_closed else "grok_protocol_cleanup_incomplete"),
-                         capture_error=capture_error, execution_error=result.execution_error or process_error or "grok_account_readback_unavailable")
+                         capture_error=capture_error, execution_error=result.execution_error or process_error or "grok_receiving_unavailable")
         self.execution_result = result  # Retain owner evidence even if export scanning rejects it.
         scan_execution_output(result, self.output_context)
         return result

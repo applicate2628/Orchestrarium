@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Record optional native Grok authentication mode separately from selected auth method and unknown account identity, omitting personal/raw metadata; retain actual failures and report the missing canonical receiving owner without activating a route.
+
 - Preserve Grok ACP model/effort drift across configuration replies and session-close drain, retaining acquired output and preventing a late or restored snapshot from being reported as successful requested-profile execution.
 
 - Reorganize provider access guidance into separate subscription and API tables, distinguishing native Lead and external worker paths while retaining documented exceptions and unresolved cases.

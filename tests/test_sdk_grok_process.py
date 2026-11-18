@@ -116,7 +116,7 @@ def test_adapter_uses_actual_owner_return_and_never_invents_account_or_receiving
         assert result.native_result_text == "Native review"
         assert result.status == "incomplete"
         assert result.cleanup_error == (None if settled else "grok_process_settlement_unavailable")
-        assert result.execution_error == "grok_account_readback_unavailable"
+        assert result.execution_error == "grok_receiving_unavailable"
         assert "authenticate" in effects and "session/prompt" in effects
         assert adapter.process_result.tree.tree_empty is settled
 
