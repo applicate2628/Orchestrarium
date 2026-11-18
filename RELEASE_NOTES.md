@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Refine the official provider access matrix: distinguish interactive agent-issued Kimi calls from non-interactive automation, document Claude approval exceptions and AGY API/ACP boundaries, and use current Grok entitlement language.
+
 - The Antigravity Lead package can invoke the existing explicit Codex SDK review bridge from its own managed runtime. Shared dispatch, permissions, lifecycle and canonical receiving remain the owners; missing AGY components do not silently select a neighboring Codex pack. The installed skill documents the external-review path without granting launch authority, copying vendor dependencies or claiming native acceptance.
 
 - Antigravity command hooks reuse the shared stray-artifact AUDIT checks for native Bash commands, using the tool's actual working directory rather than guessing from the hook process. Worktree, redirect and build-output warnings keep their existing exemptions, do not execute the proposed command and do not override native approvals. Installed ownership preserves earlier startup/write hooks and unrelated customizations.
