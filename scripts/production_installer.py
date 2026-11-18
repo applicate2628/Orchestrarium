@@ -557,6 +557,9 @@ UI_CONTINUITY_CONTRACT_TARGET = Path("contracts") / "ui-transition-continuity.md
 CODEX_HOOK_INVENTORY = "codex-hook-inventory.json"
 CODEX_ROLE_MANIFEST = "orchestrarium-role-manifest.json"
 _STOCK_NATIVE_ROLE_CONTRACT_PRIOR_PAIRS = (
+    # Exact factory contract before latest-family-only routing.
+    ((Path("shared") / "role-routing-policy.v1.json", "9672319f42039f6e8864de31e00ea4423011f3be679c3180e2161a8611b28259"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "882b96207b5503bb231002301cc15df08107c66a9ccfd189a84b48e6e62d1b0a")),
     # Exact previous factory contract for the 6.2 task-first ranking.
     ((Path("shared") / "role-routing-policy.v1.json", "b3551957c35cc724e905522d0b9ce0044fc050fcbeb2fd9e0893835cca083168"),
      (Path("shared") / "orchestrarium-role-manifest.json", "fbb6a7dbdb41336a8a82d8adfebbd79b762e5472f98267c30500d0e99c3fd03a")),

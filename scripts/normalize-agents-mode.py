@@ -375,11 +375,6 @@ def reserve_resolver_allows_reserve(
 def render_scalar(key: str, meta: ScalarMeta, existing: dict[str, ScalarMeta]) -> list[str]:
     current = existing.get(key)
     value = current.value if current and current.value else meta.value
-    if key == "externalCodexProfile":
-        decoded = decode_supported_yaml_scalar(value)
-        match = re.fullmatch(r"gpt-6\.1-sol-(high|xhigh|max)", decoded)
-        if match:
-            value = "gpt-6.2-sol-" + match.group(1)
     if key == "externalPriorityProfile" and value in RETIRED_PROFILE_NAMES:
         value = meta.value
     return [f"{key}: {value}{comment_suffix(meta.comment)}"]

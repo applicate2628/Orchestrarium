@@ -6,10 +6,18 @@ with their actual owners. This module has no runtime or filesystem dependency.
 from __future__ import annotations
 
 
+# Confirmed current families, not a numeric version ladder (Terra remains 6.1).
+CURRENT_CODEX_FAMILY_MODELS = frozenset({
+    "gpt-6-luna", "gpt-6.1-terra", "gpt-6.2-sol", "gpt-6.2-astra",
+})
+
+
 def launch_requirements(provider: str, model: str, effort: str) -> tuple[str | None, bool]:
     """Return a forbidden-choice reason and whether individual agreement is needed."""
     if not all(type(value) is str and value for value in (provider, model, effort)):
         return "effective-choice-incomplete", False
+    if provider == "codex" and model.lower().startswith("gpt-") and model not in CURRENT_CODEX_FAMILY_MODELS:
+        return "model-generation-not-admitted", False
     if effort == "low":
         return "low-not-admitted", False
     if effort == "ultra":
@@ -17,9 +25,9 @@ def launch_requirements(provider: str, model: str, effort: str) -> tuple[str | N
     if provider == "codex":
         if model == "gpt-6-luna" and effort not in {"high", "xhigh", "max"}:
             return "luna-minimum-high", False
-        if model in {"gpt-6.1-terra", "gpt-5.6-terra"} and effort not in {"medium", "high", "xhigh", "max"}:
+        if model == "gpt-6.1-terra" and effort not in {"medium", "high", "xhigh", "max"}:
             return "terra-minimum-medium", False
-    return None, (provider == "codex" and model in {"gpt-6-astra", "gpt-6.2-astra"}) or effort == "max"
+    return None, (provider == "codex" and model == "gpt-6.2-astra") or effort == "max"
 
 
 def qualify_launch(provider: str, model: str, effort: str, *,
