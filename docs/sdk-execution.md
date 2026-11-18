@@ -721,6 +721,21 @@ nonauthorizing; interrupted writes are not automatically replayed. See the
 contract and capture topology. Offline synthetic results do not prove native
 file writes or operating-system confinement.
 
+### Grok ACP selected-profile currentness
+
+The existing Grok exchange retains each selected control while applying the
+remaining model/effort controls. A full configuration snapshot that changes an
+already established selection cannot be hidden by a later restoring snapshot.
+This check covers setter replies, prompt notifications and session-close drain.
+The current response and cleanup are drained without starting another prompt;
+already acquired text remains available with a sticky execution error rather
+than being presented as a successful requested-profile result.
+
+Offline protocol fixtures cover these interleavings and late-close drift. They
+do not establish account identity, internal tool enforcement or native acceptance,
+and do not activate a public Grok worker. The current official source baseline is
+[Grok Build `2bdd1d6a`](https://github.com/xai-org/grok-build/tree/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8).
+
 ### Current baseline and remaining provider work
 
 This matrix describes the current source contract. Exact published HEAD and

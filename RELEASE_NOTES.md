@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Preserve Grok ACP model/effort drift across configuration replies and session-close drain, retaining acquired output and preventing a late or restored snapshot from being reported as successful requested-profile execution.
+
 - Reorganize provider access guidance into separate subscription and API tables, distinguishing native Lead and external worker paths while retaining documented exceptions and unresolved cases.
 
 - Exercise the installed AGY-to-Codex scoped Worker route through existing custody and receiving, including protected control-plane refusal and retained failure/no-replay handling; document write-workspace topology without claiming native sandbox acceptance.

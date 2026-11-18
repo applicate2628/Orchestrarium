@@ -34,7 +34,8 @@ class GrokAcpExchange:
         self._frames = self._wire_bytes = 0
         self._permission_error = None
         self._config_options = {}
-        self._configuration_ready = False
+        self._established_config = {}
+        self._profile_error = None
         self._cancel = threading.Event()
         self.cancel_sent = self.cancel_acknowledged = False
 
@@ -54,6 +55,8 @@ class GrokAcpExchange:
 
     def _rpc(self, channel, method, params):
         if method != "session/close":
+            if self._profile_error is not None:
+                raise GrokAcpError(self._profile_error)
             if self._cancel.is_set():
                 raise GrokAcpError("grok_cancelled_before_effect")
             if self.assert_current is not None:
@@ -121,9 +124,12 @@ class GrokAcpExchange:
                         raise GrokAcpError("grok_output_limit")
                     self._text += content["text"]
                 elif update.get("sessionUpdate") == "config_option_update":
-                    self._config(update)
-                    if self._configuration_ready and (self.observed_model, self.observed_effort) != (self.request.model, self.request.effort):
-                        raise GrokAcpError("grok_config_mismatch")
+                    # Keep draining the current response/cleanup. A restored
+                    # snapshot never erases already observed profile drift.
+                    try:
+                        self._config(update)
+                    except GrokAcpError as exc:
+                        self._profile_error = self._profile_error or str(exc)
                 continue
             if type(frame.get("id")) is not int or frame["id"] != identity or "method" in frame:
                 raise GrokAcpError("grok_response_mismatch")
@@ -141,6 +147,11 @@ class GrokAcpExchange:
         self._config_options = by_id
         self.observed_model = by_id.get("model", {}).get("currentValue")
         self.observed_effort = by_id.get("reasoning_effort", {}).get("currentValue")
+        # Both replies and notifications carry full state. Only previously
+        # selected controls are fixed during sequential model/effort setup.
+        if any(by_id.get(key, {}).get("currentValue") != value
+               for key, value in self._established_config.items()):
+            self._profile_error = self._profile_error or "grok_config_mismatch"
 
     def _require_option(self, key, selected):
         option = self._config_options.get(key, {})
@@ -182,10 +193,12 @@ class GrokAcpExchange:
                 self._require_option(key, value)
                 self._config(self._rpc(channel, "session/set_config_option", {"sessionId": self.session_id, "configId": key, "value": value}))
                 if self._config_options.get(key, {}).get("currentValue") != value:
-                    raise GrokAcpError("grok_config_mismatch")
+                    self._profile_error = self._profile_error or "grok_config_mismatch"
+                if self._profile_error is not None:
+                    raise GrokAcpError(self._profile_error)
+                self._established_config[key] = value
             if (self.observed_model, self.observed_effort) != (request.model, request.effort):
                 raise GrokAcpError("grok_config_mismatch")
-            self._configuration_ready = True
             result = self._rpc(channel, "session/prompt", {"sessionId": self.session_id, "prompt": [{"type": "text", "text": request.prompt}]})
             stop_reason = result.get("stopReason")
             if not isinstance(stop_reason, str) or stop_reason not in {"end_turn", "cancelled", "refusal", "max_tokens", "max_turn_requests"}:
@@ -206,6 +219,7 @@ class GrokAcpExchange:
                     self.protocol_closed = isinstance(meta, dict) and ("x.ai/closeOutcome" not in meta or meta["x.ai/closeOutcome"] in {"closed", "notResident"})
                 except Exception:
                     self.protocol_closed = False
+        error = error or self._profile_error
         observation = Observation(0, "grok.acp.terminal", json_text({
             "selected": {"model": request.model, "effort": request.effort, "account": request.account_binding},
             "observed": {"model": self.observed_model, "effort": self.observed_effort, "account": None},
