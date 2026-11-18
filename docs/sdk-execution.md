@@ -817,6 +817,23 @@ first-text boundary; they are not a real model or native parser acceptance run.
 
 Pinned sources: [leading slash parser](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-shell/src/session/slash_authority.rs#L41-L55), [human intent resolution](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-shell/src/session/slash_commands.rs#L1556-L1566), and [ACP turn ordering](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-shell/src/session/acp_session_impl/turn.rs#L627-L756).
 
+### Windows working-directory owner attribution
+
+The common process supervisor attributes a working directory to the current
+process token's user or its exact eligible default owner. Windows can assign a
+group as the default owner of newly created objects; that group must appear in
+the token with `SE_GROUP_OWNER` and without `SE_GROUP_USE_FOR_DENY_ONLY`.
+An unrelated user or group is not admitted. The binding retains the actual owner
+identity and existing reparse-point and pre-effect identity-change checks.
+This is not a discretionary-access-list audit or exclusive per-user isolation,
+and does not claim support for an impersonating host. No filesystem owner,
+access permissions or process token is changed to obtain admission.
+
+Official semantics: [default owner](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-token_owner),
+[group attributes](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-token_groups),
+and [new object ownership](https://learn.microsoft.com/en-us/windows/win32/secauthz/owner-of-a-new-object).
+Offline checks and a successful binding do not establish a successful model turn.
+
 ### Grok native tool-policy integration boundary
 
 Source inspection at the pinned Grok Build revision distinguishes native policy

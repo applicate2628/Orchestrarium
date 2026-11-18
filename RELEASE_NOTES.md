@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Recognize the Windows process token's exact eligible default owner when binding an owned working directory, so elevated processes can use directories they create without changing filesystem ownership. Preserve rejection of unrelated or deny-only owners, actual-owner identity and drift checks; this is not a claim of exclusive per-user isolation.
+
 - The shared development workflow now requires GUI-independent functional operations and a replaceable presentation client through the existing common contract. Architecture guidance adds headless and client-replacement acceptance while preserving required approvals, presentation-only behavior and explicitly justified user-requested exceptions.
 
 

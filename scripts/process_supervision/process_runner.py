@@ -1194,6 +1194,21 @@ def _is_reparse(metadata: os.stat_result) -> bool:
     return bool(getattr(metadata, "st_file_attributes", 0) & 0x400)
 
 
+def _windows_owner_attributed(owner: bytes, user: bytes, default_owner: bytes | None,
+                              groups: tuple[tuple[bytes, int], ...] | None) -> bool:
+    """Accept the process user or its exact Windows-permitted default owner.
+
+    TOKEN_OWNER group semantics require SE_GROUP_OWNER and not DENY_ONLY.
+    This is owner attribution, not an exclusive-user DACL or sandbox claim.
+    """
+    if owner == user:
+        return True
+    return owner == default_owner and groups is not None and any(
+        sid == owner and attributes & 0x8 and not attributes & 0x10
+        for sid, attributes in groups
+    )
+
+
 def _windows_owner_digest(path: Path) -> str:
     from ctypes import wintypes
 
@@ -1227,9 +1242,9 @@ def _windows_owner_digest(path: Path) -> str:
         ctypes.POINTER(wintypes.DWORD),
     ]
     read_process_identity.restype = wintypes.BOOL
-    equal_sid = advapi32.EqualSid
-    equal_sid.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-    equal_sid.restype = wintypes.BOOL
+    valid_sid = advapi32.IsValidSid
+    valid_sid.argtypes = [ctypes.c_void_p]
+    valid_sid.restype = wintypes.BOOL
     sid_length = advapi32.GetLengthSid
     sid_length.argtypes = [ctypes.c_void_p]
     sid_length.restype = wintypes.DWORD
@@ -1250,20 +1265,54 @@ def _windows_owner_digest(path: Path) -> str:
             kernel32.GetCurrentProcess(), 0x0008, ctypes.byref(token)
         ):
             raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-        needed = wintypes.DWORD()
-        read_process_identity(token, 1, None, 0, ctypes.byref(needed))
-        if not needed.value:
+        def token_information(kind: int, minimum: int):
+            needed = wintypes.DWORD()
+            read_process_identity(token, kind, None, 0, ctypes.byref(needed))
+            if needed.value < minimum:
+                raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+            buffer = ctypes.create_string_buffer(needed.value)
+            capacity = len(buffer)
+            if (not read_process_identity(token, kind, buffer, capacity, ctypes.byref(needed))
+                    or not minimum <= needed.value <= capacity):
+                raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+            return buffer, needed.value
+
+        def sid_bytes(pointer):
+            if not pointer or not valid_sid(pointer):
+                raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+            length = sid_length(pointer)
+            if not length:
+                raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+            return ctypes.string_at(pointer, length)
+
+        # Keep returned buffers alive while their embedded SID pointers are read.
+        user_buffer, _ = token_information(1, ctypes.sizeof(ctypes.c_void_p))  # TokenUser
+        actual_owner = sid_bytes(owner_sid)
+        user = sid_bytes(ctypes.cast(user_buffer, ctypes.POINTER(ctypes.c_void_p))[0])
+        default_owner = None
+        groups = None
+        if actual_owner != user:
+            owner_buffer, _ = token_information(4, ctypes.sizeof(ctypes.c_void_p))  # TokenOwner
+            default_owner = sid_bytes(ctypes.cast(owner_buffer, ctypes.POINTER(ctypes.c_void_p))[0])
+            if actual_owner != default_owner:
+                raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+
+            class SidAndAttributes(ctypes.Structure):
+                _fields_ = [("sid", ctypes.c_void_p), ("attributes", wintypes.DWORD)]
+
+            class TokenGroups(ctypes.Structure):
+                _fields_ = [("count", wintypes.DWORD), ("groups", SidAndAttributes * 1)]
+
+            offset = TokenGroups.groups.offset
+            group_buffer, returned = token_information(2, offset)  # TokenGroups
+            count = ctypes.cast(group_buffer, ctypes.POINTER(wintypes.DWORD))[0]
+            if count > (returned - offset) // ctypes.sizeof(SidAndAttributes):
+                raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+            rows = (SidAndAttributes * count).from_buffer(group_buffer, offset)
+            groups = tuple((sid_bytes(row.sid), row.attributes) for row in rows)
+        if not _windows_owner_attributed(actual_owner, user, default_owner, groups):
             raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-        buffer = ctypes.create_string_buffer(needed.value)
-        if not read_process_identity(token, 1, buffer, needed, ctypes.byref(needed)):
-            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-        token_sid = ctypes.cast(buffer, ctypes.POINTER(ctypes.c_void_p))[0]
-        if not equal_sid(owner_sid, token_sid):
-            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-        length = sid_length(owner_sid)
-        if not length:
-            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-        return hashlib.sha256(ctypes.string_at(owner_sid, length)).hexdigest()
+        return hashlib.sha256(actual_owner).hexdigest()
     finally:
         if token:
             close(token)
