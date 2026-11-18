@@ -1675,6 +1675,27 @@ payload remain excluded; `restorableObservation` and `replayAuthorized` remain
 false. This diagnostic improvement does not retroactively recover the failed
 receiving or qualify native fresh/continuation acceptance.
 
+### Corrected acceptance harness: offline verification
+
+The streaming-to-receiving regression in
+`tests/test_sdk_codex_stream_receiving.py` uses the actual Codex Consultant
+adapter, worker frame decoder, output scanner, dispatch and canonical receiving
+owners with a synthetic vendor client and process boundary. More than 100
+notification events complete under the existing 4096-event default; the historical
+100-event test setting instead records a blocked result. Fresh and resumed turns
+produce canonical fixture receipts, preserve thread/context/depth, and reject
+reusing an already consumed predecessor. Credential-labelled canaries and an
+exact synthetic credential are rejected without publishing an artifact or terminal
+receipt; diagnostics do not retain the rejected value.
+
+The exact prepared operator harness was checked separately with its frozen neutral
+prompt bytes and an intercepted subprocess boundary: argument selection, prompt-set
+binding, completed/hash-bound predecessor selection, duplicate-launch rejection and
+local readback. That smoke uses explicitly synthetic receipt inputs, not canonical
+receiving evidence. Together these checks cover the previously separate paths;
+neither qualifies a real provider, account, native process containment, or successful
+live continuation. The real failed attempt above remains unchanged.
+
 ### Verified native evidence and subsequent changes
 
 - October 25 installed Windows fixture: success and receiving-collision passed
