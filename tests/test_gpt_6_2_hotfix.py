@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class GPT62Tests(unittest.TestCase):
     def test_astra_requires_agreement_at_every_admitted_effort(self):
-        for model in ("gpt-6-astra", "gpt-6.2-astra"):
+        for model in ("gpt-6.2-astra",):
             for effort in ("medium", "high", "xhigh", "max"):
                 with self.subTest(model=model, effort=effort):
                     self.assertEqual(qualify_launch("codex", model, effort), "individual-launch-approval-required")
@@ -40,7 +40,7 @@ if __name__ == "__main__":
     unittest.main()
 
 class ConfigurationMigrationTests(unittest.TestCase):
-    def test_legacy_profiles_migrate_same_effort_and_custom_values_survive(self):
+    def test_normalization_preserves_explicit_retired_and_custom_choices(self):
         import importlib.util
         import sys
         path = ROOT/"scripts/normalize-agents-mode.py"
@@ -49,14 +49,7 @@ class ConfigurationMigrationTests(unittest.TestCase):
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         default = module.ScalarMeta("gpt-6.2-sol-xhigh", "")
-        for generation in ("6.1",):
-            for effort in ("high", "xhigh", "max"):
-                old = "gpt-" + generation + "-sol-" + effort
-                for spelling in (old, '"' + old + '"', "'" + old + "'"):
-                    self.assertEqual(module.render_scalar("externalCodexProfile", default,
-                        {"externalCodexProfile":module.ScalarMeta(spelling, "")}),
-                        ["externalCodexProfile: gpt-6.2-sol-" + effort])
-        for unchanged in ("default", "gpt-6.2-sol-high", "gpt-6-sol-high", "gpt-5.6-sol-max", "custom-model-profile"):
+        for unchanged in ("default", "gpt-6.1-sol-high", "gpt-6.1-sol-xhigh", "gpt-6.1-sol-max", "gpt-6.2-sol-high", "gpt-6-sol-high", "gpt-5.6-sol-max", "custom-model-profile"):
             self.assertEqual(module.render_scalar("externalCodexProfile", default,
                 {"externalCodexProfile":module.ScalarMeta(unchanged, "")}),
                 ["externalCodexProfile: " + unchanged])

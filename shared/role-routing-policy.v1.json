@@ -30,18 +30,6 @@
       "codexModel": "gpt-6-luna",
       "useCriteria": "Default for exact mechanical work and a candidate for supervised bounded work with an objective oracle. No task-selection or acceptance authority; no mandatory cheaper-model trial."
     },
-    "balanced-medium": {
-      "modelTier": "balanced",
-      "effort": "medium",
-      "codexModel": "gpt-5.6-terra",
-      "useCriteria": "Routine work when cost per verified task favors balanced depth."
-    },
-    "balanced-high": {
-      "modelTier": "balanced",
-      "effort": "high",
-      "codexModel": "gpt-5.6-terra",
-      "useCriteria": "Balanced work needing stronger validation without frontier depth."
-    },
     "frontier-medium": {
       "modelTier": "frontier",
       "effort": "medium",
@@ -59,12 +47,6 @@
       "effort": "xhigh",
       "codexModel": "gpt-6.2-sol",
       "useCriteria": "Demanding work with caller-justified additional reasoning."
-    },
-    "sol-5.6-xhigh": {
-      "modelTier": "frontier",
-      "effort": "xhigh",
-      "codexModel": "gpt-5.6-sol",
-      "useCriteria": "Explicit read-only architecture or security review at the historical frontier/xhigh floor; caller justifies task fit and preserves current profession, scope and gates; actual correlated receiving is required for final commission credit."
     },
     "apex-max": {
       "modelTier": "apex",
@@ -153,43 +135,43 @@
       "requiredModelTier": "balanced",
       "requiredEffort": "high",
       "mutationClass": "read-only",
-      "admissibleProfiles": ["luna-high", "luna-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "luna-max", "terra-6.1-max"]
+      "admissibleProfiles": ["luna-high", "luna-xhigh", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "luna-max", "terra-6.1-max"]
     },
     "engineering": {
       "requiredModelTier": "balanced",
       "requiredEffort": "high",
       "mutationClass": "bounded-write",
-      "admissibleProfiles": ["luna-high", "luna-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "luna-max", "terra-6.1-max"]
+      "admissibleProfiles": ["luna-high", "luna-xhigh", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "luna-max", "terra-6.1-max"]
     },
     "planning": {
       "requiredModelTier": "balanced",
       "requiredEffort": "high",
       "mutationClass": "read-only",
-      "admissibleProfiles": ["balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-high", "terra-6.1-xhigh", "terra-6.1-max"]
+      "admissibleProfiles": ["frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-high", "terra-6.1-xhigh", "terra-6.1-max"]
     },
     "review": {
       "requiredModelTier": "balanced",
       "requiredEffort": "high",
       "mutationClass": "read-only",
-      "admissibleProfiles": ["balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "sol-5.6-xhigh", "terra-6.1-high", "terra-6.1-xhigh", "terra-6.1-max"]
+      "admissibleProfiles": ["frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-high", "terra-6.1-xhigh", "terra-6.1-max"]
     },
     "critical-design": {
       "requiredModelTier": "frontier",
       "requiredEffort": "xhigh",
       "mutationClass": "read-only",
-      "admissibleProfiles": ["frontier-high", "frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max", "sol-5.6-xhigh"]
+      "admissibleProfiles": ["frontier-high", "frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max"]
     },
     "critical-security": {
       "requiredModelTier": "frontier",
       "requiredEffort": "xhigh",
       "mutationClass": "read-only",
-      "admissibleProfiles": ["frontier-high", "frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max", "sol-5.6-xhigh"]
+      "admissibleProfiles": ["frontier-high", "frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max"]
     },
     "recovery": {
       "requiredModelTier": "frontier",
       "requiredEffort": "high",
       "mutationClass": "bounded-write",
-      "admissibleProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "terra-6.1-max"]
+      "admissibleProfiles": ["frontier-high", "frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "terra-6.1-max"]
     }
   },
   "roles": {
@@ -203,29 +185,29 @@
     },
     "default": {
       "defaultProfile": "frontier-xhigh",
-      "allowedProfiles": ["terra-6.1-high", "terra-6.1-xhigh", "balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-max"]
+      "allowedProfiles": ["terra-6.1-high", "terra-6.1-xhigh", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-max"]
     },
     "explorer": {
       "defaultProfile": "terra-6.1-high",
       "previousFactoryProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "luna-max", "terra-6.1-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "luna-max", "terra-6.1-max"]
     },
     "worker": {
       "defaultProfile": "frontier-high",
       "previousFactoryProfile": "frontier-high",
       "taskDefaultProfiles": {"recovery": "frontier-high"},
-      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
     },
     "analyst": {
       "defaultProfile": "terra-6.1-high",
       "previousFactoryProfile": "frontier-high",
       "taskDefaultProfiles": {"exploration": "terra-6.1-high"},
-      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
     },
     "planner": {
       "defaultProfile": "terra-6.1-high",
       "previousFactoryProfile": "frontier-high",
-      "allowedProfiles": ["terra-6.1-high", "terra-6.1-xhigh", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-max"]
+      "allowedProfiles": ["terra-6.1-high", "terra-6.1-xhigh", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-max"]
     },
     "architect": {
       "defaultProfile": "frontier-xhigh",
@@ -233,7 +215,7 @@
     },
     "architecture-reviewer": {
       "defaultProfile": "frontier-xhigh",
-      "allowedProfiles": ["frontier-xhigh", "sol-5.6-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max"]
+      "allowedProfiles": ["frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max"]
     },
     "algorithm-scientist": {
       "defaultProfile": "astra-high",
@@ -249,50 +231,50 @@
     },
     "security-reviewer": {
       "defaultProfile": "frontier-xhigh",
-      "allowedProfiles": ["frontier-xhigh", "sol-5.6-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max"]
+      "allowedProfiles": ["frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max"]
     },
     "backend-engineer": {
       "defaultProfile": "frontier-high",
       "previousFactoryProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
     },
     "platform-engineer": {
       "defaultProfile": "frontier-high",
       "previousFactoryProfile": "frontier-high",
       "taskDefaultProfiles": {"recovery": "frontier-high"},
-      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
     },
     "qa-engineer": {
       "defaultProfile": "terra-6.1-high",
       "previousFactoryProfile": "frontier-high",
-      "allowedProfiles": ["terra-6.1-high", "terra-6.1-xhigh", "balanced-high", "frontier-high", "frontier-xhigh", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-max"]
+      "allowedProfiles": ["terra-6.1-high", "terra-6.1-xhigh", "frontier-high", "frontier-xhigh", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-max"]
     },
     "knowledge-archivist": {
       "defaultProfile": "terra-6.1-high",
       "previousFactoryProfile": "frontier-medium",
-      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "luna-max", "terra-6.1-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "luna-max", "terra-6.1-max"]
     },
     "scientific-software-engineer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-high", "terra-6.1-xhigh", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-high", "terra-6.1-xhigh", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
     }
   },
   "skillOnlyRoles": {
     "consultant": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["terra-6.1-high", "terra-6.1-xhigh", "balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-max"]
+      "allowedProfiles": ["terra-6.1-high", "terra-6.1-xhigh", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-max"]
     },
     "product-manager": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["terra-6.1-high", "terra-6.1-xhigh", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-max"]
+      "allowedProfiles": ["terra-6.1-high", "terra-6.1-xhigh", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-max"]
     },
     "product-analyst": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "luna-max", "terra-6.1-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "frontier-medium", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "luna-max", "terra-6.1-max"]
     },
     "ux-designer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["terra-6.1-high", "terra-6.1-xhigh", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-max"]
+      "allowedProfiles": ["terra-6.1-high", "terra-6.1-xhigh", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-max"]
     },
     "performance-engineer": {
       "defaultProfile": "frontier-high",
@@ -304,51 +286,51 @@
     },
     "frontend-engineer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
     },
     "qt-ui-engineer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
     },
     "model-view-engineer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
     },
     "data-engineer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
     },
     "toolchain-engineer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
     },
     "geometry-engineer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
     },
     "graphics-engineer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
     },
     "visualization-engineer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "balanced-medium", "balanced-high", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
+      "allowedProfiles": ["luna-high", "luna-xhigh", "terra-6.1-medium", "terra-6.1-high", "terra-6.1-xhigh", "frontier-medium", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "luna-max", "terra-6.1-max"]
     },
     "performance-reviewer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["terra-6.1-high", "terra-6.1-xhigh", "balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-max"]
+      "allowedProfiles": ["terra-6.1-high", "terra-6.1-xhigh", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-max"]
     },
     "accessibility-reviewer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["terra-6.1-high", "terra-6.1-xhigh", "balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-max"]
+      "allowedProfiles": ["terra-6.1-high", "terra-6.1-xhigh", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-max"]
     },
     "ux-reviewer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["terra-6.1-high", "terra-6.1-xhigh", "balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-max"]
+      "allowedProfiles": ["terra-6.1-high", "terra-6.1-xhigh", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-max"]
     },
     "ui-test-engineer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["terra-6.1-high", "terra-6.1-xhigh", "balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-max"]
+      "allowedProfiles": ["terra-6.1-high", "terra-6.1-xhigh", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max", "terra-6.1-max"]
     }
   },
   "mechanicalExecutionContract": {
