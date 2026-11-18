@@ -237,7 +237,7 @@ historical results as fresh acceptance.
 |---|---|---|
 | Common execution | Existing shared dispatch/supervisor/ledger; SDK worker uses the invoking Python interpreter. | Exercise the same lifecycle, events, receipt and cancellation owners for each supported provider/role; retain main regressions. |
 | Codex | Explicit Windows Reviewer, Consultant and scoped Worker source bridges; offline qualification and historical bounded native evidence below. | Complete current installed/native qualification and intended child-Lead/session/platform outcomes through the common mechanism. |
-| Claude | SDK Host API including scoped Worker tools plus explicit prompt-only Consultant and Reviewer command-line routes, exact receiving and offline checks; native Lead is a different boundary. | Qualify current native execution and complete public Worker/child-Lead/session outcomes using official API/cloud access; do not wrap a subscription CLI as a third-party worker. |
+| Claude | SDK Host API and explicit scoped Worker command-line route, plus prompt-only Consultant and Reviewer routes, exact receiving and offline checks; native Lead is a different boundary. | Qualify current native execution and complete child-Lead/session outcomes using official API/cloud access; do not wrap a subscription CLI as a third-party worker. |
 | Antigravity | Official setup direction; no implemented AGY runtime adapter in the current SDK execution factory. | Implement Lead/session integration and native subagent handoff; separately qualify any admitted programmatic worker route. |
 | Copilot | Setup direction; existing integration candidates are not a callable SDK execution route. | Reconcile reusable candidate work, implement the common adapter and verify supported Lead/worker/reviewer roles without provider-name role bans. |
 | Kimi | Existing ACP boundary is separate from the current SDK factory. | Reconcile the supported Kimi runtime with the official agent integration; do not silently substitute the older Python runtime or a model API for the chosen route. |
@@ -371,10 +371,10 @@ requests never inherit Write/Edit capabilities.
 The existing Host `authorize_tool` callback must authorize each exact tool name
 and input under its current permissions, including the actual Windows/POSIX path,
 workspace scope and protected targets for file operations. Selecting a workspace
-or returning task text does not grant that permission. The adapter does not add
-an alternative file-permission engine or assume the free-text scope is a path
-policy. Tool hooks can deny a call; vendor deny/ask rules still apply after a
-hook allows it, as documented in the [official permission evaluation](https://code.claude.com/docs/en/agent-sdk/permissions).
+or returning task text does not grant that permission. The adapter does not
+assume the free-text scope is a path policy. The public Worker bridge supplies this callback from the already admitted whole-workspace
+write binding and the existing custody owner, not from model-written task text.
+Tool hooks can deny a call; vendor deny/ask rules still apply after a hook allows it, as documented in the [official permission evaluation](https://code.claude.com/docs/en/agent-sdk/permissions).
 
 The shared runtime custody owner protects the selected work item/ledger/artifacts,
 Claude configuration and capture directories, native executable installation,
@@ -392,10 +392,27 @@ do not establish native enforcement. Review actual changes independently; task
 completion remains nonauthorizing and closes no review obligations. Uncertain
 writes require inspection/reconciliation, not automatic retry or rollback.
 
-The public Claude CLI remains prompt-only because that bridge has no file-effect
-authority callback. This limitation does not disable the existing Host API with
-its explicitly admitted tool authority. No credentials, subscription wrapper,
-installation, model call or implicit quota approval are introduced.
+The explicit public Claude Worker task route supplies a file-effect callback.
+Read/Write/Edit paths must stay within the selected workspace. Write/Edit cannot
+change project control directories or selected protected state; ordinary project
+instructions and Git context remain readable. Links/reparse paths and unsafe
+write aliases are rejected rather than followed. Glob/Grep check the requested
+search subtree for paths escaping the admitted boundary; an ordinary `.git`
+directory alone does not disable whole-repository search. Search patterns support
+ordinary wildcards and non-path brace alternatives such as `*.{py,js}` or
+`{src,tests}/**`; path-producing, home-directory and unsupported nested expansions
+are rejected. Use a narrower explicit search path/pattern instead. These checks
+do not close the check/use race against a concurrent hostile filesystem writer.
+
+The invoking Host must provide the applicable current project guidance in the
+supplied prompt/handoff. The native preset and shared frame remain present, but
+ambient project settings/skills are not automatically loaded. File readability
+is not evidence that project instructions were read or admitted as trusted input.
+
+Reviewer and Consultant CLI routes remain prompt-only. No credentials,
+subscription wrapper, installation, model call or implicit quota approval are
+introduced. The same explicit task binding and canonical Worker profession are
+required; task output does not authorize publication or close reviews.
 
 ### Claude read-only Consultant adapter increment
 

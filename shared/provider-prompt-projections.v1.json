@@ -69,7 +69,7 @@
     },
     "sdk_execution/claude.py": {
       "source": "scripts/sdk_execution/claude.py",
-      "sha256": "599ff3df7ece3dbb32fe799d2a8503ae3eb671b0f779b6134a1662e7ea0c082c",
+      "sha256": "da43d97a9bab7cc7fa77c6a5ef4f38beecdf08a3efc63ffc51ecb851a38407f4",
       "destination": "scripts/sdk_execution/claude.py"
     },
     "sdk_execution/codex.py": {
@@ -85,7 +85,7 @@
     "sdk_execution/dispatch.py": {
       "source": "scripts/sdk_execution/dispatch.py",
       "destination": "scripts/sdk_execution/dispatch.py",
-      "sha256": "32931812fb915e58006876c52a17d901f1224889c8d391a7cd175ad7ca14ada1"
+      "sha256": "1c984ba882847d9eff954178528b90ac1597bb1258f94704916628d05a8c08f9"
     },
     "sdk_execution/contracts.py": {
       "source": "scripts/sdk_execution/contracts.py",

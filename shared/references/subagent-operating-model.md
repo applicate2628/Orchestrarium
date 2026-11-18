@@ -979,6 +979,18 @@ local form. Reuse creates an explicit dependency on that global installation,
 not a guarantee that a neighboring file will be read. Client-specific selection,
 updates and removal belong to the existing installer and its ownership receipts.
 
+## Explicit Worker file effects
+
+A public SDK Worker route may implement its existing Host tool authorization
+callback against the explicitly admitted workspace and protected control paths.
+This does not turn task text, a binding file, or a tool name into user permission.
+Distinguish read access needed for project context from mutation of governance,
+credentials, runtime and receiving state. Application-level path checks are not
+an operating-system sandbox or atomic protection from concurrent path replacement.
+Independent verification and existing publication authority remain required.
+The invoking Host supplies applicable current project guidance through the
+existing trusted handoff; readable files do not prove instructions were loaded.
+
 ## Terms and Abbreviations
 
 - `accepted artifact`: an output that has passed its required gate and may be used by downstream roles.

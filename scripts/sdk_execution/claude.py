@@ -20,11 +20,13 @@ import asyncio
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass, fields, is_dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import inspect
 import hashlib
 import os
+import ntpath
 import re
+import stat
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -290,11 +292,11 @@ class ClaudeReviewAdapter:
     checks the exact tool arguments/path under that owner's current data permissions.
     Policy, tool and account callbacks all await the parent owner on the SDK loop;
     the Codex blocking-thread bridge must not be used here.
-    For the full Host tool profile, load_instructions supplies selected common,
-    Claude and project rules; filesystem settings are disabled. The prompt-only
-    CLI profile instead supplies the verified common capsule plus explicit task
-    context and the native preset. It cannot perform repository operations or
-    claim that ambient project rules were loaded.
+    The full Host may supply selected common, Claude and project rules through
+    load_instructions. Public CLI profiles supply the verified common capsule,
+    explicit prompt/handoff task context and native preset; ambient project
+    rules are not claimed loaded. A public Worker may read admitted project
+    instructions through its scoped file tools; prompt-only profiles cannot.
     The existing private capture owner transports it in an append-only system
     prompt file while preserving the native claude_code system-prompt preset.
 
@@ -795,3 +797,141 @@ class ClaudeWorkerAdapter(ClaudeConsultantAdapter):
             "sandboxMode": "tool-restricted-workspace-write",
             "writeWorkspaceSha256": hashlib.sha256(self._request.write_workspace.encode("utf-8")).hexdigest(),
         }
+
+
+def authorize_claude_workspace_tool(request, selection, name, arguments, *, expected_identity, protected_paths=()):
+    """Authorize one native file-tool input, not atomic OS confinement.
+
+    The caller retains workspace identity and control paths. Checks describe the
+    current filesystem only; no handles are transferred to the vendor tool.
+    """
+    from .runtime import validate_worker_custody
+    import provider_prompt as owner
+    if request.provider != "claude" or request.write_workspace is None or expected_identity is None:
+        raise AdapterError("worker_file_authority_required")
+    validate_worker_custody(request, selection, expected_identity=expected_identity)
+    required = {
+        "Read": {"file_path"}, "Write": {"file_path", "content"},
+        "Edit": {"file_path", "old_string", "new_string"},
+        "Glob": {"pattern"}, "Grep": {"pattern"},
+    }
+    optional = {
+        "Read": {"offset", "limit", "pages"}, "Write": set(), "Edit": {"replace_all"},
+        "Glob": {"path"},
+        "Grep": {"path", "glob", "type", "output_mode", "-i", "-n", "-B", "-A", "-C", "context", "-o", "head_limit", "offset", "multiline"},
+    }
+    if (name not in required or type(arguments) is not dict
+            or not required[name].issubset(arguments) or set(arguments) - required[name] - optional[name]):
+        raise AdapterError("invalid_file_tool_arguments")
+    for key, value in arguments.items():
+        if value is None and key in optional[name]:
+            continue
+        if key in {"replace_all", "-i", "-n", "-o", "multiline"}:
+            valid = type(value) is bool
+        elif key in {"offset", "limit", "-B", "-A", "-C", "context", "head_limit"}:
+            valid = type(value) is int and value >= 0
+        else:
+            valid = type(value) is str
+        if not valid:
+            raise AdapterError("invalid_file_tool_arguments")
+    if arguments.get("output_mode") not in (None, "content", "files_with_matches", "count"):
+        raise AdapterError("invalid_file_tool_arguments")
+    root = Path(request.write_workspace)
+    control_names = {".git", ".agents", ".codex", ".claude"}
+    protected = tuple(Path(p).resolve(strict=False) for p in protected_paths)
+
+    def checked_path(raw, *, absolute):
+        if type(raw) is not str or not raw or any(ord(c) < 32 for c in raw):
+            raise AdapterError("invalid_file_tool_path")
+        if raw.startswith("~"):
+            raise AdapterError("file_tool_path_alias")
+        path = Path(raw)
+        if absolute and not path.is_absolute():
+            raise AdapterError("absolute_file_tool_path_required")
+        if ".." in path.parts:
+            raise AdapterError("file_tool_path_escape")
+        if not path.is_absolute():
+            path = root / path
+        if os.name == "nt":
+            if raw.startswith(("\\\\", "//")) or not path.drive or len(path.drive) != 2:
+                raise AdapterError("file_tool_path_alias")
+            for part in path.parts[1:]:
+                # Prefer the native naming owner; older supported Python uses
+                # pathlib for device names plus invalid-character checks.
+                reserved = getattr(ntpath, "isreserved", None)
+                if (reserved(part) if reserved is not None else
+                        (PureWindowsPath(part).is_reserved()
+                         or any(c in part for c in ':*?"<>|') or part.endswith((".", " ")))):
+                    raise AdapterError("file_tool_path_alias")
+        if not path.is_absolute():
+            path = root / path
+        owner.validate_no_reparse_components(path)
+        resolved = path.resolve(strict=False)
+        if os.path.normcase(str(path)) != os.path.normcase(str(resolved)):
+            raise AdapterError("file_tool_path_alias")
+        if not resolved.is_relative_to(root):
+            raise AdapterError("file_tool_path_escape")
+        if name in {"Write", "Edit"} and any(part.casefold() in control_names for part in resolved.relative_to(root).parts):
+            raise AdapterError("file_tool_protected_path")
+        if any(resolved == p or resolved.is_relative_to(p) for p in protected):
+            raise AdapterError("file_tool_protected_path")
+        return resolved
+
+    def ordinary(path, *, write=False, missing=False):
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            if not missing:
+                raise AdapterError("file_tool_target_missing") from None
+            ancestor = path.parent
+            while not ancestor.exists():
+                ancestor = ancestor.parent
+            owner.validate_no_reparse_components(ancestor)
+            if not ancestor.is_dir():
+                raise AdapterError("file_tool_target_not_ordinary")
+            return None
+        if owner._metadata_is_reparse(info) or stat.S_ISLNK(info.st_mode):
+            raise AdapterError("file_tool_path_alias")
+        if not stat.S_ISREG(info.st_mode) and not stat.S_ISDIR(info.st_mode):
+            raise AdapterError("file_tool_target_not_ordinary")
+        if write and stat.S_ISREG(info.st_mode) and info.st_nlink != 1:
+            raise AdapterError("file_tool_write_alias")
+        return info
+
+    try:
+        if name in {"Read", "Write", "Edit"}:
+            target = checked_path(arguments["file_path"], absolute=True)
+            info = ordinary(target, write=name != "Read", missing=name == "Write")
+            if info is not None and not stat.S_ISREG(info.st_mode):
+                raise AdapterError("file_tool_target_not_file")
+        else:
+            target = checked_path(arguments.get("path") or str(root), absolute=False)
+            for pattern in ([arguments["pattern"]] if name == "Glob" else [arguments.get("glob")]):
+                if pattern is not None and (not pattern or pattern.startswith(("/", "\\", "~"))
+                        or ":" in pattern or ".." in re.split(r"[\\/]", pattern)):
+                    raise AdapterError("file_tool_pattern_escape")
+                if pattern is not None:
+                    # Support ordinary native wildcard patterns and simple
+                    # extension/name alternatives, not path-producing expansion.
+                    reduced = re.sub(r"\{[A-Za-z0-9_-]+(?:,[A-Za-z0-9_-]+)+\}", "safe", pattern)
+                    if any(char in reduced for char in "{}()"):
+                        raise AdapterError("file_tool_pattern_expansion_unsupported")
+            info = ordinary(target)
+            if name == "Glob" and not stat.S_ISDIR(info.st_mode):
+                raise AdapterError("file_tool_search_directory_required")
+            if stat.S_ISDIR(info.st_mode):
+                # Native glob/regex semantics remain vendor-owned. Validate all
+                # reachable entries, not a guessed Python glob result subset.
+                pending = [target]
+                while pending:
+                    directory = pending.pop()
+                    for entry in directory.iterdir():
+                        path = checked_path(str(entry), absolute=True)
+                        item = ordinary(path)
+                        if stat.S_ISDIR(item.st_mode):
+                            pending.append(path)
+        validate_worker_custody(request, selection, expected_identity=expected_identity)
+    except AdapterError:
+        raise
+    except (OSError, ValueError):
+        raise AdapterError("file_tool_authority_unavailable") from None

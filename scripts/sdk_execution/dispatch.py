@@ -198,13 +198,19 @@ class CodexReviewDispatch:
             raise DispatchError("E_CLAUDE_SDK_AUTH_CONTEXT_CHANGED")
 
     def _authorize_tool(self, request, name, arguments):
-        # This CLI route grants no filesystem capability, even inside cwd.
-        from .claude import OUTPUT_TOOL
+        # Read-only routes remain prompt-only; writes use the selected workspace owner.
+        from .claude import OUTPUT_TOOL, authorize_claude_workspace_tool
         from .contracts import validate_task, validate_review
-        if request != self.request or name != OUTPUT_TOOL:
+        if request != self.request:
             raise DispatchError("E_CLAUDE_SDK_TOOL_DENIED")
         self._check_auth_context()
-        (validate_task if request.result_kind == "task" else validate_review)(arguments, request=request)
+        if name == OUTPUT_TOOL:
+            (validate_task if request.result_kind == "task" else validate_review)(arguments, request=request)
+        elif request.write_workspace is not None:
+            authorize_claude_workspace_tool(request, self.selection, name, arguments,
+                expected_identity=self._workspace_identity, protected_paths=self._protected_paths)
+        else:
+            raise DispatchError("E_CLAUDE_SDK_TOOL_DENIED")
 
     def _verify_auth_context(self, request, evidence):
         if (request != self.request or type(evidence) is not dict
@@ -225,7 +231,7 @@ class CodexReviewDispatch:
         _require_policy_custody(root, self._runtime_namespace)
         for path in self._protected_paths:
             _require_disjoint(root, path)
-        if _owner()._capture_output_path("codex") != self._capture_root:
+        if _owner()._capture_output_path(self.request.provider) != self._capture_root:
             raise DispatchError("E_CODEX_SDK_CAPTURE_SELECTION_CHANGED")
         _require_disjoint(root, self._capture_root, directory=True)
         if self._capture_identity is not None:
@@ -532,8 +538,7 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
     # Direct callers must retain the same rule as the public CLI entrypoint.
     owner._qualify_managed_model_launch(provider, prevalidated, runtime_namespace=runtime_namespace)
     binding = read_binding(Path(binding_path))
-    if provider == "claude" and (binding.get("writeWorkspace") is not None
-            or binding.get("installedHookRoot") is not None or binding["expectedAccountEmail"] is not None
+    if provider == "claude" and (binding.get("installedHookRoot") is not None or binding["expectedAccountEmail"] is not None
             or model in {"opus", "sonnet", "haiku"}):
         raise DispatchError("E_CLAUDE_SDK_PROMPT_ONLY_REQUIRED")
     write_workspace = binding.get("writeWorkspace")
@@ -572,7 +577,7 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
         protected_paths = tuple(Path(v).absolute() for v in (binding_path, c.terminal_receipt, c.prompt_file) if v is not None)
         for path in protected_paths:
             _require_disjoint(cwd, path)
-        capture_root = owner._capture_output_path("codex")
+        capture_root = owner._capture_output_path(provider)
         _require_disjoint(cwd, capture_root, directory=True)
     command, _expected = owner._resolve_launch_provider_command(provider, cwd)
     if len(command) != 1 or not Path(command[0]).is_absolute():
@@ -631,7 +636,7 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
         context_mode=binding.get("contextMode", "fresh"),
         coordinator_binding=binding["coordinatorBinding"], scope=tuple(binding["scope"]),
         max_output_bytes=c.result_max_bytes, max_events=binding["maxEvents"],
-        **({"tool_profile":"prompt-only"} if provider == "claude" else {}),
+        **({"tool_profile":"prompt-only"} if provider == "claude" and not write_mode else {}),
     )
     if provider == "codex":
         request = runtime.prepare_codex_request(request)

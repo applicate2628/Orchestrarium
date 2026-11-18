@@ -31,8 +31,9 @@ A Codex Host may separately use the existing Python SDK executor for an admitted
 Claude API/cloud Worker with explicit file-tool authority. Its
 `tool-restricted-workspace-write` provenance is not the Codex native
 `workspace-write` sandbox. The exact provider/access route and Host permission
-callback remain authoritative; the public Claude command-line route stays
-prompt-only. This does not enable a subscription CLI worker or a default-route
+callback remain authoritative. The explicit public Claude Worker task route
+checks each file operation against its admitted workspace and protected control
+paths; Reviewer and Consultant command-line routes remain prompt-only. This does not enable a subscription CLI worker or a default-route
 change. See the shared guarantee distinction and SDK implementation boundary.
 
 ## Codex-specific runtime notes
