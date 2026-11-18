@@ -169,12 +169,66 @@ def prepare_codex_request(request: ExecutionRequest) -> ExecutionRequest:
     return replace(request, prompt=_owner().assemble_external_prompt(request.prompt.encode("utf-8")).decode("utf-8"))
 
 
+def _worker_authority_roots() -> tuple[Path, ...]:
+    """Loaded code/data installations, not ambient credential values."""
+    import importlib.util
+    roots = [Path(__file__).absolute().parents[2], Path(__file__).resolve().parents[2],
+             Path(sys.executable).parent,
+             Path(sys.prefix), Path(sys.base_prefix)]
+    # Top-level discovery does not import or launch the provider package.
+    spec = importlib.util.find_spec("openai_codex")
+    if spec is not None:
+        if spec.origin and spec.origin not in {"built-in", "frozen"}:
+            roots.append(Path(spec.origin).parent)
+        roots.extend(Path(p) for p in (spec.submodule_search_locations or ()))
+    return tuple(roots)
+
+
+def validate_worker_custody(request: ExecutionRequest, selection: Any, *, expected_identity=None):
+    """Check selected path custody, not OS isolation or arbitrary file effects.
+
+    Returned identity may be retained by this operation's existing effect owner.
+    Public receipt/capture targets require their separate dispatcher check.
+    """
+    if request.write_workspace is None:
+        return None
+    if request.provider != "codex" or type(selection) is not CodexRuntimeSelection:
+        raise RuntimeBindingError("worker_runtime_selection_required")
+    execution_role(request)
+    owner = _owner()
+    try:
+        root = Path(request.write_workspace)
+        owner.validate_no_reparse_components(root)
+        resolved = root.resolve(strict=True)
+        if (not root.is_dir() or request.cwd != request.write_workspace
+                or os.path.normcase(str(resolved)) != os.path.normcase(request.write_workspace)):
+            raise ValueError("noncanonical workspace")
+        protected = [Path(selection.work_item), Path(selection.codex_home),
+                     Path(selection.executable).parent, *_worker_authority_roots()]
+        if selection.installed_hook_root is not None:
+            protected.append(Path(selection.installed_hook_root))
+        for path in protected:
+            owner.validate_no_reparse_components(path)
+            guarded = path.resolve(strict=False)
+            if resolved.is_relative_to(guarded) or guarded.is_relative_to(resolved):
+                raise RuntimeBindingError("worker_workspace_overlaps_protected_state")
+        stat = root.stat()
+        identity = (os.path.normcase(str(resolved)), stat.st_dev, stat.st_ino)
+        if expected_identity is not None and identity != expected_identity:
+            raise RuntimeBindingError("worker_workspace_identity_changed")
+        return identity
+    except RuntimeBindingError:
+        raise
+    except (OSError, ValueError, ImportError):
+        raise RuntimeBindingError("worker_workspace_custody_unavailable") from None
+
+
 def validate_admitted_request(request: ExecutionRequest, selection: Any) -> None:
     """Check exact current common-governance input, without changing admission."""
     if type(request) not in {ExecutionRequest, CoordinationInferenceRequest}:
         raise RuntimeBindingError("admitted_execution_request_required")
     if request.write_workspace is not None:
-        raise RuntimeBindingError("worker_runtime_receiving_not_qualified")
+        validate_worker_custody(request, selection)
     if type(request) is CoordinationInferenceRequest:
         if (selection.auth_mode != "codex-auth-file"
             or selection.config_overrides != CODEX_BOUNDED_REVIEW_OVERRIDES
@@ -202,10 +256,10 @@ def selected_sdk_execution(request: ExecutionRequest, selection: Any) -> dict[st
     labels are provenance, not admission constraints or compatibility promises.
     """
     if request.write_workspace is not None:
-        raise RuntimeBindingError("worker_runtime_receiving_not_qualified")
+        validate_worker_custody(request, selection)
     runtime_selection_from_dict(request.provider, selection.to_dict())
     if request.provider == "codex":
-        adapter, sandbox, approval = "openai-codex", "read-only", "deny_all"
+        adapter, sandbox, approval = "openai-codex", ("workspace-write" if request.write_workspace is not None else "read-only"), "deny_all"
     elif request.provider == "claude":
         adapter, sandbox, approval = "claude-agent-sdk", "tool-restricted-read-only", "deny_unadmitted"
     else:
@@ -215,6 +269,8 @@ def selected_sdk_execution(request: ExecutionRequest, selection: Any) -> dict[st
         "sandboxMode": sandbox, "approvalPolicy": approval,
         "accountBinding": request.account_binding, "requestSha256": request_sha256(request, selection),
     }
+    if request.write_workspace is not None:
+        value["writeWorkspaceSha256"] = hashlib.sha256(request.write_workspace.encode("utf-8")).hexdigest()
     if type(request) is CoordinationInferenceRequest:
         value.update(schemaVersion=3, operationKind="coordination-inference",
                      innerRequestSha256=request.inner_request_sha256,
@@ -308,6 +364,7 @@ def assert_current_launch(request: ExecutionRequest, selection: Any, effect: str
     """Current consistency checks, not authority manufactured by a ledger read."""
     if not isinstance(effect, str) or not effect or selection.expected_launch_sha256 is None:
         raise RuntimeBindingError("current_launch_binding_required")
+    validate_worker_custody(request, selection)
     writer, validator, events = _events(selection)
     launches = [e for e in events if e.get("runId") == request.external_dispatch_id]
     if len(launches) != 1 or launches[0].get("eventKind") != "launch":
@@ -343,7 +400,12 @@ def _require_authority(authority: Callable[[ExecutionRequest, str], None], reque
 def execution_role(request: ExecutionRequest) -> str:
     """Project provenance for the already validated operation, not permission."""
     if request.write_workspace is not None:
-        raise RuntimeBindingError("worker_runtime_receiving_not_qualified")
+        if type(request) is not ExecutionRequest or request.provider != "codex" or request.result_kind != "task":
+            raise RuntimeBindingError("worker_task_request_required")
+        _roles, _reviewers, workers, _unsupported = _owner()._external_role_taxonomy()
+        if request.role not in workers:
+            raise RuntimeBindingError("worker_role_required")
+        return "external-worker"
     if type(request) is CoordinationInferenceRequest:
         return "main"
     if type(request) is not ExecutionRequest:
@@ -379,6 +441,7 @@ def claim_launch(request: ExecutionRequest, selection: Any, *, authority: Callab
         raise RuntimeBindingError("new_launch_selection_required")
     if Path(selection.work_item).name != request.work_item_id:
         raise RuntimeBindingError("work_item_binding_mismatch")
+    validate_worker_custody(request, selection)
     _require_authority(authority, request, "sdk_launch_admission")
     _verify_runtime(selection)
     writer, validator, budget = _ledger(selection)
@@ -402,10 +465,12 @@ def claim_launch(request: ExecutionRequest, selection: Any, *, authority: Callab
 
 def create_codex_adapter(request: ExecutionRequest, sink: Any, selection: CodexRuntimeSelection):
     """Real worker-only factory, called after creator-verified Job containment."""
-    from .codex import CodexConsultantAdapter, CodexReviewAdapter, _official_client_binding
+    from .codex import CodexConsultantAdapter, CodexReviewAdapter, CodexWorkerAdapter, _official_client_binding
     if request.result_kind == "task":
         validate_admitted_request(request, selection)
-    adapter_type = CodexConsultantAdapter if request.result_kind == "task" else CodexReviewAdapter
+    adapter_type = (CodexWorkerAdapter if request.write_workspace is not None else
+                    CodexConsultantAdapter if request.result_kind == "task" else CodexReviewAdapter)
+    workspace_identity = validate_worker_custody(request, selection)
     if type(request) is CoordinationInferenceRequest:
         validate_admitted_request(request, selection)
         from .coordination_codex import CodexCoordinationAdapter
@@ -439,6 +504,7 @@ def create_codex_adapter(request: ExecutionRequest, sink: Any, selection: CodexR
     def require_current(current: ExecutionRequest, effect: str) -> None:
         if current != request:
             raise RuntimeBindingError("worker_request_binding_mismatch")
+        validate_worker_custody(current, selection, expected_identity=workspace_identity)
         assert_current_launch(current, selection, effect)
         # Ledger consistency is not permission. The existing owned duplex channel
         # asks the original parent policy/account/budget owner before every effect.
@@ -552,12 +618,14 @@ def run_admitted_review(
     if selection.expected_launch_sha256 is not None:
         raise RuntimeBindingError("existing_launch_is_not_replay_authority")
     validate_admitted_request(request, selection)
+    workspace_identity = validate_worker_custody(request, selection)
     if request.provider == "claude":
         if any(not callable(callback) or inspect.iscoroutinefunction(callback)
                for callback in (authorize_tool, verify_account)):
             raise RuntimeBindingError("existing_claude_tool_and_account_owners_required")
 
     def require_live_request() -> None:
+        validate_worker_custody(request, selection, expected_identity=workspace_identity)
         cancelled = cancellation_probe()
         if type(cancelled) is not bool:
             raise RuntimeBindingError("invalid_cancellation_observation")
@@ -606,6 +674,7 @@ def run_admitted_review(
         if current != effective:
             raise RuntimeBindingError("worker_request_binding_mismatch")
         require_live_request()
+        validate_worker_custody(current, admitted, expected_identity=workspace_identity)
         assert_current_launch(current, admitted, effect)
         _require_authority(authority, current, effect)
         if context is not None:

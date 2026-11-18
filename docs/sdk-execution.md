@@ -333,11 +333,20 @@ ignore legacy configuration. Therefore configuration alone is not enforcement.
 OS enforcement and installed-runtime behavior still need separately authorized
 qualification; offline fake-client tests prove contract handling only.
 
-This increment does not activate a public write route. Existing runtime admission
-rejects write-bearing requests until its custody and receiving integration is
-qualified: the writable workspace must not contain the ledger, credentials,
-trusted runtime or receiving artifacts. That check belongs to existing runtime
-admission, not a new permission store. Startup/hook trust remains its current
+Runtime admission, selected provenance and task receiving now share the existing
+owners. Custody rejects a writable directory containing, contained by, or aliased
+to the selected work item (including ledger/artifacts), Codex home/credentials,
+native runtime installation, Python/SDK installation, trusted source or hook root.
+This selected-path check does not discover arbitrary secrets or enforce an OS
+sandbox. Metadata exports only `writeWorkspaceSha256`, committed by the selected
+request; it does not publish a local directory path. Observed policy must match
+selected version-2 provenance. Worker evidence retains its canonical profession,
+external-worker role and gate none; it cannot close review or authorize itself.
+
+This increment does not activate a public write route. Before dispatch exposes
+that route, its separate capture, binding and terminal-receipt targets must also
+remain outside the writable directory. Native sandbox qualification and review
+of actual file changes remain separate. Startup/hook trust remains its current
 owner. A TaskResult reports evidence, not proof of accepted writes or completed
 review. On interrupted/uncertain execution, retain evidence and inspect actual
 changes; do not auto-replay, roll back, or delete work. Worker resume is not yet

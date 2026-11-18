@@ -44,6 +44,7 @@ class SdkWorkerObservation:
     stdout: bytes = field(repr=False)
     stderr: bytes = field(repr=False)
     _seal: object = field(repr=False, compare=False)
+    workspace_identity: tuple[str, int, int] | None = field(default=None, repr=False, kw_only=True)
 
     def is_bound_to(self, request: ExecutionRequest) -> bool:
         """In-process composition binding, never persisted authority or OS proof."""
@@ -51,7 +52,7 @@ class SdkWorkerObservation:
             self.request, self.process, self.result, self.cancel,
             self.unavailable_reason, self.protocol_error, self.job_memory_limit_bytes,
             self.runtime_selection_json,
-            self.observations, self.stdout, self.stderr,
+            self.observations, self.stdout, self.stderr, self.workspace_identity,
         )
         return (
             type(self._seal) is tuple and len(self._seal) == len(values) + 1
@@ -143,6 +144,13 @@ def run_sdk_worker(
         raise ValueError("explicit worker runtime selection must be a dictionary")
     selection_json = None if runtime_selection is None else json_text(runtime_selection)
     selection = None if selection_json is None else json.loads(selection_json)
+    workspace_identity = None
+    if request.write_workspace is not None:
+        from sdk_execution.runtime import runtime_selection_from_dict, validate_worker_custody
+        if selection is None:
+            raise ValueError("worker workspace requires retained runtime selection")
+        workspace_identity = validate_worker_custody(
+            request, runtime_selection_from_dict(request.provider, selection))
     execute_payload = _execute_payload(request, selection, job_memory_limit_bytes)
     process_request = build_sdk_worker_request(
         owner, request, environment=environment,
@@ -289,4 +297,5 @@ def run_sdk_worker(
         process_request.capture_sink_binding.bytes_for("stdout"),
         process_request.capture_sink_binding.bytes_for("stderr"),
     )
-    return SdkWorkerObservation(*values, (_OBSERVATION_SEAL, *values))
+    return SdkWorkerObservation(*values, (_OBSERVATION_SEAL, *values, workspace_identity),
+                                workspace_identity=workspace_identity)

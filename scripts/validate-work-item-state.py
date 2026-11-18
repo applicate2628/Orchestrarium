@@ -393,11 +393,15 @@ def validate_sdk_execution(
         (provider, value["adapter"], value["sandboxMode"], value["approvalPolicy"])
         in (
             ("codex", "openai-codex", "read-only", "deny_all"),
+            ("codex", "openai-codex", "workspace-write", "deny_all"),
             ("claude", "claude-agent-sdk", "tool-restricted-read-only", "deny_unadmitted"),
         )
     )
     if not supported_binding or value["model"] != model or value["effort"] != effort:
         raise ValueError("sdkExecution must bind the declared provider, model, effort and adapter controls")
+    writing = value["sandboxMode"] == "workspace-write"
+    if writing != ("writeWorkspaceSha256" in value) or (writing and value["schemaVersion"] not in {1, 2}):
+        raise ValueError("sdkExecution workspace binding does not match its sandbox")
     if value["schemaVersion"] == 3 and (
         provider != "codex" or value["outerBudgetBinding"] == value["innerBudgetBinding"]
     ):
@@ -418,6 +422,19 @@ def _validate_sdk_event(event: Mapping[str, object], errors: list[str]) -> None:
     except ValueError as exc:
         fail(errors, f"{run_id}: {exc}")
     selected = event.get("sdkExecution")
+    if type(selected) is dict and selected.get("sandboxMode") == "workspace-write":
+        try:
+            # Reuse the canonical role owner rather than another role allowlist.
+            import provider_prompt
+            _roles, _reviewers, workers, _unsupported = provider_prompt._external_role_taxonomy()
+            if (selected.get("schemaVersion") != 2
+                    or event.get("executionRole") != "external-worker"
+                    or event.get("role") != "external-worker"
+                    or event.get("assignedRole") not in workers
+                    or event.get("gate") != "none"):
+                raise ValueError("workspace-write requires selected worker provenance and gate none")
+        except (ValueError, ImportError) as exc:
+            fail(errors, f"{run_id}: {exc}")
     if type(selected) is dict and selected.get("schemaVersion") == 3:
         if any(event.get(k) != expected for k, expected in
                (("provider", "codex"), ("role", "lead"), ("executionRole", "main"),

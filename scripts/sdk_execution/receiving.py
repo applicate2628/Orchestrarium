@@ -160,6 +160,8 @@ def terminal_payload(request: ExecutionRequest, observation: Any, *, output_cont
         or result.execution_error is not None or result.capture_error is not None
         or observation.protocol_error is not None
     )
+    if request.write_workspace is not None and admitted_sdk_execution is None:
+        raise ValueError("SDK writes require admitted request commitment")
     selected_config = admitted_sdk_execution if admitted_sdk_execution is not None else result.sdk_execution
     if not isinstance(selected_config, dict) or selected_config.get("accountBinding") != request.account_binding:
         raise ValueError("SDK selected account does not match admitted request")
@@ -168,14 +170,32 @@ def terminal_payload(request: ExecutionRequest, observation: Any, *, output_cont
     selected_config = validator.validate_sdk_execution(
         selected_config, provider=request.provider, model=request.model, effort=request.effort,
     )
+    if request.write_workspace is not None:
+        if (selected_config.get("schemaVersion") != 2
+                or selected_config.get("sandboxMode") != "workspace-write"
+                or selected_config.get("writeWorkspaceSha256") != hashlib.sha256(request.write_workspace.encode("utf-8")).hexdigest()
+                or request.cwd != request.write_workspace):
+            raise ValueError("SDK write workspace commitment mismatch")
+    elif selected_config.get("sandboxMode") == "workspace-write":
+        raise ValueError("SDK read-only request cannot receive writes")
     if "requestSha256" in selected_config:
-        from .runtime import runtime_selection_from_dict, request_sha256
+        from .runtime import runtime_selection_from_dict, request_sha256, validate_worker_custody, RuntimeBindingError
         retained = getattr(observation, "runtime_selection_json", None)
         if retained is None:
             raise ValueError("SDK runtime request commitment has no retained selection")
         selection = runtime_selection_from_dict(request.provider, strict_json(retained))
         if request_sha256(request, selection) != selected_config["requestSha256"]:
             raise ValueError("SDK runtime request commitment mismatch")
+        if request.write_workspace is not None:
+            identity = getattr(observation, "workspace_identity", None)
+            if identity is None:
+                raise ValueError("SDK write observation has no retained workspace identity")
+            try:
+                validate_worker_custody(request, selection, expected_identity=identity)
+            except RuntimeBindingError:
+                # Preserve settled diagnostics, but never complete evidence against
+                # a replaced workspace or changed authority-path custody.
+                complete = False
     if complete:
         reported = result.sdk_execution
         try:

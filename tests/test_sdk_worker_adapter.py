@@ -194,16 +194,15 @@ def test_worker_contradictory_file_change_is_not_complete(tmp_path):
     assert result.execution_error == "contradictory_duplicate_item"
 
 
-def test_public_runtime_still_refuses_worker_before_composition(tmp_path):
+def test_worker_runtime_requires_retained_selection_before_composition(tmp_path):
     from sdk_execution.runtime import validate_admitted_request, execution_role, RuntimeBindingError, selected_sdk_execution, create_codex_adapter
     req = workspace_request(tmp_path)
-    with pytest.raises(RuntimeBindingError, match="worker_runtime_receiving_not_qualified"):
+    with pytest.raises(RuntimeBindingError, match="worker_runtime_selection_required"):
         validate_admitted_request(req, None)
-    with pytest.raises(RuntimeBindingError, match="worker_runtime_receiving_not_qualified"):
-        execution_role(req)
-    with pytest.raises(RuntimeBindingError, match="worker_runtime_receiving_not_qualified"):
+    assert execution_role(req) == "external-worker"
+    with pytest.raises(RuntimeBindingError, match="worker_runtime_selection_required"):
         selected_sdk_execution(req, None)
-    with pytest.raises(RuntimeBindingError, match="worker_runtime_receiving_not_qualified"):
+    with pytest.raises(RuntimeBindingError, match="worker_runtime_selection_required"):
         create_codex_adapter(req, None, None)
 
 

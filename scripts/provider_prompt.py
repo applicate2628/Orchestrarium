@@ -7242,18 +7242,27 @@ def _validate_sdk_result_binding(payload: dict[str, object]) -> None:
             raise ValueError("provider result SDK identity missing")
     if payload["externalDispatchId"] == payload["externalEvidenceRunId"]:
         raise ValueError("provider result SDK identities must be distinct")
-    if payload.get("executionRole") == "consultant":
+    execution_role = payload.get("executionRole")
+    selected = payload["sdkExecution"]
+    if execution_role in {"consultant", "external-worker"}:
         primary = payload.get("primaryOutcome")
-        if (payload.get("provider") != "codex" or payload.get("assignedRole") != "consultant"
+        _roles, _reviewers, workers, _unsupported = _external_role_taxonomy()
+        role_matches = (payload.get("assignedRole") == "consultant"
+                        if execution_role == "consultant" else payload.get("assignedRole") in workers)
+        mode_matches = (selected.get("sandboxMode") == "read-only"
+                        if execution_role == "consultant" else
+                        selected.get("sandboxMode") == "workspace-write" and selected.get("schemaVersion") == 2)
+        if (payload.get("provider") != "codex" or not role_matches or not mode_matches
                 or payload.get("gate") != "none"
                 or payload.get("status") not in {"completed", "blocked"}
                 or not isinstance(primary, dict) or primary.get("gate") != "none"
                 or primary.get("status") != payload.get("status")
                 or primary.get("token") in {"COMPLETE:PASS", "COMPLETE:REVISE", "COMPLETE:BLOCKED"}
                 or payload.get("token") in {"COMPLETE:PASS", "COMPLETE:REVISE", "COMPLETE:BLOCKED"}):
-            raise ValueError("provider result SDK consultant role or outcome mismatch")
-    elif payload.get("executionRole") != "external-reviewer":
+            raise ValueError("provider result SDK task role or outcome mismatch")
+    elif execution_role != "external-reviewer" or selected.get("sandboxMode") == "workspace-write":
         raise ValueError("provider result SDK review role mismatch")
+
 
 
 def parse_provider_result(output: str) -> dict[str, object]:

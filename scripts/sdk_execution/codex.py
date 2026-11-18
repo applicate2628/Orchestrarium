@@ -313,6 +313,9 @@ class CodexReviewAdapter:
     def _sandbox_config(self, request):
         return {}
 
+    def _sandbox_metadata(self, request):
+        return {}
+
     def _sandbox_matches(self, request, sandbox):
         return (isinstance(sandbox, dict) and sandbox.get("type") == "readOnly"
                 and sandbox.get("networkAccess") is False)
@@ -546,6 +549,7 @@ class CodexReviewAdapter:
                 "schemaVersion": 1, "adapter": "openai-codex", "sdkVersion": binding.sdk_version,
                 "runtimeVersion": runtime, "model": request.model, "effort": request.effort,
                 "sandboxMode": self._sandbox_mode(request), "approvalPolicy": "deny_all", "accountBinding": request.account_binding,
+                **self._sandbox_metadata(request),
             })
             if resume:
                 self._turn_id = resume[1]
@@ -767,6 +771,10 @@ class CodexWorkerAdapter(CodexConsultantAdapter):
 
     def _sandbox_mode(self, request):
         return "workspace-write"
+
+    def _sandbox_metadata(self, request):
+        import hashlib
+        return {"writeWorkspaceSha256": hashlib.sha256(request.write_workspace.encode("utf-8")).hexdigest()}
 
     def _sandbox_policy(self, request):
         return {"type": "workspaceWrite", "writableRoots": [], "networkAccess": False,

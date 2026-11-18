@@ -366,7 +366,8 @@
         "sandboxMode": {
           "enum": [
             "read-only",
-            "tool-restricted-read-only"
+            "tool-restricted-read-only",
+            "workspace-write"
           ]
         },
         "approvalPolicy": {
@@ -402,9 +403,16 @@
           "minLength": 1,
           "maxLength": 128,
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$"
+        },
+        "writeWorkspaceSha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "$comment": "SHA-256 of exact canonical request write_workspace UTF-8. Binds workspace without exporting a machine path; not permission or containment evidence."
         }
       },
-      "$comment": "Exact SDK configuration, not permission or qualification evidence. Version 1 retains historical version-bearing metadata. Version 2 records only admitted controls and the request commitment, never fabricating SDK/runtime versions before startup; actual observed versions are retained in the scanned, artifact-bound review evidence. All tokens are bounded 128-character ASCII; version metadata additionally permits standard build/epoch markers. Codex read-only names its OS sandbox; Claude tool-restricted-read-only does not claim OS isolation. Approval-policy labels are not blanket tool denials.",
+      "$comment": "Exact SDK configuration, not permission or qualification evidence. Version 1 retains historical version-bearing metadata. Version 2 records only admitted controls and the request commitment, never fabricating SDK/runtime versions before startup; actual observed versions are retained in the scanned, artifact-bound review evidence. All tokens are bounded 128-character ASCII; version metadata additionally permits standard build/epoch markers. Codex read-only names its OS sandbox; Claude tool-restricted-read-only does not claim OS isolation. Approval-policy labels are not blanket tool denials. Workspace-write adds its exact writeWorkspaceSha256 binding; selected v2 remains request-bound and observed v1 remains evidence only.",
       "allOf": [
         {
           "if": {
@@ -417,7 +425,10 @@
           "then": {
             "properties": {
               "sandboxMode": {
-                "const": "read-only"
+                "enum": [
+                  "read-only",
+                  "workspace-write"
+                ]
               },
               "approvalPolicy": {
                 "const": "deny_all"
@@ -466,6 +477,33 @@
               "approvalPolicy": {
                 "const": "deny_all"
               }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "sandboxMode": {
+                "const": "workspace-write"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "writeWorkspaceSha256"
+            ],
+            "properties": {
+              "schemaVersion": {
+                "enum": [
+                  1,
+                  2
+                ]
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "writeWorkspaceSha256": false
             }
           }
         }

@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-17
 
+- Integrate Codex Worker custody, selected workspace-digest provenance and task receiving through the existing runtime and ledger owners. Protected authority paths cannot overlap the writable workspace, and Worker evidence cannot become a review verdict. Public write dispatch and native sandbox qualification remain separate.
+
 - Add an explicit whole-workspace write contract and Codex Worker adapter using the existing lifecycle. It checks effective roots, network and temporary-directory exclusions before the turn, retains role/approval boundaries, and rejects uncertain resume. This offline adapter increment does not activate public writes: runtime custody and receiving qualification remain separate.
 
 - Connect read-only Codex Consultant task execution through the existing launch, process and receiving owners with explicit `--sdk-task-binding`. Consultant evidence retains its role and never becomes a review verdict or closure; review flags remain review-only, and receiving failure preserves diagnostics without relaunch. This is offline-qualified source integration, not installation or live acceptance.
