@@ -440,7 +440,7 @@ def validate_sdk_execution(
                          and not (persistent and "forkSourceSha256" in value))
         copilot_context = (provider == "copilot" and value["sandboxMode"] == "tool-restricted-read-only"
                            and "forkSourceSha256" not in value
-                           and (value["schemaVersion"] == 1 or persistent))
+                           and (value["schemaVersion"] in {1, 2} or persistent))
         if not (codex_context or copilot_context):
             raise ValueError("continuation metadata requires a supported read-only native context")
     if value["schemaVersion"] in {3, 5} and value["operationKind"] != {

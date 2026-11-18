@@ -662,6 +662,7 @@
                   "schemaVersion": {
                     "enum": [
                       1,
+                      2,
                       5
                     ]
                   }

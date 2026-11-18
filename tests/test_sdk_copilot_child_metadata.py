@@ -28,16 +28,17 @@ def test_scoped_selected_profile_and_full_launch(persistent):
     jsonschema.validate(event, schema)
 
 
-def test_observed_source_is_not_a_selected_route():
+def test_observed_and_selected_continuation_share_source_binding():
     value = metadata(1, continuationSourceSha256="d"*64)
     assert validate(value) == value
     jsonschema.validate(value, owner().AGENT_RUN_SCHEMA["properties"]["sdkExecution"])
     value["schemaVersion"] = 2
     value.pop("sdkVersion"); value.pop("runtimeVersion")
     value["requestSha256"] = "a"*64
-    with pytest.raises(ValueError): validate(value)
-    with pytest.raises(jsonschema.ValidationError):
-        jsonschema.validate(value, owner().AGENT_RUN_SCHEMA["properties"]["sdkExecution"])
+    # The selected Consultant continuation route now binds the same source;
+    # metadata is not standalone role or launch authority.
+    assert validate(value) == value
+    jsonschema.validate(value, owner().AGENT_RUN_SCHEMA["properties"]["sdkExecution"])
 
 
 @pytest.mark.parametrize("change", [

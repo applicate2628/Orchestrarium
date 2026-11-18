@@ -186,6 +186,15 @@ class CodexReviewDispatch:
         self._stage = 0
         self._stages = (_STAGES[:-2] + ("fork" if request.context_mode == "fork" else "resume", "reconcile", "turn_start")
                         if request.native_continuation is not None else _STAGES)
+        self._copilot_stages = _COPILOT_STAGES
+        if request.provider == "copilot":
+            stages = list(_COPILOT_STAGES)
+            if request.native_continuation is not None:
+                index = stages.index("copilot_session_create")
+                stages[index:index+1] = ["copilot_session_resume", "copilot_session_history"]
+            if request.result_kind == "task" and request.role == "consultant" and request.write_workspace is None:
+                stages.insert(stages.index("copilot_profile_after"), "copilot_session_history")
+            self._copilot_stages = tuple(stages)
         self._queries = 0
         self._controls = self._control_snapshot()
         self._artifact = prevalidated.control.ledger_artifact
@@ -308,15 +317,15 @@ class CodexReviewDispatch:
             owner.ledger_resource_options(self.prevalidated.control)
             if request.provider == "copilot":
                 if (effect == "tool" and request.write_workspace is not None
-                        and self._stage == _COPILOT_STAGES.index("copilot_send") + 1):
+                        and self._stage == self._copilot_stages.index("copilot_send") + 1):
                     return  # Exact Host file arguments are checked by the tool owner.
                 # Export retained evidence after any admitted adapter phase,
                 # including partial/failed acquisition. This terminal-only
                 # transition never authorizes a skipped native effect or replay.
-                if effect == "copilot_result" and _COPILOT_STAGES.index("copilot_start") < self._stage < len(_COPILOT_STAGES):
-                    self._stage = len(_COPILOT_STAGES)
+                if effect == "copilot_result" and self._copilot_stages.index("copilot_start") < self._stage < len(self._copilot_stages):
+                    self._stage = len(self._copilot_stages)
                     return
-                if self._stage >= len(_COPILOT_STAGES) or effect != _COPILOT_STAGES[self._stage]:
+                if self._stage >= len(self._copilot_stages) or effect != self._copilot_stages[self._stage]:
                     raise DispatchError("E_COPILOT_SDK_EFFECT_DENIED")
                 self._stage += 1
                 return
@@ -580,14 +589,15 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
             or model in {"opus", "sonnet", "haiku"}):
         raise DispatchError("E_CLAUDE_SDK_PROMPT_ONLY_REQUIRED")
     if provider == "copilot" and ((task_mode and binding.get("writeWorkspace") is None and role.assigned_role != "consultant")
-            or binding.get("contextMode", "fresh") != "fresh"
+            or binding.get("contextMode", "fresh") not in {"fresh", "continuation"}
             or binding.get("installedHookRoot") is not None or binding["expectedAccountEmail"] is not None):
         raise DispatchError("E_COPILOT_SDK_PROMPT_ONLY_REQUIRED")
     write_workspace = binding.get("writeWorkspace")
     write_mode = write_workspace is not None
     continuation_mode = binding.get("contextMode") in {"continuation", "fork"}
-    if continuation_mode and (provider != "codex" or not task_mode or write_mode
-                              or role.assigned_role != "consultant" or role.execution_role != "consultant"):
+    if continuation_mode and (provider not in {"codex", "copilot"} or not task_mode or write_mode
+                              or role.assigned_role != "consultant" or role.execution_role != "consultant"
+                              or (provider == "copilot" and binding["contextMode"] != "continuation")):
         raise DispatchError("E_CODEX_SDK_CONTINUATION_ROUTE_UNSUPPORTED")
     if write_mode and not task_mode:
         raise DispatchError("E_CODEX_SDK_REVIEW_ONLY")
@@ -707,12 +717,12 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
     )
     if provider == "codex":
         request = runtime.prepare_codex_request(request)
-        if continuation_mode:
-            request = runtime.prepare_received_continuation_request(
-                request, selection, predecessor_evidence_run_id=binding["predecessorEvidenceRunId"],
-                **({"context_mode": "fork"} if binding["contextMode"] == "fork" else {}))
     else:
         runtime.validate_admitted_request(request, selection)
+    if continuation_mode:
+        request = runtime.prepare_received_continuation_request(
+            request, selection, predecessor_evidence_run_id=binding["predecessorEvidenceRunId"],
+            **({"context_mode": "fork"} if binding["contextMode"] == "fork" else {}))
     runtime.validate_worker_custody(request, selection)
     started = _utc_now()
     owner.prepare_ledger_admission(c, runtime.build_launch_arguments(request, selection, started_at=started))

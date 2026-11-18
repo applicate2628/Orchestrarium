@@ -133,10 +133,11 @@ class ExecutionRequest:
             raise ValueError("task adapter combination not implemented")
         if self.native_continuation is not None:
             if (type(self.native_continuation) is not NativeContinuation
-                    or self.context_mode not in {"continuation", "fork"} or self.provider != "codex"
-                    or self.role != "consultant" or self.result_kind != "task"
-                    or self.write_workspace is not None or self.tool_profile != "default"):
-                raise ValueError("native continuation requires read-only Codex Consultant")
+                    or self.context_mode not in {"continuation", "fork"} or self.provider not in {"codex", "copilot"}
+                    or self.role != "consultant" or self.result_kind != "task" or self.write_workspace is not None
+                    or self.tool_profile != ("prompt-only" if self.provider == "copilot" else "default")
+                    or (self.provider == "copilot" and self.context_mode != "continuation")):
+                raise ValueError("native continuation requires an implemented read-only Consultant route")
             prior = self.native_continuation
             if {self.external_dispatch_id, self.external_evidence_run_id} & {prior.prior_dispatch_id, prior.prior_evidence_run_id}:
                 raise ValueError("continuation requires new execution identities")
@@ -146,8 +147,8 @@ class ExecutionRequest:
             raise ValueError("unsupported context mode")
         if self.provider not in {"codex", "claude", "kimi", "grok", "minimax", "mimo", "copilot"}:
             raise ValueError("invalid provider")
-        if self.provider == "copilot" and (self.tool_profile != ("default" if self.write_workspace is not None else "prompt-only") or self.context_mode != "fresh"):
-            raise ValueError("Copilot requires fresh prompt-only evidence or scoped default-profile tasks")
+        if self.provider == "copilot" and (self.tool_profile != ("default" if self.write_workspace is not None else "prompt-only") or (self.context_mode != "fresh" and self.native_continuation is None)):
+            raise ValueError("Copilot requires prompt-only evidence or scoped default-profile tasks")
         if self.external_dispatch_id == self.external_evidence_run_id:
             raise ValueError("dispatch and evidence identities must differ")
         if not isinstance(self.scope, tuple) or not 1 <= len(self.scope) <= 128:

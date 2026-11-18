@@ -30,6 +30,7 @@ def payload(**changes):
 class FakeSdk:
     def __init__(self):
         self.calls=[]; self.options=None; self.runtime=None; self.send_options=None
+        self.history=[]; self.turn='native-turn'
         self.content=json_text(payload()); self.failure=None; self.cleanup_failure=None
         self.events=[]; self.permission=False; self.handler=None; self.on_send=None
         self.profile_model='selected-model'; self.profile_effort='high'
@@ -61,7 +62,22 @@ class FakeSdk:
         if self.failure=='send': raise RuntimeError('private send error')
         if self.failure=='timeout': raise TimeoutError()
         if self.reply_none:return None
-        return SimpleNamespace(type='assistant.message',agent_id=self.agent_id,data=SimpleNamespace(content=self.content))
+        final=SimpleNamespace(type='assistant.message',id='message-'+self.turn,agent_id=self.agent_id,
+            data=SimpleNamespace(content=self.content,turn_id=self.turn))
+        if type(self).get_events is FakeSdk.get_events:
+            def event(kind):
+                return SimpleNamespace(type=kind,id=kind+'-'+self.turn,agent_id=None,
+                    data=SimpleNamespace(turn_id=self.turn))
+            self.history.extend((event('assistant.turn_start'),final,event('assistant.turn_end')))
+        return final
+    async def get_events(self):
+        self.calls.append('history')
+        return list(self.history)
+    async def resume_session(self,session_id,**kwargs):
+        self.calls.append('resume'); self.options=kwargs
+        assert session_id==self.session_id
+        assert kwargs['continue_pending_work'] is False and kwargs['allow_transcript_recovery'] is False
+        return self
     async def get_current(self,*,timeout):
         self.calls.append('profile')
         return SimpleNamespace(model_id=self.profile_model,reasoning_effort=self.profile_effort,provider_id=None)

@@ -646,7 +646,7 @@ def _received_native_context(request, selection, predecessor_evidence_run_id, *,
     from .receiving import review_artifact_target
     validate_admitted_request(request, selection)
     coordination = type(request) is CoordinationInferenceRequest and request.child_choice_json is not None and request.decision_session_mode == "native-persistent"
-    if ((request.provider not in {"codex", "copilot"} if coordination else request.provider != "codex") or (not coordination and (request.role != "consultant" or request.result_kind != "task"))
+    if ((request.provider not in {"codex", "copilot"}) or (not coordination and (request.role != "consultant" or request.result_kind != "task"))
             or request.write_workspace is not None or selection.expected_launch_sha256 is not None):
         raise RuntimeBindingError("received_continuation_predecessor_required")
     if events is None:
@@ -741,7 +741,7 @@ def native_session_depth(request, selection):
 
 def prepare_received_continuation_request(request, selection, *, predecessor_evidence_run_id, context_mode="continuation"):
     """Prepare a new task from durable received evidence, without model effects."""
-    if context_mode not in {"continuation", "fork"}:
+    if context_mode not in {"continuation", "fork"} or (request.provider == "copilot" and context_mode != "continuation"):
         raise RuntimeBindingError("invalid_native_context_mode")
     source = _received_continuation_source(request, selection, predecessor_evidence_run_id)
     return replace(request, context_mode=context_mode, native_continuation=source)
@@ -760,7 +760,7 @@ def _validate_continuation(request, selection, previous_run, previous_terminal, 
     if type(previous_run) is not RuntimeRun or type(previous_terminal) is not dict:
         raise RuntimeBindingError("received_continuation_predecessor_required")
     prior = previous_run.request
-    if (prior.provider != "codex" or prior.result_kind != "task" or prior.role != "consultant"
+    if (prior.provider not in {"codex", "copilot"} or prior.result_kind != "task" or prior.role != "consultant"
             or prior.write_workspace is not None or previous_run.observation is None):
         raise RuntimeBindingError("continuation_predecessor_kind_mismatch")
     for name in _CONTINUATION_CONTEXT_FIELDS:

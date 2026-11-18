@@ -97,7 +97,9 @@ def validate_copilot_request(request):
             raise CopilotError("copilot_request_unsupported")
         return
     if (type(request) is not ExecutionRequest or request.provider != "copilot"
-            or request.context_mode != "fresh"):
+            or request.context_mode not in {"fresh", "continuation"}
+            or (request.context_mode == "continuation" and (request.native_continuation is None
+                or request.role != "consultant" or request.result_kind != "task" or request.write_workspace is not None))):
         raise CopilotError("copilot_request_unsupported")
     import provider_prompt as owner
     _roles, reviewers, workers, _unsupported = owner._external_role_taxonomy()
@@ -497,12 +499,13 @@ class CopilotExecutor:
                 self._retain_content(content,"copilot.assistant.message")
                 if coordination:
                     evidence_result = validate_intent(content, request)
-                    native_turn_id = await self._native_tip(request, final_event=event)
-                    if request.native_continuation is not None and native_turn_id == request.native_continuation.native_turn_id:
-                        raise CopilotError("copilot_turn_not_new")
                 else:
                     evidence_result = (validate_task if request.result_kind == "task" else validate_review)(
                         strict_json(content,max_bytes=request.max_output_bytes),request=request)
+                if coordination or (request.result_kind == "task" and request.role == "consultant" and request.write_workspace is None):
+                    native_turn_id = await self._native_tip(request, final_event=event)
+                    if request.native_continuation is not None and native_turn_id == request.native_continuation.native_turn_id:
+                        raise CopilotError("copilot_turn_not_new")
                 provider_status = "completed"
                 await self._profile(request,"copilot_profile_after")
         except asyncio.CancelledError:

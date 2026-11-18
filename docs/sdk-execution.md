@@ -171,10 +171,11 @@ Exact revision, source-freeze evidence and review are recorded in the PR.
 ### Native Consultant continuation through the Host
 
 The existing Host executor can explicitly continue a received read-only Codex
-Consultant task. This is `context_mode: continuation`, not a fresh independent
+or Copilot Consultant task. Copilot uses the explicit prompt-only task profile;
+this does not enable continuation for its Reviewer or Worker routes. This is `context_mode: continuation`, not a fresh independent
 review, a text handoff, a fork, or reconciliation of an old turn. The caller
 supplies the actual retained predecessor `RuntimeRun` and received terminal;
-thread/turn identifiers copied into an arbitrary request are not sufficient.
+session/thread/turn identifiers copied into an arbitrary request are not sufficient.
 The receiving owner verifies the original sealed observation, canonical artifact
 and ledger readback. A new admitted request uses distinct dispatch/evidence/
 artifact identities, retaining the work item, scope, selected runtime, workspace
@@ -248,8 +249,40 @@ admitted new turn. Repeating a consumed operation, an unresolved predecessor,
 corrupt receipt or drift cannot silently become a new model call. Artifacts
 written before continuation receipts existed remain readable but cannot supply
 restart continuation; an explicitly admitted fresh task/handoff is still usable.
-Other role/provider continuation and scoped child-Lead lifecycle remain roadmap
-work. Offline fixtures do not constitute native acceptance.
+Remaining unsupported role/provider continuation and platform qualification stay
+in the roadmap; implemented scoped child-Lead lifecycle is not outstanding work.
+Offline fixtures do not constitute native acceptance.
+
+### Copilot Consultant continuation through public receiving
+
+Copilot's version-5 task binding can select `contextMode: continuation` and the
+existing `predecessorEvidenceRunId`. The public dispatcher restores the exact
+received Consultant artifact and predecessor receipt under the existing Host
+authority. It does not accept a bare session identifier as recovery authority,
+and it does not enable Copilot fork, Reviewer continuation or Worker continuation.
+
+A newly received fresh Consultant result records the actual completed root turn
+from the supported SDK event history. The resumed session must match that exact
+completed tip before one new prompt is sent. Active, changed or unrelated
+history cannot silently become a fresh session. The adapter uses the existing
+resume flags that prohibit automatic pending-work continuation and transcript
+recovery; uncertain execution is not replayed.
+
+The existing native-context digest, one-successor ledger claim, current
+authentication selection, permissions, private runtime storage and receiving
+owners retain their roles. The final successor receives its own canonical
+artifact/receipt and may be selected as a later predecessor. Legacy results
+without a proven native turn and continuation receipt remain readable historical
+evidence; no turn identity is invented for them. This is source/offline support,
+not an installed runtime or live-provider acceptance claim.
+
+The public crossed check exercises fresh dispatch and canonical receiving,
+restores its predecessor after dropping operation objects, resumes the actual
+SDK-shaped session history, receives the successor and rejects a second consume
+of the same predecessor. Provider/process peers are synthetic; public admission,
+factory, ledger and artifact owners are real. Revision-specific test evidence
+and independent review are recorded in the PR.
+
 
 ### Native Codex Consultant fork
 
@@ -591,7 +624,7 @@ checkpoints below retain their original scope; they are not fresh acceptance.
 | Codex | Explicit Windows Reviewer, Consultant and scoped Worker source bridges; offline qualification and historical bounded native evidence below. | Qualify the current installed/native routes and remaining platform behavior. Consultant durable continuation/fork and scoped child-Lead coordination are already implemented; do not rebuild them as outstanding work. |
 | Claude | SDK Host API and explicit scoped Worker command-line route, prompt-only Consultant/Reviewer, and scoped fresh-handoff child decisions through existing Root/receiving owners. Native subscription Lead is a different boundary. | Qualify current native execution and remaining supported persistent session outcomes using official API/cloud access; do not wrap a subscription CLI as a third-party worker. |
 | Antigravity | Official setup direction; no implemented AGY runtime adapter in the current SDK execution factory. | Implement Lead/session integration and native subagent handoff; separately qualify any admitted programmatic worker route. |
-| Copilot | Explicit public fresh Consultant/Reviewer and scoped Worker; scoped child decision sessions through the existing Host lifecycle and canonical Windows receiving. Source/offline qualification only. | Qualify the current installed runtime and native session lifecycle; remaining native Lead/subagent integration must use verified vendor capabilities. |
+| Copilot | Explicit public Consultant (fresh and received-predecessor continuation), fresh Reviewer and scoped Worker; scoped child decision sessions through the existing Host lifecycle and canonical Windows receiving. Source/offline qualification only. | Qualify the current installed runtime and native session lifecycle; remaining native Lead/subagent integration must use verified vendor capabilities. |
 | Kimi | Existing ACP boundary is separate from the current SDK factory. | Reconcile the supported Kimi runtime with the official agent integration; do not silently substitute the older Python runtime or a model API for the chosen route. |
 | Grok | Candidate protocol support is not live-qualified execution. | Integrate the official Grok Build Agent Client Protocol (ACP) route, including account/tool enforcement and result receiving; do not invent a separate vendor SDK or substitute the xAI model API. |
 
