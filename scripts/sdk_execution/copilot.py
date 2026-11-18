@@ -190,12 +190,25 @@ class CopilotExecutor:
             unchanged = False
         if not unchanged: raise CopilotError("copilot_runtime_changed")
 
+    async def _settle_sdk_cleanup(self, method):
+        # Keep caller cancellation separate from a cleanup coroutine cancelling
+        # itself. The shared drain preserves ownership; a cancelled SDK cleanup
+        # is a failed cleanup outcome, not permission to abandon remaining owners.
+        task = None
+        try:
+            task = asyncio.create_task(asyncio.wait_for(method(), self._cleanup_timeout))
+            await drain_owned(task)
+        except asyncio.CancelledError:
+            if task is None or not task.cancelled():
+                raise
+            return False
+        except Exception:
+            return False
+        return True
+
     async def _abort(self):
         if self._session is not None:
-            try:
-                await asyncio.wait_for(self._session.abort(),self._cleanup_timeout)
-            except Exception:
-                return False
+            return await self._settle_sdk_cleanup(self._session.abort)
         return True
 
     def _request_abort(self):
@@ -528,8 +541,8 @@ class CopilotExecutor:
                 except Exception: cleanup_error = "copilot_unsubscribe_failed"
             for obj,method in ((self._session,"disconnect"),(self._client,"stop")):
                 if obj is not None:
-                    try: await asyncio.wait_for(getattr(obj,method)(),self._cleanup_timeout)
-                    except Exception: cleanup_error = "copilot_cleanup_failed"
+                    if not await self._settle_sdk_cleanup(getattr(obj,method)):
+                        cleanup_error = "copilot_cleanup_failed"
             closed = self._client is not None and cleanup_error is None
         error = error or self._event_error
         status = "interrupted" if self._cancel_requested else "completed" if evidence_result is not None and not error and not cleanup_error else "incomplete"

@@ -80,7 +80,7 @@
     "sdk_execution/copilot.py": {
       "source": "scripts/sdk_execution/copilot.py",
       "destination": "scripts/sdk_execution/copilot.py",
-      "sha256": "7107eba042beebede66601bac4042ce36343364fee9c8166a0ebdf6a47d32f3d"
+      "sha256": "a94441f754e0e470bea5a9cef8ad0803b67c355451fef7a9f75ad9f835f172f8"
     },
     "sdk_execution/codex.py": {
       "source": "scripts/sdk_execution/codex.py",

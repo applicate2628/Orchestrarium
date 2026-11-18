@@ -898,6 +898,19 @@ Source evidence: [official custom Tool and result interfaces](https://github.com
 and [typed permission/event data](https://github.com/microsoft/copilot-sdk/blob/3ce61458503b6b27ebd1f674a980f4d9596d9b22/python/copilot/_generated/session_events.py).
 This source integration is not installed or live-provider qualification.
 
+### Copilot cleanup cancellation preserves acquired evidence
+
+The existing Copilot cleanup owner distinguishes a native SDK cleanup coroutine
+cancelling itself from cancellation requested by the calling task. Abort,
+disconnect and client stop retain the existing cleanup deadline and shared
+owned-task drain. A self-cancelled cleanup is recorded as failed cleanup, does
+not skip remaining cleanup owners, and does not discard already acquired
+terminal evidence. It is not reported as successful settlement. Caller
+cancellation retains the interrupted outcome; no inference or cleanup retry is
+introduced. Offline regression cases cover native self-cancellation and repeated
+caller cancellation during cleanup; live Copilot behavior remains separately
+unqualified.
+
 ### Copilot scoped child decision sessions
 
 Current source evidence: 107 independent bounded checks pass, including the

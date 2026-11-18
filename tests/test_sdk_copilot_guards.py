@@ -71,6 +71,58 @@ def test_cleanup_failure_preserves_acquired_task_without_false_completion(tmp_pa
     assert executor.execution_result is result
 
 
+@pytest.mark.parametrize("stage", ["abort", "disconnect", "stop"])
+def test_native_cleanup_cancellation_retains_result_and_drains_remaining_owner(tmp_path, stage):
+    sdk = FakeSdk()
+    async def cancelled_cleanup():
+        sdk.calls.append(stage)
+        raise asyncio.CancelledError("private SDK cleanup cancellation")
+    setattr(sdk, stage, cancelled_cleanup)
+    if stage == "abort":
+        sdk.events = [SimpleNamespace(type="session.error", data=None)]
+    executor, _, _ = make_executor(tmp_path, sdk)
+    result = asyncio.run(executor.execute(request()))
+    assert result.status == "incomplete"
+    assert result.provider_status == "completed"
+    assert result.task.content == "Bounded advice."
+    assert result.cleanup_error == ("copilot_abort_failed" if stage == "abort" else "copilot_cleanup_failed")
+    assert not result.protocol_closed
+    assert executor.execution_result is result
+    assert sdk.calls.count("disconnect") == sdk.calls.count("stop") == 1
+    assert "private" not in str(result.to_dict())
+    before = list(sdk.calls)
+    with pytest.raises(CopilotError, match="operation_already_consumed"):
+        asyncio.run(executor.execute(request()))
+    assert sdk.calls == before
+
+
+@pytest.mark.parametrize("stage", ["disconnect", "stop"])
+def test_repeated_caller_cancellation_during_cleanup_retains_owned_outcome(tmp_path, stage):
+    executor, sdk, _ = make_executor(tmp_path)
+    async def scenario():
+        entered, release = asyncio.Event(), asyncio.Event()
+        async def pending_cleanup():
+            sdk.calls.append(stage)
+            entered.set()
+            await release.wait()
+        setattr(sdk, stage, pending_cleanup)
+        running = asyncio.create_task(executor.execute(request()))
+        await entered.wait()
+        running.cancel()
+        await asyncio.sleep(0)
+        running.cancel()
+        await asyncio.sleep(0)
+        assert not running.done()
+        release.set()
+        result = await running
+        assert result.status == "interrupted"
+        assert result.task.content == "Bounded advice."
+        assert result.cleanup_error is None
+        assert executor.execution_result is result
+        assert sdk.calls.count("disconnect") == sdk.calls.count("stop") == 1
+    asyncio.run(scenario())
+
+
 def test_malformed_acquired_text_is_retained_without_fabricating_task(tmp_path):
     sdk = FakeSdk()
     sdk.content = "not a structured task"
