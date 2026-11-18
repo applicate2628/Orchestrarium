@@ -733,7 +733,7 @@ checkpoints below retain their original scope; they are not fresh acceptance.
 | Claude | SDK Host API and explicit scoped Worker command-line route, prompt-only Consultant/Reviewer, and scoped fresh/persistent child decisions through existing Root/receiving owners. Native subscription Lead is a different boundary. | Qualify current native execution and remaining supported persistent session outcomes using official API/cloud access; do not wrap a subscription CLI as a third-party worker. |
 | Antigravity | Native startup projection through the common installer: distinct Lead skill/rule and SessionStart shared-governance context. No AGY runtime adapter in the SDK execution factory. | Complete native tool/lifecycle hooks and subagent handoff where supported; qualify installed/native behavior and separately admitted programmatic workers. |
 | Copilot | Explicit public Consultant (fresh and received-predecessor continuation), fresh Reviewer and scoped Worker; scoped child decision sessions through the existing Host lifecycle and canonical Windows receiving. Source/offline qualification only. | Qualify the current installed runtime and native session lifecycle; remaining native Lead/subagent integration must use verified vendor capabilities. |
-| Kimi | Existing ACP boundary is separate from the current SDK factory. | Reconcile the supported Kimi runtime with the official agent integration; do not silently substitute the older Python runtime or a model API for the chosen route. |
+| Kimi | Current Kimi Code ACP owner, configuration-currentness handling and canonical receiving; private global tool policy is independent of agent-profile discovery. | Qualify the installed native runtime and remaining supported integrations. Do not substitute archived kimi-cli/kimi-sdk, an unqualified kimi-agent-sdk, or a model API. |
 | Grok | Candidate protocol support is not live-qualified execution. | Integrate the official Grok Build Agent Client Protocol (ACP) route, including account/tool enforcement and result receiving; do not invent a separate vendor SDK or substitute the xAI model API. |
 
 ### Copilot provisioning boundary
@@ -1919,6 +1919,34 @@ state, not a reason to reject an otherwise current result. Revocation or request
 drift withholds tool delivery while preserving the received evidence; it never
 replays the provider. Read-only reconciliation remains available under its own
 current permission checks.
+
+### Kimi Code ACP profile discovery and tool authority
+
+The supported source is [MoonshotAI/kimi-code](https://github.com/MoonshotAI/kimi-code),
+not the archived `kimi-cli`/`kimi-sdk` implementation or a generic model API.
+At reviewed source revision `50ec3c3940a3f265cf1b99123d6d2ebf9c23aaa0`,
+[ACP startup](https://github.com/MoonshotAI/kimi-code/blob/50ec3c3940a3f265cf1b99123d6d2ebf9c23aaa0/apps/kimi-code/src/cli/sub/acp.ts)
+and [session creation/configuration](https://github.com/MoonshotAI/kimi-code/blob/50ec3c3940a3f265cf1b99123d6d2ebf9c23aaa0/packages/acp-server/src/server.ts)
+do not expose an explicit agent-profile selector. Creating an override under
+the capture directory cannot guarantee discovery from a different session cwd
+or a nested Git project. Orche does not create that redundant agent override, change the selected cwd,
+or invent an ACP field to claim exact profile selection.
+
+The existing private `[tools]` config remains the authority boundary. The official
+[tool-policy evaluator](https://github.com/MoonshotAI/kimi-code/blob/50ec3c3940a3f265cf1b99123d6d2ebf9c23aaa0/packages/agent-core-v2/src/agent/toolPolicy/evaluate.ts)
+intersects global, profile, workspace and session policies; the
+[execution service](https://github.com/MoonshotAI/kimi-code/blob/50ec3c3940a3f265cf1b99123d6d2ebf9c23aaa0/packages/agent-core-v2/src/agent/toolPolicy/toolPolicyService.ts)
+also checks before tool execution. The core
+[tools config section](https://github.com/MoonshotAI/kimi-code/blob/50ec3c3940a3f265cf1b99123d6d2ebf9c23aaa0/packages/agent-core-v2/src/agent/toolPolicy/configSection.ts)
+does not declare an environment override. A broader discovered profile cannot
+widen the selected global tool set. A narrower profile may reduce availability.
+The empty-tool encoding denies every tool, including native Agent/AgentSwarm;
+explicitly admitted native delegation remains subject to the same tool limits.
+A wildcard child selection does not promise that every agent type is available.
+
+This is a source-backed contract and offline compatibility correction, not a
+native execution observation, an OS sandbox, or approval for provider quota use.
+It adds no model call, SDK migration, new global task blocker or permission grant.
 
 Kimi ACP configuration replies and `config_option_update` notifications describe
 complete option snapshots. The existing exchange checks already selected model

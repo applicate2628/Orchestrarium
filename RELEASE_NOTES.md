@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Kimi Code ACP no longer relies on a generated agent override beside capture files, which native discovery could miss when the task uses another working directory. The existing private global tool policy remains the upper bound across discovered profiles; task cwd and provider permissions stay unchanged. This removes a misleading profile-selection assumption without blocking ordinary tasks or switching to an archived SDK.
+
 - Antigravity pre-write hooks now reuse the shared machine-local-path AUDIT rule for documented write and replacement payloads. Warnings examine new content without treating removed text or descriptions as writes, preserve native approvals and remain nonblocking on diagnostic failure. Existing startup registrations upgrade through the same ownership checks; unrelated hooks remain untouched.
 
 - Antigravity native sessions gain a separate startup projection through the common ownership-aware installer: shared governance, a distinct Lead skill and a SessionStart context hook. Project/global discovery preserves Codex skills and unrelated hooks; update and removal retain existing ownership checks. This is instruction integration, not native permission enforcement, SDK worker execution or live acceptance.

@@ -777,26 +777,9 @@ def read_kimi_capability_selection(path: Path) -> KimiCapabilitySelectionV1:
         raise ValueError("E_KIMI_CAPABILITIES_INVALID") from exc
 
 
-def _kimi_agent_profile(selection: KimiCapabilitySelectionV1) -> bytes:
-    tools = json.dumps(
-        list(selection.tools), ensure_ascii=True, separators=(",", ":")
-    ).encode("ascii")
-    subagents = json.dumps(
-        list(selection.subagents), ensure_ascii=True, separators=(",", ":")
-    ).encode("ascii")
-    return (
-        b"---\n"
-        b"name: agent\n"
-        b"description: Orchestrarium finite ACP result agent\n"
-        b"override: true\n"
-        b"tools: " + tools + b"\n"
-        b"subagents: " + subagents + b"\n"
-        b"---\n\n"
-        b"${base_prompt}\n"
-    )
-
-
 def _kimi_tools_policy(selection: KimiCapabilitySelectionV1) -> dict[str, list[str]]:
+    # Native global tools intersect every discovered agent profile. Keep a
+    # nonempty allowlist for deny-all: native enabled=[] means unrestricted.
     enabled = list(selection.tools) if selection.tools else ["Agent"]
     return {
         "enabled": enabled,
@@ -1497,9 +1480,6 @@ class KimiPrivateHomeAliasesV1:
         capabilities: KimiCapabilitySelectionV1 = KimiCapabilitySelectionV1(),
     ) -> "KimiPrivateHomeAliasesV1":
         config_bytes = _kimi_private_config(user_data / "config.toml", capabilities)
-        profile_dir = run_dir / ".kimi-code" / "agents"
-        profile_dir.mkdir(parents=True)
-        (profile_dir / "agent.md").write_bytes(_kimi_agent_profile(capabilities))
         home = run_dir / "kimi-home"
         home.mkdir(mode=0o700)
         private_config = home / "config.toml"

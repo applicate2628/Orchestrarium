@@ -3320,34 +3320,19 @@ def test_kimi_private_home_aliases_unlink_before_lifecycle_removes_private_state
     assert secret.read_text(encoding="utf-8") == "private\n"
 
 
-def test_kimi_private_run_materializes_fixed_zero_capability_agent_profile(
-    tmp_path: Path,
-) -> None:
+def test_kimi_private_run_uses_global_policy_without_discovery_profile(tmp_path: Path) -> None:
     owner = _load_owner()
     user_data = tmp_path / "user-data"
     user_data.mkdir()
-    (user_data / "config.toml").write_text(
-        "default_model='kimi-code/k3'\n", encoding="utf-8"
-    )
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-
-    try:
-        owner.KimiPrivateHomeAliasesV1.create(run_dir, user_data)
-    except OSError as exc:
-        pytest.skip(f"file symlinks unavailable: {exc}")
-
-    profile = run_dir / ".kimi-code" / "agents" / "agent.md"
-    assert profile.read_bytes() == (
-        b"---\n"
-        b"name: agent\n"
-        b"description: Orchestrarium finite ACP result agent\n"
-        b"override: true\n"
-        b"tools: []\n"
-        b"subagents: []\n"
-        b"---\n\n"
-        b"${base_prompt}\n"
-    )
+    aliases = owner.KimiPrivateHomeAliasesV1.create(run_dir, user_data)
+    config = tomllib.loads(aliases.private_config.read_text(encoding="utf-8"))
+    assert config["tools"] == {
+        "enabled": ["Agent"], "disabled": ["Agent", "AgentSwarm"]
+    }
+    assert not (run_dir / ".kimi-code").exists()
+    aliases.cleanup()
 
 
 def _write_kimi_capabilities(
