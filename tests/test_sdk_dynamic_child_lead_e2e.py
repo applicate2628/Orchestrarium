@@ -20,9 +20,9 @@ from process_supervision import sdk_worker
 from provider_prompt import ProviderOutputContext,assemble_external_prompt
 
 
-@pytest.mark.parametrize("initial_catalog", ["seeded", "empty"])
+@pytest.mark.parametrize("initial_catalog", ["seeded", "empty", "restored"])
 def test_actual_proposal_root_admission_restart_execution_and_archive(tmp_path,monkeypatch,initial_catalog):
-    if initial_catalog == "empty":
+    if initial_catalog != "seeded":
         from types import SimpleNamespace
         from test_sdk_runtime import fixture as root_fixture
         from test_mutate_work_item import quick_status, closure
@@ -35,6 +35,9 @@ def test_actual_proposal_root_admission_restart_execution_and_archive(tmp_path,m
         selection=replace(root,work_item=str(child))
         requests={};selections={}
         root_owner=SimpleNamespace(resolve=lambda key:requests[key],assert_current=lambda req,effect:None)
+        base_root_owner=root_owner
+        if initial_catalog=="restored":
+            root_owner=runtime.RootTaskRegistry(root_authority=base_root_owner,root_selection=root,source_environment={})
         assignment=runtime.publish_child_assignment(root_selection=root,root_authority=root_owner,selections={},
             child_id="child-grant",coordinator_binding=task.coordinator_binding,scope=task.scope,
             required_request_ids=(),child_work_item=str(child),goal="Investigate the remaining scoped case.",
@@ -132,7 +135,7 @@ def test_actual_proposal_root_admission_restart_execution_and_archive(tmp_path,m
         # than timing out later pre-created executors before their turn.
         common=dict(authority=authority,process_owner=process,source_environment={},
                     deadline_monotonic=time.monotonic()+3600,cancellation_probe=lambda:False,started_at=INSTANT)
-        initial_executors=({} if initial_catalog=="empty" else {
+        initial_executors=({} if initial_catalog!="seeded" else {
             "task-one":runtime.SdkReviewExecutor(request_id="task-one",selection=selection,artifact="task-result.json",**common)})
         decision_number=0
         def factory(admitted,projection):
@@ -157,14 +160,39 @@ def test_actual_proposal_root_admission_restart_execution_and_archive(tmp_path,m
                                  decision_factory=factory,executors=initial_executors)
         pending=asyncio.run(loop.run())
         assert pending["status"]=="needs-admission"
-        assert counts==({"decisions":1,"tasks":0} if initial_catalog=="empty" else {"decisions":2,"tasks":1})
-        requests["task-two"]=runtime.prepare_codex_request(replace(task,external_dispatch_id="extra-dispatch",external_evidence_run_id="extra-evidence",
+        assert counts==({"decisions":1,"tasks":0} if initial_catalog!="seeded" else {"decisions":2,"tasks":1})
+        candidate=runtime.prepare_codex_request(replace(task,external_dispatch_id="extra-dispatch",external_evidence_run_id="extra-evidence",
             artifact_id="extra-artifact",prompt="Check the remaining scoped case."))
-        selections["task-two"]=selection
-        runtime.publish_child_task_admission(authority=authority,proposal_id="extra-analysis",request_id="task-two",
-            selection=selection,accepted=True,artifact="extra-admission.json",started_at=INSTANT)
         from test_mutate_work_item import closure
-        authority=runtime.ChildLeadAuthority(root_authority=authority._root_authority,root_selection=root,
+        task_key="task-two"
+        if initial_catalog=="restored":
+            registry=authority._root_authority
+            outcome=registry.admit(authority=authority,proposal_id="extra-analysis",request=candidate,
+                selection=selection,artifact="extra-admission.json",started_at=INSTANT)
+            task_key=outcome["request_id"]
+            assert outcome["status"]=="accepted"
+            # Discard all ephemeral request/registry state. The new owner must
+            # restore the concrete accepted request, not ask Root to reroute it.
+            requests.clear();selections.clear()
+            registry=runtime.RootTaskRegistry(root_authority=base_root_owner,root_selection=root,source_environment={})
+            restored_authority=runtime.ChildLeadAuthority(root_authority=registry,root_selection=root,
+                child_id=assignment.child_id,selections={},closure_data=closure(INSTANT).encode(),
+                terminal_instant=INSTANT,repository_root=tmp_path)
+            restoration=registry.restore(restored_authority)
+            assert restoration["unavailable"]=={}
+            selections=restoration["selections"]
+            assert set(selections)=={task_key}
+            assert task_key not in requests
+            restored=registry.resolve(task_key)
+            assert restored.prompt==candidate.prompt and restored.model==candidate.model
+            assert restored.scope==candidate.scope and restored.role==candidate.role
+            root_owner=registry
+        else:
+            requests[task_key]=candidate;selections[task_key]=selection
+            runtime.publish_child_task_admission(authority=authority,proposal_id="extra-analysis",request_id=task_key,
+                selection=selection,accepted=True,artifact="extra-admission.json",started_at=INSTANT)
+            root_owner=authority._root_authority
+        authority=runtime.ChildLeadAuthority(root_authority=root_owner,root_selection=root,
             child_id=assignment.child_id,selections=selections,closure_data=closure(INSTANT).encode(),
             terminal_instant=INSTANT,repository_root=tmp_path)
         common["authority"]=authority
@@ -174,7 +202,7 @@ def test_actual_proposal_root_admission_restart_execution_and_archive(tmp_path,m
         loop=ChildLeadCoordinator(child_id=assignment.child_id,authority=authority,
             decision_factory=factory,executors=executors)
         archived=asyncio.run(loop.run())
-    assert counts==({"decisions":3,"tasks":1} if initial_catalog=="empty" else {"decisions":4,"tasks":2})
+    assert counts==({"decisions":3,"tasks":1} if initial_catalog!="seeded" else {"decisions":4,"tasks":2})
     assert native_calls==["start"]+["resume"]*(counts["decisions"]-1)
     assert len({row["id"] for row in native_history})==counts["decisions"]
     assert Path(archived).is_dir() and "archive" in Path(archived).parts
@@ -182,4 +210,7 @@ def test_actual_proposal_root_admission_restart_execution_and_archive(tmp_path,m
     events=[json.loads(line) for line in (Path(archived)/"agent-runs.jsonl").read_text().splitlines()]
     assert len([row for row in events if row.get("eventKind")=="terminal"])==counts["decisions"]+counts["tasks"]
     assert all(row.get("authorizing") is False for row in events if row.get("eventKind")=="terminal")
-    assert executors["task-two"].terminal["status"]=="completed"
+    assert executors[task_key].terminal["status"]=="completed"
+    if initial_catalog=="restored":
+        assert sum(row.get("eventKind")=="launch" and row.get("runId")==restored.external_dispatch_id for row in events)==1
+        assert task_key not in requests

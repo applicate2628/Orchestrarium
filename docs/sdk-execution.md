@@ -408,13 +408,46 @@ ready tasks may continue; `needs-host-refresh` describes the missing binding for
 the addition, not a blanket suspension or permission to manufacture an executor.
 
 The current Root authority resolves and checks requests; it does not include a
-generic automatic task synthesizer. This integration therefore supports a durable
-machine handoff: inspect the pending proposal, let the existing Root Host publish
-its decision, then resume child execution with the admitted request and executor.
+generic automatic task synthesizer. Root/Lead explicitly selects the concrete
+request and runtime route for each arbitrary valid task, using the existing
+routing criteria. `runtime.RootTaskRegistry` registers that decision through
+`.admit(...)` and restores accepted decisions through `.restore(...)`. It wraps
+the existing current-authority owner rather than replacing its permission or
+financial-budget checks. There is no fixed role/model template list or automatic
+prompt classifier.
+
+The exact private request/runtime selection is retained in the same Root
+admission artifact, bound to its canonical accepted receipt and request digest.
+A prepared registry entry permits admission/commit checks only; it cannot launch
+before accepted evidence exists. After restart, restore the exact accepted
+snapshot instead of reconstructing a prompt/model from new defaults. Lost
+acknowledgement or competing registration reconciles the same stable identity;
+conflicting content cannot replace it. Actual current authorization is checked
+again for each effect, not inferred from historical registration.
+
+The private snapshot does not enter child proposal/result handoff. Existing
+credential scanning protects the persisted source; credential environments are
+not serialized. A revoked or unavailable task retains its evidence and does not
+suspend unrelated ready work. The restored selections and resolver feed the
+existing child authority, executors and coordinator; no second scheduler or
+permission store is created.
 `needs-admission` does not by itself mean a new mandatory question to the user.
 Root can perform already authorized routine admission programmatically; existing
 user permissions still govern consequential actions and model spending. Do not
 claim that an automatic Root decision policy was installed by this interface.
+
+The next routing step should reuse `shared/role-routing-policy.v1.json` as the
+Lead's task-fit criteria and `model_routing.launch_policy.qualify_launch` to
+validate its explicit provider/model/effort choice, not invent a role-to-model
+allowlist or infer consent from a task description. That qualifier does not
+classify prompts or choose a model. The existing Host permission/budget owner
+must check the concrete request at admission and effects; execution resource
+limits or a count of proposals do not establish an aggregate financial budget.
+Where the connected owner cannot enforce an admitted spending scope, that exact
+quota-consuming operation still needs its required authorization. A future
+selector can produce a recommendation for this same registration interface;
+it should not create a second registry, scheduler or financial-policy store.
+This is remaining integration design, not current autonomous execution.
 
 This does **not** provide provider-native child-agent steering or allow a child
 to admit arbitrary new work. The separate Consultant fork mechanism does not

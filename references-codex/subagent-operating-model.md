@@ -122,6 +122,12 @@ existing Root admission owner; no fabricated seed execution or additional
 approval store is needed. Decision and task effects retain their exact current
 Root authorization. Empty catalog alone is not a completed outcome.
 
+Durable SDK Root registration retains the exact explicitly selected task and
+runtime route in existing admission evidence. Restore those bytes rather than
+reselecting defaults; current permission checks still apply to each effect.
+Registration is not autonomous task-fit routing, historical consent is not
+current authorization, and private registration payload is not child handoff.
+
 ## Terms and Abbreviations
 
 - SDK: Software Development Kit.

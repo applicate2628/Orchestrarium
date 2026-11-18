@@ -1310,8 +1310,25 @@ def _child_artifact_document(selection,row):
     return strict_json(raw.decode(),max_bytes=size)
 
 
+def _decode_child_registration(value,digest):
+    if type(value) is not dict or set(value)!={"schemaVersion","request","selection"} or type(value["schemaVersion"]) is not int or value["schemaVersion"]!=1:
+        raise RuntimeBindingError("child_registration_invalid")
+    request=ExecutionRequest.from_dict(value["request"])
+    selection=runtime_selection_from_dict(request.provider,value["selection"])
+    if selection.expected_launch_sha256 is not None or request_sha256(request,selection)!=digest:
+        raise RuntimeBindingError("child_registration_changed")
+    return request,selection
+
+
+def _child_admission_document(authority,assignment,proposal_id):
+    identity=hashlib.sha256(json_text([assignment.assignment_sha256,proposal_id]).encode()).hexdigest()
+    rows=[row for row in _events(authority._root_selection)[2] if row.get("runId")=="child-admission-"+identity]
+    if len(rows)!=1:raise RuntimeBindingError("child_registration_not_received")
+    return _child_artifact_document(authority._root_selection,rows[0])
+
+
 def publish_child_task_admission(*,authority,proposal_id,accepted,artifact,started_at,
-        request_id=None,selection=None,required=True):
+        request_id=None,selection=None,required=True,registration=None):
     """Trusted Root publishes its concrete admission, not a model permission."""
     from .receiving import review_artifact_target
     if type(authority) is not ChildLeadAuthority or type(accepted) is not bool or type(required) is not bool:
@@ -1337,8 +1354,15 @@ def publish_child_task_admission(*,authority,proposal_id,accepted,artifact,start
         "proposal_sha256":hashlib.sha256(json_text(proposal["proposal"]).encode()).hexdigest(),
         "source_evidence_id":proposal["source_evidence_id"],"status":"accepted" if accepted else "rejected",
         "request_id":request_id,"request_sha256":digest,"required":required if accepted else False}
+    if registration is not None:
+        if not accepted:raise RuntimeBindingError("child_registration_requires_acceptance")
+        if type(authority._root_authority) is not RootTaskRegistry or authority._root_authority._scan(request,selection)!=registration:
+            raise RuntimeBindingError("child_registry_owner_mismatch")
+        registered_request,registered_selection=_decode_child_registration(registration,digest)
+        if registered_request!=request or registered_selection!=selection:raise RuntimeBindingError("child_registration_changed")
+        doc["registration"]=registration
     if proposal["status"]!="pending":
-        if proposal["admission"]!=doc:raise RuntimeBindingError("child_proposal_already_decided")
+        if _child_admission_document(authority,assignment,proposal_id)!=doc:raise RuntimeBindingError("child_proposal_already_decided")
         return proposal
     root_selection=authority._root_selection
     content=(json_text(doc)+"\n").encode()
@@ -1372,9 +1396,110 @@ def publish_child_task_admission(*,authority,proposal_id,accepted,artifact,start
     except Exception:
         # A lost acknowledgement is not a second admission. Read canonical outcome.
         current=authority.proposal_results(assignment).get(proposal_id)
-        if current is None or current.get("admission")!=doc:raise
+        if current is None or current["status"]=="pending" or _child_admission_document(authority,assignment,proposal_id)!=doc:raise
         return current
     return authority.proposal_results(assignment)[proposal_id]
+
+
+class RootTaskRegistry:
+    """Exact explicit Root decisions; live permission remains with the Host owner."""
+    def __init__(self,*,root_authority,root_selection,source_environment):
+        self._root_authority=root_authority;self._root_selection=root_selection
+        self._environment=dict(source_environment);self._entries={};self._prepared={};self._admission_active=set();self._lock=threading.RLock()
+
+    def resolve(self,request_id):
+        if request_id in self._entries:return self._entries[request_id][2]
+        if request_id in self._prepared:
+            if request_id not in self._admission_active:raise RuntimeBindingError("child_registration_not_received")
+            return self._prepared[request_id][2]
+        return self._root_authority.resolve(request_id)
+
+    def assert_current(self,request,effect):
+        entries=[entry for entry in self._entries.values() if entry[2]==request]
+        pending=[key for key,entry in self._prepared.items() if entry[2]==request]
+        if entries:
+            authority,proposal_id,_request,selection=entries[0]
+            assignment=_load_child_assignment(self._root_selection,authority._child_id)
+            outcome=authority.proposal_results(assignment).get(proposal_id)
+            doc=_child_admission_document(authority,assignment,proposal_id)
+            if (outcome is None or outcome["status"]!="accepted" or "registration" not in doc
+                or _decode_child_registration(doc["registration"],doc["request_sha256"])!=(request,selection)):
+                raise RuntimeBindingError("child_registration_changed")
+        elif pending and (effect not in {"child_task_admission","child_task_admission_commit"} or not any(key in self._admission_active for key in pending)):
+            raise RuntimeBindingError("child_registration_not_received")
+        _require_authority(self._root_authority.assert_current,request,effect)
+
+    def _check_owner(self,authority):
+        if type(authority) is not ChildLeadAuthority or authority._root_authority is not self or authority._root_selection!=self._root_selection:
+            raise RuntimeBindingError("child_registry_owner_mismatch")
+
+    def _scan(self,request,selection):
+        _environment,context=prepare_environment(selection,self._environment)
+        value={"schemaVersion":1,"request":request.to_dict(),"selection":selection.to_dict()}
+        # Root source may legitimately contain machine paths. Reuse only the
+        # credential detector, never persist the environment or secret needles.
+        failure=_owner().credential_scan_terminal(context.needles,stdout=json_text(value).encode(),stderr=b"")
+        if failure is not None:raise RuntimeBindingError(failure)
+        return value
+
+    def admit(self,authority,proposal_id,request,selection,*,artifact,started_at,required=True):
+        self._check_owner(authority)
+        if type(required) is not bool:raise RuntimeBindingError("child_registration_invalid")
+        with self._lock:
+            assignment=_load_child_assignment(self._root_selection,authority._child_id)
+            outcome=authority.proposal_results(assignment).get(proposal_id)
+            if outcome is None:raise RuntimeBindingError("child_proposal_unavailable")
+            identity=hashlib.sha256(json_text([assignment.assignment_sha256,proposal_id,outcome["source_evidence_id"],outcome["proposal"]]).encode()).hexdigest()
+            request_id="root-task-"+identity
+            request=replace(request,external_dispatch_id="dispatch-"+identity,external_evidence_run_id="evidence-"+identity)
+            if type(request) is not ExecutionRequest or selection.expected_launch_sha256 is not None:
+                raise RuntimeBindingError("child_registration_invalid")
+            # A committed outcome is read before any new materialization attempt.
+            if outcome["status"]!="pending":
+                doc=_child_admission_document(authority,assignment,proposal_id)
+                if (outcome["status"]!="accepted" or doc["required"]!=required or doc["request_id"]!=request_id or "registration" not in doc
+                    or _decode_child_registration(doc["registration"],doc["request_sha256"])!=(request,selection)):
+                    raise RuntimeBindingError("child_registration_conflict")
+                _require_authority(self._root_authority.assert_current,request,"child_registration_restore")
+                self._entries[request_id]=(authority,proposal_id,request,selection)
+                return outcome
+            validate_admitted_request(request,selection)
+            _require_authority(self._root_authority.assert_current,request,"child_registration_admission")
+            registration=self._scan(request,selection)
+            entry=(authority,proposal_id,request,selection)
+            if request_id in self._prepared and self._prepared[request_id][1:]!=entry[1:]:raise RuntimeBindingError("child_registration_conflict")
+            self._prepared[request_id]=entry
+            self._admission_active.add(request_id)
+            try:
+                outcome=publish_child_task_admission(authority=authority,proposal_id=proposal_id,accepted=True,
+                    request_id=request_id,selection=selection,artifact=artifact,started_at=started_at,required=required,registration=registration)
+                self._entries[request_id]=entry
+                self._prepared.pop(request_id,None)
+                return outcome
+            finally:
+                self._admission_active.discard(request_id)
+
+    def restore(self,authority):
+        self._check_owner(authority)
+        assignment=authority.resolve_child(authority._child_id)
+        restored={};unavailable={}
+        for proposal_id,outcome in authority.proposal_results(assignment).items():
+            if outcome["status"]!="accepted":continue
+            doc=_child_admission_document(authority,assignment,proposal_id)
+            if "registration" not in doc:continue  # Legacy caller-owned requests remain caller-owned.
+            request,selection=_decode_child_registration(doc["registration"],doc["request_sha256"])
+            request_id=doc["request_id"]
+            try:
+                _load_child_assignment(self._root_selection,authority._child_id)
+                validate_admitted_request(request,selection)
+                _require_authority(self._root_authority.assert_current,request,"child_registration_restore")
+                self._scan(request,selection)
+            except Exception:
+                unavailable[request_id]="current_registration_authority_unavailable"
+                continue
+            self._entries[request_id]=(authority,proposal_id,request,selection)
+            restored[request_id]=selection
+        return {"selections":restored,"unavailable":unavailable}
 
 
 class ChildLeadAuthority:
@@ -1438,6 +1563,7 @@ class ChildLeadAuthority:
             if row.get("scope")!=["child-task-admission:"+assignment.assignment_sha256]:continue
             doc=_child_artifact_document(self._root_selection,row)
             fields={"schemaVersion","assignment_sha256","proposal_id","proposal_sha256","source_evidence_id","status","request_id","request_sha256","required"}
+            if type(doc) is dict and "registration" in doc:fields.add("registration")
             if (type(doc) is not dict or set(doc)!=fields or type(doc["schemaVersion"]) is not int or doc["schemaVersion"]!=1
                 or doc["assignment_sha256"]!=assignment.assignment_sha256 or type(doc["proposal_id"]) is not str
                 or type(doc["status"]) is not str or doc["status"] not in {"accepted","rejected"}
@@ -1453,7 +1579,11 @@ class ChildLeadAuthority:
                     raise RuntimeBindingError("child_task_admission_invalid")
             elif doc["request_id"] is not None or doc["request_sha256"] is not None or doc["required"]:
                 raise RuntimeBindingError("child_task_admission_invalid")
-            result[doc["proposal_id"]]={**prior,"status":doc["status"],"request_id":doc["request_id"],"required":doc["required"],"admission":doc}
+            if "registration" in doc:
+                if doc["status"]!="accepted":raise RuntimeBindingError("child_registration_requires_acceptance")
+                _decode_child_registration(doc["registration"],doc["request_sha256"])
+            public_doc={key:value for key,value in doc.items() if key!="registration"}
+            result[doc["proposal_id"]]={**prior,"status":doc["status"],"request_id":doc["request_id"],"required":doc["required"],"admission":public_doc}
         return result
 
     def proposal_results(self,assignment):
