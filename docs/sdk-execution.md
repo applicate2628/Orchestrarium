@@ -3,7 +3,8 @@
 This branch implements part of the SDK integration project separately from Rust/npm.
 Implemented source routes now include Codex, official Claude API and Copilot
 execution with canonical receiving, plus scoped child-Lead session coordination.
-Current qualification is offline; older bounded native evidence applies only to
+Current successful qualification remains offline; the November 18 native acceptance
+attempt below did not complete. Older bounded native evidence applies only to
 its recorded revisions and routes. This is not the complete
 multivendor SDK target. The completion roadmap below records the current PR19
 integration outcome and remaining work, including provider execution and receiving;
@@ -1399,7 +1400,7 @@ wholly unfinished features. Continue only the following unresolved outcomes:
 | Provider routes | Remaining supported AGY native lifecycle/result qualification beyond startup, advisory hooks and explicit Root association; Kimi installed/native qualification of its reconciled Kimi Code ACP owner; Grok Build ACP actual runtime, account/tool enforcement and canonical receiving. | Use confirmed official capabilities and the existing owners. Do not turn subscription Lead routes into third-party workers. |
 | Session coverage | Remaining provider-native continuation and native Lead/subagent integration where the official runtime exposes a qualified integration surface. Host recovery of newly committed fresh decisions is implemented separately and is not native resume. | Existing Codex/Claude/Copilot child coordination is not missing. Host lineage/depth does not prove control of vendor-internal subagents. |
 | Platform coverage | POSIX platform containment/custody and lifecycle qualification for intended macOS/Linux routes. | Windows offline results do not qualify POSIX or prove an OS sandbox. |
-| Current native acceptance | Install/inspect the selected current payload and exercise admitted real provider routes and recovery. | Not yet performed for this HEAD. Installation and quota-consuming calls retain their separate authorization; offline peers are not native acceptance. |
+| Current native acceptance | Install/inspect the selected current payload and exercise admitted real provider routes and recovery. | Not yet successfully qualified. The November 18 Codex attempt below did not complete; installation and quota-consuming calls retain their separate authorization. Offline peers are not native acceptance. |
 | PR delivery | Keep main policy/regression fixes, this roadmap, source projections and PR description synchronized; complete unresolved acceptance. | PR remains draft, unmerged and not globally installed. No automatic model selection, budget policy or Actions run is implied. |
 
 Active SDK implementation owner: the existing PR19 lane. Shared main routing and
@@ -1582,6 +1583,43 @@ Installer-managed SDK helpers are shared by both host packs. The dispatch module
 is registered in the source installer payload. The historical installed check
 verified source and installed-file hashes together; subsequent changes must retain
 their own source, installer and shared-owner regression evidence.
+
+### November 18 current Codex acceptance attempt
+
+The implementation tree `095ef6a2fc24db696c49e0c394dc8af35a3ace59` was exercised
+through the actual public read-only Consultant path, without a GUI or changes to
+the working global installation. An isolated official Python SDK 0.170.0 used
+its supported explicit `codex_bin` selection with the existing Codex CLI 0.169.0.
+The redundant bundled CLI download was stopped; this SDK-only environment is
+not a claim that the package's complete dependency set passed `pip check`.
+Metadata-only initialization/config/account queries verified ChatGPT authentication,
+the selected account, effective `service_tier=default` (not Fast), and protocol
+closure before the model call. No token, account email or raw configuration is
+published here.
+
+Exactly one real `gpt-6.2-sol` / `medium` fresh Consultant turn was started. The
+acceptance harness had incorrectly selected `maxEvents=100`, below the existing
+`ExecutionRequest` default of 4096. The retained-observation budget includes
+streaming notifications, so even a short result can exhaust that smaller value.
+The adapter reported `observation_limit_exceeded`, retained diagnostic evidence,
+and received a nonauthorizing **blocked** terminal; its owned process resources
+settled. This was an artificial test configuration error, not a provider access
+failure or successful acceptance. The source implementation was not modified
+on this evidence alone.
+
+A subsequent metadata-only `thread/read` inspected the exact retained thread and
+turn without resume or inference: the native turn was **interrupted**, with a
+full item view and one retained agent message. No completed Consultant receipt
+was manufactured from that diagnostic. The planned second continuation was not
+started because it lacked a valid completed predecessor. There was no retry,
+third inference, model fallback or Actions run. The original binding, attempt,
+terminal and diagnostics remain in private operational evidence.
+
+The harness now derives its observation budget from the existing request owner
+instead of overriding it with 100; the original failed binding remains unchanged.
+Successful fresh/continuation acceptance is still outstanding and requires its
+own authorized calls. This result does not qualify other roles, providers,
+platforms, cancellation scenarios or full SDK delivery.
 
 ### Verified native evidence and subsequent changes
 
