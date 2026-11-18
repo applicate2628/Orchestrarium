@@ -9,6 +9,7 @@ home is not evidence that its complete configuration was observed or immutable.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 import hashlib
 import json
@@ -1144,6 +1145,8 @@ class ChildLeadAssignment:
     assignment_sha256: str
     decision_runtime_sha256: str
     decision_session_mode: str = "fresh-handoff"
+    goal: str | None = None
+    context: str | None = None
 
     @property
     def request_ids(self):
@@ -1151,7 +1154,7 @@ class ChildLeadAssignment:
 
 
 def _child_assignment_document(assignment):
-    return {"schemaVersion": 1, **{name:getattr(assignment,name) for name in (
+    return {"schemaVersion": 1, **({"goal":assignment.goal,"context":assignment.context} if assignment.goal is not None else {}), **{name:getattr(assignment,name) for name in (
         "child_id", "coordinator_binding", "child_work_item", "scope", "catalog",
         "required_request_ids", "lifecycle_permissions", "task_depth", "parent_child_id", "max_task_depth", "decision_runtime_sha256", "decision_session_mode")}}
 
@@ -1196,6 +1199,7 @@ def _load_child_assignment(selection, child_id, *, events=None, seen=(), allow_c
     expected={"schemaVersion","child_id","coordinator_binding","child_work_item","scope","catalog","required_request_ids","lifecycle_permissions","task_depth","parent_child_id","max_task_depth","decision_runtime_sha256"}
     if type(doc) is dict and "decision_session_mode" in doc:
         expected.add("decision_session_mode")
+    if type(doc) is dict and "goal" in doc:expected.update({"goal","context"})
     if type(doc) is not dict or set(doc)!=expected or type(doc['schemaVersion']) is not int or doc['schemaVersion']!=1 or doc['child_id']!=child_id:
         raise RuntimeBindingError("child_assignment_invalid")
     if (any(type(doc[n]) is not str or not doc[n].strip() for n in ('child_id','coordinator_binding','child_work_item'))
@@ -1206,8 +1210,11 @@ def _load_child_assignment(selection, child_id, *, events=None, seen=(), allow_c
         raise RuntimeBindingError("child_assignment_invalid")
     if doc.get('decision_session_mode','fresh-handoff') not in {'fresh-handoff','native-persistent'}:raise RuntimeBindingError('child_session_mode_invalid')
     if not _sha256(doc['decision_runtime_sha256']):raise RuntimeBindingError('child_decision_runtime_invalid')
+    if 'goal' in doc and (type(doc['goal']) is not str or not doc['goal'].strip()
+        or (doc['context'] is not None and type(doc['context']) is not str)):
+        raise RuntimeBindingError('child_goal_invalid')
     ids=[x[0] for x in doc['catalog']]
-    if (not ids or len(set(ids))!=len(ids) or not set(doc['required_request_ids'])<=set(ids)
+    if ((not ids and (not doc.get('goal') or not doc['scope'])) or len(set(ids))!=len(ids) or not set(doc['required_request_ids'])<=set(ids)
         or not set(doc['lifecycle_permissions'])<={'delegate','finish','cancel','delegate-child'}
         or type(doc['task_depth']) is not int or doc['task_depth']<1
         or (doc['max_task_depth'] is not None and (type(doc['max_task_depth']) is not int or doc['max_task_depth']<doc['task_depth']))):
@@ -1225,16 +1232,24 @@ def _load_child_assignment(selection, child_id, *, events=None, seen=(), allow_c
         raise RuntimeBindingError("child_assignment_cancelled")
     return ChildLeadAssignment(child_id,doc['coordinator_binding'],doc['child_work_item'],tuple(doc['scope']),
         tuple(tuple(x) for x in doc['catalog']),tuple(doc['required_request_ids']),tuple(doc['lifecycle_permissions']),
-        doc['task_depth'],parent_id,doc['max_task_depth'],row['artifactRevision'],doc['decision_runtime_sha256'],doc.get('decision_session_mode','fresh-handoff'))
+        doc['task_depth'],parent_id,doc['max_task_depth'],row['artifactRevision'],doc['decision_runtime_sha256'],doc.get('decision_session_mode','fresh-handoff'),doc.get('goal'),doc.get('context'))
 
 
 def publish_child_assignment(*, root_selection, root_authority, selections, child_id, coordinator_binding,
-        scope, required_request_ids, lifecycle_permissions, artifact, started_at, parent_child_id=None, max_task_depth=None, decision_selection=None, decision_session_mode="fresh-handoff"):
-    """Root explicitly grants a finite catalog through its existing artifact/ledger."""
+        scope, required_request_ids, lifecycle_permissions, artifact, started_at, parent_child_id=None, max_task_depth=None, decision_selection=None, decision_session_mode="fresh-handoff", child_work_item=None, goal=None, context=None):
+    """Root publishes scope and goal, optionally with an initial admitted catalog."""
     from .receiving import review_artifact_target
-    if not selections or not isinstance(child_id,str) or not child_id:
-        raise RuntimeBindingError("child_catalog_required")
+    if not isinstance(selections,Mapping) or not isinstance(child_id,str) or not child_id:
+        raise RuntimeBindingError("child_catalog_invalid")
+    if (goal is not None and (type(goal) is not str or not goal.strip())) or (context is not None and (goal is None or type(context) is not str)):
+        raise RuntimeBindingError("child_goal_invalid")
+    if not selections and (child_work_item is None or goal is None or not scope):
+        raise RuntimeBindingError("empty_child_goal_and_work_item_required")
     catalog=[];child_item=None
+    if child_work_item is not None:
+        explicit_child=Path(child_work_item)
+        if not explicit_child.is_absolute():raise RuntimeBindingError("child_work_item_absolute_required")
+        child_item=str(explicit_child.resolve(strict=True))
     for request_id,selection in selections.items():
         request=root_authority.resolve(request_id)
         validate_admitted_request(request,selection)
@@ -1259,7 +1274,7 @@ def publish_child_assignment(*, root_selection, root_authority, selections, chil
         raise RuntimeBindingError('child_decision_runtime_invalid')
     decision_digest=hashlib.sha256(json_text(decision_selection.to_dict()).encode()).hexdigest()
     value=ChildLeadAssignment(child_id,coordinator_binding,str(child),tuple(scope),tuple(catalog),tuple(required_request_ids),
-        tuple(lifecycle_permissions),depth,parent_child_id,max_task_depth,'',decision_digest,decision_session_mode)
+        tuple(lifecycle_permissions),depth,parent_child_id,max_task_depth,'',decision_digest,decision_session_mode,goal,context)
     content=(json_text(_child_assignment_document(value))+'\n').encode()
     target=review_artifact_target(root_selection.work_item,artifact,must_be_new=True)
     with _owner().TerminalReceiptV1.reserve(target) as receipt:receipt.commit(content)
@@ -1606,7 +1621,10 @@ class ChildLeadAuthority:
         self.assert_child_current(assignment,'child_decision_prepare')
         if request.decision_session_mode!=assignment.decision_session_mode:
             raise RuntimeBindingError('child_session_mode_changed')
-        if json.loads(request.child_choice_json)["assignment_sha256"]!=assignment.assignment_sha256:
+        projection=json.loads(request.child_choice_json)
+        if projection.get("goal")!=assignment.goal or projection.get("context")!=assignment.context:
+            raise RuntimeBindingError("child_goal_changed")
+        if projection["assignment_sha256"]!=assignment.assignment_sha256:
             raise RuntimeBindingError("child_decision_assignment_changed")
         if hashlib.sha256(json_text(selection.to_dict()).encode()).hexdigest()!=assignment.decision_runtime_sha256:
             raise RuntimeBindingError('child_decision_runtime_not_admitted')
@@ -1685,6 +1703,8 @@ class ChildLeadAuthority:
     def validate_decision(self,assignment,request,choice_json):
         from .coordination import validate_child_choice
         choice=validate_child_choice(choice_json)
+        if choice.get("goal")!=assignment.goal or choice.get("context")!=assignment.context:
+            raise RuntimeBindingError("child_goal_changed")
         if choice["assignment_sha256"]!=assignment.assignment_sha256 or request.admitted_request_id!=assignment.child_id:
             raise RuntimeBindingError("child_decision_assignment_changed")
         self.assert_child_current(assignment,'child_model')

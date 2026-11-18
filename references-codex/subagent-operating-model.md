@@ -116,6 +116,12 @@ New sessions receive the updated native instruction snapshot; running sessions
 are not retroactively rewritten. Global uninstall warns rather than inventing a
 complete dependent-project census. See INSTALL.md for the supported lifecycle.
 
+An explicitly Root-admitted SDK child may begin with an empty executable catalog
+and an immutable goal/context. Its real decision produces proposals for the
+existing Root admission owner; no fabricated seed execution or additional
+approval store is needed. Decision and task effects retain their exact current
+Root authorization. Empty catalog alone is not a completed outcome.
+
 ## Terms and Abbreviations
 
 - SDK: Software Development Kit.

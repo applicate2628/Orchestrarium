@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- SDK child coordination can start from a Root-defined goal and context before executable tasks exist. It forms scoped proposals for the existing Root admission owner, then executes admitted tasks and restores the same lifecycle after restart, without requiring a fabricated seed task or extra approval store.
+
 - Scoped child Leads can propose new tasks through a durable handoff to Root admission. Existing Root-published decisions extend the executable catalog without granting the child new authority or discarding its native session; pending/declined proposals remain recoverable and independent ready work can continue. Redundant catalog reads within one authority check are removed while preserving per-effect revocation and lifecycle checks; no cross-effect cache or timeout change is introduced.
 
 - Scoped Codex child Leads can explicitly retain a native decision conversation across turns and Host restart. Existing received evidence and atomic claims preserve saved decisions without replaying tasks; separate fresh-handoff mode remains available, and no new model-launch or lifecycle authority is granted.

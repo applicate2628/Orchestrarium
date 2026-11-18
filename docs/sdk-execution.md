@@ -312,8 +312,9 @@ and actually enforced hierarchy/native depth.
 The Python Host entrypoints are `runtime.publish_child_assignment`,
 `runtime.ChildLeadAuthority`, and `coordinator.ChildLeadCoordinator`. This is
 explicit Host composition, not a new command-line binding or automatic activation.
-Root supplies existing admitted immutable requests, their concrete receiving
-selections, and a separate child work-item. Publishing the assignment commits its
+Root supplies existing admitted immutable requests and their concrete receiving
+selections, or starts with an empty executable catalog and an explicit goal and
+context. Both routes use a separate child work-item. Publishing the assignment commits its
 artifact and digest to Root's existing ledger. A descriptive `scope` label is not
 a filesystem sandbox; each selected executor retains its own real permissions.
 
@@ -368,10 +369,16 @@ receipts. Child finish/cancel still goes through existing lifecycle owners.
 
 ### Dynamic child tasks through Root admission
 
-This additive route starts from an existing Root child assignment with its seed
-admitted task catalog. It does not yet redesign empty-catalog child creation or
-supply a generic Root task synthesizer. A child can propose a task without granting
-itself execution rights. The proposal contains a stable proposal identity and task intent (role, prompt and descriptive
+A Root child assignment may start with admitted executable tasks or with no
+executable tasks yet. For an empty catalog, Root supplies the explicit child
+work-item and immutable goal/context in the existing assignment; no fake seed
+task, additional permission store or separate admission anchor is required.
+The first actual decision can form a scoped task proposal from that goal/context;
+permitted finish/cancel intents still use the existing lifecycle checks.
+Each decision still requires its own exact request through existing Root
+resolve/current-authority checks, and proposed tasks require their ordinary Root
+admission before execution. An empty catalog is not automatic completion.
+A child can propose a task without granting itself execution rights. The proposal contains a stable proposal identity and task intent (role, prompt and descriptive
 scope), not an executable provider/model/budget/write-permission selection.
 The actual Root Host admits and registers a concrete immutable request with its
 runtime selection through the existing authority.

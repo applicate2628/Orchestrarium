@@ -1052,6 +1052,12 @@ Independent verification and existing publication authority remain required.
 The invoking Host supplies applicable current project guidance through the
 existing trusted handoff; readable files do not prove instructions were loaded.
 
+An explicitly Root-admitted SDK child may begin with an empty executable catalog
+and an immutable goal/context. Its real decision produces proposals for the
+existing Root admission owner; no fabricated seed execution or additional
+approval store is needed. Decision and task effects retain their exact current
+Root authorization. Empty catalog alone is not a completed outcome.
+
 ## Terms and Abbreviations
 
 - `accepted artifact`: an output that has passed its required gate and may be used by downstream roles.

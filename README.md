@@ -32,7 +32,7 @@ Optional software development kit (SDK) helpers are part of the installer-manage
 
 Client-specific authentication restrictions are documented in [client integration notes](docs/client-integrations.md). They do not block the primary Codex route.
 
-Scoped child Lead coordination is an explicit Python Host integration over existing admitted requests and lifecycle owners, not an automatically enabled CLI mode. Root can select separate fresh-handoff decisions or a persistent Codex native decision thread with received-evidence recovery; neither mode enables launches by itself. New child task proposals use durable handoff to existing Root admission; only Root-published admitted requests extend the executable catalog. See [child Lead integration and remaining boundaries](docs/sdk-execution.md#scoped-child-lead-host-integration). Offline coverage does not imply installed/native acceptance.
+Scoped child Lead coordination is an explicit Python Host integration over existing admitted requests and lifecycle owners, not an automatically enabled CLI mode. Root can select separate fresh-handoff decisions or a persistent Codex native decision thread with received-evidence recovery; neither mode enables launches by itself. A child may start from an explicit goal/context with no executable tasks yet. New child task proposals use durable handoff to existing Root admission; only Root-published admitted requests extend the executable catalog. See [child Lead integration and remaining boundaries](docs/sdk-execution.md#scoped-child-lead-host-integration). Offline coverage does not imply installed/native acceptance.
 
 
 ## Repository layout

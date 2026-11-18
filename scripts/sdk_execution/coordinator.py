@@ -437,6 +437,9 @@ class ChildLeadCoordinator:
         if callable(getattr(self._authority,"proposal_results",None)):
             outcomes=self._authority.proposal_results(assignment)
             value["proposal_results"]=[{"proposal_id":key,"result":outcomes[key]} for key in sorted(outcomes)]
+        if getattr(assignment, "goal", None) is not None:
+            value["goal"] = assignment.goal
+            value["context"] = assignment.context
         encoded = json_text(value)
         validate_child_choice(encoded)
         return encoded

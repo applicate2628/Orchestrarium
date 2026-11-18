@@ -20,12 +20,37 @@ from process_supervision import sdk_worker
 from provider_prompt import ProviderOutputContext,assemble_external_prompt
 
 
-def test_actual_proposal_root_admission_restart_execution_and_archive(tmp_path,monkeypatch):
-    original_publish=runtime.publish_child_assignment
-    with patch.object(runtime,"publish_child_assignment",side_effect=lambda **kwargs: original_publish(**kwargs,decision_session_mode="native-persistent")):
-        authority,assignment,requests,selections,root=fixture(tmp_path,monkeypatch)
-    task=requests["task-one"]
-    selection=selections["task-one"]
+@pytest.mark.parametrize("initial_catalog", ["seeded", "empty"])
+def test_actual_proposal_root_admission_restart_execution_and_archive(tmp_path,monkeypatch,initial_catalog):
+    if initial_catalog == "empty":
+        from types import SimpleNamespace
+        from test_sdk_runtime import fixture as root_fixture
+        from test_mutate_work_item import quick_status, closure
+        template,root=root_fixture(tmp_path)
+        root_item=Path(root.work_item);(root_item/"status.md").write_text(quick_status())
+        child=root_item.parent/"child-lane";child.mkdir();(child/"status.md").write_text(quick_status())
+        # A Host configuration template is not registered or executable.
+        task=runtime.prepare_codex_request(replace(template,work_item_id=child.name,cwd=str(child),
+            role="consultant",result_kind="task",coordinator_binding="child-coordinator"))
+        selection=replace(root,work_item=str(child))
+        requests={};selections={}
+        root_owner=SimpleNamespace(resolve=lambda key:requests[key],assert_current=lambda req,effect:None)
+        assignment=runtime.publish_child_assignment(root_selection=root,root_authority=root_owner,selections={},
+            child_id="child-grant",coordinator_binding=task.coordinator_binding,scope=task.scope,
+            required_request_ids=(),child_work_item=str(child),goal="Investigate the remaining scoped case.",
+            context="Root background without an executable seed.",
+            lifecycle_permissions=("delegate","finish","cancel","delegate-child"),
+            artifact="child-assignment.json",started_at=INSTANT,decision_session_mode="native-persistent",
+            decision_selection=replace(selection,config_overrides=runtime.CODEX_BOUNDED_REVIEW_OVERRIDES))
+        authority=runtime.ChildLeadAuthority(root_authority=root_owner,root_selection=root,child_id=assignment.child_id,
+            selections={},closure_data=closure(INSTANT).encode(),terminal_instant=INSTANT,repository_root=tmp_path)
+        assert assignment.request_ids==() and authority.child_catalog(assignment)==()
+    else:
+        original_publish=runtime.publish_child_assignment
+        with patch.object(runtime,"publish_child_assignment",side_effect=lambda **kwargs: original_publish(**kwargs,decision_session_mode="native-persistent")):
+            authority,assignment,requests,selections,root=fixture(tmp_path,monkeypatch)
+        task=requests["task-one"]
+        selection=selections["task-one"]
     counts={"decisions":0,"tasks":0}
     native_history=[]
     native_calls=[]
@@ -107,7 +132,8 @@ def test_actual_proposal_root_admission_restart_execution_and_archive(tmp_path,m
         # than timing out later pre-created executors before their turn.
         common=dict(authority=authority,process_owner=process,source_environment={},
                     deadline_monotonic=time.monotonic()+3600,cancellation_probe=lambda:False,started_at=INSTANT)
-        executor=runtime.SdkReviewExecutor(request_id="task-one",selection=selection,artifact="task-result.json",**common)
+        initial_executors=({} if initial_catalog=="empty" else {
+            "task-one":runtime.SdkReviewExecutor(request_id="task-one",selection=selection,artifact="task-result.json",**common)})
         decision_number=0
         def factory(admitted,projection):
             nonlocal decision_number
@@ -128,10 +154,10 @@ def test_actual_proposal_root_admission_restart_execution_and_archive(tmp_path,m
             return runtime.SdkCoordinationWorker(request_id=key,selection=chosen,artifact=key+".json",**common)
         write_empty_bug_dispositions(tmp_path,"child-lane",INSTANT)
         loop=ChildLeadCoordinator(child_id=assignment.child_id,authority=authority,
-                                 decision_factory=factory,executors={"task-one":executor})
+                                 decision_factory=factory,executors=initial_executors)
         pending=asyncio.run(loop.run())
         assert pending["status"]=="needs-admission"
-        assert counts=={"decisions":2,"tasks":1}
+        assert counts==({"decisions":1,"tasks":0} if initial_catalog=="empty" else {"decisions":2,"tasks":1})
         requests["task-two"]=runtime.prepare_codex_request(replace(task,external_dispatch_id="extra-dispatch",external_evidence_run_id="extra-evidence",
             artifact_id="extra-artifact",prompt="Check the remaining scoped case."))
         selections["task-two"]=selection
@@ -148,12 +174,12 @@ def test_actual_proposal_root_admission_restart_execution_and_archive(tmp_path,m
         loop=ChildLeadCoordinator(child_id=assignment.child_id,authority=authority,
             decision_factory=factory,executors=executors)
         archived=asyncio.run(loop.run())
-    assert counts=={"decisions":4,"tasks":2}
-    assert native_calls==["start","resume","resume","resume"]
-    assert len({row["id"] for row in native_history})==4
+    assert counts==({"decisions":3,"tasks":1} if initial_catalog=="empty" else {"decisions":4,"tasks":2})
+    assert native_calls==["start"]+["resume"]*(counts["decisions"]-1)
+    assert len({row["id"] for row in native_history})==counts["decisions"]
     assert Path(archived).is_dir() and "archive" in Path(archived).parts
     assert Path(root.work_item).is_dir() and not Path(assignment.child_work_item).exists()
     events=[json.loads(line) for line in (Path(archived)/"agent-runs.jsonl").read_text().splitlines()]
-    assert len([row for row in events if row.get("eventKind")=="terminal"])==6
+    assert len([row for row in events if row.get("eventKind")=="terminal"])==counts["decisions"]+counts["tasks"]
     assert all(row.get("authorizing") is False for row in events if row.get("eventKind")=="terminal")
     assert executors["task-two"].terminal["status"]=="completed"

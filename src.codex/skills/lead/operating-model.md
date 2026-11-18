@@ -695,3 +695,9 @@ pending/declined proposals from canonical evidence and continue independent read
 work; use the same request identity for execution rather than replaying admission
 or creating duplicate tasks. A machine needs-admission handoff does not introduce
 a new mandatory human-approval gate for already authorized routine work.
+
+An explicitly Root-admitted SDK child may begin with an empty executable catalog
+and an immutable goal/context. Its real decision produces proposals for the
+existing Root admission owner; no fabricated seed execution or additional
+approval store is needed. Decision and task effects retain their exact current
+Root authorization. Empty catalog alone is not a completed outcome.

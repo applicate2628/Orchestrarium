@@ -317,15 +317,20 @@ def validate_child_choice(choice_json):
     # Outer request/transport admission owns size; this pure schema adds no cap.
     value = strict_json(choice_json, max_bytes=len(choice_json.encode("utf-8")))
     base_keys = {"assignment_sha256", "catalog", "required_request_ids", "completed_request_ids", "received_results", "unavailable_results"}
-    if type(value) is not dict or set(value) not in (base_keys, base_keys | {"proposal_results"}):
+    if type(value) is not dict or set(value) not in (base_keys, base_keys | {"proposal_results"}, base_keys | {"proposal_results", "goal", "context"}):
         raise ValueError("invalid child choice fields")
     if json_text(value) != choice_json:
         raise ValueError("canonical child choice serialization required")
     digest = value["assignment_sha256"]
     if type(digest) is not str or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
         raise ValueError("invalid child assignment digest")
-    if type(value["catalog"]) is not list or not value["catalog"]:
-        raise ValueError("child catalog required")
+    if "goal" in value:
+        if type(value["goal"]) is not str or not value["goal"].strip():
+            raise ValueError("child goal required")
+        if value["context"] is not None and type(value["context"]) is not str:
+            raise ValueError("invalid child context")
+    if type(value["catalog"]) is not list or (not value["catalog"] and "goal" not in value):
+        raise ValueError("child catalog or explicit goal required")
     ids = []
     for row in value["catalog"]:
         if type(row) is not dict or set(row) != {"request_id", "request_sha256", "role", "scope", "prompt"}:
