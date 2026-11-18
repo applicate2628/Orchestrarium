@@ -1,16 +1,24 @@
 # SDK integration project
 
-Status: design reconciled on 2026-10-26 against the consolidated implementation
-[PR #19](https://github.com/applicate2628/Orchestrarium/pull/19), exact head
-`fc5db5b7d67e078c96c3fde3a7da1e0072d7fab8`. This PR remains documentation only.
-The source matrix below supersedes future-tense implementation claims in the
-original design; an implemented adapter is not proof of live qualification.
-SDK, npm distribution and Rust operations are independent tasks.
+Status: design reference reconciled on 2026-11-18. This PR is documentation only,
+not a second delivery tracker. Current approved multivendor scope, delivery order
+and implementation/qualification state belong to [PR19](https://github.com/applicate2628/Orchestrarium/pull/19)
+and its [completion roadmap](https://github.com/applicate2628/Orchestrarium/blob/23f212f1a7ed5b321abed496e0de88d3de83e567/docs/sdk-execution.md#pr19-completion-roadmap-2026-11-17).
+That link pins the reviewed November 18 snapshot; consult the actual PR19 head
+before selecting remaining work. Its November 17 approval replaces the earlier
+Codex-only/stub-only completion scope, without authorizing quota-consuming calls.
 
-## Source-pinned design-to-implementation matrix
+This reference retains design boundaries and dated evidence. The October matrix
+below is historical, not a current roadmap. SDK, distribution and Rust retain
+separate owners; implementation, installation, live qualification and activation
+are different claims.
 
-All implementation links in this matrix select the exact PR19 head above, not a
-moving branch. The implementation is still a draft, not merged product behavior.
+## Historical source-pinned matrix, 2026-10-26
+
+This historical matrix selects commit
+`fc5db5b7d67e078c96c3fde3a7da1e0072d7fab8`, not the current head. Its remaining-work
+statements and provider limitations describe that October snapshot only. PR19 owns
+their current disposition; this table is retained evidence, not a task list.
 
 | Work | Implementation and source evidence | Qualification and remaining work |
 | --- | --- | --- |
@@ -31,7 +39,7 @@ Historical Windows synthetic success/collision PASS and one Luna/high smoke PASS
 (18.343 seconds, cleanup PASS) belong to the pre-merge candidate, not sufficient by themselves to qualify the consolidated PR19 head.
 No runtime tests are rerun by this documentation reconciliation.
 
-## Codex subscription coordinator: implemented bounded slice
+## Historical Codex coordinator qualification, 2026-10-26
 
 PR19 implements an Orchestrarium adapter of the public Agents Model interface
 through the official Codex SDK/App Server and existing subscription. It is not an
@@ -48,12 +56,14 @@ unknown, not zero. This is not arbitrary multi-step routing or crash qualificati
 
 The exact qualified runtime tree is `acf9a9addb0ea73b5544f8b3070d1dff9a773841`.
 Checkpoint SHA-256: `7f13e81558f62be309667a9e652117450d339a237f4d2c0dbe5712746fd11626`.
-The sanitized portable live caller is not yet in the repository; retained hashes
-are not publicly reproducible execution steps. That delivery gap remains open.
+At that checkpoint the portable live caller was not in the repository; hashes
+alone were not publicly reproducible execution steps. This is a historical
+limitation, not a current assertion that the caller is still missing.
 
-Next qualification is scoped to the missing portable caller and deliberately
-selected recovery/platform scenarios, not re-implementing an absent Model backend.
-Keep streaming, arbitrary tool selection and other-vendor live use unqualified.
+Current qualification work is selected from PR19's execution and diagnostic/recovery
+evidence, not by reviving this historical gap. The public Model adapter already
+exists. This bounded result does not qualify streaming, arbitrary tool selection
+or other-vendor live use.
 No new paid/live launch is authorized by this document. Preserve existing owners,
 explicit budgets and cleanup; no OAuth extraction, private API, credential copying,
 API-billing substitution or implicit fallback.
@@ -69,8 +79,11 @@ A model API is not a substitute for a provider coding runtime.
 This project owns SDK-1 shared contract fixtures, SDK-2A a Host-led Codex bridge and SDK-2B an optional Agents coordinator, SDK-3 remaining provider adapters and SDK-4 qualified glue removal. Each implementation PR
 names actual deleted glue and preserved receiving behavior. Independent [npm distribution](https://github.com/applicate2628/Orchestrarium/pull/17) and
 [native Rust operations](https://github.com/applicate2628/Orchestrarium/pull/21) have independent main-based PRs and owning plans;
-ranking/evaluation, expanded role lifecycle and cross-host takeover remain in
-[PR #13](https://github.com/applicate2628/Orchestrarium/pull/13).
+broader orchestration design remains in
+[PR #13](https://github.com/applicate2628/Orchestrarium/pull/13). The child-Lead and
+session work already admitted in PR19 stays in that SDK roadmap. SDK-1 through
+SDK-4 are design categories, not a competing completion checklist; PR19 owns the
+approved multivendor role/access matrix and current implementation state.
 Neither design PR is a blanket merge prerequisite for this one. This extraction
 moves the SDK design, not the earlier manual-trust documentation/test repair in PR17.
 
@@ -108,21 +121,29 @@ Canonical owners remain [shared governance](../shared/AGENTS.shared.md),
 [external dispatch](../src.codex/skills/lead/external-dispatch.md),
 [provider execution](../scripts/provider_prompt.py) and
 [process supervision](../scripts/process_supervision/process_runner.py).
-Current admitted Codex/Claude paths, Kimi explicit-only fixed-profile eligibility
-and Grok unavailable execution remain unchanged. Missing transport capability is
+Current provider/role/access eligibility comes from PR19's approved matrix and
+existing admission owners, not the historical provider list in this reference. Missing transport capability is
 not permission to switch providers, profiles, accounts or billing lanes.
 
 ## Dependencies and delivery boundary
 
-The coordinator is optional, provisioned separately into an explicitly selected
-isolated Python environment with tested dependency locks and compatible adapter
-versions. Record compatible coordinator and consumed operation-interface/native
-versions where used, the actual interpreter and route requirements; no hidden install,
-environment discovery fallback or silent credential inheritance. The SDK project
-owns that Python dependency contract; PR17 owns npm distribution and consumption
-of the declared contract, not provisioning the environment. Existing CLI-owned ACP
-operations retain their actual CLI/account prerequisites. No whole-product
-Python-free claim follows from a future native hook port.
+SDK integration owns the Python dependency/capability contract: supported official
+vendor package routes, tested locks, selected interpreter, access/account requirements
+and adapter compatibility. An optional coordinator uses an explicitly selected
+environment, without hidden installation, ambient discovery or silent credentials.
+
+Distribution PR17 owns delivery of the qualified Orchestrarium release payload,
+including its selected Python runtime and consumption of the SDK dependency contract.
+It is not a second dependency-policy owner. Orchestrarium does not repackage vendor
+SDKs or CLI binaries; an official vendor installation may supply its own runtime
+with original metadata and dependencies. The
+[PR19 provider installation boundary](https://github.com/applicate2628/Orchestrarium/blob/23f212f1a7ed5b321abed496e0de88d3de83e567/docs/sdk-execution.md#provider-installation-boundary)
+keeps provider dependencies in the selected environment and the base distribution
+launcher installer-only. Qualify the connection between that environment and the
+entrypoint/supervised worker; a bundle alone does not prove SDK execution. Record
+the actual interpreter, qualified payload and compatible operation interfaces.
+Existing ACP routes retain their actual CLI/account prerequisites; a Rust hook
+port alone does not establish a Python-free product.
 
 ## Selected architecture and one source of truth
 
@@ -140,7 +161,12 @@ accepted inputs and observations, not copy rules, decide closure or maintain sha
 project ledgers. Native provider sessions and SDK conversation history may retain
 transport/conversation state, but neither supersedes authoritative project state.
 
-Selected adapter implementations:
+The original adapter choices below are not an exhaustive current provider or
+role/access inventory. PR19 owns that matrix, including AGY Lead-only subscription
+integration and additional supported routes. Package availability is not permission
+to call a subscription as a worker.
+
+Original adapter design choices:
 - **Codex:** direct [official Python Codex SDK](https://github.com/openai/codex/blob/main/sdk/python/README.md)
   (`openai-codex`) over Codex App Server. No Codex-to-ACP wrapper and no alternative
   experimental Agents `codex_tool` for the same operation. The latter is a different
@@ -158,7 +184,7 @@ Selected adapter implementations:
   relay or alternate transport until a concrete remote use case justifies it.
 
 These are selected integration paths, not measured reliability or universal
-platform qualification. PR19's [capability-based compatibility contract](https://github.com/applicate2628/Orchestrarium/blob/fc5db5b7d67e078c96c3fde3a7da1e0072d7fab8/docs/sdk-execution.md#capability-based-compatibility)
+platform qualification. PR19's [capability-based compatibility contract](https://github.com/applicate2628/Orchestrarium/blob/23f212f1a7ed5b321abed496e0de88d3de83e567/docs/sdk-execution.md#capability-based-compatibility)
 supersedes this draft's mandatory product-wide SDK/CLI pin. Admission checks required
 public APIs, capabilities and actual observed contracts; release strings/digests
 are evidence for a selected run, not an allowlist. Reproducible test dependency
@@ -279,8 +305,10 @@ runner or introduce a Rust dependency just to claim this is solved.
 ## Concrete SDK cases: replacement, deletion and proof
 
 Use ready components only where their ownership removes existing glue or avoids a
-new duplicate mechanism. The matrix above records the implemented bounded Codex
-slice; the broader cases below are not blanket live-route qualification.
+new duplicate mechanism. The cases below preserve October 23 design rationale;
+line ranges are historical investigation coordinates, not current source locations
+or proof that replacements remain unimplemented. PR19 owns delivered cases and
+remaining work. These examples are not blanket live-route qualification.
 No blanket hook-count reduction follows; host-mode hooks and foreign registrations
 (including Graft) remain outside SDK-owned-lane deletion.
 
@@ -356,23 +384,21 @@ record actual deleted source and retained route coverage; a new dependency plus 
 old glue is not a completed simplification. Upstream interfaces were inspected through
 GitHub on 2026-10-23; implementation records inspected revisions and qualifies required capabilities.
 
-## Remaining delivery plan
+## Delivery-plan ownership
 
-1. Preserve SDK-1's implemented identity/schema/receiving owners; extend only
-   concrete uncovered cases at those owners.
-2. Qualify SDK-2A's current-head installed Windows bridge and diagnostic recovery
-   independently of the optional outer loop; preserve strict trust and profile gates.
-3. Research SDK-2B's supported subscription-backed public Model contract, then,
-   only after admission and separate launch authorization, qualify one bounded
-   Agents cycle and Session/resume/crash receiving. Reuse SDK mechanics rather than
-   creating a parallel scheduler, session store or authoritative ledger.
-4. Keep SDK-3's implemented source/offline coverage; schedule other-provider live
-   evidence when quotas and permissions permit. Codex work need not wait for it.
-5. Apply SDK-4 deletion criteria within each qualified lane. Retain live legacy
-   routes and hooks; do not create a whole-product deletion milestone.
+Do not maintain a second ordered SDK plan here. Continue from
+[PR19's ordered implementation slices](https://github.com/applicate2628/Orchestrarium/blob/23f212f1a7ed5b321abed496e0de88d3de83e567/docs/sdk-execution.md#ordered-implementation-slices)
+and its current execution state at the actual PR head. Reconcile source, accepted
+evidence and active ownership before choosing an incomplete slice. The public
+Model adapter and bounded coordinator cycle already exist; do not restart their
+research or implementation because an older design used future tense.
 
-Rust and npm are independent tasks, not blanket prerequisites. No default route
-change, provider activation or new paid/live launch follows from this plan.
+The approved multivendor target is not completed by a Codex-only smoke or adapter
+catalog. Conversely, an unrun provider/platform check holds its dependent
+qualification, not independent ready work. PR19 owns the complete role/access/context
+acceptance criteria. Update this reference when an accepted contract or ownership
+boundary changes, not to duplicate progress. No default-route change, activation,
+merge, installation or paid/live launch follows from this reconciliation.
 
 ## Verification and completion
 
@@ -395,10 +421,10 @@ Source review/stubs do not qualify live providers or platform process guarantees
 
 Provider/runtime versions and the coordinator-model/account choice must be explicit
 before live qualification, with applicable route, data, budget and permission.
-Current generic Windows CLI remains unavailable at its private-directory boundary;
-generic POSIX execution remains unavailable. Native-host/specialized paths are not
-proof those generic entrypoints work. First SDK changes may preserve existing
-admitted paths without claiming to enable the generic runner.
+The October design recorded unavailable generic Windows/POSIX runner paths; this
+is not a current platform-status assertion. Use the current execution owner and
+PR19 evidence for actual capability and qualification. Native-host/specialized
+success does not prove that a different generic entrypoint works.
 
 Review responsibility: provider integration owns adapters/SDK changes; Architect
 and existing state/review/process owners accept implementation boundaries; Lead coordinates scope and

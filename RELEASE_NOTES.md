@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-18
+
+- Reconciled the SDK design reference with the approved multivendor completion roadmap in PR19. Historical evidence stays dated, already implemented coordinator work is not reopened, and SDK dependency ownership is separated from qualified distribution delivery without creating another progress tracker.
+
 ## 2026-10-26
 
 - Reconcile the SDK design matrix with the consolidated coordinator implementation and its one bounded subscription-backed live cycle. Separate completed integration from the still-missing portable live caller and unqualified recovery, streaming and arbitrary planning scenarios; this status correction starts no provider.
