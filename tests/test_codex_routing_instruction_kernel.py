@@ -178,6 +178,26 @@ class CodexRoutingInstructionKernelTests(unittest.TestCase):
         self.codex = (ROOT / CODEX).read_text(encoding="utf-8")
         self.shared = (ROOT / SHARED).read_text(encoding="utf-8")
 
+    def test_normal_and_ultra_share_existing_native_dispatch_owner(self):
+        # Source-contract guard only; no model launch or runtime attestation.
+        text = (ROOT / "src.codex/skills/lead/operating-model.md").read_text(encoding="utf-8")
+        unit = selected_unit(text, "Native Astra task-dependent route", "For ordinary native and skill-only roles,")
+        clauses = (
+            "normal and Ultra Leads use the same caller-owned procedure",
+            "The Lead model calls these selectors explicitly",
+            "Codex native `spawn_agent` does not call the Orchestrarium selector automatically",
+            "Do not copy the parent's Ultra effort into a child",
+            "The caller invokes the native host tool with the returned exact pair and profession handoff",
+            "Missing actual metadata alone neither invalidates substantive artifact review nor blocks acceptance or independent authorized work",
+            "An observed rejection or control mismatch holds only its dependent operation",
+        )
+        for clause in clauses:
+            with self.subTest(clause=clause):
+                self.assertIn(lexical(clause), lexical(unit))
+                changed = unit.replace(clause, "omitted", 1)
+                self.assertNotIn(lexical(clause), lexical(changed))
+        self.assertIn("ordinary and Ultra Leads follow the same caller-owned procedure", self.codex)
+
     def test_inline_obligations(self):
         for duty, present in codex_duties(self.codex).items():
             with self.subTest(duty=duty):

@@ -1,19 +1,64 @@
 # Orchestrarium
 
-A cross-provider agent orchestration monorepo that keeps the production Codex and Claude Code lines aligned on one shared governance and reference core.
+<img src="assets/branding/orche.png" alt="Little Orche, the small winged green mascot" width="160" height="152">
 
-Codex native roles use the task and role selector, with Terra for suitable ordinary work and Sol for science. Named Luna mechanical roles have a separate supervised corridor; ordinary eligible producer roles can use `luna-high` or `luna-xhigh`. Explicit user controls, host restrictions, independent reviews and per-attempt Astra or Max consent remain binding. See [Codex platform rules](src.codex/AGENTS.codex.md) and [installation details](INSTALL.md) for role, migration and runtime contracts.
+**A workflow pack for coordinated AI development.** The current project is
+Orchestrarium; its mascot is Little Orche. The planned Orche rebrand follows
+the SDK and Rust transitions and is not part of this release.
 
-- `src.codex/` — the production Codex provider-pack source
-- `src.claude/` — the production Claude Code provider-pack source
+Orchestrarium helps a leading assistant divide work, assign suitable specialist roles,
+keep authors and reviewers separate, and carry verified results through to
+delivery. Shared rules provide a common workflow; each supported client keeps
+its own runtime conventions. Rules and role selection do not grant permission
+to launch models or spend quota.
 
-The provider lines share one governance model and role vocabulary, while each keeps the runtime structure expected by its own provider. The root router installs Codex, Claude, or both. The removed Gemini and Qwen provider values are retained only as fail-closed migration identifiers; they are not install or execution routes.
+## Start here
 
-Warning: Orchestrarium is optimized for maximum execution effectiveness and low orchestration drag rather than for minimum token spend. On large tasks, multi-opinion review lanes, or aggressive external fan-out, usage can rise quickly and consume a substantial token budget in a short time.
+- **Install or update:** [installation guide](INSTALL.md).
+- **Understand the workflow:** [documentation index](docs/README.md).
+- **Work on the project:** [maintainer starting point](docs/new-session-guide.md).
+- **See released changes:** [release notes](RELEASE_NOTES.md).
 
-New maintenance sessions should start with [`docs/new-session-guide.md`](docs/new-session-guide.md). It records the source-first rule for this monorepo: tracked Orchestrarium source is canon, while `~/.codex/`, `~/.claude/`, project `.agents/`, and project `.claude/` are installed runtime outputs that should not be patched as the durable fix before the source owner is updated.
+## Current release and SDK development
 
-For a repository transfer, `$manual-repo-transfer` defaults to a verified Git clone plus only the required current local-state overlay; ignored `work-items/` is not in the clone. Direct transfers can preserve unfinished work without requiring cleanup or publication. When cleanup is explicitly requested, `$repo-cleanup` and the transfer owner apply their existing separate contracts. Offline or full recovery is an explicit alternative.
+| | Current `main` | SDK development in [PR #19](https://github.com/applicate2628/Orchestrarium/pull/19) |
+| --- | --- | --- |
+| Availability | The production source described by this README and its installation guide. | A separate, unmerged development branch; not the current globally installed release. |
+| Clients and layout | Codex and Claude Code packs share governance. Their source remains in `src.codex/` and `src.claude/`. | Work toward a common core with client adapters, including Antigravity integration. Its changed paths do not apply to `main`. |
+| Delegation | Existing role selection and execution routes, with their documented permissions and platform limits. | Optional SDK (Software Development Kit) execution and child-session coordination are being developed and checked. They are not enabled by this README. |
+| Evidence | Use the current installation guide and source contracts for the operation being performed. | Offline checks do not establish live provider or platform acceptance. Read the PR's current evidence and remaining limits before testing. |
+
+The SDK branch is not a reason to reinstall or migrate a working setup early.
+This page does not announce SDK release readiness or enable quota-consuming runs.
+
+### Roles, models and cost
+
+The leading assistant chooses each Codex task's model and reasoning effort through the existing
+role selector; a role name alone is not a fixed model assignment. Current user
+settings, supported model options and permissions still apply. Authors and
+reviewers remain separate. See [Codex platform rules](src.codex/AGENTS.codex.md)
+for the maintained routing contract rather than a second model ranking here.
+
+Parallel work and independent reviews can consume substantial tokens. Orchestrarium
+prioritizes effective execution, not the lowest possible spend. Selecting a
+route does not authorize a model launch, external review or paid operation.
+
+### Maintainer notes
+
+The repository source is authoritative; installed files are runtime outputs.
+Start maintenance with [the source-first guide](docs/new-session-guide.md).
+The root installer currently selects Codex, Claude, or both. Removed Gemini and
+Qwen values are migration identifiers, not supported installation or execution
+routes.
+
+For repository transfer, `$manual-repo-transfer` uses a verified Git clone plus
+only the required current local-state overlay; ignored `work-items/` is not
+included in a clone. Cleanup is a separate explicitly requested operation.
+
+Optional distribution assembly is documented in [the distribution guide](scripts/distribution/README.md).
+It binds the supplied runtime to its notice inventory; it does not change
+provider permissions. [Runtime evidence](scripts/distribution/runtime-evidence.md)
+records the bounded packaging checks, not general SDK acceptance.
 
 ## WARNING: Claude external authentication
 
@@ -90,6 +135,8 @@ monthly archive without inventing candidate, active, or closure history.
 
 ## Installation
 
+The pre-SDK installer uses its existing Windows and POSIX transaction backends under the ordinary serialized-writer contract. Capability, ownership and recovery checks remain active; see [Installation](INSTALL.md) for platform-specific limits.
+
 Use the root router installers for the common path:
 
 ```bash
@@ -128,9 +175,9 @@ Important: operator preferences live in per-provider `agents-mode` files; both p
 - `preferExternalWorker` and `preferExternalReviewer` let routing prefer `$external-worker` on `implement` and `$external-reviewer` on `review` and `QA`.
 - `externalProvider` accepts `auto | codex | claude | kimi | grok`. `auto` remains lane-driven, not host-pack-driven, and shipped production profiles stay on the Codex/Claude pair with `reserve` only as a supplemental advisory/review candidate. Kimi is explicit-only through the canonical fixed `kimi-code/k3` wrapper for policy-admitted read-only exploration/research/planning/review or mapped `external-worker` engineering. Its optional validated capability file may select admitted read tools/Model Context Protocol servers or scoped worker tools; omission preserves empty tools/servers/subagents and permission `reject`. Every result is independently verified and nonauthorizing. Kimi never enters `auto`; Grok remains unavailable in 1.x. Legacy Gemini/Qwen scalar values fail closed with `E_EXTERNAL_PROVIDER_REMOVED` and are not rewritten silently.
 - `externalPriorityProfile` selects the active named provider-order profile, `reserveResolver` binds the symbolic `reserve` slot to a concrete read-only resolver, `externalPriorityProfiles` stores the switchable per-lane provider orders, and `externalOpinionCounts` raises specific lanes above the default single-opinion behavior when one external opinion is not enough. Those counts are lane-local distinct-opinion requirements, not a cap on how many parallel external helper instances may run overall; `parallelMode` remains the general fan-out rule for any helper lane, while bounded same-provider external helper fan-out lives under the dedicated brigade surfaces.
-- `externalModelMode: runtime-default | pinned-top-pro` remains the shared production model policy for the Codex/Claude pair. For `runtime-default`, the caller obtains the installed runtime's observed supported model and effort and passes them explicitly at launch; if not observed, the route is unavailable; `pinned-top-pro` starts on the strongest documented provider-native model/profile and allows one named same-provider fallback on limit-style failures.
-- `externalCodexProfile: default | gpt-6.1-sol-high | gpt-6.1-sol-xhigh | gpt-6.1-sol-max | gpt-6-sol-high | gpt-6-sol-xhigh | gpt-6-sol-max | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-terra` is the Codex-specific external profile override. The shipped omitted-key/first-write value uses `gpt-6.1-sol-xhigh`, symmetric to Claude's `opus-xhigh`; `max-speed` uses `gpt-6.1-sol-high`.
-  Explicit `default` instead inherits `externalModelMode` after provider resolution, with Sol selections under that policy using GPT-6.1 Sol. `gpt-6.1-sol-high`, `gpt-6.1-sol-xhigh`, and `gpt-6.1-sol-max` pin model `gpt-6.1-sol` with the named reasoning effort. Existing explicit `gpt-6-sol-high`, `gpt-6-sol-xhigh`, `gpt-6-sol-max`, `gpt-5.6-sol-xhigh`, and `gpt-5.6-sol-max` tokens retain their literal model/effort meaning for the remainder of 1.x and are not normalized forward. `gpt-5.6-terra` is unchanged: it selects the balanced Codex model (a distinct model, `model_reasoning_effort = "high"`, not an effort suffix) and must be verified against the installed Codex runtime.
+- `externalModelMode: runtime-default | pinned-top-pro` remains the shared production model policy for the Codex/Claude pair. For `runtime-default`, the caller obtains the installed runtime's observed supported model and effort and passes them explicitly at launch; if not observed, the route is unavailable; `pinned-top-pro` starts on the strongest documented provider-native model/profile and does not authorize a retired-model fallback on limit-style failures.
+- `externalCodexProfile: default | gpt-6.2-sol-high | gpt-6.2-sol-xhigh | gpt-6.2-sol-max` is the Codex-specific external profile override. The shipped omitted-key/first-write value uses `gpt-6.2-sol-xhigh`, symmetric to Claude's `opus-xhigh`; `max-speed` uses `gpt-6.2-sol-high`.
+  The current external Codex profiles are `default`, `gpt-6.2-sol-high`, `gpt-6.2-sol-xhigh` and `gpt-6.2-sol-max`. The shipped default is `gpt-6.2-sol-xhigh`; `default` uses `externalModelMode` with an explicitly observed, currently admitted runtime model/effort. Named Sol profiles request GPT-6.2 Sol at their stated effort. Max remains approval-gated. Retired profiles are not launchable and are not silently rewritten or used as quota fallbacks.
 - Explicit self-provider selection is allowed only as an override for isolation, transport, profile, or an intentionally independent rerun.
 - `reserve` is a symbolic advisory/review-only profile candidate. It is not a scalar provider, not a worker path, and not a silent fallback from primary `claude` or `codex`; `reserveResolver: claude-sonnet | claude-wrapper | wrapper:<command> | disabled` selects the concrete read-only resolver, where `wrapper:<command>` is a PATH-resolved command or repo-relative wrapper path.
 - External provider CLI launches use file-based prompts by default: write substantive task prompts to temporary prompt files and feed them through stdin or a provider-supported file-input mechanism instead of putting the full prompt in argv.
@@ -168,7 +215,7 @@ If a repo-local lane policy explicitly asks for consultant input at closeout, it
 
 See [INSTALL.md](INSTALL.md) for quick install, pack-specific install details, dual-platform setup, and post-install customization.
 
-Publication scan-derived push credit requires the actual native Git callback to receive one fresh bounded, reaped, non-empty Version 3 union of actual update commit/tree/blob graphs relative to each old object ID and a separate Version 4 result covering actual transferred roots, including noncommit objects. Version 2 and manual/default/path scan output remain diagnostic only and cannot authorize a push.
+Publication scan-derived push credit requires the actual native Git callback to receive one fresh bounded, reaped, non-empty Version 3 union of actual update commit/tree/blob graphs relative to content already disclosed to the same qualified receiver and a separate Version 4 result covering newly disclosed actual update roots, including noncommit objects. Version 2 and manual/default/path scan output remain diagnostic only and cannot authorize a push.
 
 ## Orchestration utilities
 
@@ -265,7 +312,7 @@ python .\scripts\check-publication-gate.py
 
 This repository is licensed under the Mozilla Public License 2.0. See [LICENSE](LICENSE).
 
-Managed adapters supply actual assigned-role provenance and consume `--user-approved-launch` locally before `--`; that flag is only the caller projection of one genuine exact-attempt Astra/Max agreement. `provider_prompt.launch` and the native selector share the pure `model_routing/launch_policy.py` rule. A complete selected logical package includes that nested module, including relocated transports; a FILE link on R/P does not move its companion namespace to the referent directory. Missing/broken mandatory support fails truthfully before effects. Prefer completing the qualified package; declared same-owner Assistance with all canonical rule, scope, genuine permission where needed, resources and readback guarantees may be selected by Root without a new ordinary permission loop. There is no catch-and-allow, raw-flag authority or automatic retry. Roleless direct-user compatibility does not permit managed callers to omit their assigned profession.
+Managed adapters supply actual assigned-role provenance and consume `--user-approved-launch` locally before `--`; that flag is only the caller projection of genuine exact-launch approval. Optional `--astra-task-authorization-json` instead carries a matching genuine Astra 6.2 High/Extra high task authorization; caller-checked scope, revocation and limits still bind before covered repeats, and Max never uses it. `provider_prompt.launch` and the native selector share the pure `model_routing/launch_policy.py` rule. A complete selected logical package includes that nested module, including relocated transports; a FILE link on R/P does not move its companion namespace to the referent directory. Missing/broken mandatory support fails truthfully before effects. Prefer completing the qualified package; declared same-owner Assistance with all canonical rule, scope, genuine permission where needed, resources and readback guarantees may be selected by Root without a new ordinary permission loop. There is no catch-and-allow, raw-flag authority or automatic retry. Roleless direct-user compatibility does not permit managed callers to omit their assigned profession.
 
 ## Codex native instruction ownership
 

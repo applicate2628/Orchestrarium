@@ -62,13 +62,17 @@ except ModuleNotFoundError as error:
 try:
     from installation.ownership import (
         RECEIPT_NAME as _PROVIDER_RECEIPT_NAME,
-        serialize_fresh_payloads as _serialize_fresh_payloads)
+        serialize_fresh_payloads as _serialize_fresh_payloads,
+        serialize_fresh_install as _serialize_fresh_install,
+        fresh_control_paths as _fresh_control_paths)
 except ModuleNotFoundError as error:
     if error.name not in {"installation", "installation.ownership"}:
         raise
     from scripts.installation.ownership import (
         RECEIPT_NAME as _PROVIDER_RECEIPT_NAME,
-        serialize_fresh_payloads as _serialize_fresh_payloads)
+        serialize_fresh_payloads as _serialize_fresh_payloads,
+        serialize_fresh_install as _serialize_fresh_install,
+        fresh_control_paths as _fresh_control_paths)
 
 try:
     from installation.configuration import render_selected_document as _render_selected_document
@@ -553,6 +557,19 @@ UI_CONTINUITY_CONTRACT_TARGET = Path("contracts") / "ui-transition-continuity.md
 CODEX_HOOK_INVENTORY = "codex-hook-inventory.json"
 CODEX_ROLE_MANIFEST = "orchestrarium-role-manifest.json"
 _STOCK_NATIVE_ROLE_CONTRACT_PRIOR_PAIRS = (
+    # Exact factory contract before removing Low catalogue entries.
+    ((Path("shared") / "role-routing-policy.v1.json", "172b335f9d0ea70021bff88b048d1472709132897989365f4b4ee3e47e5682d1"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "c8164fe1df43369c22e9d2c800ef2e2cb0e775c6a31dc65fc25c06cf77e812dc")),
+    # Exact factory contract before latest-family-only routing.
+    ((Path("shared") / "role-routing-policy.v1.json", "9672319f42039f6e8864de31e00ea4423011f3be679c3180e2161a8611b28259"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "882b96207b5503bb231002301cc15df08107c66a9ccfd189a84b48e6e62d1b0a")),
+    # Exact previous factory contract for the 6.2 task-first ranking.
+    ((Path("shared") / "role-routing-policy.v1.json", "b3551957c35cc724e905522d0b9ce0044fc050fcbeb2fd9e0893835cca083168"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "fbb6a7dbdb41336a8a82d8adfebbd79b762e5472f98267c30500d0e99c3fd03a")),
+    # Exact pre-6.2 factory contract. Keep the Terra ranking pair last: its
+    # position is the existing control-only migration provenance boundary.
+    ((Path("shared") / "role-routing-policy.v1.json", "fafd37b08375e0d261a57edd06613ab15dcaac9075fc031bf2702b173e6f8cf7"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "2ca416fa4fc2aa93c7fe74dc6db62273d72367a901e0ee260fce55377acb6d77")),
     (
         (Path("shared") / "role-routing-policy.v1.json",
          "b6b76525d5e9d054cf8c1a9d89ea038c42ce8b488a1a835873d6d38f6e5b8bd3"),
@@ -679,6 +696,9 @@ def _parser(provider: str) -> argparse.ArgumentParser:
     modes.add_argument("--global", "-Global", dest="global_install", action="store_true")
     modes.add_argument("--target", "-Target")
     parser.add_argument("--force", "-Force", action="store_true")
+    parser.add_argument("--uninstall", action="store_true", help="Preview selected-current owned content removal")
+    parser.add_argument("--apply", action="store_true", help="Apply the reviewed uninstall selection")
+    parser.add_argument("--uninstall-selection", metavar="SHA256", help="Exact current selection from uninstall preview")
     parser.add_argument(
         "--replace-unreceipted-lead-sha256",
         metavar="SHA256",
@@ -906,6 +926,101 @@ class _WindowsBoundNode:
     _security_bindings = None
     _descriptor_bindings = None
     _target_bindings = None
+    _privilege_bindings = None
+
+    @classmethod
+    @contextmanager
+    def symlink_privilege(cls, *, required: bool = True):
+        """Use an existing privilege on a private thread token before acquisition.
+
+        FSCTL symlink access is captured when the creator handle is opened.
+        Never adjust the process token or grant a privilege absent from the
+        current effective token. Restore any prior impersonation exactly.
+        """
+        if not required:
+            yield
+            return
+        ctypes, W, kernel, *_rest = cls._api()
+        if cls._privilege_bindings is None:
+            class Luid(ctypes.Structure):
+                _fields_ = [("low", W.DWORD), ("high", W.LONG)]
+
+            class Item(ctypes.Structure):
+                _fields_ = [("luid", Luid), ("attributes", W.DWORD)]
+
+            class Privileges(ctypes.Structure):
+                _fields_ = [("count", W.DWORD), ("items", Item * 1)]
+
+            api = ctypes.WinDLL("advapi32", use_last_error=True)
+            kernel.GetCurrentThread.argtypes = ()
+            kernel.GetCurrentThread.restype = W.HANDLE
+            kernel.GetCurrentProcess.argtypes = ()
+            kernel.GetCurrentProcess.restype = W.HANDLE
+            api.OpenThreadToken.argtypes = (W.HANDLE, W.DWORD, W.BOOL, ctypes.POINTER(W.HANDLE))
+            api.OpenThreadToken.restype = W.BOOL
+            api.OpenProcessToken.argtypes = (W.HANDLE, W.DWORD, ctypes.POINTER(W.HANDLE))
+            api.OpenProcessToken.restype = W.BOOL
+            api.DuplicateTokenEx.argtypes = (W.HANDLE, W.DWORD, ctypes.c_void_p,
+                                             ctypes.c_int, ctypes.c_int, ctypes.POINTER(W.HANDLE))
+            api.DuplicateTokenEx.restype = W.BOOL
+            api.LookupPrivilegeValueW.argtypes = (W.LPCWSTR, W.LPCWSTR, ctypes.POINTER(Luid))
+            api.LookupPrivilegeValueW.restype = W.BOOL
+            api.AdjustTokenPrivileges.argtypes = (W.HANDLE, W.BOOL, ctypes.POINTER(Privileges),
+                                                  W.DWORD, ctypes.c_void_p, ctypes.c_void_p)
+            api.AdjustTokenPrivileges.restype = W.BOOL
+            api.SetThreadToken.argtypes = (ctypes.POINTER(W.HANDLE), W.HANDLE)
+            api.SetThreadToken.restype = W.BOOL
+            cls._privilege_bindings = api, Privileges
+        api, Privileges = cls._privilege_bindings
+        source, private = W.HANDLE(), W.HANDLE()
+        had_thread_token = False
+        attached = False
+        try:
+            # QUERY | DUPLICATE | IMPERSONATE; the latter permits exact restore.
+            if api.OpenThreadToken(kernel.GetCurrentThread(), 0x0E, True, ctypes.byref(source)):
+                had_thread_token = True
+            else:
+                error = ctypes.get_last_error()
+                if error != 1008:  # ERROR_NO_TOKEN is the only process-token route.
+                    raise ctypes.WinError(error)
+                if not api.OpenProcessToken(kernel.GetCurrentProcess(), 0x0A, ctypes.byref(source)):
+                    raise ctypes.WinError(ctypes.get_last_error())
+            # QUERY | ADJUST_PRIVILEGES | IMPERSONATE, SecurityImpersonation,
+            # TokenImpersonation. The source token remains unchanged.
+            if not api.DuplicateTokenEx(source, 0x2C, None, 2, 2, ctypes.byref(private)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            state = Privileges()
+            state.count = 1
+            state.items[0].attributes = 2  # SE_PRIVILEGE_ENABLED, never REMOVED.
+            if not api.LookupPrivilegeValueW(None, "SeCreateSymbolicLinkPrivilege",
+                                              ctypes.byref(state.items[0].luid)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            ctypes.set_last_error(0)
+            success = api.AdjustTokenPrivileges(private, False, ctypes.byref(state), 0, None, None)
+            error = ctypes.get_last_error()
+            if not success or error:  # Includes successful API / NOT_ALL_ASSIGNED.
+                raise ctypes.WinError(error)
+            if not api.SetThreadToken(None, private):
+                raise ctypes.WinError(ctypes.get_last_error())
+            attached = True
+            yield
+        finally:
+            try:
+                if attached and not api.SetThreadToken(None, source if had_thread_token else None):
+                    # Do not run rollback/caller code under an unrestored identity.
+                    # Process death releases the private token and native handles.
+                    try:
+                        os.write(2, b"E_WINDOWS_TOKEN_RESTORE_FAILED: installer stopped; inspect retained transaction state.\n")
+                    finally:
+                        os._exit(70)
+            finally:
+                try:
+                    if private and not kernel.CloseHandle(private):
+                        raise ctypes.WinError(ctypes.get_last_error())
+                finally:
+                    if source and not kernel.CloseHandle(source):
+                        raise ctypes.WinError(ctypes.get_last_error())
+
 
     @classmethod
     def _api(cls):
@@ -1259,7 +1374,7 @@ class _WindowsBoundNode:
         return name
 
     @classmethod
-    def target_reparse_data(cls, target: "_WindowsBoundNode", *, junction: bool = False) -> bytes:
+    def target_reparse_data(cls, target: "_WindowsBoundNode", *, junction: bool | None = None) -> bytes:
         """Let the OS name the target; encode the documented reparse metadata layout."""
         import struct
         ctypes, wintypes, kernel, *_rest = cls._api()
@@ -1287,6 +1402,8 @@ class _WindowsBoundNode:
             raise ctypes.WinError(ctypes.get_last_error())
         if length >= len(buffer):
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: native target spelling drift")
+        if junction is None:
+            junction = _windows_projection_uses_junction(buffer.value)
         converted = UnicodeString()
         try:
             status = convert(buffer.value, ctypes.byref(converted), None, None)
@@ -1404,6 +1521,7 @@ class _SliceAMigratedFileRecord:
     old_current: _PhysicalNode | None = None
     new_current: _PhysicalNode | None = None
     selection_links: tuple[tuple[Path, _PhysicalNode], ...] = ()
+    reservation_state: dict[Path, _PhysicalNode] | None = None
 
     @property
     def proof_key(self) -> tuple[Any, ...]:
@@ -2004,6 +2122,7 @@ class _CopyMetadataParticipant:
     restored: _CopyMetadataImage | None = None
     unknown: bool = False
     target_text: str | None = field(default=None, compare=False, repr=False)
+    created_origin: _PhysicalNode | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -2062,10 +2181,10 @@ class _DeclaredPathEffect:
 def _require_transaction_disposal_backend() -> None:
     """Refuse unqualified transaction disposal before reads or effects.
 
-    This negative gate is not a capability or ownership proof. Windows callers
+    This platform gate is not a capability or ownership proof. Every caller
     must still satisfy the existing native object and transaction checks.
     """
-    if os.name != "nt":
+    if os.name not in {"nt", "posix"}:
         raise ValueError(
             "E_EFFECT_BOUND_DISPOSAL_UNQUALIFIED: transaction disposal requires "
             "a qualified effect-bound backend; preserve retained recovery material"
@@ -2242,10 +2361,10 @@ class _InstallTransaction:
                     if descriptor is not None:
                         raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing actual producer digest")
                     node_data = bound.digest() if bound is not None else _file_sha256(path)
-                elif node_kind == "link":
+                elif node_kind in {"link", "reparse"}:
+                    # The acquired object's stored target is evidence even when
+                    # its referent was removed by an earlier owned inverse.
                     node_data = bound.logical_target() if bound is not None else os.readlink(path)
-                elif node_kind == "reparse":
-                    node_data = str(Path(bound.logical_target()).resolve(strict=True)) if bound is not None else str(path.resolve(strict=True))
             reparse = (bound.reparse_data() if bound is not None and not metadata_only
                        and getattr(metadata, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT else None)
             return _PhysicalNode(node_kind, (metadata.st_dev, metadata.st_ino, metadata.st_mode,
@@ -2646,6 +2765,19 @@ class _InstallTransaction:
         return dependency
 
     @staticmethod
+    def _copy_close_failure(path, primary, cleanup, *, context="copy-close"):
+        """Add one close failure without dropping the copy's existing evidence."""
+        prior = primary if isinstance(primary, _InstallFailure) else None
+        members = () if prior is None else prior.members
+        return _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", context,
+            primary if primary is not None else cleanup,
+            members=members + (_RollbackFailureMember("backup", -1, str(path),
+                "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
+                cause_exception=cleanup),),
+            recovery_path=None if prior is None else prior.recovery_path,
+            unresolved_paths=() if prior is None else prior.unresolved_paths)
+
+    @staticmethod
     @contextmanager
     def _copy_reference(path: Path, expected: _PhysicalNode, *, writable=False,
                         metadata_only=False):
@@ -2681,10 +2813,7 @@ class _InstallTransaction:
             try:
                 os.close(descriptor)
             except OSError as cleanup:
-                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "copy-close", primary or cleanup,
-                    members=(_RollbackFailureMember("backup", -1, str(path),
-                             "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
-                             cause_exception=cleanup),)) from primary
+                raise _InstallTransaction._copy_close_failure(path, primary, cleanup) from primary
 
     def _acquire_copy_metadata(self, path, metadata, descriptor, bound):
         participant = self._copy_metadata.get(path)
@@ -2693,13 +2822,21 @@ class _InstallTransaction:
         if descriptor is None and bound is None:
             # POSIX observation binds a no-follow descriptor before hashing.
             descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            primary = None
             try:
                 actual = os.fstat(descriptor)
                 if (actual.st_dev, actual.st_ino, actual.st_mode) != (metadata.st_dev, metadata.st_ino, metadata.st_mode):
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: copy metadata acquisition")
                 image = self._read_copy_metadata(actual, descriptor, None)
+            except BaseException as error:
+                primary = error
+                raise
             finally:
-                os.close(descriptor)
+                try:
+                    os.close(descriptor)
+                except OSError as cleanup:
+                    raise _InstallTransaction._copy_close_failure(
+                        path, primary, cleanup, context="copy-metadata-close") from primary
         else:
             image = self._read_copy_metadata(metadata, descriptor, bound)
         participant.before = participant.current = image
@@ -2726,10 +2863,58 @@ class _InstallTransaction:
             if actual.stable() != expected.stable():
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: copy stable metadata drift")
 
+    def _representable_copy_times(self, path: Path, descriptor: int,
+                                  requested: tuple[int, int]) -> tuple[int, int]:
+        """Measure this pair through the same setter on an owned sibling file."""
+        parent = _CreateOnlyMutablePath._identity(path.parent)
+        prepared = {}
+        primary = None
+        def record(member, node):
+            prepared[member] = node
+            self._advance(member, {member: node})
+        try:
+            probe, node = self._prepare_payload_file(path.parent, ".timestamp-", b"", record, fsync="none")
+            with self._copy_reference(probe, node, writable=True) as (fd, bound):
+                if (bound is not None or os.fstat(fd).st_dev != os.fstat(descriptor).st_dev
+                        or _CreateOnlyMutablePath._identity(path.parent) != parent):
+                    raise ValueError("E_MUTABLE_PATH_POSTCONDITION: timestamp probe binding")
+                def sample(pair):
+                    os.utime(fd, ns=pair)
+                    actual = os.fstat(fd)
+                    if self._scalar_descriptor_node(probe, fd, node) != node:
+                        raise ValueError("E_MUTABLE_PATH_POSTCONDITION: timestamp probe drift")
+                    result = (actual.st_atime_ns, actual.st_mtime_ns)
+                    if any(value > limit for value, limit in zip(result, pair)):
+                        raise ValueError("E_MUTABLE_PATH_POSTCONDITION: timestamp probe rounding")
+                    return result
+                first = sample(requested)
+                contrast = tuple(0 if value != 0 else 86_400_000_000_000 for value in first)
+                other = sample(contrast)
+                final = sample(requested)
+                if first != final or any(value == alternate for value, alternate in zip(first, other)):
+                    raise ValueError("E_MUTABLE_PATH_POSTCONDITION: timestamp probe reproducibility")
+                if _CreateOnlyMutablePath._identity(path.parent) != parent:
+                    raise ValueError("E_MUTABLE_PATH_POSTCONDITION: timestamp probe parent drift")
+                return final
+        except BaseException as error:
+            primary = error
+            raise
+        finally:
+            for member, witness in prepared.items():
+                try:
+                    self._dispose_image(member, {member: witness})
+                except BaseException as cleanup:
+                    paths, members, errors = self._settlement_failure(cleanup, "backup", -1, member,
+                        "E_ROLLBACK_BACKUP_CLEANUP_FAILED", (member,), participant="backup")
+                    raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "timestamp-probe",
+                        cleanup if primary is None else primary, members=tuple(members),
+                        recovery_path=member, unresolved_paths=tuple(paths), retained_errors=errors) from primary
+
     def _apply_copy_metadata(self, path: Path, node: _PhysicalNode,
                              desired: _CopyMetadataImage, mode: int, record,
                              participant: _CopyMetadataParticipant | None = None,
-                             *, restored=False) -> _CopyMetadataImage:
+                             *, restored=False, fresh_copy=False,
+                             restoration_verified=False) -> _CopyMetadataImage:
         """Verify time assignment exactly; later atime is a read-variable observation.
 
         Stable metadata and physical/restriction identity remain constrained for
@@ -2741,6 +2926,13 @@ class _InstallTransaction:
             known = self._copy_current.get(path)
             if known is not None and current.stable() != known.stable():
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: copy setter beforeimage drift")
+            if current == desired and stat.S_IMODE(node.python_identity[2]) == mode:
+                self._copy_current[path] = current
+                if participant is not None:
+                    participant.current, participant.unknown = current, False
+                    if restored:
+                        participant.restored = current
+                return current  # Already exact; do not round an unchanged original through a setter.
             operation_ordinal = 0
             def progress(operation, projected, *, identity=None, label,
                          sets_times=False, optional_operation_errnos=()):
@@ -2798,7 +2990,14 @@ class _InstallTransaction:
                 projected_effect = projected.stable() if stable_observation else projected
                 known_effect = (actual_effect == projected_effect if assigned else
                                 actual_effect in (current_effect, projected_effect))
-                if not assignment_known or not known_effect or actual_identity not in (node.python_identity, valid_identity):
+                # A successful setter can produce a verified but unrequested time
+                # image (for example filesystem quantization). Record that outcome
+                # for rollback without accepting it as exact requested assignment.
+                observed_time_only = (sets_times and primary is None and assignment is not None
+                    and replace(assignment, atime_ns=projected.atime_ns, mtime_ns=projected.mtime_ns) == projected
+                    and actual == assignment and actual_identity == valid_identity)
+                if (not observed_time_only and (not assignment_known or not known_effect)
+                        or actual_identity not in (node.python_identity, valid_identity)):
                     if primary is not None:
                         _CopySetterDiagnostic.attach(primary, label, restored, "operation", operation_ordinal,
                             current, projected, node.python_identity, valid_identity, actual, actual_identity, participant=participant)
@@ -2827,6 +3026,24 @@ class _InstallTransaction:
                     if isinstance(primary, OSError) and primary.errno in optional_operation_errnos:
                         return  # Known optional operation error; recording already succeeded.
                     raise primary
+                if (observed_time_only and label == "timestamps" and not restored and bound is None
+                        and participant is not None and actual_effect != projected_effect
+                        and ((fresh_copy and participant.origin is None and participant.before is None)
+                             or (restoration_verified and participant.origin is not None and participant.before is not None
+                                 and self._same_origin(node, participant.origin.python_identity, participant.origin.native_proof)))):
+                    pair = self._representable_copy_times(path, descriptor, (projected.atime_ns, projected.mtime_ns))
+                    represented = replace(projected, atime_ns=pair[0], mtime_ns=pair[1])
+                    if actual == represented:
+                        if (self._scalar_descriptor_node(path, descriptor, node) != node
+                                or not self._image_matches(path, {path: node})):
+                            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: timestamp target drift")
+                        if self._read_copy_metadata(os.fstat(descriptor), descriptor, bound).stable() != actual.stable():
+                            participant.unknown = True
+                            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: timestamp target metadata drift")
+                        # Validation reads can update access time. Repeat the request
+                        # with its measured expectation through the same owner.
+                        progress(operation, represented, label="timestamps-representable", sets_times=True)
+                        return
                 if (actual_effect != projected_effect or actual_identity != valid_identity
                         or (assignment_pair is not None and not assigned)):
                     error = ValueError("E_MUTABLE_PATH_POSTCONDITION: copy metadata readback")
@@ -3016,7 +3233,7 @@ class _InstallTransaction:
                     try:
                         os.close(descriptor)
                     except OSError as cleanup:
-                        raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "scalar-parent-close", primary or cleanup,
+                        raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "scalar-parent-close", cleanup if primary is None else primary,
                             members=(_RollbackFailureMember("backup", -1, str(path),
                                      "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="scalar",
                                      cause_exception=cleanup),)) from primary
@@ -3058,7 +3275,7 @@ class _InstallTransaction:
                 paths, members, retained_errors = _InstallTransaction._settlement_failure(reset, "snapshot", -1, path,
                     "E_ROLLBACK_RESTORE_FAILED", (path,), participant="backup")
                 previous = primary if isinstance(primary, _InstallFailure) else None
-                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "descriptor-read-reset", primary or reset,
+                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "descriptor-read-reset", reset if primary is None else primary,
                     members=(previous.members if previous is not None else ()) + tuple(members),
                     unresolved_paths=(previous.unresolved_paths if previous is not None else ()) + tuple(paths),
                     recovery_path=previous.recovery_path if previous is not None else None,
@@ -3110,7 +3327,7 @@ class _InstallTransaction:
                 paths, members, retained_errors = self._settlement_failure(cleanup, "snapshot", -1, storage,
                     "E_ROLLBACK_RESTORE_FAILED", (storage,), participant="scalar")
                 previous = primary if isinstance(primary, _InstallFailure) else None
-                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "scalar-close", primary or cleanup,
+                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "scalar-close", cleanup if primary is None else primary,
                                       members=(previous.members if previous is not None else ()) + tuple(members),
                                       unresolved_paths=(previous.unresolved_paths if previous is not None else ()) + tuple(paths),
                                       recovery_path=entry["operation_backup"] if appended else None,
@@ -3170,7 +3387,7 @@ class _InstallTransaction:
                 parent_entry = {"kind": "scalar", "path": logical, "current_path": directory,
                                 "before_node": None, "current_node": None, "origin": None,
                                 "links": links, "operation_backup": None, "consumed": False, "born": True,
-                                "logical_views": ()}
+                                "logical_views": (), "implicit_container": True}
                 def record_directory(path, node):
                     parent_entry["origin"] = parent_entry["current_node"] = node
                     self._advance(path, {path: node})
@@ -3268,7 +3485,8 @@ class _InstallTransaction:
                    and not self._same_origin(origin, record.old_identity, record.old_native_proof)
                    for record in self._slice_a_migrated)
 
-    def _settle_scalars(self, blocked: list[Path], *, entries=None) -> tuple[list[Path], list[_RollbackFailureMember], tuple[BaseException, ...]]:
+    def _settle_scalars(self, blocked: list[Path], *, entries=None,
+                        allow_container_retention: bool = False) -> tuple[list[Path], list[_RollbackFailureMember], tuple[BaseException, ...]]:
         unresolved, failures = [], []
         retained_errors = ()
         selected = None if entries is None else {id(entry) for entry in entries}
@@ -3284,6 +3502,26 @@ class _InstallTransaction:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar dependency")
                 if entry["origin"] is None:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: unproved scalar creator retained")
+                if allow_container_retention and entry.get("implicit_container") is True:
+                    # Only the dependency scheduler may settle a shared parent.
+                    # Its creator owns the directory identity, not external children.
+                    if (entry.get("born") is not True or entry["before_node"] is not None
+                            or entry["origin"].kind != "directory"
+                            or entry["current_node"] is None
+                            or not self._same_origin(entry["origin"],
+                                entry["current_node"].python_identity, entry["current_node"].native_proof)):
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: container proof")
+                    self._assert_scalar_binding(entry, check_storage=False)
+                    if not self._point_matches(path, entry["current_node"]):
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: container origin")
+                    if any(path.iterdir()):
+                        self._assert_scalar_binding(entry, check_storage=False)
+                        if not self._point_matches(path, entry["current_node"]):
+                            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: container observation drift")
+                        entry["disposition"] = "retained-external-container"
+                        entry["consumed"] = True
+                        print("  RETAINED_EXTERNAL_CONTAINER: external state preserved after owned rollback")
+                        continue
                 self._assert_scalar_binding(entry)
                 if entry["before_node"] is None:
                     self._dispose_node(path, entry["current_node"])
@@ -3299,6 +3537,7 @@ class _InstallTransaction:
                     if hashlib.sha256(payload).hexdigest() != entry["before_node"].data:
                         raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar inverse input")
                     descriptor = os.open(path, os.O_RDWR | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0))
+                    primary = None
                     try:
                         current = self._scalar_descriptor_node(path, descriptor, entry["origin"])
                         if current != entry["current_node"]:
@@ -3306,8 +3545,31 @@ class _InstallTransaction:
                         self._write_owned_file(path, descriptor, (payload,),
                             lambda member, node: self._advance(member, {member: node}), entry["before_node"].data,
                             initial_state=current)
+                    except BaseException as error:
+                        primary = error
+                        raise
                     finally:
-                        os.close(descriptor)
+                        try:
+                            os.close(descriptor)
+                        except OSError as cleanup:
+                            paths, members, errors = self._settlement_failure(
+                                cleanup, "snapshot", ordinal, path, "E_ROLLBACK_RESTORE_FAILED",
+                                (path,), participant="scalar")
+                            if primary is not None:
+                                prior_paths, prior_members, prior_errors = self._settlement_failure(
+                                    primary, "snapshot", ordinal, path, "E_ROLLBACK_RESTORE_FAILED",
+                                    participant="scalar")
+                                paths = prior_paths + paths
+                                members = prior_members + members
+                                errors = _merge_copy_setter_operation_errors(prior_errors, errors)
+                            prior = primary if isinstance(primary, _InstallFailure) else None
+                            raise _InstallFailure(
+                                "E_ROLLBACK_SETTLEMENT_FAILED", "scalar-close",
+                                primary if primary is not None else cleanup,
+                                members=tuple(members),
+                                recovery_path=None if prior is None else prior.recovery_path,
+                                unresolved_paths=tuple(dict.fromkeys(paths)),
+                                retained_errors=errors) from primary
                     self._assert_scalar_binding(entry)
                 entry["consumed"] = True
             except BaseException as error:
@@ -3338,15 +3600,20 @@ class _InstallTransaction:
         """Move only known physical references; logical historical paths stay fixed."""
         def moved(path):
             return target / path.relative_to(source) if path == source or source in path.parents else path
-        self._copy_current = {moved(path): metadata for path, metadata in self._copy_current.items()}
+        copy_current = {moved(path): metadata for path, metadata in self._copy_current.items()}
         relocated = self._relocate(image, source, target)
+        copy_updates = []
         for selected, participant in self._copy_metadata.items():
             if selected == source or source in selected.parents:
-                participant.current = None
+                copy_updates.append((participant, None))
             if selected in relocated:
                 with self._copy_reference(selected, relocated[selected]) as (descriptor, bound):
                     metadata = self._read_copy_metadata(os.fstat(descriptor), descriptor, bound)
-                self._copy_current[selected] = participant.current = metadata
+                copy_current[selected] = metadata
+                copy_updates.append((participant, metadata))
+        self._copy_current = copy_current
+        for participant, metadata in copy_updates:
+            participant.current = metadata
         for entry in self._entries:
             if entry["kind"] == "scalar":
                 entry["current_path"] = moved(entry["current_path"])
@@ -3390,7 +3657,9 @@ class _InstallTransaction:
                                                                  if record.retention_parent_path is not None else None),
                                           prepared_path=(moved(record.prepared_path)
                                                          if record.prepared_path is not None else None),
-                                          logical_leaf_path=record.logical_leaf_path or record.leaf_path)
+                                          logical_leaf_path=record.logical_leaf_path or record.leaf_path,
+                                          reservation_state=({moved(path): node for path, node in record.reservation_state.items()}
+                                              if record.reservation_state is not None else None))
                                    if (migration is None or record.proof_key != migration.proof_key)
                                    and any(moved(path) != path for path in
                                            (record.leaf_path, record.tombstone_path, record.prepared_path)
@@ -3646,12 +3915,21 @@ class _InstallTransaction:
                       if parent_descriptors is not None else
                       operation(-100, os.fsencode(source), -100, os.fsencode(target), 1))
         elif sys.platform == "darwin":
-            operation = getattr(runtime, "renamex_np", None)
-            if operation is None:
-                return False
-            operation.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
-            operation.restype = ctypes.c_int
-            result = operation(os.fsencode(source), os.fsencode(target), 4)
+            if parent_descriptors is not None:
+                operation = getattr(runtime, "renameatx_np", None)
+                if operation is None:
+                    return False  # Held-parent selection must not become pathname selection.
+                operation.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+                operation.restype = ctypes.c_int
+                result = operation(parent_descriptors[0], os.fsencode(source.name),
+                                   parent_descriptors[1], os.fsencode(target.name), 4)
+            else:
+                operation = getattr(runtime, "renamex_np", None)
+                if operation is None:
+                    return False
+                operation.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+                operation.restype = ctypes.c_int
+                result = operation(os.fsencode(source), os.fsencode(target), 4)
         else:
             return False
         if result == 0:
@@ -3672,19 +3950,34 @@ class _InstallTransaction:
             return
         with ExitStack() as resources:
             selected = {"links": migration.selection_links}
-            self._assert_scalar_binding(selected, check_storage=False)
-            parent = self._bind_scalar_parent(migration.parent_path,
-                dict(migration.selection_links)[migration.parent_path], resources)
-            self._assert_scalar_binding(selected, check_storage=False)
+            parents = dict(migration.selection_links)
+            retention = None
+            if target.parent != migration.parent_path:
+                retention = self._migration_retention.get(target.parent)
+                if retention is None or target != migration.tombstone_path:
+                    raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: unregistered migration parent")
+                parents[target.parent] = retention[2]
+            def validate():
+                self._assert_scalar_binding(selected, check_storage=False)
+                if retention is not None:
+                    self.assert_migration_retention(target.parent, retention[3], pending=migration)
+            validate()
+            references = {}
+            for path in (source.parent, target.parent):
+                if path not in references:
+                    if path not in parents:
+                        raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: unselected migration parent")
+                    references[path] = self._bind_scalar_parent(path, parents[path], resources)
+            validate()
             primary = None
             try:
-                yield (parent, parent) if os.name != "nt" else None
+                yield (references[source.parent], references[target.parent]) if os.name != "nt" else None
             except BaseException as error:
                 primary = error
                 raise
             finally:
                 try:
-                    self._assert_scalar_binding(selected, check_storage=False)
+                    validate()
                 except BaseException as drift:
                     if primary is None:
                         raise
@@ -3693,6 +3986,141 @@ class _InstallTransaction:
                     raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "migration", primary,
                         members=tuple(members), unresolved_paths=tuple(paths),
                         retained_errors=errors) from primary
+
+    def _set_reservation(self, state, effect=None, migration=None):
+        if effect is not None:
+            effect.reservation_state = state
+        else:
+            self._slice_a_migrated = [replace(item, reservation_state=state)
+                if item.proof_key == migration.proof_key else item for item in self._slice_a_migrated]
+
+    def _dispose_reservation(self, path, state, *, migration=None):
+        if migration is None:
+            self._dispose_image(path, state)
+        else:
+            if (set(state) != {path} or state[path].kind != "file"
+                    or any(item.proof_key != migration.proof_key for item in self._migration_dependencies(path))
+                    or any(not item.settled and any(self._paths_overlap(path, endpoint)
+                        for endpoint in (item.location, item.retained, item.quarantine, item.prepared_path)
+                        if endpoint is not None) for item in self._effects)):
+                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: reservation dependency")
+            self._dispose_node(path, state[path])
+            self._advance(path, {})
+
+    def _retain_reserved_original(self, source: Path, target: Path,
+                                   before: dict[Path, _PhysicalNode],
+                                   effect: _DeclaredPathEffect | None,
+                                   migration: _SliceAMigratedFileRecord | None = None) -> dict[Path, _PhysicalNode]:
+        """Move an original over our empty typed reservation under caller serialization."""
+        relocated = self._relocate(before, source, target)
+        accounted = False
+        reservation = None
+        def set_state(state):
+            nonlocal reservation
+            reservation = state
+            self._set_reservation(state, effect, migration)
+        def record(path, node):
+            set_state({path: node})
+            self._advance(path, {path: node})
+        with ExitStack() as resources:
+            source_parent = self._capture_node(source.parent, kind="directory")
+            target_parent = self._capture_node(target.parent, kind="directory")
+            source_fd = self._bind_scalar_parent(source.parent, source_parent, resources)
+            target_fd = self._bind_scalar_parent(target.parent, target_parent, resources)
+            try:
+                if before[source].kind == "directory":
+                    self._create_owned_directory(target, record, parent_descriptor=target_fd)
+                else:
+                    descriptor = os.open(target.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                         0o600, dir_fd=target_fd)
+                    primary = None
+                    try:
+                        record(target, self._capture_node(target, descriptor=descriptor, kind="file",
+                                                          data=hashlib.sha256(b"").hexdigest()))
+                    except BaseException as error:
+                        primary = error
+                        raise
+                    finally:
+                        try:
+                            os.close(descriptor)
+                        except OSError as cleanup:
+                            raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "reservation-close",
+                                primary if primary is not None else cleanup, recovery_path=target,
+                                members=(_RollbackFailureMember("backup", -1, str(target),
+                                    "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup),
+                                    participant="reservation", cause_exception=cleanup),)) from primary
+                if effect is not None:
+                    self._assert_effect_endpoint(effect, source)
+                    self._assert_effect_endpoint(effect, target)
+                if (not self._point_matches(source.parent, source_parent)
+                        or not self._point_matches(target.parent, target_parent)
+                        or not self._image_matches(source, before)
+                        or not reservation
+                        or not self._image_matches(target, reservation)):
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained reservation drift")
+                # Never remove the reservation first. Under caller serialization,
+                # this replaces only our verified empty typed slot, not an occupant.
+                os.rename(source.name, target.name, src_dir_fd=source_fd, dst_dir_fd=target_fd)
+                if not self._image_matches(source, {}) or not self._image_matches(target, relocated):
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained reservation outcome")
+                set_state(None)
+                accounted = True
+                self._moved(source, target, before, effect, migration)
+                return relocated
+            except BaseException as primary:
+                if not accounted and self._image_matches(source, {}) and self._image_matches(target, relocated):
+                    set_state(None)
+                    accounted = True
+                    try:
+                        self._moved(source, target, before, effect, migration)
+                    except BaseException as accounting:
+                        raise _InstallFailure(
+                            "E_ROLLBACK_SETTLEMENT_FAILED", "retained-accounting", primary,
+                            recovery_path=target,
+                            members=(_RollbackFailureMember(
+                                "backup", -1, str(target), "E_ROLLBACK_BACKUP_CLEANUP_FAILED",
+                                str(accounting), participant="effect", cause_exception=accounting),)) from primary
+                elif (not accounted and reservation
+                        and self._image_matches(source, before)
+                        and self._image_matches(target, reservation)):
+                    try:
+                        self._dispose_reservation(target, dict(reservation), migration=migration if effect is None else None)
+                        set_state(None)
+                        self._advance(target, {})
+                    except BaseException as cleanup:
+                        raise _InstallFailure(
+                            "E_ROLLBACK_SETTLEMENT_FAILED", "retained-reservation", primary,
+                            recovery_path=target,
+                            members=(_RollbackFailureMember(
+                                "backup", -1, str(target), "E_ROLLBACK_BACKUP_CLEANUP_FAILED",
+                                str(cleanup), participant="effect", cause_exception=cleanup),)) from primary
+                raise
+
+    def _receiving_failure(self, primary: BaseException, secondary: BaseException,
+                           path: Path) -> _InstallFailure:
+        """Retain both failures without replacing the publication's evidence."""
+        paths, members, errors = self._settlement_failure(
+            secondary, "snapshot", -1, path, "E_ROLLBACK_SETTLEMENT_FAILED",
+            (path,), participant="effect")
+        if isinstance(secondary, _InstallFailure):
+            if secondary.members:
+                members.append(_RollbackFailureMember(
+                    "snapshot", -1, str(path), secondary.stable_id, str(secondary.cause),
+                    _copy_setter_detail(secondary),
+                    secondary if _copy_setter_operation_errors(secondary) else None,
+                    "effect", cause_exception=secondary))
+            if secondary.recovery_path is not None:
+                paths.append(secondary.recovery_path)
+        recovery = None
+        if isinstance(primary, _InstallFailure):
+            members = list(primary.members) + members
+            paths = list(primary.unresolved_paths) + paths
+            recovery = primary.recovery_path
+        return _InstallFailure(
+            "E_ROLLBACK_SETTLEMENT_FAILED", "transaction", primary,
+            members=tuple(members), recovery_path=recovery,
+            unresolved_paths=tuple(dict.fromkeys(paths)), retained_errors=errors)
+
 
     def _publish_retained(self, source: Path, target: Path, *,
                           effect: _DeclaredPathEffect | None = None,
@@ -3729,20 +4157,32 @@ class _InstallTransaction:
             try:
                 supported = (self._native_publish_no_replace(source, target, parent_descriptors=parent_descriptors)
                              if parent_descriptors is not None else self._native_publish_no_replace(source, target))
-            except BaseException:
+            except BaseException as primary:
                 try:
-                    metadata = target.lstat()
-                    moved_root = (metadata.st_dev, metadata.st_ino) == before[source].python_identity[:2]
-                    if moved_root and self._image_matches(source, {}):
-                        self._moved(source, target, before, effect, migration)
-                except FileNotFoundError:
-                    pass
+                    try:
+                        metadata = target.lstat()
+                    except FileNotFoundError:
+                        metadata = None
+                    if metadata is not None:
+                        moved_root = (metadata.st_dev, metadata.st_ino) == before[source].python_identity[:2]
+                        if moved_root and self._image_matches(source, {}):
+                            self._moved(source, target, before, effect, migration)
+                except BaseException as receiving:
+                    raise self._receiving_failure(primary, receiving, target) from primary
                 raise
             if supported:
                 self._moved(source, target, before, effect, migration)
                 return self._relocate(before, source, target)
             if (not self._image_matches(source, before)) or not self._image_matches(target, {}):
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: ambiguous publication")
+            if (((effect is not None and source == effect.location and target == effect.retained)
+                     or (effect is None and migration is not None
+                         and source == migration.leaf_path and target == migration.tombstone_path
+                         and before[source].kind == "file"))
+                    and before[source].kind in {"directory", "file"}
+                    and {os.open, os.mkdir, os.stat, os.rename} <= os.supports_dir_fd
+                    and hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW")):
+                return self._retain_reserved_original(source, target, before, effect, migration)
             if ((effect is not None and source == effect.location)
                     or (migration is not None and source == migration.leaf_path)):
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained-object atomic capability")
@@ -3754,6 +4194,21 @@ class _InstallTransaction:
                 self._dispose_node(source, before[source])
                 self._moved(source, target, before, effect, migration)
                 return actual
+            if (before[source].kind == "directory" and effect is not None
+                    and source == effect.prepared_path and target == effect.location
+                    and (not effect.before or (not effect.actual and effect.retained_state
+                         and effect.retained in effect.retained_state
+                         and self._image_matches(effect.retained, effect.retained_state)))
+                    and migration is None
+                    and {os.open, os.mkdir, os.stat} <= os.supports_dir_fd
+                    and hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW")
+                    and hasattr(os, "fchmod")):
+                # Fresh creation is caller-serialized, not an atomic tree rename.
+                # Record partial new identities before any later failure; the
+                # public writer still owns prepared-image cleanup in its finally.
+                self._transition_order += 1
+                effect.transition_order = self._transition_order
+                return self._construct_exclusive_tree(source, target, before, effect)
             if (before[source].kind == "directory" and effect is not None
                     and source == effect.prepared_path and target == effect.location):
                 raise _InstallFailure("E_ATOMIC_DIRECTORY_PUBLISH_UNSUPPORTED", "transaction")
@@ -3816,7 +4271,8 @@ class _InstallTransaction:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: source link native identity")
                 data = original.reparse_data()
                 directory = bool(original.basic().attributes & stat.FILE_ATTRIBUTE_DIRECTORY)
-            with _WindowsBoundNode.create(target, directory=directory) as created:
+            with _WindowsBoundNode.symlink_privilege(required=int.from_bytes(data[:4], "little") == 0xA000000C), \
+                    _WindowsBoundNode.create(target, directory=directory) as created:
                 node = self._capture_node(target, bound_node=created,
                                           kind="directory" if directory else "file",
                                           data=None if directory else hashlib.sha256(b"").hexdigest())
@@ -3839,21 +4295,23 @@ class _InstallTransaction:
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: source link copy drift")
 
     def _create_owned_projection(self, source: Path, target: Path, record,
-                                  *, junction: bool = True) -> _PhysicalNode:
-        # New Windows directory projections use a mount-point reparse tag.
-        # This preserves creator-handle custody without requiring the symbolic
-        # link privilege. A native failure is not retried through a pathname API.
+                                  *, junction: bool | None = None) -> _PhysicalNode:
         if os.name != "nt":
             target.symlink_to(source, target_is_directory=True)
             node = self._capture_node(target)
             record(target, node)
             return node
-        with _WindowsBoundNode.create(target, directory=True) as created:
-            node = self._capture_node(target, bound_node=created, kind="directory")
-            record(target, node)
-            with _WindowsBoundNode(source, purpose="observe", follow=True) as original:
-                target_proof = original.proof
-                raw = _WindowsBoundNode.target_reparse_data(original, junction=junction)
+        # Select the representation from the OS-resolved bound target before
+        # acquiring the creator. Local directory projections use mount points;
+        # other namespaces retain symbolic-link semantics and admission.
+        with _WindowsBoundNode(source, purpose="observe", follow=True) as original:
+            target_proof = original.proof
+            raw = _WindowsBoundNode.target_reparse_data(original, junction=junction)
+            with _WindowsBoundNode.symlink_privilege(
+                    required=int.from_bytes(raw[:4], "little") == 0xA000000C), \
+                    _WindowsBoundNode.create(target, directory=True) as created:
+                node = self._capture_node(target, bound_node=created, kind="directory")
+                record(target, node)
                 created.set_reparse_data(raw)
                 node = self._capture_node(target, bound_node=created)
                 if node.native_proof != created.creator_proof or node.reparse_data != raw:
@@ -3886,6 +4344,8 @@ class _InstallTransaction:
                 mode=None if target in self._copy_metadata else stat.S_IMODE(expected.python_identity[2]))
             if target in self._copy_metadata:
                 participant = self._copy_metadata[target]
+                if participant.origin is None and participant.before is None:
+                    participant.created_origin = node
                 participant.unknown = True
                 native = None
                 if os.name == "nt":
@@ -3980,8 +4440,12 @@ class _InstallTransaction:
                 if fsync != "best-effort":
                     raise
         if mode is not None:
+            def record_mode(identity):
+                nonlocal node
+                node = replace(node, python_identity=identity)
+                record(target, node)
             changed = self._chmod_owned(target, node.python_identity, mode, descriptor=descriptor,
-                                        native_proof=node.native_proof)
+                                        native_proof=node.native_proof, on_mode_set=record_mode)
             node = replace(node, python_identity=changed)
             record(target, node)
         if digest.hexdigest() != expected_digest:
@@ -4004,7 +4468,7 @@ class _InstallTransaction:
             try:
                 os.close(descriptor)
             except OSError as cleanup:
-                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "file-close", primary or cleanup,
+                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "file-close", cleanup if primary is None else primary,
                                       members=(_RollbackFailureMember("backup", -1, str(path),
                                                "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
                                                cause_exception=cleanup),),
@@ -4158,7 +4622,7 @@ class _InstallTransaction:
                      participant="backup", cause_exception=cleanup))
             if failures:
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "construction",
-                                      original or failures[0].cause, members=tuple(failures),
+                                      failures[0].cause if original is None else original, members=tuple(failures),
                                       recovery_path=source.parent) from original
 
     @staticmethod
@@ -4177,7 +4641,8 @@ class _InstallTransaction:
     @staticmethod
     def _chmod_owned(path: Path, before: tuple[int, int, int, int], requested: int,
                      *, descriptor: int | None = None,
-                     native_proof: _NativeNodeProof | None = None) -> tuple[int, int, int, int]:
+                     native_proof: _NativeNodeProof | None = None,
+                     on_mode_set=None) -> tuple[int, int, int, int]:
         """Project this platform's chmod producer result before accepting readback."""
         expected = _InstallTransaction._chmod_identity(before, requested)
         if _CreateOnlyMutablePath._identity(path) != before:
@@ -4205,6 +4670,11 @@ class _InstallTransaction:
             path.chmod(requested)
         else:
             os.fchmod(descriptor, stat.S_IMODE(requested))
+            # Ordinary permission bits have a known successful setter image.
+            # Special bits may be stripped by the OS and still require readback.
+            if on_mode_set is not None and not (
+                    (before[2] | requested) & (stat.S_ISUID | stat.S_ISGID | stat.S_ISVTX)):
+                on_mode_set(expected)
         actual = _CreateOnlyMutablePath._identity(path)
         if actual != expected:
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal permission transition")
@@ -4213,6 +4683,67 @@ class _InstallTransaction:
     @staticmethod
     def _clear_owned_readonly(path: Path, before: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
         return _InstallTransaction._chmod_owned(path, before, before[2] | stat.S_IWRITE)
+
+    def _dispose_posix_node(self, path: Path, expected: _PhysicalNode) -> None:
+        """Qualify one leaf under caller serialization, not hostile-writer exclusion.
+
+        The caller owns ancestor selection and journal advancement within the
+        supported ordinary serialized-writer lifecycle.
+        No permission changes or recursive adoption occur in this primitive.
+        """
+        if (not isinstance(expected, _PhysicalNode)
+                or expected.evidence_role != "sealed"
+                or expected.kind not in {"file", "directory", "link"}
+                or expected.reparse_data is not None):
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: POSIX disposal witness")
+        required = {os.stat, os.unlink, os.rmdir}
+        if (os.name != "posix" or not required <= os.supports_dir_fd
+                or not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW")):
+            raise ValueError("E_EFFECT_BOUND_DISPOSAL_UNQUALIFIED: POSIX relative disposal capability")
+        parent_identity = _CreateOnlyMutablePath._identity(path.parent)
+        descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        primary = None
+        try:
+            parent = os.fstat(descriptor)
+            bound_parent = (parent.st_dev, parent.st_ino, parent.st_mode,
+                            getattr(parent, "st_file_attributes", 0))
+            if (not self._binding_identity_matches(parent_identity, bound_parent)
+                    or not self._point_matches(path, expected, check_file_content=True)):
+                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: POSIX disposal currentness")
+            leaf = os.stat(path.name, dir_fd=descriptor, follow_symlinks=False)
+            leaf_identity = (leaf.st_dev, leaf.st_ino, leaf.st_mode,
+                             getattr(leaf, "st_file_attributes", 0))
+            if (not self._binding_identity_matches(expected.python_identity, leaf_identity)
+                    or not self._binding_identity_matches(
+                        parent_identity, _CreateOnlyMutablePath._identity(path.parent))):
+                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: POSIX disposal binding")
+            operation = os.rmdir if expected.kind == "directory" else os.unlink
+            operation(path.name, dir_fd=descriptor)
+            try:
+                os.stat(path.name, dir_fd=descriptor, follow_symlinks=False)
+            except FileNotFoundError:
+                return
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: POSIX disposal postcondition")
+        except BaseException as error:
+            primary = error
+            raise
+        finally:
+            try:
+                os.close(descriptor)
+            except BaseException as cleanup:
+                cause = cleanup if primary is None else primary
+                previous = primary if isinstance(primary, _InstallFailure) else None
+                paths, members, errors = self._settlement_failure(
+                    cleanup, "backup", -1, path, "E_ROLLBACK_BACKUP_CLEANUP_FAILED",
+                    (path,), participant="backup")
+                raise _InstallFailure(
+                    "E_ROLLBACK_SETTLEMENT_FAILED", "disposal-close", cause,
+                    members=(previous.members if previous is not None else ()) + tuple(members),
+                    unresolved_paths=(previous.unresolved_paths if previous is not None else ()) + tuple(paths),
+                    recovery_path=(previous.recovery_path if previous is not None
+                                   and previous.recovery_path is not None else path),
+                    retained_errors=_merge_copy_setter_operation_errors(
+                        errors, (previous,) if _copy_setter_operation_errors(previous) else ())) from cause
 
     def _dispose_node(self, path: Path, expected: _PhysicalNode) -> None:
         _require_transaction_disposal_backend()
@@ -4235,7 +4766,7 @@ class _InstallTransaction:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal bytes")
                 if expected.kind == "link" and bound.logical_target() != expected.data:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal link")
-                if expected.kind == "reparse" and str(Path(bound.logical_target()).resolve(strict=True)) != expected.data:
+                if expected.kind == "reparse" and bound.logical_target() != expected.data:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal reparse")
                 if attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
                     if expected.reparse_data is None or bound.reparse_data() != expected.reparse_data:
@@ -4249,6 +4780,7 @@ class _InstallTransaction:
             except FileNotFoundError:
                 return
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal pending or replaced")
+        self._dispose_posix_node(path, expected)
 
     def _dispose_image(self, path: Path, expected: dict[Path, _PhysicalNode]) -> None:
         _require_transaction_disposal_backend()
@@ -4358,34 +4890,41 @@ class _InstallTransaction:
                     self._advance(effect.retained, {})
                 if not commit and not effect.before and effect.actual:
                     preserve = any(node.evidence_role == "runtime-observation" for node in effect.actual.values())
-                    destination = (effect.retained.with_name(effect.retained.name + ".after") if preserve else effect.retained)
-                    if preserve:
-                        effect.quarantine = destination
-                    detached = self._relocate(effect.actual, effect.location, destination)
-                    self._publish_retained(effect.location, destination, effect=effect)
-                    if preserve:
-                        effect.quarantine_state = detached
-                        effect.preserve_runtime_custody = True
-                        effect.actual = {}
-                        self._advance(effect.location, {})
-                        self._advance(destination, detached)
+                    if not preserve:
+                        # Empty-before effects own only newly created nodes. Their
+                        # inverse needs disposal, not retention of a prior object.
+                        self._dispose_image(effect.location, dict(effect.actual))
                         effect.restored_state = {}
                         self.assert_effect_current(effect)
                         effect.settled = True
                         continue
-                    effect.retained_state = detached
-                    self._advance(effect.retained, detached)
-                    if (not self._image_matches(effect.retained, detached)):
-                        if self._image_matches(effect.location, {}):
-                            self._publish_retained(effect.retained, effect.location, source_state=detached)
-                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: creation detach drift")
+                    destination = effect.retained.with_name(effect.retained.name + ".after")
+                    effect.quarantine = destination
+                    detached = self._relocate(effect.actual, effect.location, destination)
+                    self._publish_retained(effect.location, destination, effect=effect)
+                    effect.quarantine_state = detached
+                    effect.preserve_runtime_custody = True
                     effect.actual = {}
-                    effect.retained_state = detached
                     self._advance(effect.location, {})
-                    self._dispose_image(effect.retained, detached)
+                    self._advance(destination, detached)
+                    effect.restored_state = {}
+                    self.assert_effect_current(effect)
+                    effect.settled = True
+                    continue
+                if not commit and effect.restored_state is not None:
+                    # Restoration already completed. Retained cleanup may be
+                    # partial; never replace the restored original with that tail.
+                    if not self._image_matches(effect.location, effect.restored_state):
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: restored image drift")
+                    if effect.retained_state:
+                        self._dispose_image(effect.retained, dict(effect.retained_state))
                     effect.retained_state = None
                     self._advance(effect.retained, {})
-                    effect.restored_state = {}
+                    if effect.quarantine_state and not effect.preserve_runtime_custody:
+                        self._dispose_image(effect.quarantine, dict(effect.quarantine_state))
+                        effect.quarantine_state = None
+                        self._advance(effect.quarantine, {})
+                    self.assert_effect_current(effect)
                     effect.settled = True
                     continue
                 if effect.retained_state is None:
@@ -4404,6 +4943,13 @@ class _InstallTransaction:
                     self._advance(effect.retained, {})
                     effect.settled = True
                     continue
+                if effect.actual and all(node.evidence_role == "sealed" for node in effect.actual.values()):
+                    # The retained beforeimage owns recovery. A sealed replacement
+                    # needs disposal, not an additional atomic quarantine move.
+                    # The image owner checks migration dependencies and journals
+                    # completed members so partial disposal remains recoverable.
+                    self._dispose_image(effect.location, dict(effect.actual))
+                    self._advance(effect.location, {})
                 detached = effect.retained.with_name(effect.retained.name + ".after")
                 effect.quarantine = detached
                 if effect.actual:
@@ -4849,6 +5395,10 @@ class _InstallTransaction:
                 if (not self._image_matches(member, state)):
                     raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: retained replacement")
             else:
+                reservation = next((record.reservation_state for record in self._slice_a_migrated
+                    if record.tombstone_path == member and record.reservation_state is not None), None)
+                if reservation is not None and not self._image_matches(member, reservation):
+                    raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: migration reservation")
                 owner._assert_regular(member, existing=True)
 
     def _settle_migration_retention(self, *, only_empty: bool = False,
@@ -4996,6 +5546,26 @@ class _InstallTransaction:
                 retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
         return unresolved, failures, retained_errors
 
+    def _settle_migration_reservation(self, record, owner=None):
+        record = next((item for item in self._slice_a_migrated if item.proof_key == record.proof_key), record)
+        if record.reservation_state is None:
+            return record
+        registered = self._slice_a_owners.get(os.path.normcase(str(record.anchor_path)))
+        if registered is None or (owner is not None and owner is not registered):
+            raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: migration reservation owner")
+        if not self._binding_identity_matches(record.anchor_identity, registered._identity(record.anchor_path)):
+            raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: migration reservation anchor")
+        registered._walk_existing(record.leaf_path)
+        registered._walk_existing(record.tombstone_path)
+        registered._assert_migration_retention_record(record)
+        if (record.started or set(record.reservation_state) != {record.tombstone_path}
+                or not self._image_matches(record.leaf_path, {
+                    record.leaf_path: self._current_role(record, old=True)})):
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: migration reservation source")
+        self._dispose_reservation(record.tombstone_path, record.reservation_state, migration=record)
+        self._set_reservation(None, migration=record)
+        return next(item for item in self._slice_a_migrated if item.proof_key == record.proof_key)
+
     def _settle_migrated(
         self, blocked: list[Path] | None = None,
     ) -> tuple[list[Path], list[_RollbackFailureMember], tuple[BaseException, ...]]:
@@ -5016,6 +5586,7 @@ class _InstallTransaction:
                 )
                 if owner is None:
                     raise RuntimeError("E_ROLLBACK_CREATED_IDENTITY_CHANGED")
+                record = self._settle_migration_reservation(record)
                 if not record.started and not record.tombstone_path.exists() and (self._image_matches(record.leaf_path, {
                         record.leaf_path: self._current_role(record, old=True)})):
                     continue  # An armed migration failed before its first effect.
@@ -5136,7 +5707,7 @@ class _InstallTransaction:
                 retain_backup = True
                 continue
             if kind == "scalar":
-                paths, members, errors = self._settle_scalars(unresolved, entries=(record,))
+                paths, members, errors = self._settle_scalars(unresolved, entries=(record,), allow_container_retention=True)
             elif kind == "created":
                 paths, members, errors = self._settle_created(unresolved, records=(record,))
             elif kind == "retention":
@@ -5222,6 +5793,12 @@ class _InstallTransaction:
             if record.settled:
                 continue
             try:
+                if record.reservation_state is not None:
+                    if not record.started and usable(record.leaf_path,
+                            {record.leaf_path: self._current_role(record, old=True)},
+                            "migration", ordinal, "migration"):
+                        return record.leaf_path, unresolved, failures, retained_errors
+                    continue
                 if not record.started and self._node_metadata_matches(record.tombstone_path, None):
                     continue  # No retained candidate from an unperformed migration.
                 current = self._current_role(record, old=True)
@@ -5273,7 +5850,7 @@ class _InstallTransaction:
                 raise exc._with_recovery_path(recovery_path) from exc
             return False
 
-        original: BaseException = exc or _InstallFailure(
+        original: BaseException = exc if exc is not None else _InstallFailure(
             "E_INSTALL_TRANSACTION_UNCOMMITTED",
             "transaction",
             "enabled transaction exited without commit",
@@ -5658,22 +6235,21 @@ class _CreateOnlyMutablePath:
                     self._rollback_identity_changed()
                 self.transaction._dispose_node(record.leaf_path, current)
             elif record.kind == "projection":
+                # The target may already have been reclaimed by an earlier
+                # owned inverse. Prove the exact link object without following
+                # it; never acquire authority over a replacement destination.
+                expected = _PhysicalNode(
+                    "link" if stat.S_ISLNK(record.leaf_identity[2]) else "reparse",
+                    record.leaf_identity, record.projection_data,
+                    record.native_proof, record.reparse_data,
+                )
                 if (
                     record.projection_target is None
                     or not (stat.S_ISLNK(metadata.st_mode) or _is_reparse_metadata(metadata))
-                    or (os.name == "posix" and (
-                        not isinstance(record.projection_data, str)
-                        or os.readlink(record.leaf_path) != record.projection_data
-                    ))
-                    or (os.name != "posix" and not _projection_resolves_to(
-                        record.leaf_path, record.projection_target
-                    ))
+                    or not self.transaction._image_matches(record.leaf_path, {record.leaf_path: expected})
                 ):
                     self._rollback_identity_changed()
-                self.transaction._dispose_node(record.leaf_path,
-                    _PhysicalNode("link" if stat.S_ISLNK(record.leaf_identity[2]) else "reparse",
-                                  record.leaf_identity,
-                                  record.projection_data, record.native_proof, record.reparse_data))
+                self.transaction._dispose_node(record.leaf_path, expected)
             elif record.kind == "directory":
                 if (
                     not stat.S_ISDIR(metadata.st_mode)
@@ -5923,6 +6499,7 @@ class _CreateOnlyMutablePath:
         self._ensure_parent(path)
         fresh_parents = self._fresh_file_parents(path) if existing is None else None
         completed_node = None
+        restoration_verified = False
         def record(member, node):
             nonlocal completed_node
             completed_node = node
@@ -5939,7 +6516,12 @@ class _CreateOnlyMutablePath:
                     record(path, node)
                 elif existing is None:
                     outgoing = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o666)
-                    resources.callback(os.close, outgoing)
+                    def close_outgoing(_type, primary, _traceback):
+                        try:
+                            os.close(outgoing)
+                        except OSError as cleanup:
+                            raise _InstallTransaction._copy_close_failure(path, primary, cleanup) from primary
+                    resources.push(close_outgoing)
                     target_bound = None
                     node = self.transaction._capture_node(path, descriptor=outgoing, kind="file",
                                                           data=hashlib.sha256(b"").hexdigest())
@@ -5950,6 +6532,18 @@ class _CreateOnlyMutablePath:
                     node = self.transaction._scalar_descriptor_node(path, outgoing, existing)
                     if node != existing:
                         raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: copy bound bytes")
+                if existing is not None and target_bound is None and participant.before is not None:
+                    before = participant.before
+                    pair = (before.atime_ns, before.mtime_ns)
+                    if self.transaction._representable_copy_times(path, outgoing, pair) != pair:
+                        raise ValueError("E_MUTABLE_PATH_POSTCONDITION: original timestamps not restorable")
+                    # This qualification must precede the first byte or metadata write.
+                    self.transaction._assert_copy_metadata(path)
+                    if self.transaction._scalar_descriptor_node(path, outgoing, existing) != existing:
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: copy restore preflight drift")
+                    restoration_verified = True
+                if existing is None:
+                    participant.created_origin = node  # Exclusive creator, never a moved-in original.
                 participant.current = self.transaction._read_copy_metadata(os.fstat(outgoing), outgoing, target_bound)
                 self.transaction._copy_current[path] = participant.current
                 if node.data != expected.data:
@@ -5968,7 +6562,12 @@ class _CreateOnlyMutablePath:
                     raise ValueError("E_MUTABLE_PATH_POSTCONDITION: copy completed bytes")
                 desired = self.transaction._read_copy_metadata(os.fstat(incoming), incoming, source_bound)
             self.transaction._apply_copy_metadata(path, node, desired,
-                stat.S_IMODE(expected.python_identity[2]), record, participant)
+                stat.S_IMODE(expected.python_identity[2]), record, participant,
+                fresh_copy=(participant.origin is None and participant.before is None
+                    and participant.created_origin is not None
+                    and self.transaction._same_origin(node, participant.created_origin.python_identity,
+                                                      participant.created_origin.native_proof)),
+                restoration_verified=restoration_verified)
         self._record_fresh_file(path, completed_node, fresh_parents)
         return path
 
@@ -6069,7 +6668,7 @@ class _CreateOnlyMutablePath:
             paths, members, retained_errors = self.transaction._settlement_failure(cleanup, "backup", -1, path,
                 "E_ROLLBACK_BACKUP_CLEANUP_FAILED", (path,), participant="backup")
             raise _InstallFailure(
-                "E_ROLLBACK_SETTLEMENT_FAILED", "prepared", original or cleanup,
+                "E_ROLLBACK_SETTLEMENT_FAILED", "prepared", cleanup if original is None else original,
                 members=tuple(members), recovery_path=path, unresolved_paths=tuple(paths), retained_errors=retained_errors,
             ) from original
 
@@ -6092,21 +6691,39 @@ class _CreateOnlyMutablePath:
         self.transaction.assert_effect_current(effect)
         if effect.before:
             before_move = dict(effect.actual)
+            primary = None
             try:
                 self.transaction._publish_retained(path, effect.retained, effect=effect, migration=migration)
+            except BaseException as exc:
+                primary = exc
+                raise
             finally:
-                retained = self.transaction._relocate(before_move, path, effect.retained)
-                if (self.transaction._image_matches(effect.retained, retained)):
-                    self.transaction.retained_replacement(effect, before_move)
+                try:
+                    retained = self.transaction._relocate(before_move, path, effect.retained)
+                    if self.transaction._image_matches(effect.retained, retained):
+                        self.transaction.retained_replacement(effect, before_move)
+                except BaseException as receiving:
+                    if primary is None:
+                        raise
+                    raise self.transaction._receiving_failure(primary, receiving, effect.retained) from primary
         self._final_absence(path)
         published = None
+        primary = None
         try:
             published = self.transaction._publish_retained(prepared, path, effect=effect, migration=migration)
+        except BaseException as exc:
+            primary = exc
+            raise
         finally:
-            if published is not None:
-                self.transaction.published_replacement(effect, published)
-            elif (self.transaction._image_matches(path, effect.proposed)):
-                self.transaction.published_replacement(effect)
+            try:
+                if published is not None:
+                    self.transaction.published_replacement(effect, published)
+                elif self.transaction._image_matches(path, effect.proposed):
+                    self.transaction.published_replacement(effect)
+            except BaseException as receiving:
+                if primary is None:
+                    raise
+                raise self.transaction._receiving_failure(primary, receiving, path) from primary
 
     @_InstallTransaction.direct_writer
     def remove_exact_file(self, relative: Path, expected_digest: str) -> Path:
@@ -6144,12 +6761,21 @@ class _CreateOnlyMutablePath:
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: armed retention source")
         self.transaction.assert_effect_current(effect)
         before_move = dict(effect.actual)
+        primary = None
         try:
             self.transaction._publish_retained(path, effect.retained, effect=effect)
+        except BaseException as exc:
+            primary = exc
+            raise
         finally:
-            retained = self.transaction._relocate(before_move, path, effect.retained)
-            if (self.transaction._image_matches(effect.retained, retained)):
-                self.transaction.retained_replacement(effect, before_move)
+            try:
+                retained = self.transaction._relocate(before_move, path, effect.retained)
+                if self.transaction._image_matches(effect.retained, retained):
+                    self.transaction.retained_replacement(effect, before_move)
+            except BaseException as receiving:
+                if primary is None:
+                    raise
+                raise self.transaction._receiving_failure(primary, receiving, effect.retained) from primary
         return path
 
     def migrate_exact_file(
@@ -6309,6 +6935,10 @@ class _CreateOnlyMutablePath:
 
         record = next((current for current in self.transaction._slice_a_migrated
                        if current.proof_key == record.proof_key), record)
+        record = self.transaction._settle_migration_reservation(record, self)
+        if not record.started and self.transaction._image_matches(record.leaf_path, {
+                record.leaf_path: self.transaction._current_role(record, old=True)}) and not record.tombstone_path.exists():
+            return
         effect = None
         try:
             if (
@@ -6370,6 +7000,7 @@ class _CreateOnlyMutablePath:
 
         record = next((current for current in self.transaction._slice_a_migrated
                        if current.proof_key == record.proof_key), record)
+        record = self.transaction._settle_migration_reservation(record, self)
         self.transaction._assert_scalar_binding({"links": record.selection_links}, check_storage=False)
         self._walk_existing(record.leaf_path)
         self._walk_existing(record.tombstone_path)
@@ -7957,10 +8588,17 @@ def _adoption_identity_v2(name: str, target: Path, token: str, *, factory: Path 
     raise ValueError("E_CANONICAL_SKILL_ADOPTION_MISMATCH")
 
 
+def _windows_projection_uses_junction(native_target: str) -> bool:
+    """Local DOS volumes use mount points; UNC/other namespaces keep symlinks."""
+    import ntpath
+    drive, tail = ntpath.splitdrive(native_target)
+    return bool(re.fullmatch(r"[A-Za-z]:", drive.removeprefix("\\\\?\\"))) and tail.startswith(("\\", "/"))
+
+
 def _is_directory_junction(path: Path) -> bool:
     """Recognize only mount-point reparses, including on supported Python 3.11."""
     try:
-        return getattr(path.lstat(), "st_reparse_tag", None) == 0xA0000003  # IO_REPARSE_TAG_MOUNT_POINT
+        return getattr(path.lstat(), "st_reparse_tag", None) == 0xA0000003
     except OSError:
         return False
 
@@ -8026,10 +8664,12 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "3e964408acb6fe3ea1ba8a43158927e83b6d23bb121dd34b6b843863caf4a9fd",
     }),
     "backend-engineer": frozenset({
+        "a6e1e0239ef1c6e25b97f932790d56a134612f704824811d99cbe87e661594ca",  # Exact factory role before 6.2 task-first ranking.
         "f3b85eac0023a12de0d529a47766762f5a2ffaeac092c42e9b1b11be6a246c27",
         "38d99e26339cb0942eb66d4062e0de33f085c5b39f445cc358ac217b03010589",
     }),
     "explorer": frozenset({
+        "d57e825cc7155a81d75fe5ed205b2e402bd4a637c785d7f097223e6418700f74",  # Exact factory role before 6.2 task-first ranking.
         "03375f98ee2f442d1b236afce90919547f738348dd77cb9ca67c704e21772172",
         "a98b89ec3c513f8242459adda45808612645ed5f5cb07b9da8839fe66b670e89",
     }),
@@ -8038,10 +8678,12 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "0f26fae798309c1b69f3fe5077196e3e5895211bc661f7575aa683fd01e2225b",
     }),
     "knowledge-archivist": frozenset({
+        "8d148b86cdad5ef415cda74362bb607b700dca3069947bcfb45d5c802233f873",  # Exact factory role before 6.2 task-first ranking.
         "82ff6b4e4cbc433175ae36b23216f001cbec427e341d01b2b01709b25d744e02",
         "8f69d0f67010b77b71c81b77ad74119300ad245061c4363cbcfd2f1d0fab510c",
     }),
     "scientific-software-engineer": frozenset({
+        "d220652c7a880bcdcdd68a57a2f9cfe267014617a668655fe3a27e418709ed16",  # Exact pre-6.2 factory role (adefe904).
         "b4ee95a146843dd06a4470b380d7d263fb5c149edf9b2204c0944090e0d4ba3b",
     }),
     "planner": frozenset({
@@ -8049,18 +8691,24 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "dcde16fa86661eee94b21618fb6320026185ddb425541b15239b4c7d232c4faa",
     }),
     "algorithm-scientist": frozenset({
+        "a20cde75a7e9d1bef8dbb451658fa5341e5ee0e43ee1f89db453ccd2ec2576dd",  # Exact factory role before 6.2 task-first ranking.
+        "81b79398d9b55495cf32925007635b9f688920c75c32b50e4b092d4ef9bd1893",  # Exact pre-6.2 factory role (adefe904).
         "cd2bbbaf5f4173f07bfe18cea39d90dd0cc341630b77b5dac0d82d9f92b57d7e",
         "1bc7c60b30f1bb360a502ee955e41513a80d3e3f9e222e5a673817a7e421c8bd",
     }),
     "architect": frozenset({
+        "278f9311b982844cd0fdd542cf6f3c6fd0ec790bdd5cdf4d09bede1195828ec4",  # Exact pre-6.2 factory role (adefe904).
         "71f3d9e27019de2e133d8947a33cdb69ab38261824fab36bcb18c7f7f3ff0792",
         "bcdd83abcb3e5d99e0dd0963d622b475ea11d450bb16f1af1bc93855891ff4fb",
     }),
     "architecture-reviewer": frozenset({
+        "8ae8704a3f823b74bd5fbc8590fa43c979dbee66e341f1107bedf873b69a2d03",  # Exact pre-6.2 factory role (adefe904).
         "5e404f6643d8992dd7cd4a40e8a5d3ae4f7f388381907aa230b6b0fa15ac458a",
         "239a91ef35b54cc640372132b51662bcbe0da88dded68ff53d339621689df8c3",
     }),
     "computational-scientist": frozenset({
+        "aa94f35c668d62394bd12a27609ead6dd9e042b2e13a82a4b38d693967e98aac",  # Exact factory role before 6.2 task-first ranking.
+        "7731852f496a050f187b11c265943e5b6bc553820acd7d9359769852eb598aea",  # Exact pre-6.2 factory role (adefe904).
         "4169e5ac3442e542b0249879595b6974b78e0924b377613b5b427a6488171901",
         "7ddcfb3afe6d9032d03d3da6468662a961819ceacf5252caccccfc69744cc9d3",
     }),
@@ -8070,6 +8718,7 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "fd846b4791aea45f743661615d913d2f3cc96ee0b86fdb8abe53871b97e3c07c",
     }),
     "worker": frozenset({
+        "cc520f7c717fa1c9c529c07439967b0d8795b130b12073350504fe5ae7acad2c",  # Exact factory role before 6.2 task-first ranking.
         "392be7e7e35a5e76f27c0073c2be0545a1be6aa856753209cb4f8ba95976ce5e",
         "952271e679f9215f039e52377a35100fbc9b2fdb343db17f266c38be8a200815",
         "2d950ebfa4e9cc7293ee32cbc71ad3910fa6938a80a339bbbc3434ecc6c4d860",
@@ -8077,6 +8726,7 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "1b311bd1a413c660382c57df74bdccc016f9b8a919e039efe21f703f0b09e475",
     }),
     "platform-engineer": frozenset({
+        "0bc8c33d45761495089826145a466ab5ced84a7c52e957e22a378ed17cc5da4b",  # Exact factory role before 6.2 task-first ranking.
         "d54979aced93372dd0d20b18f413a472ec5b2f481848609e38045f8ed6a191f0",
         "3e4c199ba984cbfba080249ad28c645ffbf78a08daf8519e0aa058e7f92aaa40",
         "2f62aaf20edd4b30838db3e728d6a907e8f6826620d2eede78c02a1cd0b7a214",
@@ -8084,22 +8734,26 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "e5d44b7fafc7ec8ab3c69b4086bdda5e5430974334f90fc407b5bb78ace8a4cf",
     }),
     "security-engineer": frozenset({
+        "9cce8eb32f8386dba2cbe88ddefd54ff1ee8695956682f0a93ee8194ebcc6513",  # Exact pre-6.2 factory role (adefe904).
         "6e53fa663da8eed31ab4012354ee9bebf24f16ecb9cdaa517a7f196dcfd1969e",
         "aeb2800e4e498ad7d3a63951608e780eb730ef2bd744ff679fee5c697f5d837a",
         "54117decdfcf9bff576e23d31a1dc6aa2d2f4fd0d498820f9c1244b6742f78f9",
         "ceb53c8db3d77f75beea76a9cc27120d7623a60661cca3dac92b01a35ce06a0c",
     }),
     "security-reviewer": frozenset({
+        "3d5b521ee8c6a230e1327cf4cf815b6c9c98f844de0aa985b4e3a7b4cfe3eb6c",  # Exact pre-6.2 factory role (adefe904).
         "f22614caec4561e5cb0833e6264081b42c46570936fe1d2b62e8534c17ee214d",
         "0f9b75713128885b8db86b32a9ecb3e756b0022add169a89fc10d615745445f1",
     }),
     "mechanical-scout": frozenset({
+        "8ed620f22a35d59df3ef2cf64cad73ef8140452253dde49fc32f527000d2bb2e",  # Exact factory role before 6.2 task-first ranking.
         "4521ff3194ed13831214f94ad228c7aa0eba97b6d40bec56e990b3490fdcc672",
         "1d2d6c4fb6463710f8e6cd1bda1738f8230cd7483b9f342f7f0e500e5ac5bb67",
         "7d9c28aeb4471ea63fe733dde320fec3bfa60dcb11cb85404ff2aed2fc6658b5",
         "d384fa021005f10b4b3faf48818a4963ab314689b986a6fbed25b5ad13e66df1",
     }),
     "mechanical-worker": frozenset({
+        "155462c4f5eb5c035254ae50f61469de954c12439ef6289e6bdf74f04cf0999f",  # Exact factory role before 6.2 task-first ranking.
         "8c126a95d35301bd493e3e2f89e4061781aaf28ca4444a3d4a67b1868c4c7568",
         "ccf7633f55389ce826cd848692277b764a559ee0b7bc81402d5657b908165869",
         "6ab77b24305af7c7b8bf8b8661b2abe1a4fa628974eee9da096419deebea39b8",
@@ -9079,7 +9733,7 @@ def _assert_canonical_member_state(
 
 
 def _preflight_directory_move_capabilities(plan: _CanonicalSkillsPlan, target: Path) -> tuple[tuple[Path, tuple[int, int, int, int]], ...]:
-    """Probe required native directory moves before any coupled live effects."""
+    """Probe the selected retention owner before any coupled live effects."""
     parents = { (target / skill.name).parent for skill in plan.skills
                 if skill.accepted_prior is not None and skill.managed_before is None }
     witnesses = []
@@ -9089,21 +9743,27 @@ def _preflight_directory_move_capabilities(plan: _CanonicalSkillsPlan, target: P
         transaction = _InstallTransaction([], enabled=False)
         state = transaction._observe(probe)
         original = None
+        effect = None
+        move_finished = False
         try:
             source = probe / "source"
             destination = probe / "destination"
             source.mkdir()
             source_state = transaction._observe(source)
             state.update(source_state)
-            if not transaction._native_publish_no_replace(source, destination):
-                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: required directory no-replace capability unavailable")
+            owner = _CreateOnlyMutablePath(probe, transaction, dry_run=False)
+            effect = transaction.arm_replacement(source, None, owner,
+                retained_destination=destination, preserve_on_commit=True)
+            transaction._publish_retained(source, destination, effect=effect)
+            move_finished = True
             state = transaction._relocate(source_state, source, destination) | {probe: state[probe]}
             if (not transaction._image_matches(probe, state)):
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION: directory capability probe drift")
             source.mkdir()
-            state.update(transaction._observe(source))
+            source_state = transaction._observe(source)
+            state.update(source_state)
             try:
-                transaction._native_publish_no_replace(source, destination)
+                transaction._publish_retained(source, destination, source_state=source_state)
             except FileExistsError:
                 pass
             else:
@@ -9115,6 +9775,16 @@ def _preflight_directory_move_capabilities(plan: _CanonicalSkillsPlan, target: P
             raise
         finally:
             try:
+                if effect is not None and not move_finished:
+                    # A move can finish before accounting or descriptor close fails.
+                    # Consider only the original witnesses and our recorded slot;
+                    # never adopt an arbitrary current directory census.
+                    candidates = (state | (effect.reservation_state or {}),
+                        transaction._relocate(source_state, source, destination) | {probe: state[probe]})
+                    for candidate in candidates:
+                        if transaction._image_matches(probe, candidate):
+                            state = candidate
+                            break
                 transaction._dispose_image(probe, state)
             except BaseException as cleanup:
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "capability",
@@ -12018,6 +12688,7 @@ def _fresh_provider_receipt_candidate(target: Path) -> Path | None:
 
 def _fresh_provider_receipt_files(
     provider: str, scope: str, receipt: Path, owner: _CreateOnlyMutablePath,
+    *, include_controls: bool = False,
 ) -> dict[str, _FreshFileWitness]:
     transaction = owner.transaction
     transient = {path for path in (transaction._temporary, *transaction._migration_retention)
@@ -12038,9 +12709,14 @@ def _fresh_provider_receipt_files(
     selected = {key: rows[0] for key, rows in candidates.items() if len(rows) == 1}
     payload = _serialize_fresh_payloads(
         {key: witness.node.data for key, witness in selected.items()}, provider, scope)
-    if payload is None:
-        return {}
-    files = json.loads(payload)["files"]
+    files = {} if payload is None else json.loads(payload)["files"]
+    if include_controls:
+        for key in selected.keys() & _fresh_control_paths(provider, scope):
+            witness = selected[key]
+            # A subsequent write is not the original creator's afterimage.
+            # Preserve it unclaimed rather than infer ownership from its name.
+            if transaction._image_matches(witness.path, {witness.path: witness.node}):
+                files[key] = witness.node.data
     return {key: selected[key] for key in files}
 
 
@@ -12055,9 +12731,13 @@ def _record_fresh_provider_receipt(
     if (not any(receipt == root or root in receipt.parents for root in transaction._original)
             or any(receipt in image for image in transaction._original.values())):
         return
-    selected = _fresh_provider_receipt_files(provider, scope, receipt, owner)
-    payload = _serialize_fresh_payloads(
-        {key: witness.node.data for key, witness in selected.items()}, provider, scope)
+    selected = _fresh_provider_receipt_files(
+        provider, scope, receipt, owner, include_controls=True)
+    control_paths = _fresh_control_paths(provider, scope)
+    payload = _serialize_fresh_install(
+        {key: witness.node.data for key, witness in selected.items() if key not in control_paths},
+        {key: witness.node.data for key, witness in selected.items() if key in control_paths},
+        provider, scope)
     if payload is None:
         return
     for witness in selected.values():
@@ -12415,18 +13095,43 @@ def _finish_install_result(provider, target, dry_run, applied, primary, cleanup_
     return 0
 
 
+def _installer_platform_admitted() -> bool:
+    """Admit implemented platform backends; native operation checks remain mandatory."""
+    return os.name in {"nt", "posix"}
+
+
 def install(provider: str, argv: list[str] | None = None) -> int:
     args = _parser(provider).parse_args(argv)
     # Even dry-run builds and disposes staging before entering the transaction.
-    # Keep this temporary hold ahead of target resolution and all plan creation.
-    if os.name == "posix":
+    # Refuse unsupported hosts before target resolution and all plan creation.
+    if not _installer_platform_admitted():
         print(
-            "FAIL: E_POSIX_DISPOSAL_UNQUALIFIED: POSIX installer operations are "
-            "temporarily disabled, including --dry-run; the disposal race remains unresolved. "
+            "FAIL: E_INSTALLER_PLATFORM_UNSUPPORTED: this host has no qualified installer backend. "
             "No target or staging operations were started.",
             file=sys.stderr,
         )
         return 1
+    if args.uninstall_selection is not None and not args.uninstall:
+        print("FAIL: --uninstall-selection requires --uninstall", file=sys.stderr)
+        return 1
+    if args.uninstall and any(value for name, value in vars(args).items()
+                              if name.startswith(("replace_", "migrate_", "enroll_"))):
+        print("FAIL: uninstall and update selections are separate operations", file=sys.stderr)
+        return 1
+    if args.apply and not args.uninstall:
+        print("FAIL: --apply requires --uninstall", file=sys.stderr)
+        return 1
+    if args.uninstall and provider != "claude":
+        print("FAIL: selected-current uninstall is qualified only for Claude; shared Codex runtime preserved", file=sys.stderr)
+        return 1
+    if args.uninstall:
+        root = Path(__file__).resolve().parents[1]
+        try:
+            operation = _load_module_from_path("orche_presdk_uninstall", root / "scripts/installation/uninstall.py")
+            return operation.run(sys.modules[__name__], root, provider, args)
+        except Exception as exc:
+            print("FAIL: uninstall preserved unverified state: " + _installer_failure_text(exc), file=sys.stderr)
+            return 1
     if args.replace_claude_instruction and provider != "claude":
         print("FAIL: E_CLAUDE_INSTRUCTION_SELECTION_INVALID: Claude only", file=sys.stderr)
         return 1

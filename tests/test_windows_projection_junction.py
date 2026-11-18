@@ -42,8 +42,10 @@ class ProjectionOwnerTests(unittest.TestCase):
         self.source, self.target = object(), object()
         self.creator_proof, self.target_proof = object(), object()
         self.empty = SimpleNamespace(native_proof=self.creator_proof, reparse_data=None)
-        self.final = SimpleNamespace(native_proof=self.creator_proof, reparse_data=b"junction")
+        self.final = SimpleNamespace(native_proof=self.creator_proof, reparse_data=struct.pack("<I", 0xA0000003) + b"junction")
         self.set_error = None
+        self.privilege_error = None
+        self.auto_junction = True
         self.changed_target = False
         self.wrong_follow = False
         self.capture_count = 0
@@ -84,9 +86,22 @@ class ProjectionOwnerTests(unittest.TestCase):
                     outer.events.append(("creator-close", path))
 
             @staticmethod
+            @contextmanager
+            def symlink_privilege(*, required=True):
+                outer.events.append(("privilege", required))
+                if required and outer.privilege_error is not None:
+                    raise outer.privilege_error
+                try:
+                    yield
+                finally:
+                    outer.events.append(("privilege-close", required))
+
+            @staticmethod
             def target_reparse_data(original, *, junction):
                 outer.encodings.append((original.path, junction))
-                return b"junction" if junction else b"symlink"
+                selected = outer.auto_junction if junction is None else junction
+                tag = 0xA0000003 if selected else 0xA000000C
+                return struct.pack("<I", tag) + (b"junction" if selected else b"symlink")
 
         self.ns["_WindowsBoundNode"] = Bound
         self.ns["_projection_resolves_to"] = lambda target, source: True
@@ -105,9 +120,10 @@ class ProjectionOwnerTests(unittest.TestCase):
             self.owner, self.source, self.target,
             lambda path, node: self.records.append((path, node)), **kwargs)
 
-    def test_default_uses_junction_with_same_creator_and_target_checks(self):
+    def test_default_defers_representation_with_same_creator_and_target_checks(self):
         self.assertIs(self.run_projection(), self.final)
-        self.assertEqual(self.encodings, [(self.source, True)])
+        self.assertEqual(self.encodings, [(self.source, None)])
+        self.assertIn(("privilege", False), self.events)
         self.assertEqual(self.records, [(self.target, self.empty), (self.target, self.final)])
         self.assertEqual(sum(event[0] == "create" for event in self.events), 1)
         self.assertEqual(sum(event[0] == "set" for event in self.events), 1)
@@ -116,9 +132,10 @@ class ProjectionOwnerTests(unittest.TestCase):
         self.assertLess(close, follow)
 
     def test_explicit_symlink_route_remains_explicit(self):
-        self.final.reparse_data = b"symlink"
+        self.final.reparse_data = struct.pack("<I", 0xA000000C) + b"symlink"
         self.run_projection(junction=False)
         self.assertEqual(self.encodings, [(self.source, False)])
+        self.assertIn(("privilege", True), self.events)
 
     def test_native_failure_is_not_retried_or_relabelled(self):
         self.set_error = OSError("native denial")
@@ -129,7 +146,27 @@ class ProjectionOwnerTests(unittest.TestCase):
         self.assertEqual(sum(event[0] == "set" for event in self.events), 1)
         self.assertEqual(sum(event[0] == "create" for event in self.events), 1)
         self.assertFalse(any(event[0] == "acquire" and event[1] is self.target for event in self.events))
-        self.assertEqual(self.events[-1], ("creator-close", self.target))
+        self.assertLess(self.events.index(("creator-close", self.target)),
+                        self.events.index(("privilege-close", False)))
+        self.assertEqual(self.events[-1], ("close", self.source))
+
+    def test_auto_symlink_requests_privilege_before_creator(self):
+        self.auto_junction = False
+        self.final.reparse_data = struct.pack("<I", 0xA000000C) + b"symlink"
+        self.assertIs(self.run_projection(), self.final)
+        self.assertEqual(self.encodings, [(self.source, None)])
+        self.assertLess(self.events.index(("privilege", True)),
+                        self.events.index(("create", self.target, True)))
+
+    def test_privilege_refusal_never_acquires_creator(self):
+        self.auto_junction = False
+        self.privilege_error = OSError("privilege unavailable")
+        with self.assertRaises(OSError) as raised:
+            self.run_projection()
+        self.assertIs(raised.exception, self.privilege_error)
+        self.assertEqual(self.records, [])
+        self.assertFalse(any(event[0] in {"create", "set"} for event in self.events))
+        self.assertEqual(self.events[-1], ("close", self.source))
 
     def test_wrong_creator_proof_refuses(self):
         self.final.native_proof = object()
