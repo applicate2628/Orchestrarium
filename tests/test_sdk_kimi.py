@@ -138,7 +138,7 @@ def test_common_adapter_runs_existing_owner_and_preserves_native_result(tmp_path
     assert receipt["selected"]["permission"] == "reject"
     assert requests[0].cancellation_probe is not None
     assert requests[0].stdin_bytes is None
-    assert effects == ["kimi_launch_admission", "kimi_process_start", "kimi_prompt"]
+    assert effects == ["kimi_launch_admission", "kimi_process_start", "kimi_prompt", "kimi_result"]
     assert runners[0]._closed
     assert "ORCHESTRARIUM_PROVIDER_RESULT" not in capsys.readouterr().out
     assert ExecutionResult.from_dict(result.to_dict()) == result

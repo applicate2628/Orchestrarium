@@ -73,6 +73,7 @@ class KimiAcpAdapter:
         self._request: ExecutionRequest | None = None
         self._operation: owner.KimiOperationBindingV1 | None = None
         self._finished = False
+        self.execution_result: ExecutionResult | None = None
 
     def _binding(self, request: ExecutionRequest) -> None:
         prepared = self._prepared
@@ -195,7 +196,10 @@ class KimiAcpAdapter:
     def _execute(self, request: ExecutionRequest) -> ExecutionResult:
         def current(effect: str) -> None:
             self._binding(request)
-            if self._assert_current(request, effect) is not None:
+            decision = self._assert_current(request, effect)
+            if decision is not None:
+                if inspect.iscoroutine(decision) and inspect.getcoroutinestate(decision) == inspect.CORO_CREATED:
+                    decision.close()
                 raise KimiAdapterError("invalid_authority_callback")
 
         operation = owner.KimiOperationBindingV1(
@@ -212,10 +216,18 @@ class KimiAcpAdapter:
                 # vocabulary. Never relay provider, account or OS diagnostics.
                 code, owner_failed = 1, True
             result = self._result(request, operation, code)
-            return replace(
+            result = replace(
                 result, status="incomplete", execution_error=result.execution_error or "kimi_owner_failed",
                 cleanup_error=result.cleanup_error or "kimi_settlement_unavailable",
             ) if owner_failed else result
+            # Receiving has already happened. Withhold stale delivery without
+            # discarding acquired evidence or repeating launch admission.
+            self.execution_result = result
+            try:
+                current("kimi_result")
+            except Exception:
+                raise KimiAdapterError("kimi_result_authority_denied") from None
+            return result
         finally:
             with self._lock:
                 self._finished = True

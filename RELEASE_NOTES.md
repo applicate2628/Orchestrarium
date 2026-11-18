@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Direct Kimi Host execution rechecks current authority after receiving before returning evidence. Revocation withholds delivery without losing the acquired result or canonical receipt, and never replays execution. The existing runtime and read-only recovery route are unchanged.
+
 - Paired ledger helpers reuse unchanged loaded modules instead of repeatedly compiling the validator and lifecycle owner during SDK permission checks. Every lookup still verifies the complete source generation; new consumers refresh after source updates while held old bindings continue to detect drift. Ledger contents, permissions and results are never cached. This also preserves linked/global installation isolation.
 - Removed Low from the active routing effort catalogue, profiles and task metadata. The existing cross-provider launch rejection remains binding; other efforts and historical migration evidence are unchanged.
 

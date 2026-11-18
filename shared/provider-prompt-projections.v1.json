@@ -134,7 +134,7 @@
     },
     "sdk_execution/kimi.py": {
       "source": "scripts/sdk_execution/kimi.py",
-      "sha256": "6662838766c111bb4bf23f5ca43268faf6abff892a4f9911c9c389c0ae30dd52",
+      "sha256": "42a0896b0b9d367c3598d61b9f251826c2956f3a6a4f25ad5e3d551a0c229f9a",
       "destination": "scripts/sdk_execution/kimi.py"
     },
     "sdk_execution/mimo.py": {

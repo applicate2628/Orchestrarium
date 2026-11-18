@@ -1705,6 +1705,12 @@ drift withholds tool delivery while preserving the received evidence; it never
 replays the provider. Read-only reconciliation remains available under its own
 current permission checks.
 
+Direct `KimiAcpAdapter.execute()` also checks current Host authority after receiving
+and before returning its result. If permission was revoked during evidence
+recording, delivery is withheld while `execution_result` and the canonical receipt
+remain retained. The consumed operation is not replayed; read-only recovery keeps
+its separate current-permission checks. This does not change the Kimi runtime.
+
 The public `KimiAcpAdapter.reconcile_received(request, output_context=...)` path retrieves already
 received native terminal evidence without launching Kimi or writing another
 ledger event. The caller supplies the same prepared binding, current authority
