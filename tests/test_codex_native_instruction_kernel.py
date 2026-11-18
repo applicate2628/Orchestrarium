@@ -41,11 +41,11 @@ class CodexNativeInstructionKernelTests(unittest.TestCase):
 
     def test_kernel_keeps_consent_and_nonauthority(self):
         self.require(section(read(KERNEL), "Native dispatch kernel"),
-            "every Astra attempt at any effort and every model Max",
-            "genuine individual user agreement",
-            "task, role, scope, provider route, model, effort and one attempt",
+            "Every model Max still needs separate exact-attempt approval",
+            "A genuine task-scoped user authorization may cover Astra High/Extra high",
+            "unchanged scope, route, allowed efforts and spending bounds",
             "Low is excluded on every model",
-            "copied approval flag or prior attempt never creates consent",
+            "copied flags do not create launch or spending authority",
             "Current user configuration and parent permissions remain binding",
             "Missing inputs, rejection or drift confer no retry, fallback, alternative-route or permission-reset authority",
             "A genuinely authorized later action still requires resolved owner inputs")
@@ -78,7 +78,7 @@ class CodexNativeInstructionKernelTests(unittest.TestCase):
             "partial controls remain unresolved", "preserves noncontrol bytes",
             "without reserializing TOML", "configuration conflict",
             "capability-unknown", "unspecified by runtime",
-            "user_approved_launch=False", "one combined agreement",
+            "user_approved_launch=False", "The exact-launch flag cannot manufacture consent",
             "rechecks the resolved tuple at host submission")
 
     def test_mechanical_procedure_preserves_exact_contracts(self):

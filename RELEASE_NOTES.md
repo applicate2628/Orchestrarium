@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Normal and Ultra Codex Leads now share an explicit native-dispatch procedure: select each child by task through the existing resolver, submit the exact model/effort pair, and distinguish requested controls from host evidence. This clarifies that ranking is caller-owned rather than an automatic host hook; missing runtime metadata alone does not freeze substantive review or independent work. No model defaults, permission rules or runtime hooks are changed.
+
 - Removed Low from the active routing effort catalogue, profiles and task metadata. The existing cross-provider launch rejection remains binding; other efforts and historical migration evidence are unchanged.
 
 - Codex model routing now admits only the latest confirmed version in each family: Luna 6, Terra 6.1, Sol 6.2 and Astra 6.2. Older model profiles are removed from active choices rather than retained as launchable compatibility or quota-fallback routes. Existing user configuration is preserved and retired choices are reported explicitly; historical evidence and migration fixtures remain intact. This prevents new tasks from silently returning to obsolete model generations.
