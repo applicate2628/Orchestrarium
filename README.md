@@ -32,6 +32,9 @@ Optional software development kit (SDK) helpers are part of the installer-manage
 
 Client-specific authentication restrictions are documented in [client integration notes](docs/client-integrations.md). They do not block the primary Codex route.
 
+Scoped child Lead coordination is an explicit Python Host integration over existing admitted requests and lifecycle owners, not an automatically enabled CLI mode. See [child Lead integration and remaining boundaries](docs/sdk-execution.md#scoped-child-lead-host-integration). Offline coverage does not imply installed/native acceptance.
+
+
 ## Repository layout
 
 ```text

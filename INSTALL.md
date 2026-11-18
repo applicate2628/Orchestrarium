@@ -1,5 +1,8 @@
 # Install Orche
 
+
+Scoped child Lead coordination is an explicit Python Host integration over existing admitted requests and lifecycle owners, not an automatically enabled CLI mode. See [child Lead integration and remaining boundaries](docs/sdk-execution.md#scoped-child-lead-host-integration). Offline coverage does not imply installed/native acceptance.
+
 ## Official agent SDK setup
 
 Orche supplies its integration code, not repackaged vendor SDKs or coding CLI

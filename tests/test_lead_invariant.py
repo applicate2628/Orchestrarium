@@ -21,6 +21,9 @@ WRONG (this test fails on it):
   - "subagent_type: lead" as a live dispatch, "You are the `lead` subagent",
     "spawn/dispatch/invoke `$lead`", "`$lead` ... spawned/dispatched"
 
+Scoped child coordination is an explicitly admitted SDK task session, not an ordinary
+spawnable specialist role; the ordinary-role refusal remains enforced.
+
 FINE (allow-listed — this test must stay green on it):
   - "$lead" as a bare ROLE NAME held by the main conversation
   - "the main conversation (as Lead)", "the main session IS the lead",
@@ -34,7 +37,7 @@ The allow-list is CATEGORY-SCOPED (see _ALLOW_GROUP_EXCUSES): it may excuse a
 duality/field hit, but dispatch:* polarity is always decided around the exact
 forbidden occurrence. A refusal elsewhere on the line can never neutralize it.
 
-Scope: src.claude, src.codex, shared, docs. NOT work-items /
+Scope: adapters/claude, src.codex, shared, docs. NOT work-items /
 .scratch / changelogs / dated-plan snapshots (those legitimately record superseded
 relations).
 """
@@ -52,7 +55,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # Shipped-pack trees only. work-items/, .scratch/, changelogs, and dated-plan
 # snapshots are excluded (see _is_excluded) because recording a superseded
 # relation there is legitimate provenance, not a live split.
-SCAN_DIRS = ("src.claude", "src.codex", "shared", "docs")
+SCAN_DIRS = ("adapters/claude", "src.codex", "shared", "docs")
 
 TEXT_SUFFIXES = {".md", ".sh", ".ps1", ".py", ".yaml", ".yml", ".toml", ".json", ".txt"}
 
@@ -1053,20 +1056,20 @@ def test_live_dispatch_corpus_is_exact_and_refused():
 
     assert Counter((path, name) for path, name, _polarity in occurrences) == Counter(
         {
-            ("src.claude/CLAUDE.md", "dispatch:subagent_type-lead"): 2,
-            ("src.claude/agents/lead.md", "dispatch:subagent_type-lead"): 2,
-            ("src.claude/agents/lead.md", "dispatch:lead-spawned"): 1,
-            ("src.claude/commands/agents-bugfix.md", "dispatch:verb-lead"): 1,
-            ("src.claude/commands/agents-resume.md", "dispatch:verb-lead"): 1,
-            ("src.claude/skills/lead/SKILL.md", "dispatch:subagent_type-lead"): 1,
-            ("src.codex/AGENTS.codex.md", "dispatch:lead-spawned"): 1,
+            ("adapters/claude/CLAUDE.md", "dispatch:subagent_type-lead"): 2,
+            ("adapters/claude/agents/lead.md", "dispatch:subagent_type-lead"): 2,
+            ("adapters/claude/agents/lead.md", "dispatch:lead-spawned"): 1,
+            ("adapters/claude/commands/agents-bugfix.md", "dispatch:verb-lead"): 1,
+            ("adapters/claude/commands/agents-resume.md", "dispatch:verb-lead"): 1,
+            ("adapters/claude/skills/lead/SKILL.md", "dispatch:subagent_type-lead"): 1,
+            ("src.codex/AGENTS.codex.md", "dispatch:verb-lead"): 1,
         }
     )
     assert Counter(name for _path, name, _polarity in occurrences) == Counter(
         {
             "dispatch:subagent_type-lead": 5,
-            "dispatch:verb-lead": 2,
-            "dispatch:lead-spawned": 2,
+            "dispatch:verb-lead": 3,
+            "dispatch:lead-spawned": 1,
         }
     )
     assert all(polarity is _DispatchPolarity.REFUSED for _path, _name, polarity in occurrences)

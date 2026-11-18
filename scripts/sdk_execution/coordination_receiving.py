@@ -18,7 +18,7 @@ def coordination_terminal_payload(request, observation, *, output_context, admit
         raise ValueError("coordination runtime commitment unavailable")
     selection = runtime_selection_from_dict("codex", strict_json(observation.runtime_selection_json))
     selected = selected_sdk_execution(request, selection)
-    if admitted_sdk_execution != selected or selected["schemaVersion"] != 3:
+    if admitted_sdk_execution != selected or selected["schemaVersion"] != (5 if request.child_choice_json is not None else 3):
         raise ValueError("coordination launch commitment mismatch")
     owner = _provider_owner()
     validator = owner._ledger_owner().load_validator()
@@ -40,7 +40,7 @@ def coordination_terminal_payload(request, observation, *, output_context, admit
         controls = ("adapter", "model", "effort", "sandboxMode", "approvalPolicy", "accountBinding")
         if reported["schemaVersion"] != 1 or any(reported[k] != selected[k] for k in controls):
             complete = False
-    content = {"operation": "coordination-inference", "evidence": result.to_tool_output(),
+    content = {"operation": "scoped-child-coordination" if request.child_choice_json is not None else "coordination-inference", "evidence": result.to_tool_output(),
                "reported_sdk_configuration": reported,
                "process": {"outcome": process.outcome, "failure_id": process.failure_id,
                            "target_exit_code": process.target_exit_code}}

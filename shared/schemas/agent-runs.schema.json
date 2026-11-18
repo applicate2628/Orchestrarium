@@ -274,7 +274,8 @@
             "operationKind": false,
             "innerRequestSha256": false,
             "outerBudgetBinding": false,
-            "innerBudgetBinding": false
+            "innerBudgetBinding": false,
+            "childChoiceSha256": false
           },
           "required": [
             "sdkVersion",
@@ -291,7 +292,8 @@
             "operationKind": false,
             "innerRequestSha256": false,
             "outerBudgetBinding": false,
-            "innerBudgetBinding": false
+            "innerBudgetBinding": false,
+            "childChoiceSha256": false
           },
           "required": [
             "requestSha256"
@@ -303,12 +305,36 @@
               "const": 3
             },
             "sdkVersion": false,
-            "runtimeVersion": false
+            "runtimeVersion": false,
+            "childChoiceSha256": false,
+            "operationKind": {
+              "const": "coordination-inference"
+            }
           },
           "required": [
             "requestSha256",
             "operationKind",
             "innerRequestSha256",
+            "outerBudgetBinding",
+            "innerBudgetBinding"
+          ]
+        },
+        {
+          "properties": {
+            "schemaVersion": {
+              "const": 5
+            },
+            "sdkVersion": false,
+            "runtimeVersion": false,
+            "innerRequestSha256": false,
+            "operationKind": {
+              "const": "scoped-child-coordination"
+            }
+          },
+          "required": [
+            "requestSha256",
+            "operationKind",
+            "childChoiceSha256",
             "outerBudgetBinding",
             "innerBudgetBinding"
           ]
@@ -327,7 +353,8 @@
           "enum": [
             1,
             2,
-            3
+            3,
+            5
           ]
         },
         "adapter": {
@@ -384,7 +411,10 @@
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$"
         },
         "operationKind": {
-          "const": "coordination-inference"
+          "enum": [
+            "coordination-inference",
+            "scoped-child-coordination"
+          ]
         },
         "innerRequestSha256": {
           "type": "string",
@@ -425,6 +455,13 @@
           "maxLength": 64,
           "pattern": "^[0-9a-f]{64}$",
           "$comment": "Exact received source for a new native thread fork. Does not consume the source continuation slot or grant child-Lead authority."
+        },
+        "childChoiceSha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "$comment": "Immutable closed child catalog and received-state choice projection commitment."
         }
       },
       "$comment": "Exact SDK configuration, not permission or qualification evidence. Version 1 retains historical version-bearing metadata. Version 2 records only admitted controls and the request commitment, never fabricating SDK/runtime versions before startup; actual observed versions are retained in the scanned, artifact-bound review evidence. All tokens are bounded 128-character ASCII; version metadata additionally permits standard build/epoch markers. Codex read-only names its OS sandbox; Claude tool-restricted modes do not claim OS isolation; admitted Host tool callbacks own path permissions. Approval-policy labels are not blanket tool denials. Workspace-write adds its exact writeWorkspaceSha256 binding; selected v2 remains request-bound and observed v1 remains evidence only.",

@@ -57,6 +57,16 @@ native subagent-depth controls separate. Repeated intents never automatically
 create another fork after an unknown outcome. Retain original outcomes and reconcile uncertainty through
 the same owners; API-key mode readback does not establish an account identity.
 
+### Scoped SDK child coordination
+
+An explicitly Root-admitted child assignment binds a child work-item and exact
+request catalog. Codex coordination decisions select among ready admitted tasks
+or propose child completion/cancellation; actual execution and ledger/lifecycle
+writes remain with the existing Host owners. The loop hands back received state,
+not self-certified model completion. This is a logical child task session, not
+proof of a persistent native Lead thread or control of native subagent depth.
+Root/sibling mutation and global acceptance remain outside the child assignment.
+
 ## Codex-specific runtime notes
 
 - Mechanical-plan filesystem preflight is a repo-local check, not host containment. An explicitly observed exact root may be located on an ordinary mounted volume; native identity is rechecked across its ancestor chain. Detected descendant mounts and all links/junctions/reparse points remain refused. Python documents that [os.path.ismount](https://docs.python.org/3/library/os.path.html#os.path.ismount) cannot reliably detect same-filesystem bind mounts and also treats Linux btrfs subvolumes as mount points. No stronger mount-detection guarantee is claimed; caller authority and host restrictions remain independent.

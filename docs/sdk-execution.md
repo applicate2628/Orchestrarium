@@ -225,13 +225,13 @@ writing still require the separate integration below.
 Approved target: the root Lead can split genuinely independent outcomes
 into separate sessions, each with a scoped child Lead and its own delegation.
 Assign exclusive ownership and expected integration results before dispatch.
-The existing shared Lead/lifecycle contract currently reserves dispatch and
-lifecycle writing to the root main conversation. Implementing scoped child Leads
-therefore includes an explicit, reviewed change to that existing owner contract:
-root-global coordination and final acceptance stay with the root; a child may
-delegate and record outcomes only within its assigned scope, not mutate root or
-sibling lifecycle, acquire new grants or declare global completion. Do not
-silently bypass the current root-only contract by relabeling a worker as Lead.
+The shared Lead/lifecycle contract admits an explicit scoped-child exception:
+root-global admission, integration and final acceptance stay with Root. A child
+selects descendant requests and proposes lifecycle actions only within its
+recorded assignment. The existing Host owner checks actual current authority
+before dispatch or child-only lifecycle effects; neither model text nor a role
+label grants permission to mutate Root/siblings, acquire access or declare global
+completion. Ordinary specialists remain non-spawning.
 Use separate Git worktrees and pull requests when the change is independently
 reviewable and needs isolation; do not create a PR for every small task or split
 one atomic change into competing edits. Existing suitable PRs remain reusable.
@@ -306,6 +306,45 @@ Orchestrarium owners rather than importing a second coordinator or approval loop
 Acceptance covers independent ownership, child-result integration, conflicting
 changes, cancellation/uncertain children and the distinction between configured
 and actually enforced hierarchy/native depth.
+
+### Scoped child Lead Host integration
+
+The Python Host entrypoints are `runtime.publish_child_assignment`,
+`runtime.ChildLeadAuthority`, and `coordinator.ChildLeadCoordinator`. This is
+explicit Host composition, not a new command-line binding or automatic activation.
+Root supplies existing admitted immutable requests, their concrete receiving
+selections, and a separate child work-item. Publishing the assignment commits its
+artifact and digest to Root's existing ledger. A descriptive `scope` label is not
+a filesystem sandbox; each selected executor retains its own real permissions.
+
+1. Root resolves the child catalog through the existing admission authority and
+   publishes exact request hashes, required results, permitted lifecycle
+   operations and the selected decision-runtime binding. The decision envelope
+   is separate from each task executor profile; a tool-free decision does not
+   force Worker tasks to use a read-only task profile. Parent lineage derives logical task depth from the recorded parent
+   assignment. An optional task-specific maximum is inherited, not a universal
+   default and not a claim to control vendor-native subagent depth.
+2. Construct the scoped authority with the same catalog selections and existing
+   lifecycle owner data. Supply actual `SdkReviewExecutor` instances, plus a
+   decision factory producing an actual `SdkCoordinationWorker` for the current
+   received-state projection. A model response cannot manufacture an admitted
+   request, choose another work-item or grant itself broader access.
+3. Run the coordinator. Each decision selects an available admitted request,
+   requests child completion, or requests cancellation. The Host performs effects
+   through the existing executors, receiving and lifecycle owners. A declared
+   success in model text does not satisfy independent review or close gates.
+4. After interruption, reconstruct from the same assignment and canonical ledger,
+   not an in-memory conversation or a new competing state file. Retain incomplete
+   outcomes for recovery rather than automatically repeating a model invocation.
+
+The implemented dialogue uses separate SDK coordination turns with explicit
+received-state handoff. It does **not** promise one persistent native Lead thread,
+provider-native child-agent steering, or dynamic admission of arbitrary new work.
+Requests outside the catalog return to Root admission. The separate Consultant
+native fork/continuation mechanism is not converted into child-Lead authority.
+Broader multi-Lead acceptance still includes provider/session integration, actual
+installed execution and authorized native validation; offline tests alone do not
+establish those results.
 
 ### Official access terms and project choices
 

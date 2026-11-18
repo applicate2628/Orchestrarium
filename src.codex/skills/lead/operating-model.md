@@ -511,6 +511,11 @@ When `$product-manager` admits a new candidate approach into discovery, the road
 
 Every role EXCEPT `$lead` MUST use the designated agent invocation mechanism (skill activation) with the matching role; the main session holds the `$lead` orchestration skill in-context and is never activated as a separate subagent. Every OTHER INTERNAL leaf specialist is activated per stage; the provider-backed external adapter routes (`$external-worker` / `$external-reviewer`) launch the selected external provider directly instead. Do not simulate those other roles in the main conversation or emulate a specialist by "acting as" that role. Independent roles (e.g., security-engineer and performance-engineer) SHOULD be launched in parallel when their scopes do not overlap. Sequential dependencies must wait for the previous role to return its accepted artifact.
 
+The explicitly Root-admitted logical SDK child coordinator is the scoped exception:
+it submits admitted-child dispatch/lifecycle intents through the existing Host
+owner. It is not an ordinary native specialist adopting Lead or a new global
+owner, and does not relax the provider access or independent-review rules.
+
 ## Interaction types
 
 | Symbol | Type | Description | Authorization |
@@ -663,3 +668,15 @@ Managed adapters supply actual assigned-role provenance and consume `--user-appr
 
 
 Public launchers retain their selected lexical script argument before importing P and pass the call-local `runtime_namespace` through `launch`/`kimi_main` to the shared rule. P correlates the actual runtime participant with that selected namespace. Direct P library calls without a launcher use the selected P module origin, never process argv0 or cwd. There is no provider/user namespace flag, search or physical-parent fallback; genuine task authority, package/native currentness and applicable exact-attempt or task-scoped user receiving remain separate.
+
+
+### Scoped child coordination boundary
+
+Root retains global admission, integration and final acceptance. The explicitly
+admitted SDK child coordinator selects only its immutable request catalog and
+child lifecycle intents; existing Host execution/receiving/lifecycle owners check
+the current recorded assignment before effects. Descriptive scope is not a file
+sandbox. Child outcomes require independent acceptance and cannot close Root or
+siblings. Parent assignment depth, conversation-fork depth and vendor subagent
+depth are distinct. See the shared scoped-child contract and SDK execution
+runbook for current implemented routes and recovery limits.

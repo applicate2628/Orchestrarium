@@ -40,7 +40,7 @@ Short version:
 
 > **One subagent = one profession + one artifact + one gate.**
 
-> **The root main conversation holding Lead alone dispatches downstream roles and writes work-item lifecycle state.** A specialist returns evidence plus an optional non-binding recommended next role to the root, then stops; it never adopts Lead, launches a peer or downstream stage, advances the pipeline, or writes `agent-runs.jsonl`. The root may directly launch a configured external wrapper; no provider or leaf may recursively launch another wrapper.
+> **Root owns global admission, integration and acceptance. An explicitly admitted scoped child coordinator may choose descendant dispatch and child-only lifecycle intents through the existing Host owner.** A specialist returns evidence plus an optional non-binding recommended next role to the root, then stops; it never adopts Lead, launches a peer or downstream stage, advances the pipeline, or writes `agent-runs.jsonl`. The root may directly launch a configured external wrapper; no provider or leaf may recursively launch another wrapper.
 
 Shortest version:
 
@@ -399,10 +399,10 @@ Do not design the technical solution and do not produce the delivery plan.
 ### 7.2 `lead`
 
 ```text
-You hold the `lead` role as the main conversation — lead is never dispatched as a subagent.
+You hold the Lead coordination role under Root global authority or an explicit scoped child assignment; ordinary specialists do not adopt Lead.
 
 Your task is not to write code. Your task is to route work through roles and artifacts.
-You alone dispatch downstream stages and write work-item lifecycle state, including `agent-runs.jsonl`; a main-owned helper or wrapper may write only on your behalf.
+Root retains global admission and final acceptance. For a scoped child assignment, select only admitted descendant requests and child-only lifecycle intents; the existing Host owner validates and performs effects. Never mutate Root/sibling work or manufacture admission.
 
 For a staged or full-delivery route, turn the request into a canonical brief:
 - goal
@@ -978,6 +978,32 @@ standalone installation; missing or unproved global policy retains the complete
 local form. Reuse creates an explicit dependency on that global installation,
 not a guarantee that a neighboring file will be read. Client-specific selection,
 updates and removal belong to the existing installer and its ownership receipts.
+
+## Scoped child coordination
+
+Root records an explicit assignment to one child work-item and a catalog of
+already admitted immutable requests. The child chooses among ready catalog IDs,
+consumes received outcomes, and may propose completing or cancelling its own
+assignment. The Host rechecks the assignment and exact request bindings before
+effects and uses existing execution, ledger receiving and lifecycle owners.
+Neither a role label, descriptive scope text nor a permissive model response is
+a grant. New tasks outside the catalog remain proposals for Root admission.
+
+Root and sibling items cannot be selected by a child lifecycle argument. Actual
+close still requires canonical child outcome and independent acceptance under the
+existing lifecycle contract; child completion is not global project acceptance.
+Cancellation stops new dispatch before targeting only identified descendants;
+uncertain outcomes remain recoverable and are not silently rerun. Restore uses
+existing assignment artifacts and execution ledgers, not conversational memory
+or a second task store. An unresolved descendant holds dependent completion,
+not unrelated ready catalog work.
+
+Child-assignment depth follows verified parent assignments. It is distinct from
+native conversation fork depth and vendor-owned subagent depth. No universal
+numeric ceiling is introduced. A separately admitted scope/resource policy must
+be carried with its actual units and owner, not inferred from a model prompt.
+The current SDK child loop uses native coordination decisions plus explicit
+received-state handoff; it does not claim a persistent native Lead conversation.
 
 ## Native task continuation
 

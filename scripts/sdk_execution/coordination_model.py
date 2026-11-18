@@ -90,7 +90,7 @@ def validate_call(request, system_instructions, input, model_settings, tools,
 class OneCoordinationCall:
     """One-use guard and current owner checks, independent of SDK defaults."""
     def __init__(self, request, worker, authority, *, inner_request):
-        if type(request) is not CoordinationInferenceRequest or not callable(worker) or not callable(authority):
+        if type(request) is not CoordinationInferenceRequest or request.child_choice_json is not None or not callable(worker) or not callable(authority):
             raise ValueError("explicit coordination operation and owners required")
         if (type(inner_request) is not ExecutionRequest
             or hashlib.sha256(json_text(inner_request.to_dict()).encode()).hexdigest() != request.inner_request_sha256

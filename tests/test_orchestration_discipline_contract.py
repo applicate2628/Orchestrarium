@@ -356,8 +356,8 @@ PINS = [
 
     # Single-writer orchestration — the root main conversation owns dispatch and lifecycle
     # state; specialists return a bounded result and recommendation without advance authority.
-    ("single-writer-root", "Only the root main conversation holding Lead dispatches downstream roles and writes work-item lifecycle state.",
-     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+    ("single-writer-root", "Root retains global dispatch and lifecycle authority; an explicitly admitted scoped child coordinator uses the existing Host owner for exact assigned-child actions only, never Root or sibling state.",
+     ["src.codex/skills/lead/subagent-contracts.md"]),
     ("single-writer-ledger", "Only the root main conversation holding Lead writes `agent-runs.jsonl`:",
      ["src.claude/agents/contracts/subagent-contracts.md"]),
     ("root-owned-ledger", None, ["src.codex/skills/lead/subagent-contracts.md"]),
@@ -369,7 +369,7 @@ PINS = [
      ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md", "shared/references/subagent-operating-model.md"]),
     ("single-writer-spine", None,
      [SPINE]),
-    ("single-writer-shared", "The root main conversation holding Lead alone dispatches downstream roles and writes work-item lifecycle state.",
+    ("single-writer-shared", "Root owns global admission, integration and acceptance. An explicitly admitted scoped child coordinator may choose descendant dispatch and child-only lifecycle intents through the existing Host owner.",
      ["shared/references/subagent-operating-model.md"]),
 
     # Review baselines belong to the producing run, not the aggregate worktree.
@@ -557,12 +557,18 @@ def isolation_duties(text: str) -> dict[str, bool]:
 def lead_dispatch_duties(text: str) -> dict[str, bool]:
     unit = selected_unit(text, "Core delegation principles", "$lead:")
     duties = complete_shared_relationships(unit, {
-        "root-only-dispatch-and-lifecycle": "root main conversation alone dispatches/writes lifecycle",
-        "no-specialist-or-delivery-owner": "never subagent/end-to-end coder/roadmap owner",
+        "root-global-authority": "Root retains global admission, integration and final acceptance",
+        "specialist-nonspawning": "ordinary specialists remain non-spawning",
+        "admitted-scoped-choice": "An explicitly Root-admitted scoped child coordinator may select among its admitted descendant requests and propose lifecycle actions for its exact assigned work-item",
+        "host-validated-effects": "The existing Host validates current assignment, request identities, permissions and canonical evidence before dispatch or lifecycle effects",
+        "no-child-authority-escalation": "child output grants no authority, access to Root/siblings or global completion",
+        "root-new-admission": "Root owns new admission outside the catalog",
+        "no-specialist-or-delivery-owner": "This is a scoped coordination session, not a specialist adopting Lead, an end-to-end coder or a roadmap owner",
     })
     owner = selected_unit(text, "Core delegation principles", "$lead")
-    duties["root-only-dispatch-and-lifecycle"] &= identifier_present(owner, "$lead")
+    duties["root-global-authority"] &= identifier_present(owner, "$lead")
     return duties
+
 
 
 def fixed_value_duties(text: str, *, projection: bool = False) -> dict[str, bool]:
@@ -595,9 +601,10 @@ def independent_review_duties(text: str) -> dict[str, bool]:
 
 
 def root_ledger_duties(text: str) -> dict[str, bool]:
-    unit = selected_unit(text, "agent-runs.jsonl format", "Only the root main conversation holding Lead owns")
+    unit = selected_unit(text, "agent-runs.jsonl format", "Root retains")
     clauses = {
-        "root-ownership": "Only the root main conversation holding Lead owns agent-runs.jsonl.",
+        "root-ownership": "Root retains global ledger authority.",
+        "scoped-child-owner": "An explicitly admitted scoped child coordinator submits dispatch/lifecycle intents through the existing Host owner, which can write only the assigned child ledger under its verified assignment.",
         "actual-root-execution": "Root records actual native and already-admitted declared direct external owner-equivalent executions;",
         "bounded-wrapper-delegation": "an actual supported tracked provider wrapper may write its own pair on Root's behalf.",
         "specialist-no-append": "Specialists never append.",
@@ -605,7 +612,7 @@ def root_ledger_duties(text: str) -> dict[str, bool]:
         "actual-wrapper-evidence": "wrapper-specific envelopes and identifiers apply only when that wrapper actually ran.",
     }
     duties = relationships(unit, clauses)
-    duties["root-ownership"] &= identifier_present(unit, "agent-runs.jsonl")
+    duties["root-ownership"] &= bool(selected_section(text, "agent-runs.jsonl format"))
     duties["complete-owner-unit"] = lexical(unit) == lexical(" ".join(clauses.values()))
     return duties
 
@@ -854,12 +861,58 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
                     changed = text.replace(unit, unit.replace(old, new, 1), 1)
                     self.assertFalse(independent_review_duties(changed)[duty])
 
+    def test_scoped_child_current_owners_preserve_specialist_boundaries(self) -> None:
+        contracts = self._read("src.codex/skills/lead/subagent-contracts.md")
+        shared = self._read("shared/references/subagent-operating-model.md")
+        for gap, text in (
+            ("single-writer-root", contracts),
+            ("single-writer-specialist", contracts),
+            ("single-writer-stop", contracts),
+            ("single-writer-wrapper", contracts),
+            ("single-writer-wrapper", shared),
+            ("single-writer-shared", shared),
+        ):
+            with self.subTest(gap=gap):
+                pin = next(pin for name, pin, _ in PINS if name == gap)
+                self.assertIn(pin, text)
+        self.assertTrue(all(root_ledger_duties(contracts).values()))
+        tracking = self._read("docs/work-item-execution-tracking.md")
+        for fragment in (
+            "Root retains global authority over `agent-runs.jsonl`",
+            "An explicitly Root-admitted scoped child coordinator submits intents through the existing Host owner for its exact assigned child ledger, without Root/sibling mutation authority.",
+            "Specialists return their artifact, evidence, and gate result to that owner rather than appending their own events.",
+        ):
+            self.assertIn(fragment, tracking)
+
+
+    def test_scoped_child_guards_reject_authority_expansion(self) -> None:
+        text = self._read(SPINE)
+        unit = selected_unit(text, "Core delegation principles", "$lead:")
+        self.assertTrue(all(lead_dispatch_duties(text).values()))
+        for duty, old, new in (
+            ("specialist-nonspawning", "ordinary specialists remain non-spawning", "ordinary specialists may spawn"),
+            ("admitted-scoped-choice", "explicitly Root-admitted", "self-admitted"),
+            ("admitted-scoped-choice", "its admitted descendant requests", "any request"),
+            ("admitted-scoped-choice", "its exact assigned work-item", "any work-item"),
+            ("host-validated-effects", "current assignment, request identities, permissions and canonical evidence", "requested permissions"),
+            ("no-child-authority-escalation", "grants no authority", "grants authority"),
+            ("no-child-authority-escalation", "Root/siblings", "Root"),
+            ("root-new-admission", "Root owns new admission outside the catalog", "Child owns new admission outside the catalog"),
+        ):
+            with self.subTest(duty=duty, mutation=old):
+                self.assertEqual(unit.count(old), 1)
+                changed = text.replace(unit, unit.replace(old, new, 1), 1)
+                changed += "\n## Example\n" + unit
+                self.assertFalse(lead_dispatch_duties(changed)[duty])
+
     def test_root_ledger_guards_reject_weakened_owner_duties(self) -> None:
         text = self._read("src.codex/skills/lead/subagent-contracts.md")
-        unit = selected_unit(text, "agent-runs.jsonl format", "Only the root main conversation holding Lead owns")
+        unit = selected_unit(text, "agent-runs.jsonl format", "Root retains")
         for duty, old, new in (
-            ("root-ownership", "`agent-runs.jsonl`", "`Agent-runs.jsonl`"),
-            ("root-ownership", "owns `agent-runs.jsonl`", "owns all ledger files except `agent-runs.jsonl`"),
+            ("root-ownership", "global ledger authority", "local ledger authority"),
+            ("scoped-child-owner", "only the assigned child ledger", "any ledger"),
+            ("scoped-child-owner", "under its verified assignment", "without verified assignment"),
+            ("scoped-child-owner", "through the existing Host owner", "on its own authority"),
             ("actual-root-execution", "actual native and already-admitted", "guessed native and unadmitted"),
             ("bounded-wrapper-delegation", "an actual supported tracked provider wrapper", "any helper"),
             ("bounded-wrapper-delegation", "its own pair", "any pair"),
@@ -877,7 +930,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
     def test_ledger_and_review_guards_preserve_scope_and_bounded_formatting(self) -> None:
         for owner, check, section, marker, old, new in (
             ("src.codex/skills/lead/subagent-contracts.md", root_ledger_duties,
-             "agent-runs.jsonl format", "Only the root main conversation holding Lead owns",
+             "agent-runs.jsonl format", "Root retains",
              "Specialists never append", "Specialists may append"),
             ("src.codex/skills/architecture-reviewer/SKILL.md", independent_review_duties,
              "Anti-layering audit (multi-fix batch)", "Independent review:",
@@ -921,8 +974,8 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
             (stop_rule_duties, "Scope and ownership discipline", "No logic duplication / no fix layering:", "owner-siblings-contract-diagnosis", "diagnose owner/siblings/shared contract", "patch only the visible symptom"),
             (stop_rule_duties, "Scope and ownership discipline", "No logic duplication / no fix layering:", "independent-continuation", "Continue safe diagnosis and independent authorized work", "Block all independent work"),
             (stop_rule_duties, "Scope and ownership discipline", "No logic duplication / no fix layering:", "scoped-escalation", "expand the pause only for evidenced shared dependencies or safety risks", "expand the pause for any inconvenience"),
-            (lead_dispatch_duties, "Core delegation principles", "$lead:", "root-only-dispatch-and-lifecycle", "root main conversation alone", "root and every specialist"),
-            (lead_dispatch_duties, "Core delegation principles", "$lead:", "no-specialist-or-delivery-owner", "never subagent/end-to-end coder/roadmap owner", "may be subagent/end-to-end coder/roadmap owner"),
+            (lead_dispatch_duties, "Core delegation principles", "$lead:", "root-global-authority", "Root retains global admission, integration and final acceptance", "Every specialist owns global admission, integration and final acceptance"),
+            (lead_dispatch_duties, "Core delegation principles", "$lead:", "no-specialist-or-delivery-owner", "not a specialist adopting Lead", "also a specialist adopting Lead"),
             (isolation_duties, "Operational and environment safety", "Parallel resource-surface isolation:", "full-overlap-surfaces", "throughout overlap", "only at launch"),
             (isolation_duties, "Operational and environment safety", "Parallel resource-surface isolation:", "conflict-serialization-or-isolation", "Otherwise serialize or use", "Otherwise run concurrently or use"),
             (isolation_duties, "Operational and environment safety", "Parallel resource-surface isolation:", "conflict-serialization-or-isolation", "explicitly requested validated isolation", "automatic unvalidated isolation"),
@@ -970,7 +1023,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
             (stop_rule_duties, "independent-continuation", "Continue safe diagnosis and independent authorized work"),
             (stop_rule_duties, "scoped-escalation", "expand the pause only for evidenced shared dependencies or safety risks"),
             (isolation_duties, "conflict-serialization-or-isolation", "explicitly requested validated isolation"),
-            (lead_dispatch_duties, "root-only-dispatch-and-lifecycle", "root main conversation alone dispatches/writes lifecycle"),
+            (lead_dispatch_duties, "root-global-authority", "Root retains global admission, integration and final acceptance"),
             (fixed_value_duties, "single-owned-safe-defaults", "policy defaults need one owner/omission safety"),
         ):
             with self.subTest(duty=duty):
@@ -1897,7 +1950,8 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
 
         tracking = self._read("docs/work-item-execution-tracking.md")
         for fragment in (
-            "Only the root main conversation holding Lead writes `agent-runs.jsonl`",
+            "Root retains global authority over `agent-runs.jsonl`",
+            "An explicitly Root-admitted scoped child coordinator submits intents through the existing Host owner for its exact assigned child ledger, without Root/sibling mutation authority.",
             "Classify new work before creating recovery state",
             "quick-fix four-fact status or the staged lifecycle owner",
             "`agent-run-ledger init` is compatibility-only",

@@ -14,6 +14,7 @@ this module deliberately has no checkpoint store, retry registry or scheduler.
 """
 from __future__ import annotations
 
+import asyncio
 import copy
 import importlib
 from importlib import metadata
@@ -368,3 +369,140 @@ def create_review_coordinator(
         executor=executor, max_turns=max_turns, session=session,
     )
     return coordinator, executor
+
+
+class ChildLeadCoordinator:
+    """Scoped Host loop over real admitted inference/execution/receiving owners.
+
+    Each decision is a bounded native SDK turn with explicit received-state
+    handoff, not a claim of one persistent vendor thread or native subagent.
+    This object is one-use. Uncertain effects are retained by their actual
+    executors and never retried by this loop.
+    """
+    def __init__(self, *, child_id, authority, decision_factory, executors):
+        self._child_id = _identifier(child_id, "child_id")
+        for name in ("resolve_child", "assert_child_current", "resolve",
+                     "completed_requests", "attempted_requests", "received_context", "validate_decision",
+                     "receive_child_result", "attach_executors", "attach_decision_worker"):
+            _sync_method(authority, name)
+        if not inspect.iscoroutinefunction(getattr(authority, "cancel_child", None)):
+            raise CoordinatorBindingError("async child cancellation owner required")
+        if not callable(decision_factory) or type(executors) is not dict:
+            raise CoordinatorBindingError("explicit child decision factory and executors required")
+        self._authority, self._factory = authority, decision_factory
+        self._executors = dict(executors)
+        authority.attach_executors(self._executors)
+        self._used = False
+        self.decisions = []
+        self.results = {}
+        self.active_executor = None
+
+    def _current(self, assignment, effect):
+        if self._authority.resolve_child(self._child_id) != assignment:
+            raise CoordinatorBindingError("child assignment changed")
+        if self._authority.assert_child_current(assignment, effect) is not None:
+            raise CoordinatorBindingError("child authority must return None")
+
+    def _projection(self, assignment):
+        import hashlib
+        from .contracts import json_text
+        from .coordination import validate_child_choice
+        self._current(assignment, "child_state")
+        completed = self._authority.completed_requests(assignment)
+        received = self._authority.received_context(assignment)
+        attempted = self._authority.attempted_requests(assignment)
+        if type(attempted) is not dict or not set(completed) <= set(attempted):
+            raise CoordinatorBindingError("canonical attempted child state unavailable")
+        if type(completed) is not dict or type(received) is not dict or set(received) != set(completed):
+            raise CoordinatorBindingError("canonical child receipt projection unavailable")
+        catalog = []
+        for request_id in assignment.request_ids:
+            request = self._authority.resolve(request_id)
+            if type(request) is not ExecutionRequest:
+                raise CoordinatorBindingError("child catalog request unavailable")
+            catalog.append({"request_id": request_id,
+                "request_sha256": hashlib.sha256(json_text(request.to_dict()).encode()).hexdigest(),
+                "role": request.role, "scope": list(request.scope), "prompt": request.prompt})
+        value = {"assignment_sha256": assignment.assignment_sha256, "catalog": catalog,
+            "required_request_ids": list(assignment.required_request_ids),
+            "completed_request_ids": sorted(completed),
+            "received_results": [{"request_id": key, "result": received[key]} for key in sorted(received)],
+            "unavailable_results": [{"request_id": key, "result": attempted[key]} for key in sorted(set(attempted)-set(completed))]}
+        encoded = json_text(value)
+        validate_child_choice(encoded)
+        return encoded
+
+    async def run(self):
+        from .runtime import SdkCoordinationWorker, SdkReviewExecutor
+        from .coordination import validate_intent, validate_child_choice
+        from .contracts import strict_json
+        if self._used:
+            raise CoordinatorBindingError("child operation already consumed")
+        self._used = True
+        assignment = self._authority.resolve_child(self._child_id)
+        self._current(assignment, "child_start")
+        try:
+            while True:
+                projection = self._projection(assignment)
+                state = validate_child_choice(projection)
+                completed_ids = set(state["completed_request_ids"])
+                unavailable_ids = {row["request_id"] for row in state["unavailable_results"]}
+                pending_ids = set(assignment.request_ids) - completed_ids - unavailable_ids
+                if not pending_ids and set(assignment.required_request_ids) - completed_ids:
+                    return {"status": "needs-reconciliation", "child_id": assignment.child_id,
+                            "unavailable_results": state["unavailable_results"]}
+                self._current(assignment, "child_decision_prepare")
+                worker = self._factory(assignment, projection)
+                if type(worker) is not SdkCoordinationWorker:
+                    raise CoordinatorBindingError("actual coordination worker required")
+                self._authority.attach_decision_worker(assignment, worker, projection)
+                decision_request = worker.validate_request()
+                if decision_request.child_choice_json != projection:
+                    raise CoordinatorBindingError("decision does not bind current child projection")
+                if self._authority.validate_decision(assignment, decision_request, projection) is not None:
+                    raise CoordinatorBindingError("decision authority must return None")
+                self.active_executor = worker
+                self.decisions.append(worker)  # Retain before any awaited effect.
+                observation = await worker(decision_request)
+                if asyncio.current_task().cancelling():
+                    raise asyncio.CancelledError()
+                self.active_executor = None
+                self._current(assignment, "child_decision_received")
+                if self._projection(assignment) != projection:
+                    raise CoordinatorBindingError("child state changed during decision")
+                intent = strict_json(validate_intent(observation.result.intent_json, decision_request))
+                if intent["action"] == "cancel":
+                    return await self._authority.cancel_child(assignment)
+                if intent["action"] == "finish":
+                    return self._authority.receive_child_result(assignment)
+                request_id = intent["request_id"]
+                executor = self._executors.get(request_id)
+                if type(executor) is not SdkReviewExecutor:
+                    raise CoordinatorBindingError("actual admitted child executor required")
+                request = self._authority.resolve(request_id)
+                if executor.validate_request() != request:
+                    raise CoordinatorBindingError("child executor binding mismatch")
+                self._current(assignment, "child_delegate")
+                self.active_executor = executor
+                try:
+                    result = await executor.execute(request)
+                    if asyncio.current_task().cancelling():
+                        raise asyncio.CancelledError()
+                except Exception:
+                    # A canonical attempted operation remains unavailable, never
+                    # replayed. Its failure need not stop independent ready tasks.
+                    self._current(assignment, "child_result_failed")
+                    if request_id not in self._authority.attempted_requests(assignment):
+                        raise
+                else:
+                    self.results[request_id] = result
+                finally:
+                    self.active_executor = None
+                self._current(assignment, "child_result_received")
+                if request_id not in self._authority.attempted_requests(assignment):
+                    raise CoordinatorBindingError("child execution has no canonical attempted receipt")
+        except asyncio.CancelledError:
+            # Concrete executor cancellation drains its owned process before
+            # this lifecycle owner settles or preserves the uncertain child.
+            await self._authority.cancel_child(assignment)
+            raise

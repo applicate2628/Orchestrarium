@@ -94,13 +94,13 @@
     },
     "sdk_execution/coordinator.py": {
       "source": "scripts/sdk_execution/coordinator.py",
-      "sha256": "3b2f2438281f7a2c229933ba20d3aef42d3dc160463f8c59d4264c3402e659fe",
+      "sha256": "5fca8c8c4241ec22817718d54e5b6f969e27080fcada4fa62593cd0772038233",
       "destination": "scripts/sdk_execution/coordinator.py"
     },
     "sdk_execution/coordination.py": {
       "source": "scripts/sdk_execution/coordination.py",
       "destination": "scripts/sdk_execution/coordination.py",
-      "sha256": "259a9e188daac6cba3d593adab76bcb89906e02d1cb551a8351909663ef1dd0f"
+      "sha256": "a57c735668db8fb8dbf11ef982eb0718ffb651a808bc8cadfafa52237ab41a0e"
     },
     "sdk_execution/coordination_codex.py": {
       "source": "scripts/sdk_execution/coordination_codex.py",
@@ -110,12 +110,12 @@
     "sdk_execution/coordination_model.py": {
       "source": "scripts/sdk_execution/coordination_model.py",
       "destination": "scripts/sdk_execution/coordination_model.py",
-      "sha256": "1de34cea7a623c700f2e13e3adc836a1af627e68623eebdbd4bdaf8f1f521841"
+      "sha256": "a853ed8ab1445e12c83510e57ac2d154e36fbeb5a77ca9693c02ed2be13ee259"
     },
     "sdk_execution/coordination_receiving.py": {
       "source": "scripts/sdk_execution/coordination_receiving.py",
       "destination": "scripts/sdk_execution/coordination_receiving.py",
-      "sha256": "a240d479a6ff7332255d87533ef7bd1537d4d9e41e4a1a57f83e6de83ae9d3a1"
+      "sha256": "af52b5826da9f6c7181899b744b28c7f252275de6cbac1e83fa92d95a7305b93"
     },
     "sdk_execution/grok.py": {
       "source": "scripts/sdk_execution/grok.py",
@@ -145,7 +145,7 @@
     "sdk_execution/runtime.py": {
       "source": "scripts/sdk_execution/runtime.py",
       "destination": "scripts/sdk_execution/runtime.py",
-      "sha256": "04e9066d76bddf70997f820065f236b97f400d5a1ca983c7b885231f80766998"
+      "sha256": "a3a4295f934e38cf324414c811fe38f344219b79a3935fca2d5045d6eaa5b831"
     },
     "sdk_execution/worker.py": {
       "source": "scripts/sdk_execution/worker.py",

@@ -403,7 +403,7 @@ def validate_sdk_execution(
     writing = value["sandboxMode"] in {"workspace-write", "tool-restricted-workspace-write"}
     if writing != ("writeWorkspaceSha256" in value) or (writing and value["schemaVersion"] not in {1, 2}):
         raise ValueError("sdkExecution workspace binding does not match its sandbox")
-    if value["schemaVersion"] == 3 and (
+    if value["schemaVersion"] in {3, 5} and (
         provider != "codex" or value["outerBudgetBinding"] == value["innerBudgetBinding"]
     ):
         raise ValueError("coordination inference requires Codex and distinct turn reservations")
@@ -411,6 +411,9 @@ def validate_sdk_execution(
         raise ValueError("native context source modes are mutually exclusive")
     if ({"continuationSourceSha256", "forkSourceSha256"} & value.keys()) and (provider != "codex" or value["sandboxMode"] != "read-only" or value["schemaVersion"] not in {1, 2}):
         raise ValueError("continuation metadata requires Codex read-only execution")
+    if value["schemaVersion"] in {3, 5} and value["operationKind"] != {
+        3: "coordination-inference", 5: "scoped-child-coordination"}[value["schemaVersion"]]:
+        raise ValueError("coordination operation kind does not match selected schema")
     return dict(value)
 
 
@@ -443,7 +446,7 @@ def _validate_sdk_event(event: Mapping[str, object], errors: list[str]) -> None:
     if type(selected) is dict and ({"continuationSourceSha256", "forkSourceSha256"} & selected.keys()):
         if selected.get("schemaVersion") != 2 or event.get("executionRole") != "consultant" or event.get("assignedRole") != "consultant" or event.get("gate") != "none":
             fail(errors, f"{run_id}: continuation requires selected Consultant provenance")
-    if type(selected) is dict and selected.get("schemaVersion") == 3:
+    if type(selected) is dict and selected.get("schemaVersion") in {3, 5}:
         if any(event.get(k) != expected for k, expected in
                (("provider", "codex"), ("role", "lead"), ("executionRole", "main"),
                 ("assignedRole", "lead"), ("gate", "none"))):
@@ -5022,9 +5025,11 @@ def _validate_event_fields(
 
     sdk_terminal = (event.get("actualExecutionPath") == "direct-external-sdk"
                     and event.get("eventKind") == "terminal")
-    if "artifactSizeBytes" in event and not (sdk_terminal and artifact):
-        fail(errors, f"{run_id}: artifactSizeBytes requires a persisted SDK terminal artifact")
-    if sdk_terminal and artifact:
+    internal_artifact = (event.get("eventKind") == "standalone" and event.get("terminalClass") is None
+                         and event.get("actualExecutionPath") is None and not event.get("provider"))
+    if "artifactSizeBytes" in event and not ((sdk_terminal or internal_artifact) and artifact):
+        fail(errors, f"{run_id}: artifactSizeBytes requires a persisted SDK terminal or internal standalone artifact")
+    if (sdk_terminal or (internal_artifact and "artifactSizeBytes" in event)) and artifact:
         digest, size = event.get("artifactRevision"), event.get("artifactSizeBytes")
         if (not isinstance(digest, str) or SHA256_RE.fullmatch(digest) is None
             or type(size) is not int or size < 0):
@@ -5318,8 +5323,8 @@ def _validate_event_fields(
             selected_sdk = event.get("sdkExecution")
             coordination_actor = (
                 sdk_route and event.get("provider") == "codex"
-                and type(selected_sdk) is dict and selected_sdk.get("schemaVersion") == 3
-                and selected_sdk.get("operationKind") == "coordination-inference"
+                and type(selected_sdk) is dict and selected_sdk.get("schemaVersion") in {3, 5}
+                and selected_sdk.get("operationKind") == {3:"coordination-inference",5:"scoped-child-coordination"}.get(selected_sdk.get("schemaVersion"))
                 and event.get("role") == event.get("assignedRole") == "lead"
                 and event.get("gate") == "none"
             )
