@@ -374,8 +374,8 @@ def create_review_coordinator(
 class ChildLeadCoordinator:
     """Scoped Host loop over real admitted inference/execution/receiving owners.
 
-    Each decision is a bounded native SDK turn with explicit received-state
-    handoff, not a claim of one persistent vendor thread or native subagent.
+    Each decision is a bounded native SDK turn. The explicit Root grant selects
+    fresh handoff or one persisted native thread, never a native subagent.
     This object is one-use. Uncertain effects are retained by their actual
     executors and never retried by this loop.
     """
@@ -455,22 +455,28 @@ class ChildLeadCoordinator:
                 worker = self._factory(assignment, projection)
                 if type(worker) is not SdkCoordinationWorker:
                     raise CoordinatorBindingError("actual coordination worker required")
-                self._authority.attach_decision_worker(assignment, worker, projection)
-                decision_request = worker.validate_request()
-                if decision_request.child_choice_json != projection:
-                    raise CoordinatorBindingError("decision does not bind current child projection")
-                if self._authority.validate_decision(assignment, decision_request, projection) is not None:
-                    raise CoordinatorBindingError("decision authority must return None")
-                self.active_executor = worker
-                self.decisions.append(worker)  # Retain before any awaited effect.
-                observation = await worker(decision_request)
-                if asyncio.current_task().cancelling():
-                    raise asyncio.CancelledError()
-                self.active_executor = None
+                intent = None
+                if getattr(assignment, "decision_session_mode", "fresh-handoff") == "native-persistent":
+                    # The candidate factory is effect-free. Recover canonical
+                    # received intent before starting another native turn.
+                    intent = self._authority.recover_child_decision(assignment, worker, projection)
+                if intent is None:
+                    self._authority.attach_decision_worker(assignment, worker, projection)
+                    decision_request = worker.validate_request()
+                    if decision_request.child_choice_json != projection:
+                        raise CoordinatorBindingError("decision does not bind current child projection")
+                    if self._authority.validate_decision(assignment, decision_request, projection) is not None:
+                        raise CoordinatorBindingError("decision authority must return None")
+                    self.active_executor = worker
+                    self.decisions.append(worker)
+                    observation = await worker(decision_request)
+                    if asyncio.current_task().cancelling():
+                        raise asyncio.CancelledError()
+                    self.active_executor = None
+                    intent = strict_json(validate_intent(observation.result.intent_json, decision_request))
                 self._current(assignment, "child_decision_received")
                 if self._projection(assignment) != projection:
                     raise CoordinatorBindingError("child state changed during decision")
-                intent = strict_json(validate_intent(observation.result.intent_json, decision_request))
                 if intent["action"] == "cancel":
                     return await self._authority.cancel_child(assignment)
                 if intent["action"] == "finish":

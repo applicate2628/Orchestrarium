@@ -409,7 +409,10 @@ def validate_sdk_execution(
         raise ValueError("coordination inference requires Codex and distinct turn reservations")
     if {"continuationSourceSha256", "forkSourceSha256"} <= value.keys():
         raise ValueError("native context source modes are mutually exclusive")
-    if ({"continuationSourceSha256", "forkSourceSha256"} & value.keys()) and (provider != "codex" or value["sandboxMode"] != "read-only" or value["schemaVersion"] not in {1, 2}):
+    persistent=(value.get("schemaVersion")==5 and value.get("decisionSessionMode")=="native-persistent" and "childAssignmentSha256" in value)
+    if ("decisionSessionMode" in value)!=("childAssignmentSha256" in value) or (("decisionSessionMode" in value or "childAssignmentSha256" in value) and not persistent):
+        raise ValueError("persistent child session requires selected assignment binding")
+    if ({"continuationSourceSha256", "forkSourceSha256"} & value.keys()) and (provider != "codex" or value["sandboxMode"] != "read-only" or (value["schemaVersion"] not in {1, 2} and not persistent) or (persistent and "forkSourceSha256" in value)):
         raise ValueError("continuation metadata requires Codex read-only execution")
     if value["schemaVersion"] in {3, 5} and value["operationKind"] != {
         3: "coordination-inference", 5: "scoped-child-coordination"}[value["schemaVersion"]]:
@@ -444,7 +447,10 @@ def _validate_sdk_event(event: Mapping[str, object], errors: list[str]) -> None:
         except (ValueError, ImportError) as exc:
             fail(errors, f"{run_id}: {exc}")
     if type(selected) is dict and ({"continuationSourceSha256", "forkSourceSha256"} & selected.keys()):
-        if selected.get("schemaVersion") != 2 or event.get("executionRole") != "consultant" or event.get("assignedRole") != "consultant" or event.get("gate") != "none":
+        scoped=(selected.get("schemaVersion")==5 and selected.get("decisionSessionMode")=="native-persistent" and "forkSourceSha256" not in selected
+            and event.get("executionRole")=="main" and event.get("assignedRole")=="lead")
+        consultant=(selected.get("schemaVersion")==2 and event.get("executionRole")=="consultant" and event.get("assignedRole")=="consultant")
+        if not (scoped or consultant) or event.get("gate") != "none":
             fail(errors, f"{run_id}: continuation requires selected Consultant provenance")
     if type(selected) is dict and selected.get("schemaVersion") in {3, 5}:
         if any(event.get(k) != expected for k, expected in

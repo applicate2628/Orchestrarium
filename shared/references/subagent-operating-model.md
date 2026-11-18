@@ -1002,8 +1002,13 @@ Child-assignment depth follows verified parent assignments. It is distinct from
 native conversation fork depth and vendor-owned subagent depth. No universal
 numeric ceiling is introduced. A separately admitted scope/resource policy must
 be carried with its actual units and owner, not inferred from a model prompt.
-The current SDK child loop uses native coordination decisions plus explicit
-received-state handoff; it does not claim a persistent native Lead conversation.
+The selected route must distinguish separate native decision sessions with
+received-state handoff from a supported persistent native conversation. Persistence
+must use observed provider thread/turn identity and canonical receiving evidence,
+not a prompt pretending to restore history. Restore a saved unconsumed intent
+before requesting another decision; do not replay attempted effects or silently
+switch session modes after uncertainty. Persistence grants no extra permissions
+and does not establish provider-native subagent control.
 
 ## Native task continuation
 

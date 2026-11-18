@@ -312,6 +312,8 @@ def selected_sdk_execution(request: ExecutionRequest, selection: Any) -> dict[st
             value.pop("innerRequestSha256")
             value.update(schemaVersion=5, operationKind="scoped-child-coordination",
                          childChoiceSha256=child_choice_sha256(request.child_choice_json))
+            if request.decision_session_mode == "native-persistent":
+                value.update(decisionSessionMode="native-persistent",childAssignmentSha256=json.loads(request.child_choice_json)["assignment_sha256"])
     return value
 
 
@@ -492,6 +494,11 @@ def claim_launch(request: ExecutionRequest, selection: Any, *, authority: Callab
                   source_bytes=previous.encode("utf-8"), ledger_resource_budget=budget) if previous else [])
         if errors or any(e.get("runId") in {request.external_dispatch_id, request.external_evidence_run_id} for e in events):
             raise RuntimeBindingError("existing_launch_is_not_replay_authority")
+        if type(request) is CoordinationInferenceRequest and request.decision_session_mode=="native-persistent":
+            anchor=json.loads(request.child_choice_json)["assignment_sha256"]
+            prior=[e for e in events if e.get("eventKind")=="launch" and e.get("sdkExecution",{}).get("childAssignmentSha256")==anchor]
+            if request.native_continuation is None and prior:
+                raise RuntimeBindingError("child_native_session_already_started")
         if request.native_continuation is not None:
             _validate_continuation(request, selection, previous_run, previous_terminal, events=events)
             source = request.native_continuation.source_sha256
@@ -582,17 +589,23 @@ _CONTINUATION_CONTEXT_FIELDS = ("work_item_id", "provider", "role", "model", "ef
 def continuation_context_sha256(request, selection):
     """Consistency commitment, not account identity or permission to launch."""
     controls = {name: getattr(request, name) for name in _CONTINUATION_CONTEXT_FIELDS}
+    if type(request) is CoordinationInferenceRequest:
+        controls.update(decision_session_mode=request.decision_session_mode,
+            assignment_sha256=json.loads(request.child_choice_json)["assignment_sha256"],
+            system_instructions=request.system_instructions,
+            governance_prefix=request.prompt[:-len(request.inference_payload)])
     runtime = selection.to_dict()
     runtime.pop("expected_launch_sha256", None)
     return hashlib.sha256(json_text({"controls": controls, "runtime": runtime}).encode()).hexdigest()
 
 
-def _received_native_context(request, selection, predecessor_evidence_run_id, *, events=None):
+def _received_native_context(request, selection, predecessor_evidence_run_id, *, events=None, with_document=False):
     """Read an already received artifact; do not reconstruct a process observation."""
     from .contracts import NativeContinuation, strict_json
     from .receiving import review_artifact_target
     validate_admitted_request(request, selection)
-    if (request.provider != "codex" or request.role != "consultant" or request.result_kind != "task"
+    coordination = type(request) is CoordinationInferenceRequest and request.child_choice_json is not None and request.decision_session_mode == "native-persistent"
+    if (request.provider != "codex" or (not coordination and (request.role != "consultant" or request.result_kind != "task"))
             or request.write_workspace is not None or selection.expected_launch_sha256 is not None):
         raise RuntimeBindingError("received_continuation_predecessor_required")
     if events is None:
@@ -606,13 +619,13 @@ def _received_native_context(request, selection, predecessor_evidence_run_id, *,
         raise RuntimeBindingError("continuation_receipt_changed")
     launch = launches[0]
     expected = {"workItem": request.work_item_id, "provider": "codex", "model": request.model,
-        "effort": request.effort, "scope": list(request.scope), "assignedRole": "consultant",
-        "executionRole": "consultant", "actualExecutionPath": "direct-external-sdk"}
+        "effort": request.effort, "scope": list(request.scope), "assignedRole": "lead" if coordination else "consultant",
+        "executionRole": "main" if coordination else "consultant", "actualExecutionPath": "direct-external-sdk"}
     selected = launch.get("sdkExecution")
     if (launch.get("eventKind") != "launch" or terminal.get("eventKind") != "terminal"
             or terminal.get("status") != "completed" or terminal.get("gate") != "none"
             or any(launch.get(k) != v or terminal.get(k) != v for k,v in expected.items())
-            or type(selected) is not dict or selected.get("schemaVersion") != 2
+            or type(selected) is not dict or selected.get("schemaVersion") != (5 if coordination else 2)
             or not _sha256(selected.get("requestSha256")) or terminal.get("sdkExecution") != selected
             or launch.get("externalEvidenceRunId") != predecessor_evidence_run_id
             or terminal.get("externalEvidenceRunId") != predecessor_evidence_run_id
@@ -640,7 +653,9 @@ def _received_native_context(request, selection, predecessor_evidence_run_id, *,
             or hashlib.sha256(content).hexdigest() != terminal["artifactRevision"]):
         raise RuntimeBindingError("continuation_artifact_changed")
     document = strict_json(content.decode("utf-8"), max_bytes=size)
-    if type(document) is not dict or set(document) != {"task", "reported_sdk_configuration", "native_continuation"}:
+    document_keys = ({"operation","evidence","process","reported_sdk_configuration","native_continuation"} if coordination
+        else {"task","reported_sdk_configuration","native_continuation"})
+    if type(document) is not dict or set(document) != document_keys:
         raise RuntimeBindingError("continuation_durable_provenance_required")
     native = document["native_continuation"]
     keys = {"schema_version", "thread_id", "turn_id", "context_sha256"}
@@ -653,11 +668,18 @@ def _received_native_context(request, selection, predecessor_evidence_run_id, *,
     if depth is not None and (type(depth) is not int or depth < 0):
         raise RuntimeBindingError("invalid_native_session_depth")
     reported = document["reported_sdk_configuration"]
+    selected_only={"schemaVersion", "requestSha256"}
+    if coordination:
+        selected_only.update({"operationKind","childChoiceSha256","outerBudgetBinding","innerBudgetBinding","decisionSessionMode","childAssignmentSha256"})
+        if (selected.get("decisionSessionMode")!="native-persistent" or selected.get("childAssignmentSha256")!=json.loads(request.child_choice_json)["assignment_sha256"]
+            or document["operation"]!="scoped-child-coordination"):
+            raise RuntimeBindingError("continuation_scope_changed")
     if (type(reported) is not dict or reported.get("schemaVersion") != 1
             or {k:v for k,v in reported.items() if k not in {"schemaVersion", "sdkVersion", "runtimeVersion"}}
-            != {k:v for k,v in selected.items() if k not in {"schemaVersion", "requestSha256"}}):
+            != {k:v for k,v in selected.items() if k not in selected_only}):
         raise RuntimeBindingError("continuation_receipt_changed")
-    return NativeContinuation(launch["runId"], terminal["runId"], selected["requestSha256"], native["thread_id"], native["turn_id"]), depth
+    source=NativeContinuation(launch["runId"], terminal["runId"], selected["requestSha256"], native["thread_id"], native["turn_id"])
+    return (source,depth,document,terminal) if with_document else (source,depth)
 
 
 def _received_continuation_source(request, selection, predecessor_evidence_run_id, *, events=None):
@@ -1120,6 +1142,7 @@ class ChildLeadAssignment:
     max_task_depth: int | None
     assignment_sha256: str
     decision_runtime_sha256: str
+    decision_session_mode: str = "fresh-handoff"
 
     @property
     def request_ids(self):
@@ -1129,7 +1152,7 @@ class ChildLeadAssignment:
 def _child_assignment_document(assignment):
     return {"schemaVersion": 1, **{name:getattr(assignment,name) for name in (
         "child_id", "coordinator_binding", "child_work_item", "scope", "catalog",
-        "required_request_ids", "lifecycle_permissions", "task_depth", "parent_child_id", "max_task_depth", "decision_runtime_sha256")}}
+        "required_request_ids", "lifecycle_permissions", "task_depth", "parent_child_id", "max_task_depth", "decision_runtime_sha256", "decision_session_mode")}}
 
 
 def _child_record(writer, validator, selection, *, run_id, artifact, content, scope, cancelled=False, instant):
@@ -1170,6 +1193,8 @@ def _load_child_assignment(selection, child_id, *, events=None, seen=(), allow_c
         raise RuntimeBindingError("child_assignment_changed")
     doc=strict_json(raw.decode(),max_bytes=size)
     expected={"schemaVersion","child_id","coordinator_binding","child_work_item","scope","catalog","required_request_ids","lifecycle_permissions","task_depth","parent_child_id","max_task_depth","decision_runtime_sha256"}
+    if type(doc) is dict and "decision_session_mode" in doc:
+        expected.add("decision_session_mode")
     if type(doc) is not dict or set(doc)!=expected or type(doc['schemaVersion']) is not int or doc['schemaVersion']!=1 or doc['child_id']!=child_id:
         raise RuntimeBindingError("child_assignment_invalid")
     if (any(type(doc[n]) is not str or not doc[n].strip() for n in ('child_id','coordinator_binding','child_work_item'))
@@ -1178,6 +1203,7 @@ def _load_child_assignment(selection, child_id, *, events=None, seen=(), allow_c
         or any(type(x) is not str or not x for n in ('scope','required_request_ids','lifecycle_permissions') for x in doc[n])
         or any(type(x) is not list or len(x)!=2 or type(x[0]) is not str or not x[0] or not _sha256(x[1]) for x in doc['catalog'])):
         raise RuntimeBindingError("child_assignment_invalid")
+    if doc.get('decision_session_mode','fresh-handoff') not in {'fresh-handoff','native-persistent'}:raise RuntimeBindingError('child_session_mode_invalid')
     if not _sha256(doc['decision_runtime_sha256']):raise RuntimeBindingError('child_decision_runtime_invalid')
     ids=[x[0] for x in doc['catalog']]
     if (not ids or len(set(ids))!=len(ids) or not set(doc['required_request_ids'])<=set(ids)
@@ -1198,11 +1224,11 @@ def _load_child_assignment(selection, child_id, *, events=None, seen=(), allow_c
         raise RuntimeBindingError("child_assignment_cancelled")
     return ChildLeadAssignment(child_id,doc['coordinator_binding'],doc['child_work_item'],tuple(doc['scope']),
         tuple(tuple(x) for x in doc['catalog']),tuple(doc['required_request_ids']),tuple(doc['lifecycle_permissions']),
-        doc['task_depth'],parent_id,doc['max_task_depth'],row['artifactRevision'],doc['decision_runtime_sha256'])
+        doc['task_depth'],parent_id,doc['max_task_depth'],row['artifactRevision'],doc['decision_runtime_sha256'],doc.get('decision_session_mode','fresh-handoff'))
 
 
 def publish_child_assignment(*, root_selection, root_authority, selections, child_id, coordinator_binding,
-        scope, required_request_ids, lifecycle_permissions, artifact, started_at, parent_child_id=None, max_task_depth=None, decision_selection=None):
+        scope, required_request_ids, lifecycle_permissions, artifact, started_at, parent_child_id=None, max_task_depth=None, decision_selection=None, decision_session_mode="fresh-handoff"):
     """Root explicitly grants a finite catalog through its existing artifact/ledger."""
     from .receiving import review_artifact_target
     if not selections or not isinstance(child_id,str) or not child_id:
@@ -1232,7 +1258,7 @@ def publish_child_assignment(*, root_selection, root_authority, selections, chil
         raise RuntimeBindingError('child_decision_runtime_invalid')
     decision_digest=hashlib.sha256(json_text(decision_selection.to_dict()).encode()).hexdigest()
     value=ChildLeadAssignment(child_id,coordinator_binding,str(child),tuple(scope),tuple(catalog),tuple(required_request_ids),
-        tuple(lifecycle_permissions),depth,parent_child_id,max_task_depth,'',decision_digest)
+        tuple(lifecycle_permissions),depth,parent_child_id,max_task_depth,'',decision_digest,decision_session_mode)
     content=(json_text(_child_assignment_document(value))+'\n').encode()
     target=review_artifact_target(root_selection.work_item,artifact,must_be_new=True)
     with _owner().TerminalReceiptV1.reserve(target) as receipt:receipt.commit(content)
@@ -1310,6 +1336,15 @@ class ChildLeadAuthority:
         if type(request) is CoordinationInferenceRequest:
             admitted=any(self.resolve(i)==request for i in self._decision_workers)
             _require_authority(self._root_authority.assert_current,request,effect)
+            if effect=="sdk_launch_commit" and request.decision_session_mode=="native-persistent":
+                worker=next(w for key,w in self._decision_workers.items() if self._decision_requests[key]==request)
+                tip=self._persistent_decision_tip(assignment,request,worker._selection)
+                if tip is not None:
+                    source,document,_terminal=tip
+                    if request.native_continuation!=source:raise RuntimeBindingError("child_native_tip_changed")
+                    intent=document["evidence"]["intent"]
+                    if intent["action"]!="execute" or intent["request_id"] not in self.attempted_requests(assignment):
+                        raise RuntimeBindingError("child_received_intent_pending")
         if 'delegate' not in assignment.lifecycle_permissions or not admitted:
             raise RuntimeBindingError('child_delegation_not_admitted')
 
@@ -1365,6 +1400,73 @@ class ChildLeadAuthority:
             result[key]={'terminal':row,'artifact':strict_json(raw.decode(),max_bytes=size)}
         return result
 
+    def _persistent_decision_tip(self,assignment,request,selection):
+        """Follow the unique received native chain, never a timestamp or a seal clone."""
+        if not os.path.lexists(Path(selection.work_item)/'agent-runs.jsonl'):return None
+        _,_,events=_events(selection)
+        launches=[row for row in events if row.get('eventKind')=='launch'
+            and row.get('sdkExecution',{}).get('childAssignmentSha256')==assignment.assignment_sha256]
+        if not launches:return None
+        first=[row for row in launches if 'continuationSourceSha256' not in row['sdkExecution']]
+        if len(first)!=1:raise RuntimeBindingError('child_native_chain_invalid')
+        current=first[0];visited=set()
+        while True:
+            if current['runId'] in visited:raise RuntimeBindingError('child_native_chain_invalid')
+            visited.add(current['runId'])
+            source,_depth,document,terminal=_received_native_context(request,selection,current['externalEvidenceRunId'],events=events,with_document=True)
+            next_rows=[row for row in launches if row['sdkExecution'].get('continuationSourceSha256')==source.source_sha256]
+            if not next_rows:
+                if len(visited)!=len(launches):raise RuntimeBindingError('child_native_chain_invalid')
+                return source,document,terminal
+            if len(next_rows)!=1:raise RuntimeBindingError('child_native_chain_invalid')
+            current=next_rows[0]
+
+    def prepare_child_decision(self,assignment,request,selection):
+        """Bind a new Host-admitted turn to received context without starting it."""
+        self.assert_child_current(assignment,'child_decision_prepare')
+        if request.decision_session_mode!=assignment.decision_session_mode:
+            raise RuntimeBindingError('child_session_mode_changed')
+        if json.loads(request.child_choice_json)["assignment_sha256"]!=assignment.assignment_sha256:
+            raise RuntimeBindingError("child_decision_assignment_changed")
+        if hashlib.sha256(json_text(selection.to_dict()).encode()).hexdigest()!=assignment.decision_runtime_sha256:
+            raise RuntimeBindingError('child_decision_runtime_not_admitted')
+        if assignment.decision_session_mode=='fresh-handoff':return request
+        tip=self._persistent_decision_tip(assignment,request,selection)
+        if tip is None:
+            if request.native_continuation is not None:raise RuntimeBindingError('child_native_source_unavailable')
+            return request
+        return replace(request,context_mode='continuation',native_continuation=tip[0])
+
+    def recover_child_decision(self,assignment,worker,projection):
+        """Return only a current canonical pending intent, never a native observation."""
+        if assignment.decision_session_mode!='native-persistent':return None
+        if type(worker) is not SdkCoordinationWorker or worker._authority is not self:
+            raise RuntimeBindingError('child_decision_authority_mismatch')
+        request=self._root_authority.resolve(worker._request_id)
+        self.validate_decision(assignment,request,projection)
+        if hashlib.sha256(json_text(worker._selection.to_dict()).encode()).hexdigest()!=assignment.decision_runtime_sha256:
+            raise RuntimeBindingError('child_decision_runtime_not_admitted')
+        tip=self._persistent_decision_tip(assignment,request,worker._selection)
+        if tip is None:return None
+        source,document,terminal=tip
+        if request.native_continuation!=source:raise RuntimeBindingError('child_native_tip_changed')
+        from .coordination import child_choice_sha256
+        evidence=document['evidence'];intent=evidence['intent']
+        if (type(intent) is not dict or set(intent)!={'operation_id','child_choice_sha256','action','request_id'}
+            or intent['operation_id']!=evidence.get('operation_id')
+            or intent['child_choice_sha256']!=terminal['sdkExecution']['childChoiceSha256']):
+            raise RuntimeBindingError('child_received_intent_invalid')
+        if intent['action']=='execute':
+            if intent['request_id'] not in assignment.request_ids:raise RuntimeBindingError('child_received_intent_invalid')
+            if intent['request_id'] in self.attempted_requests(assignment):return None
+        elif intent['action'] not in {'finish','cancel'} or intent['request_id'] is not None:
+            raise RuntimeBindingError('child_received_intent_invalid')
+        _,context=prepare_environment(worker._selection,worker._environment)
+        failure=_owner().provider_output_safety_scan_terminal('codex',context.needles,
+            stdout=json_text({'terminal':terminal,'artifact':document}).encode(),stderr=b'',serialized_line=False)
+        if failure is not None:raise RuntimeBindingError(failure)
+        return intent
+
     def attach_decision_worker(self,assignment,worker,choice_json):
         if (type(worker) is not SdkCoordinationWorker or worker._authority is not self
             or Path(worker._selection.work_item).resolve()!=Path(assignment.child_work_item).resolve()):
@@ -1398,10 +1500,15 @@ class ChildLeadAuthority:
         return result
 
     def validate_decision(self,assignment,request,choice_json):
+        from .coordination import validate_child_choice
+        choice=validate_child_choice(choice_json)
+        if choice["assignment_sha256"]!=assignment.assignment_sha256 or request.admitted_request_id!=assignment.child_id:
+            raise RuntimeBindingError("child_decision_assignment_changed")
         self.assert_child_current(assignment,'child_model')
         if (type(request) is not CoordinationInferenceRequest or request.child_choice_json!=choice_json
             or request.work_item_id!=Path(assignment.child_work_item).name
-            or request.coordinator_binding!=assignment.coordinator_binding or not set(request.scope)<=set(assignment.scope)):
+            or request.coordinator_binding!=assignment.coordinator_binding or not set(request.scope)<=set(assignment.scope)
+            or request.decision_session_mode!=assignment.decision_session_mode):
             raise RuntimeBindingError('child_decision_scope_mismatch')
         _require_authority(self._root_authority.assert_current,request,'child_model')
 

@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Scoped Codex child Leads can explicitly retain a native decision conversation across turns and Host restart. Existing received evidence and atomic claims preserve saved decisions without replaying tasks; separate fresh-handoff mode remains available, and no new model-launch or lifecycle authority is granted.
+
 - Introduce scoped SDK child coordination: Root assigns a child work-item and admitted request catalog, and the child chooses work while the existing Host retains permission checks, receiving and child-only lifecycle effects. Recovery preserves completed and uncertain execution evidence; child completion never substitutes for global acceptance or independent review.
 
 - Read-only Codex Consultant tasks can explicitly fork a received native conversation at its exact completed turn through task binding version 5. The new session retains scope and derived logical depth, separate intents may branch independently, and retrying an uncertain intent never silently creates another session. This does not grant child-Lead authority or control native subagent depth.

@@ -680,3 +680,10 @@ sandbox. Child outcomes require independent acceptance and cannot close Root or
 siblings. Parent assignment depth, conversation-fork depth and vendor subagent
 depth are distinct. See the shared scoped-child contract and SDK execution
 runbook for current implemented routes and recovery limits.
+
+For an explicitly selected persistent SDK child session, use its canonical received
+decision and native thread/turn lineage. Resolve an outstanding saved intent before
+requesting another decision. Never manufacture a fresh session as automatic
+recovery, replay an attempted catalog task, or treat session persistence as broader
+permission. The existing SDK execution runbook owns the concrete native route and
+its qualification limits.

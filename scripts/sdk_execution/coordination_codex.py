@@ -14,6 +14,13 @@ class CodexCoordinationAdapter(CodexReviewAdapter):
     async def reconcile(self, *args, **kwargs):
         raise ValueError("coordination resume is unavailable before effects")
 
+    def _thread_start_settings(self, request, settings):
+        # Official persistent thread/start, not a process-local synthetic session.
+        # https://github.com/openai/codex/blob/rust-v0.169.0/codex-rs/app-server-protocol/src/protocol/v2/thread.rs
+        if request.decision_session_mode == "native-persistent":
+            return {**settings, "ephemeral": False}
+        return settings
+
     def _output_schema(self, request):
         return intent_schema(request)
 

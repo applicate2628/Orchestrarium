@@ -38,12 +38,21 @@ def coordination_terminal_payload(request, observation, *, output_context, admit
         complete = False
     else:
         controls = ("adapter", "model", "effort", "sandboxMode", "approvalPolicy", "accountBinding")
-        if reported["schemaVersion"] != 1 or any(reported[k] != selected[k] for k in controls):
+        if (reported["schemaVersion"] != 1 or any(reported[k] != selected[k] for k in controls)
+            or reported.get("continuationSourceSha256")!=selected.get("continuationSourceSha256")):
             complete = False
     content = {"operation": "scoped-child-coordination" if request.child_choice_json is not None else "coordination-inference", "evidence": result.to_tool_output(),
                "reported_sdk_configuration": reported,
                "process": {"outcome": process.outcome, "failure_id": process.failure_id,
                            "target_exit_code": process.target_exit_code}}
+    if request.decision_session_mode=="native-persistent":
+        prior=request.native_continuation
+        if prior is not None and (result.native_thread_id!=prior.native_thread_id or result.native_turn_id==prior.native_turn_id):
+            complete=False
+        if complete:
+            from .runtime import continuation_context_sha256
+            content["native_continuation"]={"schema_version":2,"thread_id":result.native_thread_id,
+                "turn_id":result.native_turn_id,"context_sha256":continuation_context_sha256(request,selection),"session_depth":0}
     # This is not a provider-review envelope or a verdict. The existing receiver
     # uses common identity/resultText fields only to bind artifact and terminal.
     payload = {

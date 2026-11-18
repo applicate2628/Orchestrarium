@@ -63,9 +63,13 @@ An explicitly Root-admitted child assignment binds a child work-item and exact
 request catalog. Codex coordination decisions select among ready admitted tasks
 or propose child completion/cancellation; actual execution and ledger/lifecycle
 writes remain with the existing Host owners. The loop hands back received state,
-not self-certified model completion. This is a logical child task session, not
-proof of a persistent native Lead thread or control of native subagent depth.
-Root/sibling mutation and global acceptance remain outside the child assignment.
+not self-certified model completion. Root may explicitly select fresh-handoff
+or native-persistent decisions. The persistent Codex route resumes the received
+native thread and starts a new turn; its evidence and single-successor claims use
+the existing ledger. Recovery first resolves saved decisions without replaying
+attempted tasks. This does not control native subagent depth or authorize tools
+inside the decision turn. Root/sibling mutation and global acceptance remain
+outside the child assignment; offline coverage is not native qualification.
 
 ## Codex-specific runtime notes
 

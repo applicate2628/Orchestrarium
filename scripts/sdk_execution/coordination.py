@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass, field, fields
 import hashlib
 from typing import Any
 
-from .contracts import ExecutionRequest, Observation, json_text, strict_json
+from .contracts import ExecutionRequest, NativeContinuation, Observation, json_text, strict_json
 
 
 def _text(value: object) -> str:
@@ -23,11 +23,31 @@ class CoordinationInferenceRequest(ExecutionRequest):
     inner_request_sha256: str = ""
     system_instructions: str | None = None
     child_choice_json: str | None = field(default=None, kw_only=True)
+    decision_session_mode: str = field(default="fresh-handoff", kw_only=True)
 
     def __post_init__(self) -> None:
         # Validate base fields as the exact existing type; its validator iterates
         # dataclass fields and must not mistake new optional metadata for text.
-        ExecutionRequest(**{f.name: getattr(self, f.name) for f in fields(ExecutionRequest)})
+        base = {f.name: getattr(self, f.name) for f in fields(ExecutionRequest)}
+        if self.decision_session_mode not in {"fresh-handoff", "native-persistent"}:
+            raise ValueError("invalid decision session mode")
+        if self.decision_session_mode == "native-persistent":
+            if self.child_choice_json is None or self.context_mode not in {"fresh", "continuation"}:
+                raise ValueError("persistent decisions require scoped fresh or continuation context")
+            if self.result_kind != "review" or self.tool_profile != "default":
+                raise ValueError("persistent coordination output/profile required")
+            prior = self.native_continuation
+            if self.context_mode == "continuation":
+                if type(prior) is not NativeContinuation:
+                    raise ValueError("persistent decision predecessor required")
+                if {self.external_dispatch_id, self.external_evidence_run_id} & {prior.prior_dispatch_id, prior.prior_evidence_run_id}:
+                    raise ValueError("continuation requires new execution identities")
+            elif prior is not None:
+                raise ValueError("fresh decision cannot retain a predecessor")
+            # This exact coordination type owns Lead continuation eligibility.
+            # Generic ExecutionRequest must not acquire that authority.
+            base.update(native_continuation=None, context_mode="fresh")
+        ExecutionRequest(**base)
         if self.provider != "codex" or self.role != "lead" or self.write_workspace is not None:
             raise ValueError("explicit Codex coordination operation required")
         for value in (self.operation_id, self.admitted_request_id,
@@ -57,10 +77,14 @@ class CoordinationInferenceRequest(ExecutionRequest):
         value = super(CoordinationInferenceRequest, self).to_dict()
         if self.child_choice_json is None:
             value.pop("child_choice_json")
+        if self.decision_session_mode == "fresh-handoff":
+            value.pop("decision_session_mode")
         return value
 
     @classmethod
     def from_dict(cls, value: object) -> CoordinationInferenceRequest:
+        if type(value) is dict and "decision_session_mode" not in value:
+            value = {**value, "decision_session_mode": "fresh-handoff"}
         if type(value) is dict and "child_choice_json" not in value:
             value = {**value, "child_choice_json": None}
         if type(value) is dict and "native_continuation" not in value:
@@ -77,7 +101,8 @@ class CoordinationInferenceRequest(ExecutionRequest):
             raise ValueError("invalid coordination request fields")
         if type(value["scope"]) is not list:
             raise ValueError("invalid coordination scope")
-        return cls(**{**value, "scope": tuple(value["scope"])})
+        return cls(**{**value, "scope": tuple(value["scope"]),
+            "native_continuation": NativeContinuation.from_dict(value["native_continuation"]) if value["native_continuation"] is not None else None})
 
 
 def coordination_payload(operation_id, request_id, system_instructions, inner_request_sha256):

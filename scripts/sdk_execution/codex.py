@@ -314,6 +314,9 @@ class CodexReviewAdapter:
     def _sandbox_policy(self, request):
         return {"type": "readOnly", "networkAccess": False}
 
+    def _thread_start_settings(self, request, settings):
+        return settings
+
     def _sandbox_config(self, request):
         return {}
 
@@ -549,7 +552,7 @@ class CodexReviewAdapter:
             started = _object(client.thread_fork(resumed_thread, {
                 **settings, "lastTurnId": continuation.native_turn_id, "ephemeral": False,
                 "deferGoalContinuation": True,
-            }) if fork else client.thread_resume(resumed_thread, settings) if resumed_thread else client.thread_start(settings))
+            }) if fork else client.thread_resume(resumed_thread, settings) if resumed_thread else client.thread_start(self._thread_start_settings(request, settings)))
             native_thread = _object(started.get("thread"))
             self._thread_id = _identifier(native_thread.get("id"))
             if continuation:

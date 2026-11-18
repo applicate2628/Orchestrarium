@@ -337,14 +337,40 @@ a filesystem sandbox; each selected executor retains its own real permissions.
    not an in-memory conversation or a new competing state file. Retain incomplete
    outcomes for recovery rather than automatically repeating a model invocation.
 
-The implemented dialogue uses separate SDK coordination turns with explicit
-received-state handoff. It does **not** promise one persistent native Lead thread,
-provider-native child-agent steering, or dynamic admission of arbitrary new work.
-Requests outside the catalog return to Root admission. The separate Consultant
-native fork/continuation mechanism is not converted into child-Lead authority.
-Broader multi-Lead acceptance still includes provider/session integration, actual
-installed execution and authorized native validation; offline tests alone do not
-establish those results.
+Root explicitly selects `decision_session_mode`: `fresh-handoff` preserves
+separate SDK decision sessions; `native-persistent` uses one actual Codex native
+thread across new decision turns. Legacy assignments retain `fresh-handoff`.
+There is no automatic switch to a fresh thread when persistence or recovery fails.
+Both modes keep the same catalog, Host permissions and independent acceptance.
+
+The official Codex Python SDK exposes `thread_resume` and `turn_start`
+([reviewed client source, v0.169.0](https://github.com/openai/codex/blob/rust-v0.169.0/sdk/python/src/openai_codex/client.py)).
+Persistent mode starts a non-ephemeral thread; subsequent admitted decisions
+resume its verified completed tip and start a new turn with current received
+state. This is not replaying the previous turn, a simulated history clone, or a
+promise that an SDK process remains resident between turns. Native thread identity
+and immutable controls come from canonical received decision evidence, not a
+caller-supplied raw thread ID. The changing decision projection does not change
+the assignment's scope or the thread's permission boundary.
+
+After restart, the Host first resolves a received but unconsumed decision intent.
+An admitted execute intent is verified against its recorded decision projection
+and the currently authorized exact target, not equality of unrelated changing
+results. It uses the catalog's original dispatch/evidence identity; its existing
+atomic claim prevents duplicate execution. A completed or uncertain
+attempt is inspected rather than rerun. Only then can a new decision claim the
+single successor of the prior received decision. Initial persistent session
+creation is likewise bound to the assignment, so simultaneous recovery callers
+cannot silently create parallel native threads for the same session. Unknown or
+blocked decisions are retained for reconciliation, not used as continuation
+receipts. Child finish/cancel still goes through existing lifecycle owners.
+
+This does **not** provide provider-native child-agent steering or dynamic admission
+of arbitrary new work. Requests outside the catalog return to Root admission.
+The separate Consultant fork mechanism does not grant child-Lead authority.
+Installed/native qualification still requires authorized provider execution;
+offline tests exercise the real Host chain with a simulated native boundary and
+must not be presented as installed or live acceptance.
 
 ### Official access terms and project choices
 
