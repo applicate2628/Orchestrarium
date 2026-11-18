@@ -4,6 +4,10 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Synchronize SDK delivery with the merged Windows replacement-security fix and refresh the two source-manifest digests for the already reviewed owner-attribution and safe-diagnostic changes, preserving the existing transport inventory and validation.
+
+- Narrow first-version SDK acceptance to a native Lead of another provider delegating to Codex through the existing SDK route and receiving its result. Keep non-Codex implementations and broader platform qualification deferred, and distinguish the direct native Codex proof from the originating Lead handoff.
+
 - Record a bounded native Codex read-only Consultant fresh/continuation success on the verified implementation revision, with canonical receipt and local restart readback evidence. Preserve the earlier failed attempt and the remaining broader SDK acceptance gaps.
 
 - Add an offline Codex streaming-to-receiving regression covering the normal event budget, canonical continuation handoff and secret rejection, plus a separately verified operator-harness smoke. These synthetic checks do not upgrade the incomplete live acceptance.
@@ -251,6 +255,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-14
 
+- Align installer integration fixtures and installation guidance with the existing exact outside-document byte preservation contract. Tests now distinguish LF-rendered managed bodies from retained user CRLF text and supply the native-config plan's real storage binding, so Windows verification checks the current contract without normalizing user content.
 - Clarify platform selection for Windows-resident installer targets: the Windows backend must own the complete transaction rather than substitute individual POSIX operations. Separate native POSIX qualification, repeated installation and uninstall claims so component tests cannot be mistaken for full lifecycle acceptance.
 
 - Preserve primary exceptions by presence across installer copy, scalar, payload, tree-construction and prepared-image cleanup boundaries. False-valued errors no longer become cleanup errors, and exception truthiness cannot interrupt settlement diagnostics. This changes cause selection only, not filesystem effects or platform admission.
@@ -272,6 +277,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 - Restore fresh-install rollback through the existing identity-checked disposal owner instead of requiring a native move merely to retain newly created data. Existing-object replacement and runtime-observation custody retain their original safeguards. This removes a fresh-file recovery failure under an unsupported native move capability; directory atomic-publication refusal and POSIX disposal holds remain unchanged, so this is not complete DrvFS installation support.
 
 ## 2026-11-10
+
+- Windows exact-tree updates now capture the existing ordinary members' owner, group and discretionary access-control list (DACL) through identity-bound handles and create their replacements with that policy before writing payloads or publishing the tree. Protected files and directories no longer inherit broader staged-parent access during a selected Lead update. New members inherit their replacement parent; capture, creation or verification failure refuses publication, and rollback retains the original objects. No elevation or live permission rewrite is used. This is bounded owner/group/DACL preservation, not full security-descriptor, scalar-writer, race or crash qualification; platform and live-rollout holds remain independent.
 
 - Consolidate Codex routing, recovery and role resolution inline, combining the ordered route list with its required participants and referring to shared rules already composed in the same instruction document. Per-stage recovery, additive Architect participation in factual decisions, direct-role exceptions, lifecycle ownership and external worker/reviewer capability boundaries remain binding. This saves 3,232 source bytes without a new loader, read dependency or Lead activation; the broader instruction-budget problem and live loading/compaction qualification remain open.
 

@@ -22,14 +22,21 @@ These results do not enable a default route or qualify arbitrary general use.
 
 ## PR19 completion roadmap, updated 2026-11-18
 
-**Status: approved by Dmitry on 2026-11-17; implementation remains incomplete.**
-The approved target is a working multivendor SDK integration in this pull request
-(PR), not merely a setup menu or the existing Codex review slice. This completion
-scope replaces the earlier Codex-only/stub-only plan. Approval permits staged
-implementation, but does not upgrade old test results or authorize quota-consuming
-provider calls, external reviews, bots or GitHub Actions.
-Already-authorized bounded work retains its own scope. Rust remains a separate
-implementation line, not a prerequisite for finishing this SDK work.
+**First-version acceptance revised by Dmitry on 2026-11-18.**
+A native Lead of another provider must be able to delegate a task to a Codex
+session through the supported SDK route and receive its result. This is the
+first-version outcome, not full multivendor worker qualification. The broader
+November 17 design remains future scope; non-Codex implementations and their
+recorded evidence are retained, not removed or represented as live-qualified.
+
+The successful direct Codex Consultant fresh/continuation pair below proves the
+bounded Codex backend path. It does **not** by itself prove invocation from a real
+Lead session of another provider. Track source/installed bridge coverage, the
+actual originating Lead handoff and Codex canonical result receiving separately.
+The other provider remains a native Lead under its own terms; this is not permission
+to wrap its subscription session as a third-party worker. Existing user approvals,
+provider access and spending rules still apply. No new quota or Actions permission
+is inferred from the narrower first-version scope.
 
 ### Shared design
 
@@ -1420,16 +1427,16 @@ Copilot crossed offline tests exercise actual Host/ledger/archive lifecycle with
 synthetic provider/process peers. Paired module-generation reuse removes repeated
 owner compilation without caching mutable permissions, grants or ledger state.
 
-The ordered slices above remain the acceptance specification, not a queue of
-wholly unfinished features. Continue only the following unresolved outcomes:
+The ordered slices above record the broader design and implementation history.
+The following first-version scope supersedes treating all those provider outcomes
+as release blockers:
 
-| Next outcome | Concrete remaining work | Verification/delivery boundary |
+| Scope | Concrete remaining work | Verification/delivery boundary |
 |---|---|---|
-| Provider routes | Remaining supported AGY native lifecycle/result qualification beyond startup, advisory hooks and explicit Root association; Kimi installed/native qualification of its reconciled Kimi Code ACP owner; Grok Build ACP actual runtime, account/tool enforcement and canonical receiving. | Use confirmed official capabilities and the existing owners. Do not turn subscription Lead routes into third-party workers. |
-| Session coverage | Remaining provider-native continuation and native Lead/subagent integration where the official runtime exposes a qualified integration surface. Host recovery of newly committed fresh decisions is implemented separately and is not native resume. | Existing Codex/Claude/Copilot child coordination is not missing. Host lineage/depth does not prove control of vendor-internal subagents. |
-| Platform coverage | POSIX platform containment/custody and lifecycle qualification for intended macOS/Linux routes. | Windows offline results do not qualify POSIX or prove an OS sandbox. |
-| Current native acceptance | Install/inspect the selected current payload and exercise admitted real provider routes and recovery. | The November 18 Codex read-only Consultant fresh/continuation pair has bounded native qualification. Other routes remain open; the prior failed attempt is retained with an explicit blocked settlement. Installation and quota-consuming calls retain separate authorization. Offline peers are not native acceptance. |
-| PR delivery | Keep main policy/regression fixes, this roadmap, source projections and PR description synchronized; complete unresolved acceptance. | PR remains draft, unmerged and not globally installed. No automatic model selection, budget policy or Actions run is implied. |
+| First version: other-provider Lead to Codex | Verify the native Lead entry point delegates through the existing Codex SDK owner and receives the correctly bound result, including failure/recovery and user permissions. | Source/offline bridge evidence and the direct native Codex pair are separate from a real originating Lead execution. Do not label the whole path native-qualified from either alone. |
+| First version: Codex delivery | Integrate current main fixes, verify the selected payload and shared owner regressions, synchronize this plan and PR evidence. | The bounded Windows Codex Consultant pair is live-qualified at its recorded revision. PR remains draft/unmerged and not globally installed; installation and further model calls retain their own authorization. |
+| Deferred: non-Codex workers and sessions | Non-Codex worker/runtime, account/tool enforcement, receiving and broader native session qualification beyond the selected originating Lead-to-Codex handoff. | Retain existing implementations and offline evidence without claiming live success. Not a first-version blocker under the revised decision. |
+| Deferred: wider platforms | Intended macOS/Linux SDK process custody and lifecycle qualification. | Windows success does not qualify POSIX or promise an operating-system sandbox. Preserve the exact platform evidence gaps. |
 
 Active SDK implementation owner: the existing PR19 lane. Shared main routing and
 global installation changes belong to their existing separate owner and are

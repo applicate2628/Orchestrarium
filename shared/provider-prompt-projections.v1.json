@@ -14,7 +14,7 @@
     },
     "process_supervision/process_runner.py": {
       "source": "scripts/process_supervision/process_runner.py",
-      "sha256": "a30e4b9811d9e805fadb193b72562f4d19964ff8fbf0c01acb5aff13adb7d13e",
+      "sha256": "98372368a2c8cba9c95a463ee896f6b3717094fb1d630799a85de6250b11809b",
       "destination": "scripts/process_supervision/process_runner.py"
     },
     "invoke-codex-prompt.py": {
@@ -95,7 +95,7 @@
     "sdk_execution/dispatch.py": {
       "source": "scripts/sdk_execution/dispatch.py",
       "destination": "scripts/sdk_execution/dispatch.py",
-      "sha256": "ac86291ae07ea1261c25772e2040ddf55450dba06f78b717e983dc2bc4c0f337"
+      "sha256": "bdc7e7bec93fb961951e71f9a84bf5b430dac4580d34251095e37b423c2fa887"
     },
     "sdk_execution/contracts.py": {
       "source": "scripts/sdk_execution/contracts.py",

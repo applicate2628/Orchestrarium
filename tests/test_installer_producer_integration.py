@@ -676,11 +676,9 @@ class ProducerIntegrationTests(unittest.TestCase):
         legacy = self.target / "legacy.toml"
         legacy.write_bytes(b"synthetic frozen legacy")
         original_identity = PI._CreateOnlyMutablePath._identity(legacy)
-        selection, config_payload = PI._read_native_config_selection(
-            config, PI._InstallTransaction([], enabled=False))
-        plan = SimpleNamespace(config_exists=True, config_prior_digest=PI._file_sha256(config),
-                               config_selection=selection, config_payload=config_payload,
-                               legacy_exists=True, legacy_path=legacy)
+        selection, payload = PI._read_native_config_selection(config, self.transaction([]))
+        plan = SimpleNamespace(config_selection=selection, config_exists=True, config_prior_digest=PI._file_sha256(config),
+                               config_payload=payload, legacy_exists=True, legacy_path=legacy)
         transaction = self.transaction([])
         primary = RuntimeError("later")
         with patch.object(PI, "CODEX_LEGACY_LUNA_SHA256", PI._file_sha256(legacy)):
@@ -1063,7 +1061,7 @@ class ProducerIntegrationTests(unittest.TestCase):
         (pack / "CLAUDE.md").write_text("@AGENTS.md\n# Claude Code Pack\n", encoding="utf-8")
         return pack
 
-    def test_codex_document_merge_is_inplace_and_preserves_user_line_endings(self):
+    def test_codex_document_merge_preserves_outside_bytes_and_rolls_back(self):
         pack = self.documentation_fixture()
         target = self.target / "AGENTS.md"
         original = ("user prefix\r\n" + PI.CODEX_BEGIN + "\r\nold\r\n" + PI.CODEX_END + "\r\nuser tail\r\n").encode()
@@ -1078,8 +1076,10 @@ class ProducerIntegrationTests(unittest.TestCase):
                 current = target.read_bytes()
                 self.assertIn(b"new codex", current)
                 self.assertIn(b"user tail", current)
-                self.assertTrue(current.startswith(b"user prefix\r\n"))
-                self.assertTrue(current.endswith(b"user tail\r\n"))
+                self.assertEqual(
+                    b"user prefix\r\n" + PI.CODEX_BEGIN.encode()
+                    + b"\n# Shared Governance\nnew shared\n\nnew codex\n"
+                    + PI.CODEX_END.encode() + b"\r\nuser tail\r\n", current)
                 raise primary
         self.assertIs(primary, caught.exception)
         self.assertEqual(original, target.read_bytes())
@@ -1155,8 +1155,9 @@ class ProducerIntegrationTests(unittest.TestCase):
                     self.assertEqual(original, before + after)
                     self.assertEqual(original.count("@AGENTS.md"), text.count("@AGENTS.md"))
                     raw_before, raw_body = target.read_bytes().split(begin.encode())
-                    _raw_managed, raw_after = raw_body.split(end.encode())
+                    raw_managed, raw_after = raw_body.split(end.encode())
                     self.assertEqual(original.replace("\n", "\r\n").encode(), raw_before + raw_after)
+                    self.assertEqual(b"# Claude Code Pack\n", raw_managed)
                 changed = text + ("" if text.endswith("\n") else "\n") + "@AGENTS.md\nLater user import.\n"
                 target.write_text(changed)
                 with self.transaction([target, agents]) as transaction:
@@ -1586,10 +1587,16 @@ class ProducerIntegrationTests(unittest.TestCase):
                 written.append(path)
                 self.assertEqual(identities[path], PI._CreateOnlyMutablePath._identity(path))
                 if path == target:
-                    self.assertTrue(path.read_bytes().startswith(b"user prefix\r\n@AGENTS.md\r\n"))
-                    self.assertTrue(path.read_bytes().endswith(b"user tail\r\n"))
+                    expected = (b"user prefix\r\n@AGENTS.md\r\n"
+                        b"<!-- BEGIN ORCHESTRARIUM CLAUDE MANAGED -->\n"
+                        b"# Claude Code Pack\n<!-- END ORCHESTRARIUM CLAUDE MANAGED -->\n"
+                        b"user tail\r\n")
                 else:
-                    self.assertTrue(path.read_bytes().endswith(original[path]))
+                    expected = (b"<!-- BEGIN ORCHESTRARIUM SHARED MANAGED -->\n"
+                        b"# Shared Governance\nnew shared\n"
+                        b"<!-- END ORCHESTRARIUM SHARED MANAGED -->\n\n"
+                        b"local agent instructions\r\n")
+                self.assertEqual(expected, path.read_bytes())
                 if fail_after_first:
                     raise primary
 
