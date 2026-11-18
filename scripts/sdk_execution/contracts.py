@@ -108,9 +108,9 @@ class ExecutionRequest:
         if self.tool_profile not in {"default", "prompt-only"}:
             raise ValueError("unsupported tool profile")
         if self.tool_profile == "prompt-only" and (
-            self.provider != "claude" or self.write_workspace is not None
+            self.provider not in {"claude", "copilot"} or self.write_workspace is not None
         ):
-            raise ValueError("prompt-only profile requires read-only Claude")
+            raise ValueError("prompt-only profile requires an implemented read-only provider")
         if self.result_kind not in {"review", "task"}:
             raise ValueError("unsupported result kind")
         if self.write_workspace is not None:
@@ -129,7 +129,7 @@ class ExecutionRequest:
                 raise ValueError("write workspace requires implemented task contract")
             # Role eligibility belongs to the existing taxonomy/adapter owner,
             # not a second worker role list in this portable value codec.
-        elif self.result_kind == "task" and (self.provider not in {"codex", "claude"} or self.role != "consultant"):
+        elif self.result_kind == "task" and (self.provider not in {"codex", "claude", "copilot"} or self.role != "consultant"):
             raise ValueError("task adapter combination not implemented")
         if self.native_continuation is not None:
             if (type(self.native_continuation) is not NativeContinuation
@@ -144,8 +144,11 @@ class ExecutionRequest:
             raise ValueError("native continuation binding required")
         if self.context_mode not in {"fresh", "handoff", "continuation", "fork"}:
             raise ValueError("unsupported context mode")
-        if self.provider not in {"codex", "claude", "kimi", "grok", "minimax", "mimo"}:
+        if self.provider not in {"codex", "claude", "kimi", "grok", "minimax", "mimo", "copilot"}:
             raise ValueError("invalid provider")
+        if self.provider == "copilot" and (self.role != "consultant" or self.result_kind != "task"
+                or self.tool_profile != "prompt-only" or self.context_mode != "fresh"):
+            raise ValueError("Copilot currently implements fresh prompt-only Consultant tasks")
         if self.external_dispatch_id == self.external_evidence_run_id:
             raise ValueError("dispatch and evidence identities must differ")
         if not isinstance(self.scope, tuple) or not 1 <= len(self.scope) <= 128:

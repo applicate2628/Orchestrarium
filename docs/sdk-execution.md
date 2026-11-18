@@ -515,7 +515,7 @@ historical results as fresh acceptance.
 | Codex | Explicit Windows Reviewer, Consultant and scoped Worker source bridges; offline qualification and historical bounded native evidence below. | Qualify current installed/native execution; extend Consultant continuation to remaining child-Lead/session/platform outcomes through the common mechanism. |
 | Claude | SDK Host API and explicit scoped Worker command-line route, plus prompt-only Consultant and Reviewer routes, exact receiving and offline checks; native Lead is a different boundary. | Qualify current native execution and complete child-Lead/session outcomes using official API/cloud access; do not wrap a subscription CLI as a third-party worker. |
 | Antigravity | Official setup direction; no implemented AGY runtime adapter in the current SDK execution factory. | Implement Lead/session integration and native subagent handoff; separately qualify any admitted programmatic worker route. |
-| Copilot | Setup direction; existing integration candidates are not a callable SDK execution route. | Reconcile reusable candidate work, implement the common adapter and verify supported Lead/worker/reviewer roles without provider-name role bans. |
+| Copilot | Explicit fresh prompt-only Consultant executor over the official Python SDK; source/offline qualification only. | Complete canonical receiving/public dispatch and supported Lead/worker/reviewer roles; qualify the current installed runtime without provider-name role bans. |
 | Kimi | Existing ACP boundary is separate from the current SDK factory. | Reconcile the supported Kimi runtime with the official agent integration; do not silently substitute the older Python runtime or a model API for the chosen route. |
 | Grok | Candidate protocol support is not live-qualified execution. | Integrate the official Grok Build Agent Client Protocol (ACP) route, including account/tool enforcement and result receiving; do not invent a separate vendor SDK or substitute the xAI model API. |
 
@@ -527,10 +527,29 @@ Printing a setup plan does not install the package, start a runtime or invoke a
 model. Package installation is distinct from runtime provisioning and native
 acceptance. The vendor documents automatic runtime download on first use;
 `COPILOT_SKIP_CLI_DOWNLOAD=1` disables that download, and `COPILOT_CLI_PATH` selects
-an already provisioned binary. The future execution adapter must use the admitted
-runtime/access configuration rather than silently downloading or launching one.
-This setup correction does not implement a callable Copilot executor or qualify
-an installed SDK/runtime.
+an already provisioned binary. Setup alone neither activates the executor nor
+qualifies an installed SDK/runtime.
+
+### Explicit Copilot Consultant execution
+
+`scripts/sdk_execution/copilot.py` supplies a narrow executor for the existing
+`AgentsCoordinator` interface: one fresh, prompt-only Consultant task. The Host
+supplies the existing runtime, private authentication, current permissions and
+execution/cleanup deadlines. No installer, default runtime selection, automatic
+retry or session resumption is added. Other target roles remain implementation
+work, not a permanent provider restriction.
+
+The adapter uses the official empty-mode SDK session, disables tools and ambient
+features for this operation, and marks the delegated message as agent-originated.
+It validates the returned task through the existing result contract and scans
+exported evidence. The selected account label is not proof of observed identity.
+SDK session/client cleanup is reported separately from operating-system process
+settlement; tool output retains `process_settlement: not_established`. This is not
+an operating-system sandbox, canonical ledger receipt, public CLI activation or
+native acceptance claim. Those integrations remain explicit follow-up work.
+
+API reference: [official Python client and session interfaces at the reviewed source](https://github.com/microsoft/copilot-sdk/tree/3ce61458503b6b27ebd1f674a980f4d9596d9b22/python/copilot).
+The source revision is evidence for API shape, not an installed-version pin.
 
 ### Approved role/access acceptance scope
 

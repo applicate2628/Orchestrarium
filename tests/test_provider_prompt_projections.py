@@ -34,6 +34,7 @@ TRANSPORT_FILES = (
     "sdk_execution/_async.py",
     "sdk_execution/acp_streams.py",
     "sdk_execution/claude.py",
+    "sdk_execution/copilot.py",
     "sdk_execution/codex.py",
     "sdk_execution/codex_tools.py",
     "sdk_execution/dispatch.py",
@@ -1481,7 +1482,7 @@ def test_every_projection_violation_uses_one_stable_id(
     assert result.stderr.startswith("E_TRANSPORT_PROJECTION_PARITY:")
 
 
-@pytest.mark.parametrize("generation", ("PRE_SDK_TRANSPORT_FILES", "POLICY_TRANSPORT_FILES", "PRE_POLICY_SDK_TRANSPORT_FILES"))
+@pytest.mark.parametrize("generation", ("PRE_SDK_TRANSPORT_FILES", "POLICY_TRANSPORT_FILES", "PRE_POLICY_SDK_TRANSPORT_FILES", "PRE_COPILOT_TRANSPORT_FILES"))
 @pytest.mark.parametrize("inventory", ("exact-old", "missing-old", "partial-sdk", "reordered-old"))
 def test_pre_sdk_manifest_compatibility_is_predecessor_only_and_exact(
     tmp_path: Path, inventory: str, generation: str,
@@ -1507,7 +1508,7 @@ def test_pre_sdk_manifest_compatibility_is_predecessor_only_and_exact(
             validator._load_manifest(path, predecessor_only=True)
 
 
-@pytest.mark.parametrize("generation", ("PRE_SDK_TRANSPORT_FILES", "POLICY_TRANSPORT_FILES", "PRE_POLICY_SDK_TRANSPORT_FILES"))
+@pytest.mark.parametrize("generation", ("PRE_SDK_TRANSPORT_FILES", "POLICY_TRANSPORT_FILES", "PRE_POLICY_SDK_TRANSPORT_FILES", "PRE_COPILOT_TRANSPORT_FILES"))
 @pytest.mark.parametrize("peer_change", (None, "unexpected-sdk", "customized-old"))
 def test_sdk_projection_upgrade_preserves_receipted_pre_sdk_generation(
     tmp_path: Path, peer_change: str | None, generation: str,

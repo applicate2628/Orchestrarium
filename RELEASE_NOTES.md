@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- An explicitly supplied Copilot SDK runtime can serve a fresh prompt-only Consultant task through the common coordinator interface. The adapter keeps Host permission checks, structured task validation and cleanup evidence separate from account verification and operating-system containment; it does not install a runtime or activate public routing.
+
 - Copilot setup plans now identify the current official Microsoft Python SDK package and source. Guidance distinguishes package installation from runtime provisioning and warns about first-use downloads; this does not activate a Copilot executor or run a model.
 
 - The shared SDK coordinator now rechecks the current Root request and permissions after execution before delivering evidence, including direct Kimi ACP composition. It does not rerun launch preflight against completed artifacts or repeat execution; stale/revoked results remain retained instead of being silently delivered.

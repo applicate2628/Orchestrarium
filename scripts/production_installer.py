@@ -174,6 +174,7 @@ SDK_RUNTIME_HELPERS = (
     "sdk_execution/_async.py",
     "sdk_execution/acp_streams.py",
     "sdk_execution/claude.py",
+    "sdk_execution/copilot.py",
     "sdk_execution/codex.py",
     "sdk_execution/codex_tools.py",
     "sdk_execution/dispatch.py",

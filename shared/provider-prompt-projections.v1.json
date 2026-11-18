@@ -72,6 +72,11 @@
       "sha256": "da43d97a9bab7cc7fa77c6a5ef4f38beecdf08a3efc63ffc51ecb851a38407f4",
       "destination": "scripts/sdk_execution/claude.py"
     },
+    "sdk_execution/copilot.py": {
+      "source": "scripts/sdk_execution/copilot.py",
+      "destination": "scripts/sdk_execution/copilot.py",
+      "sha256": "10db6ee898a9eb9d25cf235de2e0da30ea3ebde4339584e8bf92d04cf989bdb1"
+    },
     "sdk_execution/codex.py": {
       "source": "scripts/sdk_execution/codex.py",
       "destination": "scripts/sdk_execution/codex.py",
@@ -90,7 +95,7 @@
     "sdk_execution/contracts.py": {
       "source": "scripts/sdk_execution/contracts.py",
       "destination": "scripts/sdk_execution/contracts.py",
-      "sha256": "d98a8d0b6c039caa172920e64671b855b7c8de25123e834e05cf40966b566bad"
+      "sha256": "afd67490f157b2ef319b312278cc508037e1e69995de2b9cf3ce6bd001b6410c"
     },
     "sdk_execution/coordinator.py": {
       "source": "scripts/sdk_execution/coordinator.py",
