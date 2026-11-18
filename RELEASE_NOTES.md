@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Connect Claude Consultant to the fixed SDK worker factory and existing Python Host executor, keeping current account/tool authority and ledger receiving rather than adding another dispatcher. Host integrations can use typed advice; the CLI task selector remains Codex-only until its actual Host policy context is integrated. Offline validation is not native acceptance or permission to spend model quota.
+
 - Bind Claude Consultant advice to the admitted request and retained official API/cloud runtime selection in the existing provenance and receiving owners. Advice remains nonauthorizing and incompatible evidence stays blocked; real Claude task launch and the public selector remain disabled pending their separate integration. These offline checks do not authorize model spending or establish native acceptance.
 
 ## 2026-11-17

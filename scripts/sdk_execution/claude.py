@@ -198,12 +198,12 @@ def _official_client_binding(options: dict[str, Any], *, cli_path: str) -> Clien
 
 def create_claude_adapter(request: ExecutionRequest, sink: Any, selection: ClaudeRuntimeSelection):
     """Fixed worker factory after creator-owned Job verification; never call in the parent."""
-    from .runtime import assert_current_launch, prepare_environment
+    from .runtime import assert_current_launch, prepare_environment, validate_admitted_request
 
     if request.provider != "claude" or type(selection) is not ClaudeRuntimeSelection:
         raise AdapterError("claude_request_required")
     if request.result_kind == "task":
-        raise AdapterError("claude_task_runtime_receiving_not_qualified")
+        validate_admitted_request(request, selection)
     assert_current_launch(request, selection, "worker_factory")
     environment, _context = prepare_environment(selection, dict(os.environ))
     # The public SDK overlays env on ambient values. Clean this already-contained
@@ -232,7 +232,8 @@ def create_claude_adapter(request: ExecutionRequest, sink: Any, selection: Claud
         # this exact admitted nonsecret alias before sending its one-use grant.
         return request.account_binding
 
-    return ClaudeReviewAdapter(
+    adapter_type = ClaudeConsultantAdapter if request.result_kind == "task" else ClaudeReviewAdapter
+    return adapter_type(
         client_factory=lambda options: _official_client_binding(options, cli_path=selection.executable),
         assert_current=current, authorize_tool=tool,
         load_instructions=lambda _value: selection.instructions,

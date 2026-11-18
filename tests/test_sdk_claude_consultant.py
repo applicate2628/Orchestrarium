@@ -143,22 +143,13 @@ def test_review_adapter_still_rejects_task_before_factory():
         asyncio.run(instance.execute(request()))
     assert client.calls == []
 
-@pytest.mark.parametrize("entry", ["run", "factory"])
-def test_public_runtime_remains_unqualified_before_effects(monkeypatch, tmp_path, entry):
-    from sdk_execution import runtime, claude
-    def no_effect(*args, **kwargs):
-        pytest.fail("unqualified task reached launch/environment effects")
-    monkeypatch.setattr(runtime, "assert_current_launch", no_effect)
-    monkeypatch.setattr(runtime, "prepare_environment", no_effect)
+def test_runtime_requires_trusted_account_and_tool_owners(tmp_path):
+    from sdk_execution import runtime
     from process_supervision.process_runner import ProcessRunnerV1
     import provider_prompt
-    req = request()
     selection = base.claude_selection(tmp_path, expected_launch_sha256=None,
         instructions=provider_prompt.assemble_external_prompt(b"Advice").decode())
-    calls = {
-        "run": lambda: runtime.run_admitted_review(req, selection, owner=object.__new__(ProcessRunnerV1), source_environment={},
-            authority=no_effect, deadline_monotonic=0, cancellation_probe=lambda: False, started_at="fixture"),
-        "factory": lambda: claude.create_claude_adapter(req, None, object.__new__(claude.ClaudeRuntimeSelection)),
-    }
-    with pytest.raises((runtime.RuntimeBindingError, base.AdapterError), match="claude_task_runtime_receiving_not_qualified"):
-        calls[entry]()
+    with pytest.raises(runtime.RuntimeBindingError, match="existing_claude_tool_and_account_owners_required"):
+        runtime.run_admitted_review(request(), selection, owner=object.__new__(ProcessRunnerV1),
+            source_environment={}, authority=lambda *_: None, deadline_monotonic=0,
+            cancellation_probe=lambda: False, started_at="fixture")

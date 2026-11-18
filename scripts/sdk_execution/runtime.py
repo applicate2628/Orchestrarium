@@ -637,10 +637,6 @@ def run_admitted_review(
     if selection.expected_launch_sha256 is not None:
         raise RuntimeBindingError("existing_launch_is_not_replay_authority")
     validate_admitted_request(request, selection)
-    if request.provider == "claude" and request.result_kind == "task":
-        # The typed evidence route does not activate the fixed worker factory.
-        # Refuse before claiming a launch rather than create a doomed operation.
-        raise RuntimeBindingError("claude_task_runtime_receiving_not_qualified")
     workspace_identity = validate_worker_custody(request, selection)
     if request.provider == "claude":
         if any(not callable(callback) or inspect.iscoroutinefunction(callback)

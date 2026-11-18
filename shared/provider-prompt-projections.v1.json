@@ -69,7 +69,7 @@
     },
     "sdk_execution/claude.py": {
       "source": "scripts/sdk_execution/claude.py",
-      "sha256": "893d4f896428c28604b9c222db64296f467e0cffdf92146388bc9598fff18bc9",
+      "sha256": "3793abf473ae970cd078ddea4b96c9c0f004320b354b5f14b1cf852c9ddb2065",
       "destination": "scripts/sdk_execution/claude.py"
     },
     "sdk_execution/codex.py": {
@@ -145,7 +145,7 @@
     "sdk_execution/runtime.py": {
       "source": "scripts/sdk_execution/runtime.py",
       "destination": "scripts/sdk_execution/runtime.py",
-      "sha256": "d3bcd77d090ec5138c5fd299ee379c60537ad771744d8161cae101920c6c9698"
+      "sha256": "c9a5c7b78f759577c139f298338a5cddd02b53d6aff79a61d042650344a27e41"
     },
     "sdk_execution/worker.py": {
       "source": "scripts/sdk_execution/worker.py",

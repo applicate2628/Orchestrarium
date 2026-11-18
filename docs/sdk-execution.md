@@ -383,11 +383,31 @@ ledger owners. The selected mode is `tool-restricted-read-only`, not an operatin
 system sandbox guarantee. Completed advice remains nonauthorizing task evidence;
 incomplete or mismatched evidence cannot become a review verdict or task closure.
 
-The real launch/factory and public task selector remain unqualified for Claude
-Consultant and reject it before process/model effects. Synthetic receiving checks
-do not establish native acceptance, authorize account/quota use, or activate a
-public Claude route. The next launch integration must preserve the existing
-API/cloud account, tool, role, process and ledger owners.
+The fixed Claude factory now selects `ClaudeConsultantAdapter` for the exact
+admitted task contract. The existing public Python Host API,
+`runtime.SdkReviewExecutor`, executes and receives this task despite its historical
+Review name; no additional dispatcher, permission store or stage machine is
+introduced. The Host supplies its existing request authority (`resolve` and
+`assert_current`), concrete `ClaudeRuntimeSelection`, process owner, selected
+environment, artifact, budgets/cancellation and trusted synchronous `authorize_tool`
+and `verify_account` callbacks. Those callbacks are code owned by the Host, not
+fields or callable paths supplied in an untrusted task binding.
+
+The API/cloud mode check is transport eligibility, not proof of account identity
+or spending consent. Official API authentication authenticates the selected
+credential; SDK initialization and `apiKeySource` do not independently identify
+a billing account. The existing Host account callback must use its own admitted
+auth context rather than treating the request's arbitrary alias as verification.
+This preserves the current callback contract, not a new universal account probe.
+The tool callback checks exact tool arguments under the Host's current access.
+Read-only tools do not constitute operating-system containment.
+
+The command-line `--sdk-task-binding` selector remains Codex-only: the CLI does not
+yet supply the Claude Host policy context. This is a missing CLI adaptation, not
+a prohibition on the integrated Python route. Receiving failures retain the
+acquired RuntimeRun; repair/reconcile evidence instead of repeating execution.
+Synthetic factory/executor checks do not establish native acceptance or authorize
+account/quota use. Actual provider execution remains separately permissioned.
 
 ### Ordered implementation slices
 
