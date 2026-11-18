@@ -313,19 +313,17 @@ Notes:
 | Value | Meaning | Effective provider behavior |
 |---|---|---|
 | `runtime-default` | The caller obtains the installed runtime's observed supported model and effort and passes them explicitly at launch; if not observed, the route is unavailable | Do not inject a stronger pinned model path just because the provider resolved externally. Transport keys still apply, and narrower provider-specific overrides may still win where they exist. |
-| `pinned-top-pro` | Use the strongest documented model/profile path for the resolved provider | Start on the strongest documented provider-native model/profile and allow only the bounded same-provider fallback used for usage-limit or quota exhaustion while staying inside the approved version floor and lane policy for that provider. |
+| `pinned-top-pro` | Use the strongest documented model/profile path for the resolved provider | Start on the strongest documented provider-native model/profile and report quota or capability failure without a retired-model fallback. |
 
 Notes:
 - This is the shared cross-provider model-selection policy. It applies only after provider resolution.
 - `runtime-default` is the first-write default where this key exists.
 - `pinned-top-pro` means:
-- Codex: model `gpt-6.1-sol` with `model_reasoning_effort = "xhigh"` supplied through a supported Codex config/profile path; for direct `codex exec` launches, use `--model gpt-6.1-sol -c model_reasoning_effort="xhigh"` or a profile that sets the same key. Only explicitly configured repo-local fully autonomous low-reasoning worker lanes may retry once on `gpt-5.6-terra` after usage-limit or quota exhaustion on the primary path.
+- Codex: model `gpt-6.2-sol` with `model_reasoning_effort = "xhigh"` supplied through a supported Codex config/profile path; for direct `codex exec` launches, use `--model gpt-6.2-sol -c model_reasoning_effort="xhigh"` or a profile that sets the same key. Quota exhaustion does not authorize a retired-model fallback.
 - Claude: `opus-max` for the primary `claude` candidate. `reserve` is not a fallback from that candidate; it is a separate symbolic advisory/review candidate that the profile order may reach after primary `claude` and `codex`.
 - Supplemental candidates apply only where their lane policy allows them. `reserve` is advisory/review-only and does not affect primary Claude model/profile selection.
 - Codex-line `externalClaudeProfile`, when explicitly set, remains a narrower override for Claude model/profile selection than the shared `externalModelMode`.
-- Do not silently downgrade below `gpt-5.6-terra` on the Codex line.
 - Repo-local policy treats these named fallback paths as alternate limit or budget pools when runtime observation shows that they exhaust independently. They are not quality-equivalent substitutes for the primary path.
-- Use `gpt-5.6-terra` as a balanced reasoning option when full `gpt-6.1-sol` depth is not required. Compare cost per verified result by task, model, and effort rather than assuming a static price or speed advantage. It is a genuine reasoning model, review-gated like any external lane.
 - Treat `reserve` differently from provider fallback pools: it is a separate advisory/review candidate, not a primary-Claude retry path and not a worker, implementation, editing, or publication path.
 
 ### `externalCodexProfile`
@@ -335,23 +333,16 @@ Bounded `medium` is native-only through the ordinary role/task selector. Externa
 
 | Value | Meaning | Effective Codex behavior |
 |---|---|---|
-| `default` | Inherit the shared model policy | When the resolved provider is Codex, apply `externalModelMode` unchanged. Balance-oriented presets may choose this value deliberately; omitted-key and first-write values instead use `gpt-6.1-sol-xhigh`. With `default` plus `runtime-default`, retain the runtime-observed model and effort; this does not force Sol 6.1 or rewrite an explicit versioned profile. |
-| `gpt-6.1-sol-high` | Explicit Sol profile for the speed preset | When the resolved provider is Codex, request model `gpt-6.1-sol` with `model_reasoning_effort = "high"` regardless of `externalModelMode`. |
-| `gpt-6.1-sol-xhigh` | Shipped explicit Sol profile | When the resolved provider is Codex, request model `gpt-6.1-sol` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode`. |
-| `gpt-6.1-sol-max` | Explicit higher-effort Codex request for higher-complexity/hard lanes | When the resolved provider is Codex, request model `gpt-6.1-sol` with `model_reasoning_effort = "max"`. Max remains approval-gated. This is NOT `gpt-6.1-sol-ultra` — no `ultra` route is shipped on a subagent lane. |
-| `gpt-6-sol-high` | Explicit compatibility profile | Request the literal `gpt-6-sol` model at `high`; never normalize forward. Max remains approval-gated. |
-| `gpt-6-sol-xhigh` | Explicit compatibility profile | Request the literal `gpt-6-sol` model at `xhigh`; never normalize forward. Max remains approval-gated. |
-| `gpt-6-sol-max` | Explicit compatibility profile | Request the literal `gpt-6-sol` model at `max`; never normalize forward. Max remains approval-gated. |
-| `gpt-5.6-sol-xhigh` | Retained explicit GPT-5.6 compatibility profile | Preserve the literal request for model `gpt-5.6-sol` with `model_reasoning_effort = "xhigh"`; do not normalize it to GPT-6. |
-| `gpt-5.6-sol-max` | Retained explicit GPT-5.6 compatibility profile | Preserve the literal request for model `gpt-5.6-sol` with `model_reasoning_effort = "max"`; do not normalize it to GPT-6. |
-| `gpt-5.6-terra` | Explicit Codex balanced-tier request (a distinct model, not an effort suffix on `gpt-5.6-sol`) | When the resolved provider is Codex, request model `gpt-5.6-terra` with `model_reasoning_effort = "high"` or flag if the installed Codex runtime supports it. If the runtime cannot prove that model is available, record the route as unavailable or deviated instead of silently fabricating an equivalent. |
+| `default` | Inherit the shared model policy | When the resolved provider is Codex, apply `externalModelMode` unchanged. Balance-oriented presets may choose this value deliberately; omitted-key and first-write values instead use `gpt-6.2-sol-xhigh`. With `default` plus `runtime-default`, retain the runtime-observed model and effort; this does not force Sol 6.2 or rewrite an explicit versioned profile. |
+| `gpt-6.2-sol-high` | Explicit Sol profile for the speed preset | When the resolved provider is Codex, request model `gpt-6.2-sol` with `model_reasoning_effort = "high"` regardless of `externalModelMode`. |
+| `gpt-6.2-sol-xhigh` | Shipped explicit Sol profile | When the resolved provider is Codex, request model `gpt-6.2-sol` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode`. |
+| `gpt-6.2-sol-max` | Explicit higher-effort Codex request for higher-complexity/hard lanes | When the resolved provider is Codex, request model `gpt-6.2-sol` with `model_reasoning_effort = "max"`. Max remains approval-gated. This is NOT `gpt-6.2-sol-ultra` — no `ultra` route is shipped on a subagent lane. |
 
 Notes:
 - This is a shared `agents-mode` key because any host line may route an external lane to Codex.
 - The key applies only after provider resolution. It has no effect when the resolved provider is Claude, Kimi, or `reserve`.
-- `default` is intentionally different from every version-named token: it preserves `externalModelMode`, while omitted-key and first-write values use `gpt-6.1-sol-xhigh`.
-- Existing configs that contain a version-named GPT-5.6 Sol token are not rewritten. Both retained tokens keep their literal model/effort meaning for the remainder of 1.x; removing them requires a separately admitted breaking change.
-- Treat `gpt-5.6-terra` as a repo-local profile label that still requires installed-runtime verification before claiming an actual provider-native balanced model was used. Its output stays review-gated like any external lane, and it is not a replacement for `gpt-6.1-sol-xhigh` on flagship-depth work.
+- `default` is intentionally different from every version-named token: it preserves `externalModelMode`, while omitted-key and first-write values use `gpt-6.2-sol-xhigh`.
+- Only the latest confirmed version of each admitted Codex family is selectable: GPT-6 Luna, GPT-6.1 Terra, GPT-6.2 Sol and GPT-6.2 Astra. Existing user configuration is preserved, but a retired choice is not executable and must be replaced by an explicitly selected current profile; no silent fallback is allowed.
 
 ## External role eligibility
 
@@ -386,12 +377,10 @@ Guardrails:
 | Situation | Rule |
 |---|---|
 | `externalCodexProfile: default` and Codex is the chosen provider | Inherit `externalModelMode`; under `runtime-default`, pass the runtime-observed model and effort explicitly, and under `pinned-top-pro`, use the documented top Codex path. |
-| `externalCodexProfile: gpt-6.1-sol-high` and Codex is the chosen provider | Request model `gpt-6.1-sol` with `model_reasoning_effort = "high"`. If unsupported or ambiguous, disclose the shortfall instead of silently falling back. |
-| `externalCodexProfile: gpt-6.1-sol-xhigh` and Codex is the chosen provider | Request model `gpt-6.1-sol` with `model_reasoning_effort = "xhigh"`. If unsupported or ambiguous, disclose the shortfall in the execution record instead of silently falling back to an unrelated profile. |
-| `externalCodexProfile: gpt-6.1-sol-max` and Codex is the chosen provider | Request model `gpt-6.1-sol` with `model_reasoning_effort = "max"` for higher-complexity/hard lanes; max remains approval-gated. If unsupported or ambiguous, disclose the shortfall in the execution record instead of silently falling back to an unrelated profile. |
-| `externalCodexProfile: gpt-5.6-sol-xhigh` or `gpt-5.6-sol-max` and Codex is the chosen provider | Preserve the explicit versioned request for model `gpt-5.6-sol` with the named effort. Do not normalize it to GPT-6; these compatibility tokens remain supported for the remainder of 1.x. |
-| `externalCodexProfile: gpt-5.6-terra` and Codex is the chosen provider | Request the installed runtime's `gpt-5.6-terra` balanced model if supported (a distinct model, not an effort suffix on `gpt-5.6-sol`; `model_reasoning_effort = "high"`). If unsupported or ambiguous, disclose the shortfall in the execution record instead of silently falling back to an unrelated profile. |
-| `externalModelMode: pinned-top-pro` and Codex is the chosen provider | Try model `gpt-6.1-sol` with `model_reasoning_effort = "xhigh"` through a supported Codex config/profile path first. Only on an explicitly configured repo-local fully autonomous low-reasoning worker lane may Codex retry once with `gpt-5.6-terra` after usage-limit or quota exhaustion on the primary path. Other lanes must disclose Codex unavailability instead of downgrading. |
+| `externalCodexProfile: gpt-6.2-sol-high` and Codex is the chosen provider | Request model `gpt-6.2-sol` with `model_reasoning_effort = "high"`. If unsupported or ambiguous, disclose the shortfall instead of silently falling back. |
+| `externalCodexProfile: gpt-6.2-sol-xhigh` and Codex is the chosen provider | Request model `gpt-6.2-sol` with `model_reasoning_effort = "xhigh"`. If unsupported or ambiguous, disclose the shortfall in the execution record instead of silently falling back to an unrelated profile. |
+| `externalCodexProfile: gpt-6.2-sol-max` and Codex is the chosen provider | Request model `gpt-6.2-sol` with `model_reasoning_effort = "max"` for higher-complexity/hard lanes; max remains approval-gated. If unsupported or ambiguous, disclose the shortfall in the execution record instead of silently falling back to an unrelated profile. |
+| `externalModelMode: pinned-top-pro` and Codex is the chosen provider | Request GPT-6.2 Sol at `xhigh` through the supported path. Report unavailability or quota exhaustion without a retired-model fallback. |
 | `externalModelMode: pinned-top-pro` and Claude is the chosen provider | Try primary `claude` on `opus-max`. Do not retry primary Claude through the secret-backed wrapper. Advisory/review lanes may later collect the separate `reserve` candidate if their profile order and opinion count reach it. |
 | Claude CLI is the chosen provider and is already authenticated | Use the plain Claude CLI path first. |
 | Claude CLI is not logged in, or auth is intentionally repo-local | Do not convert a primary `claude` route into a wrapper-backed run. Advisory/review lanes may still reach `reserve` as an independent later candidate when the runtime has a resolver for it. |
@@ -422,8 +411,8 @@ Notes:
 
 | Provider | `consultantMode` | `delegationMode` | `parallelMode` | `mcpMode` | `preferExternalWorker` | `preferExternalReviewer` | `externalProvider` | `reserveResolver` | `externalCodexWorkdirMode` | `externalClaudeWorkdirMode` | `externalModelMode` | `externalCodexProfile` | `externalClaudeProfile` |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Codex | `disabled` | `auto` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-6.1-sol-xhigh` | `opus-xhigh` unless explicitly overridden |
-| Claude Code | `disabled` | `auto` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-6.1-sol-xhigh` | not part of canonical Claude-line config |
+| Codex | `disabled` | `auto` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-6.2-sol-xhigh` | `opus-xhigh` unless explicitly overridden |
+| Claude Code | `disabled` | `auto` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-6.2-sol-xhigh` | not part of canonical Claude-line config |
 
 Structured defaults written alongside the scalar keys:
 
@@ -477,8 +466,8 @@ When a non-trivial task is interrupted, record a durable resume point: current s
 | Direct external launch | Provider-backed consultant execution in `external` mode and both external adapter roles must launch the selected external transport directly. If the host runtime cannot do that, the route is disabled rather than proxied through an internal helper. |
 | External CLI prompt delivery | Substantive task prompts are file-based by default: create a temporary prompt file and feed it through stdin or a provider-supported file-input mechanism instead of putting the full prompt in argv. |
 | External workdir mode | `externalCodexWorkdirMode` and `externalClaudeWorkdirMode` choose whether each production external provider runs in a fresh neutral empty directory or in the current project/worktree. The ordinary default is `neutral`. |
-| Shared external model policy | for `externalModelMode: runtime-default`, the caller obtains the installed runtime's observed supported model and effort and passes them explicitly; if not observed, the route is unavailable; `pinned-top-pro` pins the strongest documented model/profile for the resolved provider and allows one named same-provider fallback on retryable provider exhaustion. |
-| Codex external profile | `externalCodexProfile: default` inherits the shared model policy when Codex is the resolved provider. The shipped omitted-key/first-write value is `gpt-6.1-sol-xhigh`; `gpt-6.1-sol-xhigh` and `gpt-6.1-sol-max` request model `gpt-6.1-sol` with the named reasoning effort. The retained `gpt-5.6-sol-xhigh` and `gpt-5.6-sol-max` tokens continue to request their literal GPT-5.6 model/effort for 1.x, and unchanged `gpt-5.6-terra` selects the balanced Codex tier with `model_reasoning_effort = "high"`. |
+| Shared external model policy | for `externalModelMode: runtime-default`, the caller obtains the installed runtime's observed supported model and effort and passes them explicitly; if not observed, the route is unavailable; `pinned-top-pro` pins the strongest documented model/profile for the resolved provider and reports quota exhaustion without a retired-model fallback. |
+| Codex external profile | The current external Codex profiles are `default`, `gpt-6.2-sol-high`, `gpt-6.2-sol-xhigh` and `gpt-6.2-sol-max`. The shipped default is `gpt-6.2-sol-xhigh`; `default` uses `externalModelMode` with an explicitly observed, currently admitted runtime model/effort. Named Sol profiles request GPT-6.2 Sol at their stated effort. Max remains approval-gated. Retired profiles are not launchable and are not silently rewritten or used as quota fallbacks. |
 | Reserve candidate | `reserve` is the advisory/review-only supplemental candidate after primary `claude` and `codex`. It is symbolic, bound by `reserveResolver`, independent of primary providers, and must not be used for worker or mutating work. |
 | Active priority profile | `externalPriorityProfile` selects the named provider-order map used only when `externalProvider: auto`. Unknown profile names fail closed. |
 | Multi-opinion routing | `externalOpinionCounts` controls how many distinct external opinions a lane must collect under `auto`. Missing counts mean `1`; shortfalls keep the lane `BLOCKED`. It does not replace the general `parallelMode` rule. |

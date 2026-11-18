@@ -184,9 +184,7 @@ For non-Consultant callers, continue to honor `externalCodexProfile` and `extern
 - `runtime-default` → keep the selected provider on its native runtime default model/profile.
 - `externalCodexProfile: default` → inherit the selected `externalModelMode` when Codex is selected or `auto` resolves to Codex.
 - `externalCodexProfile: gpt-6.2-sol-max` → request model `gpt-6.2-sol` with `model_reasoning_effort = "max"` when Codex is selected or `auto` resolves to Codex, for higher-complexity/hard lanes (NOT `gpt-6.2-sol-ultra`, which spawns subagents and must never be shipped on a subagent lane).
-- `externalCodexProfile: gpt-5.6-terra` → select the balanced Codex model tier (a distinct model; `model_reasoning_effort = "high"`, so this is a model choice, not merely an effort downgrade) when Codex is selected or `auto` resolves to Codex; record unavailable or deviated if that model cannot be verified against the installed runtime.
 - `externalCodexProfile: gpt-6.2-sol-xhigh` → explicitly request model `gpt-6.2-sol` with `model_reasoning_effort = "xhigh"` via `-c model_reasoning_effort=xhigh` regardless of `externalModelMode`, symmetric to `externalClaudeProfile: opus-xhigh`.
-- Explicit `externalCodexProfile: gpt-5.6-sol-xhigh` and `gpt-5.6-sol-max` values retain their named GPT-5.6 model and effort through 1.x.
 Use the approved `invoke-claude-prompt` wrapper for substantive Claude consultation; do not substitute raw `claude -p` recipes.
 
 Reserve advisory candidate:
