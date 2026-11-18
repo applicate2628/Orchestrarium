@@ -1,4 +1,4 @@
-"""One read-only review through the public Claude Agent SDK, never a live default.
+"""One read-only task or review through the public Claude Agent SDK, never a live default.
 
 Public API reference: anthropics/claude-agent-sdk-python
 163f50ed56fa8c3fd9346148b6e56e7696794b58 (v0.2.173, bundled CLI 2.1.309).
@@ -30,7 +30,7 @@ from uuid import uuid4
 from ._async import drain_owned
 from .contracts import (
     CancelReceipt, ExecutionRequest, ExecutionResult, Observation, json_text,
-    review_schema, validate_review,
+    review_schema, validate_review, task_schema, validate_task,
 )
 
 READ_TOOLS = ("Read", "Glob", "Grep")
@@ -202,6 +202,8 @@ def create_claude_adapter(request: ExecutionRequest, sink: Any, selection: Claud
 
     if request.provider != "claude" or type(selection) is not ClaudeRuntimeSelection:
         raise AdapterError("claude_request_required")
+    if request.result_kind == "task":
+        raise AdapterError("claude_task_runtime_receiving_not_qualified")
     assert_current_launch(request, selection, "worker_factory")
     environment, _context = prepare_environment(selection, dict(os.environ))
     # The public SDK overlays env on ambient values. Clean this already-contained
@@ -405,7 +407,7 @@ class ClaudeReviewAdapter:
                 self._tools[call_id] = None
                 await self._authority("tool")
                 if name == OUTPUT_TOOL:
-                    validate_review(arguments, request=self._request)
+                    self._parse_final(arguments, self._request)
                 if await self._authorize_tool(self._request, name, arguments) is not None:
                     raise AdapterError("invalid_tool_authority_callback")
                 if self._cancel_requested:
@@ -454,18 +456,32 @@ class ClaudeReviewAdapter:
             "fallback_model": None, "continue_conversation": False, "resume": None,
             "verbatim_prompts": True, "include_partial_messages": True,
             "max_buffer_size": self._request.max_output_bytes,
-            "output_format": {"type": "json_schema", "schema": review_schema(self._request)},
+            "output_format": {"type": "json_schema", "schema": self._output_schema(self._request)},
             "can_use_tool": self._deny_permission,
             "hooks": {event: [{"hooks": [self._hook]}] for event in (
                 "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop",
             )},
         }
 
+    def _validate_output_kind(self, request: ExecutionRequest) -> None:
+        if request.result_kind != "review" or request.write_workspace is not None:
+            raise AdapterError("review_request_required")
+
+    def _output_schema(self, request: ExecutionRequest) -> dict[str, Any]:
+        return review_schema(request)
+
+    def _parse_final(self, payload: object, request: ExecutionRequest):
+        return validate_review(payload, request=request)
+
+    def _make_result(self, **values: Any) -> ExecutionResult:
+        return ExecutionResult(**values)
+
     async def execute(self, request: ExecutionRequest) -> ExecutionResult:
         if not isinstance(request, ExecutionRequest) or request.provider != "claude":
             raise AdapterError("unsupported_provider")
         if self._used:
             raise AdapterError("operation_already_consumed")
+        self._validate_output_kind(request)
         self._used, self._request = True, request
         self._session_id, self._prompt_id = str(uuid4()), str(uuid4())
         task = asyncio.create_task(self._execute())
@@ -617,7 +633,7 @@ class ClaudeReviewAdapter:
                     models = data.get("model_usage")
                     if models is not None and (not isinstance(models, dict) or set(models) != {request.model}):
                         raise AdapterError("observed_model_mismatch")
-                    review = validate_review(data.get("structured_output"), request=request)
+                    review = self._parse_final(data.get("structured_output"), request)
                     usage = {key: data[key] for key in ("usage", "model_usage", "total_cost_usd") if data.get(key) is not None}
                     if usage:
                         encoded_usage = json_text(usage)
@@ -697,10 +713,32 @@ class ClaudeReviewAdapter:
         if (execution_error not in (None, "cancelled_before_effect")
             or self._capture_error or cleanup_error):
             status = "failed" if provider_status == "failed" else "incomplete"
-        return ExecutionResult(
+        return self._make_result(
             request=request, status=status, provider_status=provider_status,
             native_thread_id=self._session_id, native_turn_id=self._prompt_id,
             sdk_execution_json=metadata, observations=tuple(self._observations), review=review,
             usage_json=usage_json, execution_error=execution_error,
             capture_error=self._capture_error, cleanup_error=cleanup_error, protocol_closed=protocol_closed,
         )
+
+
+class ClaudeConsultantAdapter(ClaudeReviewAdapter):
+    """Read-only advice through the existing official API/cloud lifecycle.
+
+    This typed adapter does not activate a public dispatch route, permit writes,
+    or grant subscription access. Existing account, tool and process owners
+    remain mandatory; task evidence is not an authorizing review verdict.
+    """
+
+    def _validate_output_kind(self, request: ExecutionRequest) -> None:
+        if request.role != "consultant" or request.result_kind != "task" or request.write_workspace is not None:
+            raise AdapterError("consultant_task_request_required")
+
+    def _output_schema(self, request: ExecutionRequest) -> dict[str, Any]:
+        return task_schema(request)
+
+    def _parse_final(self, payload: object, request: ExecutionRequest):
+        return validate_task(payload, request=request)
+
+    def _make_result(self, **values: Any) -> ExecutionResult:
+        return ExecutionResult(task=values.pop("review"), **values)

@@ -223,10 +223,16 @@ def validate_worker_custody(request: ExecutionRequest, selection: Any, *, expect
         raise RuntimeBindingError("worker_workspace_custody_unavailable") from None
 
 
+def _require_runtime_result_route(request: ExecutionRequest) -> None:
+    if request.provider == "claude" and request.result_kind == "task":
+        raise RuntimeBindingError("claude_task_runtime_receiving_not_qualified")
+
+
 def validate_admitted_request(request: ExecutionRequest, selection: Any) -> None:
     """Check exact current common-governance input, without changing admission."""
     if type(request) not in {ExecutionRequest, CoordinationInferenceRequest}:
         raise RuntimeBindingError("admitted_execution_request_required")
+    _require_runtime_result_route(request)
     if request.write_workspace is not None:
         validate_worker_custody(request, selection)
     if type(request) is CoordinationInferenceRequest:
@@ -255,6 +261,7 @@ def selected_sdk_execution(request: ExecutionRequest, selection: Any) -> dict[st
     Adapter results retain their observed version metadata separately. Version
     labels are provenance, not admission constraints or compatibility promises.
     """
+    _require_runtime_result_route(request)
     if request.write_workspace is not None:
         validate_worker_custody(request, selection)
     runtime_selection_from_dict(request.provider, selection.to_dict())
@@ -399,6 +406,7 @@ def _require_authority(authority: Callable[[ExecutionRequest, str], None], reque
 
 def execution_role(request: ExecutionRequest) -> str:
     """Project provenance for the already validated operation, not permission."""
+    _require_runtime_result_route(request)
     if request.write_workspace is not None:
         if type(request) is not ExecutionRequest or request.provider != "codex" or request.result_kind != "task":
             raise RuntimeBindingError("worker_task_request_required")

@@ -116,7 +116,7 @@ def test_new_fields_preserve_positional_constructor_contracts():
     assert inspect.signature(ExecutionResult).parameters["task"].kind is inspect.Parameter.KEYWORD_ONLY
 
 
-@pytest.mark.parametrize("provider",["claude","kimi","grok","minimax","mimo"])
+@pytest.mark.parametrize("provider",["kimi","grok","minimax","mimo"])
 def test_unimplemented_task_adapters_rejected_at_request_boundary(provider):
     with pytest.raises(ValueError,match="not implemented"):
         task_request(provider=provider)
@@ -155,3 +155,22 @@ def test_consultant_cancels_only_its_owned_turn():
         assert result.status == "interrupted" and result.task is None
         assert result.to_tool_output()["process_settlement"] == "not_established"
     asyncio.run(scenario())
+
+
+def test_claude_task_codec_is_additive_but_runtime_stays_unqualified():
+    from sdk_execution import runtime
+    from sdk_execution.claude import create_claude_adapter
+    req = task_request(provider="claude")
+    assert ExecutionRequest.from_dict(req.to_dict()) == req
+    result = ExecutionResult(req, "completed", provider_status="completed", protocol_closed=True,
+                             task=validate_task(task_payload(), request=req))
+    assert ExecutionResult.from_dict(result.to_dict()) == result
+    assert result.to_tool_output()["authoritative"] is False
+    for callback in (lambda:runtime.validate_admitted_request(req,None),
+                     lambda:runtime.selected_sdk_execution(req,None),
+                     lambda:runtime.execution_role(req)):
+        with pytest.raises(ValueError, match="claude_task_runtime_receiving_not_qualified"):
+            callback()
+
+    with pytest.raises(ValueError, match="claude_request_required"):
+        create_claude_adapter(req,None,None)

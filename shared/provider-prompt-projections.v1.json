@@ -69,7 +69,7 @@
     },
     "sdk_execution/claude.py": {
       "source": "scripts/sdk_execution/claude.py",
-      "sha256": "10fdd94d967e87bcd5bcabd462f9af07b96ff8d282e499b222f3342eb9fa8843",
+      "sha256": "893d4f896428c28604b9c222db64296f467e0cffdf92146388bc9598fff18bc9",
       "destination": "scripts/sdk_execution/claude.py"
     },
     "sdk_execution/codex.py": {
@@ -90,7 +90,7 @@
     "sdk_execution/contracts.py": {
       "source": "scripts/sdk_execution/contracts.py",
       "destination": "scripts/sdk_execution/contracts.py",
-      "sha256": "4226f88c2bfb37a40f5a9d923d79ba94399cfbf9e0d55649500cd7dd5277a1de"
+      "sha256": "77ba93c806577194035abe43a4e86e299eb0e9475fce2e84e9c443dfd6471e78"
     },
     "sdk_execution/coordinator.py": {
       "source": "scripts/sdk_execution/coordinator.py",
@@ -145,7 +145,7 @@
     "sdk_execution/runtime.py": {
       "source": "scripts/sdk_execution/runtime.py",
       "destination": "scripts/sdk_execution/runtime.py",
-      "sha256": "c95a861bdcdf264c502552d6c9a27877a972c094b5d56be91db2b6695c7e5d22"
+      "sha256": "54f4b58c375b7143e6580a47a8ff37f99b1af63a143685f11cc11d0d8c5d07b8"
     },
     "sdk_execution/worker.py": {
       "source": "scripts/sdk_execution/worker.py",

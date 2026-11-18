@@ -90,7 +90,7 @@ class ExecutionRequest:
                 raise ValueError("write workspace requires Codex task contract")
             # Role eligibility belongs to the existing taxonomy/adapter owner,
             # not a second worker role list in this portable value codec.
-        elif self.result_kind == "task" and (self.provider, self.role) != ("codex", "consultant"):
+        elif self.result_kind == "task" and (self.provider not in {"codex", "claude"} or self.role != "consultant"):
             raise ValueError("task adapter combination not implemented")
         if self.context_mode not in {"fresh", "handoff"}:
             raise ValueError("unsupported context mode")

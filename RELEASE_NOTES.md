@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-17
 
+- Add typed read-only Claude Consultant advice through the existing Agent SDK lifecycle. Structured tool output and final evidence share exact task identity validation, without a fabricated review verdict. Account/tool/cleanup restrictions are unchanged; this offline adapter increment does not activate public Claude task dispatch or model spending.
+
 - Extend explicit Codex task dispatch with version-4 whole-workspace Worker binding, preserving Consultant/review compatibility. Invocation inputs, terminal output and owner-controlled capture storage stay outside the write boundary; the actual capture directory is bound before process creation. This offline-tested public source route does not authorize model spending or claim installed/native sandbox acceptance.
 
 - Integrate Codex Worker custody, selected workspace-digest provenance and task receiving through the existing runtime and ledger owners. Protected authority paths cannot overlap the writable workspace, and Worker evidence cannot become a review verdict. Public write dispatch and native sandbox qualification remain separate.

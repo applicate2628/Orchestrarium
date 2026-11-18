@@ -236,7 +236,7 @@ historical results as fresh acceptance.
 | Surface | Implemented or observed baseline | Remaining outcome in PR19 |
 |---|---|---|
 | Common execution | Existing shared dispatch/supervisor/ledger; SDK worker uses the invoking Python interpreter. | Exercise the same lifecycle, events, receipt and cancellation owners for each supported provider/role; retain main regressions. |
-| Codex | Explicit Windows read-only external-reviewer bridge; historical bounded native evidence below. | Complete official selected-environment setup and current runtime checks, then integrate the additional intended roles through the common mechanism. |
+| Codex | Explicit Windows Reviewer, Consultant and scoped Worker source bridges; offline qualification and historical bounded native evidence below. | Complete current installed/native qualification and intended child-Lead/session/platform outcomes through the common mechanism. |
 | Claude | SDK worker factory/adapter and offline checks; native Lead is a different boundary. | Complete the public execution path and receiving with the provider-supported programmatic access method; do not wrap a subscription CLI as a third-party worker. |
 | Antigravity | Official setup direction; no implemented AGY runtime adapter in the current SDK execution factory. | Implement Lead/session integration and native subagent handoff; separately qualify any admitted programmatic worker route. |
 | Copilot | Setup direction; existing integration candidates are not a callable SDK execution route. | Reconcile reusable candidate work, implement the common adapter and verify supported Lead/worker/reviewer roles without provider-name role bans. |
@@ -358,6 +358,30 @@ owner. A TaskResult reports evidence, not proof of accepted writes or completed
 review. On interrupted/uncertain execution, retain evidence and inspect actual
 changes; do not auto-replay, roll back, or delete work. Worker resume is not yet
 qualified. Other read-only routes remain available.
+
+### Claude read-only Consultant adapter increment
+
+`ClaudeConsultantAdapter` reuses the existing Claude Agent SDK execution lifecycle
+and common TaskResult contract. Both the synthetic StructuredOutput tool arguments
+and final `structured_output` are checked against the selected task schema and
+exact run/artifact/role. Advice never requires a fabricated review verdict.
+Read/Glob/Grep scope, existing current-authority/account callbacks, cancellation,
+observation capture and cleanup remain unchanged. Partial evidence is retained
+without converting failure into completion; review adapters reject task requests.
+
+The official [structured-output interface](https://code.claude.com/docs/en/agent-sdk/structured-outputs)
+supports a caller-selected JSON schema and structured result. This is vendor
+interface evidence, not proof of an installed runtime or a grant to invoke it.
+The current [authentication guidance](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use)
+retains the distinction between programmatic API/cloud integrations and native
+end-user Claude Code sessions. This project slice introduces no subscription
+wrapper, credentials, login, billing fallback or live call.
+
+This is an offline-tested adapter increment only. The common codec can carry
+Claude Consultant tasks, but selected runtime provenance, launch/factory and
+public receiving remain unqualified for that combination and reject it before
+effects. The next integration must preserve existing account/role/ledger owners;
+it must not label this adapter result a completed public Claude route.
 
 ### Ordered implementation slices
 
