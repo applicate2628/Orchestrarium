@@ -10852,6 +10852,10 @@ def _capture_runtime_source(relative: Path, *, failure_id: str, authority=None):
         raise
 
 
+_paired_source_binding = None
+_paired_validator_module = None
+
+
 def _validator_module():
     path = Path(__file__).with_name("validate-work-item-state.py")
     transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
@@ -10888,6 +10892,10 @@ def _validator_module():
             return transaction._validator_reuse
     if transaction is None:
         owner = actual_lifecycle_owner()
+        if _paired_source_binding is not None:
+            _paired_source_binding.assert_current()
+            verify_cached_lifecycle_owner(_paired_validator_module, owner)
+            return _paired_validator_module
         spec = importlib.util.spec_from_file_location("work_item_state_validator", path)
         if spec is None or spec.loader is None:
             raise LifecycleError("WI-VALIDATOR-LOAD", f"cannot load validator: {path}")

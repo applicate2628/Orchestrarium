@@ -4,9 +4,11 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Paired ledger helpers reuse unchanged loaded modules instead of repeatedly compiling the validator and lifecycle owner during SDK permission checks. Every lookup still verifies the complete source generation; new consumers refresh after source updates while held old bindings continue to detect drift. Ledger contents, permissions and results are never cached. This also preserves linked/global installation isolation.
+
 - Codex model routing now admits only the latest confirmed version in each family: Luna 6, Terra 6.1, Sol 6.2 and Astra 6.2. Older model profiles are removed from active choices rather than retained as launchable compatibility or quota-fallback routes. Existing user configuration is preserved and retired choices are reported explicitly; historical evidence and migration fixtures remain intact. This prevents new tasks from silently returning to obsolete model generations.
 
-- A draft candidate connects explicitly selected Copilot decision sessions to the existing scoped child-Lead lifecycle. The full end-to-end lifecycle check remains pending; this is not a completed acceptance. Native session continuation checks observed completed-turn history, while canonical claims and received-intent recovery prevent automatic replay after interruption. Task permissions and independent acceptance remain separate; this does not install a runtime, authorize model use or control native subagents.
+- Explicitly selected Copilot decision sessions connect to the existing scoped child-Lead lifecycle. Offline end-to-end checks cover completion and recovery after a received decision; installed/native acceptance remains separate. Native session continuation checks observed completed-turn history, while canonical claims and received-intent recovery prevent automatic replay after interruption. Task permissions and independent acceptance remain separate; this does not install a runtime, authorize model use or control native subagents.
 
 - Copilot SDK Worker can use explicitly admitted Host file tools in a separate workspace through existing permissions and canonical receiving. The shared file-path/custody checks are reused rather than approving native write requests broadly; shell and unselected tools stay unavailable. Partial effects remain observable, with no automatic replay or OS-sandbox claim.
 

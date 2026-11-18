@@ -386,3 +386,61 @@ def test_task_selector_cannot_convert_other_roles(tmp_path, monkeypatch, role):
     expected = "ROLE_UNSUPPORTED" if role == "lead" else "REVIEW_ONLY"
     with pytest.raises(ValueError, match=expected):
         prepare(tmp_path, monkeypatch, ledger_role=role, sdk_task_binding=tmp_path / "task.json")
+
+
+@pytest.mark.parametrize("model", ["gpt-6-sol", "gpt-5.6-terra", "gpt-6-astra", "gpt-6.2-terra"])
+def test_retired_codex_family_denied_before_binding_or_claim_even_if_approved(tmp_path, monkeypatch, model):
+    monkeypatch.setattr(dispatch, "_require_supported_platform", lambda: None)
+    control = owner.Control(ledger_role="qa-engineer", ledger_role_explicit=True,
+        provider_flags=["--model", model, "-c", "model_reasoning_effort=high"],
+        user_approved_launch=True)
+    flags, selected_model, effort = owner.resolved_profile("codex", control.provider_flags)
+    selected = owner.PolicyBoundLaunch(control, "audit", tuple(flags), selected_model, effort,
+                                       owner.external_role_provenance(control, "codex"), None)
+    touched = []
+    monkeypatch.setattr(dispatch, "read_binding", lambda *a: touched.append("binding"))
+    monkeypatch.setattr(runtime, "claim_launch", lambda *a, **k: touched.append("claim"))
+    with pytest.raises(ValueError, match="E_CODEX_SDK_PREPARATION_FAILED"):
+        dispatch.prepare_dispatch(selected, tmp_path / "not-read.json", source_environment={},
+                                  cancellation_probe=lambda: False)
+    assert touched == []
+
+
+@pytest.mark.parametrize("model", ["gpt-6-luna", "gpt-6.1-terra", "gpt-6.2-sol", "gpt-6.2-astra"])
+def test_latest_family_retains_actual_sdk_preparation(tmp_path, monkeypatch, model):
+    operation = prepare(tmp_path, monkeypatch, user_approved_launch=True,
+        provider_flags=["--model", model, "-c", "model_reasoning_effort=high"])
+    assert operation.request.model == model
+    assert operation.request.effort == "high"
+    assert not (Path(operation.selection.work_item) / "agent-runs.jsonl").exists()
+
+
+@pytest.mark.parametrize("provider,model,effort,approved,denied", [
+    ("copilot", "gpt-6-sol", "high", False, False),
+    ("claude", "gpt-6-astra", "high", False, False),
+    ("codex", "gpt-6.2-astra", "high", False, True),
+    ("codex", "gpt-6.2-astra", "high", True, False),
+    ("codex", "gpt-6.2-sol", "max", False, True),
+    ("codex", "gpt-6.2-sol", "max", True, False),
+])
+def test_sdk_model_policy_keeps_provider_and_existing_approval_boundaries(
+        tmp_path, monkeypatch, provider, model, effort, approved, denied):
+    monkeypatch.setattr(dispatch, "_require_supported_platform", lambda: None)
+    flags = (["--model", model, "-c", "model_reasoning_effort="+effort] if provider == "codex"
+             else ["--model", model, "--effort", effort])
+    control = owner.Control(ledger_role="qa-engineer", ledger_role_explicit=True,
+                            provider_flags=flags, user_approved_launch=approved)
+    resolved, selected_model, selected_effort = owner.resolved_profile(provider, flags)
+    selected = owner.PolicyBoundLaunch(control, "audit", tuple(resolved), selected_model, selected_effort,
+                                       owner.external_role_provenance(control, provider), None)
+    class BindingReached(Exception): pass
+    def stop_at_binding(*args): raise BindingReached()
+    monkeypatch.setattr(dispatch, "read_binding", stop_at_binding)
+    if denied:
+        with pytest.raises(ValueError, match="E_CODEX_SDK_PREPARATION_FAILED"):
+            dispatch.prepare_dispatch(selected, tmp_path / "not-read.json", provider=provider,
+                                      source_environment={}, cancellation_probe=lambda: False)
+    else:
+        with pytest.raises(BindingReached):
+            dispatch.prepare_dispatch(selected, tmp_path / "not-read.json", provider=provider,
+                                      source_environment={}, cancellation_probe=lambda: False)

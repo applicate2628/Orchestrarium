@@ -9,6 +9,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -41,7 +42,12 @@ INVALID_CURRENT_DISPOSITION_SUCCESS_MARKER = "RESULT: PASS dispose-invalid-curre
 NONCANONICAL_HISTORY_SUCCESS_MARKER = "RESULT: PASS recover-noncanonical-history"
 
 
-def load_validator():
+_paired_source_binding = None
+_VALIDATOR_MODULE = None
+_VALIDATOR_MODULE_LOCK = threading.RLock()
+
+
+def _load_validator_module():
     validator_path = Path(__file__).with_name("validate-work-item-state.py")
     spec = importlib.util.spec_from_file_location("validate_work_item_state", validator_path)
     if spec is None or spec.loader is None:
@@ -49,6 +55,26 @@ def load_validator():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def load_validator():
+    """Reuse code only under the complete paired source generation binding."""
+    global _VALIDATOR_MODULE
+    binding = _paired_source_binding
+    if binding is None:
+        # The standalone CLI has no paired binding: retain its fresh-load
+        # semantics rather than assume a path-only cache is authoritative.
+        return _load_validator_module()
+    binding.assert_current()
+    with _VALIDATOR_MODULE_LOCK:
+        binding.assert_current()
+        if _VALIDATOR_MODULE is None:
+            module = _load_validator_module()
+            binding.assert_current()
+            module._paired_source_binding = binding
+            module._paired_validator_module = module
+            _VALIDATOR_MODULE = module
+        return _VALIDATOR_MODULE
 
 
 def utc_timestamp() -> str:

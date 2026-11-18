@@ -600,10 +600,14 @@ This source integration is not installed or live-provider qualification.
 
 ### Copilot scoped child decision sessions
 
-Current candidate evidence: 73 independent bounded checks pass, including the
-corrected late-activity negative oracle. The full child-ledger/archive end-to-end
-check has not completed and is under diagnosis. This increment is
-retained in the draft PR for review, not declared a completed Lead acceptance.
+Current source evidence: 107 independent bounded checks pass, including the
+corrected late-activity negative oracle, complete paired-loader graph and SDK
+latest-family routing. Two additional offline child-ledger/archive end-to-end
+cases pass on unchanged source: ordinary completion and Host reconstruction
+after a received decision. Their assertions verify two decisions, one task,
+create then resume, distinct native-shaped turn identities and real canonical
+archive/receiving. The SDK/process peers are synthetic; this is not native
+provider or installed-platform acceptance.
 
 The existing Host composition admits Copilot decision inference through
 `ChildLeadCoordinator`, not a second Lead loop or a new command-line Lead flag.
@@ -634,6 +638,20 @@ Official interface evidence: [resume-session options](https://github.com/microso
 [session event history and disconnect](https://github.com/microsoft/copilot-sdk/blob/3ce61458503b6b27ebd1f674a980f4d9596d9b22/python/copilot/session.py),
 and [message and turn event types](https://github.com/microsoft/copilot-sdk/blob/3ce61458503b6b27ebd1f674a980f4d9596d9b22/python/copilot/_generated/session_events.py).
 These source contracts are distinct from native acceptance.
+
+The shared paired ledger loader reuses only loaded code definitions within a
+verified source generation. Every lookup still checks the complete writer,
+validator, lifecycle, reducer and schema cohort. A new consumer can acquire a
+fresh generation after an update; an already held old binding does not silently
+rebind. Ledger contents, task grants and current permissions are read again, not
+served from a cache. This removes repeated owner compilation without skipping
+the authority checks that decision recovery relies on.
+
+Known verification limitation: the existing
+`test_validator_factory_refuses_unqualified_lifecycle_origin[missing]` constructor
+expectation also fails against the pre-fix source. The focused paired-graph tests
+check the actual executing lifecycle/validator identity and current reads; this
+result is not a claim that the entire historical lifecycle suite passes.
 
 ### Approved role/access acceptance scope
 

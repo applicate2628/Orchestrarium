@@ -9,7 +9,7 @@
     },
     "provider_prompt.py": {
       "source": "scripts/provider_prompt.py",
-      "sha256": "72fa927fd7803c00cfde8f507d90b001879767a5c37887afdae034be93debc9a",
+      "sha256": "48ce956d5245ca2ab5cb00a69ca0b2a42ebe186f2e983caf8c476fa7e1a4f82a",
       "destination": "scripts/provider_prompt.py"
     },
     "process_supervision/process_runner.py": {

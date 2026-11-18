@@ -19,7 +19,7 @@ import threading
 import time
 import tomllib
 import types
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -5685,20 +5685,40 @@ def run_support_command(
     return result, sink.bytes_for("stdout"), sink.bytes_for("stderr")
 
 
+_LEDGER_OWNER_LOCK = threading.RLock()
+_LEDGER_OWNER_GENERATION = None
+
+
 def _ledger_owner():
-    """Use the existing paired writer/module-loader owner, never row policy."""
-    binding = _ledger_helper_binding()
-    if binding is None:
-        raise ValueError("WI-LEDGER-RESOURCE-MISSING: paired ledger owner unavailable")
-    helper = binding.helper
-    spec = importlib.util.spec_from_file_location("_provider_paired_ledger_owner", helper)
-    if spec is None or spec.loader is None:
-        raise ValueError("WI-LEDGER-RESOURCE-MISSING: paired ledger owner cannot load")
-    module = importlib.util.module_from_spec(spec)
-    binding.assert_current()
-    spec.loader.exec_module(module)
-    binding.assert_current()
-    return module
+    """Reuse only a current paired module graph, never ledger data or authority."""
+    global _LEDGER_OWNER_GENERATION
+    with _LEDGER_OWNER_LOCK:
+        held = _LEDGER_OWNER_GENERATION
+        if held is not None:
+            try:
+                held[0].assert_current()
+            except (ValueError, OSError):
+                # New consumers may select a new generation. Held modules retain
+                # their original binding and still refuse use after source drift.
+                _LEDGER_OWNER_GENERATION = None
+                held = None
+        binding = _ledger_helper_binding()
+        if binding is None:
+            raise ValueError("WI-LEDGER-RESOURCE-MISSING: paired ledger owner unavailable")
+        binding.assert_current()
+        if held is not None and asdict(held[0]) == asdict(binding):
+            return held[1]
+        spec = importlib.util.spec_from_file_location(
+            "_provider_paired_ledger_owner", binding.helper,
+        )
+        if spec is None or spec.loader is None:
+            raise ValueError("WI-LEDGER-RESOURCE-MISSING: paired ledger owner cannot load")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        binding.assert_current()
+        module._paired_source_binding = binding
+        _LEDGER_OWNER_GENERATION = (binding, module)
+        return module
 
 
 def ledger_resource_options(control: Control) -> list[str]:

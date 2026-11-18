@@ -12,6 +12,7 @@ import os
 import re
 import stat as stat_module
 import sys
+import threading
 from collections import deque
 from dataclasses import dataclass, field, fields, is_dataclass, replace
 from datetime import datetime
@@ -537,8 +538,40 @@ def _kimi_empty_flags_resolved_effort(event: Mapping[str, object]) -> bool:
     )
 
 
+_paired_source_binding = None
+_paired_validator_module = None
+_PAIRED_LIFECYCLE_LOCK = threading.RLock()
+
+
 def load_lifecycle_owner():
     global _LIFECYCLE_OWNER
+    binding = _paired_source_binding
+    if binding is not None:
+        binding.assert_current()
+        with _PAIRED_LIFECYCLE_LOCK:
+            binding.assert_current()
+            if _LIFECYCLE_OWNER is not None:
+                return _LIFECYCLE_OWNER
+            # Each paired generation owns its registration, including concurrent
+            # scopes. The lifecycle module captures this exact identity at import.
+            name = f"work_item_lifecycle_owner_for_validation_{id(_PAIRED_LIFECYCLE_LOCK):x}"
+            owner_path = Path(__file__).with_name("mutate-work-item.py")
+            spec = importlib.util.spec_from_file_location(name, owner_path)
+            if spec is None or spec.loader is None:
+                raise RuntimeError(f"Unable to load lifecycle owner from {owner_path}")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            try:
+                spec.loader.exec_module(module)
+                binding.assert_current()
+                module._paired_source_binding = binding
+                module._paired_validator_module = _paired_validator_module
+                _LIFECYCLE_OWNER = module
+            except BaseException:
+                if sys.modules.get(name) is module:
+                    del sys.modules[name]
+                raise
+            return module
     if _LIFECYCLE_OWNER is not None:
         return _LIFECYCLE_OWNER
     owner_path = Path(__file__).with_name("mutate-work-item.py")
