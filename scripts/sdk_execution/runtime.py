@@ -224,8 +224,17 @@ def validate_worker_custody(request: ExecutionRequest, selection: Any, *, expect
 
 
 def _require_runtime_result_route(request: ExecutionRequest) -> None:
+    # Evidence/admission compatibility is separate from enabling a live factory.
     if request.provider == "claude" and request.result_kind == "task":
-        raise RuntimeBindingError("claude_task_runtime_receiving_not_qualified")
+        if (type(request) is not ExecutionRequest or request.role != "consultant"
+                or request.write_workspace is not None):
+            raise RuntimeBindingError("claude_consultant_task_request_required")
+
+
+def _require_task_auth_route(request: ExecutionRequest, selection: Any) -> None:
+    if request.provider == "claude" and request.result_kind == "task":
+        if not _owner().claude_programmatic_auth_mode_supported(selection.auth_mode):
+            raise RuntimeBindingError("claude_programmatic_auth_mode_required")
 
 
 def validate_admitted_request(request: ExecutionRequest, selection: Any) -> None:
@@ -241,6 +250,7 @@ def validate_admitted_request(request: ExecutionRequest, selection: Any) -> None
             or selection.mcp_scope.servers):
             raise RuntimeBindingError("bounded_subscription_coordination_selection_required")
     runtime_selection_from_dict(request.provider, selection.to_dict())
+    _require_task_auth_route(request, selection)
     frame = _owner().assemble_external_prompt(b"").decode("utf-8")
     instructions = request.prompt if request.provider == "codex" else selection.instructions
     if not instructions.startswith(frame):
@@ -265,6 +275,7 @@ def selected_sdk_execution(request: ExecutionRequest, selection: Any) -> dict[st
     if request.write_workspace is not None:
         validate_worker_custody(request, selection)
     runtime_selection_from_dict(request.provider, selection.to_dict())
+    _require_task_auth_route(request, selection)
     if request.provider == "codex":
         adapter, sandbox, approval = "openai-codex", ("workspace-write" if request.write_workspace is not None else "read-only"), "deny_all"
     elif request.provider == "claude":
@@ -626,6 +637,10 @@ def run_admitted_review(
     if selection.expected_launch_sha256 is not None:
         raise RuntimeBindingError("existing_launch_is_not_replay_authority")
     validate_admitted_request(request, selection)
+    if request.provider == "claude" and request.result_kind == "task":
+        # The typed evidence route does not activate the fixed worker factory.
+        # Refuse before claiming a launch rather than create a doomed operation.
+        raise RuntimeBindingError("claude_task_runtime_receiving_not_qualified")
     workspace_identity = validate_worker_custody(request, selection)
     if request.provider == "claude":
         if any(not callable(callback) or inspect.iscoroutinefunction(callback)

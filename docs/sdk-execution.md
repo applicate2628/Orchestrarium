@@ -377,11 +377,17 @@ retains the distinction between programmatic API/cloud integrations and native
 end-user Claude Code sessions. This project slice introduces no subscription
 wrapper, credentials, login, billing fallback or live call.
 
-This is an offline-tested adapter increment only. The common codec can carry
-Claude Consultant tasks, but selected runtime provenance, launch/factory and
-public receiving remain unqualified for that combination and reject it before
-effects. The next integration must preserve existing account/role/ledger owners;
-it must not label this adapter result a completed public Claude route.
+The offline receiving increment binds Claude Consultant evidence to the exact
+admitted request and retained runtime selection through existing provenance and
+ledger owners. The selected mode is `tool-restricted-read-only`, not an operating
+system sandbox guarantee. Completed advice remains nonauthorizing task evidence;
+incomplete or mismatched evidence cannot become a review verdict or task closure.
+
+The real launch/factory and public task selector remain unqualified for Claude
+Consultant and reject it before process/model effects. Synthetic receiving checks
+do not establish native acceptance, authorize account/quota use, or activate a
+public Claude route. The next launch integration must preserve the existing
+API/cloud account, tool, role, process and ledger owners.
 
 ### Ordered implementation slices
 

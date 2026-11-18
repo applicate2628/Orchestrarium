@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-18
+
+- Bind Claude Consultant advice to the admitted request and retained official API/cloud runtime selection in the existing provenance and receiving owners. Advice remains nonauthorizing and incompatible evidence stays blocked; real Claude task launch and the public selector remain disabled pending their separate integration. These offline checks do not authorize model spending or establish native acceptance.
+
 ## 2026-11-17
 
 - Add typed read-only Claude Consultant advice through the existing Agent SDK lifecycle. Structured tool output and final evidence share exact task identity validation, without a fabricated review verdict. Account/tool/cleanup restrictions are unchanged; this offline adapter increment does not activate public Claude task dispatch or model spending.

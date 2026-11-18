@@ -9,7 +9,7 @@
     },
     "provider_prompt.py": {
       "source": "scripts/provider_prompt.py",
-      "sha256": "dbbb2c516b69a1b650cc0413282cc81d76473cebd1137d9ec1b12fac170ac8bd",
+      "sha256": "033e3ddfa559802f780544b9c4c3de9a7bd950a2e30f7ba4b7ac7f340519db22",
       "destination": "scripts/provider_prompt.py"
     },
     "process_supervision/process_runner.py": {
@@ -139,13 +139,13 @@
     },
     "sdk_execution/receiving.py": {
       "source": "scripts/sdk_execution/receiving.py",
-      "sha256": "2a0f3c1fff0369e5372b3a9c8e384fe21d9a65e8df274f81f72cd2eb179f7248",
+      "sha256": "f79aab380cf6d6d739a14d2afb75fc7dc684af511045d3d5059553b484cffb65",
       "destination": "scripts/sdk_execution/receiving.py"
     },
     "sdk_execution/runtime.py": {
       "source": "scripts/sdk_execution/runtime.py",
       "destination": "scripts/sdk_execution/runtime.py",
-      "sha256": "54f4b58c375b7143e6580a47a8ff37f99b1af63a143685f11cc11d0d8c5d07b8"
+      "sha256": "d3bcd77d090ec5138c5fd299ee379c60537ad771744d8161cae101920c6c9698"
     },
     "sdk_execution/worker.py": {
       "source": "scripts/sdk_execution/worker.py",

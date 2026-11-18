@@ -4026,6 +4026,20 @@ def _copy_provider_path_control(
     child[name] = value
 
 
+def claude_programmatic_auth_mode_supported(mode: str) -> bool:
+    """Classify supported API/cloud transport without reading credentials.
+
+    This is route eligibility, not proof of account access or spending consent.
+    The legacy CLI subscription override is deliberately not a programmatic route.
+    """
+    return (
+        type(mode) is str
+        and mode in {"claude-direct", "claude-bedrock", "claude-vertex"}
+        and mode in PROVIDER_AUTH_SECRET_ENV_KEYS_V1
+        and mode in PROVIDER_AUTH_CONTROL_ENV_KEYS_V1
+    )
+
+
 def resolve_provider_auth_configuration(
     provider: str, environment: dict[str, str] | None = None
 ) -> ProviderAuthConfiguration:
@@ -7249,10 +7263,14 @@ def _validate_sdk_result_binding(payload: dict[str, object]) -> None:
         _roles, _reviewers, workers, _unsupported = _external_role_taxonomy()
         role_matches = (payload.get("assignedRole") == "consultant"
                         if execution_role == "consultant" else payload.get("assignedRole") in workers)
-        mode_matches = (selected.get("sandboxMode") == "read-only"
+        provider = payload.get("provider")
+        consultant_modes = {"codex": "read-only", "claude": "tool-restricted-read-only"}
+        mode_matches = (provider in consultant_modes
+                        and selected.get("sandboxMode") == consultant_modes[provider]
                         if execution_role == "consultant" else
-                        selected.get("sandboxMode") == "workspace-write" and selected.get("schemaVersion") == 2)
-        if (payload.get("provider") != "codex" or not role_matches or not mode_matches
+                        provider == "codex" and selected.get("sandboxMode") == "workspace-write"
+                        and selected.get("schemaVersion") == 2)
+        if (not role_matches or not mode_matches
                 or payload.get("gate") != "none"
                 or payload.get("status") not in {"completed", "blocked"}
                 or not isinstance(primary, dict) or primary.get("gate") != "none"
