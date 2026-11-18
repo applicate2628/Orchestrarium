@@ -237,7 +237,7 @@ historical results as fresh acceptance.
 |---|---|---|
 | Common execution | Existing shared dispatch/supervisor/ledger; SDK worker uses the invoking Python interpreter. | Exercise the same lifecycle, events, receipt and cancellation owners for each supported provider/role; retain main regressions. |
 | Codex | Explicit Windows Reviewer, Consultant and scoped Worker source bridges; offline qualification and historical bounded native evidence below. | Complete current installed/native qualification and intended child-Lead/session/platform outcomes through the common mechanism. |
-| Claude | SDK Host API plus explicit prompt-only Consultant and Reviewer command-line routes, exact receiving and offline checks; native Lead is a different boundary. | Qualify current native execution and complete scoped Worker/child-Lead/session outcomes using official API/cloud access; do not wrap a subscription CLI as a third-party worker. |
+| Claude | SDK Host API including scoped Worker tools plus explicit prompt-only Consultant and Reviewer command-line routes, exact receiving and offline checks; native Lead is a different boundary. | Qualify current native execution and complete public Worker/child-Lead/session outcomes using official API/cloud access; do not wrap a subscription CLI as a third-party worker. |
 | Antigravity | Official setup direction; no implemented AGY runtime adapter in the current SDK execution factory. | Implement Lead/session integration and native subagent handoff; separately qualify any admitted programmatic worker route. |
 | Copilot | Setup direction; existing integration candidates are not a callable SDK execution route. | Reconcile reusable candidate work, implement the common adapter and verify supported Lead/worker/reviewer roles without provider-name role bans. |
 | Kimi | Existing ACP boundary is separate from the current SDK factory. | Reconcile the supported Kimi runtime with the official agent integration; do not silently substitute the older Python runtime or a model API for the chosen route. |
@@ -358,6 +358,44 @@ owner. A TaskResult reports evidence, not proof of accepted writes or completed
 review. On interrupted/uncertain execution, retain evidence and inspect actual
 changes; do not auto-replay, roll back, or delete work. Worker resume is not yet
 qualified. Other read-only routes remain available.
+
+### Claude Worker Host integration
+
+An explicitly admitted Claude task with `write_workspace == cwd` and a canonical
+Worker profession can use the existing Python Host executor. The adapter exposes
+only Read/Glob/Grep, Write/Edit and StructuredOutput, retains default permission
+mode and checks the observed tool set. Bash, notebook editing, network tools,
+MCP and child-agent tools are not part of this route. Consultant and Reviewer
+requests never inherit Write/Edit capabilities.
+
+The existing Host `authorize_tool` callback must authorize each exact tool name
+and input under its current permissions, including the actual Windows/POSIX path,
+workspace scope and protected targets for file operations. Selecting a workspace
+or returning task text does not grant that permission. The adapter does not add
+an alternative file-permission engine or assume the free-text scope is a path
+policy. Tool hooks can deny a call; vendor deny/ask rules still apply after a
+hook allows it, as documented in the [official permission evaluation](https://code.claude.com/docs/en/agent-sdk/permissions).
+
+The shared runtime custody owner protects the selected work item/ledger/artifacts,
+Claude configuration and capture directories, native executable installation,
+Python/SDK installation and trusted sources. It retains the original workspace
+identity across effects and receiving. Selected and observed metadata use
+`tool-restricted-workspace-write`, distinct from Codex's native `workspace-write`.
+The workspace digest is bound to the exact request; a mismatched policy or changed
+root cannot be presented as the admitted result.
+
+These are application-level tool and custody checks, **not an operating-system
+sandbox or protection against a hostile path/symlink swap between a hook and the
+native file operation**. A Host requiring race-proof filesystem confinement must
+supply that enforcement through its existing environment. Offline SDK fixtures
+do not establish native enforcement. Review actual changes independently; task
+completion remains nonauthorizing and closes no review obligations. Uncertain
+writes require inspection/reconciliation, not automatic retry or rollback.
+
+The public Claude CLI remains prompt-only because that bridge has no file-effect
+authority callback. This limitation does not disable the existing Host API with
+its explicitly admitted tool authority. No credentials, subscription wrapper,
+installation, model call or implicit quota approval are introduced.
 
 ### Claude read-only Consultant adapter increment
 

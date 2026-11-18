@@ -395,11 +395,12 @@ def validate_sdk_execution(
             ("codex", "openai-codex", "read-only", "deny_all"),
             ("codex", "openai-codex", "workspace-write", "deny_all"),
             ("claude", "claude-agent-sdk", "tool-restricted-read-only", "deny_unadmitted"),
+            ("claude", "claude-agent-sdk", "tool-restricted-workspace-write", "deny_unadmitted"),
         )
     )
     if not supported_binding or value["model"] != model or value["effort"] != effort:
         raise ValueError("sdkExecution must bind the declared provider, model, effort and adapter controls")
-    writing = value["sandboxMode"] == "workspace-write"
+    writing = value["sandboxMode"] in {"workspace-write", "tool-restricted-workspace-write"}
     if writing != ("writeWorkspaceSha256" in value) or (writing and value["schemaVersion"] not in {1, 2}):
         raise ValueError("sdkExecution workspace binding does not match its sandbox")
     if value["schemaVersion"] == 3 and (
@@ -422,7 +423,7 @@ def _validate_sdk_event(event: Mapping[str, object], errors: list[str]) -> None:
     except ValueError as exc:
         fail(errors, f"{run_id}: {exc}")
     selected = event.get("sdkExecution")
-    if type(selected) is dict and selected.get("sandboxMode") == "workspace-write":
+    if type(selected) is dict and selected.get("sandboxMode") in {"workspace-write", "tool-restricted-workspace-write"}:
         try:
             # Reuse the canonical role owner rather than another role allowlist.
             import provider_prompt

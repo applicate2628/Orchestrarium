@@ -93,8 +93,8 @@ class ExecutionRequest:
                     or str(path) != self.write_workspace or "\0" in self.write_workspace
                     or self.write_workspace != self.cwd):
                 raise ValueError("write workspace must be normalized absolute cwd")
-            if self.provider != "codex" or self.result_kind != "task":
-                raise ValueError("write workspace requires Codex task contract")
+            if self.provider not in {"codex", "claude"} or self.result_kind != "task":
+                raise ValueError("write workspace requires implemented task contract")
             # Role eligibility belongs to the existing taxonomy/adapter owner,
             # not a second worker role list in this portable value codec.
         elif self.result_kind == "task" and (self.provider not in {"codex", "claude"} or self.role != "consultant"):

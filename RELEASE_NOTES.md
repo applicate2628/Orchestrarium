@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Add scoped Claude Worker execution to the existing Python Host SDK integration. Write/Edit requests require the current Host tool authority and shared protected-state custody; exact task/workspace provenance remains nonauthorizing. The recorded tool-restricted write mode does not claim an operating-system sandbox, and the public CLI stays prompt-only until its file-effect owner is integrated.
+
 - Extend the existing Claude prompt-only SDK command-line route to independent Reviewer output as well as Consultant advice. The review selector uses canonical reviewer roles, an exact request commitment and retained API/cloud selection; its PASS/REVISE evidence remains nonauthorizing and grants no filesystem tools or obligation closures. This completes the bounded source route without changing default execution or model-spending permissions.
 
 - Add an explicit Claude Consultant SDK task route to the existing CLI launch owner. It uses selected official API/cloud auth context and prompt-only capabilities, without invented account identity, implied filesystem permissions or a second permission store. Existing Host read-only execution remains compatible; source/offline qualification does not authorize model spending or claim native acceptance.

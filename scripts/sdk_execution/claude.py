@@ -22,6 +22,7 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass, fields, is_dataclass
 from pathlib import Path
 import inspect
+import hashlib
 import os
 import re
 from typing import Any, Protocol
@@ -203,12 +204,13 @@ def _official_client_binding(options: dict[str, Any], *, cli_path: str) -> Clien
 
 def create_claude_adapter(request: ExecutionRequest, sink: Any, selection: ClaudeRuntimeSelection):
     """Fixed worker factory after creator-owned Job verification; never call in the parent."""
-    from .runtime import assert_current_launch, prepare_environment, validate_admitted_request
+    from .runtime import assert_current_launch, prepare_environment, validate_admitted_request, validate_worker_custody
 
     if request.provider != "claude" or type(selection) is not ClaudeRuntimeSelection:
         raise AdapterError("claude_request_required")
     if request.result_kind == "task" or request.tool_profile == "prompt-only":
         validate_admitted_request(request, selection)
+    workspace_identity = validate_worker_custody(request, selection)
     assert_current_launch(request, selection, "worker_factory")
     environment, _context = prepare_environment(selection, dict(os.environ))
     # The public SDK overlays env on ambient values. Clean this already-contained
@@ -219,18 +221,21 @@ def create_claude_adapter(request: ExecutionRequest, sink: Any, selection: Claud
     async def current(value: ExecutionRequest, effect: str) -> None:
         if value != request:
             raise AdapterError("worker_request_binding_mismatch")
+        validate_worker_custody(value, selection, expected_identity=workspace_identity)
         assert_current_launch(value, selection, effect)
         await sink.authorize(value, effect)
 
     async def tool(value: ExecutionRequest, name: str, arguments: dict[str, Any]) -> None:
         if value != request:
             raise AdapterError("worker_request_binding_mismatch")
+        validate_worker_custody(value, selection, expected_identity=workspace_identity)
         assert_current_launch(value, selection, "tool")
         await sink.authorize(value, "tool", {"kind": "tool", "name": name, "arguments": arguments})
 
     async def account(value: ExecutionRequest, evidence: dict[str, Any]) -> str:
         if value != request:
             raise AdapterError("worker_request_binding_mismatch")
+        validate_worker_custody(value, selection, expected_identity=workspace_identity)
         assert_current_launch(value, selection, "account")
         await sink.authorize(value, "account", {"kind": "account", "evidence": evidence})
         # The parent account owner, not apiKeySource/config presence, established
@@ -238,7 +243,8 @@ def create_claude_adapter(request: ExecutionRequest, sink: Any, selection: Claud
         # The alias does not itself prove a vendor-observed account identity.
         return request.account_binding
 
-    adapter_type = ClaudeConsultantAdapter if request.result_kind == "task" else ClaudeReviewAdapter
+    adapter_type = (ClaudeWorkerAdapter if request.write_workspace is not None else
+                    ClaudeConsultantAdapter if request.result_kind == "task" else ClaudeReviewAdapter)
     return adapter_type(
         client_factory=lambda options: _official_client_binding(options, cli_path=selection.executable),
         assert_current=current, authorize_tool=tool,
@@ -373,7 +379,7 @@ class ClaudeReviewAdapter:
 
     async def _deny_permission(self, _name: str, _arguments: dict[str, Any], _context: object) -> dict[str, Any]:
         self._hook_error = self._hook_error or "unexpected_permission_request"
-        return {"behavior": "deny", "message": "Not admitted for this read-only review.", "interrupt": True}
+        return {"behavior": "deny", "message": "Not admitted for this operation.", "interrupt": True}
 
     async def _hook(self, data: dict[str, Any], tool_use_id: str | None, _context: object) -> dict[str, Any]:
         event = data.get("hook_event_name") if isinstance(data, dict) else None
@@ -451,11 +457,14 @@ class ClaudeReviewAdapter:
                 }, "continue_": False, "stopReason": self._hook_error}
             return {"continue_": False, "stopReason": self._hook_error}
 
-    def _read_tools(self) -> tuple[str, ...]:
+    def _available_tools(self) -> tuple[str, ...]:
         return () if self._request.tool_profile == "prompt-only" else READ_TOOLS
 
+    def _sandbox_metadata(self) -> dict[str, str]:
+        return {"sandboxMode": "tool-restricted-read-only"}
+
     def _observed_tools(self) -> tuple[str, ...]:
-        return (*self._read_tools(), OUTPUT_TOOL)
+        return (*self._available_tools(), OUTPUT_TOOL)
 
     def _options(self, instruction_path: str) -> dict[str, Any]:
         return {
@@ -467,8 +476,8 @@ class ClaudeReviewAdapter:
             # prescribes file transport for large prompts. A custom/file system
             # prompt would replace, rather than append to, the native defaults.
             "extra_args": {"append-system-prompt-file": instruction_path},
-            "tools": list(self._read_tools()), "allowed_tools": [], "permission_mode": "default",
-            "disallowed_tools": ["Bash", "Write", "Edit", "NotebookEdit", "Agent", "Task", "WebFetch", "WebSearch"] + (list(READ_TOOLS) if self._request.tool_profile == "prompt-only" else []),
+            "tools": list(self._available_tools()), "allowed_tools": [], "permission_mode": "default",
+            "disallowed_tools": [name for name in (*READ_TOOLS, "Bash", "Write", "Edit", "NotebookEdit", "Agent", "Task", "WebFetch", "WebSearch") if name not in self._available_tools()],
             "mcp_servers": {}, "strict_mcp_config": True, "setting_sources": [],
             "skills": [], "plugins": [], "agents": {}, "add_dirs": [],
             "fallback_model": None, "continue_conversation": False, "resume": None,
@@ -608,7 +617,7 @@ class ClaudeReviewAdapter:
                     if (init.get("model") != request.model or init.get("cwd") != request.cwd
                         or init.get("permissionMode") != "default"
                         or not isinstance(init.get("tools"), list)
-                        or set(init["tools"]) not in (set(self._read_tools()), set(self._observed_tools()))
+                        or set(init["tools"]) not in (set(self._available_tools()), set(self._observed_tools()))
                         or init.get("mcp_servers") != [] or init.get("skills") != [] or init.get("plugins") != []):
                         raise AdapterError("observed_profile_mismatch")
                     await self._account("system_init", init)
@@ -620,7 +629,7 @@ class ClaudeReviewAdapter:
                     metadata = json_text({
                         "schemaVersion": 1, "adapter": "claude-agent-sdk", "sdkVersion": sdk_version,
                         "runtimeVersion": runtime_version, "model": request.model, "effort": request.effort,
-                        "sandboxMode": "tool-restricted-read-only", "approvalPolicy": "deny_unadmitted",
+                        **self._sandbox_metadata(), "approvalPolicy": "deny_unadmitted",
                         "accountBinding": request.account_binding,
                     })
                 elif kind == "ResultMessage":
@@ -760,3 +769,29 @@ class ClaudeConsultantAdapter(ClaudeReviewAdapter):
 
     def _make_result(self, **values: Any) -> ExecutionResult:
         return ExecutionResult(task=values.pop("review"), **values)
+
+class ClaudeWorkerAdapter(ClaudeConsultantAdapter):
+    """Host-authorized file tools, not an operating-system filesystem sandbox.
+
+    The trusted Host callback must authorize each exact path/input within the
+    selected workspace, including platform aliases, links and protected state.
+    Hook-time validation is not atomic filesystem confinement: native tool
+    effects retain the actual Host permission and containment guarantees.
+    """
+
+    def _validate_output_kind(self, request: ExecutionRequest) -> None:
+        if request.result_kind != "task" or request.write_workspace is None or request.tool_profile != "default":
+            raise AdapterError("worker_write_task_required")
+        import provider_prompt
+        _roles, _reviewers, workers, _unsupported = provider_prompt._external_role_taxonomy()
+        if request.role not in workers:
+            raise AdapterError("worker_role_required")
+
+    def _available_tools(self) -> tuple[str, ...]:
+        return (*READ_TOOLS, "Write", "Edit")
+
+    def _sandbox_metadata(self) -> dict[str, str]:
+        return {
+            "sandboxMode": "tool-restricted-workspace-write",
+            "writeWorkspaceSha256": hashlib.sha256(self._request.write_workspace.encode("utf-8")).hexdigest(),
+        }

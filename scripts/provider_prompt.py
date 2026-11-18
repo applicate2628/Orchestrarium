@@ -7268,7 +7268,7 @@ def _validate_sdk_result_binding(payload: dict[str, object]) -> None:
         mode_matches = (provider in consultant_modes
                         and selected.get("sandboxMode") == consultant_modes[provider]
                         if execution_role == "consultant" else
-                        provider == "codex" and selected.get("sandboxMode") == "workspace-write"
+                        provider in {"codex", "claude"} and selected.get("sandboxMode") == {"codex":"workspace-write", "claude":"tool-restricted-workspace-write"}[provider]
                         and selected.get("schemaVersion") == 2)
         if (not role_matches or not mode_matches
                 or payload.get("gate") != "none"
@@ -7278,7 +7278,7 @@ def _validate_sdk_result_binding(payload: dict[str, object]) -> None:
                 or primary.get("token") in {"COMPLETE:PASS", "COMPLETE:REVISE", "COMPLETE:BLOCKED"}
                 or payload.get("token") in {"COMPLETE:PASS", "COMPLETE:REVISE", "COMPLETE:BLOCKED"}):
             raise ValueError("provider result SDK task role or outcome mismatch")
-    elif execution_role != "external-reviewer" or selected.get("sandboxMode") == "workspace-write":
+    elif execution_role != "external-reviewer" or selected.get("sandboxMode") in {"workspace-write", "tool-restricted-workspace-write"}:
         raise ValueError("provider result SDK review role mismatch")
 
 

@@ -27,6 +27,14 @@ qualification remains pending. Diagnostic recovery is implemented but not yet
 native-qualified; earlier native observations cover an older source snapshot.
 V3 SDK evidence keeps existing receiving/ledger owners and cannot close another run. See [the exact opt-in contract and limits](../docs/sdk-execution.md).
 
+A Codex Host may separately use the existing Python SDK executor for an admitted
+Claude API/cloud Worker with explicit file-tool authority. Its
+`tool-restricted-workspace-write` provenance is not the Codex native
+`workspace-write` sandbox. The exact provider/access route and Host permission
+callback remain authoritative; the public Claude command-line route stays
+prompt-only. This does not enable a subscription CLI worker or a default-route
+change. See the shared guarantee distinction and SDK implementation boundary.
+
 ## Codex-specific runtime notes
 
 - Mechanical-plan filesystem preflight is a repo-local check, not host containment. An explicitly observed exact root may be located on an ordinary mounted volume; native identity is rechecked across its ancestor chain. Detected descendant mounts and all links/junctions/reparse points remain refused. Python documents that [os.path.ismount](https://docs.python.org/3/library/os.path.html#os.path.ismount) cannot reliably detect same-filesystem bind mounts and also treats Linux btrfs subvolumes as mount points. No stronger mount-detection guarantee is claimed; caller authority and host restrictions remain independent.

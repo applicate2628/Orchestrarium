@@ -169,14 +169,14 @@ def prepare_codex_request(request: ExecutionRequest) -> ExecutionRequest:
     return replace(request, prompt=_owner().assemble_external_prompt(request.prompt.encode("utf-8")).decode("utf-8"))
 
 
-def _worker_authority_roots() -> tuple[Path, ...]:
+def _worker_authority_roots(provider="codex") -> tuple[Path, ...]:
     """Loaded code/data installations, not ambient credential values."""
     import importlib.util
     roots = [Path(__file__).absolute().parents[2], Path(__file__).resolve().parents[2],
              Path(sys.executable).parent,
              Path(sys.prefix), Path(sys.base_prefix)]
     # Top-level discovery does not import or launch the provider package.
-    spec = importlib.util.find_spec("openai_codex")
+    spec = importlib.util.find_spec({"codex": "openai_codex", "claude": "claude_agent_sdk"}[provider])
     if spec is not None:
         if spec.origin and spec.origin not in {"built-in", "frozen"}:
             roots.append(Path(spec.origin).parent)
@@ -192,7 +192,9 @@ def validate_worker_custody(request: ExecutionRequest, selection: Any, *, expect
     """
     if request.write_workspace is None:
         return None
-    if request.provider != "codex" or type(selection) is not CodexRuntimeSelection:
+    from .claude import ClaudeRuntimeSelection
+    expected = {"codex": CodexRuntimeSelection, "claude": ClaudeRuntimeSelection}.get(request.provider)
+    if type(selection) is not expected:
         raise RuntimeBindingError("worker_runtime_selection_required")
     execution_role(request)
     owner = _owner()
@@ -203,10 +205,14 @@ def validate_worker_custody(request: ExecutionRequest, selection: Any, *, expect
         if (not root.is_dir() or request.cwd != request.write_workspace
                 or os.path.normcase(str(resolved)) != os.path.normcase(request.write_workspace)):
             raise ValueError("noncanonical workspace")
-        protected = [Path(selection.work_item), Path(selection.codex_home),
-                     Path(selection.executable).parent, *_worker_authority_roots()]
-        if selection.installed_hook_root is not None:
-            protected.append(Path(selection.installed_hook_root))
+        protected = [Path(selection.work_item), Path(selection.executable).parent,
+                     *(_worker_authority_roots() if request.provider == "codex" else _worker_authority_roots("claude"))]
+        if request.provider == "codex":
+            protected.append(Path(selection.codex_home))
+            if selection.installed_hook_root is not None:
+                protected.append(Path(selection.installed_hook_root))
+        else:
+            protected.extend((Path(selection.config_dir), Path(selection.prompts_dir)))
         for path in protected:
             owner.validate_no_reparse_components(path)
             guarded = path.resolve(strict=False)
@@ -226,8 +232,9 @@ def validate_worker_custody(request: ExecutionRequest, selection: Any, *, expect
 def _require_runtime_result_route(request: ExecutionRequest) -> None:
     # Evidence/admission compatibility is separate from enabling a live factory.
     if request.provider == "claude" and request.result_kind == "task":
-        if (type(request) is not ExecutionRequest or request.role != "consultant"
-                or request.write_workspace is not None):
+        _roles, _reviewers, workers, _unsupported = _owner()._external_role_taxonomy()
+        if (type(request) is not ExecutionRequest or
+                (request.role not in workers if request.write_workspace is not None else request.role != "consultant")):
             raise RuntimeBindingError("claude_consultant_task_request_required")
     if request.provider == "claude" and request.tool_profile == "prompt-only" and request.result_kind == "review":
         _roles, reviewers, _workers, _unsupported = _owner()._external_role_taxonomy()
@@ -283,7 +290,7 @@ def selected_sdk_execution(request: ExecutionRequest, selection: Any) -> dict[st
     if request.provider == "codex":
         adapter, sandbox, approval = "openai-codex", ("workspace-write" if request.write_workspace is not None else "read-only"), "deny_all"
     elif request.provider == "claude":
-        adapter, sandbox, approval = "claude-agent-sdk", "tool-restricted-read-only", "deny_unadmitted"
+        adapter, sandbox, approval = "claude-agent-sdk", ("tool-restricted-workspace-write" if request.write_workspace is not None else "tool-restricted-read-only"), "deny_unadmitted"
     else:
         raise RuntimeBindingError("unsupported_runtime_provider")
     value = {
@@ -423,7 +430,7 @@ def execution_role(request: ExecutionRequest) -> str:
     """Project provenance for the already validated operation, not permission."""
     _require_runtime_result_route(request)
     if request.write_workspace is not None:
-        if type(request) is not ExecutionRequest or request.provider != "codex" or request.result_kind != "task":
+        if type(request) is not ExecutionRequest or request.provider not in {"codex", "claude"} or request.result_kind != "task":
             raise RuntimeBindingError("worker_task_request_required")
         _roles, _reviewers, workers, _unsupported = _owner()._external_role_taxonomy()
         if request.role not in workers:

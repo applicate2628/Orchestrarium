@@ -177,11 +177,11 @@ def terminal_payload(request: ExecutionRequest, observation: Any, *, output_cont
     )
     if request.write_workspace is not None:
         if (selected_config.get("schemaVersion") != 2
-                or selected_config.get("sandboxMode") != "workspace-write"
+                or selected_config.get("sandboxMode") != {"codex":"workspace-write", "claude":"tool-restricted-workspace-write"}[request.provider]
                 or selected_config.get("writeWorkspaceSha256") != hashlib.sha256(request.write_workspace.encode("utf-8")).hexdigest()
                 or request.cwd != request.write_workspace):
             raise ValueError("SDK write workspace commitment mismatch")
-    elif selected_config.get("sandboxMode") == "workspace-write":
+    elif selected_config.get("sandboxMode") in {"workspace-write", "tool-restricted-workspace-write"}:
         raise ValueError("SDK read-only request cannot receive writes")
     if "requestSha256" in selected_config:
         from .runtime import runtime_selection_from_dict, request_sha256, validate_worker_custody, RuntimeBindingError
