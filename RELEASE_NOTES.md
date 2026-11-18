@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Reorganize provider access guidance into separate subscription and API tables, distinguishing native Lead and external worker paths while retaining documented exceptions and unresolved cases.
+
 - Exercise the installed AGY-to-Codex scoped Worker route through existing custody and receiving, including protected control-plane refusal and retained failure/no-replay handling; document write-workspace topology without claiming native sandbox acceptance.
 
 - Refine the official provider access matrix: distinguish interactive agent-issued Kimi calls from non-interactive automation, document Claude approval exceptions and AGY API/ACP boundaries, and use current Grok entitlement language.

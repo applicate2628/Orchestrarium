@@ -1,58 +1,43 @@
-# Provider access: what can we connect?
+# Provider access: subscription or API?
 
-**Checked: 2026-11-18.** This is the repository's source-linked access reference, not legal advice or a statement that an adapter is ready.
+**Checked: 2026-11-18.** Choose the billing route first, then the role. **Lead** coordinates; **external worker** is called by another agent or orchestrator. A provider's native subagent is not an external worker.
 
-**Status:** **Supported** = the provider documents this use, subject to its terms; **Restricted** = an explicit restriction covers the described use; **Unclear** = the sources do not settle this exact use. Unclear is not a blanket provider ban.
+**Supported** means officially documented, subject to the applicable terms. **Restricted** means a stated restriction applies. **Unclear** means this exact arrangement is not settled. These are access findings, not adapter readiness or spending permission.
 
-A **Lead** coordinates work; a **worker** carries out delegated work. These are our roles, not provider licences. Permissions, account eligibility, spending approval and technical readiness remain separate.
+## 1. Subscription / personal plan
 
-## At a glance
+| Provider and official connection | Lead | External worker | Practical boundary |
+|---|---|---|---|
+| **Codex** — local SDK / app-server, own ChatGPT account | Supported | Supported | User-owned workflow; no account sharing or limit bypass. API is recommended for automation, not universally required. [SDK][codex-sdk] · [Auth][codex-auth] · [Terms][openai-terms] |
+| **Claude** — unchanged Claude Code, own subscription login | Supported | Not generally established; see conditions | Native subagents are supported. Hosting the unchanged client with the user's own sign-in has explicit conditions; third-party subscription credential intermediation is restricted without separate Anthropic approval. [Conditions][claude-legal] · [SDK exception][claude-sdk] |
+| **Antigravity** — native app/CLI or official ACP editor connection, personal login | Supported in documented use | Unclear for external SDK/ACP orchestration; consumer CLI wrapper restricted | Direct scripts/CI and ACP editors are documented. They do not settle every external orchestrator arrangement. [FAQ][agy-faq] · [ACP][agy-acp] · [Terms §6][agy-terms] |
+| **Kimi Code** — official client or supported coding tool, membership | Supported for interactive coding | Depends on actual use; one-off cross-agent delegation not expressly classified | Agent-driven requests are not automatically forbidden. Non-interactive batches/pipelines are restricted; no universal human-presence or approval-click threshold is defined. [Guidelines][kimi-guidelines] · [Codex][kimi-codex] · [Hermes][kimi-hermes] |
+| **Grok Build** — official CLI / ACP, eligible subscription entitlement | Supported | Supported | Scripts, automation and orchestration apps are explicitly documented. Preserve account entitlement and limits. [Announcement][grok-build] · [Current guide][grok-headless] · [Terms][grok-terms] |
 
-| Provider | Connection and account | Intended use | Status | What matters |
-|---|---|---|---|---|
-| **Codex** | Official local SDK / app-server; user's ChatGPT account | Lead or delegated agent in the user's own workflow | **Supported** | Official SDK supports custom agents and applications; Codex supports subscription sign-in. Preserve the user's account and workspace controls. [Sources][codex-sdk] |
-| **Codex** | Sharing an account with other users or bypassing limits | Any role | **Restricted** | These are separate restrictions, not a ban on the official SDK. [Terms][openai-terms] |
-| **Claude** | Unmodified Claude Code; user's own subscription login | Native Lead and native subagents | **Supported** | Ordinary individual use; user signs in through Anthropic. [Authentication][claude-legal] |
-| **Claude** | Unmodified Claude Code hosted inside another product | User's own session | **Supported, with conditions** | Host accepts Commercial Terms, preserves every auth method and does not resell or intermediate usage. [Hosting conditions][claude-legal] |
-| **Claude** | Third-party app offering Claude.ai login or routing users' subscription credentials | External worker | **Restricted without separate provider approval** | No assumed credential/token intermediation rights. Preserve the SDK's explicit prior-approval exception and the unchanged-binary hosting conditions. [Authentication][claude-legal], [SDK][claude-sdk] |
-| **Claude** | Official Agent SDK with supported API/cloud authentication | Programmatic Lead or worker | **Supported** | Governed by Commercial Terms. A generic ACP connection does not itself grant subscription rights. [SDK][claude-sdk] |
-| **Antigravity** | Native app/CLI; personal plan | Native Lead, native subagents; direct scripting/CI | **Supported** | Direct scripts are documented separately from third-party agent wrappers. [FAQ][agy-faq] |
-| **Antigravity** | Official `agy acp`; personal login | Coding agent in an ACP editor/client | **Supported in the documented editor use** | Personal OAuth is documented; partner-model availability depends on the client. This is not a general external-orchestration grant. [ACP][agy-acp] |
-| **Antigravity** | Consumer `agy -p` wrapped by a third-party coding agent/app | External worker | **Restricted** | FAQ says unsupported under consumer plans; Terms §6 restrict third-party access. [FAQ][agy-faq], [Terms][agy-terms] |
-| **Antigravity** | SDK or ACP; personal plan | Autonomous workers controlled by an external orchestrator | **Unclear** | ACP/editor support and SDK access do not settle this exact arrangement. See the documented ambiguity below. |
-| **Antigravity** | Official SDK; Gemini API key or eligible Google Cloud authentication | Programmatic Lead or worker | **Supported, with applicable service terms** | The documented programmatic route uses its own API/cloud entitlement and billing, not an inferred consumer-quota grant. [SDK][agy-sdk], [Authentication][agy-auth], [Terms scope][agy-terms] |
-| **Kimi Code** | Official client or supported third-party coding tool; subscription | Personal interactive coding | **Supported** | Third-party tools/frameworks are explicitly supported; preserve real client identity. [Guidelines][kimi-guidelines] |
-| **Kimi Code** | Subscription used for scripted batches or other non-interactive automation | Non-interactive batch/pipeline worker | **Restricted** | Explicitly outside subscription scope. This is about usage, not the ACP protocol or a role name. [Guidelines][kimi-guidelines] |
-| **Grok Build** | Official CLI / ACP; account with eligible Grok Build subscription entitlement | Programmatic Lead or worker | **Supported** | Provider explicitly offers scripts, automations, bots and orchestration apps to subscribers. [Announcement][grok-build], [Current guide][grok-headless] |
+## 2. API / cloud developer access
 
-## Read the boundary, not just the status
+**This is a separate access and billing route, not permission to reuse consumer subscription credentials.** A key issued by Kimi Code membership still belongs in the subscription table.
 
-**Codex.** The [SDK guide][codex-sdk] explicitly supports controlling Codex from custom agents, CI and applications. [Authentication][codex-auth] distinguishes ChatGPT subscription access from API access and recommends API keys for automation; a recommendation is not a universal subscription prohibition. The [Terms of Use][openai-terms] (effective 2026-01-01), “Registration and access” and “Using our Services”, retain account-sharing and anti-circumvention restrictions. A user-owned local workflow is not a grant to resell account access or run a public shared service.
+| Provider and connection | Lead | External worker | Practical boundary |
+|---|---|---|---|
+| **Codex** — official SDK / app-server with API key | Supported | Supported | Programmatic agent access under the applicable API account and terms. [SDK][codex-sdk] · [Auth][codex-auth] |
+| **Claude** — official Agent SDK with supported API/cloud auth | Supported | Supported | Commercial Terms and the selected cloud/account permissions apply. [SDK][claude-sdk] · [Commercial Terms][claude-commercial] |
+| **Antigravity** — official SDK with Gemini API key or eligible Google Cloud auth | Supported | Supported | Uses the selected API/cloud entitlement and service terms, not assumed personal-plan quota. [SDK][agy-sdk] · [Auth][agy-auth] · [Terms scope][agy-terms] |
+| **Kimi Platform** — platform-issued key, separate API billing | Documented; contractual check incomplete | Documented; contractual check incomplete | Model API for your own agent loop, not a built-in agent runtime. Developer integration is documented; the applicable platform agreement has not been fully verified in this audit. [Quickstart][kimi-platform] · [Product distinction][kimi-comparison] |
+| **Grok API** — API key, separate API account/billing | Supported | Supported | Model API for your own agent loop. API agreement explicitly covers integrations into your products/services. [Developer terms §1.1][grok-api-terms] · [API guide][grok-api] |
 
-**Claude.** [Legal and compliance][claude-legal], “Can customers offer Claude Code in their products?” and “Authentication and credential use”, must be read together: unchanged hosted Claude Code with the end user's own sign-in is expressly contemplated, while third-party credential intermediation is not generally permitted; the [SDK guidance][claude-sdk] preserves an explicit prior-approval exception. [Consumer Terms][claude-consumer] (effective 2025-10-08) §3(7) restrict automated/non-human access except an Anthropic API key or other express permission. [Commercial Terms][claude-commercial] (effective 2025-06-17) §A.1 and the [Agent SDK licence section][claude-sdk] govern the separate developer-product route. Neither “all orchestration is forbidden” nor “any subscription SDK wrapper is allowed” follows.
+## Important distinctions
 
-**Antigravity.** The [Google Terms][google-terms] (US version effective 2026-07-30) and service-specific terms apply together; account region and any separate business agreement matter. [Terms][agy-terms] §6 and the [FAQ][agy-faq] restrict third-party access/consumer CLI wrappers, but Google's [ACP guide][agy-acp] explicitly supports outside clients with personal login. The [pricing page][agy-pricing] includes Python SDK in Individual plans and [authentication][agy-auth] mentions shared SDK sign-in; however its programmatic section and [SDK overview][agy-sdk] describe API/cloud/local-model authentication, not an explicit consumer-quota grant for external orchestration. The broad wording of Terms §6 and FAQ is in tension with the specific ACP editor documentation; the latter confirms documented product support, not a legal amendment inferred by this project. This unresolved distinction should be clarified for the exact arrangement; do not turn it into a ban on all SDKs or all ACP clients. The ACP guide limits third-party models to named supported clients, so Gemini availability does not imply Claude availability in every client.
+- **AGY Lead → Codex worker:** assess the recipient under Codex's route. This is neither a native AGY subagent nor a wrapper consuming AGY subscription quota. Both providers' applicable terms still apply; this example does not prove Orchestrarium readiness.
+- **Claude:** the unchanged-client hosting exception is not blanket permission to collect tokens or offer a third-party Claude.ai login. Consumer automation restrictions retain expressly permitted exceptions. [Conditions][claude-legal] · [Consumer Terms §3(7)][claude-consumer]
+- **AGY:** broad Terms §6/FAQ wording is in tension with the explicit ACP editor guide. Documented product support is not a legal amendment inferred here. Python SDK inclusion in Individual plans does not resolve external consumer-quota orchestration. ACP partner-model availability also varies by client. [Terms][agy-terms] · [ACP][agy-acp] · [Plans][agy-pricing]
+- **Kimi:** assess the workflow, not the label “worker”. Interactive coding through other agent tools is documented; unattended batch pipelines are a different use. Overseas and mainland terms differ. [Guidelines][kimi-guidelines] · [Overseas Terms §2][kimi-terms]
 
-**Kimi Code.** [Community Guidelines][kimi-guidelines], “Scope of Use” and “Don't use Kimi Code for non-interactive automation”, explicitly separate supported interactive third-party tools from unsupported subscription automation. The [overseas Terms][kimi-terms] (effective 2026-11-05), §2, incorporate documentation/guidelines and restrict automation except express written authorization; §1 restricts account sharing. Mainland-China accounts have separate applicable terms. An API-shaped key supplied by a coding subscription does not automatically turn that subscription into unrestricted platform access. Official [Codex][kimi-codex] and [Hermes Agent][kimi-hermes] integrations demonstrate that agent-driven requests are not, by themselves, prohibited non-interactive batches. The sources do not define a universal human-presence threshold or expressly classify every one-off cross-agent delegation; assess the actual workflow, not the caller's role name or absence of approval clicks.
+The [SDK plan](sdk-execution.md#approved-roleaccess-acceptance-scope) owns implementation scope. Its selected routes are project choices, not universal provider bans. Recheck the relevant row when the account, region, contract, billing or use changes. This is a dated source reference, not account-specific legal advice.
 
-**Grok Build.** The [official announcement][grok-build] explicitly combines subscriber access with headless automation and ACP orchestration apps. The [current guide][grok-headless] documents cached local sign-in for ACP. [Terms][grok-terms] (updated 2026-10-27) §3 incorporates documentation and the [Acceptable Use Policy][grok-aup] restricts unauthorized automation, not every automated use. Keep actual account entitlement and limits separate from Orchestrarium's unfinished technical qualification.
+**Terms checked:** OpenAI consumer terms effective 2026-01-01; Anthropic consumer 2025-10-08 and commercial 2025-06-17; Google universal terms US version 2026-07-30 plus AGY additional terms; Kimi overseas 2026-11-05; xAI consumer/API terms updated 2026-10-27. Regional and separately signed agreements may differ. [Google universal terms][google-terms] · [xAI AUP][grok-aup]
 
-## Example: Antigravity Lead delegates to Codex
-
-The user works in a native Antigravity Lead session; it delegates a task to an external Codex agent through Codex's official SDK/app-server using the user's own eligible ChatGPT account. Assess the recipient under the Codex row: this is not an external wrapper consuming Antigravity's subscription, and it is not a native Antigravity subagent. The sources support the recipient's official integration; they do not prove this complete Orchestrarium route is implemented, tested or separately approved for spending. Preserve both providers' applicable terms and the user's tool permissions.
-
-## How this relates to our plan
-
-The [SDK execution plan](sdk-execution.md#approved-roleaccess-acceptance-scope) owns implementation scope and readiness. Its selected Lead-only consumer integrations for Claude and Antigravity are project choices, not universal legal classifications. Role names and a successful test cannot create service access rights. Native Lead integration, vendor-native subagents and externally invoked workers must be assessed separately.
-
-Recheck the affected row when the provider changes its terms or when the product, authentication, billing or usage arrangement changes. Keep the date and primary-source links here rather than creating another permissions table.
-
-## Terms and abbreviations
-
-- **SDK:** software development kit used to control an agent from code.
-- **ACP:** Agent Client Protocol, a client-to-agent interface; it does not grant account rights.
-- **CLI:** command-line interface; **CI:** continuous integration.
-- **OAuth:** the provider's account sign-in flow; **API:** application programming interface.
+**Abbreviations:** SDK = software development kit; ACP = Agent Client Protocol; CLI = command-line interface; API = application programming interface.
 
 [codex-sdk]: https://learn.chatgpt.com/docs/codex-sdk
 [codex-auth]: https://learn.chatgpt.com/docs/auth
@@ -69,11 +54,14 @@ Recheck the affected row when the provider changes its terms or when the product
 [agy-auth]: https://antigravity.google/docs/install/
 [agy-sdk]: https://antigravity.google/docs/sdk/overview/
 [kimi-guidelines]: https://www.kimi.com/code/docs/en/kimi-code/community-guidelines.html
-
 [kimi-terms]: https://www.kimi.ai/user/agreement/modelUse?version=v2
 [kimi-codex]: https://www.kimi.com/code/docs/en/third-party-tools/codex.html
 [kimi-hermes]: https://www.kimi.com/code/docs/en/third-party-tools/hermes.html
+[kimi-platform]: https://platform.kimi.ai/docs/get-your-api-key
+[kimi-comparison]: https://www.kimi.com/code/docs/en/#platform-comparison
 [grok-build]: https://x.ai/news/grok-build-cli
 [grok-headless]: https://docs.x.ai/build/cli/headless-scripting
 [grok-terms]: https://x.ai/legal/terms-of-service
 [grok-aup]: https://x.ai/legal/acceptable-use-policy
+[grok-api-terms]: https://x.ai/legal/terms-of-service-enterprise
+[grok-api]: https://docs.x.ai/docs/overview
