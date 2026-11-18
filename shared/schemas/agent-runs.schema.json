@@ -277,7 +277,8 @@
             "innerBudgetBinding": false,
             "childChoiceSha256": false,
             "childAssignmentSha256": false,
-            "decisionSessionMode": false
+            "decisionSessionMode": false,
+            "childDecisionContextSha256": false
           },
           "if": {
             "properties": {
@@ -307,7 +308,8 @@
             "innerBudgetBinding": false,
             "childChoiceSha256": false,
             "childAssignmentSha256": false,
-            "decisionSessionMode": false
+            "decisionSessionMode": false,
+            "childDecisionContextSha256": false
           },
           "required": [
             "requestSha256"
@@ -325,7 +327,8 @@
               "const": "coordination-inference"
             },
             "childAssignmentSha256": false,
-            "decisionSessionMode": false
+            "decisionSessionMode": false,
+            "childDecisionContextSha256": false
           },
           "required": [
             "requestSha256",
@@ -485,7 +488,7 @@
           "minLength": 64,
           "maxLength": 64,
           "pattern": "^[0-9a-f]{64}$",
-          "$comment": "Explicit Root assignment anchor for a persistent scoped child session."
+          "$comment": "Explicit Root assignment anchor for a scoped child decision."
         },
         "decisionSessionMode": {
           "type": "string",
@@ -493,6 +496,13 @@
           "minLength": 1,
           "maxLength": 32,
           "pattern": "[a-z-]+"
+        },
+        "childDecisionContextSha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "$comment": "Immutable fresh-handoff decision context; not a native session continuation."
         }
       },
       "$comment": "Exact SDK configuration, not permission or qualification evidence. Version 1 retains historical version-bearing metadata. Version 2 records only admitted controls and the request commitment, never fabricating SDK/runtime versions before startup; actual observed versions are retained in the scanned, artifact-bound review evidence. All tokens are bounded 128-character ASCII; version metadata additionally permits standard build/epoch markers. Codex read-only names its OS sandbox; Claude tool-restricted modes do not claim OS isolation; admitted Host tool callbacks own path permissions. Approval-policy labels are not blanket tool denials. Workspace-write adds its exact writeWorkspaceSha256 binding; selected v2 remains request-bound and observed v1 remains evidence only. Copilot prompt-only controls deny all tools; they do not prove account identity or OS process settlement.",
@@ -538,8 +548,7 @@
               "approvalPolicy": {
                 "const": "deny_unadmitted"
               },
-              "decisionSessionMode": false,
-              "childAssignmentSha256": false
+              "decisionSessionMode": false
             }
           }
         },
@@ -704,20 +713,42 @@
                 "required": [
                   "childAssignmentSha256"
                 ]
+              },
+              {
+                "required": [
+                  "childDecisionContextSha256"
+                ]
               }
             ]
           },
           "then": {
-            "required": [
-              "decisionSessionMode",
-              "childAssignmentSha256"
-            ],
             "properties": {
               "schemaVersion": {
                 "const": 5
               },
               "forkSourceSha256": false
-            }
+            },
+            "oneOf": [
+              {
+                "required": [
+                  "decisionSessionMode",
+                  "childAssignmentSha256"
+                ],
+                "properties": {
+                  "childDecisionContextSha256": false
+                }
+              },
+              {
+                "required": [
+                  "childAssignmentSha256",
+                  "childDecisionContextSha256"
+                ],
+                "properties": {
+                  "decisionSessionMode": false,
+                  "continuationSourceSha256": false
+                }
+              }
+            ]
           }
         },
         {

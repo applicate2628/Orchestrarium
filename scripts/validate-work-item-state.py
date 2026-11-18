@@ -423,13 +423,17 @@ def validate_sdk_execution(
         or value["outerBudgetBinding"] == value["innerBudgetBinding"]
     ):
         raise ValueError("coordination inference requires a supported scoped provider and distinct turn reservations")
-    if provider == "claude" and {"decisionSessionMode", "childAssignmentSha256"} & value.keys():
+    if provider == "claude" and "decisionSessionMode" in value:
         raise ValueError("Claude scoped decisions require fresh handoff")
     if {"continuationSourceSha256", "forkSourceSha256"} <= value.keys():
         raise ValueError("native context source modes are mutually exclusive")
     persistent=(value.get("schemaVersion")==5 and value.get("decisionSessionMode")=="native-persistent" and "childAssignmentSha256" in value)
-    if ("decisionSessionMode" in value)!=("childAssignmentSha256" in value) or (("decisionSessionMode" in value or "childAssignmentSha256" in value) and not persistent):
-        raise ValueError("persistent child session requires selected assignment binding")
+    fresh = (value.get("schemaVersion") == 5 and "childAssignmentSha256" in value
+             and "childDecisionContextSha256" in value and "decisionSessionMode" not in value
+             and not {"continuationSourceSha256", "forkSourceSha256"} & value.keys())
+    if {"decisionSessionMode", "childAssignmentSha256", "childDecisionContextSha256"} & value.keys():
+        if not (fresh or (persistent and "childDecisionContextSha256" not in value)):
+            raise ValueError("scoped child decision requires exact fresh or persistent assignment binding")
     if {"continuationSourceSha256", "forkSourceSha256"} & value.keys():
         codex_context = (provider == "codex" and value["sandboxMode"] == "read-only"
                          and (value["schemaVersion"] in {1, 2} or persistent)

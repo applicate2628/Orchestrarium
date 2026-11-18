@@ -114,10 +114,9 @@ binds the answer to that call, but does not prove a resumable native history tip
 No continuation receipt or persistent-session guarantee is created here.
 Unsupported native continuation is not silently downgraded to handoff. Recovery
 reads the existing canonical task state and does not repeat an already attempted
-task. Fresh-handoff recovery can require a new decision: recovering a received
-but unapplied decision without another inference is not implemented for this
-mode. The native-persistent decision-recovery guarantee must not be inferred
-from its durable task receipts.
+task. New fresh decisions also carry the exact assignment/context commitments
+described below, allowing a received but unapplied intent to be recovered without
+another inference. This is Host ledger recovery, not native session resume.
 
 This is source/offline integration, not installed or live-provider qualification.
 The scoped candidate passed 157 adjacent adapter tests and two crossed offline
@@ -130,6 +129,44 @@ one task execution. Exact revision and final review are recorded in the PR.
 
 Official reference: [Claude Agent SDK Python public interface](https://github.com/anthropics/claude-agent-sdk-python/tree/163f50ed56fa8c3fd9346148b6e56e7696794b58).
 The reference documents SDK operations, not an installed-version requirement.
+
+### Recovering received fresh decisions
+
+The existing child authority can recover a completed, received but unapplied
+`fresh-handoff` decision from its canonical ledger/artifact. New scoped fresh
+launches bind `childAssignmentSha256` and `childDecisionContextSha256`; receiving
+retains matching assignment/context metadata in the existing decision artifact.
+Per-turn operation and budget identities are not mistaken for immutable decision
+context. Current Root permissions and actual task budgets are still checked by
+their existing owners before an effect.
+
+Recovery considers only the exact assignment/context and verified artifact,
+not an inferred latest wall-clock timestamp or a provider conversation tip.
+A recovered execute intent targets a currently admitted task. The existing
+atomic task claim prevents competing Hosts from executing that task twice;
+a task already attempted, including an uncertain outcome, is not replayed.
+Finish decisions must satisfy current lifecycle and required-result conditions.
+Cancellation retains its existing authority/lifecycle checks without requiring
+all tasks to have completed. Changed scope or content is not silently accepted as the old decision.
+
+A valid completed pending intent is considered before an unrelated uncertain
+decision record. An uncertain launch is not fabricated into a completed intent
+or automatically called again. If it is the only applicable record, that exact
+decision requires reconciliation; already admitted independent task execution
+remains available. This is not a global permission lock or a new approval stage.
+
+Legacy fresh records without the new commitments remain historical evidence,
+not guessed recovery authority. Persistent native-session recovery retains its
+own existing chain contract. Neither path introduces a second receipt store,
+automatic model retries or new native-subagent guarantees.
+
+Offline qualification includes five actual-ledger recovery/race tests, two
+persistent-session regression cases and 31 independent bounded tests. A crossed
+Claude fresh-decision test interrupts after canonical decision receipt but before
+task execution, restores the Host, and completes with one task execution and
+without repeating that received decision's inference. Its provider/process peers
+are synthetic; existing Host, claims, ledger, receiving and archive are real.
+Exact revision, source-freeze evidence and review are recorded in the PR.
 
 ### Native Consultant continuation through the Host
 
@@ -1085,7 +1122,7 @@ wholly unfinished features. Continue only the following unresolved outcomes:
 | Next outcome | Concrete remaining work | Verification/delivery boundary |
 |---|---|---|
 | Provider routes | AGY native Lead/session integration; reconcile Kimi's supported agent runtime; Grok Build ACP actual runtime, account/tool enforcement and canonical receiving. | Use confirmed official capabilities and the existing owners. Do not turn subscription Lead routes into third-party workers. |
-| Session coverage | Remaining provider-native continuation and native Lead/subagent integration where supported, including Claude API durable continuation beyond its implemented fresh child decisions, and exact recovery of received-but-unapplied fresh decisions without another inference. | Existing Codex/Copilot child coordination is not missing. Host lineage/depth does not prove control of vendor-internal subagents. |
+| Session coverage | Remaining provider-native continuation and native Lead/subagent integration where supported, including Claude API durable continuation beyond its implemented fresh child decisions. Host recovery of newly committed fresh decisions is implemented separately and is not native resume. | Existing Codex/Copilot child coordination is not missing. Host lineage/depth does not prove control of vendor-internal subagents. |
 | Platform coverage | POSIX platform containment/custody and lifecycle qualification for intended macOS/Linux routes. | Windows offline results do not qualify POSIX or prove an OS sandbox. |
 | Current native acceptance | Install/inspect the selected current payload and exercise admitted real provider routes and recovery. | Not yet performed for this HEAD. Installation and quota-consuming calls retain their separate authorization; offline peers are not native acceptance. |
 | PR delivery | Keep main policy/regression fixes, this roadmap, source projections and PR description synchronized; complete unresolved acceptance. | PR remains draft, unmerged and not globally installed. No automatic model selection, budget policy or Actions run is implied. |

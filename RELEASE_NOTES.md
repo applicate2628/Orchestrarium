@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Fresh child decisions now retain exact assignment/context commitments in the existing ledger and artifact so a received, unapplied intent can be recovered without another model call. Existing task claims prevent repeated effects across competing Hosts; uncertain operations remain explicit reconciliation cases without locking independent admitted tasks. Legacy evidence and native-session recovery keep their separate guarantees.
+
 - Scoped child Leads can use the official Claude Agent SDK with fresh sessions and explicit authorized context. Decisions return through the existing Root admission and receiving lifecycle without granting tool effects or wrapping subscription access. Persistent native resume remains separate; this increment has offline evidence only.
 
 - Direct Kimi Host execution rechecks current authority after receiving before returning evidence. Revocation withholds delivery without losing the acquired result or canonical receipt, and never replays execution. The existing runtime and read-only recovery route are unchanged.

@@ -22,7 +22,7 @@ from process_supervision import sdk_worker
 from provider_prompt import ProviderOutputContext,assemble_external_prompt
 
 
-@pytest.mark.parametrize("restart",[False,True])
+@pytest.mark.parametrize("restart",[False,True,"before-task"])
 def test_claude_child_lead_fresh_handoff_and_received_task_restart(tmp_path,monkeypatch,restart):
     executable=tmp_path/"claude-fixture.exe"; executable.write_bytes(b"synthetic never executed")
     base=tmp_path/"claude-state"; base.mkdir()
@@ -145,11 +145,12 @@ def test_claude_child_lead_fresh_handoff_and_received_task_restart(tmp_path,monk
             current=authority.assert_child_current
             def lose_host(admitted,effect):
                 current(admitted,effect)
-                if effect=="child_result_received":raise RuntimeError("simulated Host restart after durable receipt")
+                if effect == ("child_decision_received" if restart == "before-task" else "child_result_received"):
+                    raise RuntimeError("simulated Host restart after durable receipt")
             authority.assert_child_current=lose_host
             with pytest.raises(RuntimeError,match="simulated Host restart"):
                 asyncio.run(loop.run())
-            assert counts=={"decisions":1,"tasks":1}
+            assert counts=={"decisions":1,"tasks":0 if restart == "before-task" else 1}
             from test_mutate_work_item import closure
             authority=runtime.ChildLeadAuthority(root_authority=authority._root_authority,root_selection=root,
                 child_id=assignment.child_id,selections=selections,closure_data=closure(INSTANT).encode(),

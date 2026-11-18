@@ -104,7 +104,7 @@
     },
     "sdk_execution/coordinator.py": {
       "source": "scripts/sdk_execution/coordinator.py",
-      "sha256": "248db6decd936f53eaacd5845334b3d53eb2e22b64bc3db59bfbf3f0d533d9d6",
+      "sha256": "54c6ab7bb26ce3ed2918e2df6a1dcc215cf724cc1f34d3ce5eb9270070768b21",
       "destination": "scripts/sdk_execution/coordinator.py"
     },
     "sdk_execution/coordination.py": {
@@ -125,7 +125,7 @@
     "sdk_execution/coordination_receiving.py": {
       "source": "scripts/sdk_execution/coordination_receiving.py",
       "destination": "scripts/sdk_execution/coordination_receiving.py",
-      "sha256": "82f59b74e1107a9a2f42fee7f390350556f7aca82f034e880f9eb130349d65ce"
+      "sha256": "f6c536c518361ca2b8b42ecdcdce105720ca56d64655ab2b4bef8348dd2cf05b"
     },
     "sdk_execution/grok.py": {
       "source": "scripts/sdk_execution/grok.py",
@@ -155,7 +155,7 @@
     "sdk_execution/runtime.py": {
       "source": "scripts/sdk_execution/runtime.py",
       "destination": "scripts/sdk_execution/runtime.py",
-      "sha256": "7b164320b05724b88fca29f306cfe137754d0347379d87c94618ffea0c436b81"
+      "sha256": "0cb86f0bb2d1997af1d59ee131a201017e19580dba33143a66b868bb549fae3c"
     },
     "sdk_execution/worker.py": {
       "source": "scripts/sdk_execution/worker.py",

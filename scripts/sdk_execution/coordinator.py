@@ -478,10 +478,13 @@ class ChildLeadCoordinator:
                 if type(worker) is not SdkCoordinationWorker:
                     raise CoordinatorBindingError("actual coordination worker required")
                 intent = None
-                if getattr(assignment, "decision_session_mode", "fresh-handoff") == "native-persistent":
+                recover = getattr(self._authority, "recover_child_decision", None)
+                if callable(recover):
                     # The candidate factory is effect-free. Recover canonical
-                    # received intent before starting another native turn.
-                    intent = self._authority.recover_child_decision(assignment, worker, projection)
+                    # received intent before spending another inference call.
+                    intent = recover(assignment, worker, projection)
+                    if isinstance(intent, dict) and intent.get("status") == "needs-reconciliation":
+                        return {**intent, "child_id": assignment.child_id}
                 if intent is None:
                     self._authority.attach_decision_worker(assignment, worker, projection)
                     decision_request = worker.validate_request()
