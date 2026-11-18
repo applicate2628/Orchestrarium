@@ -1,32 +1,76 @@
-# Orche
+# Orchestrarium
 
-<img src="assets/branding/orche.png" alt="Orche, the winged green mascot" width="160" height="148">
+<img src="assets/branding/orche.png" alt="Little Orche, the small winged green mascot" width="160" height="152">
 
-Orche is the workflow pack formerly named Orchestrarium. The repository URL and
-existing technical ownership/receipt identifiers remain compatible; branding
-does not rename installed state or authorize a migration.
+**A workflow pack for coordinated AI development.** The current project is
+Orchestrarium; its mascot is Little Orche. The planned Orche rebrand follows
+the SDK and Rust transitions and is not part of this release.
 
-A Codex-first workflow pack with one shared governance, SDK and installation core.
-Other clients are integrations of that core, not parallel products. Kimi and Grok
-have higher secondary integration priority than Claude; priority alone does not
-enable a model, qualify a host installer or authorize a paid run.
+Orchestrarium helps a leading assistant divide work, assign suitable specialist roles,
+keep authors and reviewers separate, and carry verified results through to
+delivery. Shared rules provide a common workflow; each supported client keeps
+its own runtime conventions. Rules and role selection do not grant permission
+to launch models or spend quota.
 
-Optional local distribution assembly is documented in [the distribution guide](scripts/distribution/README.md). It binds the supplied runtime to its exact notice inventory before producing a bundle, and packages this existing installer without changing its ownership or provider policies. Windows build and bounded Codex/Claude project receiving are recorded in [runtime evidence](scripts/distribution/runtime-evidence.md); local directory projections use native junctions without privilege elevation. Historical SDK recovery evidence is not acceptance of this layout.
+## Start here
 
-Codex native roles use the task and role selector, with Terra for suitable ordinary work and Sol for science. Named Luna mechanical roles have a separate supervised corridor; ordinary eligible producer roles can use `luna-high` or `luna-xhigh`. Explicit user controls, host restrictions, independent reviews and per-attempt Astra or Max consent remain binding. See [Codex platform rules](src.codex/AGENTS.codex.md) and [installation details](INSTALL.md) for role, migration and runtime contracts.
+- **Install or update:** [installation guide](INSTALL.md).
+- **Understand the workflow:** [documentation index](docs/README.md).
+- **Work on the project:** [maintainer starting point](docs/new-session-guide.md).
+- **See released changes:** [release notes](RELEASE_NOTES.md).
 
-- `src.codex/` — the production Codex provider-pack source
-- `adapters/claude/` — the existing secondary client adapter source
+## Current release and SDK development
 
-One shared governance model and role vocabulary serve the host integrations; adapter files retain the runtime structure required by each client. The root router selects Codex, Claude, and the bounded Antigravity native startup integration; these selections have different qualification scopes. The removed Gemini and Qwen provider values are retained only as fail-closed migration identifiers; they are not install or execution routes.
+| | Current `main` | SDK development in [PR #19](https://github.com/applicate2628/Orchestrarium/pull/19) |
+| --- | --- | --- |
+| Availability | The production source on `main`; use its [installation guide](https://github.com/applicate2628/Orchestrarium/blob/main/INSTALL.md). | A separate, unmerged development branch; not the current globally installed release. |
+| Clients and layout | Codex and Claude Code packs share governance. Their source remains in `src.codex/` and `src.claude/`. | Work toward a common core with client adapters, including Antigravity integration. Its changed paths do not apply to `main`. |
+| Delegation | Existing role selection and execution routes, with their documented permissions and platform limits. | Optional SDK (Software Development Kit) execution and child-session coordination are being developed and checked. They are not enabled by this README. |
+| Evidence | Use the current installation guide and source contracts for the operation being performed. | Offline checks do not establish live provider or platform acceptance. Read the PR's current evidence and remaining limits before testing. |
 
-Warning: Orchestrarium is optimized for maximum execution effectiveness and low orchestration drag rather than for minimum token spend. On large tasks, multi-opinion review lanes, or aggressive external fan-out, usage can rise quickly and consume a substantial token budget in a short time.
+The SDK branch is not a reason to reinstall or migrate a working setup early.
+This page does not announce SDK release readiness or enable quota-consuming runs.
 
-New maintenance sessions should start with [`docs/new-session-guide.md`](docs/new-session-guide.md). It records the source-first rule for this monorepo: tracked Orchestrarium source is canon, while `~/.codex/`, `~/.claude/`, project `.agents/`, and project `.claude/` are installed runtime outputs that should not be patched as the durable fix before the source owner is updated.
+### Roles, models and cost
 
-For a repository transfer, `$manual-repo-transfer` defaults to a verified Git clone plus only the required current local-state overlay; ignored `work-items/` is not in the clone. Direct transfers can preserve unfinished work without requiring cleanup or publication. When cleanup is explicitly requested, `$repo-cleanup` and the transfer owner apply their existing separate contracts. Offline or full recovery is an explicit alternative.
+The leading assistant chooses each Codex task's model and reasoning effort through the existing
+role selector; a role name alone is not a fixed model assignment. Current user
+settings, supported model options and permissions still apply. Authors and
+reviewers remain separate. See [Codex platform rules](src.codex/AGENTS.codex.md)
+for the maintained routing contract rather than a second model ranking here.
 
-Official agent SDK installation is offered separately through `python install.py --sdk-setup <provider> --sdk-python <interpreter>`. This form prints a proposal, including vendor runtime dependencies; `--sdk-venv <directory> --apply` instead performs the disclosed official installation and checks the selected environment. Orche does not redistribute those SDKs or CLIs. See [official setup and environment selection](INSTALL.md#official-agent-sdk-setup). Antigravity has a separate native startup projection through the common installer; it is not a programmatically invoked consumer-subscription worker. See [startup scope and commands](INSTALL.md#antigravity-native-startup).
+Parallel work and independent reviews can consume substantial tokens. Orchestrarium
+prioritizes effective execution, not the lowest possible spend. Selecting a
+route does not authorize a model launch, external review or paid operation.
+
+### Maintainer notes
+
+The repository source is authoritative; installed files are runtime outputs.
+Start maintenance with [the source-first guide](docs/new-session-guide.md).
+On this SDK branch, the root installer selects Codex, Claude, and the bounded
+Antigravity native startup integration, with separate qualification scopes.
+Removed Gemini and Qwen values remain migration identifiers, not install or
+execution routes.
+
+For repository transfer, `$manual-repo-transfer` uses a verified Git clone plus
+only the required current local-state overlay; ignored `work-items/` is not
+included in a clone. Cleanup is a separate explicitly requested operation.
+
+Optional distribution assembly is documented in [the distribution guide](scripts/distribution/README.md).
+It binds the supplied runtime to its notice inventory; it does not change
+provider permissions. [Runtime evidence](scripts/distribution/runtime-evidence.md)
+records the bounded packaging checks, not general SDK acceptance.
+
+## SDK branch scope
+
+This checkout is the SDK development branch in PR #19, not the current installed
+release. The current-main column above refers to `main`, not to this branch's
+changed paths. This branch has one shared governance, SDK and installation core;
+client adapters integrate that core rather than creating separate products.
+Kimi and Grok remain higher secondary integration priorities than Claude, without
+automatically enabling a route, qualifying a platform or authorizing quota use.
+
+Official agent SDK installation is offered separately through `python install.py --sdk-setup <provider> --sdk-python <interpreter>`. This form prints a proposal, including vendor runtime dependencies; `--sdk-venv <directory> --apply` instead performs the disclosed official installation and checks the selected environment. Orchestrarium does not redistribute those SDKs or CLIs. See [official setup and environment selection](INSTALL.md#official-agent-sdk-setup). Antigravity has a separate native startup projection through the common installer; it is not a programmatically invoked consumer-subscription worker. See [startup scope and commands](INSTALL.md#antigravity-native-startup).
 
 Optional software development kit (SDK) helpers are part of the installer-managed host-pack payload, without dependency provisioning or automatic activation. The explicit `--sdk-review-binding` Codex review path keeps the existing Host (invoking orchestration session) and default routes; the historical installed Windows success/receiving-collision checks and bounded live Codex review passed, while subsequent shared-owner changes retain separate regression evidence and broader scenarios remain unqualified. See [the opt-in contract and qualification boundaries](docs/sdk-execution.md). Maintainers can provision hash-verified public SDK source fixtures without installing or launching providers; see [the offline compatibility checks](docs/sdk-execution.md#reviewed-codex-source-fixtures). The separate `--sdk-task-binding` selector supports read-only Codex Consultant advice with `--ledger-role consultant`, using the same binding and existing launch/receiving owners. Version 5 selects a received predecessor by evidence-run identity for continuation after restart or an explicit native conversation fork; the existing canonical artifact/ledger carries the receipt, and completed turns are not replayed. Older artifacts without a continuation receipt remain readable but do not establish a resumable session. The Claude wrapper also supports an explicit prompt-only Consultant SDK task with a concrete model and selected official API/cloud credentials: it consumes supplied prompt/handoff context, grants no filesystem tools, and records auth-context selection rather than claiming account identity. The mutually exclusive `--sdk-review-binding` selector also supports prompt-only Claude review with a canonical reviewer profession. Review and task schemas stay separate; even a PASS review remains external-nonauthorizing evidence and cannot close obligations. The Python Host executor and explicit Claude Worker task route support Write/Edit through per-tool Host permission and protected-state custody. Public Worker file operations are checked against the admitted workspace and protected control paths; this is application-level enforcement, not an operating-system sandbox. Claude Reviewer and Consultant routes remain prompt-only. Claude Consultant version-5 bindings can resume an exactly received native transcript through its verified private path and canonical one-successor claim; missing or changed transcript evidence is not replaced with a fresh session. This does not enable Reviewer/Worker continuation and is not an OS-exclusive transcript lock. Persistent Claude child decisions use the separate scoped Host coordination route. Binding version 4 also admits an explicitly selected Codex Worker profession with a whole-workspace write boundary; binding, prompt, ledger, credentials, runtime, terminal and capture storage stay outside that workspace. Existing `CODEX_PROMPTS_DIR` selects an external capture directory. This source path has offline regression evidence only, not installed or live qualification; default routes and spending permissions are unchanged.
 
