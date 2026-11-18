@@ -259,7 +259,7 @@ def _require_runtime_result_route(request: ExecutionRequest) -> None:
 
 
 def _require_task_auth_route(request: ExecutionRequest, selection: Any) -> None:
-    if request.provider == "claude" and (request.result_kind == "task" or request.tool_profile == "prompt-only"):
+    if request.provider == "claude" and (request.result_kind == "task" or request.tool_profile == "prompt-only" or type(request) is CoordinationInferenceRequest):
         if not _owner().claude_programmatic_auth_mode_supported(selection.auth_mode):
             raise RuntimeBindingError("claude_programmatic_auth_mode_required")
 
@@ -1300,15 +1300,18 @@ def publish_child_assignment(*, root_selection, root_authority, selections, chil
     depth=1 if parent is None else parent.task_depth+1
     if parent is not None and max_task_depth is None:max_task_depth=parent.max_task_depth
     from .copilot import CopilotRuntimeSelection
+    from .claude import ClaudeRuntimeSelection
     if decision_selection is None:
         options={"work_item":str(child),"expected_launch_sha256":None}
         if type(root_selection) is CodexRuntimeSelection:
             options["config_overrides"]=CODEX_BOUNDED_REVIEW_OVERRIDES
         decision_selection=replace(root_selection,**options)
-    if (type(decision_selection) not in {CodexRuntimeSelection, CopilotRuntimeSelection}
+    if (type(decision_selection) not in {CodexRuntimeSelection, CopilotRuntimeSelection, ClaudeRuntimeSelection}
         or decision_selection.work_item!=str(child) or decision_selection.expected_launch_sha256 is not None
         or (type(decision_selection) is CodexRuntimeSelection and decision_selection.config_overrides!=CODEX_BOUNDED_REVIEW_OVERRIDES)):
         raise RuntimeBindingError('child_decision_runtime_invalid')
+    if type(decision_selection) is ClaudeRuntimeSelection and decision_session_mode != "fresh-handoff":
+        raise RuntimeBindingError("claude_fresh_child_decision_required")
     decision_digest=hashlib.sha256(json_text(decision_selection.to_dict()).encode()).hexdigest()
     value=ChildLeadAssignment(child_id,coordinator_binding,str(child),tuple(scope),tuple(catalog),tuple(required_request_ids),
         tuple(lifecycle_permissions),depth,parent_child_id,max_task_depth,'',decision_digest,decision_session_mode,goal,context)

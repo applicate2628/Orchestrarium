@@ -537,7 +537,9 @@
               },
               "approvalPolicy": {
                 "const": "deny_unadmitted"
-              }
+              },
+              "decisionSessionMode": false,
+              "childAssignmentSha256": false
             }
           }
         },
@@ -783,7 +785,8 @@
               "adapter": {
                 "enum": [
                   "openai-codex",
-                  "microsoft-copilot-sdk"
+                  "microsoft-copilot-sdk",
+                  "claude-agent-sdk"
                 ]
               },
               "sandboxMode": {
@@ -793,7 +796,10 @@
                 ]
               },
               "approvalPolicy": {
-                "const": "deny_all"
+                "enum": [
+                  "deny_all",
+                  "deny_unadmitted"
+                ]
               }
             }
           }
@@ -2187,7 +2193,8 @@
           "provider": {
             "enum": [
               "codex",
-              "copilot"
+              "copilot",
+              "claude"
             ]
           },
           "gate": {

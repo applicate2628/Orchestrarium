@@ -419,10 +419,12 @@ def validate_sdk_execution(
     if writing != ("writeWorkspaceSha256" in value) or (writing and value["schemaVersion"] not in {1, 2}):
         raise ValueError("sdkExecution workspace binding does not match its sandbox")
     if value["schemaVersion"] in {3, 5} and (
-        (provider != "codex" and not (provider == "copilot" and value["schemaVersion"] == 5))
+        (provider != "codex" and not (provider in {"copilot", "claude"} and value["schemaVersion"] == 5))
         or value["outerBudgetBinding"] == value["innerBudgetBinding"]
     ):
         raise ValueError("coordination inference requires a supported scoped provider and distinct turn reservations")
+    if provider == "claude" and {"decisionSessionMode", "childAssignmentSha256"} & value.keys():
+        raise ValueError("Claude scoped decisions require fresh handoff")
     if {"continuationSourceSha256", "forkSourceSha256"} <= value.keys():
         raise ValueError("native context source modes are mutually exclusive")
     persistent=(value.get("schemaVersion")==5 and value.get("decisionSessionMode")=="native-persistent" and "childAssignmentSha256" in value)
@@ -5408,7 +5410,7 @@ def _validate_event_fields(
             coordination_actor = (
                 sdk_route and type(selected_sdk) is dict
                 and (event.get("provider") == "codex" and selected_sdk.get("schemaVersion") in {3, 5}
-                     or event.get("provider") == "copilot" and selected_sdk.get("schemaVersion") == 5)
+                     or event.get("provider") in {"copilot", "claude"} and selected_sdk.get("schemaVersion") == 5)
                 and selected_sdk.get("operationKind") == {3:"coordination-inference",5:"scoped-child-coordination"}.get(selected_sdk.get("schemaVersion"))
                 and event.get("role") == event.get("assignedRole") == "lead"
                 and event.get("gate") == "none"

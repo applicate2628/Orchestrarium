@@ -36,6 +36,10 @@ from .contracts import (
     review_schema, validate_review, task_schema, validate_task,
 )
 
+from .coordination import (
+    CoordinationInferenceRequest, CoordinationInferenceResult, intent_schema, validate_intent,
+)
+
 READ_TOOLS = ("Read", "Glob", "Grep")
 # Native JSON-schema delivery uses this synthetic output-only tool, not another
 # filesystem permission. Official SDK changelog 0.3.260 (CLI 2.1.260) documents it:
@@ -210,7 +214,8 @@ def create_claude_adapter(request: ExecutionRequest, sink: Any, selection: Claud
 
     if request.provider != "claude" or type(selection) is not ClaudeRuntimeSelection:
         raise AdapterError("claude_request_required")
-    if request.result_kind == "task" or request.tool_profile == "prompt-only":
+    if (request.result_kind == "task" or request.tool_profile == "prompt-only"
+            or type(request) is CoordinationInferenceRequest):
         validate_admitted_request(request, selection)
     workspace_identity = validate_worker_custody(request, selection)
     assert_current_launch(request, selection, "worker_factory")
@@ -245,7 +250,8 @@ def create_claude_adapter(request: ExecutionRequest, sink: Any, selection: Claud
         # The alias does not itself prove a vendor-observed account identity.
         return request.account_binding
 
-    adapter_type = (ClaudeWorkerAdapter if request.write_workspace is not None else
+    adapter_type = (ClaudeCoordinationAdapter if type(request) is CoordinationInferenceRequest else
+                    ClaudeWorkerAdapter if request.write_workspace is not None else
                     ClaudeConsultantAdapter if request.result_kind == "task" else ClaudeReviewAdapter)
     return adapter_type(
         client_factory=lambda options: _official_client_binding(options, cli_path=selection.executable),
@@ -748,6 +754,36 @@ class ClaudeReviewAdapter:
             sdk_execution_json=metadata, observations=tuple(self._observations), review=review,
             usage_json=usage_json, execution_error=execution_error,
             capture_error=self._capture_error, cleanup_error=cleanup_error, protocol_closed=protocol_closed,
+        )
+
+
+class ClaudeCoordinationAdapter(ClaudeReviewAdapter):
+    """Fresh scoped child decision through the same API/cloud evidence lifecycle."""
+
+    def _validate_output_kind(self, request: ExecutionRequest) -> None:
+        if (type(request) is not CoordinationInferenceRequest
+                or request.child_choice_json is None or request.role != "lead"
+                or request.result_kind != "review" or request.tool_profile != "default"
+                or request.write_workspace is not None or request.context_mode != "fresh"
+                or request.decision_session_mode != "fresh-handoff"
+                or request.native_continuation is not None):
+            raise AdapterError("fresh_scoped_coordination_required")
+
+    def _available_tools(self) -> tuple[str, ...]:
+        return ()
+
+    def _output_schema(self, request: ExecutionRequest) -> dict[str, Any]:
+        return intent_schema(request)
+
+    def _parse_final(self, payload: object, request: ExecutionRequest):
+        return validate_intent(json_text(payload), request)
+
+    def _make_result(self, **values: Any) -> CoordinationInferenceResult:
+        intent = values.pop("review")
+        # The existing provider echo confirms the prompt UUID for this fresh
+        # operation. It is not a persisted-session tip or resume capability.
+        return CoordinationInferenceResult(
+            intent_json=intent, **values,
         )
 
 

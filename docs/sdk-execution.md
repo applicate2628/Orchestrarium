@@ -95,6 +95,42 @@ existing launch record, not a second session store. Verify fresh-review isolatio
 correct resume, explicit-handoff contents and wrong-session/account/provider
 refusal through the owning contract. These tests do not authorize model calls.
 
+### Claude scoped fresh child decisions
+
+The existing Python Host `ChildLeadCoordinator` can select the official Claude
+Agent SDK for scoped child decisions using `fresh-handoff`. The child receives
+the authorized goal, current task state and explicit context; its typed decision
+returns to the existing Root admission/lifecycle owners. It does not independently
+gain write, launch, publication or closure authority.
+
+The existing API/cloud credential boundary and current Host permission checks
+remain in force. The decision adapter grants no filesystem, shell or Agent tools;
+the structured-output mechanism only carries the decision. Receiving retains the
+existing sealed observations, process settlement and canonical nonauthorizing
+receipt. A user-owned Claude subscription Lead is not invoked through this route.
+
+Each decision is a fresh SDK session. The provider-confirmed prompt correlation
+binds the answer to that call, but does not prove a resumable native history tip.
+No continuation receipt or persistent-session guarantee is created here.
+Unsupported native continuation is not silently downgraded to handoff. Recovery
+reads the existing canonical task state and does not repeat an already attempted
+task. Fresh-handoff recovery can require a new decision: recovering a received
+but unapplied decision without another inference is not implemented for this
+mode. The native-persistent decision-recovery guarantee must not be inferred
+from its durable task receipts.
+
+This is source/offline integration, not installed or live-provider qualification.
+The scoped candidate passed 157 adjacent adapter tests and two crossed offline
+Host/lifecycle tests (ordinary completion and restart after a canonical task
+receipt). Independent bounded coverage passed 22 tests; these counts overlap
+other author checks and are not an additive total. The crossed path uses the
+actual factory, adapter, frame parser, Root/ledger/receiving and archive, with
+synthetic provider and process peers. It checks two distinct fresh sessions and
+one task execution. Exact revision and final review are recorded in the PR.
+
+Official reference: [Claude Agent SDK Python public interface](https://github.com/anthropics/claude-agent-sdk-python/tree/163f50ed56fa8c3fd9346148b6e56e7696794b58).
+The reference documents SDK operations, not an installed-version requirement.
+
 ### Native Consultant continuation through the Host
 
 The existing Host executor can explicitly continue a received read-only Codex
@@ -516,7 +552,7 @@ checkpoints below retain their original scope; they are not fresh acceptance.
 |---|---|---|
 | Common execution | Existing shared dispatch/supervisor/ledger; SDK worker uses the invoking Python interpreter. | Exercise the same lifecycle, events, receipt and cancellation owners for each supported provider/role; retain main regressions. |
 | Codex | Explicit Windows Reviewer, Consultant and scoped Worker source bridges; offline qualification and historical bounded native evidence below. | Qualify the current installed/native routes and remaining platform behavior. Consultant durable continuation/fork and scoped child-Lead coordination are already implemented; do not rebuild them as outstanding work. |
-| Claude | SDK Host API and explicit scoped Worker command-line route, plus prompt-only Consultant and Reviewer routes, exact receiving and offline checks; native Lead is a different boundary. | Qualify current native execution and complete child-Lead/session outcomes using official API/cloud access; do not wrap a subscription CLI as a third-party worker. |
+| Claude | SDK Host API and explicit scoped Worker command-line route, prompt-only Consultant/Reviewer, and scoped fresh-handoff child decisions through existing Root/receiving owners. Native subscription Lead is a different boundary. | Qualify current native execution and remaining supported persistent session outcomes using official API/cloud access; do not wrap a subscription CLI as a third-party worker. |
 | Antigravity | Official setup direction; no implemented AGY runtime adapter in the current SDK execution factory. | Implement Lead/session integration and native subagent handoff; separately qualify any admitted programmatic worker route. |
 | Copilot | Explicit public fresh Consultant/Reviewer and scoped Worker; scoped child decision sessions through the existing Host lifecycle and canonical Windows receiving. Source/offline qualification only. | Qualify the current installed runtime and native session lifecycle; remaining native Lead/subagent integration must use verified vendor capabilities. |
 | Kimi | Existing ACP boundary is separate from the current SDK factory. | Reconcile the supported Kimi runtime with the official agent integration; do not silently substitute the older Python runtime or a model API for the chosen route. |
@@ -1035,7 +1071,7 @@ not a live bot review or an atomic hosted transaction.
 
 Completed source/offline milestones include setup apply/recovery; Codex public
 Reviewer/Consultant/scoped Worker, durable Consultant continuation/fork; official
-Claude API public Reviewer/Consultant/scoped Worker; Copilot public
+Claude API public Reviewer/Consultant/scoped Worker and fresh child decisions; Copilot public
 Reviewer/Consultant/scoped Worker and scoped fresh/persistent child decisions.
 The existing Root admission, dynamic task proposal/explicit decision recovery,
 canonical receiving, closure and PR-result-currentness owners remain in use.
@@ -1049,7 +1085,7 @@ wholly unfinished features. Continue only the following unresolved outcomes:
 | Next outcome | Concrete remaining work | Verification/delivery boundary |
 |---|---|---|
 | Provider routes | AGY native Lead/session integration; reconcile Kimi's supported agent runtime; Grok Build ACP actual runtime, account/tool enforcement and canonical receiving. | Use confirmed official capabilities and the existing owners. Do not turn subscription Lead routes into third-party workers. |
-| Session coverage | Remaining provider-native continuation and native Lead/subagent integration where supported, including Claude API session outcomes. | Existing Codex/Copilot child coordination is not missing. Host lineage/depth does not prove control of vendor-internal subagents. |
+| Session coverage | Remaining provider-native continuation and native Lead/subagent integration where supported, including Claude API durable continuation beyond its implemented fresh child decisions, and exact recovery of received-but-unapplied fresh decisions without another inference. | Existing Codex/Copilot child coordination is not missing. Host lineage/depth does not prove control of vendor-internal subagents. |
 | Platform coverage | POSIX platform containment/custody and lifecycle qualification for intended macOS/Linux routes. | Windows offline results do not qualify POSIX or prove an OS sandbox. |
 | Current native acceptance | Install/inspect the selected current payload and exercise admitted real provider routes and recovery. | Not yet performed for this HEAD. Installation and quota-consuming calls retain their separate authorization; offline peers are not native acceptance. |
 | PR delivery | Keep main policy/regression fixes, this roadmap, source projections and PR description synchronized; complete unresolved acceptance. | PR remains draft, unmerged and not globally installed. No automatic model selection, budget policy or Actions run is implied. |
