@@ -173,8 +173,52 @@ admitted new turn. Repeating a consumed operation, an unresolved predecessor,
 corrupt receipt or drift cannot silently become a new model call. Artifacts
 written before continuation receipts existed remain readable but cannot supply
 restart continuation; an explicitly admitted fresh task/handoff is still usable.
-Other role/provider continuation, native fork and scoped child-Lead lifecycle
-remain roadmap work. Offline fixtures do not constitute native acceptance.
+Other role/provider continuation and scoped child-Lead lifecycle remain roadmap
+work. Offline fixtures do not constitute native acceptance.
+
+### Native Codex Consultant fork
+
+A Codex Consultant task may explicitly select `contextMode: fork` in version-5
+task binding, with the same `predecessorEvidenceRunId` as continuation. The
+received predecessor supplies actual session identity and inherited scope/access
+controls. Python Hosts use `prepare_received_continuation_request` with
+`context_mode="fork"`; omission retains continuation mode.
+This creates a distinct provider-native thread, not a child Lead or
+an independently authorized permission scope. A worktree or PR is not created
+merely by forking a conversation.
+
+The [official 0.169 SDK client](https://github.com/openai/codex/blob/rust-v0.169.0/sdk/python/src/openai_codex/client.py)
+exposes `thread_fork`; its [protocol contract](https://github.com/openai/codex/blob/rust-v0.169.0/codex-rs/app-server-protocol/src/protocol/v2/thread.rs)
+selects `lastTurnId`: history through that completed turn
+is copied, excluding later parent turns. Therefore a subsequently advanced parent
+is not by itself a reason to reject the fork. The adapter requests persistent
+native state and defers inherited goal continuation, verifies the returned new thread differs from its source, checks
+the source linkage and exact copied history boundary, and checks current runtime
+controls before starting one new turn. Parent history is not modified. This is
+official API capability plus local integration checks, not live qualification.
+[Vendor fork tests](https://github.com/openai/codex/blob/rust-v0.169.0/codex-rs/app-server/tests/suite/v2/thread_fork.rs)
+cover source preservation and reopening after restart; they do not replace
+Orchestrarium acceptance of its installed route.
+
+Different explicitly admitted fork intents may share a predecessor. The existing
+atomic launch claim still rejects reuse of an intent; neither a timeout nor an
+unknown create outcome grants an automatic second fork. Preserve observed child
+identity on failure for diagnosis/reconciliation. Do not infer a completed result
+or silently rerun a completed turn. Successful received child output can supply
+a later continuation or fork through the same durable evidence path.
+The guarded intent is the existing admitted dispatch/evidence operation, not
+semantic deduplication of arbitrary prompts or artifact identities. A new public
+invocation may create new operation IDs; it is a new explicit request, not an
+idempotent retry API. After an uncertain outcome, inspect the retained terminal
+receipt and ledger rather than rerunning the launcher with new IDs/paths.
+
+Logical session depth describes only Orchestrarium's received session lineage:
+a new fresh session starts at zero, continuation preserves the predecessor's
+depth, and fork increments it. Older receipts without depth retain an unknown
+value rather than being reset to zero or blocking otherwise valid work. This is
+not a universal depth ceiling, native subagent-depth control or evidence that
+hidden vendor descendants are counted. Child-Lead delegation and scoped lifecycle
+writing still require the separate integration below.
 
 ### Independent multi-Lead sessions and depth
 
@@ -807,7 +851,7 @@ not converted to fresh. Existing interrupted-turn reconciliation is unchanged.
 The remaining provider-specific context modes in the roadmap remain unfinished.
 
 Version 5 has the version-3 keys plus `predecessorEvidenceRunId`. It requires
-`contextMode: continuation`, `contextHandoff: null` and a nonempty predecessor
+`contextMode: continuation` or `fork`, `contextHandoff: null` and a nonempty predecessor
 terminal evidence-run ID in the selected work item. It is supported only by
 `--sdk-task-binding` with read-only Codex Consultant task mode. Review, Worker,
 Claude and the older binding versions do not gain continuation through this field.

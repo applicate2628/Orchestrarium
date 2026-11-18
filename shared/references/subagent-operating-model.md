@@ -995,6 +995,13 @@ predecessor inside the existing atomic claim. A retained old result or restart
 never authorizes replay. Missing legacy receipts affect only that continuation;
 independent admitted fresh/handoff work remains available. Durable continuation
 does not grant child-Lead authority or control unrelated native clients.
+An explicit native fork is a new session from a verified received snapshot,
+not permission to delegate as a Lead. Different admitted fork intents may share
+an ancestor; the same intent must not be replayed after uncertainty. Preserve
+source linkage and derive logical session depth from received evidence; propagate
+unknown legacy depth rather than fabricate zero. Native subagent depth remains
+vendor-owned and distinct from this lineage. Verify copied history and selected
+controls before the first new turn, and retain observed child identity on failure.
 
 ## Explicit Worker file effects
 

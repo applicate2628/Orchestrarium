@@ -126,7 +126,7 @@ def read_binding(path: Path) -> dict[str, Any]:
                 (mode == "handoff" and (type(handoff) is not str or not handoff.strip()))):
                 raise ValueError()
         if version == 5:
-            if (value["contextMode"] != "continuation" or value["contextHandoff"] is not None
+            if (value["contextMode"] not in {"continuation", "fork"} or value["contextHandoff"] is not None
                     or not _text(value["predecessorEvidenceRunId"])):
                 raise ValueError()
         if version == 2 or (version in (3, 4, 5) and value["installedHookRoot"] is not None):
@@ -181,7 +181,7 @@ class CodexReviewDispatch:
         self._consumed = False
         self._finished = False
         self._stage = 0
-        self._stages = (_STAGES[:-2] + ("resume", "reconcile", "turn_start")
+        self._stages = (_STAGES[:-2] + ("fork" if request.context_mode == "fork" else "resume", "reconcile", "turn_start")
                         if request.native_continuation is not None else _STAGES)
         self._queries = 0
         self._controls = self._control_snapshot()
@@ -550,7 +550,7 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
         raise DispatchError("E_CLAUDE_SDK_PROMPT_ONLY_REQUIRED")
     write_workspace = binding.get("writeWorkspace")
     write_mode = write_workspace is not None
-    continuation_mode = binding.get("contextMode") == "continuation"
+    continuation_mode = binding.get("contextMode") in {"continuation", "fork"}
     if continuation_mode and (provider != "codex" or not task_mode or write_mode
                               or role.assigned_role != "consultant" or role.execution_role != "consultant"):
         raise DispatchError("E_CODEX_SDK_CONTINUATION_ROUTE_UNSUPPORTED")
@@ -654,7 +654,8 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
         request = runtime.prepare_codex_request(request)
         if continuation_mode:
             request = runtime.prepare_received_continuation_request(
-                request, selection, predecessor_evidence_run_id=binding["predecessorEvidenceRunId"])
+                request, selection, predecessor_evidence_run_id=binding["predecessorEvidenceRunId"],
+                **({"context_mode": "fork"} if binding["contextMode"] == "fork" else {}))
     else:
         runtime.validate_admitted_request(request, selection)
     runtime.validate_worker_custody(request, selection)

@@ -301,7 +301,7 @@ def selected_sdk_execution(request: ExecutionRequest, selection: Any) -> dict[st
     if request.write_workspace is not None:
         value["writeWorkspaceSha256"] = hashlib.sha256(request.write_workspace.encode("utf-8")).hexdigest()
     if request.native_continuation is not None:
-        value["continuationSourceSha256"] = request.native_continuation.source_sha256
+        value["forkSourceSha256" if request.context_mode == "fork" else "continuationSourceSha256"] = request.native_continuation.source_sha256
     if type(request) is CoordinationInferenceRequest:
         value.update(schemaVersion=3, operationKind="coordination-inference",
                      innerRequestSha256=request.inner_request_sha256,
@@ -488,8 +488,8 @@ def claim_launch(request: ExecutionRequest, selection: Any, *, authority: Callab
             raise RuntimeBindingError("existing_launch_is_not_replay_authority")
         if request.native_continuation is not None:
             _validate_continuation(request, selection, previous_run, previous_terminal, events=events)
-            source = selected_sdk_execution(request, selection)["continuationSourceSha256"]
-            if any(e.get("eventKind") == "launch" and e.get("sdkExecution", {}).get("continuationSourceSha256") == source for e in events):
+            source = request.native_continuation.source_sha256
+            if request.context_mode == "continuation" and any(e.get("eventKind") == "launch" and e.get("sdkExecution", {}).get("continuationSourceSha256") == source for e in events):
                 raise RuntimeBindingError("continuation_predecessor_already_consumed")
         _require_authority(authority, request, "sdk_launch_commit")
         return event
@@ -581,7 +581,7 @@ def continuation_context_sha256(request, selection):
     return hashlib.sha256(json_text({"controls": controls, "runtime": runtime}).encode()).hexdigest()
 
 
-def _received_continuation_source(request, selection, predecessor_evidence_run_id, *, events=None):
+def _received_native_context(request, selection, predecessor_evidence_run_id, *, events=None):
     """Read an already received artifact; do not reconstruct a process observation."""
     from .contracts import NativeContinuation, strict_json
     from .receiving import review_artifact_target
@@ -637,22 +637,44 @@ def _received_continuation_source(request, selection, predecessor_evidence_run_i
     if type(document) is not dict or set(document) != {"task", "reported_sdk_configuration", "native_continuation"}:
         raise RuntimeBindingError("continuation_durable_provenance_required")
     native = document["native_continuation"]
-    if (type(native) is not dict or set(native) != {"schema_version", "thread_id", "turn_id", "context_sha256"}
-            or type(native["schema_version"]) is not int or native["schema_version"] != 1
+    keys = {"schema_version", "thread_id", "turn_id", "context_sha256"}
+    if (type(native) is not dict or type(native.get("schema_version")) is not int
+            or native["schema_version"] not in {1, 2}
+            or set(native) != (keys if native["schema_version"] == 1 else keys | {"session_depth"})
             or native["context_sha256"] != continuation_context_sha256(request, selection)):
         raise RuntimeBindingError("continuation_scope_changed")
+    depth = native.get("session_depth")
+    if depth is not None and (type(depth) is not int or depth < 0):
+        raise RuntimeBindingError("invalid_native_session_depth")
     reported = document["reported_sdk_configuration"]
     if (type(reported) is not dict or reported.get("schemaVersion") != 1
             or {k:v for k,v in reported.items() if k not in {"schemaVersion", "sdkVersion", "runtimeVersion"}}
             != {k:v for k,v in selected.items() if k not in {"schemaVersion", "requestSha256"}}):
         raise RuntimeBindingError("continuation_receipt_changed")
-    return NativeContinuation(launch["runId"], terminal["runId"], selected["requestSha256"], native["thread_id"], native["turn_id"])
+    return NativeContinuation(launch["runId"], terminal["runId"], selected["requestSha256"], native["thread_id"], native["turn_id"]), depth
 
 
-def prepare_received_continuation_request(request, selection, *, predecessor_evidence_run_id):
+def _received_continuation_source(request, selection, predecessor_evidence_run_id, *, events=None):
+    return _received_native_context(request, selection, predecessor_evidence_run_id, events=events)[0]
+
+
+def native_session_depth(request, selection):
+    """Observed Orchestrarium session lineage, not provider subagent depth."""
+    if request.native_continuation is None:
+        return 0
+    source, depth = _received_native_context(request, replace(selection, expected_launch_sha256=None),
+        request.native_continuation.prior_evidence_run_id)
+    if source != request.native_continuation:
+        raise RuntimeBindingError("continuation_observed_binding_mismatch")
+    return None if depth is None else depth + (1 if request.context_mode == "fork" else 0)
+
+
+def prepare_received_continuation_request(request, selection, *, predecessor_evidence_run_id, context_mode="continuation"):
     """Prepare a new task from durable received evidence, without model effects."""
+    if context_mode not in {"continuation", "fork"}:
+        raise RuntimeBindingError("invalid_native_context_mode")
     source = _received_continuation_source(request, selection, predecessor_evidence_run_id)
-    return replace(request, context_mode="continuation", native_continuation=source)
+    return replace(request, context_mode=context_mode, native_continuation=source)
 
 
 def _validate_continuation(request, selection, previous_run, previous_terminal, *, events=None):

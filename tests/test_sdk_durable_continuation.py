@@ -72,7 +72,7 @@ def test_canonical_artifact_requires_complete_strict_native_receipt(tmp_path,mon
     elif mutation=='unknown-field':doc['native_continuation']['extra']=True
     elif mutation=='wrong-context':doc['native_continuation']['context_sha256']='0'*64
     content=json.dumps(doc)
-    if mutation=='duplicate-key':content=content.replace('"schema_version": 1','"schema_version": 1, "schema_version": 1')
+    if mutation=='duplicate-key':content=content.replace('"schema_version": 2','"schema_version": 2, "schema_version": 2')
     raw=(content+'\n').encode();target.write_bytes(raw)
     ledger=Path(selection.work_item)/'agent-runs.jsonl'
     rows=[json.loads(line) for line in ledger.read_text().splitlines()]

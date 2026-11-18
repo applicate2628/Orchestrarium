@@ -82,7 +82,8 @@ def test_no_implicit_reviewer_worker_continuation(tmp_path, monkeypatch, role, t
         dispatch.prepare_dispatch(selected, path, source_environment=environment, cancellation_probe=lambda: False)
 
 
-def test_public_restart_restore_claim_worker_receive_and_no_replay(tmp_path, monkeypatch):
+@pytest.mark.parametrize("mode", ["continuation", "fork"])
+def test_public_restart_restore_claim_worker_receive_and_no_replay(tmp_path, monkeypatch, mode):
     import process_supervision.sdk_worker as worker
     from process_supervision.process_runner import ProcessRunnerV1
     from provider_prompt import ProviderOutputContext
@@ -102,7 +103,7 @@ def test_public_restart_restore_claim_worker_receive_and_no_replay(tmp_path, mon
     predecessor = terminal["runId"]
     del initial, prior_run, prior_observation, terminal, prior_selected
 
-    path.write_text(json.dumps(binding(predecessorEvidenceRunId=predecessor, artifactIdentity="next-artifact")))
+    path.write_text(json.dumps(binding(contextMode=mode, predecessorEvidenceRunId=predecessor, artifactIdentity="next-artifact")))
     operation = dispatch.prepare_dispatch(selected, path, source_environment=environment,
                                           cancellation_probe=lambda: False)
     assert operation.request.native_continuation.prior_evidence_run_id == predecessor
@@ -112,10 +113,11 @@ def test_public_restart_restore_claim_worker_receive_and_no_replay(tmp_path, mon
     def simulated(process, value, **kwargs):
         calls.append(value)
         # Exercise the actual public current-authority sequence; no model runs.
-        for effect in ("start", "client_start", "query", "resume", "query", "reconcile", "turn_start"):
+        for effect in ("start", "client_start", "query", "fork" if value.context_mode == "fork" else "resume", "query", "reconcile", "turn_start"):
             kwargs["authority"](value, effect)
         admitted = runtime.runtime_selection_from_dict("codex", kwargs["runtime_selection"])
-        return observed(monkeypatch, value, admitted, result_changes={"native_turn_id": "continued-native-turn"})
+        return observed(monkeypatch, value, admitted, result_changes={"native_turn_id": "continued-native-turn",
+            **({"native_thread_id": "child-native-thread"} if value.context_mode == "fork" else {})})
     monkeypatch.setattr(worker, "run_sdk_worker", simulated)
     with ProcessRunnerV1() as process:
         run = operation.execute(process)
@@ -132,10 +134,16 @@ def test_public_restart_restore_claim_worker_receive_and_no_replay(tmp_path, mon
     assert next_operation.request.native_continuation.native_turn_id == "continued-native-turn"
 
     selected.control.ledger_artifact = "repeat.json"
-    path.write_text(json.dumps(binding(predecessorEvidenceRunId=predecessor, artifactIdentity="repeat-artifact")))
+    path.write_text(json.dumps(binding(contextMode=mode, predecessorEvidenceRunId=predecessor, artifactIdentity="repeat-artifact")))
     repeated = dispatch.prepare_dispatch(selected, path, source_environment=environment,
                                          cancellation_probe=lambda: False)
     with ProcessRunnerV1() as process:
-        with pytest.raises(ValueError, match="already_consumed"):
+        if mode == "continuation":
+            with pytest.raises(ValueError, match="already_consumed"):
+                repeated.execute(process)
+        else:
             repeated.execute(process)
-    assert len(calls) == 1
+            assert repeated.receive().terminal["status"] == "completed"
+            with pytest.raises(Exception):
+                repeated.execute(process)
+    assert len(calls) == (2 if mode == "fork" else 1)

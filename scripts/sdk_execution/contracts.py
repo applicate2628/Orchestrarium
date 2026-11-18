@@ -133,16 +133,16 @@ class ExecutionRequest:
             raise ValueError("task adapter combination not implemented")
         if self.native_continuation is not None:
             if (type(self.native_continuation) is not NativeContinuation
-                    or self.context_mode != "continuation" or self.provider != "codex"
+                    or self.context_mode not in {"continuation", "fork"} or self.provider != "codex"
                     or self.role != "consultant" or self.result_kind != "task"
                     or self.write_workspace is not None or self.tool_profile != "default"):
                 raise ValueError("native continuation requires read-only Codex Consultant")
             prior = self.native_continuation
             if {self.external_dispatch_id, self.external_evidence_run_id} & {prior.prior_dispatch_id, prior.prior_evidence_run_id}:
                 raise ValueError("continuation requires new execution identities")
-        elif self.context_mode == "continuation":
+        elif self.context_mode in {"continuation", "fork"}:
             raise ValueError("native continuation binding required")
-        if self.context_mode not in {"fresh", "handoff", "continuation"}:
+        if self.context_mode not in {"fresh", "handoff", "continuation", "fork"}:
             raise ValueError("unsupported context mode")
         if self.provider not in {"codex", "claude", "kimi", "grok", "minimax", "mimo"}:
             raise ValueError("invalid provider")

@@ -166,8 +166,10 @@ def terminal_payload(request: ExecutionRequest, observation: Any, *, output_cont
         or observation.protocol_error is not None
     )
     if request.native_continuation is not None:
-        complete = complete and (result.native_thread_id == request.native_continuation.native_thread_id
-            and bool(result.native_turn_id) and result.native_turn_id != request.native_continuation.native_turn_id)
+        expected_thread = (bool(result.native_thread_id) and result.native_thread_id != request.native_continuation.native_thread_id
+            if request.context_mode == "fork" else result.native_thread_id == request.native_continuation.native_thread_id)
+        complete = complete and (expected_thread and bool(result.native_turn_id)
+            and result.native_turn_id != request.native_continuation.native_turn_id)
     if request.write_workspace is not None and admitted_sdk_execution is None:
         raise ValueError("SDK writes require admitted request commitment")
     selected_config = admitted_sdk_execution if admitted_sdk_execution is not None else result.sdk_execution
@@ -249,6 +251,11 @@ def terminal_payload(request: ExecutionRequest, observation: Any, *, output_cont
                     "cancelled": process.cancelled, "timed_out": process.timed_out},
         "protocol_error": observation.protocol_error,
     }
+    if not complete and (result.native_thread_id is not None or result.native_turn_id is not None):
+        # Preserve observed identities for diagnosis/reconciliation, never as a
+        # completed continuation receipt or permission to repeat execution.
+        result_content["observed_native_session"] = {
+            "thread_id": result.native_thread_id, "turn_id": result.native_turn_id}
     if complete and (task_result or selected_config["schemaVersion"] == 2):
         # The durable artifact, whose exact bytes are bound by the terminal,
         # retains observed versions separately from selected launch controls.
@@ -256,8 +263,9 @@ def terminal_payload(request: ExecutionRequest, observation: Any, *, output_cont
         if (task_result and request.provider == "codex" and request.role == "consultant"
                 and request.write_workspace is None and selected_config["schemaVersion"] == 2
                 and result.native_thread_id and result.native_turn_id):
-            from .runtime import continuation_context_sha256
-            result_content["native_continuation"] = {"schema_version": 1,
+            from .runtime import continuation_context_sha256, native_session_depth
+            result_content["native_continuation"] = {"schema_version": 2,
+                "session_depth": native_session_depth(request, selection),
                 "thread_id": result.native_thread_id, "turn_id": result.native_turn_id,
                 "context_sha256": continuation_context_sha256(request, selection)}
     payload: dict[str, object] = {

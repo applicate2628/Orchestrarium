@@ -35,6 +35,7 @@ class CodexClientProtocol(Protocol):
     def account_read(self, params: dict[str, Any]) -> object: ...
     def thread_start(self, params: dict[str, Any]) -> object: ...
     def thread_resume(self, thread_id: str, params: dict[str, Any]) -> object: ...
+    def thread_fork(self, thread_id: str, params: dict[str, Any]) -> object: ...
     def thread_read(self, thread_id: str, include_turns: bool = False) -> object: ...
     def turn_start(self, thread_id: str, input_items: object, params: dict[str, Any]) -> object: ...
     def next_turn_notification(self, turn_id: str) -> object: ...
@@ -87,7 +88,7 @@ def _require_call(method: object, *args: object, **kwargs: object) -> None:
         raise AdapterError("incompatible_sdk_api") from exc
 
 
-def _require_client_api(client: object, *, resume: bool, continuation: bool = False) -> None:
+def _require_client_api(client: object, *, resume: bool, continuation: bool = False, fork: bool = False) -> None:
     # Validate consumed call shapes, including cleanup, without invoking methods.
     calls = [
         ("start", (), {}), ("initialize", (), {}),
@@ -97,7 +98,7 @@ def _require_client_api(client: object, *, resume: bool, continuation: bool = Fa
     ]
     if resume or continuation:
         calls.extend([
-            ("thread_resume", ("thread", {}), {}),
+            ("thread_fork" if fork else "thread_resume", ("thread", {}), {}),
             ("thread_read", ("thread",), {"include_turns": True}),
         ])
     if not resume:
@@ -421,6 +422,7 @@ class CodexReviewAdapter:
 
     def _execute(self, request: ExecutionRequest, resume: tuple[str, str] | None) -> ExecutionResult:
         continuation = request.native_continuation
+        fork = request.context_mode == "fork"
         observations: list[Observation] = []
         total_bytes = 0
         status, review, usage = "incomplete", None, None
@@ -522,7 +524,7 @@ class CodexReviewAdapter:
             client = binding.client
             self._client = client
             _version_metadata(binding.sdk_version, "invalid_sdk_version")
-            _require_client_api(client, resume=resume is not None, continuation=continuation is not None)
+            _require_client_api(client, resume=resume is not None, continuation=continuation is not None, fork=fork)
             _require_call(binding.read_configuration, {})
             _require_call(binding.list_mcp_status, {})
             self._authority(request, "client_start")
@@ -541,14 +543,24 @@ class CodexReviewAdapter:
                 "modelProvider": "openai", "config": {"model_reasoning_effort": request.effort, **mcp_configuration, **self._sandbox_config(request)},
             }
             resumed_thread = resume[0] if resume else continuation.native_thread_id if continuation else None
-            self._authority(request, "resume" if resumed_thread else "thread_start")
-            started = _object(client.thread_resume(resumed_thread, settings) if resumed_thread else client.thread_start(settings))
+            self._authority(request, "fork" if fork else "resume" if resumed_thread else "thread_start")
+            # Official thread/fork lastTurnId is inclusive; never fork an unbounded mutable tip.
+            # https://github.com/openai/codex/blob/rust-v0.169.0/codex-rs/app-server-protocol/src/protocol/v2/thread.rs
+            started = _object(client.thread_fork(resumed_thread, {
+                **settings, "lastTurnId": continuation.native_turn_id, "ephemeral": False,
+                "deferGoalContinuation": True,
+            }) if fork else client.thread_resume(resumed_thread, settings) if resumed_thread else client.thread_start(settings))
+            native_thread = _object(started.get("thread"))
+            self._thread_id = _identifier(native_thread.get("id"))
             if continuation:
-                # The resumed session's prior conversation is not a new output artifact.
-                started = {**started, "thread": {"id": _object(started.get("thread")).get("id")}}
-            started = capture("thread/resume" if resumed_thread else "thread/start", started)
-            self._thread_id = _identifier(_object(started.get("thread")).get("id"))
-            if resumed_thread and self._thread_id != resumed_thread:
+                # Keep observed child identity even if later checks fail; never re-export history.
+                started = {**started, "thread": {"id": self._thread_id,
+                    **({"forkedFromId": native_thread.get("forkedFromId")} if fork else {})}}
+            started = capture("thread/fork" if fork else "thread/resume" if resumed_thread else "thread/start", started)
+            if fork:
+                if self._thread_id == resumed_thread or native_thread.get("forkedFromId") != resumed_thread:
+                    raise AdapterError("native_fork_identity_mismatch")
+            elif resumed_thread and self._thread_id != resumed_thread:
                 raise AdapterError("native_thread_mismatch")
             self._profile(request, started)
             self._verify_mcp_inventory(binding, request)
@@ -558,7 +570,7 @@ class CodexReviewAdapter:
                 "runtimeVersion": runtime, "model": request.model, "effort": request.effort,
                 "sandboxMode": self._sandbox_mode(request), "approvalPolicy": "deny_all", "accountBinding": request.account_binding,
                 **self._sandbox_metadata(request),
-                **({"continuationSourceSha256": continuation.source_sha256} if continuation else {}),
+                **({("forkSourceSha256" if fork else "continuationSourceSha256"): continuation.source_sha256} if continuation else {}),
             })
             if resume:
                 self._turn_id = resume[1]
@@ -585,7 +597,7 @@ class CodexReviewAdapter:
                             or sum(t.get("id") == continuation.native_turn_id for t in turns) != 1):
                         raise AdapterError("continuation_predecessor_not_current_terminal")
                     # Do not re-export the prior private history as current evidence.
-                    capture("continuation/verified", {"threadId": self._thread_id,
+                    capture("fork/verified" if fork else "continuation/verified", {"threadId": self._thread_id,
                             "priorTurnId": continuation.native_turn_id,
                             "sourceSha256": continuation.source_sha256})
                     if self._cancel_requested:

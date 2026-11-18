@@ -49,7 +49,12 @@ turn, with single-successor consumption in the existing work-item ledger. This
 is not independent-review context, interrupted-turn replay or child-Lead permission.
 Public task binding version 5 selects a prior evidence run, and the existing
 canonical received artifact/ledger restores native identity after restart. No
-arbitrary native IDs or reconstructed in-memory seals are accepted. Retain original outcomes and reconcile uncertainty through
+arbitrary native IDs or reconstructed in-memory seals are accepted.
+The same public binding can select an explicit Consultant fork using the official
+last-turn snapshot selector. It creates a checked new native thread, preserves
+scope and derived session depth, and leaves child-Lead lifecycle authority and
+native subagent-depth controls separate. Repeated intents never automatically
+create another fork after an unknown outcome. Retain original outcomes and reconcile uncertainty through
 the same owners; API-key mode readback does not establish an account identity.
 
 ## Codex-specific runtime notes
