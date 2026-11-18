@@ -39,9 +39,9 @@ SDK_PROVIDERS = {
     },
     "copilot": {
         "label": "GitHub Copilot",
-        "package": "github-copilot-sdk",
-        "source": "https://github.com/github/copilot-sdk/blob/main/python/README.md",
-        "runtime": "The official Python SDK can download its pinned runtime on first managed use; an explicit external CLI is also supported. Review this before any first use.",
+        "package": "microsoft-copilot-sdk",
+        "source": "https://github.com/microsoft/copilot-sdk/blob/main/python/README.md",
+        "runtime": "Published wheels pin the runtime version; the SDK downloads and stages the matching runtime on first managed use unless explicitly configured otherwise. COPILOT_SKIP_CLI_DOWNLOAD=1 disables automatic download; COPILOT_CLI_PATH selects an existing binary. This setup does not run the runtime downloader or start Copilot. Review runtime acquisition before any first use.",
         "auth": "Use the provider-supported authentication and the separately authorized quota. VS Code Copilot as a native Lead is a different integration.",
     },
     "kimi": {

@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Copilot setup plans now identify the current official Microsoft Python SDK package and source. Guidance distinguishes package installation from runtime provisioning and warns about first-use downloads; this does not activate a Copilot executor or run a model.
+
 - The shared SDK coordinator now rechecks the current Root request and permissions after execution before delivering evidence, including direct Kimi ACP composition. It does not rerun launch preflight against completed artifacts or repeat execution; stale/revoked results remain retained instead of being silently delivered.
 
 - Kimi SDK-adapter recovery can read an already received terminal without rerunning the provider. The existing terminal owner binds committed receipt bytes to the ledger and retains canonical evidence when stdout delivery fails; recovery verifies that binding rather than guessing lost process or account state.

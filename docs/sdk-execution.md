@@ -519,6 +519,19 @@ historical results as fresh acceptance.
 | Kimi | Existing ACP boundary is separate from the current SDK factory. | Reconcile the supported Kimi runtime with the official agent integration; do not silently substitute the older Python runtime or a model API for the chosen route. |
 | Grok | Candidate protocol support is not live-qualified execution. | Integrate the official Grok Build Agent Client Protocol (ACP) route, including account/tool enforcement and result receiving; do not invent a separate vendor SDK or substitute the xAI model API. |
 
+### Copilot provisioning boundary
+
+The current official Python distribution is `microsoft-copilot-sdk`, imported as
+`copilot`; the setup plan links to the [official Python SDK documentation](https://github.com/microsoft/copilot-sdk/blob/main/python/README.md).
+Printing a setup plan does not install the package, start a runtime or invoke a
+model. Package installation is distinct from runtime provisioning and native
+acceptance. The vendor documents automatic runtime download on first use;
+`COPILOT_SKIP_CLI_DOWNLOAD=1` disables that download, and `COPILOT_CLI_PATH` selects
+an already provisioned binary. The future execution adapter must use the admitted
+runtime/access configuration rather than silently downloading or launching one.
+This setup correction does not implement a callable Copilot executor or qualify
+an installed SDK/runtime.
+
 ### Approved role/access acceptance scope
 
 This approved target matrix is not an existing capability claim.

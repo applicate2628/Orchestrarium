@@ -21,7 +21,7 @@ def load_installer():
 
 @pytest.mark.parametrize("provider,package", [
     ("antigravity", "google-antigravity"), ("codex", "openai-codex"),
-    ("claude", "claude-agent-sdk"), ("copilot", "github-copilot-sdk"),
+    ("claude", "claude-agent-sdk"), ("copilot", "microsoft-copilot-sdk"),
     ("kimi", "kimi-agent-sdk"),
 ])
 def test_official_package_proposal_not_api_client_substitute(provider, package):
@@ -123,7 +123,8 @@ def test_venv_preview_has_no_effect(tmp_path):
     assert not target.exists()
 
 
-def test_apply_isolated_normal_pip_and_same_interpreter(tmp_path, monkeypatch):
+@pytest.mark.parametrize("provider,package", [("codex", "openai-codex"), ("copilot", "microsoft-copilot-sdk")])
+def test_apply_isolated_normal_pip_and_same_interpreter(tmp_path, monkeypatch, provider, package):
     import os
     from types import SimpleNamespace
     from installation.sdk_setup import setup_environment, environment_python
@@ -137,14 +138,14 @@ def test_apply_isolated_normal_pip_and_same_interpreter(tmp_path, monkeypatch):
             fake_venv(target)
         return SimpleNamespace(returncode=0)
     with patch('subprocess.run', side_effect=run):
-        assert setup_environment('codex', str(target), apply=True) == 0
+        assert setup_environment(provider, str(target), apply=True) == 0
     assert calls[0][0] == [sys.executable, '-I', '-m', 'venv', str(target)]
     assert calls[1][0][:3] == [str(environment_python(target)), '-I', '-c']
     assert 'sys.prefix != sys.base_prefix' in calls[1][0][3]
     assert calls[1][0][-1] == str(target)
     install = calls[2][0]
     assert install[:7] == [str(environment_python(target)), '-I', '-m', 'pip', '--isolated', 'install', '--upgrade']
-    assert '--no-deps' not in install and install[-1] == 'openai-codex'
+    assert '--no-deps' not in install and install[-1] == package
     assert install[install.index('--index-url') + 1] == 'https://pypi.org/simple'
     assert calls[3][0][-1] == 'check'
     env = calls[0][1]
@@ -238,3 +239,14 @@ def test_conflicting_apply_arguments_no_effect(args):
         with pytest.raises(SystemExit) as exc:
             installer.main(args)
     assert exc.value.code == 2
+
+
+def test_copilot_guidance_uses_current_official_package_without_runtime_execution():
+    text = setup_guidance("copilot", "selected-python")
+    assert "https://github.com/microsoft/copilot-sdk/blob/main/python/README.md" in text
+    assert "github-copilot-sdk" not in text
+    assert "pin the runtime version" in text
+    assert "COPILOT_SKIP_CLI_DOWNLOAD=1" in text
+    assert "COPILOT_CLI_PATH" in text
+    assert "first managed use" in text
+    assert "download-runtime" not in text
