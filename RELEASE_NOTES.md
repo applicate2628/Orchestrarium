@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Kimi execution tracks model/thinking configuration updates throughout its ACP exchange, including changes returned by later setters. A drift cannot be hidden by stale initial readback or a later restoration; acquired output and cleanup remain available without reconfiguration or repeated model calls. Initial sequential setup and unrelated configuration options stay supported.
+
 - Scoped Claude child Leads can retain their native conversation across admitted decisions through existing transcript custody and Root coordination. Restart first recovers already received intent without inference, then resumes the exact transcript for a new decision; task and successor claims prevent replay. No new session store, subscription worker, automatic model launch or OS-lock guarantee is introduced.
 
 - Claude Consultant tasks can continue a canonically received native transcript after restart through the existing public task binding. Exact transcript custody/currentness and one-successor claims preserve context without guessing native turn IDs, replaying completed work or silently starting fresh. Official API/cloud access and prompt-only permissions remain unchanged; offline verification is distinct from live acceptance.

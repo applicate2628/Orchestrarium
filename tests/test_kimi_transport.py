@@ -2355,6 +2355,7 @@ class _FakeKimiAcpPeer:
         self.thinking_config_result = (
             {
                 "configOptions": [
+                    {"id": "model", "currentValue": "kimi-code/k3"},
                     {
                         "type": "select",
                         "id": "thinking",
@@ -2681,6 +2682,7 @@ def test_kimi_acp_max_thinking_readback_precedes_prompt() -> None:
     peer = _FakeKimiAcpPeer(
         thinking_config_result={
             "configOptions": [
+                {"id": "model", "currentValue": "kimi-code/k3"},
                 {"id": "thinking", "currentValue": "max"}
             ]
         }
@@ -2838,7 +2840,7 @@ def test_kimi_acp_close_deadline_remains_first_error_when_delete_write_fails() -
     (
         {"sessionUpdate": "available_commands_update", "availableCommands": []},
         {"sessionUpdate": "current_mode_update", "currentModeId": "default"},
-        {"sessionUpdate": "config_option_update", "configOptions": []},
+        {"sessionUpdate": "config_option_update", "configOptions": [{"id":"model","currentValue":"kimi-code/k3"},{"id":"thinking","currentValue":"high"}]},
         {"sessionUpdate": "usage_update", "used": 1, "size": 1048576},
         {"sessionUpdate": "session_info_update", "title": None},
     ),
@@ -2868,7 +2870,7 @@ def test_kimi_acp_demultiplexes_control_updates_while_awaiting_cleanup_response(
         interleaved_method=cleanup_method,
         interleaved_update={
             "sessionUpdate": "config_option_update",
-            "configOptions": [],
+            "configOptions": [{"id":"model","currentValue":"kimi-code/k3"},{"id":"thinking","currentValue":"high"}],
         },
     )
     exchange = owner.KimiAcpOneShotV1(b"safe task", "C:/private/run")
@@ -4148,6 +4150,7 @@ for line in sys.stdin.buffer:
         }:
             result = {
                 "configOptions": [
+                    {"id": "model", "currentValue": "kimi-code/k3"},
                     {
                         "type": "select",
                         "id": "thinking",
@@ -4333,6 +4336,7 @@ def test_fake_kimi_acp_process_preserves_literals_and_settles(tmp_path: Path) ->
 
     exchange, result, close_result = _run_fake_kimi_acp(tmp_path, "success", body)
 
+    assert result.outcome == "success", (result.outcome, result.failure_id, result.terminal_stage)
     assert (tmp_path / "prompt.bin").read_bytes() == body
     assert exchange.result_bytes == b"artifact\nGATE: PASS\n"
     assert result.outcome == "success"
@@ -5410,3 +5414,62 @@ def test_kimi_unchanged_snapshot_allows_distinct_handle_and_path_ctime(
 
     monkeypatch.setattr(owner.os, "fstat", descriptor_metadata)
     assert owner.read_kimi_capability_selection(path).tools == ("ReadFile",)
+
+
+@pytest.mark.parametrize("phase", ["session/prompt", "session/close", "session/delete"])
+def test_kimi_profile_drift_retains_text_and_drains_cleanup(phase):
+    owner = _load_owner()
+    peer = _FakeKimiAcpPeer(interleaved_method=phase, interleaved_update={
+        "sessionUpdate":"config_option_update", "configOptions":[
+            {"id":"model","currentValue":"different-model"},
+            {"id":"thinking","currentValue":"high"}]})
+    exchange = owner.KimiAcpOneShotV1(b"safe task", "C:/private/run")
+    with pytest.raises(ValueError, match="E_KIMI_ACP_PROFILE_CHANGED"):
+        exchange(peer)
+    assert exchange.result_bytes == b"artifact\nGATE: PASS\n"
+    assert exchange.protocol_closed
+    assert [r["method"] for r in peer.requests][-2:] == ["session/close","session/delete"]
+    assert sum(r["method"] == "session/prompt" for r in peer.requests) == 1
+
+
+@pytest.mark.parametrize("rows", [[], [{"id":"thinking","currentValue":"high"}],
+    [{"id":"model","currentValue":"different-model"},{"id":"thinking","currentValue":"high"}]])
+def test_kimi_thinking_reply_cannot_remove_or_change_established_model(rows):
+    owner = _load_owner()
+    peer = _FakeKimiAcpPeer(thinking_config_result={"configOptions":rows})
+    exchange = owner.KimiAcpOneShotV1(b"safe task", "C:/private/run")
+    with pytest.raises(ValueError, match="E_KIMI_ACP_"):
+        exchange(peer)
+    assert not any(r["method"] == "session/prompt" for r in peer.requests)
+    assert exchange.protocol_closed
+
+
+def test_kimi_profile_failure_is_sticky_but_initial_thinking_not_selected():
+    owner = _load_owner()
+    exchange = owner.KimiAcpOneShotV1(b"safe task", "C:/private/run")
+    rows=[{"id":"model","currentValue":"kimi-code/k3"},{"id":"thinking","currentValue":"low"},
+          {"id":"unrelated","currentValue":"anything"}]
+    exchange._profile_snapshot(rows, establish="model")
+    assert exchange.profile_error is None
+    exchange.observed_model="kimi-code/k3"
+    exchange.observed_effort="high"
+    exchange._profile_snapshot(rows)
+    rows[1]["currentValue"]="high"
+    exchange._profile_snapshot(rows)
+    with pytest.raises(ValueError, match="PROFILE_CHANGED"):
+        exchange._require_current_profile()
+
+
+def test_kimi_drift_cancels_subsequent_permission_without_grant_or_retry():
+    owner = _load_owner()
+    changed={"sessionUpdate":"config_option_update", "configOptions":[
+        {"id":"model","currentValue":"different-model"},{"id":"thinking","currentValue":"high"}]}
+    permission={"sessionId":"fake-session-1", "toolCall":{"toolCallId":"call-1","title":"Read"},
+        "options":[{"optionId":"allow","name":"Allow once","kind":"allow_once"}]}
+    peer=_FakeKimiAcpPeer(tool_updates=(changed,), permission_request=permission)
+    exchange=owner.KimiAcpOneShotV1(b"safe task","C:/private/run",permission="approve_once")
+    with pytest.raises(ValueError,match="PROFILE_CHANGED"):
+        exchange(peer)
+    assert peer.client_responses[0]["result"]["outcome"] == {"outcome":"cancelled"}
+    assert exchange.observed_receipt()["permissionDecisions"] == []
+    assert exchange.protocol_closed

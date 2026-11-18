@@ -1890,6 +1890,32 @@ drift withholds tool delivery while preserving the received evidence; it never
 replays the provider. Read-only reconciliation remains available under its own
 current permission checks.
 
+Kimi ACP configuration replies and `config_option_update` notifications describe
+complete option snapshots. The existing exchange checks already selected model
+and thinking controls on every such snapshot, including dependent changes returned
+by the next setter. Initial sequential setup may establish each control without
+requiring a not-yet-selected value prematurely. Unrelated options remain valid.
+Once an established selection drifts or loses valid evidence, later matching data
+does not erase that failure. The exchange retains acquired output and performs
+its existing cleanup; it does not silently reconfigure, retry or restart inference.
+The existing failed/blocked evidence remains nonauthorizing, not a successful
+result under the stale profile. A latched drift also prevents new permission
+approvals while response drainage and cleanup continue.
+
+The two crossed offline receiving tests exercise late model and thinking drift
+through the actual receipt/ledger owner with a synthetic native peer. Both retain
+acquired text, attempt cleanup once, record a blocked nonauthorizing terminal and
+permit repeated receipt readback without another launch or ledger mutation. They
+passed in 5.37 seconds with four relevant source hashes unchanged. A separate
+existing fake-process test fails before ACP request handling with
+`PSV1-REQUEST-INVALID`; the same exact failure was reproduced using pre-change
+owner bytes. Full transport-suite success is not claimed.
+
+Official protocol references: [Kimi ACP configuration](https://raw.githubusercontent.com/MoonshotAI/kimi-code/main/docs/en/reference/kimi-acp.md)
+and [ACP session configuration options](https://agentclientprotocol.com/protocol/v1/session-config-options).
+This is compatibility handling in the existing owner, not an installed-runtime
+qualification or a switch to another Kimi implementation.
+
 Direct `KimiAcpAdapter.execute()` also checks current Host authority after receiving
 and before returning its result. If permission was revoked during evidence
 recording, delivery is withheld while `execution_result` and the canonical receipt

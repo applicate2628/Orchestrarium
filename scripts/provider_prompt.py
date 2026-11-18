@@ -961,6 +961,7 @@ class KimiAcpOneShotV1:
     session_id: str | None = field(default=None, init=False)
     observed_model: str | None = field(default=None, init=False)
     observed_effort: str | None = field(default=None, init=False)
+    profile_error: str | None = field(default=None, init=False)
     stop_reason: str | None = field(default=None, init=False)
     protocol_closed: bool = field(default=False, init=False)
     cleanup_error: str | None = field(default=None, init=False)
@@ -1198,16 +1199,17 @@ class KimiAcpOneShotV1:
             option_ids.add(option_id)
             if kind == desired_kind:
                 matches.append(option)
-        if len(matches) != 1:
+        if self.profile_error is None and len(matches) != 1:
             raise ValueError("E_KIMI_ACP_PROTOCOL")
         tool_id = self._receipt_text(tool_call.get("toolCallId"))
         title = self._receipt_text(tool_call.get("title"))
-        selected_id = self._wire_text(matches[0].get("optionId"))
+        selected_id = self._wire_text(matches[0].get("optionId")) if self.profile_error is None else None
         response = {
             "jsonrpc": "2.0",
             "id": request_id,
             "result": {
-                "outcome": {"outcome": "selected", "optionId": selected_id}
+                "outcome": ({"outcome": "selected", "optionId": selected_id}
+                            if selected_id is not None else {"outcome": "cancelled"})
             },
         }
         payload = (
@@ -1218,7 +1220,9 @@ class KimiAcpOneShotV1:
         )
         if channel.write_line(payload) != len(payload):
             raise ValueError("E_KIMI_ACP_PROTOCOL")
-        if self._observations_omitted:
+        # A cancelled permission has no selected option. Do not manufacture a
+        # selected-decision receipt; the latched profile failure remains retained.
+        if self._observations_omitted or selected_id is None:
             return
         observed = {"id": tool_id, "title": title, "decision": self.permission}
         if len(self._permission_decisions) >= KIMI_INVOCATION_MAX_RECORDS:
@@ -1240,6 +1244,32 @@ class KimiAcpOneShotV1:
         if self._observations_omitted:
             observed["observationsOmitted"] = True
         return observed
+
+    def _profile_snapshot(self, options, *, establish=None) -> None:
+        """ACP configOptions is full state, including dependent picker changes.
+
+        Only already selected controls are invariants during sequential setup.
+        A notification never changes the admitted profile or clears a failure.
+        """
+        expected = {}
+        if self.observed_model is not None or establish == "model":
+            expected["model"] = KIMI_WINDOWS_PROFILE_V1.model
+        if self.observed_effort is not None or establish == "thinking":
+            expected["thinking"] = self.effort
+        if not isinstance(options, list):
+            self.profile_error = self.profile_error or "E_KIMI_ACP_PROTOCOL"
+            return
+        for key, selected in expected.items():
+            rows = [row for row in options if isinstance(row, dict) and row.get("id") == key]
+            if len(rows) != 1 or not isinstance(rows[0].get("currentValue"), str):
+                self.profile_error = self.profile_error or "E_KIMI_ACP_PROTOCOL"
+            elif rows[0]["currentValue"] != selected:
+                established = self.observed_model if key == "model" else self.observed_effort
+                self.profile_error = self.profile_error or ("E_KIMI_ACP_PROFILE_CHANGED" if established is not None else "E_KIMI_ACP_PROTOCOL")
+
+    def _require_current_profile(self) -> None:
+        if self.profile_error is not None:
+            raise ValueError(self.profile_error)
 
     def _response(
         self,
@@ -1283,6 +1313,9 @@ class KimiAcpOneShotV1:
                 if not isinstance(update, dict):
                     raise ValueError("E_KIMI_ACP_PROTOCOL")
                 update_kind = update.get("sessionUpdate")
+                if update_kind == "config_option_update":
+                    self._profile_snapshot(update.get("configOptions"))
+                    continue
                 if update_kind in KIMI_ACP_CONTROL_UPDATES:
                     continue
                 if not collect:
@@ -1301,6 +1334,7 @@ class KimiAcpOneShotV1:
                     if len(chunks) + len(chunk) > self.result_max_bytes:
                         raise ValueError("E_KIMI_ACP_PROTOCOL")
                     chunks += chunk
+                    self.result_bytes = bytes(chunks)
                 continue
             response_id = message.get("id")
             if (
@@ -1399,21 +1433,9 @@ class KimiAcpOneShotV1:
             )
             assert model_id is not None
             configured = self._response(channel, model_id)
-            config_options = configured.get("configOptions")
-            if not isinstance(config_options, list):
-                raise ValueError("E_KIMI_ACP_PROTOCOL")
-            model_options = [
-                option
-                for option in config_options
-                if isinstance(option, dict) and option.get("id") == "model"
-            ]
-            if (
-                len(model_options) != 1
-                or model_options[0].get("currentValue")
-                != KIMI_WINDOWS_PROFILE_V1.model
-            ):
-                raise ValueError("E_KIMI_ACP_PROTOCOL")
-            self.observed_model = model_options[0]["currentValue"]
+            self._profile_snapshot(configured.get("configOptions"), establish="model")
+            self._require_current_profile()
+            self.observed_model = KIMI_WINDOWS_PROFILE_V1.model
             thinking_id = self._send(
                 channel,
                 "session/set_config_option",
@@ -1425,20 +1447,9 @@ class KimiAcpOneShotV1:
             )
             assert thinking_id is not None
             thinking_configured = self._response(channel, thinking_id)
-            thinking_options = thinking_configured.get("configOptions")
-            if not isinstance(thinking_options, list):
-                raise ValueError("E_KIMI_ACP_PROTOCOL")
-            thinking_rows = [
-                option
-                for option in thinking_options
-                if isinstance(option, dict) and option.get("id") == "thinking"
-            ]
-            if (
-                len(thinking_rows) != 1
-                or thinking_rows[0].get("currentValue") != self.effort
-            ):
-                raise ValueError("E_KIMI_ACP_PROTOCOL")
-            self.observed_effort = thinking_rows[0]["currentValue"]
+            self._profile_snapshot(thinking_configured.get("configOptions"), establish="thinking")
+            self._require_current_profile()
+            self.observed_effort = self.effort
             if self.before_prompt is not None and self.before_prompt() is not None:
                 raise ValueError("E_KIMI_CURRENT_AUTHORITY_INVALID")
             prompt_id = self._send(
@@ -1456,6 +1467,7 @@ class KimiAcpOneShotV1:
             if not isinstance(prompt_result.get("stopReason"), str):
                 raise ValueError("E_KIMI_ACP_PROTOCOL")
             self.stop_reason = prompt_result["stopReason"]
+            self._require_current_profile()
         except BaseException as exc:
             cancel = (
                 isinstance(exc, ProcessSupervisionError)
@@ -1467,6 +1479,7 @@ class KimiAcpOneShotV1:
                 raise exc from cleanup_exc
             raise
         self._cleanup_session(channel, cancel=False)
+        self._require_current_profile()
 
 
 @dataclass
