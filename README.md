@@ -1,5 +1,7 @@
 # Orchestrarium
 
+<img src="assets/branding/orche.png" alt="Orche, the winged green mascot" width="160" height="148">
+
 Optional local distribution assembly is documented in [the distribution guide](scripts/distribution/README.md). It binds the supplied runtime to its exact notice inventory before producing a bundle, and packages this existing installer without changing its ownership or provider policies. Windows build and bounded Codex/Claude project receiving are recorded in [runtime evidence](scripts/distribution/runtime-evidence.md); local directory projections use native junctions without privilege elevation. Historical SDK recovery evidence is not acceptance of this layout.
 
 A cross-provider agent orchestration monorepo that keeps the production Codex and Claude Code lines aligned on one shared governance and reference core.
