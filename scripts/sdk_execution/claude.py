@@ -207,7 +207,7 @@ def create_claude_adapter(request: ExecutionRequest, sink: Any, selection: Claud
 
     if request.provider != "claude" or type(selection) is not ClaudeRuntimeSelection:
         raise AdapterError("claude_request_required")
-    if request.result_kind == "task":
+    if request.result_kind == "task" or request.tool_profile == "prompt-only":
         validate_admitted_request(request, selection)
     assert_current_launch(request, selection, "worker_factory")
     environment, _context = prepare_environment(selection, dict(os.environ))

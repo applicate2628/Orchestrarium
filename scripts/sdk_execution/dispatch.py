@@ -200,11 +200,11 @@ class CodexReviewDispatch:
     def _authorize_tool(self, request, name, arguments):
         # This CLI route grants no filesystem capability, even inside cwd.
         from .claude import OUTPUT_TOOL
-        from .contracts import validate_task
+        from .contracts import validate_task, validate_review
         if request != self.request or name != OUTPUT_TOOL:
             raise DispatchError("E_CLAUDE_SDK_TOOL_DENIED")
         self._check_auth_context()
-        validate_task(arguments, request=request)
+        (validate_task if request.result_kind == "task" else validate_review)(arguments, request=request)
 
     def _verify_auth_context(self, request, evidence):
         if (request != self.request or type(evidence) is not dict
@@ -532,10 +532,10 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
     # Direct callers must retain the same rule as the public CLI entrypoint.
     owner._qualify_managed_model_launch(provider, prevalidated, runtime_namespace=runtime_namespace)
     binding = read_binding(Path(binding_path))
-    if provider == "claude" and (not task_mode or binding.get("writeWorkspace") is not None
+    if provider == "claude" and (binding.get("writeWorkspace") is not None
             or binding.get("installedHookRoot") is not None or binding["expectedAccountEmail"] is not None
             or model in {"opus", "sonnet", "haiku"}):
-        raise DispatchError("E_CLAUDE_SDK_PROMPT_ONLY_CONSULTANT_REQUIRED")
+        raise DispatchError("E_CLAUDE_SDK_PROMPT_ONLY_REQUIRED")
     write_workspace = binding.get("writeWorkspace")
     write_mode = write_workspace is not None
     if write_mode and not task_mode:

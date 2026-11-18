@@ -2997,7 +2997,7 @@ def parse_control(
         raise ValueError("E_SDK_BINDING_KIND_CONFLICT")
     if result.sdk_task_binding is not None and provider not in {"codex", "claude"}:
         raise ValueError("E_SDK_TASK_PROVIDER_REQUIRED")
-    if result.sdk_review_binding is not None and provider != "codex":
+    if result.sdk_review_binding is not None and provider not in {"codex", "claude"}:
         raise ValueError("E_SDK_REVIEW_PROVIDER_REQUIRED")
     if result.result_max_bytes > RESULT_MAX_BYTES_HARD:
         raise ValueError(

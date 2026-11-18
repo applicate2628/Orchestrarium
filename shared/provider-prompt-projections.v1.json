@@ -9,7 +9,7 @@
     },
     "provider_prompt.py": {
       "source": "scripts/provider_prompt.py",
-      "sha256": "75cd9dac94cd41f028cfe290fb84208fb112da836b7a930f25b41c0bc094a4ee",
+      "sha256": "1682967eab819e1a8f8f68399cd8817856b488d1e0c727cec83d7794517e13ff",
       "destination": "scripts/provider_prompt.py"
     },
     "process_supervision/process_runner.py": {
@@ -69,7 +69,7 @@
     },
     "sdk_execution/claude.py": {
       "source": "scripts/sdk_execution/claude.py",
-      "sha256": "c3ac4d0f6fd0d34c8a5b8dae52aea557e8469088f029c270ec8712e9c0c18559",
+      "sha256": "5409d875c46d94ff099c9dabd2b3c98de1e5e80d016b34a06dbf4155aaf7d346",
       "destination": "scripts/sdk_execution/claude.py"
     },
     "sdk_execution/codex.py": {
@@ -85,12 +85,12 @@
     "sdk_execution/dispatch.py": {
       "source": "scripts/sdk_execution/dispatch.py",
       "destination": "scripts/sdk_execution/dispatch.py",
-      "sha256": "9f8bd8126f4aa822885966de347603cdf0972f49c33734d2dfb3375061b73b75"
+      "sha256": "32931812fb915e58006876c52a17d901f1224889c8d391a7cd175ad7ca14ada1"
     },
     "sdk_execution/contracts.py": {
       "source": "scripts/sdk_execution/contracts.py",
       "destination": "scripts/sdk_execution/contracts.py",
-      "sha256": "7d9dbfa8d734a6f10007775276f98a8844a0dae4d81ffd06ad3b743d44d72cd4"
+      "sha256": "6ae044beb1a972f804648f093b34ee219743470bfb62601fd9611c47cdf401ee"
     },
     "sdk_execution/coordinator.py": {
       "source": "scripts/sdk_execution/coordinator.py",
@@ -139,13 +139,13 @@
     },
     "sdk_execution/receiving.py": {
       "source": "scripts/sdk_execution/receiving.py",
-      "sha256": "f79aab380cf6d6d739a14d2afb75fc7dc684af511045d3d5059553b484cffb65",
+      "sha256": "c2e170521fdc3743a7c3db238607c9e2f5a4090b1cf7ee157af4b37211e04270",
       "destination": "scripts/sdk_execution/receiving.py"
     },
     "sdk_execution/runtime.py": {
       "source": "scripts/sdk_execution/runtime.py",
       "destination": "scripts/sdk_execution/runtime.py",
-      "sha256": "c9a5c7b78f759577c139f298338a5cddd02b53d6aff79a61d042650344a27e41"
+      "sha256": "993c6902008a94aa91d5b255df1869289d4f1d99ccce6b0bcf6d580162c35700"
     },
     "sdk_execution/worker.py": {
       "source": "scripts/sdk_execution/worker.py",

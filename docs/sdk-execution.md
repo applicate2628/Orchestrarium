@@ -237,7 +237,7 @@ historical results as fresh acceptance.
 |---|---|---|
 | Common execution | Existing shared dispatch/supervisor/ledger; SDK worker uses the invoking Python interpreter. | Exercise the same lifecycle, events, receipt and cancellation owners for each supported provider/role; retain main regressions. |
 | Codex | Explicit Windows Reviewer, Consultant and scoped Worker source bridges; offline qualification and historical bounded native evidence below. | Complete current installed/native qualification and intended child-Lead/session/platform outcomes through the common mechanism. |
-| Claude | SDK worker factory/adapter and offline checks; native Lead is a different boundary. | Complete the public execution path and receiving with the provider-supported programmatic access method; do not wrap a subscription CLI as a third-party worker. |
+| Claude | SDK Host API plus explicit prompt-only Consultant and Reviewer command-line routes, exact receiving and offline checks; native Lead is a different boundary. | Qualify current native execution and complete scoped Worker/child-Lead/session outcomes using official API/cloud access; do not wrap a subscription CLI as a third-party worker. |
 | Antigravity | Official setup direction; no implemented AGY runtime adapter in the current SDK execution factory. | Implement Lead/session integration and native subagent handoff; separately qualify any admitted programmatic worker route. |
 | Copilot | Setup direction; existing integration candidates are not a callable SDK execution route. | Reconcile reusable candidate work, implement the common adapter and verify supported Lead/worker/reviewer roles without provider-name role bans. |
 | Kimi | Existing ACP boundary is separate from the current SDK factory. | Reconcile the supported Kimi runtime with the official agent integration; do not silently substitute the older Python runtime or a model API for the chosen route. |
@@ -405,10 +405,21 @@ Read-only tools do not constitute operating-system containment.
 ### Claude prompt-only command-line integration
 
 The existing Claude wrapper accepts `--sdk-task-binding PATH` for Consultant
-advice with an explicit concrete model identifier, `--ledger-role consultant`,
-and the existing ledger/artifact/terminal-receipt controls. The task binding is
-constraints, not launch or spending permission. Review binding, write workspace,
-and Codex hook/account-email settings do not become Claude capabilities.
+advice with `--ledger-role consultant`, or `--sdk-review-binding PATH` for a
+canonical external-reviewer profession such as `--ledger-role qa-engineer`.
+The mutually exclusive selectors choose TaskResult versus ReviewResult, not
+additional authority. Both require an explicit concrete model identifier and
+the existing ledger/artifact/terminal-receipt controls. The binding contains
+constraints, not launch or spending permission. Write workspace and Codex
+hook/account-email settings do not become Claude capabilities.
+
+The Reviewer receives explicitly supplied requirements, artifacts and evidence,
+not the implementation author's private working conversation. A structured
+PASS/REVISE report remains external-nonauthorizing evidence: it cannot close
+obligations or replace the owning independent-review decision. Prompt-only
+review receiving requires the exact version-2 request commitment and retained
+API/cloud selection; an unrelated or incomplete selection cannot attest it.
+Legacy default-profile reviews retain their existing compatibility behavior.
 
 The CLI selects `tool_profile: prompt-only`: the request hash commits this
 capability, while omission preserves the historical Host profile and wire format.

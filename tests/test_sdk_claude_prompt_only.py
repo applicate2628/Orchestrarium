@@ -22,7 +22,8 @@ def test_profile_default_wire_and_explicit_hash(tmp_path):
 def test_profile_exact_route(change):
     values = {"tool_profile": "prompt-only", **change}
     with pytest.raises(ValueError):
-        request(**values)
+        from sdk_execution.runtime import execution_role
+        execution_role(request(**values))
 
 
 @pytest.mark.parametrize("tools", [[], [base.OUTPUT_TOOL]])

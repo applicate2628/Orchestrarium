@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Extend the existing Claude prompt-only SDK command-line route to independent Reviewer output as well as Consultant advice. The review selector uses canonical reviewer roles, an exact request commitment and retained API/cloud selection; its PASS/REVISE evidence remains nonauthorizing and grants no filesystem tools or obligation closures. This completes the bounded source route without changing default execution or model-spending permissions.
+
 - Add an explicit Claude Consultant SDK task route to the existing CLI launch owner. It uses selected official API/cloud auth context and prompt-only capabilities, without invented account identity, implied filesystem permissions or a second permission store. Existing Host read-only execution remains compatible; source/offline qualification does not authorize model spending or claim native acceptance.
 
 - Connect Claude Consultant to the fixed SDK worker factory and existing Python Host executor, keeping current account/tool authority and ledger receiving rather than adding another dispatcher. Host integrations can use typed advice; the CLI task selector remains Codex-only until its actual Host policy context is integrated. Offline validation is not native acceptance or permission to spend model quota.

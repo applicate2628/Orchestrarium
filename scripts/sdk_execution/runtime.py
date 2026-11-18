@@ -229,10 +229,14 @@ def _require_runtime_result_route(request: ExecutionRequest) -> None:
         if (type(request) is not ExecutionRequest or request.role != "consultant"
                 or request.write_workspace is not None):
             raise RuntimeBindingError("claude_consultant_task_request_required")
+    if request.provider == "claude" and request.tool_profile == "prompt-only" and request.result_kind == "review":
+        _roles, reviewers, _workers, _unsupported = _owner()._external_role_taxonomy()
+        if type(request) is not ExecutionRequest or request.role not in reviewers:
+            raise RuntimeBindingError("claude_prompt_only_reviewer_required")
 
 
 def _require_task_auth_route(request: ExecutionRequest, selection: Any) -> None:
-    if request.provider == "claude" and request.result_kind == "task":
+    if request.provider == "claude" and (request.result_kind == "task" or request.tool_profile == "prompt-only"):
         if not _owner().claude_programmatic_auth_mode_supported(selection.auth_mode):
             raise RuntimeBindingError("claude_programmatic_auth_mode_required")
 

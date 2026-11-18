@@ -76,10 +76,9 @@ class ExecutionRequest:
         if self.tool_profile not in {"default", "prompt-only"}:
             raise ValueError("unsupported tool profile")
         if self.tool_profile == "prompt-only" and (
-            self.provider != "claude" or self.role != "consultant"
-            or self.result_kind != "task" or self.write_workspace is not None
+            self.provider != "claude" or self.write_workspace is not None
         ):
-            raise ValueError("prompt-only profile requires read-only Claude Consultant")
+            raise ValueError("prompt-only profile requires read-only Claude")
         if self.result_kind not in {"review", "task"}:
             raise ValueError("unsupported result kind")
         if self.write_workspace is not None:
