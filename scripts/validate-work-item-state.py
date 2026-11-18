@@ -376,9 +376,17 @@ def validate_sdk_execution(
     revision = next((branch for branch in schema["oneOf"]
                      if type(value["schemaVersion"]) is int
                      and value["schemaVersion"] == branch["properties"]["schemaVersion"]["const"]), None)
-    if (revision is None or not set(revision["required"]) <= set(value)
+    if (revision is None or not set(revision.get("required", [])) <= set(value)
         or any(name in value for name, rule in revision["properties"].items() if rule is False)):
         raise ValueError("sdkExecution requires its exact versioned fields")
+    # The observed Copilot profile omits versions not observed by its SDK.
+    # Keep historical providers' version requirements owned by the same schema.
+    if revision is not None and "if" in revision:
+        matches = all(value.get(name) == rule.get("const")
+                      for name, rule in revision["if"]["properties"].items())
+        conditional = revision.get("then" if matches else "else", {})
+        if not set(conditional.get("required", [])) <= set(value):
+            raise ValueError("sdkExecution requires its exact versioned fields")
     for name, rules in schema["properties"].items():
         if name not in value:
             continue
@@ -399,6 +407,7 @@ def validate_sdk_execution(
             ("codex", "openai-codex", "read-only", "deny_all"),
             ("codex", "openai-codex", "workspace-write", "deny_all"),
             ("claude", "claude-agent-sdk", "tool-restricted-read-only", "deny_unadmitted"),
+            ("copilot", "microsoft-copilot-sdk", "tool-restricted-read-only", "deny_all"),
             ("claude", "claude-agent-sdk", "tool-restricted-workspace-write", "deny_unadmitted"),
         )
     )
@@ -437,6 +446,13 @@ def _validate_sdk_event(event: Mapping[str, object], errors: list[str]) -> None:
     except ValueError as exc:
         fail(errors, f"{run_id}: {exc}")
     selected = event.get("sdkExecution")
+    if event.get("provider") == "copilot" and type(selected) is dict:
+        if (selected.get("schemaVersion") != 2
+                or event.get("role") != "consultant"
+                or event.get("executionRole") != "consultant"
+                or event.get("assignedRole") != "consultant"
+                or event.get("gate") != "none"):
+            fail(errors, f"{run_id}: Copilot requires selected nonauthorizing Consultant provenance")
     if type(selected) is dict and selected.get("sandboxMode") in {"workspace-write", "tool-restricted-workspace-write"}:
         try:
             # Reuse the canonical role owner rather than another role allowlist.

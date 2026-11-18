@@ -35,6 +35,8 @@ MAX_FRAME_BYTES = MAX_STDIN_BYTES
 AUTHORITY_EFFECTS = frozenset({
     "start", "client_start", "thread_start", "turn_start", "resume", "reconcile",
     "connect", "query", "tool", "account",
+    "copilot_start", "copilot_client_create", "copilot_session_create",
+    "copilot_profile_before", "copilot_send", "copilot_profile_after", "copilot_result",
 })
 
 
@@ -363,6 +365,9 @@ def _create_runtime_adapter(
     selection = runtime_selection_from_dict(request.provider, raw_selection)
     if request.provider == "codex":
         return create_codex_adapter(request, sink, selection)
+    if request.provider == "copilot":
+        from sdk_execution.copilot import create_copilot_adapter
+        return create_copilot_adapter(request, sink, selection)
     from sdk_execution.claude import create_claude_adapter
     return create_claude_adapter(request, sink, selection)
 

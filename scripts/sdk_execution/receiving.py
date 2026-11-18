@@ -151,8 +151,8 @@ def terminal_payload(request: ExecutionRequest, observation: Any, *, output_cont
     scan_execution_output(result, output_context)
     process = _require_sdk_process_settlement(observation)
     task_result = request.result_kind == "task"
-    claude_bound = request.provider == "claude" and (task_result or request.tool_profile == "prompt-only")
-    if (claude_bound or request.native_continuation is not None) and (type(admitted_sdk_execution) is not dict
+    selected_profile_bound = (request.provider == "claude" and (task_result or request.tool_profile == "prompt-only")) or request.provider == "copilot"
+    if (selected_profile_bound or request.native_continuation is not None) and (type(admitted_sdk_execution) is not dict
             or admitted_sdk_execution.get("schemaVersion") != 2
             or "requestSha256" not in admitted_sdk_execution):
         raise ValueError("SDK selected profile requires admitted request commitment")
@@ -194,7 +194,7 @@ def terminal_payload(request: ExecutionRequest, observation: Any, *, output_cont
         if retained is None:
             raise ValueError("SDK runtime request commitment has no retained selection")
         selection = runtime_selection_from_dict(request.provider, strict_json(retained))
-        if claude_bound:
+        if selected_profile_bound:
             # Task and prompt-only evidence have no historical unbound profile fallback.
             # Reuse the admitted request owner, not a second permission store.
             from .runtime import validate_admitted_request

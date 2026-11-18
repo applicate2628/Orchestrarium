@@ -3,14 +3,17 @@
 Source: microsoft/copilot-sdk, 3ce61458503b6b27ebd1f674a980f4d9596d9b22,
 python/copilot/{client,session,_mode}.py. Source evidence is not installed/native
 qualification. Explicit spawned stdio uses a preprovisioned runtime, never a
-managed download. SDK cleanup is not OS process-tree settlement. This structural
-Executor is usable by AgentsCoordinator, not a CLI or canonical receiving route.
+managed download. SDK cleanup is not OS process-tree settlement. The structural
+Executor and fixed contained-worker factory share this protocol implementation;
+canonical receiving relies on the separate creator-owned worker observation.
 """
 from __future__ import annotations
 
 import asyncio
 import inspect
 import math
+import re
+from dataclasses import dataclass, asdict
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -30,6 +33,55 @@ def _load_sdk():
         AgentMessageSource=AgentMessageSource, PermissionDecisionReject=PermissionDecisionReject)
 
 
+@dataclass(frozen=True, slots=True)
+class CopilotRuntimeSelection:
+    """Nonsecret SDK transport and Host bounds; not vendor account evidence."""
+    executable: str
+    executable_sha256: str
+    base_directory: str
+    auth_mode: str
+    instructions: str
+    work_item: str
+    ledger_max_events: int | None
+    ledger_max_bytes: int | None
+    job_memory_limit_bytes: int
+    timeout_seconds: float
+    cleanup_timeout_seconds: float
+    expected_launch_sha256: str | None = None
+
+    def __post_init__(self):
+        for key in ("executable", "base_directory", "work_item"):
+            value = getattr(self,key)
+            if type(value) is not str or not Path(value).is_absolute():
+                raise CopilotError("explicit_absolute_runtime_paths_required")
+        for key in ("executable_sha256", "expected_launch_sha256"):
+            value = getattr(self,key)
+            if value is None and key == "expected_launch_sha256": continue
+            if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}",value) is None:
+                raise CopilotError("explicit_runtime_digest_required")
+        budgets = (self.job_memory_limit_bytes,)
+        if self.ledger_max_events is not None or self.ledger_max_bytes is not None:
+            budgets += (self.ledger_max_events,self.ledger_max_bytes)
+        if any(type(v) is not int or v <= 0 for v in budgets):
+            raise CopilotError("explicit_positive_resource_budget_required")
+        for value in (self.timeout_seconds,self.cleanup_timeout_seconds):
+            if type(value) not in (int,float) or not math.isfinite(value) or value <= 0:
+                raise CopilotError("copilot_explicit_deadline_required")
+        if self.auth_mode != "copilot-explicit-token": raise CopilotError("copilot_explicit_auth_required")
+        if type(self.instructions) is not str or not self.instructions.strip():
+            raise CopilotError("missing_governance_instructions")
+        import provider_prompt as owner
+        owner._bounded_strict_utf8_snapshot(self.instructions.encode("utf-8"), "instructions")
+
+    def to_dict(self): return asdict(self)
+
+    @classmethod
+    def from_dict(cls,value):
+        if type(value) is not dict or set(value) != set(cls.__dataclass_fields__):
+            raise CopilotError("invalid_runtime_selection_fields")
+        return cls(**value)
+
+
 class CopilotExecutor:
     """One fresh operation under a live Host permission/account/budget owner.
 
@@ -38,7 +90,7 @@ class CopilotExecutor:
     Missing runtime/SDK does not install, download or select an alternate route.
     """
     def __init__(self, *, runtime_path, base_directory, environment, github_token,
-                 assert_current, output_context, timeout_seconds, cleanup_timeout_seconds, sdk=None):
+                 assert_current, output_context, timeout_seconds, cleanup_timeout_seconds, sdk=None, instructions=""):
         import provider_prompt as owner
         self._runtime = Path(runtime_path)
         self._base = Path(base_directory)
@@ -50,8 +102,8 @@ class CopilotExecutor:
             raise CopilotError("copilot_explicit_environment_required")
         if type(github_token) is not str or not github_token.strip():
             raise CopilotError("copilot_explicit_credential_required")
-        if not callable(assert_current) or any(inspect.iscoroutinefunction(v) or inspect.isasyncgenfunction(v) for v in (assert_current,getattr(assert_current,"__call__",None))):
-            raise CopilotError("copilot_synchronous_authority_required")
+        if not callable(assert_current) or any(inspect.isasyncgenfunction(v) for v in (assert_current,getattr(assert_current,"__call__",None))):
+            raise CopilotError("copilot_invalid_authority")
         if type(output_context) is not owner.ProviderOutputContext:
             raise CopilotError("copilot_output_context_required")
         output_context.__post_init__()
@@ -63,9 +115,12 @@ class CopilotExecutor:
         self._environment["COPILOT_SKIP_CLI_DOWNLOAD"] = "1"
         self._token = github_token
         self._authority = assert_current
+        if type(instructions) is not str: raise CopilotError("copilot_invalid_instructions")
+        self._instructions = instructions
         self._output = owner.ProviderOutputContext(tuple(dict.fromkeys((*output_context.needles,github_token.encode("utf-8")))))
         self._timeout, self._cleanup_timeout = timeout_seconds, cleanup_timeout_seconds
         self._sdk = sdk
+        self._observed_profile = None
         self._request = self._session = self._client = None
         self._cancel_requested = False
         self._abort_task = None
@@ -78,7 +133,7 @@ class CopilotExecutor:
         stat = self._runtime.stat()
         return (str(self._runtime.resolve()),stat.st_dev,stat.st_ino,stat.st_size,stat.st_mtime_ns)
 
-    def _current(self, request, effect):
+    async def _current(self, request, effect):
         try:
             unchanged = self._runtime_identity() == self._identity
         except OSError:
@@ -87,11 +142,17 @@ class CopilotExecutor:
             raise CopilotError("copilot_runtime_changed")
         try:
             answer = self._authority(request,effect)
+            if inspect.isawaitable(answer): answer = await answer
         except Exception:
             raise CopilotError("copilot_authority_denied") from None
         if answer is not None:
             if inspect.iscoroutine(answer): answer.close()
             raise CopilotError("copilot_invalid_authority_callback")
+        try:
+            unchanged = self._runtime_identity() == self._identity
+        except OSError:
+            unchanged = False
+        if not unchanged: raise CopilotError("copilot_runtime_changed")
 
     async def _abort(self):
         if self._session is not None:
@@ -136,10 +197,12 @@ class CopilotExecutor:
         if self._event_error: self._request_abort()
 
     async def _profile(self, request, effect):
-        self._current(request,effect)
+        await self._current(request,effect)
+        if self._cancel_requested: raise asyncio.CancelledError()
         profile = await self._session.rpc.model.get_current(timeout=self._timeout)
         if (getattr(profile,"model_id",None),getattr(profile,"reasoning_effort",None)) != (request.model,request.effort):
             raise CopilotError("copilot_profile_mismatch")
+        self._observed_profile = (profile.model_id,profile.reasoning_effort)
 
     async def execute(self, request):
         if (type(request) is not ExecutionRequest or request.provider != "copilot"
@@ -149,8 +212,8 @@ class CopilotExecutor:
             raise CopilotError("copilot_request_unsupported")
         if self._request is not None:
             raise CopilotError("operation_already_consumed")
-        self._current(request,"copilot_start")
         self._request = request
+        await self._current(request,"copilot_start")
         task = asyncio.create_task(self._execute(request))
         try:
             return await asyncio.shield(task)
@@ -183,16 +246,19 @@ class CopilotExecutor:
                     self._request_abort()
                     return sdk.PermissionDecisionReject(feedback="Prompt-only operation has no tool authority")
                 if self._cancel_requested: raise asyncio.CancelledError()
-                self._current(request,"copilot_client_create")
+                await self._current(request,"copilot_client_create")
+                if self._cancel_requested: raise asyncio.CancelledError()
                 runtime = sdk.RuntimeConnection.for_spawned_stdio(path=str(self._runtime),env=dict(self._environment),
                     working_directory=request.cwd,base_directory=str(self._base))
                 self._client = sdk.CopilotClient(mode="empty",runtime=runtime,
                     github={"token":self._token,"use_logged_in_user":False})
                 await self._client.start()
                 if self._cancel_requested: raise asyncio.CancelledError()
-                self._current(request,"copilot_session_create")
+                await self._current(request,"copilot_session_create")
+                if self._cancel_requested: raise asyncio.CancelledError()
                 self._session = await self._client.create_session(model=request.model,
                     working_directory=request.cwd,enable_config_discovery=False,
+                    system_message={"mode":"append","content":self._instructions},
                     tools={"available_tools":[]},permissions={"on_request":deny},
                     inference={"reasoning_effort":request.effort},
                     instructions={"skip_custom_instructions":True,"on_demand_discovery":False,"directories":[]},
@@ -207,7 +273,8 @@ class CopilotExecutor:
                 if self._cancel_requested: raise asyncio.CancelledError()
                 await self._profile(request,"copilot_profile_before")
                 if self._cancel_requested: raise asyncio.CancelledError()
-                self._current(request,"copilot_send")
+                await self._current(request,"copilot_send")
+                if self._cancel_requested: raise asyncio.CancelledError()
                 event = await self._session.send_and_wait(request.prompt,
                     source=sdk.AgentMessageSource(request.coordinator_binding),
                     response_schema=task_schema(request),timeout=self._timeout)
@@ -247,7 +314,14 @@ class CopilotExecutor:
             closed = self._client is not None and cleanup_error is None
         error = error or self._event_error
         status = "interrupted" if self._cancel_requested else "completed" if task_result is not None and not error and not cleanup_error else "incomplete"
+        metadata = None
+        if self._observed_profile is not None:
+            metadata = {"schemaVersion":1,"adapter":"microsoft-copilot-sdk",
+                "model":self._observed_profile[0],"effort":self._observed_profile[1],
+                "sandboxMode":"tool-restricted-read-only","approvalPolicy":"deny_all",
+                "accountBinding":request.account_binding}
         result = ExecutionResult(request,status,provider_status=provider_status,
+            sdk_execution_json=json_text(metadata) if metadata is not None else None,
             native_thread_id=session_id,task=task_result,observations=tuple(self._observations),
             execution_error=error,cleanup_error=cleanup_error,protocol_closed=closed)
         self.execution_result = result
@@ -259,5 +333,28 @@ class CopilotExecutor:
             stdout=evidence.encode("utf-8"),stderr=b"")
         if failure is not None: raise CopilotError(failure)
         scan_execution_output(result,self._output)
-        self._current(request,"copilot_result")
+        await self._current(request,"copilot_result")
         return result
+
+
+def create_copilot_adapter(request, sink, selection):
+    """Fixed contained worker factory; no installation or credential fallback."""
+    import os
+    from .runtime import assert_current_launch, prepare_environment, validate_admitted_request
+    if request.provider != "copilot" or type(selection) is not CopilotRuntimeSelection:
+        raise CopilotError("copilot_request_unsupported")
+    validate_admitted_request(request, selection)
+    assert_current_launch(request, selection, "worker_factory")
+    environment, output_context = prepare_environment(selection, dict(os.environ))
+
+    async def current(value, effect):
+        if value != request: raise CopilotError("worker_request_binding_mismatch")
+        assert_current_launch(value, selection, effect)
+        await sink.authorize(value,effect)
+
+    return CopilotExecutor(runtime_path=selection.executable,
+        base_directory=selection.base_directory, environment=environment,
+        github_token=environment["COPILOT_GITHUB_TOKEN"], assert_current=current,
+        output_context=output_context, timeout_seconds=selection.timeout_seconds,
+        cleanup_timeout_seconds=selection.cleanup_timeout_seconds,
+        instructions=selection.instructions)

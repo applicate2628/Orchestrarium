@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Copilot Consultant now has an explicit SDK-only public entrypoint and canonical receiving through the existing Windows launch, process and ledger owners. Exact runtime selection, private authentication, current permissions and actual model/effort readback remain checked; SDK cleanup does not self-attest OS settlement. Offline tests do not qualify an installed runtime or native execution.
+
 - An explicitly supplied Copilot SDK runtime can serve a fresh prompt-only Consultant task through the common coordinator interface. The adapter keeps Host permission checks, structured task validation and cleanup evidence separate from account verification and operating-system containment; it does not install a runtime or activate public routing.
 
 - Copilot setup plans now identify the current official Microsoft Python SDK package and source. Guidance distinguishes package installation from runtime provisioning and warns about first-use downloads; this does not activate a Copilot executor or run a model.

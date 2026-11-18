@@ -31,6 +31,9 @@ _BINDING_KEYS = frozenset({
     "scope", "artifactIdentity", "maxEvents", "jobMemoryLimitBytes",
 })
 _BINDING_LIMIT = 65_536
+_COPILOT_STAGES = ("sdk_prepare", "sdk_launch_admission", "sdk_launch_commit", "sdk_worker_start",
+    "copilot_start", "copilot_client_create", "copilot_session_create", "copilot_profile_before",
+    "copilot_send", "copilot_profile_after", "copilot_result")
 _CLAUDE_STAGES = ("sdk_prepare", "sdk_launch_admission", "sdk_launch_commit", "sdk_worker_start",
                   "start", "account", "connect", "account", "query", "account")
 _STAGES = ("sdk_prepare", "sdk_launch_admission", "sdk_launch_commit", "sdk_hook_trust",
@@ -195,6 +198,13 @@ class CodexReviewDispatch:
         self._workspace_identity = runtime.validate_worker_custody(request, selection)
 
     def _check_auth_context(self):
+        if self.request.provider == "copilot":
+            auth = _owner().resolve_provider_auth_configuration("copilot", dict(self._environment))
+            snapshot = (auth.mode, tuple((key,auth.child_environment.get(key)) for key in
+                _owner().PROVIDER_AUTH_SECRET_ENV_KEYS_V1[auth.mode]))
+            if snapshot != self._auth_snapshot:
+                raise DispatchError("E_COPILOT_SDK_AUTH_CONTEXT_CHANGED")
+            return
         if self.request.provider != "claude":
             return
         if _owner()._capture_output_path("claude") != self._capture_root:
@@ -291,6 +301,11 @@ class CodexReviewDispatch:
             owner._qualify_managed_model_launch(
                 request.provider, self.prevalidated, runtime_namespace=self._runtime_namespace)
             owner.ledger_resource_options(self.prevalidated.control)
+            if request.provider == "copilot":
+                if self._stage >= len(_COPILOT_STAGES) or effect != _COPILOT_STAGES[self._stage]:
+                    raise DispatchError("E_COPILOT_SDK_EFFECT_DENIED")
+                self._stage += 1
+                return
             if request.provider == "claude":
                 if effect == "tool" and self._stage == len(_CLAUDE_STAGES):
                     return  # Exact StructuredOutput payload is checked separately.
@@ -318,7 +333,7 @@ class CodexReviewDispatch:
             self._consumed = True
         try:
             execute = runtime.run_admitted_codex if self.request.provider == "codex" else runtime.run_admitted_review
-            callbacks = {} if self.request.provider == "codex" else {
+            callbacks = {} if self.request.provider != "claude" else {
                 "authorize_tool": self._authorize_tool, "verify_account": self._verify_auth_context}
             run = execute(
                 self.request, self.selection, owner=process_owner,
@@ -527,7 +542,7 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
                       cancellation_probe: Callable[[], bool],
                       runtime_namespace: Path | None = None, provider: str = "codex") -> CodexReviewDispatch:
     """Read-only preparation; canonical runtime alone claims and settles a launch."""
-    if provider not in {"codex", "claude"}:
+    if provider not in {"codex", "claude", "copilot"}:
         raise DispatchError("E_SDK_PROVIDER_UNSUPPORTED")
     prepared_at = time.monotonic()
     _require_supported_platform()
@@ -548,6 +563,10 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
     if provider == "claude" and (binding.get("installedHookRoot") is not None or binding["expectedAccountEmail"] is not None
             or model in {"opus", "sonnet", "haiku"}):
         raise DispatchError("E_CLAUDE_SDK_PROMPT_ONLY_REQUIRED")
+    if provider == "copilot" and (not task_mode or role.assigned_role != "consultant"
+            or binding.get("contextMode", "fresh") != "fresh" or binding.get("writeWorkspace") is not None
+            or binding.get("installedHookRoot") is not None or binding["expectedAccountEmail"] is not None):
+        raise DispatchError("E_COPILOT_SDK_PROMPT_ONLY_REQUIRED")
     write_workspace = binding.get("writeWorkspace")
     write_mode = write_workspace is not None
     continuation_mode = binding.get("contextMode") in {"continuation", "fork"}
@@ -594,6 +613,10 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
     if len(command) != 1 or not Path(command[0]).is_absolute():
         raise DispatchError("E_CODEX_SDK_NATIVE_EXECUTABLE_REQUIRED")
     executable = Path(command[0])
+    if provider == "copilot":
+        selected_path = source_environment.get("COPILOT_CLI_PATH")
+        if not selected_path or not Path(selected_path).is_absolute() or Path(selected_path).resolve(strict=True) != executable.resolve(strict=True):
+            raise DispatchError("E_COPILOT_SDK_RUNTIME_SELECTION_CHANGED")
     owner.validate_no_reparse_components(executable)
     digest = hashlib.sha256()
     with executable.open("rb") as stream:
@@ -616,6 +639,22 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
             config_overrides=runtime.CODEX_BOUNDED_REVIEW_OVERRIDES,
             installed_hook_root=binding.get("installedHookRoot"),
         )
+    elif provider == "copilot":
+        from .copilot import CopilotRuntimeSelection
+        base = source_environment.get("COPILOT_BASE_DIRECTORY")
+        if not base or not Path(base).is_absolute():
+            raise DispatchError("E_COPILOT_SDK_BASE_DIRECTORY_REQUIRED")
+        owner.validate_no_reparse_components(Path(base))
+        if not Path(base).is_dir(): raise DispatchError("E_COPILOT_SDK_BASE_DIRECTORY_REQUIRED")
+        auth_snapshot = (auth.mode, tuple((key,auth.child_environment.get(key)) for key in
+            owner.PROVIDER_AUTH_SECRET_ENV_KEYS_V1[auth.mode]))
+        selection = CopilotRuntimeSelection(
+            executable=str(executable), executable_sha256=digest.hexdigest(), base_directory=base,
+            auth_mode=auth.mode, instructions=owner.assemble_external_prompt(b"").decode("utf-8"),
+            work_item=str(item), ledger_max_events=int(options[1]) if options else None,
+            ledger_max_bytes=int(options[3]) if options else None,
+            job_memory_limit_bytes=binding["jobMemoryLimitBytes"],
+            timeout_seconds=c.timeout_secs, cleanup_timeout_seconds=c.timeout_secs)
     else:
         from .claude import ClaudeRuntimeSelection
         if not owner.claude_programmatic_auth_mode_supported(auth.mode):
@@ -648,7 +687,7 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
         context_mode="fresh" if continuation_mode else binding.get("contextMode", "fresh"),
         coordinator_binding=binding["coordinatorBinding"], scope=tuple(binding["scope"]),
         max_output_bytes=c.result_max_bytes, max_events=binding["maxEvents"],
-        **({"tool_profile":"prompt-only"} if provider == "claude" and not write_mode else {}),
+        **({"tool_profile":"prompt-only"} if provider in {"claude", "copilot"} and not write_mode else {}),
     )
     if provider == "codex":
         request = runtime.prepare_codex_request(request)

@@ -156,6 +156,12 @@ def runtime_selection_from_dict(provider: str, value: object):
             return ClaudeRuntimeSelection.from_dict(value)
         except AdapterError as error:
             raise RuntimeBindingError(str(error)) from error
+    if provider == "copilot":
+        from .copilot import CopilotError, CopilotRuntimeSelection
+        try:
+            return CopilotRuntimeSelection.from_dict(value)
+        except CopilotError as error:
+            raise RuntimeBindingError(str(error)) from error
     raise RuntimeBindingError("unsupported_runtime_provider")
 
 
@@ -293,6 +299,8 @@ def selected_sdk_execution(request: ExecutionRequest, selection: Any) -> dict[st
         adapter, sandbox, approval = "openai-codex", ("workspace-write" if request.write_workspace is not None else "read-only"), "deny_all"
     elif request.provider == "claude":
         adapter, sandbox, approval = "claude-agent-sdk", ("tool-restricted-workspace-write" if request.write_workspace is not None else "tool-restricted-read-only"), "deny_unadmitted"
+    elif request.provider == "copilot":
+        adapter, sandbox, approval = "microsoft-copilot-sdk", "tool-restricted-read-only", "deny_all"
     else:
         raise RuntimeBindingError("unsupported_runtime_provider")
     value = {
@@ -323,6 +331,15 @@ def prepare_environment(selection: Any, source: dict[str, str]):
     if type(source) is not dict or any(type(k) is not str or type(v) is not str for k, v in source.items()):
         raise RuntimeBindingError("explicit_environment_required")
     owner = _owner()
+    from .copilot import CopilotRuntimeSelection
+    if type(selection) is CopilotRuntimeSelection:
+        runtime_selection_from_dict("copilot", selection.to_dict())
+        home = Path(selection.base_directory)
+        owner.validate_no_reparse_components(home)
+        if not home.is_dir(): raise RuntimeBindingError("selected_home_unavailable")
+        auth = owner.resolve_provider_auth_configuration("copilot", source)
+        if auth.mode != selection.auth_mode: raise RuntimeBindingError("selected_auth_mode_mismatch")
+        return dict(auth.child_environment), owner.resolve_provider_output_context(auth)
     codex = isinstance(selection, CodexRuntimeSelection)
     provider = "codex" if codex else "claude"
     runtime_selection_from_dict(provider, selection.to_dict())

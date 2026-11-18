@@ -108,7 +108,7 @@ CAPTURE_MAX_BYTES_DEFAULT = 16 * 1024 * 1024
 CAPTURE_MAX_BYTES_HARD = 256 * 1024 * 1024
 RESULT_PREFIX = "ORCHESTRARIUM_PROVIDER_RESULT_V2="
 SDK_RESULT_PREFIX = "ORCHESTRARIUM_PROVIDER_RESULT_V3="
-EXTERNAL_PROVIDER_NAMES = frozenset({"codex", "claude", "kimi"})
+EXTERNAL_PROVIDER_NAMES = frozenset({"codex", "claude", "kimi", "copilot"})
 POLICY_BOUND_EXTERNAL_PROVIDERS = frozenset({"kimi", "grok"})
 _EXTERNAL_DISPATCH_DECISION_FIELDS = frozenset(
     {
@@ -136,6 +136,7 @@ SETTINGS_SNAPSHOT_MAX_BYTES = 1024 * 1024
 CLEANUP_ISSUE_LIMIT = 32
 CLEANUP_ISSUE_TOKEN_MAX = 64
 PROVIDER_AUTH_SECRET_ENV_KEYS_V1 = {
+    "copilot-explicit-token": ("COPILOT_GITHUB_TOKEN",),
     "codex-api-key": ("OPENAI_API_KEY",),
     "codex-auth-file": (),
     "claude-bedrock": (
@@ -2995,7 +2996,9 @@ def parse_control(
         index += 1
     if result.sdk_review_binding is not None and result.sdk_task_binding is not None:
         raise ValueError("E_SDK_BINDING_KIND_CONFLICT")
-    if result.sdk_task_binding is not None and provider not in {"codex", "claude"}:
+    if provider == "copilot" and result.sdk_task_binding is None:
+        raise ValueError("E_COPILOT_SDK_TASK_BINDING_REQUIRED")
+    if result.sdk_task_binding is not None and provider not in {"codex", "claude", "copilot"}:
         raise ValueError("E_SDK_TASK_PROVIDER_REQUIRED")
     if result.sdk_review_binding is not None and provider not in {"codex", "claude"}:
         raise ValueError("E_SDK_REVIEW_PROVIDER_REQUIRED")
@@ -3060,6 +3063,19 @@ def normalize_launch_profile(
     """Validate the closed non-sensitive flag grammar and derive its profile."""
 
     frozen = _bounded_launch_flag_tokens(flags)
+    if provider == "copilot":
+        # These are wrapper SDK selectors, never native CLI launch arguments.
+        values = {}
+        if len(frozen) != 4:
+            raise ValueError("E_COPILOT_SDK_PROFILE_REQUIRED")
+        for name, value in zip(frozen[::2], frozen[1::2]):
+            if name not in {"--model", "--effort"} or name in values:
+                raise ValueError("E_EXTERNAL_LAUNCH_FLAGS_UNSAFE")
+            values[name] = value
+        if (_MODEL_TOKEN.fullmatch(values.get("--model", "")) is None
+                or values.get("--effort") not in EFFORTS):
+            raise ValueError("E_EXTERNAL_LAUNCH_FLAGS_UNSAFE")
+        return frozen, values["--model"], values["--effort"]
     if provider == "kimi":
         if frozen:
             raise ValueError("E_EXTERNAL_LAUNCH_FLAGS_UNSAFE")
@@ -3155,6 +3171,9 @@ def resolved_profile(
                 "E_KIMI_PROFILE_FIXED: Kimi 1.x accepts no caller-supplied provider flags"
             )
         return [], "kimi-code/k3", kimi_effort
+    if provider == "copilot":
+        frozen, model, effort = normalize_launch_profile(provider, flags)
+        return list(frozen), model, effort
     if not flags:
         flags = (
             ["--model", "gpt-6.2-sol", "-c", "model_reasoning_effort=xhigh"]
@@ -3573,6 +3592,11 @@ def resolve_provider_command(provider: str) -> ResolvedProviderCommand | None:
     # caller's PATH or KIMI_BIN selection.
     if provider == "kimi":
         return None
+    if provider == "copilot":
+        requested = os.environ.get("COPILOT_CLI_PATH")
+        if not requested or not Path(requested).is_absolute():
+            return None
+        return _command_from_path(requested, "explicit-absolute-binding")
     environment_key = {
         "codex": "CODEX_BIN",
         "claude": "CLAUDE_BIN",
@@ -4060,6 +4084,10 @@ def resolve_provider_auth_configuration(
                     "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: mixed Codex API-key and auth-file credentials"
                 )
         mode = "codex-api-key" if source.get("OPENAI_API_KEY") else "codex-auth-file"
+    elif provider == "copilot":
+        if not source.get("COPILOT_GITHUB_TOKEN", "").strip():
+            raise ValueError("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: explicit Copilot token required")
+        mode = "copilot-explicit-token"
     elif provider == "claude":
         selected = []
         if _truthy(source.get("CLAUDE_CODE_USE_BEDROCK")):
@@ -4430,7 +4458,7 @@ def _capture_output_path(provider: str) -> Path:
     """Resolve existing capture selection once; no directory/resource effects."""
     if provider == "kimi":
         return _kimi_runtime_root() / "runs"
-    env_key = {"codex": "CODEX_PROMPTS_DIR", "claude": "CLAUDE_PROMPTS_DIR"}.get(
+    env_key = {"codex": "CODEX_PROMPTS_DIR", "claude": "CLAUDE_PROMPTS_DIR", "copilot": "COPILOT_PROMPTS_DIR"}.get(
         provider, "PROVIDER_PROMPTS_DIR"
     )
     configured = os.environ.get(env_key)
@@ -7258,13 +7286,16 @@ def _validate_sdk_result_binding(payload: dict[str, object]) -> None:
         raise ValueError("provider result SDK identities must be distinct")
     execution_role = payload.get("executionRole")
     selected = payload["sdkExecution"]
+    if payload.get("provider") == "copilot" and (
+            execution_role != "consultant" or selected.get("schemaVersion") != 2):
+        raise ValueError("provider result Copilot SDK Consultant binding mismatch")
     if execution_role in {"consultant", "external-worker"}:
         primary = payload.get("primaryOutcome")
         _roles, _reviewers, workers, _unsupported = _external_role_taxonomy()
         role_matches = (payload.get("assignedRole") == "consultant"
                         if execution_role == "consultant" else payload.get("assignedRole") in workers)
         provider = payload.get("provider")
-        consultant_modes = {"codex": "read-only", "claude": "tool-restricted-read-only"}
+        consultant_modes = {"codex": "read-only", "claude": "tool-restricted-read-only", "copilot": "tool-restricted-read-only"}
         mode_matches = (provider in consultant_modes
                         and selected.get("sandboxMode") == consultant_modes[provider]
                         if execution_role == "consultant" else
@@ -8310,7 +8341,7 @@ def _resolve_launch_provider_command(
     if resolution is not None:
         _reject_repository_path_discovery(resolution, query_cwd)
         return list(resolution.command), None
-    key = {"codex": "CODEX_BIN", "claude": "CLAUDE_BIN"}.get(
+    key = {"codex": "CODEX_BIN", "claude": "CLAUDE_BIN", "copilot": "COPILOT_CLI_PATH"}.get(
         provider, "PROVIDER_BIN"
     )
     raise ValueError(
