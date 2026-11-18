@@ -72,7 +72,7 @@ python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --pla
 python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --platform claude --hook-event UserPromptSubmit --script-marker turn-anchor-reminder --script-path <ignored> --remove
 ```
 
-The auto-installed entries use the same direct-Python exec shape on Windows and POSIX; only the absolute paths differ:
+The auto-installed entries use the same direct-Python exec shape on Windows and POSIX; only the absolute paths differ. The placeholders describe the shape; do not paste them into settings. Use the installer to register and verify the executable and script on the current host:
 
 ```json
 {
@@ -83,9 +83,9 @@ The auto-installed entries use the same direct-Python exec shape on Windows and 
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Python314\\python.exe",
+            "command": "<registered Python executable>",
             "args": [
-              "C:\\Users\\<you>\\.claude\\agents\\scripts\\check-bugfix-discipline.py"
+              "<client config root>\\agents\\scripts\\check-bugfix-discipline.py"
             ]
           }
         ]
@@ -96,9 +96,9 @@ The auto-installed entries use the same direct-Python exec shape on Windows and 
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Python314\\python.exe",
+            "command": "<registered Python executable>",
             "args": [
-              "C:\\Users\\<you>\\.claude\\agents\\scripts\\check-passive-polling-stop.py"
+              "<client config root>\\agents\\scripts\\check-passive-polling-stop.py"
             ]
           }
         ]

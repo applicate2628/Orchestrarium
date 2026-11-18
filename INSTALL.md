@@ -404,14 +404,14 @@ bash install.sh --global
 python .\install.py --global
 ```
 
-Or install into a specific project:
+Or install into a specific project. In the examples, set `PROJECT_ROOT` (Bash) or `$ProjectRoot` (PowerShell) to the intended existing project, and verify it before acknowledging the custom target.
 
 ```bash
-bash install.sh --target /path/to/project --allow-unsafe-target
+bash install.sh --target "$PROJECT_ROOT" --allow-unsafe-target
 ```
 
 ```powershell
-python .\install.py --target "D:\path\to\project" --allow-unsafe-target
+python .\install.py --target "$ProjectRoot" --allow-unsafe-target
 ```
 
 The router asks which pack to install:
@@ -476,9 +476,9 @@ Use `python scripts/install-codex.py` or its thin POSIX launcher `scripts/instal
 | Command | Result |
 | --- | --- |
 | `bash scripts/install-codex.sh --global` | Installs into `~/.codex/` |
-| `bash scripts/install-codex.sh --target /path/to/project --allow-unsafe-target` | Installs into the target project's `.agents/skills/` and merges root `AGENTS.md` |
+| `bash scripts/install-codex.sh --target "$PROJECT_ROOT" --allow-unsafe-target` | Installs into the target project's `.agents/skills/` and merges root `AGENTS.md` |
 | `python .\scripts\install-codex.py --global` | Installs into `~/.codex/` |
-| `python .\scripts\install-codex.py --target "D:\path\to\project" --allow-unsafe-target` | Installs into the target project's `.agents/skills/` and merges root `AGENTS.md` |
+| `python .\scripts\install-codex.py --target "$ProjectRoot" --allow-unsafe-target` | Installs into the target project's `.agents/skills/` and merges root `AGENTS.md` |
 | `python .\scripts\install-codex.py --global --enroll-kimi` | Runs the optional non-writing Kimi executable version/help readiness diagnostic; it does not enroll or authorize normal launch |
 | `python .\scripts\install-codex.py --global --replace-kimi-enrollment` | Compatibility alias for the same non-writing readiness diagnostic |
 | `python .\scripts\install-codex.py --global --verify-kimi-enrollment` | Compatibility alias for the same non-writing readiness diagnostic |
@@ -539,9 +539,9 @@ Use `python scripts/install-claude.py` or its thin POSIX launcher `scripts/insta
 | Command | Result |
 | --- | --- |
 | `bash scripts/install-claude.sh --global` | Installs into `~/.claude/` |
-| `bash scripts/install-claude.sh --target /path/to/project --allow-unsafe-target` | Installs into the target project's `.claude/` plus the shared `.agents/` skill surface |
+| `bash scripts/install-claude.sh --target "$PROJECT_ROOT" --allow-unsafe-target` | Installs into the target project's `.claude/` plus the shared `.agents/` skill surface |
 | `python .\scripts\install-claude.py --global` | Installs into `~/.claude/` |
-| `python .\scripts\install-claude.py --target "D:\path\to\project" --allow-unsafe-target` | Installs into the target project's `.claude/` plus the shared `.agents/` skill surface |
+| `python .\scripts\install-claude.py --target "$ProjectRoot" --allow-unsafe-target` | Installs into the target project's `.claude/` plus the shared `.agents/` skill surface |
 
 Notes:
 

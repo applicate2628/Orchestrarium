@@ -25,7 +25,15 @@ where.exe ffmpeg
 where.exe ffprobe
 ```
 
-On Windows the winget install puts ffmpeg under `C:\Users\<user>\AppData\Local\Microsoft\WinGet\Links\ffmpeg.exe` — this path may not be in the current shell's PATH even when winget reports "installed". Always check `where.exe ffmpeg` and fall back to the full path when needed.
+If either command is absent from PATH after a WinGet install, check the WinGet links under the current user's local application data. Use the corresponding link only if it exists; do not assume a Windows drive or user profile layout.
+
+```powershell
+$links = Join-Path $env:LOCALAPPDATA 'Microsoft/WinGet/Links'
+foreach ($name in 'ffmpeg.exe', 'ffprobe.exe') {
+    $candidate = Join-Path $links $name
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) { $candidate }
+}
+```
 
 Use a scratch folder inside the repo (`.scratch/video-frames/`) so the output never accidentally gets committed — the repo's `/.scratch/` rule in `.gitignore` already covers this. Do not put frames in the system temp folder — Read needs absolute paths and the workflow gets much easier when frames live next to the repo.
 

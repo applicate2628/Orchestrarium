@@ -74,7 +74,7 @@ python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --pla
 python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --platform claude --hook-event UserPromptSubmit --script-marker turn-anchor-reminder --script-path <ignored> --remove
 ```
 
-На Windows и POSIX авто-устанавливаемые записи используют одну direct-Python exec-форму; различаются только абсолютные пути:
+На Windows и POSIX авто-устанавливаемые записи используют одну direct-Python exec-форму; различаются только абсолютные пути. Угловые скобки обозначают места для путей, а не готовые значения. Используйте установщик, чтобы зарегистрировать и проверить исполняемый файл и скрипт на текущем компьютере:
 
 ```json
 {
@@ -85,9 +85,9 @@ python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --pla
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Python314\\python.exe",
+            "command": "<registered Python executable>",
             "args": [
-              "C:\\Users\\<you>\\.claude\\agents\\scripts\\check-bugfix-discipline.py"
+              "<client config root>\\agents\\scripts\\check-bugfix-discipline.py"
             ]
           }
         ]
@@ -98,9 +98,9 @@ python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --pla
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Python314\\python.exe",
+            "command": "<registered Python executable>",
             "args": [
-              "C:\\Users\\<you>\\.claude\\agents\\scripts\\check-passive-polling-stop.py"
+              "<client config root>\\agents\\scripts\\check-passive-polling-stop.py"
             ]
           }
         ]

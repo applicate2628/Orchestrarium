@@ -467,6 +467,18 @@ def _host_identity(record: dict[str, Any], host_os: str) -> str:
     )
 
 
+def _system_command_processor() -> Path | None:
+    import ctypes
+
+    buffer = ctypes.create_unicode_buffer(32768)
+    length = ctypes.windll.kernel32.GetSystemDirectoryW(buffer, len(buffer))
+    if 0 < length < len(buffer):
+        directory = Path(buffer.value)
+        if directory.is_absolute():
+            return directory / "cmd.exe"
+    return None
+
+
 def resolve_codex_command(value: str | None = None) -> list[str]:
     """Resolve one absolute command prefix that both inventory and launch can reuse."""
     # Windows PATH may contain an unrelated npm "codex.cmd" before the native
@@ -484,8 +496,10 @@ def resolve_codex_command(value: str | None = None) -> list[str]:
     if path.suffix.casefold() == ".py":
         return [str(Path(sys.executable).resolve()), str(path)]
     if os.name == "nt" and path.suffix.casefold() in {".cmd", ".bat"}:
-        comspec = Path(os.environ.get("COMSPEC", "C:/Windows/System32/cmd.exe")).resolve()
-        if not comspec.is_file():
+        override = os.environ.get("COMSPEC")
+        processor = Path(override) if override is not None else _system_command_processor()
+        comspec = processor.resolve() if processor is not None else None
+        if comspec is None or not comspec.is_file():
             raise ValueError("FAIL CODEX_HOOK_LIST_UNAVAILABLE: command processor is unavailable")
         return [str(comspec), "/d", "/s", "/c", str(path)]
     return [str(path)]
