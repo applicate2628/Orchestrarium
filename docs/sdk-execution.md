@@ -705,6 +705,29 @@ ownership-aware uninstall preserving Codex and unrelated customizations. Final
 source hashes were unchanged across those checks. No real AGY session, model
 call or user-global installation was performed.
 
+### Explicit Root association for AGY native children
+
+The installed native binding helper prepares a hash-bound assignment and records
+Root's explicit association with an observed AGY child conversation ID, using
+existing work-item artifacts and ledger transactions. Registration and binding
+have distinct operation IDs; their completed standalone Lead rows mean those
+recording operations completed, not that the native task ran or passed review.
+Same-association recovery is idempotent; conflicting or changed records are not
+silently replaced. No second registry, permission store, provider launcher or
+SDK child-decision runtime is introduced.
+
+This is an Orchestrarium Host convention, not a new native provider guarantee.
+The [official hook contract](https://antigravity.google/docs/hooks/) supplies
+proposed tool arguments and current conversation metadata, but does not document
+child IDs in `PostToolUse` or promise original subagent Prompt content in
+`SessionStart.lastUserInput`. A prompt marker or hook is only a correlation hint;
+Root must supply the observed child ID explicitly. Scope descriptions record the
+assignment, not operating-system enforcement. Result review and closure remain
+separate, and an uncertain spawn is not automatically repeated. The installed
+[prepare/bind/readback commands](../INSTALL.md#explicit-agy-native-child-association)
+perform local bookkeeping without starting a model. Native result/parentage and
+subagent depth qualification remain open.
+
 ### AGY Host to the existing Codex SDK review bridge
 
 The AGY installer supplies the existing public Codex review entrypoint and shared
@@ -1373,7 +1396,7 @@ wholly unfinished features. Continue only the following unresolved outcomes:
 
 | Next outcome | Concrete remaining work | Verification/delivery boundary |
 |---|---|---|
-| Provider routes | Remaining supported AGY native lifecycle/subagent handoff beyond startup and advisory hooks; Kimi installed/native qualification of its reconciled Kimi Code ACP owner; Grok Build ACP actual runtime, account/tool enforcement and canonical receiving. | Use confirmed official capabilities and the existing owners. Do not turn subscription Lead routes into third-party workers. |
+| Provider routes | Remaining supported AGY native lifecycle/result qualification beyond startup, advisory hooks and explicit Root association; Kimi installed/native qualification of its reconciled Kimi Code ACP owner; Grok Build ACP actual runtime, account/tool enforcement and canonical receiving. | Use confirmed official capabilities and the existing owners. Do not turn subscription Lead routes into third-party workers. |
 | Session coverage | Remaining provider-native continuation and native Lead/subagent integration where the official runtime exposes a qualified integration surface. Host recovery of newly committed fresh decisions is implemented separately and is not native resume. | Existing Codex/Claude/Copilot child coordination is not missing. Host lineage/depth does not prove control of vendor-internal subagents. |
 | Platform coverage | POSIX platform containment/custody and lifecycle qualification for intended macOS/Linux routes. | Windows offline results do not qualify POSIX or prove an OS sandbox. |
 | Current native acceptance | Install/inspect the selected current payload and exercise admitted real provider routes and recovery. | Not yet performed for this HEAD. Installation and quota-consuming calls retain their separate authorization; offline peers are not native acceptance. |

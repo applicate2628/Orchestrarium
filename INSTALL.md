@@ -120,6 +120,42 @@ Official contracts: [discovery](https://antigravity.google/docs/customization-di
 and [hooks](https://antigravity.google/docs/hooks/). The vendor discovery paths
 are distinct from Orche's chosen managed subtree and ownership identifiers.
 
+## Explicit AGY native-child association
+
+The managed package includes `scripts/sdk_execution/native_binding.py`. Root can
+use this local helper before and after an authorized native `invoke_subagent`.
+It does not launch AGY, consume quota, grant access, enforce workspace scope or
+verify native execution. Use the absolute helper path in the selected managed
+package and the existing absolute work-item directory; no development checkout
+or another provider's installed tree is a fallback.
+
+Prepare an assignment JSON file with `schema_version: 1`,
+`kind: "native-child-assignment"`, an enduring `assignment_id`,
+`provider: "antigravity"`, `parent_conversation_id`, `role`, a nonempty `scope`
+array of Root-selected scope descriptions, `task`, `expected_artifact` (within the
+existing work-item artifact policy), and `acceptance`. These are Root's recorded
+instructions, not a new permission grant or a native sandbox description.
+
+```text
+python <managed-package>/scripts/sdk_execution/native_binding.py --work-item <absolute-work-item> prepare --assignment-file <assignment.json> --started-at <UTC-timestamp>
+python <managed-package>/scripts/sdk_execution/native_binding.py --work-item <absolute-work-item> bind --assignment-id <id> --assignment-sha256 <prepared-digest> --child-conversation-id <observed-child-id> --evidence-reference <Root-observation-reference> --started-at <UTC-timestamp>
+python <managed-package>/scripts/sdk_execution/native_binding.py --work-item <absolute-work-item> readback --assignment-id <id>
+```
+
+Keep the prepared assignment ID and digest together in the native task prompt. After the native spawn,
+Root explicitly records the observed child ID and its evidence reference. Do not
+infer that ID from successful hook completion or automatically relaunch an
+uncertain spawn. This correlation pair does not authenticate the child. Native `PostToolUse` does not document a child-result/ID field, and
+`SessionStart` does not guarantee that the original task prompt appears in
+`lastUserInput`. No hook payload alone creates or authorizes this association.
+
+The same association can be read after restart without running a provider. A
+conflicting child or changed assignment is not silently overwritten. Completed
+ledger rows here describe Root's registration operations, not the child's task
+completion. Verify the child's actual work and close it through the existing
+project owners; the helper does not create a review verdict, native terminal
+receipt or automatic closure.
+
 ## AGY Lead to external Codex SDK review
 
 The AGY managed package includes the existing Orche Codex review entrypoint at

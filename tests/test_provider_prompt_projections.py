@@ -52,6 +52,7 @@ TRANSPORT_FILES = (
     "sdk_execution/receiving.py",
     "sdk_execution/runtime.py",
     "sdk_execution/worker.py",
+    "sdk_execution/native_binding.py",
 )
 SDK_TRANSPORT_FILES = tuple(
     name for name in TRANSPORT_FILES
@@ -1483,7 +1484,7 @@ def test_every_projection_violation_uses_one_stable_id(
     assert result.stderr.startswith("E_TRANSPORT_PROJECTION_PARITY:")
 
 
-@pytest.mark.parametrize("generation", ("PRE_SDK_TRANSPORT_FILES", "POLICY_TRANSPORT_FILES", "PRE_POLICY_SDK_TRANSPORT_FILES", "PRE_COPILOT_TRANSPORT_FILES", "PRE_COPILOT_ENTRY_TRANSPORT_FILES"))
+@pytest.mark.parametrize("generation", ("PRE_SDK_TRANSPORT_FILES", "POLICY_TRANSPORT_FILES", "PRE_POLICY_SDK_TRANSPORT_FILES", "PRE_COPILOT_TRANSPORT_FILES", "PRE_COPILOT_ENTRY_TRANSPORT_FILES", "PRE_NATIVE_BINDING_TRANSPORT_FILES"))
 @pytest.mark.parametrize("inventory", ("exact-old", "missing-old", "partial-sdk", "reordered-old"))
 def test_pre_sdk_manifest_compatibility_is_predecessor_only_and_exact(
     tmp_path: Path, inventory: str, generation: str,
@@ -1500,6 +1501,12 @@ def test_pre_sdk_manifest_compatibility_is_predecessor_only_and_exact(
         names.reverse()
     manifest["files"] = {name: manifest["files"][name] for name in names}
     path.write_text(json.dumps(manifest), encoding="utf-8")
+    # A one-member generation extension can produce the complete current set,
+    # which both ordinary and compatibility loading intentionally admit.
+    if tuple(names) == validator.TRANSPORT_FILES:
+        assert tuple(validator._load_manifest(path)["files"]) == tuple(names)
+        assert tuple(validator._load_manifest(path, predecessor_only=True)["files"]) == tuple(names)
+        return
     with pytest.raises(ValueError, match="complete ordered transport set"):
         validator._load_manifest(path)
     if inventory == "exact-old":
@@ -1509,7 +1516,7 @@ def test_pre_sdk_manifest_compatibility_is_predecessor_only_and_exact(
             validator._load_manifest(path, predecessor_only=True)
 
 
-@pytest.mark.parametrize("generation", ("PRE_SDK_TRANSPORT_FILES", "POLICY_TRANSPORT_FILES", "PRE_POLICY_SDK_TRANSPORT_FILES", "PRE_COPILOT_TRANSPORT_FILES", "PRE_COPILOT_ENTRY_TRANSPORT_FILES"))
+@pytest.mark.parametrize("generation", ("PRE_SDK_TRANSPORT_FILES", "POLICY_TRANSPORT_FILES", "PRE_POLICY_SDK_TRANSPORT_FILES", "PRE_COPILOT_TRANSPORT_FILES", "PRE_COPILOT_ENTRY_TRANSPORT_FILES", "PRE_NATIVE_BINDING_TRANSPORT_FILES"))
 @pytest.mark.parametrize("peer_change", (None, "unexpected-sdk", "customized-old"))
 def test_sdk_projection_upgrade_preserves_receipted_pre_sdk_generation(
     tmp_path: Path, peer_change: str | None, generation: str,

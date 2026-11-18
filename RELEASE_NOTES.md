@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Add explicit AGY native-child assignment and association through the existing work-item artifact/ledger owners, allowing Root to recover the recorded child mapping without relaunching an uncertain task; preserve separate permissions, actual-result review and closure.
+
 - Retain Claude results and close owned instruction files when the native SDK cancels its interrupt or disconnect coroutine; report unsuccessful cleanup without inventing an acknowledgement, adding a timeout, or replaying the task.
 
 - Preserve acquired Copilot results when a native cleanup coroutine cancels itself, record failed cleanup and continue the remaining cleanup owners rather than losing evidence or skipping client stop; retain caller cancellation and existing deadlines.

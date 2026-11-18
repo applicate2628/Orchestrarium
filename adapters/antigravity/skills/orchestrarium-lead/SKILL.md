@@ -56,3 +56,20 @@ source-subtree boundaries rather than making the control plane writable. Keep
 grant permission. Review actual file changes independently: a task result is not
 proof of accepted writes or native sandbox enforcement. Preserve diagnostics and
 do not automatically replay an interrupted write.
+
+## Explicit native-child assignment and association
+
+For an authorized native child task, prepare its assignment with this package's
+`scripts/sdk_execution/native_binding.py` before spawn, using the existing
+work-item ledger. Retain the returned assignment ID and digest in the task prompt.
+After observing the native child conversation ID, Root explicitly binds it to
+the exact assignment digest and records the observation reference. Readback
+restores that association after interruption without another native launch.
+Do not overwrite a conflicting association or replay an uncertain spawn.
+
+The recorded scope is an instruction, not enforced permission. The correlation pair, hook
+payload and association are not proof of native execution, parentage, accepted
+work or task completion. Preserve native authorization and the existing result
+review/closure owners. Unknown or unrelated native calls need no fabricated
+assignment to keep working. See the installation guide's explicit native-child
+association commands for the exact input contract.
