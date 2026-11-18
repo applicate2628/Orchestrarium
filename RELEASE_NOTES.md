@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-17
 
+- Extend explicit Codex task dispatch with version-4 whole-workspace Worker binding, preserving Consultant/review compatibility. Invocation inputs, terminal output and owner-controlled capture storage stay outside the write boundary; the actual capture directory is bound before process creation. This offline-tested public source route does not authorize model spending or claim installed/native sandbox acceptance.
+
 - Integrate Codex Worker custody, selected workspace-digest provenance and task receiving through the existing runtime and ledger owners. Protected authority paths cannot overlap the writable workspace, and Worker evidence cannot become a review verdict. Public write dispatch and native sandbox qualification remain separate.
 
 - Add an explicit whole-workspace write contract and Codex Worker adapter using the existing lifecycle. It checks effective roots, network and temporary-directory exclusions before the turn, retains role/approval boundaries, and rejects uncertain resume. This offline adapter increment does not activate public writes: runtime custody and receiving qualification remain separate.

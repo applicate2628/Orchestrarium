@@ -7978,6 +7978,14 @@ def _launch_sdk_review(operation, reserved_run: ReservedExternalRunV1, *, cancel
     try:
         lifecycle = reserved_run.acquire_capture("codex", "sdk-review")
         reserved_run.mark_initialized(lifecycle)
+        # The actual acquired namespace, not a guessed future capture path, is
+        # bound before any SDK worker or process runner can be constructed.
+        lifecycle._validate_identity()
+        bind_capture = getattr(operation, "bind_capture_directory", None)
+        if callable(bind_capture):
+            bind_capture(lifecycle.run_dir)
+        elif getattr(getattr(operation, "request", None), "write_workspace", None) is not None:
+            raise ValueError("E_CODEX_SDK_CAPTURE_BINDING_REQUIRED")
         runner = ProcessRunnerV1()
         close_error = None
         try:

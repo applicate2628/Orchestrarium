@@ -1,4 +1,4 @@
-"""Explicit one-shot read-only Codex execution bridge under the existing launch owner.
+"""Explicit one-shot Codex execution bridge under the existing launch owner.
 
 The invoking Host authorizes execution, just as for the legacy wrapper. A binding
 file supplies constraints, never permission. No SDK import, subprocess, credential
@@ -77,17 +77,18 @@ def read_binding(path: Path) -> dict[str, Any]:
             raise ValueError()
         version = value["schemaVersion"]
         expected = {1: _BINDING_KEYS, 2: _BINDING_KEYS | {"installedHookRoot"},
-                    3: _BINDING_KEYS | {"installedHookRoot", "contextMode", "contextHandoff"}}
+                    3: _BINDING_KEYS | {"installedHookRoot", "contextMode", "contextHandoff"},
+                    4: _BINDING_KEYS | {"installedHookRoot", "contextMode", "contextHandoff", "writeWorkspace"}}
         if version not in expected or set(value) != expected[version]:
             raise ValueError()
-        if version == 3:
+        if version in (3, 4):
             mode, handoff = value["contextMode"], value["contextHandoff"]
             if mode not in ("fresh", "handoff"):
                 raise ValueError()
             if ((mode == "fresh" and handoff is not None) or
                 (mode == "handoff" and (type(handoff) is not str or not handoff.strip()))):
                 raise ValueError()
-        if version == 2 or (version == 3 and value["installedHookRoot"] is not None):
+        if version == 2 or (version in (3, 4) and value["installedHookRoot"] is not None):
             selected_root = value["installedHookRoot"]
             if (type(selected_root) is not str or not selected_root or not Path(selected_root).is_absolute()
                     or any(ord(char) < 32 or ord(char) == 127 for char in selected_root)):
@@ -102,6 +103,11 @@ def read_binding(path: Path) -> dict[str, Any]:
             raise ValueError()
         for key, limit in (("maxEvents", 65_536), ("jobMemoryLimitBytes", 2**63 - 1)):
             if type(value[key]) is not int or not 1 <= value[key] <= limit:
+                raise ValueError()
+        if version == 4:
+            workspace = value["writeWorkspace"]
+            if (not _text(workspace) or not Path(workspace).is_absolute()
+                    or str(Path(workspace)) != workspace or ".." in Path(workspace).parts):
                 raise ValueError()
         return value
     except (OSError, ValueError, TypeError, UnicodeError):
@@ -119,7 +125,7 @@ class CodexReviewDispatch:
     """One launch's constraint guard and retained evidence, not a policy store."""
 
     def __init__(self, prevalidated, request, selection, environment, cancellation_probe,
-                 started_at, deadline, runtime_namespace=None):
+                 started_at, deadline, runtime_namespace=None, *, protected_paths=(), capture_root=None):
         self.prevalidated = prevalidated
         self._runtime_namespace = runtime_namespace
         self.request = request
@@ -139,6 +145,41 @@ class CodexReviewDispatch:
         self._result_limit = prevalidated.control.result_max_bytes
         self._capture_limit = prevalidated.control.capture_max_bytes
         self._commitment = runtime.request_sha256(request, selection)
+        self._protected_paths = tuple(protected_paths)
+        self._capture_root = capture_root
+        self._capture_identity = None
+        self._workspace_identity = runtime.validate_worker_custody(request, selection)
+
+    def _check_write_targets(self):
+        if self.request.write_workspace is None:
+            return
+        runtime.validate_worker_custody(self.request, self.selection, expected_identity=self._workspace_identity)
+        root = Path(self.request.write_workspace)
+        _require_policy_custody(root, self._runtime_namespace)
+        for path in self._protected_paths:
+            _require_disjoint(root, path)
+        if _owner()._capture_output_path("codex") != self._capture_root:
+            raise DispatchError("E_CODEX_SDK_CAPTURE_SELECTION_CHANGED")
+        _require_disjoint(root, self._capture_root, directory=True)
+        if self._capture_identity is not None:
+            path, dev, ino = self._capture_identity
+            _require_disjoint(root, path, directory=True)
+            current = path.stat()
+            if (current.st_dev, current.st_ino) != (dev, ino):
+                raise DispatchError("E_CODEX_SDK_CAPTURE_CHANGED")
+
+    def bind_capture_directory(self, path):
+        if self.request.write_workspace is None:
+            return
+        if self._consumed or self._capture_identity is not None:
+            raise DispatchError("E_CODEX_SDK_CAPTURE_CHANGED")
+        self._check_write_targets()
+        candidate = Path(path)
+        _require_disjoint(Path(self.request.write_workspace), candidate, directory=True)
+        if not candidate.is_dir() or not candidate.resolve().is_relative_to(self._capture_root.resolve()):
+            raise DispatchError("E_CODEX_SDK_CAPTURE_CHANGED")
+        current = candidate.stat()
+        self._capture_identity = (candidate, current.st_dev, current.st_ino)
 
     def _control_snapshot(self):
         c = self.prevalidated.control
@@ -157,6 +198,9 @@ class CodexReviewDispatch:
                 or self._control_snapshot() != self._controls
                 or runtime.request_sha256(self.request, self.selection) != self._commitment):
                 raise DispatchError("E_CODEX_SDK_INVOCATION_NOT_CURRENT")
+            self._check_write_targets()
+            if self.request.write_workspace is not None and self._capture_identity is None:
+                raise DispatchError("E_CODEX_SDK_CAPTURE_UNBOUND")
             owner = _owner()
             role = owner.external_role_provenance(self.prevalidated.control, "codex")
             flags, model, effort = owner.resolved_profile("codex", self.prevalidated.control.provider_flags)
@@ -180,6 +224,9 @@ class CodexReviewDispatch:
         with self._lock:
             if self._consumed:
                 raise DispatchError("E_CODEX_SDK_OPERATION_CONSUMED")
+            self._check_write_targets()
+            if self.request.write_workspace is not None and self._capture_identity is None:
+                raise DispatchError("E_CODEX_SDK_CAPTURE_UNBOUND")
             self._consumed = True
         try:
             run = runtime.run_admitted_codex(
@@ -282,6 +329,16 @@ class CodexReviewDispatch:
             if not self._finished or self.runtime_run is None or getattr(self, "_receive_consumed", False):
                 raise DispatchError("E_CODEX_SDK_RECEIVING_UNAVAILABLE")
             self._receive_consumed = True
+        if self.request.write_workspace is not None:
+            for path in self._protected_paths:
+                _require_disjoint(Path(self.request.write_workspace), path)
+            if self._capture_identity is None:
+                raise DispatchError("E_CODEX_SDK_CAPTURE_UNBOUND")
+            path, dev, ino = self._capture_identity
+            _require_disjoint(Path(self.request.write_workspace), path, directory=True)
+            current = path.stat()
+            if (current.st_dev, current.st_ino) != (dev, ino):
+                raise DispatchError("E_CODEX_SDK_CAPTURE_CHANGED")
         run = self.runtime_run
         if run.observation is None:
             payload = receiving.preworker_failure_payload(run)
@@ -317,6 +374,60 @@ class CodexReviewDispatch:
         return DispatchResult(line.encode("utf-8"), code, terminal)
 
 
+def _require_disjoint(workspace: Path, target: Path, *, directory=False):
+    """Selected namespace custody, not an OS sandbox or hostile-race guarantee."""
+    _owner().validate_no_reparse_components(target)
+    guarded = target.resolve(strict=False)
+    if guarded.is_relative_to(workspace) or (directory and workspace.is_relative_to(guarded)):
+        raise DispatchError("E_CODEX_SDK_WRITE_TARGET_OVERLAP")
+
+
+def _policy_comparison_path(path: Path) -> Path:
+    value = os.path.normcase(os.path.abspath(path))
+    # Windows junction readlink uses extended paths. Normalize only comparison;
+    # keep original paths for filesystem operations and the existing loader.
+    if os.name == "nt":
+        if value.startswith("\\\\?\\unc\\"):
+            value = "\\\\" + value[8:]
+        elif value.startswith("\\\\?\\"):
+            value = value[4:]
+    return Path(value)
+
+
+def _require_policy_custody(workspace: Path, runtime_namespace):
+    # The policy owner supports logical installations with symlink participants.
+    # Protect both selected namespace and resolved companion without forbidding
+    # that supported layout or executing policy bytes before checking custody.
+    namespace = Path(runtime_namespace) if runtime_namespace is not None else Path(os.path.abspath(_owner().__file__)).parent
+    if not namespace.is_absolute():
+        raise DispatchError("E_CODEX_SDK_WRITE_POLICY_CUSTODY")
+    selected = namespace / "model_routing" / "launch_policy.py"
+    # Protect every link participant, not just the final target: an external
+    # policy can resolve through a worker-writable intermediate directory/link.
+    workspace = _policy_comparison_path(workspace)
+    pending = [namespace, selected]
+    seen = set()
+    while pending:
+        path = pending.pop()
+        logical = _policy_comparison_path(path)
+        if logical in seen:
+            continue
+        seen.add(logical)
+        if logical.is_relative_to(workspace):
+            raise DispatchError("E_CODEX_SDK_WRITE_POLICY_CUSTODY")
+        resolved = _policy_comparison_path(path.resolve(strict=True))
+        if resolved.is_relative_to(workspace):
+            raise DispatchError("E_CODEX_SDK_WRITE_POLICY_CUSTODY")
+        if path == namespace and workspace.is_relative_to(resolved):
+            raise DispatchError("E_CODEX_SDK_WRITE_POLICY_CUSTODY")
+        pending.extend(path.parents)
+        metadata = path.lstat()
+        if stat.S_ISLNK(metadata.st_mode) or bool(getattr(metadata, "st_file_attributes", 0) & 0x400):
+            target = Path(os.readlink(path))
+            pending.append(target if target.is_absolute() else path.parent / target)
+
+
+
 def _utc_now():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -336,23 +447,29 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
     if c.sdk_task_binding is not None and c.sdk_review_binding is not None:
         raise DispatchError("E_CODEX_SDK_SELECTION_INVALID")
     task_mode = c.sdk_task_binding is not None
-    expected_role = "consultant" if task_mode else "external-reviewer"
+    # Direct callers must retain the same rule as the public CLI entrypoint.
+    owner._qualify_managed_model_launch("codex", prevalidated, runtime_namespace=runtime_namespace)
+    binding = read_binding(Path(binding_path))
+    write_workspace = binding.get("writeWorkspace")
+    write_mode = write_workspace is not None
+    if write_mode and not task_mode:
+        raise DispatchError("E_CODEX_SDK_REVIEW_ONLY")
+    expected_role = ("external-worker" if write_mode else "consultant") if task_mode else "external-reviewer"
     if (role.execution_role != expected_role or role != prevalidated.role_provenance
         or (tuple(flags), model, effort) != (prevalidated.flags, prevalidated.model, prevalidated.effort)
         or not c.ledger or not c.ledger_artifact or c.terminal_receipt is None
         or c.ledger_lane or c.ledger_closes or prevalidated.provenance is not None):
         raise DispatchError("E_CODEX_SDK_REVIEW_ONLY")
-    # Direct callers must retain the same rule as the public CLI entrypoint.
-    owner._qualify_managed_model_launch("codex", prevalidated, runtime_namespace=runtime_namespace)
+    if write_mode:
+        _require_policy_custody(Path(write_workspace), runtime_namespace)
     for index, flag in enumerate(flags):
-        if flag == "--sandbox" and flags[index + 1] != "read-only":
+        if flag == "--sandbox" and flags[index + 1] != ("workspace-write" if write_mode else "read-only"):
             raise DispatchError("E_CODEX_SDK_REVIEW_ONLY")
     from process_supervision.process_runner import MAX_STDIN_BYTES
     if c.capture_max_bytes > MAX_STDIN_BYTES:
         raise DispatchError("E_CODEX_SDK_CAPTURE_LIMIT")
     if type(source_environment) is not dict or any(type(k) is not str or type(v) is not str for k, v in source_environment.items()):
         raise DispatchError("E_CODEX_SDK_ENVIRONMENT_INVALID")
-    binding = read_binding(Path(binding_path))
     item = Path(c.ledger).resolve(strict=True)
     artifact = item / c.ledger_artifact
     receipt_target = c.terminal_receipt.resolve(strict=False)
@@ -361,6 +478,16 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
         raise DispatchError("E_CODEX_SDK_OUTPUT_ALIAS")
     receiving.review_artifact_target(item, c.ledger_artifact, must_be_new=True)
     cwd = Path.cwd().resolve(strict=True)
+    protected_paths = ()
+    capture_root = None
+    if write_mode:
+        if str(cwd) != write_workspace:
+            raise DispatchError("E_CODEX_SDK_WRITE_WORKSPACE_MISMATCH")
+        protected_paths = tuple(Path(v).absolute() for v in (binding_path, c.terminal_receipt, c.prompt_file) if v is not None)
+        for path in protected_paths:
+            _require_disjoint(cwd, path)
+        capture_root = owner._capture_output_path("codex")
+        _require_disjoint(cwd, capture_root, directory=True)
     command, _expected = owner._resolve_launch_provider_command("codex", cwd)
     if len(command) != 1 or not Path(command[0]).is_absolute():
         raise DispatchError("E_CODEX_SDK_NATIVE_EXECUTABLE_REQUIRED")
@@ -391,17 +518,19 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
         work_item_id=item.name, provider="codex", external_dispatch_id="dispatch-" + secrets.token_hex(16),
         external_evidence_run_id="evidence-" + secrets.token_hex(16), artifact_id=binding["artifactIdentity"],
         role=role.assigned_role, model=model, effort=effort, cwd=str(cwd),
-        result_kind="task" if task_mode else "review",
+        result_kind="task" if task_mode else "review", write_workspace=write_workspace,
         account_binding=binding["accountBinding"], prompt=prompt,
         context_mode=binding.get("contextMode", "fresh"),
         coordinator_binding=binding["coordinatorBinding"], scope=tuple(binding["scope"]),
         max_output_bytes=c.result_max_bytes, max_events=binding["maxEvents"],
     ))
+    runtime.validate_worker_custody(request, selection)
     started = _utc_now()
     owner.prepare_ledger_admission(c, runtime.build_launch_arguments(request, selection, started_at=started))
     runtime._verify_runtime(selection)
     return CodexReviewDispatch(prevalidated, request, selection, source_environment,
-                               cancellation_probe, started, prepared_at + c.timeout_secs, runtime_namespace)
+                               cancellation_probe, started, prepared_at + c.timeout_secs, runtime_namespace,
+                               protected_paths=protected_paths, capture_root=capture_root)
 
 
 def _require_supported_platform():

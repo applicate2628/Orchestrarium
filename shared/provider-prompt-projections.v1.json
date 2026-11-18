@@ -9,7 +9,7 @@
     },
     "provider_prompt.py": {
       "source": "scripts/provider_prompt.py",
-      "sha256": "d41372c0a6eb01fb9b650641b0a8ecf6c7ba2e5ed86cb6a606813bef2546e6f9",
+      "sha256": "dbbb2c516b69a1b650cc0413282cc81d76473cebd1137d9ec1b12fac170ac8bd",
       "destination": "scripts/provider_prompt.py"
     },
     "process_supervision/process_runner.py": {
@@ -85,7 +85,7 @@
     "sdk_execution/dispatch.py": {
       "source": "scripts/sdk_execution/dispatch.py",
       "destination": "scripts/sdk_execution/dispatch.py",
-      "sha256": "f18fce181147bef3c717ef96d29832e66e0d9d200d097865b6076e99c4a07ab9"
+      "sha256": "129088ed516fbc53ef5e52d277720d60cdcb7f0b63aaabebd1ca6989ea77e99b"
     },
     "sdk_execution/contracts.py": {
       "source": "scripts/sdk_execution/contracts.py",

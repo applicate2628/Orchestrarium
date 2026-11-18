@@ -303,9 +303,8 @@ explicit reconciliation path, without relaunching the operation.
 
 This public source integration is tested offline, not installed or live-qualified.
 Existing spending and launch authorization still apply; no default-route change
-or provider call follows merely from selecting a binding. Worker write/tool scope
-and other provider task adapters remain later slices, without a second ledger or
-permission owner.
+or provider call follows merely from selecting a binding. Worker write scope is described below; other provider task adapters remain
+later slices, without a second ledger or permission owner.
 
 ### Whole-workspace Worker adapter increment
 
@@ -343,10 +342,18 @@ request; it does not publish a local directory path. Observed policy must match
 selected version-2 provenance. Worker evidence retains its canonical profession,
 external-worker role and gate none; it cannot close review or authorize itself.
 
-This increment does not activate a public write route. Before dispatch exposes
-that route, its separate capture, binding and terminal-receipt targets must also
-remain outside the writable directory. Native sandbox qualification and review
-of actual file changes remain separate. Startup/hook trust remains its current
+The public `--sdk-task-binding` route now accepts version 4 with an explicit
+`writeWorkspace` and a canonical Worker profession supplied by `--ledger-role`.
+The directory must equal the current working directory. Versions 1-3 remain
+read-only Consultant bindings; the review selector cannot admit writes. Binding,
+prompt and terminal-receipt files must remain outside the workspace. Select an
+external owner-controlled capture directory with existing `CODEX_PROMPTS_DIR`;
+the default inside cwd is unsuitable for this write route. The actual acquired
+capture directory is bound before process creation and checked again at effects
+and receiving; an unbound or substituted directory cannot authorize execution.
+Preparation performs no provider launch. This public source integration is
+verified offline only: native sandbox qualification, installed behavior and
+independent review of actual file changes remain separate. Startup/hook trust remains its current
 owner. A TaskResult reports evidence, not proof of accepted writes or completed
 review. On interrupted/uncertain execution, retain evidence and inspect actual
 changes; do not auto-replay, roll back, or delete work. Worker resume is not yet
@@ -509,11 +516,13 @@ same policy and trust owners rather than introducing a second SDK-specific one.
 
 The strict UTF-8 JSON binding is bounded to 65,536 bytes. Version 1 contains
 exactly the following fields; version 2 additionally requires `installedHookRoot`.
-Version 3 additionally selects context as described below:
+Version 3 additionally selects context as described below. Version 4 has exactly
+the version-3 fields plus a nonempty normalized absolute `writeWorkspace`; it is
+valid only for explicitly selected task-mode Worker roles, never review or advice:
 
 | Field | Meaning |
 |---|---|
-| `schemaVersion` | Integer `1`, `2` or `3`; repository-local binding schema, not SDK version. |
+| `schemaVersion` | Integer `1`, `2`, `3` or `4`; repository-local binding schema, not SDK version. |
 | `accountBinding` | Nonsecret identifier for the selected existing account. |
 | `expectedAccountEmail` | Existing account email for auth-file verification, or null where the selected auth mode permits it; not a credential. |
 | `coordinatorBinding` | Existing Host/session binding label; does not start a coordinator. |
