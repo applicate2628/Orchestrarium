@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Retain Claude results and close owned instruction files when the native SDK cancels its interrupt or disconnect coroutine; report unsuccessful cleanup without inventing an acknowledgement, adding a timeout, or replaying the task.
+
 - Preserve acquired Copilot results when a native cleanup coroutine cancels itself, record failed cleanup and continue the remaining cleanup owners rather than losing evidence or skipping client stop; retain caller cancellation and existing deadlines.
 
 - Align POSIX selected-skill adoption fixtures with the current provider layout and both ownership receipts, preserving unrelated installed claims; document bounded native Linux checks separately from missing Codex hook tooling and unqualified SDK process custody.

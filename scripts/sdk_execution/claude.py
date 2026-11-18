@@ -602,6 +602,21 @@ class ClaudeReviewAdapter:
             await drain_owned(interrupt)
             return await drain_owned(task)
 
+    async def _settle_sdk_cleanup(self, method) -> bool:
+        # Native cleanup self-cancellation is an unsuccessful owned operation,
+        # not cancellation of the caller or permission to abandon other owners.
+        task = None
+        try:
+            task = asyncio.create_task(method())
+            await drain_owned(task)
+        except asyncio.CancelledError:
+            if task is None or not task.cancelled():
+                raise
+            return False
+        except Exception:
+            return False
+        return True
+
     async def cancel(self, run_id: str) -> CancelReceipt:
         if self._request is None or run_id != self._request.run_id:
             return CancelReceipt(run_id, False, False, error="unknown_run")
@@ -612,11 +627,9 @@ class ClaudeReviewAdapter:
             if self._finished:
                 return CancelReceipt(run_id, False, False, self._session_id, self._prompt_id, "already_finished")
             if self._connected and self._query_sent and not self._cancel_acknowledged:
-                try:
-                    await self._client.interrupt()
-                    self._cancel_acknowledged = True
-                except Exception:
+                if not await self._settle_sdk_cleanup(self._client.interrupt):
                     return CancelReceipt(run_id, True, False, self._session_id, self._prompt_id, "interrupt_failed")
+                self._cancel_acknowledged = True
         return CancelReceipt(run_id, True, self._cancel_acknowledged, self._session_id, self._prompt_id)
 
     async def _execute(self) -> ExecutionResult:
@@ -811,10 +824,8 @@ class ClaudeReviewAdapter:
                     if receipt.error:
                         errors.append(receipt.error)
                 async with self._cancel_lock:
-                    try:
-                        await self._client.disconnect()
-                        protocol_closed = True
-                    except Exception:
+                    protocol_closed = await self._settle_sdk_cleanup(self._client.disconnect)
+                    if not protocol_closed:
                         errors.append("protocol_close_failed")
                     self._finished = True
             instruction_files.close()

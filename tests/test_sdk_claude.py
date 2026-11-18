@@ -1185,3 +1185,37 @@ def test_cancellation_while_awaiting_parent_grant_does_not_connect():
         assert observed.execution_error == "cancelled_before_effect"
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("phase", ["interrupt", "disconnect", "both"])
+def test_native_cleanup_self_cancellation_retains_evidence(phase):
+    client = FakeClient()
+    client.include_terminal = phase == "disconnect"
+    async def interrupt():
+        client.calls.append("interrupt")
+        raise asyncio.CancelledError()
+    async def disconnect():
+        client.calls.append("disconnect")
+        assert Path(client.options["extra_args"]["append-system-prompt-file"]).is_file()
+        raise asyncio.CancelledError()
+    if phase in {"interrupt", "both"}:
+        client.interrupt = interrupt
+    if phase in {"disconnect", "both"}:
+        client.disconnect = disconnect
+    value, _ = adapter(client)
+    result = asyncio.run(value.execute(request()))
+    assert result.status == "incomplete"
+    assert result.observations
+    assert client.calls.count("query") == client.calls.count("disconnect") == 1
+    assert value._finished
+    if phase == "disconnect":
+        assert result.provider_status == "completed" and result.review is not None
+        assert result.execution_error is None
+        assert result.cleanup_error == "protocol_close_failed"
+    else:
+        assert result.execution_error == "missing_terminal_result"
+        assert client.calls.count("interrupt") == 1
+        assert "interrupt_failed" in result.cleanup_error
+    assert result.protocol_closed == (phase == "interrupt")
+    with pytest.raises(AdapterError, match="operation_already_consumed"):
+        asyncio.run(value.execute(request()))

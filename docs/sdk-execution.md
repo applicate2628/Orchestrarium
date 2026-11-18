@@ -131,6 +131,19 @@ one task execution. Exact revision and final review are recorded in the PR.
 Official reference: [Claude Agent SDK Python public interface](https://github.com/anthropics/claude-agent-sdk-python/tree/163f50ed56fa8c3fd9346148b6e56e7696794b58).
 The reference documents SDK operations, not an installed-version requirement.
 
+### Claude cleanup self-cancellation retains results
+
+A native Claude SDK interrupt or disconnect coroutine cancelling itself is a
+failed owned cleanup operation, not evidence of caller cancellation or process
+settlement. The existing adapter drains that operation while retaining its
+cancellation lock, records the failed acknowledgement or protocol close, and
+continues instruction-file closure and result construction. Already acquired
+output remains available as unsuccessful evidence; it is not retried or promoted
+to success. Repeated caller cancellation retains the existing owned-task drain.
+Unlike Copilot's existing cleanup contract, this Claude path adds no timeout.
+Offline fixtures cover interrupt, disconnect, combined self-cancellation and
+neighboring caller cancellation; no native provider acceptance is implied.
+
 ### Claude Consultant transcript continuation
 
 A read-only Claude Consultant task can retain a completed native transcript in

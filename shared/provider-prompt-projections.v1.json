@@ -74,7 +74,7 @@
     },
     "sdk_execution/claude.py": {
       "source": "scripts/sdk_execution/claude.py",
-      "sha256": "01fc182b371062dab28dc52e7c81b0f9d2791cf20a1c4cc9598d1aab5a396f78",
+      "sha256": "f6b5efb327dd44cdbbcc8221bf1c5aa1513abb0be4b593263667b5d4e21b89e0",
       "destination": "scripts/sdk_execution/claude.py"
     },
     "sdk_execution/copilot.py": {
