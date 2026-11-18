@@ -692,6 +692,26 @@ ownership-aware uninstall preserving Codex and unrelated customizations. Final
 source hashes were unchanged across those checks. No real AGY session, model
 call or user-global installation was performed.
 
+### AGY Host to the existing Codex SDK review bridge
+
+The AGY installer supplies the existing public Codex review entrypoint and shared
+runtime resources under its own managed `scripts/` and `shared/` directories.
+The same exact-scope ledger helper selector recognizes that ordinary project or
+current-home AGY root and retains wrapper/root/cohort currentness; it never falls
+back to the source checkout or a neighboring Codex pack. Existing dispatch,
+PolicyBoundLaunch, native trust, claim, custody and receiving remain the owners.
+No second Codex adapter, scheduler, permission model or account path is added.
+
+The installed Lead skill describes the explicit invocation and evidence path;
+[installation usage](../INSTALL.md#agy-lead-to-external-codex-sdk-review) refers to
+the existing version-1 review contract. A binding, copied payload or available
+command is not permission to spend quota or execute. The actual external Codex
+result remains nonauthorizing, distinct from native AGY subagents and AGY hook
+advisories. Offline installed-path coverage includes Reviewer and read-only
+Consultant; file presence does not qualify other provider/role combinations.
+Installed-path offline checks use a synthetic native boundary, not a real AGY
+session or Codex model invocation. Native acceptance remains separately authorized.
+
 ### Current baseline and remaining provider work
 
 This matrix describes the current source contract. Exact published HEAD and

@@ -37,6 +37,8 @@ Scoped child Lead coordination is an explicit Python Host integration over exist
 
 Antigravity startup supplies shared governance, a distinct `orchestrarium-lead` skill and a native `SessionStart` context hook. It preserves Codex skills and unrelated customizations. Its narrow PreToolUse bridge also warns about machine-local paths in supported write/replacement content through the shared AUDIT classifier. A separate native command advisory applies the existing stray-artifact audit using the tool's actual working directory, without executing the command. Neither advisory enforces tool permissions, receives native subagent results, or qualifies a live SDK route.
 
+The AGY package also exposes the [existing external Codex SDK review entrypoint](INSTALL.md#agy-lead-to-external-codex-sdk-review) from its own managed runtime and canonical receiving owner. This is an explicitly admitted external reviewer, not an AGY-native subagent or an automatic launch; live acceptance and other roles remain separately qualified.
+
 ## Repository layout
 
 ```text

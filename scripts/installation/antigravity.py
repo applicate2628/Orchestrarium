@@ -32,6 +32,13 @@ def run(backend, root: Path, args) -> int:
     for relative in ("hooks/check-machine-local-path.py", "hooks/check-no-trash-in-repo.py",
                      "scripts/hook_common.py", "scripts/git_push_gate_preflight.py"):
         payloads[target / "runtime/shared" / relative] = (root / "scripts/universal-hooks" / relative).read_bytes()
+    # The shared transport is an ordinary, independently owned copy, never a
+    # lookup through another client's skills or global installation.
+    for runtime_source, runtime_target in backend._runtime_file_destinations(root, target / "scripts"):
+        payloads[runtime_target] = runtime_source.read_bytes()
+    # Output safety uses the same adjacent classifier contract as other packs.
+    for relative in ("hooks/check-machine-local-path.py", "scripts/hook_common.py"):
+        payloads[target / relative] = (root / "scripts/universal-hooks" / relative).read_bytes()
     base = target.parent
     discovery_base = target.relative_to(anchor).as_posix() if project is not None else target.name
     argv = [sys.executable, str(target / "runtime/session_start.py")]

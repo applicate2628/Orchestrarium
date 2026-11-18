@@ -13,7 +13,12 @@ Do not invent provider model, account, process settlement or subagent identity.
 Use the project's existing lifecycle and evidence owners where installed and
 qualified. If they are unavailable, state the specific missing integration;
 do not fabricate records or substitute another provider's runtime. This pack
-does not install Codex tools, start external workers, or create SDK sessions.
+does not install the vendor Codex CLI/SDK or automatically start workers. Its own
+`scripts/invoke-codex-prompt.py --sdk-review-binding` entrypoint reuses the
+existing Codex SDK review owner when the Host explicitly admits that external
+review. Binding, model selection and installed files are not launch permission.
+Follow the installed `orchestrarium-lead` skill; retain current permissions,
+account selection, native trust checks and canonical receiving.
 Using an Antigravity consumer session as the native Lead does not authorize
 another application to consume Antigravity subscription access as its programmatic
 worker. This is distinct from the Lead delegating to an external provider through

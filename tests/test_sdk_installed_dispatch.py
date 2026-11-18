@@ -126,7 +126,7 @@ def setup_source(tmp_path, monkeypatch):
     return item, receipt, artifact, captures, argv
 
 
-def native_boundary(monkeypatch, artifact, *, receiving_collision=False):
+def native_boundary(monkeypatch, artifact, *, receiving_collision=False, result_factory=None):
     effects, requests, hook_calls = [], [], []
     monkeypatch.setattr(dispatch, "_require_supported_platform", lambda: None)
     monkeypatch.setattr(owner, "require_codex_hook_trust",
@@ -176,10 +176,13 @@ def native_boundary(monkeypatch, artifact, *, receiving_collision=False):
                 observed = dict(schemaVersion=1, adapter="openai-codex", sdkVersion="0.163.0",
                     runtimeVersion="0.163.0", model=request.model, effort=request.effort,
                     sandboxMode="read-only", approvalPolicy="deny_all", accountBinding=request.account_binding)
-                result = ExecutionResult(request=request, status="completed", provider_status="completed",
-                    native_thread_id="synthetic-thread", native_turn_id="synthetic-turn", protocol_closed=True,
-                    sdk_execution_json=json_text(observed), review=ReviewResult(
-                        request.external_evidence_run_id, request.artifact_id, request.role, "PASS", ()))
+                if result_factory is not None:
+                    result = result_factory(request, observed)
+                else:
+                    result = ExecutionResult(request=request, status="completed", provider_status="completed",
+                        native_thread_id="synthetic-thread", native_turn_id="synthetic-turn", protocol_closed=True,
+                        sdk_execution_json=json_text(observed), review=ReviewResult(
+                            request.external_evidence_run_id, request.artifact_id, request.role, "PASS", ()))
                 return encode_frame({"kind": "result", "result": result.to_dict()})
         dialogue.handler(Channel())
         if receiving_collision:

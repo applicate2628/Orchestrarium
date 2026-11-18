@@ -5520,6 +5520,8 @@ def _ledger_helper_binding() -> _LedgerHelperBinding | None:
             owner = source
         else:
             parts = tuple(part.casefold() for part in script.parts)
+            agy_project = parts[-4:] == ('.agents', 'orchestrarium-antigravity', 'scripts', 'provider_prompt.py')
+            agy_global = parts[-5:] == ('.gemini', 'config', 'orchestrarium-antigravity', 'scripts', 'provider_prompt.py')
             canonical = parts[-5:] in (
                 ('.agents', 'skills', 'lead', 'scripts', 'provider_prompt.py'),
                 ('.claude', 'skills', 'lead', 'scripts', 'provider_prompt.py'),
@@ -5538,7 +5540,17 @@ def _ledger_helper_binding() -> _LedgerHelperBinding | None:
                         matches.append((is_claude, candidate))
                 except OSError:
                     continue
-            if matches:
+            agy = agy_project or agy_global
+            if agy:
+                # AGY's installer owns an ordinary independent runtime subtree.
+                # Do not discover another client's package or admit arbitrary
+                # global locations as a missing-helper fallback.
+                scope_script = script
+                base = script.parents[4 if agy_global else 3]
+                global_scope = agy_global
+                if agy_global and os.path.normcase(str(base)) != os.path.normcase(str(home)):
+                    return None
+            elif matches:
                 if len(matches) != 1:
                     return None
                 claude, scope_script = matches[0]
@@ -5555,14 +5567,14 @@ def _ledger_helper_binding() -> _LedgerHelperBinding | None:
             # Another client's package is never a missing-helper fallback.
             claude_root = scope_script.parents[2] if claude else None
             secondary_canonical = not claude and scope_script.parts[-5].casefold() == '.claude'
-            canonical_root = (claude_root / 'skills' if claude
+            canonical_root = (scope_script.parents[1] if agy else claude_root / 'skills' if claude
                               else scope_script.parents[2] if secondary_canonical
                               else scope_script.parents[3])
             logical_roots = (canonical_root, scope_script.parents[1]) if claude else (canonical_root,)
             for logical in logical_roots:
                 validate_no_reparse_components(logical.parent)
                 metadata = logical.lstat()
-                if not global_scope:
+                if not global_scope or agy:
                     validate_no_reparse_components(logical)
                 resolved = logical.resolve(strict=True)
                 if not resolved.is_dir():
@@ -5582,7 +5594,7 @@ def _ledger_helper_binding() -> _LedgerHelperBinding | None:
                 selection.append(_ledger_selection_witness(projection))
             elif not script.samefile(scope_script):
                 return None
-            if global_scope:
+            if global_scope and not agy:
                 # The normal canonical package supplies L. Scope and OS module
                 # association above precede executing any bootstrap dependency.
                 dependency = owner / 'scripts/linked_runtime_subroots.py'

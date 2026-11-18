@@ -120,6 +120,33 @@ Official contracts: [discovery](https://antigravity.google/docs/customization-di
 and [hooks](https://antigravity.google/docs/hooks/). The vendor discovery paths
 are distinct from Orche's chosen managed subtree and ownership identifiers.
 
+## AGY Lead to external Codex SDK review
+
+The AGY managed package includes the existing Orche Codex review entrypoint at
+`<managed-root>/scripts/invoke-codex-prompt.py`, with its shared lifecycle,
+schemas and receiving dependencies. Project and global managed roots are listed
+above. It neither copies Codex skills nor falls back to another client's runtime.
+The selected wrapper, its own ordinary root and the current helper cohort are
+bound by the existing ledger owner; missing or changed owned components fail
+that operation rather than selecting a sibling Codex package.
+
+Use the same [explicit Codex review contract](docs/sdk-execution.md#explicit-codex-review-opt-in-repository-local-contract)
+and arguments from the native Lead's explicitly admitted task:
+
+```text
+python <managed-root>/scripts/invoke-codex-prompt.py TOPIC --sdk-review-binding BINDING.json --prompt-file PROMPT --terminal-receipt ABSOLUTE_TERMINAL.json --ledger WORK_ITEM --ledger-role qa-engineer --ledger-artifact sdk-review.json --ledger-max-events TASK_EVENT_BOUND --ledger-max-bytes TASK_BYTE_BOUND --timeout-secs TASK_DEADLINE -- --model SELECTED_MODEL -c model_reasoning_effort=SELECTED_EFFORT
+```
+
+Upper-case values are caller-selected placeholders, not a ready-to-run grant or
+arbitrary default limits. Use the actual Host permissions, account/native trust,
+work-item and task limits. The binding is not authorization. The Python environment
+must already contain the officially installed compatible SDK; installing this
+Orche integration neither provisions it nor calls a model. Existing Windows
+containment and current receiving checks still apply. This source slice qualifies
+an isolated installed Reviewer path with a synthetic native peer, not a live AGY
+session, all Codex roles, or native acceptance. See the
+[provider access matrix](docs/provider-access-policy.md) for account boundaries.
+
 ## Selected-client copies and uninstall
 
 Codex is the primary host. The common installer lifecycle serves the qualified

@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- The Antigravity Lead package can invoke the existing explicit Codex SDK review bridge from its own managed runtime. Shared dispatch, permissions, lifecycle and canonical receiving remain the owners; missing AGY components do not silently select a neighboring Codex pack. The installed skill documents the external-review path without granting launch authority, copying vendor dependencies or claiming native acceptance.
+
 - Antigravity command hooks reuse the shared stray-artifact AUDIT checks for native Bash commands, using the tool's actual working directory rather than guessing from the hook process. Worktree, redirect and build-output warnings keep their existing exemptions, do not execute the proposed command and do not override native approvals. Installed ownership preserves earlier startup/write hooks and unrelated customizations.
 
 - Provider access now has one dated, source-linked reference for Codex, Claude, Antigravity, Kimi Code and Grok Build, linked from repository-local rules and the SDK plan. It separates supported connections, explicit restrictions and unresolved subscription cases from adapter readiness, avoiding both invented provider bans and unsupported permission claims.
