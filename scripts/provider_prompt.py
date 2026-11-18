@@ -7475,6 +7475,7 @@ def record_terminal(
     expected_provenance: ExecutionProvenance | None = None,
     child_nonzero_category: str | None = None,
     launch_flags: tuple[str, ...] | list[str] | None = None,
+    terminal_receipt_bytes: bytes | None = None,
 ) -> bool:
     if provenance is not None:
         provenance = require_exact_execution_provenance(
@@ -7549,6 +7550,11 @@ def record_terminal(
         provenance=provenance,
         expected_provenance=expected_provenance,
     )
+    if terminal_receipt_bytes is not None:
+        if type(terminal_receipt_bytes) is not bytes or not terminal_receipt_bytes or not terminal_receipt_bytes.endswith(b"\n"):
+            raise ValueError("E_EXTERNAL_TERMINAL_RECEIPT_COMMIT_INVALID")
+        args += ["--terminal-receipt-sha256", hashlib.sha256(terminal_receipt_bytes).hexdigest(),
+                 "--terminal-receipt-size-bytes", str(len(terminal_receipt_bytes))]
     recorded = runner is not None and run_ledger(runner, args)
     if recorded and read_back_external_terminal(
         control, provider, launch_run_id, provenance
@@ -7958,7 +7964,8 @@ def finalize_reserved_run_once(
             return terminal_outcome.exit_code if terminal_outcome.exit_code != 0 else 1
 
     terminal_bytes = line.encode("utf-8", errors="strict")
-    if not commit_reserved_terminal(reserved_run, terminal_bytes, deliver_terminal):
+    delivered = commit_reserved_terminal(reserved_run, terminal_bytes, deliver_terminal)
+    if not delivered and not reserved_run.finalized:
         return terminal_outcome.exit_code if terminal_outcome.exit_code != 0 else 1
 
     if control.ledger:
@@ -7973,7 +7980,7 @@ def finalize_reserved_run_once(
                 terminal_outcome,
                 cancelled=cancelled,
                 timed_out=timed_out,
-                result_delivered=True,
+                result_delivered=delivered,
                 realization=realization,
                 runner=runner,
                 role_provenance=frozen_role,
@@ -7981,13 +7988,14 @@ def finalize_reserved_run_once(
                 expected_provenance=provenance,
                 child_nonzero_category=child_nonzero_category,
                 launch_flags=launch_flags,
+                terminal_receipt_bytes=terminal_bytes,
             )
         except Exception:
             recorded = False
         if not recorded:
             print("FAIL: E_EXTERNAL_TERMINAL_LEDGER_APPEND_FAILED", file=sys.stderr)
             return terminal_outcome.exit_code if terminal_outcome.exit_code != 0 else 1
-    return terminal_outcome.exit_code
+    return terminal_outcome.exit_code if delivered else (terminal_outcome.exit_code or 1)
 
 
 def _launch_sdk_review(operation, reserved_run: ReservedExternalRunV1, *, cancellation=None) -> int:

@@ -1064,6 +1064,15 @@ reselecting defaults; current permission checks still apply to each effect.
 Registration is not autonomous task-fit routing, historical consent is not
 current authorization, and private registration payload is not child handoff.
 
+External CLI terminal recovery distinguishes durable receiving from delivery.
+The existing terminal ledger may bind committed receipt bytes with paired
+`terminalReceiptSha256` and `terminalReceiptSizeBytes`; these do not replace the
+separate reviewed artifact revision. Failed stdout delivery remains a failure
+with `resultDelivered=false`, even when the terminal is durably received.
+Read-only recovery verifies integrity, provenance, current permissions and
+output safety without another launch, terminal write or invented process proof.
+Legacy rows lacking the binding remain metadata-only for this recovery route.
+
 ## Terms and Abbreviations
 
 - `accepted artifact`: an output that has passed its required gate and may be used by downstream roles.

@@ -9,7 +9,7 @@
     },
     "provider_prompt.py": {
       "source": "scripts/provider_prompt.py",
-      "sha256": "7d93f9c4ee861147d0e41e43fce6c6ce9b2515be17b9f253953c91c6507b46cc",
+      "sha256": "72202acc4db02e8fec8514f9866579e7d89bd3fbaa8314c6a7c62d97dedbe528",
       "destination": "scripts/provider_prompt.py"
     },
     "process_supervision/process_runner.py": {
@@ -124,7 +124,7 @@
     },
     "sdk_execution/kimi.py": {
       "source": "scripts/sdk_execution/kimi.py",
-      "sha256": "da009249f01e894e720fea255e2f453bf854a086deff8afc0b33be0dc60b8cd9",
+      "sha256": "6662838766c111bb4bf23f5ca43268faf6abff892a4f9911c9c389c0ae30dd52",
       "destination": "scripts/sdk_execution/kimi.py"
     },
     "sdk_execution/mimo.py": {

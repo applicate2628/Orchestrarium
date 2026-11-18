@@ -199,6 +199,8 @@ def build_event(args: argparse.Namespace, validator: Any | None = None) -> dict[
         "closesRunIds": getattr(args, "closes", None),
         "artifactRevision": getattr(args, "artifact_revision", None),
         "artifactSizeBytes": getattr(args, "artifact_size_bytes", None),
+        "terminalReceiptSha256": getattr(args, "terminal_receipt_sha256", None),
+        "terminalReceiptSizeBytes": getattr(args, "terminal_receipt_size_bytes", None),
         "lane": getattr(args, "lane", None),
         "effort": getattr(args, "effort", None),
         "findingClass": getattr(args, "finding_class", None),
@@ -2511,6 +2513,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     append.add_argument("--artifact-revision", help="Revision of the reviewed artifact; SDK terminals bind the received output bytes with SHA-256.")
     append.add_argument("--artifact-size-bytes", type=int, help="Exact received SDK artifact byte count, used as its bounded read size.")
+    append.add_argument("--terminal-receipt-sha256", help="Exact committed external CLI terminal receipt digest.")
+    append.add_argument("--terminal-receipt-size-bytes", type=int, help="Exact committed external CLI terminal receipt byte count.")
     append.add_argument("--lane", help="Review angle label (e.g. architecture-adversarial).")
     append.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max", "unsupported"], help="Typed declared reasoning-effort tier, or unsupported when an external provider exposes no native effort control.")
     append.add_argument("--finding-class", choices=["publication-safety", "security", "correctness", "performance", "other"], help="REVISE finding classification (publication-safety/security are non-user-waivable).")
@@ -2541,6 +2545,8 @@ def build_parser() -> argparse.ArgumentParser:
     settle.add_argument("--artifact")
     settle.add_argument("--artifact-revision", help="SHA-256 of the exact received SDK artifact bytes.")
     settle.add_argument("--artifact-size-bytes", type=int, help="Exact received SDK artifact byte count, used as its bounded read size.")
+    settle.add_argument("--terminal-receipt-sha256", help="Exact committed external CLI terminal receipt digest.")
+    settle.add_argument("--terminal-receipt-size-bytes", type=int, help="Exact committed external CLI terminal receipt byte count.")
     settle.add_argument("--evidence", action="append")
     settle.add_argument("--evidence-json", action="append")
     settle.add_argument("--scratch-evidence-json", action="append")

@@ -98,7 +98,7 @@
         "external-brigade",
         "none"
       ],
-      "$comment": "Exactly ONE main-conversation identity: 'main' (the main conversation, which also holds the Lead role). Current recovery state \u2014 Task, Current step, Last result, Next action, and staged lifecycle fields \u2014 is owned by status.md, not executionRole; its older 'orchestration: light|full-lead' scalar remains legacy-compatible. Ledgers written before 2026-07-11 may carry the legacy value 'lead'; readers map it to 'main' (see scripts/validate-work-item-state.py LEGACY_EXECUTION_ROLES). New writes must use 'main'."
+      "$comment": "Exactly ONE main-conversation identity: 'main' (the main conversation, which also holds the Lead role). Current recovery state — Task, Current step, Last result, Next action, and staged lifecycle fields — is owned by status.md, not executionRole; its older 'orchestration: light|full-lead' scalar remains legacy-compatible. Ledgers written before 2026-07-11 may carry the legacy value 'lead'; readers map it to 'main' (see scripts/validate-work-item-state.py LEGACY_EXECUTION_ROLES). New writes must use 'main'."
     },
     "assignedRole": {
       "type": "string"
@@ -1065,6 +1065,16 @@
     },
     "notes": {
       "type": "string"
+    },
+    "terminalReceiptSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "$comment": "Exact already-committed external CLI terminal envelope bytes; not the lifecycle artifact."
+    },
+    "terminalReceiptSizeBytes": {
+      "type": "integer",
+      "minimum": 1,
+      "$comment": "Paired terminal receipt size bounds read-only recovery; legacy terminals may omit both fields."
     }
   },
   "oneOf": [
@@ -1987,6 +1997,46 @@
           },
           "gate": {
             "const": "none"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "anyOf": [
+          {
+            "required": [
+              "terminalReceiptSha256"
+            ]
+          },
+          {
+            "required": [
+              "terminalReceiptSizeBytes"
+            ]
+          }
+        ]
+      },
+      "then": {
+        "required": [
+          "terminalReceiptSha256",
+          "terminalReceiptSizeBytes",
+          "eventKind",
+          "terminalClass",
+          "actualExecutionPath",
+          "authorizing"
+        ],
+        "properties": {
+          "eventKind": {
+            "const": "terminal"
+          },
+          "terminalClass": {
+            "const": "external-nonauthorizing"
+          },
+          "actualExecutionPath": {
+            "const": "direct-external-cli"
+          },
+          "authorizing": {
+            "const": false
           }
         }
       }

@@ -68,6 +68,8 @@ V2_ONLY_FIELDS = {
     "closesRunIds",
     "artifactRevision",
     "artifactSizeBytes",
+    "terminalReceiptSha256",
+    "terminalReceiptSizeBytes",
     "lane",
     "effort",
     "findingClass",
@@ -153,6 +155,8 @@ ALLOWED_FIELDS = {
     "closesRunIds",
     "artifactRevision",
     "artifactSizeBytes",
+    "terminalReceiptSha256",
+    "terminalReceiptSizeBytes",
     "lane",
     "effort",
     "findingClass",
@@ -5028,6 +5032,14 @@ def _validate_event_fields(
         artifact_path = artifact_locator.selected if artifact_locator is not None else None
     elif "artifact" in event and not isinstance(artifact, str):
         fail(errors, f"{run_id}: artifact must be a string")
+
+    if "terminalReceiptSha256" in event or "terminalReceiptSizeBytes" in event:
+        digest, size = event.get("terminalReceiptSha256"), event.get("terminalReceiptSizeBytes")
+        if (event.get("eventKind") != "terminal" or event.get("terminalClass") != "external-nonauthorizing"
+            or event.get("actualExecutionPath") != "direct-external-cli" or event.get("authorizing") is not False
+            or not isinstance(digest,str) or SHA256_RE.fullmatch(digest) is None
+            or type(size) is not int or size <= 0):
+            fail(errors, f"{run_id}: external CLI receipt requires paired exact SHA-256 and positive byte count")
 
     sdk_terminal = (event.get("actualExecutionPath") == "direct-external-sdk"
                     and event.get("eventKind") == "terminal")

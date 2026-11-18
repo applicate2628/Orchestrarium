@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-18
 
+- Kimi SDK-adapter recovery can read an already received terminal without rerunning the provider. The existing terminal owner binds committed receipt bytes to the ledger and retains canonical evidence when stdout delivery fails; recovery verifies that binding rather than guessing lost process or account state.
+
 - SDK Root can durably register an explicit task/route decision and recover its exact request and runtime selection after restart from the existing admission evidence. Recovery does not reconstruct defaults, repeat completed work or turn historical approval into current permission; model selection remains the Lead's task-specific decision.
 
 - SDK child coordination can start from a Root-defined goal and context before executable tasks exist. It forms scoped proposals for the existing Root admission owner, then executes admitted tasks and restores the same lifecycle after restart, without requiring a fabricated seed task or extra approval store.

@@ -1541,6 +1541,24 @@ preset and receives common/Claude instructions through the existing owned file
 transport. Provider-specific SDK factories remain behind the fixed worker boundary.
 Kimi continues through its existing complete CLI/ACP owner, not this SDK receiver.
 
+The public `KimiAcpAdapter.reconcile_received(request, output_context=...)` path retrieves already
+received native terminal evidence without launching Kimi or writing another
+ledger event. The caller supplies the same prepared binding, current authority
+check and existing output-scan context. Recovery verifies canonical provenance and the terminal receipt's committed
+SHA-256 and byte count before returning an immutable received-evidence value; it
+does not manufacture an `ExecutionResult`, lost process settlement, account
+identity or native session state. Current scanning and permission checks remain.
+
+The existing terminal owner records paired `terminalReceiptSha256` and
+`terminalReceiptSizeBytes` only for exact committed receipt bytes. If delivery to
+stdout fails after receipt commit, canonical receiving records delivery failure
+without replaying execution. Recovery does not reinterpret delivery failure as
+successful delivery. Legacy terminal rows without this integrity binding remain
+historical metadata, not verified recoverable full text. Missing, changed or
+unreceived evidence is reported rather than repaired by another model call.
+This does not qualify a different Kimi runtime or activate it in the Codex/Claude
+SDK worker factory; that roadmap work remains separate.
+
 `create_review_coordinator` returns the Agents coordinator and its concrete
 `SdkReviewExecutor`. The executor joins the owned runtime to scanned artifact
 materialization, atomic ledger receiving and independent readback before returning

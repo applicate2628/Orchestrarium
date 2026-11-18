@@ -3583,7 +3583,7 @@ def test_settle_once_converts_unexpected_cleanup_failure_to_combined_terminal(
 
 
 @pytest.mark.parametrize("failure_stage", ("write", "flush", "zero", "missing-buffer"))
-def test_stdout_failure_is_nonzero_after_receipt_commit_without_terminal_ledger(
+def test_stdout_failure_is_nonzero_after_receipt_commit_with_undelivered_terminal_ledger(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     failure_stage: str,
@@ -3634,8 +3634,10 @@ def test_stdout_failure_is_nonzero_after_receipt_commit_without_terminal_ledger(
             0,
         )
     assert code != 0
-    assert events == ([] if failure_stage == "missing-buffer" else ["write", "flush"] if failure_stage == "flush" else ["write"])
-    assert recorded == {}
+    assert events == ([] if failure_stage == "missing-buffer" else ["write", "flush"] if failure_stage == "flush" else ["write"]) + ["ledger"]
+    assert recorded["result_delivered"] is False
+    assert recorded["terminal_receipt_bytes"] == receipt_path.read_bytes()
+    assert recorded["outcome"].gate == "PASS"
     assert owner.parse_provider_result(receipt_path.read_text(encoding="utf-8"))["gate"] == "PASS"
     assert "E_EXTERNAL_PROVIDER_RESULT_STDOUT_FAILED" in stderr.getvalue()
     assert "C:\\private\\stdout-canary" not in stderr.getvalue()

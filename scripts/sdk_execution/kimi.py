@@ -11,7 +11,8 @@ from __future__ import annotations
 import asyncio
 import copy
 import inspect
-from dataclasses import replace
+import hashlib
+from dataclasses import dataclass, replace
 from pathlib import Path
 import threading
 from typing import Callable
@@ -24,6 +25,14 @@ from .contracts import CancelReceipt, ExecutionRequest, ExecutionResult, Observa
 
 class KimiAdapterError(ValueError):
     """Closed, non-secret adapter failure category."""
+
+
+@dataclass(frozen=True)
+class KimiReceivedEvidence:
+    """Historical canonical evidence, not a reconstructed live process result."""
+    request: ExecutionRequest
+    ledger_json: str
+    terminal_json: str | None
 
 
 class KimiAcpAdapter:
@@ -89,6 +98,72 @@ class KimiAcpAdapter:
             or prepared.control.result_max_bytes > request.max_output_bytes
         ):
             raise KimiAdapterError("kimi_request_binding_mismatch")
+
+    def reconcile_received(self, request: ExecutionRequest, *, output_context: owner.ProviderOutputContext) -> KimiReceivedEvidence:
+        """Read the existing received result without launching, settling or replaying."""
+        self._binding(request)
+        if type(output_context) is not owner.ProviderOutputContext:
+            raise KimiAdapterError("receiving_output_context_required")
+        output_context.__post_init__()
+
+        def current(effect):
+            self._binding(request)
+            try:
+                result = self._assert_current(request, effect)
+            except Exception:
+                raise KimiAdapterError("kimi_receiving_authority_denied") from None
+            if result is not None:
+                if inspect.iscoroutine(result) and inspect.getcoroutinestate(result) == inspect.CORO_CREATED:
+                    result.close()
+                raise KimiAdapterError("invalid_authority_callback")
+
+        current("kimi_receipt_read")
+        control, provenance = self._prepared.control, self._prepared.provenance
+        ledger = owner.read_back_external_terminal(control, "kimi", request.run_id, provenance)
+        if ledger is None:
+            raise KimiAdapterError("terminal_ledger_readback_failed")
+        digest, size = ledger.get("terminalReceiptSha256"), ledger.get("terminalReceiptSizeBytes")
+        terminal_json = None
+        snapshot = lifecycle = None
+        if digest is not None or size is not None:
+            if (not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest)
+                or type(size) is not int or size <= 0 or control.terminal_receipt is None):
+                raise KimiAdapterError("terminal_receipt_binding_invalid")
+            try:
+                path = owner.TerminalReceiptV1._validated_path(control.terminal_receipt)
+                lifecycle = owner._ledger_owner().load_validator().load_lifecycle_owner()
+                snapshot = lifecycle._capture_file_snapshot(path, failure_id="KIMI-RECEIPT-CHANGED", maximum_bytes=size)
+                raw = snapshot.data
+                if len(raw) != size or hashlib.sha256(raw).hexdigest() != digest:
+                    raise KimiAdapterError("terminal_receipt_changed")
+                failure = owner._provider_terminal_line_safety("kimi", output_context.needles, raw.decode("utf-8"))
+                if failure is not None:
+                    raise KimiAdapterError(failure)
+                terminal = owner.parse_provider_result(raw.decode("utf-8"))
+                if (provenance is None or any(terminal.get(key) != value for key,value in provenance.payload().items())
+                    or terminal.get("status") != ledger.get("status") or terminal.get("gate") != ledger.get("gate")):
+                    raise KimiAdapterError("terminal_binding_mismatch")
+                terminal_json = json_text(terminal)
+            except KimiAdapterError:
+                raise
+            except Exception:
+                raise KimiAdapterError("terminal_receipt_unavailable") from None
+        current("kimi_receipt_result")
+        if owner.read_back_external_terminal(control, "kimi", request.run_id, provenance) != ledger:
+            raise KimiAdapterError("terminal_ledger_changed")
+        if snapshot is not None:
+            try:
+                lifecycle._verify_captured_file(snapshot, "KIMI-RECEIPT-CHANGED")
+            except Exception:
+                raise KimiAdapterError("terminal_receipt_changed") from None
+        ledger_json = json_text(ledger)
+        # The terminal uses its validated protocol-slot scanner above; generic
+        # wrapping would misclassify genuine outcome tokens as credentials.
+        failure = owner.provider_output_safety_scan_terminal("kimi", output_context.needles,
+            stdout=ledger_json.encode("utf-8"), stderr=b"")
+        if failure is not None:
+            raise KimiAdapterError(failure)
+        return KimiReceivedEvidence(request, ledger_json, terminal_json)
 
     async def execute(self, request: ExecutionRequest) -> ExecutionResult:
         self._binding(request)
