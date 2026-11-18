@@ -1541,6 +1541,17 @@ preset and receives common/Claude instructions through the existing owned file
 transport. Provider-specific SDK factories remain behind the fixed worker boundary.
 Kimi continues through its existing complete CLI/ACP owner, not this SDK receiver.
 
+The existing `AgentsCoordinator(executor=KimiAcpAdapter(...))` composition uses
+that same launch/receiving owner directly; no additional Kimi executor wrapper or
+Codex/Claude SDK factory activation is needed. Before returning tool evidence,
+the common coordinator rechecks the exact Root request, session binding and
+current permissions after executor completion. This is not another launch
+preflight: a consumed executor or already received artifact is a normal completed
+state, not a reason to reject an otherwise current result. Revocation or request
+drift withholds tool delivery while preserving the received evidence; it never
+replays the provider. Read-only reconciliation remains available under its own
+current permission checks.
+
 The public `KimiAcpAdapter.reconcile_received(request, output_context=...)` path retrieves already
 received native terminal evidence without launching Kimi or writing another
 ledger event. The caller supplies the same prepared binding, current authority

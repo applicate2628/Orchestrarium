@@ -193,7 +193,7 @@ class AgentsCoordinator:
         )
 
     def _current(
-        self, request_id: str, expected: ExecutionRequest | None, effect: str
+        self, request_id: str, expected: ExecutionRequest | None, effect: str, *, preflight: bool = True
     ) -> ExecutionRequest:
         if self._session is not None and self._session.session_id != self._session_id:
             raise CoordinatorBindingError("selected session identity changed")
@@ -207,8 +207,8 @@ class AgentsCoordinator:
         # The concrete executor has read-only preflight for its selected deadline,
         # cancellation and artifact. Repeat before effects, not just at composition
         # time; final artifact creation and runtime authority keep their own owners.
-        preflight = getattr(self._executor, "validate_request", None)
-        if preflight is not None and preflight() != request:
+        validate = getattr(self._executor, "validate_request", None)
+        if preflight and validate is not None and validate() != request:
             raise CoordinatorBindingError("executor preflight resolved another request")
         decision = self._authority.assert_current(request, effect)
         if decision is not None:
@@ -234,6 +234,9 @@ class AgentsCoordinator:
             result = await self._executor.execute(current)
             if not isinstance(result, ExecutionResult) or result.request != current:
                 raise CoordinatorBindingError("executor returned evidence for another request")
+            # Completed artifacts are not a fresh launch conflict. Recheck only
+            # current identity/authority here, preserving the executor receipt.
+            self._current(request_id, current, "executor_result", preflight=False)
             return json_text(result.to_tool_output())
 
         bound_request_id = request_id

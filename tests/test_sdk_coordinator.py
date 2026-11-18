@@ -170,7 +170,7 @@ def harness(monkeypatch):
 def test_one_tool_calls_one_executor_and_returns_nonauthorizing_evidence(harness):
     result = asyncio.run(harness.instance.run("fixture-request"))
     assert harness.executor.calls == [harness.authority.current]
-    assert harness.authority.effects == ["coordinator_start", "coordinator_model", "execute"]
+    assert harness.authority.effects == ["coordinator_start", "coordinator_model", "execute", "executor_result"]
     output = json.loads(result.final_output)
     assert output["authoritative"] is False
     assert output["process_settlement"] == "not_established"
@@ -269,7 +269,7 @@ def test_repeated_invocation_uses_existing_owner_not_an_in_memory_replay_registr
 def test_resume_claims_owner_state_and_rebinds_tool_without_a_model_call(harness):
     result = asyncio.run(harness.instance.resume("fixture-request", "fixture-snapshot"))
     assert harness.authority.claims == ["fixture-snapshot"]
-    assert harness.authority.effects == ["coordinator_resume", "coordinator_resume", "execute"]
+    assert harness.authority.effects == ["coordinator_resume", "coordinator_resume", "execute", "executor_result"]
     assert harness.sdk.model_calls == 0
     assert json.loads(result.final_output)["authoritative"] is False
     restored = harness.sdk.restorations[0]
@@ -523,7 +523,8 @@ def composed_harness(monkeypatch, tmp_path, *, provider="codex", alter_process=N
             ledger_max_events=selection.ledger_max_events, ledger_max_bytes=selection.ledger_max_bytes,
             job_memory_limit_bytes=selection.job_memory_limit_bytes,
         )
-        source = {"ANTHROPIC_API_KEY": "synthetic-never-transmitted-secret"}
+        # Synthetic, never transmitted; use the owner's canonical auth schema.
+        source = {provider_prompt.PROVIDER_AUTH_SECRET_ENV_KEYS_V1["claude-direct"][0]: "synthetic-never-transmitted-secret"}
     authority, sdk = FakeAuthority(), FakeSdk()
     authority.current = effective
     monkeypatch.setattr(coordinator, "_load_agents_sdk", lambda: (sdk, FakeTool))
@@ -990,8 +991,8 @@ def test_explicit_session_is_passed_unchanged_to_run_and_recreated_resume(harnes
     assert harness.sdk.calls[1]["session"] is restored_session
     assert harness.authority.claims == ["fixture-snapshot"]
     assert harness.authority.effects == [
-        "coordinator_start", "coordinator_model", "execute",
-        "coordinator_resume", "coordinator_resume", "execute",
+        "coordinator_start", "coordinator_model", "execute", "executor_result",
+        "coordinator_resume", "coordinator_resume", "execute", "executor_result",
     ]
 
 
@@ -1064,3 +1065,36 @@ def test_factory_passes_caller_session_to_actual_executor_chain(monkeypatch, tmp
         assert h.process_calls == len(h.received) == 1
     finally:
         h.owner.__exit__(None, None, None)
+
+@pytest.mark.parametrize("drift",["request","permission"])
+def test_final_root_currentness_withholds_result_without_reexecuting(harness,drift):
+    original=harness.executor.execute
+    retained=[]
+    async def complete(request):
+        result=await original(request)
+        retained.append(result)
+        if drift=="request":
+            harness.authority.current=replace(request,prompt="Changed after execution.")
+        else:
+            harness.authority.denied.add("executor_result")
+        return result
+    harness.executor.execute=complete
+    error=coordinator.CoordinatorBindingError if drift=="request" else PermissionError
+    with pytest.raises(error):
+        asyncio.run(harness.instance.run("fixture-request"))
+    assert len(retained)==len(harness.executor.calls)==len(harness.sdk.calls)==1
+    assert retained[0].status=="completed"
+    assert harness.sdk.model_calls==1
+
+
+def test_final_root_check_does_not_repeat_consumed_launch_preflight(harness):
+    preflights=[]
+    def validate_request():
+        assert not harness.executor.calls, "completed artifact is not a new launch"
+        preflights.append(True)
+        return harness.authority.current
+    harness.executor.validate_request=validate_request
+    result=asyncio.run(harness.instance.run("fixture-request"))
+    assert len(preflights)==3
+    assert harness.authority.effects[-1]=="executor_result"
+    assert json.loads(result.final_output)["authoritative"] is False

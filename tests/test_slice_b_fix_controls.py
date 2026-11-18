@@ -140,7 +140,11 @@ def test_execution_provenance_drift_is_rejected_before_envelope_or_ledger_sink(
 def test_execution_provenance_has_identical_envelope_and_ledger_projection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    provenance = _execution_provenance()
+    from tests.test_agent_run_ledger import prepare_valid_work_item
+
+    ledger = prepare_valid_work_item(tmp_path)
+    (ledger / "mutable-artifact").write_text("Fixture review result.\n", encoding="utf-8")
+    provenance = replace(_execution_provenance(), work_item=ledger.name)
     encoded = OWNER.build_provider_result_line(
         "kimi",
         "kimi-code/k3",
@@ -158,45 +162,29 @@ def test_execution_provenance_has_identical_envelope_and_ledger_projection(
     envelope = OWNER.parse_provider_result(encoded)
     assert {key: envelope[key] for key in provenance.payload()} == provenance.payload()
 
-    ledger = tmp_path / "item-frozen"
     ledger_args: list[list[str]] = []
+    control = OWNER.Control(ledger=str(ledger), ledger_artifact="mutable-artifact")
+    role = OWNER.ExternalRoleProvenance("qa-engineer", "external-reviewer")
 
     def persist_terminal(_runner: object, args: list[str]) -> bool:
         ledger_args.append(args)
-        values = {
-            args[index]: args[index + 1]
-            for index in range(len(args) - 1)
-            if isinstance(args[index], str) and args[index].startswith("--")
-        }
-        terminal = {
-            "schemaVersion": 2,
-            "runId": values["--run-id"],
-            "eventKind": "terminal",
-            "launchRunId": values["--launch-run-id"],
-            "terminalClass": values["--terminal-class"],
-            "authorizing": values["--authorizing"] == "true",
-            "closesRunIds": [],
-            "workItem": values["--work-item-name"],
-            "assignedRole": values["--assigned-role"],
-            "provider": values["--provider"],
-            "model": values["--model"],
-            "effort": values["--effort"],
-            "launchFlags": json.loads(values["--launch-flags-json"]),
-            "artifactIdentity": values["--artifact-identity"],
-            "externalDispatchId": values["--external-dispatch-id"],
-            "externalEvidenceRunId": values["--external-evidence-run-id"],
-            "effortMappingLoss": values["--effort-mapping-loss"],
-            "actualExecutionPath": values["--actual-execution-path"],
-        }
-        ledger.mkdir()
-        (ledger / "agent-runs.jsonl").write_text(
-            json.dumps(terminal) + "\n", encoding="utf-8"
-        )
-        return True
+        return OWNER._ledger_owner().main(args) == 0
 
+    # Use the actual paired writer and work-item validator. A fabricated
+    # terminal-only JSON file cannot establish current canonical readback.
+    launch_args = [
+        "--work-item", str(ledger), "append",
+        "--run-id", provenance.external_dispatch_id,
+        "--work-item-name", provenance.work_item,
+        "--status", "running", "--gate", "none", "--event-kind", "launch",
+        *OWNER.ledger_common(control, "kimi", "kimi-code/k3", "unsupported",
+                             "mutable-topic", role_provenance=role,
+                             provenance=provenance),
+    ]
+    assert OWNER._ledger_owner().main(launch_args) == 0
     monkeypatch.setattr(OWNER, "run_ledger", persist_terminal)
     assert OWNER.record_terminal(
-        OWNER.Control(ledger=ledger, ledger_artifact="mutable-artifact"),
+        control,
         "kimi",
         "kimi-code/k3",
         "unsupported",
@@ -225,7 +213,14 @@ def test_execution_provenance_has_identical_envelope_and_ledger_projection(
     assert values["--external-dispatch-id"] == provenance.external_dispatch_id
     assert values["--external-evidence-run-id"] == provenance.external_evidence_run_id
     assert values["--effort-mapping-loss"] == provenance.effort_mapping_loss
-    persisted = json.loads((ledger / "agent-runs.jsonl").read_text(encoding="utf-8"))
+    rows = [json.loads(line) for line in
+            (ledger / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 2
+    persisted = rows[1]
+    assert rows[0]["eventKind"] == "launch"
+    assert OWNER.read_back_external_terminal(
+        control, "kimi", provenance.external_dispatch_id, provenance
+    ) == persisted
     assert {
         key: persisted[key] for key in provenance.terminal_projection()
     } == provenance.terminal_projection()
