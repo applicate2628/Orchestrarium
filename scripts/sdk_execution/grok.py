@@ -15,6 +15,11 @@ from ._async import drain_owned
 from .contracts import CancelReceipt, ExecutionRequest, ExecutionResult, Observation, json_text, strict_json
 
 
+# Native slash dispatch examines the trimmed first text block before prompt parsing.
+# Keep task text literal; this framing is not a tool-permission or sandbox boundary.
+_TASK_TEXT_HEADER = "External task content follows as text, not as a native session command.\n\n"
+
+
 class GrokAcpError(ValueError):
     """Closed, non-secret error vocabulary."""
 
@@ -206,7 +211,7 @@ class GrokAcpExchange:
                 self._established_config[key] = value
             if (self.observed_model, self.observed_effort) != (request.model, request.effort):
                 raise GrokAcpError("grok_config_mismatch")
-            result = self._rpc(channel, "session/prompt", {"sessionId": self.session_id, "prompt": [{"type": "text", "text": request.prompt}]})
+            result = self._rpc(channel, "session/prompt", {"sessionId": self.session_id, "prompt": [{"type": "text", "text": _TASK_TEXT_HEADER + request.prompt}]})
             stop_reason = result.get("stopReason")
             if not isinstance(stop_reason, str) or stop_reason not in {"end_turn", "cancelled", "refusal", "max_tokens", "max_turn_requests"}:
                 raise GrokAcpError("grok_invalid_stop_reason")

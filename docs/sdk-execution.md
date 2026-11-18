@@ -754,6 +754,22 @@ and admitted native execution remain separate unresolved outcomes.
 The source contract is [AuthMeta](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-login/src/meta.rs)
 and the [authenticate response producer](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-shell/src/agent/mvp_agent/mod.rs).
 
+### Grok task text versus runtime commands
+
+The ACP prompt carries an explicitly labelled task-data block with a fixed
+non-slash header before the unchanged admitted task text. The native Grok human
+input path recognizes leading slash commands before processing prompt metadata;
+raw task text such as `/plan` must not silently change runtime mode. The envelope
+preserves leading whitespace, Unicode, newlines and slash-containing tasks rather
+than rejecting them or inventing native origin metadata.
+
+This framing change neither grants tool access nor proves read-only enforcement.
+The existing live route remains inactive pending its native policy and receiving
+integration. Offline wire checks verify exact task preservation and the emitted
+first-text boundary; they are not a real model or native parser acceptance run.
+
+Pinned sources: [leading slash parser](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-shell/src/session/slash_authority.rs#L41-L55), [human intent resolution](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-shell/src/session/slash_commands.rs#L1556-L1566), and [ACP turn ordering](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-shell/src/session/acp_session_impl/turn.rs#L627-L756).
+
 ### Current baseline and remaining provider work
 
 This matrix describes the current source contract. Exact published HEAD and
