@@ -91,7 +91,7 @@ externalCodexProfile: {value}  # allowed: default | gpt-6.2-sol-high | gpt-6.2-s
 `consultantMode` continues to govern consultant behavior. `reserve` is a symbolic supplemental advisory/review profile candidate that may be reached after primary `claude`/`codex`; it is independent of primary `claude` and is not a retry, fallback, or transport swap for a failed Claude CLI run. `reserveResolver` binds that symbolic candidate to `claude-sonnet`, `claude-wrapper`, `wrapper:<command>`, or `disabled`; `wrapper:<command>` must be a PATH-resolved command or repo-relative wrapper path. `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist. `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified. `mcpMode: auto` lets the agent decide when available MCP tools are appropriate, while `force` makes relevant MCP usage a standing explicit instruction. The two preference flags are for the external dispatch contract, `externalProvider: auto` resolves by the active named production priority profile instead of a host-line default, and `externalCodexProfile: default` inherits `externalModelMode` when Codex is selected or auto-resolved. Shipped `auto` stays on the Codex/Claude pair. Kimi is explicit-only for policy-admitted read-only research/review, independently verified and nonauthorizing; Grok remains unavailable in 1.x. `externalClaudeProfile` remains Codex-line only. These keys must be preserved by any command that updates this file.
 
 Read the effective Claude overlay and normalize its effective values in memory through the existing per-key resolver before routing. Valid sparse, comment-free, or older-layout files are compatibility input for routing reads; do not rewrite them merely to read or trust their flags.
-If local `.claude/.agents-mode.yaml` is missing, read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override. Persist canonical formatting only within an authorized install/configuration write, into the canonical `.yaml` path in the same scope while preserving effective known values and unknown keys and removing retired canonical keys.
+If local `.claude/.agents-mode.yaml` is missing, read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override. Persist canonical formatting only for a separately authorized normalization, into the canonical `.yaml` path in the same scope while preserving effective known values and unknown keys and removing retired canonical keys.
 
 For the full `value | meaning` tables, see `docs/agents-mode-reference.md` in the source repository (maintainer reference; not installed at runtime).
 
@@ -125,16 +125,13 @@ For the full `value | meaning` tables, see `docs/agents-mode-reference.md` in th
 
 ## Toggle file check
 
-Before any invocation, read `.claude/.agents-mode.yaml`:
+Before any invocation, resolve the effective `consultantMode` in memory through the [external dispatch owner](contracts/external-dispatch.md). Do not create or normalize a file to read it. Missing local configuration is not a disabled mode; inherited values still apply.
 
-- If the file exists, normalize it to the current canonical format before interpreting the flags.
+- **`consultantMode: external`**: external-only. Attempt the selected external route. If it fails or is unavailable, return an unavailable memo; do not downgrade to an internal path.
+- **`consultantMode: internal`**: internal-only, including an inherited effective setting.
+- **`consultantMode: disabled`**: report "Second opinion skipped — consultant disabled (`/agents-second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING`. Do not invent a closeout blocker solely because consultant did not run.
 
-- **No file** (default): consultant is disabled. Notify "Second opinion skipped — consultant disabled (`/agents-second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately. Do not invent a closeout blocker solely because consultant did not run.
-- **`consultantMode: external`**: external-only. Attempt the selected external CLI. If it fails or is unavailable, return an unavailable memo and require the lead to keep routing honest instead of downgrading to an internal consultant path.
-- **`consultantMode: internal`**: internal-only consultant. Use the internal consultant path for any consultant invocation that is still desired.
-- **`consultantMode: disabled`**: explicitly disabled. Same behavior as the no-file case.
-
-The toggle file is local-only (`.claude/` is in `.gitignore`) and not committed to git.
+A toggle changes only the project-local key through the command contract, never the inherited layers.
 
 ## Execution paths
 
@@ -201,7 +198,7 @@ If Kimi is selected explicitly, keep it read-only and nonauthorizing.
 ### No implicit fallback
 
 - `consultantMode: external` is external-only. If the selected external provider is unavailable or fails, return an unavailable memo and let the lead reroute honestly.
-- `consultantMode: internal` is the only supported internal consultant path. It must be selected explicitly in `.claude/.agents-mode.yaml`; do not downgrade into it automatically after an external failure.
+- `consultantMode: internal` is the only supported internal consultant path. It must be the effective configured mode; do not downgrade into it automatically after an external failure.
 - Provider-backed consultant execution in `external` mode must use direct external launch from the orchestrating runtime or an approved transport wrapper script. If the current runtime cannot do that, disclose the dependency failure instead of proxying through an internal agent/helper/subagent host.
 - Never turn a failed external consultant run into a hidden internal substitute.
 

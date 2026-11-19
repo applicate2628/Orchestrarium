@@ -89,8 +89,8 @@ PACK_ROUTING_READ_ACTION_CASES = (
     (
         "codex", VALIDATORS[0], "src.codex/skills/consultant/SKILL.md",
         "consultant preserves precedence and authorized-write boundary",
-        ("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override", "Persist canonical formatting only within an authorized install/configuration write"),
-        (("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "All keys take one shared global value"), ("Persist canonical formatting only within an authorized install/configuration write", "Persist canonical formatting on every routing read")),
+        ("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override", "Persist canonical formatting only for a separately authorized normalization"),
+        (("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "All keys take one shared global value"), ("Persist canonical formatting only for a separately authorized normalization", "Persist canonical formatting on every routing read")),
     ),
     (
         "claude", VALIDATORS[1], "src.claude/agents/consultant.md",
@@ -101,8 +101,8 @@ PACK_ROUTING_READ_ACTION_CASES = (
     (
         "claude", VALIDATORS[1], "src.claude/agents/consultant.md",
         "consultant preserves precedence and authorized-write boundary",
-        ("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override", "Persist canonical formatting only within an authorized install/configuration write"),
-        (("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "All keys take one shared global value"), ("Persist canonical formatting only within an authorized install/configuration write", "Persist canonical formatting on every routing read")),
+        ("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override", "Persist canonical formatting only for a separately authorized normalization"),
+        (("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "All keys take one shared global value"), ("Persist canonical formatting only for a separately authorized normalization", "Persist canonical formatting on every routing read")),
     ),
     (
         "codex", VALIDATORS[0], "src.codex/skills/lead/subagent-contracts.md",

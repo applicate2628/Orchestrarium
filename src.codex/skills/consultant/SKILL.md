@@ -46,19 +46,11 @@ description: "Consultant: advise on tradeoffs without approving gates."
 
 ## Toggle file check
 
-Before any invocation, resolve the effective Codex overlay in this order:
+Before any invocation, resolve the effective `consultantMode` in memory through the [external dispatch owner](../lead/external-dispatch.md). Do not create or normalize a file to read it. Missing local configuration is not a disabled mode; inherited values still apply.
 
-- local `.agents/.agents-mode.yaml`
-- local legacy `.agents/.agents-mode`
-- global `~/.codex/.agents-mode.yaml`
-- global legacy `~/.codex/.agents-mode`
-
-- **No file** (default): if neither local nor global overlay exists, consultant is disabled. Notify "Second opinion skipped — consultant disabled (`/second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately. Do not invent a closeout blocker solely because consultant did not run.
-- **`consultantMode: external`**: external-only. Attempt the selected external CLI. If it fails or is unavailable, return an unavailable memo and require the lead to keep routing honest instead of downgrading to an internal consultant path.
-- **`consultantMode: internal`**: internal-only consultant. Use the internal consultant path for any consultant invocation that is still desired.
-- **`consultantMode: disabled`**: explicitly disabled. Same behavior as the no-file case.
-
-`.agents/.agents-mode.yaml` is the project-local override surface. When it is absent, read-only consultant routing falls back to the global Codex overlay at `~/.codex/.agents-mode.yaml`. Keep any project-local override local-only and do not commit it to git.
+- **`consultantMode: external`**: external-only. Attempt the selected external route. If it fails or is unavailable, return an unavailable memo; do not downgrade to an internal path.
+- **`consultantMode: internal`**: internal-only, including an inherited effective setting.
+- **`consultantMode: disabled`**: report "Second opinion skipped — consultant disabled (`/second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING`. Do not invent a closeout blocker solely because consultant did not run.
 
 The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/external-dispatch.md). Treat the canonical file as the shared routing schema plus the profile, opinion-count, and Codex-only Claude transport/profile keys:
 
@@ -80,10 +72,9 @@ The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/ext
 - `externalClaudeProfile`
 
 Read the effective Codex overlay and normalize its effective values in memory through the existing per-key resolver before routing. Valid sparse, comment-free, or older-layout files are compatibility input for routing reads; do not rewrite them merely to read or trust their flags.
-If local `.agents/.agents-mode.yaml` is missing, read local legacy `.agents/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.codex/.agents-mode.yaml`, pack-local global legacy `~/.codex/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override. Persist canonical formatting only within an authorized install/configuration write, into the canonical `.yaml` path in the same scope while preserving effective known values and unknown keys.
+If local `.agents/.agents-mode.yaml` is missing, read local legacy `.agents/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.codex/.agents-mode.yaml`, pack-local global legacy `~/.codex/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override. Persist canonical formatting only for a separately authorized normalization, into the canonical `.yaml` path in the same scope while preserving effective known values and unknown keys.
 
-When changing `consultantMode`, preserve the other keys, including the profile, reserve resolver, opinion-count, workdir, model-policy, Codex-profile, Claude-profile, and general `parallelMode` fields if they exist. When creating the file from scratch, initialize the full canonical shape and default `delegationMode` to `auto`, `parallelMode` to `auto`, `mcpMode` to `auto`, `externalProvider` to `auto`, `externalPriorityProfile` to `balanced`, `reserveResolver` to `claude-sonnet`, the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks, `externalCodexWorkdirMode` / `externalClaudeWorkdirMode` to `neutral`, `externalModelMode` to `runtime-default`, `externalCodexProfile` to `default`, and `externalClaudeProfile` to `opus-xhigh` unless the user explicitly requested a different Claude profile override.
-Within an authorized install/configuration write, normalization preserves effective known values and unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline comments plus the shipped profile/count blocks, and restores canonical key order.
+For consultant toggles follow the [dispatch owner's sparse-write contract](../lead/external-dispatch.md). A toggle is not installer normalization.
 
 ## When to invoke
 
@@ -195,7 +186,7 @@ Reserve advisory candidate:
 ### No implicit fallback
 
 - `consultantMode: external` is external-only. If the selected external provider is unavailable, stalls, or fails, return an unavailable memo and let the lead reroute honestly.
-- `consultantMode: internal` is the only supported internal consultant path. It must be selected explicitly in `.agents/.agents-mode.yaml`; do not downgrade into it automatically after an external failure.
+- `consultantMode: internal` is the only supported internal consultant path. It must be the effective configured mode; do not downgrade into it automatically after an external failure.
 - Provider-backed consultant execution in `external` mode must use direct external launch from the orchestrating runtime or an approved transport wrapper script. If the current runtime cannot do that, disclose the dependency failure instead of proxying through an internal agent/helper/subagent host.
 - Never turn a failed external consultant run into a hidden internal substitute.
 
