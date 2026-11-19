@@ -333,10 +333,7 @@ def _load_installer():
     return module
 
 
-def test_codex_only_update_peer_ledger_uses_complete_canonical_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Normal update retains old peer ledger files while current P uses its owner."""
-    from test_provider_prompt_relocation import _load_owner
-    from test_ledger_resource_budget import fixture as ledger_fixture
+def _archived_815e_ledger_source(tmp_path: Path) -> Path:
     old_source = tmp_path / 'predecessor-source'
     old_source.mkdir()
     public_repository = subprocess.run(['git', '--no-optional-locks', 'rev-parse', '--show-toplevel'],
@@ -348,21 +345,59 @@ def test_codex_only_update_peer_ledger_uses_complete_canonical_owner(tmp_path: P
         assert not any(Path(member.name).parts[0] in {'.git', '.scratch', 'work-items', '.plans', '.reports'}
                        for member in package.getmembers())
         package.extractall(old_source, filter='data')
-    frozen_legacy = _load_owner(old_source / 'scripts/provider_prompt.py', 'admitted_frozen_legacy_ledger_owner')
-    assert frozen_legacy.ledger_helper().samefile(old_source / 'scripts/agent-run-ledger.py')
+    return old_source
+
+
+def test_codex_update_refuses_unowned_815e_project_peer_without_effects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    old_source = _archived_815e_ledger_source(tmp_path)
     target = tmp_path / 'target'
     target.mkdir()
     arguments = ['--target', str(target), '--force', '--allow-unsafe-target', '--no-hypothesis-hook']
     seeded = subprocess.run([sys.executable, '-X', 'utf8', '-B', str(old_source / 'scripts/install-claude.py'),
         *arguments], cwd=old_source, capture_output=True, text=True, timeout=180)
     assert seeded.returncode == 0, seeded.stdout + seeded.stderr
+
+    installer = _load_installer()
+    before = installer._InstallTransaction._observe(target)
+    errors = []
+    render = installer._installer_failure_text
+
+    def record_failure(error):
+        errors.append(str(error))
+        return render(error)
+
+    monkeypatch.setattr(installer, '_installer_failure_text', record_failure)
+    assert installer.install('codex', arguments) == 1
+    assert errors == ['E_ACCEPTED_PRIOR_COLLISION: architect']
+    assert installer._InstallTransaction._observe(target) == before
+
+
+def test_codex_only_update_peer_ledger_uses_complete_canonical_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The updated peer uses current canonical ledger code, not its retained legacy files."""
+    from test_provider_prompt_relocation import _load_owner
+    from test_ledger_resource_budget import fixture as ledger_fixture
+
+    old_source = _archived_815e_ledger_source(tmp_path)
+    frozen_legacy = _load_owner(old_source / 'scripts/provider_prompt.py', 'admitted_frozen_legacy_ledger_owner')
+    assert frozen_legacy.ledger_helper().samefile(old_source / 'scripts/agent-run-ledger.py')
+    target = tmp_path / 'target'
+    target.mkdir()
+    arguments = ['--target', str(target), '--force', '--allow-unsafe-target', '--no-hypothesis-hook']
+    installer = _load_installer()
+    assert installer.install('claude', arguments) == 0
     peer = target / '.claude/agents'
     retained_names = ('scripts/agent-run-ledger.py', 'scripts/mutate-work-item.py',
         'scripts/validate-work-item-state.py', 'scripts/check-work-items-state.py',
         'shared/schemas/agent-runs.schema.json')
+    # Seed only historical helpers: transport bytes and ownership proof remain current.
+    for name in retained_names:
+        (peer / name).write_bytes((old_source / name).read_bytes())
     retained = {name: ((peer / name).read_bytes(), (peer / name).stat().st_ino) for name in retained_names}
     assert _sha(retained['scripts/mutate-work-item.py'][0]) == '27960edec46770328bf34bca9290576cda4aad861234dd596ac3f05b1a0e7228'
-    installer = _load_installer()
     assert installer.install('codex', arguments) == 0
     assert {name: ((peer / name).read_bytes(), (peer / name).stat().st_ino)
             for name in retained_names} == retained
@@ -371,6 +406,25 @@ def test_codex_only_update_peer_ledger_uses_complete_canonical_owner(tmp_path: P
     assert (canonical / 'scripts/linked_runtime_subroots.py').read_bytes() == (ROOT / 'scripts/linked_runtime_subroots.py').read_bytes()
     assert (peer / 'scripts/provider_prompt.py').read_bytes() == (ROOT / 'scripts/provider_prompt.py').read_bytes()
     source_owner = _load_owner(canonical / 'scripts/provider_prompt.py', 'canonical_ledger_seed_owner')
+    peer_owner = _load_owner(peer / 'scripts/provider_prompt.py', 'updated_peer_ledger_owner')
+    if os.name != "nt":
+        # This test owns ledger routing, not the Windows-only process oracle.
+        # Keep actual local helper execution and honor the binding callback.
+        from types import SimpleNamespace
+
+        def run_local_ledger(_runner, argv, *, cwd, environment, timeout_secs, before_start):
+            assert Path(argv[1]).samefile(canonical / 'scripts/agent-run-ledger.py')
+            before_start()
+            completed = subprocess.run(
+                argv, cwd=cwd, env=environment, capture_output=True, timeout=timeout_secs,
+            )
+            return (
+                SimpleNamespace(outcome="success", target_exit_code=completed.returncode),
+                completed.stdout, completed.stderr,
+            )
+
+        monkeypatch.setattr(source_owner, 'run_support_command', run_local_ledger)
+        monkeypatch.setattr(peer_owner, 'run_support_command', run_local_ledger)
     item, before = ledger_fixture(tmp_path / 'work', 4100)
     launch = ['--work-item', str(item), 'append', '--run-id', 'canonical-owner-launch',
         '--role', 'external-reviewer', '--execution-role', 'external-reviewer', '--assigned-role', 'qa-engineer',
@@ -383,13 +437,18 @@ def test_codex_only_update_peer_ledger_uses_complete_canonical_owner(tmp_path: P
         '--terminal-class', 'external-nonauthorizing', '--authorizing', 'false',
         '--actual-execution-path', 'direct-external-cli', '--artifact-identity', 'synthetic-installed-owner',
         '--started-at', '2026-10-19T00:01:00Z', '--updated-at', '2026-10-19T00:01:00Z']
+    assert source_owner.ledger_helper() == canonical / 'scripts/agent-run-ledger.py'
+    budget = dict(ledger_max_events=4200, ledger_max_bytes=len(before) + 400000)
+    source_control = source_owner.Control(ledger=str(item), **budget)
+    source_owner.prepare_ledger_admission(source_control, launch)
+    options = source_owner.ledger_resource_options(source_control)
     with source_owner.ProcessRunnerV1() as runner:
-        assert source_owner.run_ledger(runner, launch)
-        assert source_owner.run_ledger(runner, terminal)
+        assert source_owner.run_ledger(runner, [*options, *launch])
+        assert source_owner.run_ledger(runner, [*options, *terminal])
     after = (item / 'agent-runs.jsonl').read_bytes()
     assert after.startswith(before) and len(after.splitlines()) == 4102
-    owner = _load_owner(peer / 'scripts/provider_prompt.py', 'updated_peer_ledger_owner')
-    received = owner.read_back_external_terminal(owner.Control(ledger=str(item)), 'codex', 'canonical-owner-launch')
+    owner = peer_owner
+    received = owner.read_back_external_terminal(owner.Control(ledger=str(item), **budget), 'codex', 'canonical-owner-launch')
     assert received is not None and received['runId'] == 'canonical-owner-terminal'
     writer = owner._ledger_owner()
     validator = writer.load_validator()
@@ -405,12 +464,13 @@ def test_codex_only_update_peer_ledger_uses_complete_canonical_owner(tmp_path: P
         f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\n", encoding='utf-8')
     monkeypatch.chdir(decoy)
     relative = os.path.relpath(item, decoy)
+    relative_control = owner.Control(ledger=relative, **budget)
     with owner.ProcessRunnerV1() as runner:
-        assert owner.run_ledger(runner, ['--work-item', relative, 'append', '--run-id', 'peer-relative-action',
+        assert owner.run_ledger(runner, [*owner.ledger_resource_options(relative_control), '--work-item', relative, 'append', '--run-id', 'peer-relative-action',
             '--role', 'analyst', '--execution-role', 'internal', '--status', 'completed', '--gate', 'none',
             '--event-kind', 'standalone', '--scope', 'synthetic relative peer action',
             '--evidence', 'manual-check:synthetic peer action'])
-    relative_result = owner.read_back_external_terminal(owner.Control(ledger=relative), 'codex', 'canonical-owner-launch')
+    relative_result = owner.read_back_external_terminal(relative_control, 'codex', 'canonical-owner-launch')
     assert relative_result == received and not marker.exists()
     assert {name: ((peer / name).read_bytes(), (peer / name).stat().st_ino)
             for name in retained_names} == retained
@@ -534,10 +594,24 @@ def test_unsupported_required_directory_move_refuses_before_coupled_effects(tmp_
     shutil.copytree(ROOT / "src.codex/skills/lead", source / "lead")
     before = installer._InstallTransaction._observe(canonical)
     peer_before = installer._InstallTransaction._observe(peer.parent)
-    monkeypatch.setattr(installer._InstallTransaction, "_native_publish_no_replace", staticmethod(lambda *_args: False))
+    attempted = []
+
+    def unavailable(source, destination, **_kwargs):
+        attempted.append((source, destination))
+        return False
+
+    monkeypatch.setattr(installer._InstallTransaction, "_native_publish_no_replace", staticmethod(unavailable))
+    # The probe also accepts the separately supported descriptor-relative fallback.
+    monkeypatch.setattr(os, "supports_dir_fd", os.supports_dir_fd - {os.rename})
     try:
-        with pytest.raises(ValueError, match="required directory no-replace capability unavailable"):
+        with pytest.raises(ValueError, match="E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained-object atomic capability"):
             installer._preflight_canonical_skills(source, canonical, root=ROOT, claude_transport_root=peer)
+        assert len(attempted) == 1
+        probe_source, probe_destination = attempted[0]
+        probe = probe_source.parent
+        assert probe.parent == canonical and probe.name.startswith(".orchestrarium-move-probe-")
+        assert probe_source == probe / "source" and probe_destination == probe / "destination"
+        assert not probe.exists()
         assert installer._InstallTransaction._observe(canonical) == before
         assert installer._InstallTransaction._observe(peer.parent) == peer_before
     finally:
@@ -2295,10 +2369,10 @@ def test_claude_transport_preflight_accepts_the_published_pre_e7_singleton(
     assert tuple(name for name, _payload in staged.pending_files) == TRANSPORT_FILES
 
 
-def test_e7_six_tree_upgrade_rolls_back_after_middle_replacement(
+def test_full_stock_e7_codex_refuses_unqualified_tree_before_mutation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The accepted-prior e7 tree upgrade is all-or-nothing under a mid-flight fault."""
+    """A pristine E7 install is not admitted by an incomplete strong catalog."""
 
     installer = _load_installer()
     snapshot = tmp_path / "e7-source"
@@ -2325,63 +2399,61 @@ def test_e7_six_tree_upgrade_rolls_back_after_middle_replacement(
     )
     assert seeded.returncode == 0, seeded.stdout + seeded.stderr
     canonical = target / ".agents" / "skills"
-    before = {
-        path.relative_to(canonical).as_posix(): path.read_bytes()
-        for path in canonical.rglob("*") if path.is_file()
-    }
-    e7_current_skill_priors = {
-        skill.name: installer._tree_sha256(skill, ignore_runtime_cache=True)
+    legacy_digests = {
+        skill.name: installer._legacy_tree_sha256(skill, ignore_runtime_cache=True)
         for skill in canonical.iterdir()
         if skill.is_dir() and (ROOT / "src.codex" / "skills" / skill.name).is_dir()
     }
-    assert installer.E7_CANONICAL_SKILL_TREE_SHA256 == e7_current_skill_priors
-    # This test owns skill-tree rollback, not admission of unrelated e7 native
-    # roles. Keep the e7 skill trees intact and align only role files whose e7
-    # bytes have no current accepted-prior route.
-    for name in (
-        "analyst",
-        "backend-engineer",
-        "explorer",
-        "knowledge-archivist",
-        "planner",
-        "qa-engineer",
-    ):
-        installed_role = target / ".codex" / "agents" / f"{name}.toml"
-        old_role = snapshot / "src.codex" / "agents" / f"{name}.toml"
-        current_role = ROOT / "src.codex" / "agents" / f"{name}.toml"
-        assert installed_role.read_bytes() == old_role.read_bytes()
-        installed_role.write_bytes(current_role.read_bytes())
-    original = installer._CreateOnlyMutablePath.replace_exact_tree
-    calls = 0
+    assert legacy_digests == installer.E7_CANONICAL_SKILL_TREE_SHA256
+    assert installer._legacy_factory_identity_v2(
+        "accessibility-reviewer", legacy_digests["accessibility-reviewer"]
+    ) is None
 
-    def fail_after_middle(self, *args, **kwargs):
-        nonlocal calls
-        calls += 1
-        result = original(self, *args, **kwargs)
-        if calls == 3:
-            raise RuntimeError("injected six-tree replacement failure")
-        return result
+    def inventory():
+        return {
+            path.relative_to(target): (
+                installer._CreateOnlyMutablePath._identity(path),
+                os.readlink(path) if path.is_symlink() else
+                path.read_bytes() if path.is_file() else None,
+            )
+            for path in (target, *target.rglob("*"))
+        }
 
-    monkeypatch.setattr(
-        installer._CreateOnlyMutablePath, "replace_exact_tree", fail_after_middle
-    )
-    result = installer.install(
+    before = inventory()
+    original_finish = installer._finish_install_result
+    outcomes = []
+
+    def observe_finish(provider, destination, dry_run, applied, primary, cleanup):
+        outcomes.append((applied, primary, cleanup))
+        return original_finish(provider, destination, dry_run, applied, primary, cleanup)
+
+    original_enter = installer._InstallTransaction.__enter__
+    transactions = []
+
+    def observe_transaction(transaction):
+        transactions.append(transaction)
+        return original_enter(transaction)
+
+    monkeypatch.setattr(installer, "_finish_install_result", observe_finish)
+    monkeypatch.setattr(installer._InstallTransaction, "__enter__", observe_transaction)
+    assert installer.install(
         "codex",
         ["--target", str(target), "--force", "--allow-unsafe-target", "--no-hypothesis-hook"],
-    )
-    after = {
-        path.relative_to(canonical).as_posix(): path.read_bytes()
-        for path in canonical.rglob("*") if path.is_file()
-    }
-    assert result == 1
-    assert calls == 3
-    assert after == before
+    ) == 1
+    assert len(outcomes) == 1
+    applied, primary, cleanup = outcomes[0]
+    assert applied is False
+    assert type(primary) is ValueError
+    assert str(primary) == "E_LEGACY_TREE_WITNESS_UNAVAILABLE: accessibility-reviewer"
+    assert cleanup is None
+    assert transactions == []
+    assert inventory() == before
 
 
 def test_e7_claude_transport_replacement_rolls_back_trees_trio_and_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A post-transport fault restores both accepted-prior surfaces exactly."""
+    """A final-parity fault rolls back qualified E7 members, not a whole E7 install."""
 
     installer = _load_installer()
     snapshot = tmp_path / "e7-source"
@@ -2394,34 +2466,78 @@ def test_e7_claude_transport_replacement_rolls_back_trees_trio_and_manifest(
         package.extractall(snapshot, filter="data")
     target = tmp_path / "target"
     target.mkdir()
-    seeded = subprocess.run(
-        [sys.executable, str(snapshot / "scripts" / "install-claude.py"), "--target", str(target), "--force", "--allow-unsafe-target", "--no-hypothesis-hook"],
-        cwd=snapshot, capture_output=True, text=True,
-    )
-    assert seeded.returncode == 0, seeded.stdout + seeded.stderr
+    args = ["--target", str(target), "--force", "--allow-unsafe-target", "--no-hypothesis-hook"]
+    assert installer.install("claude", args) == 0
     canonical = target / ".agents" / "skills"
     transport = target / ".claude" / "agents" / "scripts"
     manifest = transport.parent / "shared" / "provider-prompt-projections.v1.json"
-    before_trees = {path.relative_to(canonical).as_posix(): path.read_bytes() for path in canonical.rglob("*") if path.is_file()}
-    before_transport = {name: (transport / name).read_bytes() if (transport / name).is_file() else None for name in TRANSPORT_FILES}
-    before_manifest = manifest.read_bytes() if manifest.is_file() else None
-    original = installer._CreateOnlyMutablePath.replace_exact_file
 
-    def fail_after_transport(self, relative, expected_digest, payload):
-        result = original(self, relative, expected_digest, payload)
-        if Path(relative).name == "provider_prompt.py":
-            raise RuntimeError("injected post-transport replacement failure")
-        return result
+    # Isolate exact, already-qualified E7 trees and the legacy transport singleton.
+    # Unrelated trees and native roles remain stock current; full E7 admission is separate.
+    retained_names = ("architect", "architecture-reviewer")
+    current_trees = {}
+    for name in retained_names:
+        installed = canonical / name
+        current_trees[name] = installer._tree_sha256(installed, ignore_runtime_cache=True)
+        archived = snapshot / "src.codex" / "skills" / name
+        legacy = installer.E7_CANONICAL_SKILL_TREE_SHA256[name]
+        assert installer._legacy_tree_sha256(archived, ignore_runtime_cache=True) == legacy
+        strong = installer._legacy_factory_identity_v2(name, legacy)
+        assert strong is not None and strong != current_trees[name]
+        shutil.rmtree(installed)
+        shutil.copytree(archived, installed)
+        assert installer._tree_sha256(installed, ignore_runtime_cache=True) == strong
 
-    monkeypatch.setattr(installer._CreateOnlyMutablePath, "replace_exact_file", fail_after_transport)
-    result = installer.install("claude", ["--target", str(target), "--force", "--allow-unsafe-target", "--no-hypothesis-hook"])
-    after_trees = {path.relative_to(canonical).as_posix(): path.read_bytes() for path in canonical.rglob("*") if path.is_file()}
-    after_transport = {name: (transport / name).read_bytes() if (transport / name).is_file() else None for name in TRANSPORT_FILES}
-    after_manifest = manifest.read_bytes() if manifest.is_file() else None
-    assert result == 1
-    assert after_trees == before_trees
-    assert after_transport == before_transport
-    assert after_manifest == before_manifest
+    launchers = {"invoke-codex-prompt.py", "invoke-claude-prompt.py"}
+    for name in TRANSPORT_FILES:
+        if name not in launchers:
+            (transport / name).unlink()
+    manifest.unlink()
+    legacy_provider = (
+        snapshot / "src.claude" / "agents" / "scripts" / "provider_prompt.py"
+    ).read_bytes()
+    assert _sha(legacy_provider) == installer.E7_LEGACY_PROVIDER_PROMPT_SHA256
+    (transport / "provider_prompt.py").write_bytes(legacy_provider)
+
+    def witness(path: Path):
+        if not path.exists():
+            return None
+        return (
+            installer._CreateOnlyMutablePath._identity(path),
+            path.read_bytes() if path.is_file() else None,
+        )
+
+    def snapshot_effects():
+        return (
+            {path.relative_to(canonical): witness(path) for path in canonical.rglob("*")},
+            {name: witness(transport / name) for name in TRANSPORT_FILES},
+            witness(manifest),
+        )
+
+    before = snapshot_effects()
+    original = installer._validate_committed_transport_projection
+    parity_calls = 0
+
+    def fail_after_transport(*args, **kwargs):
+        nonlocal parity_calls
+        original(*args, **kwargs)
+        assert manifest.read_bytes() == _current_transport_payload(manifest.name)
+        for name in TRANSPORT_FILES:
+            assert (transport / name).read_bytes() == _current_transport_payload(name)
+        for name in retained_names:
+            assert installer._tree_sha256(
+                canonical / name, ignore_runtime_cache=True
+            ) == current_trees[name]
+        parity_calls += 1
+        raise RuntimeError("injected post-transport parity failure")
+
+    monkeypatch.setattr(
+        installer, "_validate_committed_transport_projection", fail_after_transport
+    )
+    assert installer.install("claude", args) == 1
+    assert parity_calls == 1
+    assert snapshot_effects() == before
+    assert not tuple(transport.parent.rglob("*.prior"))
 
 
 def test_claude_transport_preflight_rejects_mixed_state_before_apply(
