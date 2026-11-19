@@ -270,6 +270,32 @@ configuration. Localization alone neither repairs a stale interpreter command
 nor grants native hook trust, and it does not qualify a live provider call.
 Shared skill/agent trees and other clients are outside this flag's scope.
 
+### Explicit legacy hook snapshot
+
+If the old installation has no provider installation record, do not fabricate one
+or fall back from a failed ownership check. The existing Codex installer front
+door supports a separate, explicitly reviewed maintenance selection:
+`--reviewed-hook-snapshot <selection.json> --reviewed-hook-snapshot-sha256 <sha256>`.
+Run it with the retained Python. The default is a read-only preview; `--apply`
+performs only the reviewed operation after the required approval. Do not combine
+this mode with normal installation, localization, or uninstall options.
+
+The selection pins the original and candidate configuration bytes, exact command
+positions, script digests, and the replacement executable identity. Only the
+interpreter argument may change; script arguments, foreign entries and all other
+configuration bytes remain intact. The local hook-file link is retained for
+recovery and replaced by a local file. The shared referent and installed scripts
+are not rewritten. The existing inventory producer creates a new local inventory;
+this neither adopts a package nor grants native client trust.
+
+Cloud-file script inputs are read-only dependencies, not permission to write
+through linked or placeholder paths. Their namespace, physical identity and
+content must remain verified. A missing local payload or unsupported identity
+cannot be repaired by downloading, changing attributes, or weakening the writer
+checks during preview. Failure rollback retains the original link and prior
+inventory; it preserves later edits rather than overwriting them. Retained files
+are recovery evidence, not a separate automatic post-success undo command.
+
 ### Legacy shared skill links
 
 Explicit migration is separate from installation. Preview selected known legacy

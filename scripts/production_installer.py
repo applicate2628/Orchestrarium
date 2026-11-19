@@ -763,6 +763,10 @@ def _parser(provider: str) -> argparse.ArgumentParser:
     modes.add_argument("--global", "-Global", dest="global_install", action="store_true")
     modes.add_argument("--target", "-Target")
     parser.add_argument("--force", "-Force", action="store_true")
+    parser.add_argument("--reviewed-hook-snapshot", metavar="JSON",
+                        help="Preview an explicitly reviewed argv0-only hook-file snapshot, without package adoption")
+    parser.add_argument("--reviewed-hook-snapshot-sha256", metavar="SHA256",
+                        help="Exact reviewed selection bytes; --apply performs this separate maintenance operation")
     parser.add_argument("--localize-hook-file", action="store_true",
                         help="Codex: localize a receipted hook-file leaf link within this install transaction; preserve exact bytes and original link")
     parser.add_argument("--uninstall", action="store_true", help="Preview selected-current owned content removal")
@@ -1169,15 +1173,17 @@ class _WindowsBoundNode:
         if self.handle is not None or self.descriptor is not None:
             return self
         ctypes, _wintypes, kernel, *_rest = self._api()
-        if self.purpose not in {"observe", "parent", "attributes", "dispose"}:
+        if self.purpose not in {"observe", "parent", "attributes", "dispose", "readonly", "readonly-metadata"}:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing native creator custody")
         access = (0x12019F if self.purpose == "parent" else
-                  0x81 | (0x10100 if self.purpose == "dispose" else 0)
+                  0x80 if self.purpose == "readonly-metadata" else 0x81 | (0x10100 if self.purpose == "dispose" else 0)
                   | (0x100 if self.purpose == "attributes" else 0))
         if self.read_security:
             access |= 0x20000  # READ_CONTROL; no WRITE_DAC/WRITE_OWNER or privilege.
         share = 7 if self.purpose in {"observe", "parent"} else 1
         flags = 0x2000000 | (0 if self.follow else 0x200000)
+        if self.purpose in {"readonly", "readonly-metadata"}:
+            flags |= 0x00100000  # FILE_FLAG_OPEN_NO_RECALL; never a hydration request.
         handle = kernel.CreateFileW(str(self.path), access, share, None, 3, flags, None)
         if handle == ctypes.c_void_p(-1).value:
             raise ctypes.WinError(ctypes.get_last_error())
@@ -1413,6 +1419,48 @@ class _WindowsBoundNode:
         if not kernel.SetFileInformationByHandle(self.live_handle, 0, ctypes.byref(information), ctypes.sizeof(information)):
             raise ctypes.WinError(ctypes.get_last_error())
         return self.basic()
+
+    def _cloud_range(self, offset: int, length: int) -> tuple[int, int, int, int]:
+        """One documented ONDISK range, queried with READ_ATTRIBUTES only."""
+        ctypes, wintypes, _kernel, *_rest = self._api()
+        class FileRange(ctypes.Structure):
+            _fields_ = [("offset", ctypes.c_longlong), ("length", ctypes.c_longlong)]
+        api = ctypes.WinDLL("CldApi", use_last_error=True)
+        query = api.CfGetPlaceholderRangeInfo
+        query.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_longlong, ctypes.c_longlong,
+                          ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD))
+        query.restype = ctypes.c_long
+        entry, written = FileRange(), wintypes.DWORD()
+        result = query(self.live_handle, 1, offset, length, ctypes.byref(entry), ctypes.sizeof(entry), ctypes.byref(written))
+        return int(result) & 0xFFFFFFFF, int(entry.offset), int(entry.length), int(written.value)
+
+    def require_local_cloud_data(self) -> None:
+        """Prove full [0,size) physically present before any payload read.
+
+        CfGetPlaceholderRangeInfo does not modify the file. One-entry pagination
+        progresses by returned coverage, with no invented range-count limit.
+        """
+        size = self.python_metadata().st_size
+        covered = 0
+        while covered < size:
+            result, offset, length, written = self._cloud_range(covered, size - covered)
+            if result not in {0, 0x800700EA}:  # S_OK / HRESULT_FROM_WIN32(ERROR_MORE_DATA)
+                raise ValueError(f"E_HOOK_SNAPSHOT_CLOUD_RANGE_UNAVAILABLE: HRESULT=0x{result:08x}")
+            if written != 16 or offset < 0 or offset > covered or length <= 0 or offset + length <= covered:
+                raise ValueError("E_HOOK_SNAPSHOT_RECALL_REQUIRED: locally present range missing")
+            covered = min(size, offset + length)
+        if self.python_metadata().st_size != size:
+            raise ValueError("E_HOOK_SNAPSHOT_INVALID: cloud size changed")
+
+    def attribute_tag(self) -> tuple[int, int]:
+        """Read documented FileAttributeTagInfo; never interpret cloud vendor data."""
+        ctypes, wintypes, kernel, *_rest = self._api()
+        class AttributeTag(ctypes.Structure):
+            _fields_ = [("attributes", wintypes.DWORD), ("tag", wintypes.DWORD)]
+        information = AttributeTag()
+        if not kernel.GetFileInformationByHandleEx(self.live_handle, 9, ctypes.byref(information), ctypes.sizeof(information)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return int(information.attributes), int(information.tag)
 
     def reparse_data(self) -> bytes:
         ctypes, wintypes, kernel, *_rest = self._api()
@@ -12495,6 +12543,9 @@ class _HookFileLocalization:
     backup: Path
     inventory: Path
     inventory_backup: Path
+    freeze_dependencies: bool = False
+    inventory_specs: tuple[tuple[str, Path, str, str | None], ...] = ()
+    cloud_inputs: tuple[tuple[Path, str, tuple], ...] = ()
 
 
 def _plan_hook_file_localization(root: Path, provider: str, anchor: Path, scope: str):
@@ -12581,7 +12632,7 @@ def _apply_hook_file_localization(plan: _HookFileLocalization, transaction: _Ins
         with transaction._copy_reference(path, node) as (fd, _bound):
             if hashlib.sha256(transaction._descriptor_bytes(fd, path=path)).hexdigest() != digest:
                 raise ValueError("E_HOOK_LOCALIZATION_DRIFT: selected bytes")
-        if path == plan.source:
+        if path == plan.source or plan.freeze_dependencies:
             read_owner = owner if path.is_relative_to(owner.anchor) else _CreateOnlyMutablePath(
                 path.parent, transaction, dry_run=owner.dry_run)
             dependency = transaction.bind_readonly_path(read_owner, path)
@@ -12637,6 +12688,303 @@ def _localize_hook_file(root: Path, provider: str, anchor: Path, scope: str, *, 
         if apply:
             transaction.commit()
     return dict(status="localized" if apply else "preview", link_backup=str(plan.backup))
+
+
+@contextmanager
+def _exposed_hook_snapshot_placeholders():
+    """Expose metadata only on this thread; do not change process mode or policy.
+
+    Windows may disguise placeholders as ordinary files for compatibility. The
+    explicit snapshot route must see those attributes before choosing any reader.
+    """
+    if os.name != "nt":
+        yield
+        return
+    import ctypes
+    try:
+        api = ctypes.WinDLL("ntdll")
+        query = api.RtlQueryThreadPlaceholderCompatibilityMode
+        setter = api.RtlSetThreadPlaceholderCompatibilityMode
+    except (OSError, AttributeError) as error:
+        raise ValueError("E_HOOK_SNAPSHOT_VISIBILITY_UNAVAILABLE: native API unavailable") from error
+    query.argtypes, query.restype = (), ctypes.c_byte
+    setter.argtypes, setter.restype = (ctypes.c_byte,), ctypes.c_byte
+    previous = int(setter(2))  # PHCM_EXPOSE_PLACEHOLDERS; current thread only.
+    if previous < 0:
+        raise ValueError("E_HOOK_SNAPSHOT_VISIBILITY_UNAVAILABLE: thread exposure failed")
+    try:
+        if previous not in {0, 1, 2} or int(query()) != 2:
+            raise ValueError("E_HOOK_SNAPSHOT_VISIBILITY_UNAVAILABLE: unexpected thread mode")
+        yield
+    finally:
+        restored = int(setter(previous))
+        if restored < 0 or int(query()) != previous:
+            raise RuntimeError("E_HOOK_SNAPSHOT_VISIBILITY_RESTORE_FAILED")
+
+
+@contextmanager
+def _held_reviewed_cloud_input(path: Path, expected_sha256: str):
+    # Direct diagnostic callers need the same visibility as the public operation.
+    with _exposed_hook_snapshot_placeholders():
+        with _held_reviewed_cloud_input_exposed(path, expected_sha256) as acquired:
+            yield acquired
+
+
+@contextmanager
+def _held_reviewed_cloud_input_exposed(path: Path, expected_sha256: str):
+    """Read-only native references, never mutation admission for cloud placeholders.
+
+    MS-FSCC CLOUD/CLOUD_1..F tags are non-name-surrogates. Their opaque payload
+    is not a link target. Existing writers continue to refuse all reparse paths.
+    """
+    if os.name != "nt" or not path.is_absolute():
+        raise ValueError("E_HOOK_SNAPSHOT_INVALID: Windows cloud input required")
+    if not isinstance(expected_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
+        raise ValueError("E_HOOK_SNAPSHOT_INVALID: exact cloud SHA256 required")
+
+    def metadata(bound, component):
+        attributes, tag = bound.attribute_tag()
+        directory = bool(attributes & stat.FILE_ATTRIBUTE_DIRECTORY)
+        if directory != (component != path):
+            raise ValueError("E_HOOK_SNAPSHOT_INVALID: cloud input component type")
+        if attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+            if tag & 0x20000000 or tag & ~0xF000 != 0x9000001A:
+                raise ValueError("E_HOOK_SNAPSHOT_INVALID: unsupported readonly reparse tag")
+        elif tag:
+            raise ValueError("E_HOOK_SNAPSHOT_INVALID: inconsistent readonly tag")
+        # FileAttributeTagInfo: OFFLINE and RECALL_ON_DATA_ACCESS. 0x40000 is
+        # ambiguous EA in this info class, not an enumeration RECALL_ON_OPEN.
+        if attributes & (0x1000 | 0x400000):
+            raise ValueError("E_HOOK_SNAPSHOT_RECALL_REQUIRED: payload read not attempted")
+        return tag, directory
+
+    with ExitStack() as resources:
+        acquired = []
+        for component in (*reversed(path.parents), path):
+            # Attribute-only, no-follow, NO_RECALL first; do not enumerate parents.
+            bound = resources.enter_context(_WindowsBoundNode(component, purpose="readonly-metadata"))
+            tag, directory = metadata(bound, component)
+            acquired.append((component, bound, bound.proof, tag, directory))
+        # Query physical range coverage on the attribute-only handle, before data
+        # access. Missing/error ranges are blockers, never hydration requests.
+        if acquired[-1][3]:
+            acquired[-1][1].require_local_cloud_data()
+        # Sharing remains READ only; no less restrictive retry after an error.
+        leaf = resources.enter_context(_WindowsBoundNode(path, purpose="readonly"))
+        tag, directory = metadata(leaf, path)
+        if leaf.proof != acquired[-1][2] or (tag, directory) != acquired[-1][3:]:
+            raise ValueError("E_HOOK_SNAPSHOT_INVALID: cloud data handle identity changed")
+        if not stat.S_ISREG(leaf.python_metadata().st_mode):
+            raise ValueError("E_HOOK_SNAPSHOT_INVALID: ordinary cloud data stream required")
+        witnesses = tuple((component, proof, tag, directory) for component, _bound, proof, tag, directory in acquired)
+
+        def check_metadata():
+            for component, bound, proof, tag, directory in acquired:
+                with _WindowsBoundNode(component, purpose="readonly-metadata") as current:
+                    if (current.proof != proof or bound.proof != proof
+                            or metadata(current, component) != (tag, directory)
+                            or metadata(bound, component) != (tag, directory)):
+                        raise ValueError("E_HOOK_SNAPSHOT_INVALID: cloud namespace identity changed")
+            if leaf.proof != acquired[-1][2] or metadata(leaf, path) != acquired[-1][3:]:
+                raise ValueError("E_HOOK_SNAPSHOT_INVALID: cloud data identity changed")
+
+        def check():
+            check_metadata()
+            if acquired[-1][3]:
+                acquired[-1][1].require_local_cloud_data()
+            payload = _InstallTransaction._descriptor_bytes(leaf.descriptor, path=path)
+            check_metadata()
+            if acquired[-1][3]:
+                acquired[-1][1].require_local_cloud_data()
+            if hashlib.sha256(payload).hexdigest() != expected_sha256:
+                raise ValueError("E_HOOK_SNAPSHOT_INVALID: cloud input digest mismatch")
+            return payload
+
+        payload = check()
+        yield payload, witnesses, check
+
+
+@_exposed_hook_snapshot_placeholders()
+def _plan_reviewed_hook_snapshot(root: Path, selection_path: Path, selection_sha256: str):
+    """Explicit byte selection, never inferred package ownership or receipt fallback."""
+    dependencies = {}
+    nodes = {}
+    cloud_inputs = []
+
+    def fail(reason):
+        raise ValueError("E_HOOK_SNAPSHOT_INVALID: " + reason)
+
+    def read(path, digest, *, allow_cloud=False):
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            fail("exact input SHA256 required")
+        path = Path(path)
+        if not path.is_absolute():
+            fail("absolute input required")
+        if allow_cloud and os.name == "nt" and _contains_reparse(path):
+            with _held_reviewed_cloud_input(path, digest) as (payload, witnesses, _check):
+                cloud_inputs.append((path, digest, witnesses))
+                return payload
+        if _contains_reparse(path) or not path.is_file():
+            fail("ordinary absolute input required")
+        node = _InstallTransaction._capture_node(path)
+        with _InstallTransaction._copy_reference(path, node) as (fd, _bound):
+            payload = _InstallTransaction._descriptor_bytes(fd, path=path)
+        actual = hashlib.sha256(payload).hexdigest()
+        if node.kind != "file" or node.data != actual or digest is not None and actual != digest:
+            fail("input digest mismatch")
+        if path in nodes and nodes[path] != node:
+            fail("input changed during selection")
+        dependencies[path], nodes[path] = actual, node
+        return payload
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                fail("duplicate JSON key")
+            result[key] = value
+        return result
+
+    def parse(data):
+        return json.loads(data, object_pairs_hook=unique_object)
+
+    if not isinstance(selection_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", selection_sha256):
+        fail("selection SHA256 required")
+    spec = parse(read(selection_path, selection_sha256))
+    if (not isinstance(spec, dict) or set(spec) != {"schema_version", "registration", "before_sha256",
+            "candidate", "candidate_sha256", "executable", "commands"} or type(spec["schema_version"]) is not int or spec["schema_version"] != 1):
+        fail("selection schema")
+    registration = Path(spec["registration"])
+    if not registration.is_absolute() or _contains_reparse(registration.parent) or not registration.is_symlink():
+        fail("ordinary parent and selected leaf link required")
+    original = _InstallTransaction._capture_node(registration)
+    source = registration.resolve(strict=True)
+    before = read(source, spec["before_sha256"], allow_cloud=True)
+    candidate = read(Path(spec["candidate"]), spec["candidate_sha256"])
+    executable = spec["executable"]
+    if not isinstance(executable, dict) or set(executable) != {"path", "sha256"}:
+        fail("executable selection")
+    exe = Path(executable["path"])
+    read(exe, executable["sha256"])
+    if not os.access(exe, os.X_OK) or os.name == "nt" and exe.suffix.lower() != ".exe":
+        fail("executable file required")
+    health = _hook_health_module(root)
+    host = "windows" if os.name == "nt" else "posix"
+    render = health.serialize_windows_hook_command if host == "windows" else lambda argv: " ".join(health.shlex.quote(a) for a in argv)
+    document = parse(before)
+    expected = parse(before)
+    rows = spec["commands"]
+    if not isinstance(rows, list) or not rows:
+        fail("nonempty exact command selection required")
+    seen = set()
+    markers = set()
+    inventory_specs = []
+    replacements = {}
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != {"event", "group_index", "handler_index", "before", "after", "script", "script_sha256", "marker"}:
+            fail("command selection schema")
+        event, gi, hi = row["event"], row["group_index"], row["handler_index"]
+        if not isinstance(event, str) or type(gi) is not int or type(hi) is not int or gi < 0 or hi < 0 or (event, gi, hi) in seen:
+            fail("command selection index")
+        seen.add((event, gi, hi))
+        try:
+            handler = document["hooks"][event][gi]["hooks"][hi]
+            selected = expected["hooks"][event][gi]["hooks"][hi]
+        except (KeyError, IndexError, TypeError):
+            fail("command selection absent")
+        if not isinstance(handler, dict) or handler.get("type") != "command" or handler.get("command") != row["before"] or "args" in handler:
+            fail("exact command mismatch")
+        old = health._command_argv(handler, "codex", host)
+        new = health._command_argv(dict(command=row["after"]), "codex", host)
+        if (len(old) < 2 or len(new) != len(old) or old[1:] != new[1:] or old[0] == new[0]
+                or Path(new[0]) != exe or render(old) != row["before"] or render(new) != row["after"]):
+            fail("only canonical argv0 replacement is admitted")
+        script, python_call = health._invoked_script(old)
+        new_script, new_python_call = health._invoked_script(new)
+        if not python_call or not new_python_call or script != new_script or Path(script) != Path(row["script"]):
+            fail("literal Python script required")
+        read(Path(script), row["script_sha256"], allow_cloud=True)
+        marker = row["marker"]
+        group = document["hooks"][event][gi]
+        matcher = group.get("matcher")
+        if not isinstance(marker, str) or not marker or marker in markers or matcher is not None and not isinstance(matcher, str):
+            fail("unique inventory marker and matcher required")
+        invocation = health.classify_hook_invocation(dict(command=row["after"]), {marker}, "codex", host,
+            {marker: {script}})
+        if invocation.kind != "current-owned" or invocation.marker != marker:
+            fail("inventory marker must identify the exact selected script")
+        markers.add(marker)
+        inventory_specs.append((marker, Path(script), event, matcher))
+        selected["command"] = row["after"]
+        before_token = json.dumps(row["before"]).encode("utf-8")
+        after_token = json.dumps(row["after"]).encode("utf-8")
+        if before_token in replacements and replacements[before_token][0] != after_token:
+            fail("conflicting command replacement")
+        replacements[before_token] = (after_token, replacements.get(before_token, (None, 0))[1] + 1)
+    # Token replacement plus parsed tuple comparison proves both byte preservation
+    # and location. No reserialization/adoption of foreign JSON is performed.
+    rebuilt = before
+    for old_token, (new_token, count) in replacements.items():
+        if before.count(old_token) != count:
+            fail("ambiguous encoded command occurrence")
+        rebuilt = rebuilt.replace(old_token, new_token)
+    if rebuilt != candidate or parse(candidate) != expected:
+        fail("candidate changes unselected bytes")
+    if not _InstallTransaction._point_matches(registration, original) or registration.resolve(strict=True) != source:
+        fail("selected link drift")
+    inventory = registration.parent / health.INVENTORY_NAME
+    backup = registration.with_name(registration.name + ".orche-localization-link")
+    inventory_backup = inventory.with_name(inventory.name + ".orche-localization-prior")
+    for path in (backup, inventory_backup):
+        if os.path.lexists(path):
+            fail("retained backup collision")
+    if _contains_reparse(inventory) or inventory.exists() and not inventory.is_file():
+        fail("local inventory type")
+    mutable = {registration, inventory, backup, inventory_backup}
+    if mutable.intersection(set(dependencies) | {path for path, _digest, _witness in cloud_inputs}):
+        fail("input overlaps local publication")
+    return _HookFileLocalization(registration.parent, registration, source, original, candidate,
+        tuple(dependencies.items()), tuple(nodes.items()), backup, inventory, inventory_backup, True, tuple(inventory_specs), tuple(cloud_inputs))
+
+
+@_exposed_hook_snapshot_placeholders()
+def _reviewed_hook_snapshot(root: Path, selection_path: Path, selection_sha256: str, *, apply: bool):
+    plan = _plan_reviewed_hook_snapshot(root, selection_path, selection_sha256)
+    paths = [plan.registration, plan.backup, plan.inventory, plan.inventory_backup,
+             *(path for path, _digest in plan.dependencies)]
+    with ExitStack() as resources:
+        cloud_checks = []
+        for path, digest, original_witnesses in plan.cloud_inputs:
+            _payload, current_witnesses, check = resources.enter_context(_held_reviewed_cloud_input(path, digest))
+            if current_witnesses != original_witnesses:
+                raise ValueError("E_HOOK_SNAPSHOT_INVALID: selected cloud input identity changed")
+            cloud_checks.append(check)
+        with _InstallTransaction(paths, enabled=apply, link_object_paths=(plan.registration,),
+                readonly_paths=tuple(path for path, _digest in plan.dependencies)) as transaction:
+            owner = _CreateOnlyMutablePath(plan.anchor, transaction, dry_run=not apply)
+            for check in cloud_checks:
+                check()
+            _apply_hook_file_localization(plan, transaction, owner)
+            if apply:
+                # Existing inventory producer, not trust registration or native health.
+                health = _hook_health_module(root)
+                inventory = health.plan_codex_inventory(target=plan.registration, specs=plan.inventory_specs,
+                    inventory_path=plan.inventory, host_os="windows" if os.name == "nt" else "posix")
+                health._recheck_inventory_authority(inventory.authority, for_write=True)
+                if inventory.authority.inventory != plan.inventory:
+                    raise ValueError("E_HOOK_SNAPSHOT_INVALID: inventory must remain local")
+                owner.replace_file_atomic(plan.inventory.relative_to(owner.anchor), inventory.content,
+                    mode=None, fsync="required", temporary_prefix=".orchestrarium-hook-inventory-")
+                written = health._inventory_authority(plan.registration, plan.inventory, for_write=False)
+                health._require_same_hook_target_authority(inventory.authority, written)
+                for check in cloud_checks:
+                    check()
+                transaction.commit()
+    return dict(status="snapshot-applied" if apply else "snapshot-preview",
+                registration=str(plan.registration), source=str(plan.source), link_target=plan.original.data,
+                link_backup=str(plan.backup), inventory=str(plan.inventory),
+                candidate_sha256=hashlib.sha256(plan.payload).hexdigest(),
+                inventory_status="generated" if apply else "planned", package_adopted=False, trust_granted=False)
 
 
 @dataclass(frozen=True)
@@ -13941,6 +14289,22 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
+    if args.reviewed_hook_snapshot is not None or args.reviewed_hook_snapshot_sha256 is not None:
+        defaults = vars(_parser(provider).parse_args([]))
+        allowed = {"reviewed_hook_snapshot", "reviewed_hook_snapshot_sha256", "apply", "dry_run"}
+        if (provider != "codex" or not args.reviewed_hook_snapshot or not args.reviewed_hook_snapshot_sha256
+                or args.apply and args.dry_run
+                or any(value != defaults[name] for name, value in vars(args).items() if name not in allowed)):
+            print("FAIL: reviewed hook snapshot is a separate explicit Codex maintenance selection", file=sys.stderr)
+            return 2
+        try:
+            result = _reviewed_hook_snapshot(_repo_root(Path(__file__)), Path(args.reviewed_hook_snapshot),
+                args.reviewed_hook_snapshot_sha256, apply=args.apply)
+            print(json.dumps(result, sort_keys=True))
+            return 0
+        except (OSError, RuntimeError, ValueError, TypeError, KeyError) as exc:
+            print(f"FAIL: reviewed hook snapshot preserved unverified state: {_installer_failure_text(exc)}", file=sys.stderr)
+            return 1
     if args.localize_hook_file and (provider != "codex" or args.uninstall or args.materialize_legacy_skills):
         print("FAIL: hook localization composes only with Codex installation", file=sys.stderr)
         return 2
