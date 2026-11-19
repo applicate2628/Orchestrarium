@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-19
 
+- The scratch recovery hook now compares original file bytes with Git, without clean filters or line-ending conversion. It quotes paths with special characters and enables Git's Windows long-path support, so preserved work is not mistaken for a committed copy merely because conversion makes the contents look alike.
+
 - Recognize the Windows process token's exact eligible default owner when binding its working directory, without moving the directory or changing permissions. Unrelated or deny-only identities and filesystem drift are still rejected.
 
 - Optional bundle assembly now requires a separately qualified standalone CPython standard-library runtime. It rejects third-party package content before output and packages only selected CPython notices. Superseded packaging assets and evidence remain available in the original Git checkpoint, not the current source tree. Final verification rejects unexpected notice content anywhere in the assembled bundle before creating its launch manifest. The existing source installer and provider policies are unchanged.
