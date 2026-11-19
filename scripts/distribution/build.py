@@ -37,11 +37,11 @@ case "$0" in
   *) directory=. ;;
 esac
 root=$(CDPATH= cd -P "$directory" && pwd)
-exec "$root/python/bin/python3" -I "$root/launch.py" "$@"
+exec "$root/python/bin/python3" -I -B "$root/launch.py" "$@"
 '''
 PS = '''# Orche: local launcher, not a downloader or a second installer.
 $ErrorActionPreference = 'Stop'
-& (Join-Path $PSScriptRoot 'python/python.exe') -I (Join-Path $PSScriptRoot 'launch.py') @args
+& (Join-Path $PSScriptRoot 'python/python.exe') -I -B (Join-Path $PSScriptRoot 'launch.py') @args
 exit $LASTEXITCODE
 '''
 

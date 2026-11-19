@@ -282,3 +282,9 @@ def test_unrelated_linked_entry_directory_remains_supported(builder, tmp_path):
     build_synthetic_bundle(builder, source, runtime, output, target='linux-x64', release='development')
     assert (output / 'python/Scripts').is_symlink()
     assert (output / 'python/Scripts/helper').read_bytes() == b'keep'
+
+
+
+@pytest.mark.parametrize("wrapper", ["SH", "PS"])
+def test_wrapper_disables_bytecode_before_retention_can_import_builder(builder, wrapper):
+    assert "-I -B" in getattr(builder, wrapper)
