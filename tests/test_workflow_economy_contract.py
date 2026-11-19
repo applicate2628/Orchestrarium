@@ -124,7 +124,7 @@ def workflow_duties(text: str) -> dict[str, bool]:
         "full-review-trigger": "full only new defect class/material upstream revision",
         "optional-advice-default": "Consultant/external-brigade default off",
         "advisory-readiness": "Lead may choose read-only Kimi ambiguity/options at readiness/decision",
-        "unavailable-provider": "Grok unavailable1.x: no launch/probe",
+        "unavailable-provider": "Grok unavailable 1.x: no launch/probe",
         "quick-fix-ceremony": "Quick-fix: no pre-review ceremony",
         "artifact-root-entry": "Each result one artifact/root entry",
         "progress-only-refusal": "no duplicates/progress-only artifact/REVISE while safe implementation/validation remains",

@@ -1835,12 +1835,13 @@ def test_scoped_action_registry_keeps_source_only_maintainer_checks_out_of_insta
         "all",
         "dev_repo",
         "dev_repo_nonstandalone",
+        "dev_repo_monorepo",
         "installed",
     )
     source_only_actions = tuple(
         action
         for scope, actions in module.ACTIONS
-        if scope in ("dev_repo", "dev_repo_nonstandalone")
+        if scope in ("dev_repo", "dev_repo_nonstandalone", "dev_repo_monorepo")
         for action in actions
         if module._is_source_only_maintainer_action(action)
     )
