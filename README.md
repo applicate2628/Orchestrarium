@@ -17,7 +17,7 @@ to launch models or spend quota.
 - **Install or update:** [installation guide](INSTALL.md).
 - **Understand the workflow:** [documentation index](docs/README.md).
 - **Work on the project:** [maintainer starting point](docs/new-session-guide.md).
-- **See released changes:** [release notes](RELEASE_NOTES.md).
+- **See tracked changes:** [release notes](RELEASE_NOTES.md).
 
 ## Which version?
 
@@ -164,7 +164,7 @@ Important: operator preferences live in per-provider `agents-mode` files; both p
 
 - Codex reads `.agents/.agents-mode.yaml`.
 - Claude Code reads `.claude/.agents-mode.yaml`.
-- Legacy extensionless `.agents-mode` files remain compatibility input only. Decision-driving reads should resolve in this order: provider-local `.agents-mode.yaml`, local legacy `.agents-mode`, matching pack-local global `~/.<provider>/.agents-mode.yaml`, matching pack-local global legacy `.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml`, then built-in defaults. `scripts/resolve-agents-mode.py --provider <provider> --json` is the executable reference for this per-key read order. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope without recreating any legacy path or synthesizing a project-local override on read alone.
+- Legacy extensionless `.agents-mode` files remain compatibility input only. Decision-driving reads should resolve in this order: provider-local `.agents-mode.yaml`, local legacy `.agents-mode`, matching pack-local global `~/.<provider>/.agents-mode.yaml`, matching pack-local global legacy `.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml`, then built-in defaults. `scripts/resolve-agents-mode.py --provider <provider> --json` is the executable reference for this per-key read order. Resolution never writes files. On an explicit installer or supported configuration write, normalize the effective file to the canonical `.yaml` path in the same scope without recreating a legacy path or introducing an implicit project-local override.
 - Reinstall is expected to do the same maintenance work for installed overlays: if the shipped schema or defaults changed, the installer must rewrite an existing `.agents-mode.yaml` to the current canonical form instead of preserving stale pack-owned structure verbatim.
 - `consultantMode` controls `$consultant`.
 - `delegationMode: manual` keeps explicit-permission behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist. Because the host does not parse `.agents-mode.yaml` natively, the production Claude/Codex installers register an `agents-mode-reminder` `SessionStart` hook that surfaces the active `auto`/`force` posture into the main conversation at session start and after compaction (silent on `manual`), so an init-project run is not required for the posture to take effect.

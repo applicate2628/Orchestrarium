@@ -243,7 +243,7 @@ class PreSdkDistributionTests(unittest.TestCase):
                           return_value=(Path("python"), Path("install.py"))), patch.object(
                 self.launcher, "_exec_child", return_value=0) as child:
             self.assertEqual(self.launcher.main(["--permanent-runtime", "--dry-run"]), 0)
-            self.assertEqual(child.call_args.args[1], ["python", "-I", "install.py", "--dry-run"])
+            self.assertEqual(child.call_args.args[1], ["python", "-I", "-B", "install.py", "--dry-run"])
 
 class RootInstallerDispatchTests(unittest.TestCase):
     def test_production_dispatch_inherits_caller_directory_and_preserves_arguments(self):
