@@ -34,6 +34,14 @@ class Tests(unittest.TestCase):
   for key in ('https_proxy','GIT_CONFIG_COUNT','GIT_SSL_NO_VERIFY','GIT_EXEC_PATH'):
    with self.subTest(key=key):
     self.env[key]='1';self.assertFalse(self.check().eligible);del self.env[key]
+ def test_only_literal_disabled_pager_is_eligible(self):
+  baseline=self.check()
+  self.env['GIT_PAGER']='cat'
+  self.assertEqual(self.check(),baseline)
+  self.env['GIT_PAGER']='unused-fixture-pager'
+  with patch.object(subprocess,'run') as run:
+   self.assertEqual(self.check().reason,'environment-override')
+   run.assert_not_called()
  def test_bad_endpoint(self):
   for url in ('https://user:SECRET@github.com/a/b','https://github.com:443/a/b','https://github.com/a/b?q=x','https://evil.invalid/a/b'):
    self.config('remote.origin.url',url);r=self.check();self.assertFalse(r.eligible);self.assertNotIn('SECRET',repr(r))

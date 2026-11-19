@@ -6,7 +6,6 @@ inspection through transfer. No credentials or config values appear in results.
 from dataclasses import dataclass
 from pathlib import Path
 import os,re,subprocess
-from urllib.parse import urlsplit
 
 @dataclass(frozen=True)
 class Qualification:
@@ -14,6 +13,12 @@ class Qualification:
     reason: str
     origins: tuple[str,...] = ()
     executables: tuple[str,...] = ()
+
+
+def valid_receiver_endpoint(url):
+    """Public GitHub HTTPS repository URL; no credentials or query data."""
+    return bool(re.fullmatch(r'https://github\.com/[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+',url)
+                and url.rsplit('/',1)[1] not in {'.','..'})
 
 
 def qualify(git, repository, remote, *, env, config_args=(), timeout=10, approved_gh=None, approved_gcm=None):
@@ -28,6 +33,8 @@ def qualify(git, repository, remote, *, env, config_args=(), timeout=10, approve
     allowed_env={'GIT_CONFIG_NOSYSTEM','GIT_CONFIG_GLOBAL','GIT_CONFIG_SYSTEM','GIT_TERMINAL_PROMPT'}
     for key,value in env.items():
         name=key.upper()
+        if name=='GIT_PAGER' and value=='cat':
+            continue  # Git disables paging for this exact value; no command is run.
         if value and (name.startswith('GIT_') and name not in allowed_env or name in {'HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','GIT_PROXY_COMMAND','CURL_CA_BUNDLE','SSL_CERT_FILE','SSL_CERT_DIR'}):return deny('environment-override')
     prefix=[str(git),'-C',str(repository),*config_args]
     def call(*args):
@@ -64,9 +71,7 @@ def qualify(git, repository, remote, *, env, config_args=(), timeout=10, approve
         if len(urls)!=1:return deny('multiple-push-urls')
         url=urls[0]
         # No userinfo, port, query, fragment, percent encoding or subdomain.
-        if not re.fullmatch(r'https://github\.com/[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+',url):return deny('endpoint-shape')
-        parsed=urlsplit(url)
-        if parsed.path.split('/')[-1] in {'.','..'}:return deny('endpoint-shape')
+        if not valid_receiver_endpoint(url):return deny('endpoint-shape')
         effective=call('config','--type=bool','--get-urlmatch','http.followRedirects',url).strip()
         if effective!=b'false':return deny('redirects-not-disabled')
         # URL matching is performed by Git, preserving helper ordering/reset.

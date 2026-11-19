@@ -9,7 +9,7 @@ from bounded_pipe import Broker
 from windows_identity import PinnedFile,ProcessWitness,SameHelperLifecycle,pipe_process,canonical
 from transfer_binding import ScopeBinding,TransferBinding
 from receiver_scope import Invocation,ReceiverScope
-from qualifier import qualify
+from qualifier import qualify,valid_receiver_endpoint
 GIT=r'C:\Program Files\Git\ucrt64\bin\git.exe'
 HELPER=r'C:\Program Files\Git\ucrt64\libexec\git-core\git-remote-https.exe'
 NATIVE_CALLBACK = r'''import ctypes,json,os,sys,shlex
@@ -42,12 +42,34 @@ finally:
  for witness in reversed(held):witness.close()
 '''
 
+def _owner_git_environment(inherited):
+ """Disable paging only in the private environment for owner subprocesses."""
+ env={key:value for key,value in inherited.items() if key.upper()!='GIT_PAGER'}
+ env['GIT_PAGER']='cat'
+ return env
+
+def _owner_push_endpoint(git,source,remote,cfg,env):
+ try:
+  endpoints=subprocess.check_output([git,'-C',str(source),*cfg,'remote','get-url','--push','--all',remote],env=env,stderr=subprocess.PIPE,timeout=10).decode('utf-8').splitlines()
+ except (OSError,subprocess.SubprocessError,UnicodeError):
+  raise ValueError('unqualified endpoint inspection') from None
+ if len(endpoints)!=1 or not valid_receiver_endpoint(endpoints[0]):
+  raise ValueError('unqualified endpoint selection')
+ return endpoints[0]
+
 def run_target(gate,source,remote,tip,destination,*,dry_run=False):
  source=pathlib.Path(source)
- env=dict(os.environ)
- preliminary=qualify(GIT,source,remote,env=env,config_args=('-c','http.followRedirects=false'),approved_gh=r'C:\Program Files\GitHub CLI\gh.exe')
- if not preliminary.eligible:return None
- endpoint=subprocess.check_output([GIT,'-C',str(source),'remote','get-url','--push',remote],env=env).decode().strip()
+ env=_owner_git_environment(os.environ)
+ cfg=('-c','http.followRedirects=false')
+ gh=r'C:\Program Files\GitHub CLI\gh.exe'
+ preliminary=qualify(GIT,source,remote,env=env,config_args=cfg,approved_gh=gh)
+ if not preliminary.eligible:
+  print('Receiver scope: target-local qualification refused; using ordinary publication checks.',file=sys.stderr)
+  return None
+ local_paths=_repository_config_paths(GIT,source,env)
+ if not _owner_config_origins_match(local_paths,preliminary.origins):
+  raise ValueError('unsupported config origin namespace')
+ endpoint=_owner_push_endpoint(GIT,source,remote,cfg,env)
  # All runtime scratch belongs to Orche, never the user's project root.
  root=pathlib.Path(os.environ['LOCALAPPDATA'])/'Orche'/'workspaces'/'receiver-owner';root.mkdir(parents=True,exist_ok=True)
  base=pathlib.Path(tempfile.mkdtemp(prefix='push-',dir=root))
@@ -100,33 +122,25 @@ finally:
  hookpayload=helperdir/'native_callback.py'
  hookpayload.write_text(NATIVE_CALLBACK,newline='\n')
  hook=helperdir/'native-callback';hook.write_text(launch(hookpayload),newline='\n')
- env=dict(os.environ,ORCHE_TRANSPORT_SOURCE=str(pathlib.Path(__file__).resolve().parent),ORCHE_GATE_ENTRY=str(pathlib.Path(gate.__file__).resolve()))
+ env.update(ORCHE_TRANSPORT_SOURCE=str(pathlib.Path(__file__).resolve().parent),ORCHE_GATE_ENTRY=str(pathlib.Path(gate.__file__).resolve()))
  env.update(ORCHE_RECEIVER_PIPE=pipe,ORCHE_OWNER_PID=str(os.getpid()))
  p=None;binding=None;channel=object();events=[];upstream=None;held=[];pins=[];lifecycle=None;relay=None;scanned={"allowed":False,"kind":"not-run"}
  try:
-  for path in (GIT,sys.executable,HELPER,r'C:\Program Files\Git\usr\bin\sh.exe',payload,launcher,hookpayload,hook,source/'.git/config'):
+  for path in (GIT,sys.executable,HELPER,r'C:\Program Files\Git\usr\bin\sh.exe',payload,launcher,hookpayload,hook):
    pins.append(PinnedFile(path))
-  git_pin,python_pin,upstream_pin,shell_pin,relay_pin,launcher_pin,hook_pin,hook_launcher_pin,config_pin=pins
+  git_pin,python_pin,upstream_pin,shell_pin,relay_pin,launcher_pin,hook_pin,hook_launcher_pin=pins
   if git_pin.sha256!='9c75f3f41eb5686bacde4b7c4fdfcd7970e8b699ee05c8d7a0cc9c8a7ddaffe8' or upstream_pin.sha256!='ad461657eca12dfeb50f281d107ac3760ac355a20882e4a3b0d470cb6bab77c6':raise ValueError('unqualified Git build')
   for runtime in pathlib.Path(__file__).resolve().parent.glob('*.py'):pins.append(PinnedFile(runtime))
-  cfg=('-c','http.followRedirects=false')
-  gh=r'C:\Program Files\GitHub CLI\gh.exe'
-  preliminary=qualify(GIT,source,remote,env=env,config_args=cfg,approved_gh=gh)
-  if not preliminary.eligible:raise ValueError('HTTPS qualification: '+preliminary.reason)
-  expected={canonical(source/'.git/config'),canonical(pathlib.Path.home()/'.gitconfig'),canonical(r'C:\Program Files\Git\etc\gitconfig')}
-  if {canonical(p) for p in preliminary.origins}!=expected:raise ValueError('unsupported config origin namespace')
-  # Freeze the observed global/system input selection, preserving their contents
-  # and credential helper configuration rather than disabling authentication.
-  env.update(GIT_CONFIG_GLOBAL=str(pathlib.Path.home()/'.gitconfig'),GIT_CONFIG_SYSTEM=r'C:\Program Files\Git\etc\gitconfig')
-  for path in (*preliminary.origins,*preliminary.executables):pins.append(PinnedFile(path))
+  _pin_and_freeze_owner_config(source,env,local_paths,preliminary,pins)
   qualified=qualify(GIT,source,remote,env=env,config_args=cfg,approved_gh=gh)
   if qualified!=preliminary:raise ValueError('effective config changed before pins')
+  if _owner_push_endpoint(GIT,source,remote,cfg,env)!=endpoint:raise ValueError('effective endpoint changed before pins')
   # Only this owner-generated helper directory is admitted after raw-env check.
-  env['GIT_EXEC_PATH']=str(helperdir)
+  transfer_env=dict(env,GIT_EXEC_PATH=str(helperdir))
   if shlex.quote(str(hook).replace('\\','/'))!=str(hook).replace('\\','/'):raise ValueError('unsupported hook launcher path')
   hookcfg=tuple(x for setting in (f'hook.{gate.NATIVE_PUBLICATION_HOOK}.command='+shlex.quote(str(hook).replace('\\','/')),f'hook.{gate.NATIVE_PUBLICATION_HOOK}.event=',f'hook.{gate.NATIVE_PUBLICATION_HOOK}.event=pre-push',f'hook.{gate.NATIVE_PUBLICATION_HOOK}.enabled=true',f'hook.{gate.NATIVE_PUBLICATION_HOOK}.parallel=false') for x in ('-c',setting))
   argv=[GIT,'-C',str(source),*cfg,*hookcfg,'-c',f'remote.{remote}.vcs=orche-receiver','push','--verify','--no-follow-tags','--recurse-submodules=no',*(['--dry-run'] if dry_run else []),'--',remote,tip+':'+destination]
-  p=subprocess.Popen(argv,env=env)
+  p=subprocess.Popen(argv,env=transfer_env)
   root_witness=ProcessWitness(p.pid);held.append(root_witness);broker.owner=root_witness.handle
   for expected in ('advertisement','hook','transfer'):
    with broker.accept() as connection:
@@ -149,7 +163,7 @@ finally:
      invocation=Invocation(os.urandom(32),endpoint,bytes.fromhex(upstream_pin.sha256),(root_witness.pid,root_witness.creation))
      captured=ReceiverScope(invocation,owned_channel=channel,qualified_route=True)
      if not captured.capture([row.encode() for row in request['rows']],channel=channel,invocation=invocation):connection.send_bytes(b'{"ok":false}');break
-     roots=captured.consume(channel=channel,invocation=invocation,local_object_exists=lambda oid:subprocess.run([GIT,'-C',str(source),'cat-file','-e',oid],capture_output=True).returncode==0)
+     roots=captured.consume(channel=channel,invocation=invocation,local_object_exists=lambda oid:subprocess.run([GIT,'-C',str(source),'cat-file','-e',oid],env=env,capture_output=True).returncode==0)
      if roots is None:connection.send_bytes(b'{"ok":false}');break
      scope=ScopeBinding(invocation.nonce.hex(),'sha256:'+hashlib.sha256(json.dumps(endpoint,separators=(',',':')).encode()).hexdigest(),'sha1',hashlib.sha256(raw).hexdigest(),tuple(sorted(roots)),'github-https-held-native-v1');binding=TransferBinding(scope,channel=channel);upstream=request['pid']
     elif expected=='hook':
@@ -208,6 +222,20 @@ def _repository_config_paths(git, source, env):
  return tuple(str(path) for path in paths)
 
 
+def _owner_config_origins_match(local_paths, origins):
+ expected={canonical(local_paths[0]),canonical(pathlib.Path.home()/'.gitconfig'),canonical(r'C:\Program Files\Git\etc\gitconfig')}
+ return {canonical(path) for path in origins}==expected
+
+
+def _pin_and_freeze_owner_config(source,env,local_paths,qualification,pins):
+ # Hold the effective configs, indirection files and recognized executables.
+ for name in dict.fromkeys((*local_paths,*qualification.origins,*qualification.executables)):
+  pins.append(PinnedFile(name))
+ if _repository_config_paths(GIT,source,env)!=local_paths:
+  raise ValueError('repository config paths changed')
+ env.update(GIT_CONFIG_GLOBAL=str(pathlib.Path.home()/'.gitconfig'),GIT_CONFIG_SYSTEM=r'C:\Program Files\Git\etc\gitconfig')
+
+
 def prepare_portable_batch(gate, source, remote, decision, received_decision_sha256):
  """Qualified GitHub owner preview only; never promotes or launches a push.
 
@@ -218,24 +246,20 @@ def prepare_portable_batch(gate, source, remote, decision, received_decision_sha
  if type(decision) is not dict or decision.get('schema')!='orchestrarium.portable-review.v1' or 'project' not in decision:
   raise ValueError('explicit portable decision required')
  source=pathlib.Path(source).resolve()
- env=dict(os.environ);cfg=('-c','http.followRedirects=false');gh=r'C:\Program Files\GitHub CLI\gh.exe'
+ env=_owner_git_environment(os.environ);cfg=('-c','http.followRedirects=false');gh=r'C:\Program Files\GitHub CLI\gh.exe'
  gcm=str(pathlib.Path(GIT).parent/'git-credential-manager.exe')
  if any(env.get(k) for k in ('GH_HOST','GH_HTTP_UNIX_SOCKET','GH_CONFIG_DIR','GH_DEBUG')):
   raise ValueError('unsupported provider environment')
  initial=qualify(GIT,source,remote,env=env,config_args=cfg,approved_gh=gh,approved_gcm=gcm)
  if not initial.eligible:raise ValueError('unqualified portable publication route: '+initial.reason)
  local_paths=_repository_config_paths(GIT,source,env)
- expected={canonical(local_paths[0]),canonical(pathlib.Path.home()/'.gitconfig'),canonical(r'C:\Program Files\Git\etc\gitconfig')}
- if {canonical(p) for p in initial.origins}!=expected:raise ValueError('unsupported config origin namespace')
+ if not _owner_config_origins_match(local_paths,initial.origins):raise ValueError('unsupported config origin namespace')
  pins=[];fds=();modules=None
  try:
-  for name in dict.fromkeys((GIT,gh,*local_paths,*initial.origins,*initial.executables)):pins.append(PinnedFile(name))
-  if _repository_config_paths(GIT,source,env)!=local_paths:raise ValueError('repository config paths changed')
-  env.update(GIT_CONFIG_GLOBAL=str(pathlib.Path.home()/'.gitconfig'),GIT_CONFIG_SYSTEM=r'C:\Program Files\Git\etc\gitconfig')
+  for name in (GIT,gh):pins.append(PinnedFile(name))
+  _pin_and_freeze_owner_config(source,env,local_paths,initial,pins)
   if qualify(GIT,source,remote,env=env,config_args=cfg,approved_gh=gh,approved_gcm=gcm)!=initial:raise ValueError('configuration drift')
-  endpoints=subprocess.check_output([GIT,'-C',str(source),*cfg,'remote','get-url','--push','--all',remote],env=env,timeout=10).decode('utf-8').splitlines()
-  if len(endpoints)!=1:raise ValueError('endpoint count')
-  endpoint=endpoints[0];parsed=urlsplit(endpoint);slug=parsed.path.lstrip('/')
+  endpoint=_owner_push_endpoint(GIT,source,remote,cfg,env);parsed=urlsplit(endpoint);slug=parsed.path.lstrip('/')
   if slug.endswith('.git'):slug=slug[:-4]
   if parsed.scheme!='https' or parsed.netloc!='github.com' or len(slug.split('/'))!=2:raise ValueError('provider endpoint')
   fds,closure=gate._capture_source_closure();modules=gate._load_captured_review_modules(closure);policy=modules.policy_module

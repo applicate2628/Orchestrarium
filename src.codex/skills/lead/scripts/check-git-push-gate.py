@@ -88,6 +88,42 @@ SCAN_SETTLEMENT_ATTEMPT_SECONDS = 3.0
 SCAN_SETTLEMENT_MAX_ENTRIES = 2
 
 
+class _ScannerRefusalDenied(PrRouteDenied):
+    """Preserve only a closed scanner ID; arbitrary output is never retained."""
+
+    _IDS = frozenset({
+        "PS-INPUT-REFUSAL", "PS-MSG-RANGE", "PS-MSG-READ", "PS-MSG-SPAWN",
+        "PS-MSG-READ-TIMEOUT", "PS-MSG-REAP", "PS-MSG-FRAME",
+        "PS-MSG-DECODE", "PS-MSG-LIMIT", "PS-MSG-COVERAGE", "PS-MSG-TIP-CHANGED",
+    })
+
+    _DETAILS = {
+        ("PS-MSG-COVERAGE", "empty-selection", "coverage"):
+            " The verified range contained no new selected coverage; check the source and receiver binding.",
+        ("PS-MSG-READ-TIMEOUT", "deadline", "reader"):
+            " The bounded reader timed out; check Git object availability before retrying.",
+    }
+
+    def __init__(self, failure_id: str, scanner_output: str):
+        super().__init__(failure_id)
+        match = re.fullmatch(
+            r"publication-safety: refusing id=(PS-[A-Z-]+) "
+            r"(?:reason=([a-z0-9-]+) phase=([a-z0-9-]+)|phase=([a-z0-9-]+) reason=([a-z0-9-]+))"
+            r"(?:\r?\n)?", scanner_output,
+        )
+        self.scanner_id = match.group(1) if match and match.group(1) in self._IDS else None
+        self.detail = ""
+        if self.scanner_id is not None:
+            self.detail = self._DETAILS.get((self.scanner_id,
+                match.group(2) or match.group(5), match.group(3) or match.group(4)), "")
+
+
+def _format_scanner_refusal(exc: PrRouteDenied) -> str:
+    if type(exc) is _ScannerRefusalDenied and exc.scanner_id in _ScannerRefusalDenied._IDS:
+        return f" Scanner diagnostic: id={exc.scanner_id}." + exc.detail
+    return ""
+
+
 @dataclass(frozen=True)
 class GitObjectFormat:
     name: str
@@ -492,7 +528,7 @@ class PendingScanInvocation:
                 if execution.exit_code == 1:
                     raise PrRouteDenied(prefix + "-SCAN-FINDING")
                 if execution.exit_code == 2:
-                    raise PrRouteDenied(prefix + "-SCAN-REFUSAL")
+                    raise _ScannerRefusalDenied(prefix + "-SCAN-REFUSAL", text)
                 if execution.exit_code != 0:
                     raise PrRouteDenied(prefix + "-SCAN-EXECUTION")
                 receipt = parsed.receipt
@@ -3542,6 +3578,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
     failure_id = result.failure_id or "PRG-INTERNAL"
     workdir_diagnostic = result.workdir_diagnostic
     process_diagnostic = ""
+    scanner_diagnostic = ""
     native_entry_stage = None
     native_entry_hint = None
     if result.continuation == "EVALUATE_HEAVY":
@@ -3552,6 +3589,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
             failure_id = exc.failure_id
             workdir_diagnostic = exc.workdir_diagnostic
             process_diagnostic = _format_process_failure(exc)
+            scanner_diagnostic = _format_scanner_refusal(exc)
             if type(exc) is _NativeEntryDenied and exc.stage in _NativeEntryDenied._STAGES:
                 native_entry_stage = exc.stage
                 native_entry_hint = exc.native_hint
@@ -3592,7 +3630,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
     }
     if failure_id not in reasons:
         failure_id = "PRG-INTERNAL"
-    reason = f"{failure_id}: {reasons[failure_id]}"
+    reason = f"{failure_id}: {reasons[failure_id]}" + scanner_diagnostic
     if failure_id == "PGG-NATIVE-ENTRY-REQUIRED" and native_entry_stage is not None:
         reason += f" Native-entry diagnostic: stage={native_entry_stage}."
         if native_entry_hint is not None:
@@ -3649,6 +3687,7 @@ def _native_callback_currentness(native: NativePushInput, root: str, git_exe: st
 
 def _native_pre_push_main(arguments: list[str]) -> int:
     """Git owns invocation and transfer; any failure here stops this callback."""
+    stage = "native-binding"
     try:
         if len(arguments) != 2:
             raise PrRouteDenied("PGG-NATIVE-INPUT")
@@ -3684,14 +3723,18 @@ def _native_pre_push_main(arguments: list[str]) -> int:
         if primary is None:
             # V4 still owns annotations and other actual roots even when the
             # mandatory nonempty commit graph cannot qualify publication.
+            stage = "native-coverage"
             evidence = _run_authoritative_scan(native, root, git_exe)
             raise PrRouteDenied("PGG-RANGE-RECEIPT-VERSION")
+        stage = "range-coverage"
         range_evidence = _run_authoritative_scan(primary, root, git_exe, native_input=native)
         if (range_evidence.parsed_outcome.kind not in {"valid-v3", "qualified-v3"}
             or range_evidence.execution is None or range_evidence.binding != primary):
             raise PrRouteDenied("PGG-RANGE-RECEIPT-VERSION")
+        stage = "native-currentness"
         if _native_callback_currentness(native, root, git_exe) != current:
             raise PrRouteDenied("PGG-TARGET-CURRENTNESS")
+        stage = "native-coverage"
         evidence = _run_authoritative_scan(native, root, git_exe)
         if (
             evidence.parsed_outcome.kind not in {"valid-v4", "qualified-v4"}
@@ -3699,8 +3742,10 @@ def _native_pre_push_main(arguments: list[str]) -> int:
             or not isinstance(evidence.binding, NativePushScanBinding)
         ):
             raise PrRouteDenied("PGG-NATIVE-RECEIPT-VERSION")
+        stage = "native-currentness"
         if _native_callback_currentness(native, root, git_exe) != current:
             raise PrRouteDenied("PGG-TARGET-CURRENTNESS")
+        stage = "closure-currentness"
         if (evidence.execution.closure_after != range_evidence.execution.closure_after
             or evidence.execution.pending.captured_review.repository_observation
                 != range_evidence.execution.pending.captured_review.repository_observation):
@@ -3708,6 +3753,7 @@ def _native_pre_push_main(arguments: list[str]) -> int:
         qualified_scans = tuple(result for result in (range_evidence, evidence)
             if result.parsed_outcome.kind in {"qualified-v3", "qualified-v4"})
         if qualified_scans:
+            stage = "review-currentness"
             # Both scans' exact used decisions share one final policy capture.
             # Neither scanner result keeps the other's used authority current.
             # Both scan owners settled their module slots; acquire the same
@@ -3730,7 +3776,8 @@ def _native_pre_push_main(arguments: list[str]) -> int:
         sys.stdout.write(evidence.execution.stdout.decode("utf-8", errors="strict"))
         return 0
     except PrRouteDenied as exc:
-        print(f"{exc.failure_id}: Native publication scan did not qualify this transfer.", file=sys.stderr)
+        print(f"{exc.failure_id}: Native publication scan did not qualify this transfer. Stage: {stage}."
+              + _format_scanner_refusal(exc), file=sys.stderr)
         return 2
     except Exception:
         print("PGG-SCAN-EXECUTION: Native publication scan did not complete.", file=sys.stderr)
@@ -3782,7 +3829,8 @@ def _target_local_push_main(arguments: list[str]) -> int:
         # callback retains its own bounded scan and failure/currentness checks.
         return subprocess.run(argv, cwd=root, shell=False, check=False).returncode
     except PrRouteDenied as exc:
-        print(f"{exc.failure_id}: Target-local publication did not qualify.", file=sys.stderr)
+        print(f"{exc.failure_id}: Target-local publication did not qualify."
+              + _format_scanner_refusal(exc), file=sys.stderr)
         return 2
     except Exception:
         print("PGG-SCAN-EXECUTION: Target-local publication did not complete.", file=sys.stderr)
