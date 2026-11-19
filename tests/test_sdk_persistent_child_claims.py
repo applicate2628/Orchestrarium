@@ -42,8 +42,12 @@ def decision(values, key):
     return request, worker._selection
 
 
+LIFECYCLE_LOCK_HELD = "WI-LIFECYCLE-LOCK-HELD"
+
+
 def claims(values, pairs):
-    owner = values[0]
+    owner, assignment, *_ = values
+    lifecycle, _ = owner._actual_item(assignment)
     barrier = Barrier(len(pairs))
     def claim(pair):
         request, selection = pair
@@ -53,6 +57,10 @@ def claims(values, pairs):
             return "claimed", request.external_dispatch_id, selected
         except ValueError as exc:
             return "refused", request.external_dispatch_id, str(exc)
+        except lifecycle.LifecycleError as exc:
+            if exc.failure_id != LIFECYCLE_LOCK_HELD:
+                raise
+            return "refused", request.external_dispatch_id, exc.failure_id
     with ThreadPoolExecutor(max_workers=len(pairs)) as pool:
         return list(pool.map(claim, pairs))
 
@@ -64,10 +72,12 @@ def test_simultaneous_first_claim_has_exactly_one_durable_winner(tmp_path, monke
     winners = [result for result in outcomes if result[0] == "claimed"]
     refused = [result for result in outcomes if result[0] == "refused"]
     assert len(winners) == len(refused) == 1, outcomes
-    # Optimistic snapshot drift may reject the overlapping reader before the
-    # atomic writer. Once settled, the same loser must still be refused by the
-    # persistent anchor itself, not recover permission to start another thread.
-    assert refused[0][2] in {"child_native_session_already_started", "current_ledger_invalid"}
+    # A contended lifecycle read or optimistic snapshot drift may reject the
+    # overlapping claim before the atomic writer. Once settled, the persistent
+    # anchor itself must still refuse the same loser.
+    assert refused[0][2] in {
+        "child_native_session_already_started", "current_ledger_invalid", LIFECYCLE_LOCK_HELD,
+    }
     loser = next(pair for pair in pairs if pair[0].external_dispatch_id == refused[0][1])
     with pytest.raises(ValueError, match="child_native_session_already_started"):
         runtime.claim_launch(*loser, authority=values[0].assert_current, started_at=INSTANT)
@@ -183,7 +193,9 @@ def test_distinct_successors_cannot_consume_one_received_turn_twice(tmp_path, mo
     winners = [row for row in outcomes if row[0] == "claimed"]
     refused = [row for row in outcomes if row[0] == "refused"]
     assert len(winners) == len(refused) == 1, outcomes
-    assert refused[0][2] in {"continuation_predecessor_already_consumed", "current_ledger_invalid"}, outcomes
+    assert refused[0][2] in {
+        "continuation_predecessor_already_consumed", "current_ledger_invalid", LIFECYCLE_LOCK_HELD,
+    }, outcomes
     loser = next(pair for pair in pairs if pair[0].external_dispatch_id == refused[0][1])
     with pytest.raises(ValueError, match="continuation_predecessor_already_consumed"):
         runtime.claim_launch(*loser, authority=owner.assert_current, started_at=INSTANT)
