@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-19
 
+- Align the Software Development Kit (SDK) installer’s transport member order with its existing manifest and validator. This keeps new projections and recognized upgrades on the same ordered inventory, without relaxing rejection of changed or reordered manifests.
+
 - Reconcile the SDK development branch with the pre-SDK baseline. Preserve the exact host and provider-environment boundaries, keep the installer bundle limited to the Python standard library, and retain the reviewed publication bounds and separate annotated-tag verification. Align installation and pack checks with the combined source without changing launch permissions.
 
 - Explicit SDK setup now leaves a present package unchanged, installs only after checking for local absence, and refuses unclear metadata without assuming adapter compatibility. Guidance and preview still do not run a provider or install anything.

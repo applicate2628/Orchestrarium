@@ -678,6 +678,27 @@ def test_sdk_transport_delivery_inventory_has_one_source_identity() -> None:
         }
 
 
+def test_sdk_transport_manifest_rejects_native_binding_before_worker(
+    tmp_path: Path,
+) -> None:
+    validator = _load_validator()
+    manifest = json.loads((ROOT / "shared/provider-prompt-projections.v1.json").read_bytes())
+    files = manifest["files"]
+    names = list(files)
+    worker = "sdk_execution/worker.py"
+    native_binding = "sdk_execution/native_binding.py"
+    assert names.index(native_binding) == names.index(worker) + 1
+    names.remove(native_binding)
+    names.insert(names.index(worker), native_binding)
+    manifest["files"] = {name: files[name] for name in names}
+    path = tmp_path / "provider-prompt-projections.v1.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    for predecessor_only in (False, True):
+        with pytest.raises(ValueError, match="complete ordered transport set"):
+            validator._load_manifest(path, predecessor_only=predecessor_only)
+
+
 def test_source_manifest_binds_the_generated_governance_capsule() -> None:
     """Catches a projection manifest that ships a composer without its policy input."""
 

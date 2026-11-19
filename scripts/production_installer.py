@@ -190,8 +190,8 @@ SDK_RUNTIME_HELPERS = (
     "sdk_execution/minimax.py",
     "sdk_execution/receiving.py",
     "sdk_execution/runtime.py",
-    "sdk_execution/native_binding.py",
     "sdk_execution/worker.py",
+    "sdk_execution/native_binding.py",
 )
 RUNTIME_HELPERS = (
     "model_routing/launch_policy.py",
