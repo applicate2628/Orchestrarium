@@ -292,6 +292,19 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 - Historical README catalogues preserve the existing input role when receiving never-admitted retirement records. They retain stored incoming/source inventory and exact archived payload/digest checks without starting an unrelated current-consumer sweep; strict retirement and integrity audits still detect later stale citations.
 
+## 2026-11-18
+
+- Reconciled the remaining product plan with delivered model-routing changes and
+  the approved SDK completion roadmap. Current SDK work is no longer mixed with
+  optional future 2.0 outcomes or repeated completed ranking work; distribution,
+  native Rust operations and separate installer acceptance retain their owners.
+
+## 2026-10-26
+
+- Finish the npm/Rust review split by updating the remaining roadmap to reference their separate main-based PRs. No implementation or new dependency between the projects is introduced.
+
+- Corrected the remaining 2.0 roadmap's SDK ownership links to PR18 design/status and PR19 implementation, while npm distribution belongs to PR17 and native Rust operations to independent PR21. Existing lifecycle, routing, evaluation and cross-host scope is unchanged.
+
 ## 2026-10-25
 
 - PR-scoped corrective publication no longer depends on branch-protection/rules enumeration or proving rules absent. The hook retains exact open-PR/head/ref binding, scoped human consent and a fresh complete leak scan; the ordinary push remains subject to the server's configured rules and exceptions.
@@ -328,6 +341,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 
 ## 2026-10-23
+
+- Consolidated the remaining Orchestrarium 2.0 product plan around native-role lifecycle, evidence-based routing and feedback, safe cross-host continuation and optional preferences. npm distribution and the hybrid Rust/SDK/ACP runtime are tracked in a separate project with explicit outcome dispositions and only genuine dependencies, avoiding duplicate design ownership or a whole-release blocker. Current governance, runtime behavior and provider admission are unchanged; this is planning, not implementation or measured improvement.
 
 - Claude document reinstallation now uses a bundled Markdown parser to distinguish real installer ownership from quoted user examples, including list and quote continuations. Custom instructions and imports remain in position, failed classification stays write-free, and existing Python installation commands require no additional package setup. Missing private packages refuse before ambient code can run, and Windows file metadata changes retain the held object on Python 3.11 and newer.
 - A current-line Claude instruction research and development handoff distinguishes newly documented native AGENTS.md discovery from the existing shared-policy import bridge. It establishes shared default policy and separate provider-specific sources as the target, explains why generated runtime projections remain safer than forcing a neutral root through higher-priority configuration, and identifies preservation and qualification prerequisites; this documentation change does not alter installed behavior or join the 2.0 redesign.
