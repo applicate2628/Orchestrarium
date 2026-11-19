@@ -55,7 +55,14 @@ Auto-match user intent against the installed command contracts and apply the own
 
 ## Role definitions
 
-Ordinary roles live in `.claude/agents/<role>.md`; the four Claude-owned curated inline roles `lead`, `product-manager`, `analyst`, and `planner` use `.claude/skills/<role>/SKILL.md`. Architect uses the `.claude/skills/architect` projection to the universal `.agents/skills/architect/SKILL.md` body. `.claude/agents/lead.md` uses `initialPrompt: /lead` for main-agent activation and refuses stale dispatch; the `product-manager`, `analyst`, and `planner` wrappers load their same-named skill, while the Architect wrapper loads the universal body.
+Ordinary roles live in `.claude/agents/<role>.md`. The curated inline roles
+`lead`, `product-manager`, `analyst`, `architect`, and `planner` load the
+selected Claude install's ordinary copies at `.claude/skills/<role>/SKILL.md`.
+The common authored contracts come from `src.codex/skills/`; Claude does not
+read the Codex installation's skill files. `.claude/agents/lead.md` uses
+`initialPrompt: /lead` for main-agent activation and refuses stale dispatch.
+The other curated wrappers retain Claude dispatch authority and load their own
+same-named skill.
 
 ## Publication safety scan
 

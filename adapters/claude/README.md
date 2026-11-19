@@ -11,12 +11,19 @@ Use it together with:
 Source surface:
 
 - `CLAUDE.md` is the Claude-provider runtime entrypoint in the monorepo source tree
-- `agents/` carries role definitions, contracts, team templates, and supporting scripts, including the Claude API wrapper under `agents/scripts/`. The four Claude-owned curated roles `lead`, `product-manager`, `analyst`, and `planner` keep their canonical contracts at `skills/<role>/SKILL.md`; `lead` uses the documented main-agent `initialPrompt: /lead` while the other three use thin delegate wrappers. Architect's sole body is the universal `.agents/skills/architect/SKILL.md` projection, with `agents/architect.md` retaining dispatched authority. Every other role's canonical contract lives under `agents/`.
-- `skills/` carries the curated inline role identities (`lead`, `product-manager`, `analyst`, `architect`, `planner`) and the Claude-side common skills; Architect's body is not Claude-owned source
+- `agents/` contains Claude-specific agent entrypoints, role prompts, contracts,
+  team templates, and scripts. `agents/lead.md` activates `/lead` through the
+  main-agent `initialPrompt`; the other curated roles retain native delegate
+  wrappers.
+- The common skills, including Lead, Product Manager, Analyst, Architect, and
+  Planner, are authored in [`src.codex/skills/`](../../src.codex/skills/).
+  The selected Claude installer writes ordinary copies to `.claude/skills/`,
+  independently of Codex. This adapter's source `skills/` contains historical
+  migration inputs, not a second live skill body.
 - `commands/` carries Claude-side command helpers maintained in this branch, including the bounded parallel external-helper surface `/agents-external-brigade`
 - `agents/contracts/design-panel.md` + `commands/agents-design-panel.md` carry the design-panel technique — independent multi-lane design generation on one pinned problem, converged through one mandatory synthesis; the generation-side analog of `agents/contracts/review-loop.md` + `commands/agents-review-loop.md`
 
-This subtree is the Claude runtime source owned by the monorepo. Shared governance and shared references stay one level up; only the provider-specific runtime source lives here.
+This subtree is the Claude runtime source owned by the monorepo. Shared governance and references live in [`shared/`](../../shared/).
 
 ## Terms and Abbreviations
 

@@ -493,39 +493,34 @@ Claude supports ownership-aware uninstall through the existing installer. Instal
 
 ## Quick install
 
-Run the router installer from the repository root:
-
-For global installs, POSIX requires `HOME` and ignores `USERPROFILE`; Windows requires `USERPROFILE` and does not fall back to `HOME`.
+From the repository root, preview only the selected clients. POSIX global
+install uses `HOME`; Windows uses `USERPROFILE` with no fallback to `HOME`.
 
 ```bash
-bash install.sh --global
+python install.py --clients codex claude --global --dry-run
 ```
 
 ```powershell
-python .\install.py --global
+python .\install.py --clients codex claude --global --dry-run
 ```
 
-Or install into a specific project. In the examples, set `PROJECT_ROOT` (Bash) or `$ProjectRoot` (PowerShell) to the intended existing project, and verify it before acknowledging the custom target.
+To preview a specific project, set the path to the intended existing project:
 
 ```bash
-bash install.sh --target "$PROJECT_ROOT" --allow-unsafe-target
+python install.py --clients codex --target "$PROJECT_ROOT" --allow-unsafe-target --dry-run
 ```
 
 ```powershell
-python .\install.py --target "$ProjectRoot" --allow-unsafe-target
+python .\install.py --clients codex --target "$ProjectRoot" --allow-unsafe-target --dry-run
 ```
 
-The router asks which pack to install:
-
-```text
-What to install?
-Production installs:
-  1) Codex pack
-  2) Claude Code
-  3) Codex + Claude (default production install)
-```
-
-Pressing Enter selects the default production install, `Codex + Claude`.
+The host catalog is `codex`, `claude`, and `antigravity`. To use the interactive
+menu, omit `--clients` in a terminal: enter client numbers separated by commas
+or spaces, or enter `a` to select all. Empty input or `q` cancels; there is no
+default. The menu previews before asking whether to apply. Without a terminal,
+`--clients` is required. After reviewing an explicit preview, rerun the same
+selection without `--dry-run` to apply. Selected clients are processed separately;
+a failure does not undo an earlier client's successful installation.
 
 Every `--target` install requires the explicit `--allow-unsafe-target` acknowledgement; without it, the installer exits before mutation. The flag admits the named custom project target but does not disable path, reparse-point, collision, transaction, or rollback checks.
 
@@ -533,8 +528,12 @@ The installer's `Target:` line names only the provider root (`.codex/` or `.clau
 
 | Mode | Codex mutation roots | Claude Code mutation roots |
 | --- | --- | --- |
-| `--target <project> --allow-unsafe-target` | `<project>/.codex/`, shared `<project>/.agents/`, and `<project>/AGENTS.md` | `<project>/.claude/` |
-| `--global` | `<home>/.codex/`, shared `<home>/.agents/`, and `<home>/.agents-mode.yaml` | `<home>/.claude/`, shared `<home>/.agents/`, and `<home>/.agents-mode.yaml` |
+| `--target <project> --allow-unsafe-target` | `<project>/.codex/`, `<project>/.agents/`, and `<project>/AGENTS.md` | `<project>/.claude/` |
+| `--global` | `<home>/.codex/` and `<home>/.agents/` | `<home>/.claude/` |
+
+The shared global `<home>/.agents-mode.yaml` is read-only compatibility input;
+each selected client writes only its own operator settings. For Antigravity,
+see [native startup scope](#antigravity-native-startup).
 
 When an admitted runtime subroot is a supported symbolic link or junction, the installer binds and mutates its resolved referent while preserving and rechecking that link identity.
 
@@ -615,7 +614,7 @@ Notes:
 - Installed Codex validation treats preserved user-added skills as warnings rather than pack metadata-budget failures. The strict metadata budget applies to Orchestrarium-owned roles and utility skills, while extra global skills remain visible as non-blocking orphan warnings.
 - The Claude installer treats `agents-` as a RESERVED pack namespace in `commands/` and `skills/`: on reinstall it reclaims (removes) any target `commands/agents-*.md` file or `skills/agents-*/` directory the current pack no longer ships (a renamed/removed flow, or a stale generated skill from an older standalone-branch install — the monorepo path ships flows only as `commands/`). Non-namespaced user files are always preserved; do not author files under the `agents-` prefix. `--dry-run` prints the planned reclaim without deleting.
 - Claude installs copy `agent-run-ledger.*`, `validate-work-item-state.*`, and `check-work-items-state.*` into `.claude/agents/scripts/` for project installs or `~/.claude/agents/scripts/` for global installs so task-memory operators can use the helpers without the source checkout.
-- Both production installers also copy the pure Version 3 (V3) solution-attempt reducer to `solution_attempt/reducer.py` and the bounded process owner to `process_supervision/process_runner.py` below that provider's installed scripts directory. Process Runner Version 1 (`ProcessRunnerV1`) remains Windows-only: it owns provider-prompt operations and detached Slice A validation, while skill-pack validator child checks use it on Windows. On POSIX, the validator runtime, publication scanner, and installer hook-health runner own their private process groups through `process_supervision/posix_process_group.py`; generic `ProcessRunnerV1` remains unavailable there. On Windows, the migrated Python and Git child paths retain bounded output capture and descendant-process-tree settlement through runner-owned, executable-specific, same-run probes; adapters cannot supply their own attestation. Native Codex and Claude launches fail early with a typed unavailable result on Windows. Generic `ProcessRunnerV1` requests on POSIX fail at request validation with `PSV1-POSIX-ORACLE-UNAVAILABLE` before executable acquisition or subprocess creation. The returned result is non-success, does not claim an empty descendant tree, closes runner-owned resources, and starts no child. Kimi is explicit-only through fixed `kimi-code/k3` for policy-admitted read-only exploration/research/planning/review or mapped `external-worker` engineering. Its optional validated capability file may select admitted read tools/Model Context Protocol servers or scoped worker tools; omission preserves empty tools/servers/subagents and permission `reject`. Every result is independently verified, nonauthorizing, and outside `auto`. Grok remains unavailable in 1.x. The generic Windows command-line interface remains fail-closed unavailable, and a Rust implementation remains deferred to 2.0. The installers do not copy the source-only durable operation store at `scripts/agent_run_persistence/operation_store.py` or route activation registry at `scripts/process_supervision/route_activation_registry.py`.
+- Both production installers also copy the pure Version 3 (V3) solution-attempt reducer to `solution_attempt/reducer.py` and the bounded process owner to `process_supervision/process_runner.py` below that provider's installed scripts directory. Process Runner Version 1 (`ProcessRunnerV1`) remains Windows-only: it owns provider-prompt operations and detached Slice A validation, while skill-pack validator child checks use it on Windows. On POSIX, the validator runtime, publication scanner, and installer hook-health runner own their private process groups through `process_supervision/posix_process_group.py`; generic `ProcessRunnerV1` remains unavailable there. On Windows, the migrated Python and Git child paths retain bounded output capture and descendant-process-tree settlement through runner-owned, executable-specific, same-run probes; adapters cannot supply their own attestation. On the direct single-executable Windows CLI route, the Codex wrapper supplies a built-in argument-parser contract and the process owner must qualify the executable and that contract before reading the prompt. The ordinary Claude wrapper supplies no such contract and refuses that route with `PSV1-ARGV-CODEC-UNSUPPORTED`. This is not native vendor execution acceptance; explicit SDK routes retain their own qualification. Generic `ProcessRunnerV1` requests on POSIX fail at request validation with `PSV1-POSIX-ORACLE-UNAVAILABLE` before executable acquisition or subprocess creation. The returned result is non-success, does not claim an empty descendant tree, closes runner-owned resources, and starts no child. Kimi is explicit-only through fixed `kimi-code/k3` for policy-admitted read-only exploration/research/planning/review or mapped `external-worker` engineering. Its optional validated capability file may select admitted read tools/Model Context Protocol servers or scoped worker tools; omission preserves empty tools/servers/subagents and permission `reject`. Every result is independently verified, nonauthorizing, and outside `auto`. Grok remains unavailable in 1.x. The generic Windows command-line interface remains fail-closed unavailable, and a Rust implementation remains deferred to 2.0. The installers do not copy the source-only durable operation store at `scripts/agent_run_persistence/operation_store.py` or route activation registry at `scripts/process_supervision/route_activation_registry.py`.
 - Normal Windows Kimi launch resolves the already-installed fixed `~/.kimi-code/bin/kimi.exe` afresh for each run and does not depend on enrollment, a version/hash allowlist, a live manifest, high-water state, or offline admission policy. `ProcessRunnerV1` binds the executable it opens, accepts an absent optional caller binding, and supports a junction or file symlink whose final ordinary executable has a different name. The legacy enrollment, replacement, and verification names are optional non-writing version/help readiness diagnostics only; a non-null `--kimi-offline-policy` fails clearly as obsolete before diagnostic or state work. The canonical wrapper alone owns the fixed `kimi-code/k3` file prompt, optional validated capability file, and the existing failure, timeout, cancellation, process-tree settlement, capture, and cleanup contract. Without that file, tools, Model Context Protocol servers, and subagents remain empty and permission is `reject`; selected capabilities remain caller-scoped and independently verified. The configured model identifier is not independent server-side model attestation, and the wrapper does not promise compatibility with an arbitrary future breaking Kimi command-line interface change. Orchestrarium never downloads or replaces the vendor executable.
 - The canonical Codex-line operator file is `.agents/.agents-mode.yaml` for project installs and `~/.codex/.agents-mode.yaml` for global installs.
 - For this installer monorepo itself, the absence of project-local `.agents/.agents-mode.yaml` inside `Orchestrarium/` is not automatically a bug when the maintainer is working against the global install. Ordinary reads should fall back to `~/.codex/.agents-mode.yaml` before treating the state as missing.
@@ -647,7 +646,7 @@ Use `python scripts/install-claude.py` or its thin POSIX launcher `scripts/insta
 Notes:
 
 - Project-level Claude installs create or update `.claude/AGENTS.md` and `.claude/CLAUDE.md`.
-- Claude keeps `.claude/CLAUDE.md` short. Leaf role instructions remain under `.claude/agents/*.md`, with five curated exceptions whose canonical contracts live at `.claude/skills/<role>/SKILL.md`: `lead` is selected as the main agent only when Claude resolves `settings.json.agent: lead` or the operator supplies `--agent lead`; its documented `initialPrompt: /lead` loads the inline Lead contract, while a stale `subagent_type: lead` dispatch still fails closed. The four duals `product-manager`, `analyst`, `architect`, `planner` each keep a thin delegate wrapper that loads the same-named skill.
+- Claude keeps `.claude/CLAUDE.md` short. Leaf role instructions remain under `.claude/agents/*.md`, with five curated exceptions whose common contracts are authored in `src.codex/skills/<role>/SKILL.md` and installed as ordinary copies at `.claude/skills/<role>/SKILL.md`: `lead` is selected as the main agent only when Claude resolves `settings.json.agent: lead` or the operator supplies `--agent lead`; its documented `initialPrompt: /lead` loads the inline Lead contract, while a stale `subagent_type: lead` dispatch still fails closed. The four duals `product-manager`, `analyst`, `architect`, `planner` each keep a thin delegate wrapper that loads the same-named skill.
 - User-side Claude imports (for example `@my-notes.md`) are preserved across reinstalls when they live after the required `@AGENTS.md` line and before the Claude managed-body begin marker.
 - The canonical Claude-line operator file is `.claude/.agents-mode.yaml` for project installs and `~/.claude/.agents-mode.yaml` for global installs.
 - First-time creation should write the full default shape with inline comments listing allowed values for each key.

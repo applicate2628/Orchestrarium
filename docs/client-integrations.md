@@ -9,7 +9,18 @@ and host-install support are distinct.
 
 ## Secondary adapter authentication
 
-The Python-owned `invoke-claude-prompt.py` transport (also exposed through the thin POSIX launcher `invoke-claude-prompt.sh`) runs automated, headless `claude -p`. Orchestrarium currently admits only `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` for automated Claude runs; subscription sign-in (OAuth), the subscription override, Amazon Bedrock, and Google Vertex AI fail closed. Claude authentication is irrelevant when the Codex route is selected, so absent Claude credentials do not block Codex. Orchestrarium 1.x refuses `apiKeyHelper` before prompt capture or provider lookup because a helper-generated credential cannot be bound to the transport's exact output scan. For the secret-backed path, use `invoke-claude-api.py` or its thin `invoke-claude-api.sh` launcher with the credentials documented in `SECRET.md`. See [Anthropic's Claude Code legal and compliance guidance](https://code.claude.com/docs/en/legal-and-compliance).
+A native interactive Claude Code session and an automated worker are different
+routes. The explicit Claude SDK worker route accepts direct Anthropic API
+authentication or the supported Amazon Bedrock and Google Cloud Vertex AI
+modes. Configuration is not proof of account access or consent to spend.
+Consumer subscription credentials are not an authorized programmatic worker
+route. Missing Claude credentials do not block a selected Codex route.
+
+The separate legacy `invoke-claude-prompt.py` transport runs headless
+`claude -p`. With no explicit authentication mode it refuses subscription-only
+authentication and does not execute `apiKeyHelper`. This is not a fallback for
+an unavailable SDK or an authorization to automate subscription use. See
+[Anthropic's authentication guidance](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use).
 
 ## Antigravity native startup
 

@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-19
 
+- Correct the SDK installation preview instructions, selected-client skill and transport ownership, and the documented Windows CLI parser boundary. Documentation now distinguishes common authored skills from independent installed copies and does not treat source-level parser admission as native provider acceptance. The installed Claude instructions and Architect wrapper now name Claude’s own Architect skill copy; Lead startup and native dispatch are unchanged.
+
 - Keep bundled installer launchers and their client-installation entry points from writing Python bytecode into the retained bundle during previews or installs. The separate SDK package setup and worker environment are unchanged.
 
 - Align the Software Development Kit (SDK) installer’s transport member order with its existing manifest and validator. This keeps new projections and recognized upgrades on the same ordered inventory, without relaxing rejection of changed or reordered manifests.
