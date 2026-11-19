@@ -1,6 +1,6 @@
 ---
 name: repo-cleanup
-description: Coordinate read-only repository cleanup and prepare-for-transfer requests by classifying current state, routing separately authorized work to existing owners, and rechecking evidence; when work-items/ is selected, enumerate every immediate child exactly once and never treat audit PASS as the census; never use as a deletion or process-killing engine.
+description: "Audit repository cleanup or transfer readiness and route authorized work to existing owners."
 ---
 
 # Repository Cleanup

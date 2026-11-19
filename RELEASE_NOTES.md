@@ -11,6 +11,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 - Native publication can qualify creation of a new annotated tag on already disclosed history by verifying the complete new tag object and its message against the exact receiver, without pretending that an empty commit scan authorizes a push. Publication of new history still requires both ordinary scans.
 
 - Claude help now reads its role groups from the installed role index, and the performance and status commands read the configured bug registry instead of a discontinued separate directory. Bug-fix and QA guidance returns dispositions to the lifecycle owner rather than changing or archiving records directly. Role-migration and workflow tests use the retained factory files and current routing owners.
+- Validate the entire Codex skill catalog, including newly added source entries, while retaining its metadata budgets and excluding unrelated third-party skills from installed pack checks. Reconcile the stale fingerprint with the already accepted task-first routing addendum without changing its routing or authorization rules. Codex and Claude second-opinion status now consume layered configuration in memory and do not rewrite local or global settings. Maintainers now record installation and rollback against the exact candidate, obtain an independent first assessment, and address recurring failure classes at their owning verification boundary.
 
 ## 2026-11-18
 

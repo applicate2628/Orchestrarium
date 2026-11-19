@@ -2613,3 +2613,127 @@ def test_state_contract_declarations_have_source_scope(validator: Path) -> None:
         registrations = tuple(scope for scope, group in module.ACTIONS
                               for action in group if action == declaration)
         assert registrations == ("dev_repo",), declaration
+
+
+@pytest.mark.parametrize(
+    "skill",
+    [
+        "github-pr-review-bot", "implementation-to-theory", "post-spawn-cleanup",
+        "repo-cleanup", "scientific-software-engineer", "vcpkg-ports-updater", "future-skill",
+    ],
+)
+@pytest.mark.parametrize(
+    ("dev_repo", "owned", "blocked"),
+    [(True, False, True), (False, True, True), (False, False, False)],
+    ids=("source-discovery", "installed-owned", "installed-foreign"),
+)
+def test_codex_skill_metadata_checks_catalog_without_claiming_foreign_skills(
+    tmp_path, skill, dev_repo, owned, blocked,
+):
+    from dataclasses import replace
+
+    module = _load(VALIDATORS[0], "codex_metadata_catalog")
+    runtime = module._ENGINE
+    layout = runtime.detect_layout(VALIDATORS[0], "codex", ROOT)
+    agents_text = f"## Common skills\n\n- ${skill}\n" if owned else ""
+    layout = replace(layout, skills=tmp_path, agents_text=agents_text, dev_repo=dev_repo)
+    validator = runtime.Validator(layout)
+    folder = tmp_path / skill
+    folder.mkdir()
+    (folder / "SKILL.md").write_text(
+        f"---\nname: {skill}\ndescription: |\n  multiline.\n---\n", encoding="utf-8"
+    )
+    actions = tuple(runtime._applicable_actions(module.ACTIONS, layout))
+    for action in actions:
+        if action[:2] == ("direct", "codex_skill_metadata"):
+            runtime._direct(
+                validator, *action[1:], maintainer_only_shared_reference_names=frozenset(),
+                utility_skills=frozenset(), curated_role_skills=frozenset(),
+                common_skill_pin_names=frozenset(),
+            )
+    assert validator.checks == 4
+    assert (validator.errors > 0) == blocked
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        ROOT / "src.codex/skills/second-opinion/SKILL.md",
+        ROOT / "src.claude/commands/agents-second-opinion.md",
+    ),
+)
+def test_consultant_reporting_uses_memory_only_normalization(path):
+    text = path.read_text(encoding="utf-8")
+    assert "Otherwise rewrite the effective file" not in text
+    assert "When reading, creating, or rewriting" not in text
+    assert "normalize it to the current canonical format in the same scope" not in text
+    assert "Do not change configuration files when reporting status." in text
+    assert "each key resolves to the highest-priority layer that defines it" in text
+
+
+@pytest.mark.parametrize(
+    "frontmatter",
+    [
+        "---\nname: fixture\ndescription: false\n---\n",
+        "---\nname: fixture\ndescription: null\n---\n",
+        "---\nname: fixture\ndescription: [x]\n---\n",
+        "---\nname: fixture\ndescription: {x: y}\n---\n",
+        "---\nname: fixture\ndescription: 24\n---\n",
+        "---\nname: fixture\ndescription: whitespace --- fake fence\n",
+        "---\nname: fixture\ndescription: real\n--- trailing text\n",
+        "--- title\nname: fixture\ndescription: real\n---\n",
+        "---\nname: fixture\ndescription: first\ndescription: second\n---\n",
+    ],
+)
+def test_skill_metadata_requires_exact_fences_and_string_fields(tmp_path, frontmatter):
+    module = _load(VALIDATORS[0], "codex_bad_metadata")
+    path = tmp_path / "SKILL.md"
+    path.write_text(frontmatter, encoding="utf-8")
+    assert not module._ENGINE.skill_frontmatter_valid(path, "fixture")
+
+
+def test_codex_description_budget_uses_the_fenced_quoted_value(tmp_path):
+    from dataclasses import replace
+
+    module = _load(VALIDATORS[0], "codex_quoted_metadata")
+    runtime = module._ENGINE
+    layout = runtime.detect_layout(VALIDATORS[0], "codex", ROOT)
+    folder = tmp_path / "fixture"
+    folder.mkdir()
+    body = folder / "SKILL.md"
+    body.write_text(
+        '---\nname: fixture\ndescription: "alpha --- beta" # comment\n---\n'
+        'description: not metadata\n', encoding="utf-8"
+    )
+    assert runtime.skill_frontmatter_valid(body, "fixture")
+    validator = runtime.Validator(replace(layout, skills=tmp_path))
+    validator.check_skill_frontmatter_yaml("fixture")
+    validator.check_skill_description_budget("14", "14", "fixture")
+    assert validator.checks == 4
+    assert validator.errors == 0
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"---\nname: fixture\ndescription:no separator\n---\n",
+        b"---\nname: fixture\ndescription: valid\nlicense: [\n---\n",
+        b"---\nname: fixture\vdescription: valid\n---\n",
+        b"---\nname: fixture\ndescription: broken \xff utf-8\n---\n",
+    ],
+)
+def test_skill_metadata_rejects_malformed_physical_bytes(tmp_path, content):
+    module = _load(VALIDATORS[0], "codex_malformed_metadata_bytes")
+    path = tmp_path / "SKILL.md"
+    path.write_bytes(content)
+    assert not module._ENGINE.skill_frontmatter_valid(path, "fixture")
+
+
+def test_skill_metadata_accepts_crlf_and_optional_metadata(tmp_path):
+    module = _load(VALIDATORS[0], "codex_optional_metadata")
+    path = tmp_path / "SKILL.md"
+    path.write_bytes(
+        b'---\r\nname: fixture\r\ndescription: "description"\r\n'
+        b'license: Apache-2.0\r\nversion: 2\r\nmetadata: {"label": "probe"}\r\n---\r\n'
+    )
+    assert module._ENGINE.skill_frontmatter_valid(path, "fixture")
