@@ -21,8 +21,10 @@ ensure_supported_python(str(Path(__file__).resolve()))
 
 
 def _run_production(name: str, forwarded: list[str]) -> int:
+    # Bundled launchers disable bytecode; the Python child does not inherit -B.
+    python = [sys.executable, "-B"] if sys.dont_write_bytecode else [sys.executable]
     return subprocess.run(
-        [sys.executable, str(ROOT / "scripts" / "install-client.py"), "--client", name, *forwarded],
+        [*python, str(ROOT / "scripts" / "install-client.py"), "--client", name, *forwarded],
         # Keep caller cwd: the existing installer owns project-root discovery.
     ).returncode
 

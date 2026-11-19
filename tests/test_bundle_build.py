@@ -24,11 +24,21 @@ def test_build_uses_relative_layout_and_keeps_source(builder, tmp_path):
     assert data['entry'] == 'app/install.py'
     assert (out/'app/install.py').read_bytes() == (SOURCE/'install.py').read_bytes()
     assert (out/'launch.py').read_bytes() == (SOURCE/'scripts/distribution/launch.py').read_bytes()
+    assert 'exec "$root/python/bin/python3" -I -B "$root/launch.py" "$@"' in (out/'orche').read_text()
     # Windows does not expose POSIX executable permission bits.
     if os.name != 'nt':
         assert (out/'orche').stat().st_mode & 0o111
     assert not (out/'app/tests').exists() and not (out/'app/.git').exists()
     assert (runtime/'bin/python3').read_bytes() == b'not executed'
+
+
+def test_generated_windows_launcher_suppresses_bytecode(builder, tmp_path):
+    runtime = tmp_path/'runtime'
+    runtime.mkdir()
+    (runtime/'python.exe').write_bytes(b'not executed')
+    out = build_synthetic_bundle(builder, SOURCE, runtime, tmp_path/'bundle',
+                                 target='windows-x64', release='development')
+    assert "& (Join-Path $PSScriptRoot 'python/python.exe') -I -B (Join-Path $PSScriptRoot 'launch.py') @args" in (out/'orche.ps1').read_text()
 
 
 def test_existing_output_is_never_overwritten(builder,tmp_path):

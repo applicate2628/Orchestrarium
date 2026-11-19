@@ -243,7 +243,7 @@ class SdkDistributionTests(unittest.TestCase):
                           return_value=(Path("python"), Path("install.py"))), patch.object(
                 self.launcher, "_exec_child", return_value=0) as child:
             self.assertEqual(self.launcher.main(["--permanent-runtime", "--dry-run"]), 0)
-            self.assertEqual(child.call_args.args[1], ["python", "-I", "install.py", "--dry-run"])
+            self.assertEqual(child.call_args.args[1], ["python", "-I", "-B", "install.py", "--dry-run"])
 
 class RootInstallerDispatchTests(unittest.TestCase):
     def test_production_dispatch_inherits_caller_directory_and_preserves_arguments(self):
@@ -253,20 +253,22 @@ class RootInstallerDispatchTests(unittest.TestCase):
         code = compile(ast.fix_missing_locations(ast.Module(
             body=ast.parse("from __future__ import annotations").body + [dispatch],
             type_ignores=[])), str(ROOT / "install.py"), "exec")
-        for provider in ("codex", "claude"):
-            for arguments in ([], ["--target", "relative project"], ["--global"],
+        for no_bytecode in (False, True):
+            for provider in ("codex", "claude", "antigravity"):
+                for arguments in ([], ["--target", "relative project"], ["--global"],
                               ["--no-hypothesis-hook", "--dry-run"]):
-                with self.subTest(provider=provider, arguments=arguments):
-                    runner = Mock(return_value=SimpleNamespace(returncode=23))
-                    scope = {"ROOT": ROOT, "sys": sys,
-                             "subprocess": SimpleNamespace(run=runner)}
-                    exec(code, scope)
-                    forwarded = list(arguments)
-                    self.assertEqual(scope["_run_production"](provider, forwarded), 23)
-                    runner.assert_called_once_with([
-                        sys.executable, str(ROOT / "scripts" / "install-client.py"), "--client", provider,
-                        *arguments])
-                    self.assertEqual(forwarded, arguments)
+                    with self.subTest(provider=provider, arguments=arguments, no_bytecode=no_bytecode):
+                        runner = Mock(return_value=SimpleNamespace(returncode=23))
+                        scope = {"ROOT": ROOT, "sys": SimpleNamespace(
+                                     executable=sys.executable, dont_write_bytecode=no_bytecode),
+                                 "subprocess": SimpleNamespace(run=runner)}
+                        exec(code, scope)
+                        forwarded = list(arguments)
+                        self.assertEqual(scope["_run_production"](provider, forwarded), 23)
+                        runner.assert_called_once_with([
+                            sys.executable, *(["-B"] if no_bytecode else []),
+                            str(ROOT / "scripts" / "install-client.py"), "--client", provider, *arguments])
+                        self.assertEqual(forwarded, arguments)
 
 if __name__ == "__main__":
     unittest.main()

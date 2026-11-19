@@ -107,7 +107,7 @@ def test_child_reexec_uses_bundle_and_preserves_argument_boundaries(launcher, tm
     assert launcher.main(['--permanent-runtime','--target','path with spaces','--allow-unsafe-target'])==0
     path,args,env=calls[0]
     assert path==str(exe)
-    assert args==[str(exe),'-I',str(root/'app/install.py'),'--target','path with spaces','--allow-unsafe-target']
+    assert args==[str(exe),'-I','-B',str(root/'app/install.py'),'--target','path with spaces','--allow-unsafe-target']
     assert 'PYTHONHOME' not in env and env['PYTHONNOUSERSITE']=='1'
 
 
@@ -127,7 +127,19 @@ def test_explicit_retention_runs_before_reexec(launcher,tmp_path,monkeypatch):
     calls=[];monkeypatch.setattr(launcher,'_exec_child',lambda *args:(calls.append(args),0)[1])
     assert launcher.main(['--retain-to',str(destination),'--global'])==0
     assert prepared==[(root,destination)]
-    assert calls[0][1]==[str(destination/'python/bin/python3'),'-I',str(destination/'launch.py'),'--permanent-runtime','--global']
+    assert calls[0][1]==[str(destination/'python/bin/python3'),'-I','-B',str(destination/'launch.py'),'--permanent-runtime','--global']
+
+
+def test_official_sdk_setup_preview_keeps_selected_worker_path(launcher, tmp_path, monkeypatch):
+    root, exe, _ = bundle(tmp_path, launcher)
+    monkeypatch.setattr(launcher, '__file__', str(root/'launch.py'))
+    monkeypatch.setattr(launcher.sys, 'executable', str(exe))
+    calls = []
+    monkeypatch.setattr(launcher, '_exec_child', lambda *args: (calls.append(args), 0)[1])
+    arguments = ['--sdk-setup', 'claude', '--sdk-venv', str(tmp_path/'selected worker')]
+    assert launcher.main(['--permanent-runtime', *arguments]) == 0
+    assert calls[0][1] == [str(exe), '-I', '-B', str(root/'app/install.py'), *arguments]
+    assert not (tmp_path/'selected worker').exists()
 
 
 def test_missing_retention_target_never_executes(launcher,tmp_path,monkeypatch):
@@ -243,7 +255,7 @@ def test_read_only_launch_needs_no_permanent_placement(launcher, tmp_path, monke
     calls = []
     monkeypatch.setattr(launcher, '_exec_child', lambda *values: (calls.append(values), 0)[1])
     assert launcher.main(args) == 0
-    assert calls[0][1][3:] == args
+    assert calls[0][1] == [str(exe), '-I', '-B', str(root/'app/install.py'), *args]
 
 
 def test_windows_child_waits_and_propagates_failure(launcher, monkeypatch):

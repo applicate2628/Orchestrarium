@@ -126,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
                   '--permanent-runtime. Keep the selected runtime while installed hooks use it.',
                   file=sys.stderr)
             return 2
-        return _exec_child(str(python), [str(python), '-I', str(entry), *args],
+        return _exec_child(str(python), [str(python), '-I', '-B', str(entry), *args],
                            child_environment(dict(os.environ)))
     except (OSError, ValueError, UnicodeError):
         print('Orche: bundled runtime is unavailable or inconsistent. No pack installation started; an incomplete retained copy may remain.', file=sys.stderr)
