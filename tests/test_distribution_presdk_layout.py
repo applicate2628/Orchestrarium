@@ -184,7 +184,12 @@ class SdkDistributionTests(unittest.TestCase):
                         continue  # Other profile cases still run without symlink privilege.
                 evidence = root / "evidence.json"
                 self._profile_record(runtime, notices, evidence)
-                with self.assertRaisesRegex(ValueError, "third-party"):
+                # Windows rejects symlinks as reparse points before the runtime
+                # profile check. POSIX reaches the linked-package-location check.
+                expected = ("Reparse points are not bundle inputs"
+                            if mode == "linked package location" and sys.platform == "win32"
+                            else "third-party")
+                with self.assertRaisesRegex(ValueError, expected):
                     self.builder.build(source, runtime, output, target="linux-x64",
                                        release="development", runtime_evidence=evidence)
                 self.assertFalse(output.exists())
