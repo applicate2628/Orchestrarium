@@ -66,43 +66,65 @@ STALE_MANDATORY_CLAIMS = (
 class SessionPersistenceContractTest(unittest.TestCase):
     def test_duplicate_report_cleanup_preserves_active_canonical_links(self) -> None:
         for path in ARCHIVIST_PROJECTIONS:
-            rule = next(
-                line for line in path.read_text(encoding="utf-8").splitlines()
-                if line.startswith("- When an active work-item artifact or lane result is duplicated")
-            )
             with self.subTest(path=path):
+                rule = next(
+                    (
+                        line for line in path.read_text(encoding="utf-8").splitlines()
+                        if line.startswith("- Before classifying a report as redundant or removable,")
+                    ),
+                    "",
+                )
+                self.assertIn("actual owning accepted canonical artifact/round and terminal evidence", rule)
+                self.assertIn("accepted canonical custody or an explicit retention disposition", rule)
+                self.assertIn("otherwise keep the exact report under HOLD", rule)
                 self.assertIn("Before removing", rule)
                 self.assertIn("inbound Markdown links from active canonical artifacts", rule)
-                self.assertIn("preserve the report", rule.lower())
+                self.assertIn("Preserve the report if its references cannot be safely resolved", rule)
                 self.assertIn("canonical target or historical identifier", rule)
-                self.assertIn("same change", rule)
+                self.assertIn("in the same change as removal", rule)
                 self.assertIn("After removal", rule)
                 self.assertIn("bounded link-resolution check", rule)
 
     def test_shared_owner_states_the_full_conditional_contract(self) -> None:
         text = SHARED.read_text(encoding="utf-8")
+        section = text.split("### Session persistence rule (mandatory)\n", 1)[1].split("\n### ", 1)[0]
         for required in (
-            "An active work-item is current-task `work-items/active/<slug>/`; a repository `work-items/` directory alone is not.",
-            "specialists write only canonical artifacts",
-            "root records concise lane result/provenance in `agent-runs.jsonl`",
-            "Trivial chat/work with no recovery or preservation value writes nothing.",
-            "meaningful standalone result MAY use one `.reports/YYYY-MM/` summary",
-            "explicitly requested standalone plan MAY use one `.plans/YYYY-MM/` snapshot",
-            "Work needing stages, recovery, or continuation is admitted as a work-item.",
-            "active ledger/artifact or one standalone summary",
+            "Active means current-task `work-items/active/<slug>/`, not repository `work-items/` alone.",
+            "Specialists write canonical artifacts; Root records result/provenance in agent-runs.jsonl",
+            "through validated agent-run-ledger/installed equivalent or declared binding-contract manual execution",
+            "refusal permits no invented raw row/ignored corruption",
+            "No duplicate .reports/.plans.",
+            "Trivial work without recovery value writes nothing.",
+            "No active item: one meaningful .reports/YYYY-MM summary MAY be used",
+            "plans require explicit request, one .plans/YYYY-MM snapshot",
+            "Stages/recovery/continuation require admission.",
+            "Provider/external provenance: canonical ledger/artifact or sole standalone summary",
         ):
             with self.subTest(required=required):
-                self.assertIn(required, text)
+                self.assertIn(required, section)
 
     def test_codex_and_claude_core_projections_keep_active_work_item_single_writer_rule(self) -> None:
         for path in CORE_PROJECTIONS:
             text = path.read_text(encoding="utf-8")
+            heading = "Artifact persistence protocol" if path.name == "operating-model.md" else "Session persistence"
+            section = text.split(f"## {heading}\n", 1)[1].split("\n## ", 1)[0]
             with self.subTest(path=path):
-                self.assertIn("work-items/active/<slug>/", text)
-                self.assertIn("agent-runs.jsonl", text)
+                self.assertIn("`work-items/active/<slug>/`", section)
+                self.assertIn("`agent-runs.jsonl`", section)
                 self.assertTrue(
-                    "no `.reports/` or `.plans/` duplicate" in text
-                    or "do not create `.reports/` or `.plans/` duplicates" in text
+                    "specialists write only canonical artifacts" in section
+                    or "specialist writes only its canonical artifact" in section
+                    or "specialist writes only its canonical task artifact" in section
+                )
+                self.assertTrue(
+                    "the root owns its concise lane result and provenance" in section
+                    or "the root records concise lane result/provenance" in section
+                    or "the root records the concise lane result and provenance" in section
+                )
+                self.assertTrue(
+                    "no `.reports/` or `.plans/` duplicate" in section
+                    or "do not duplicate either in `.reports/` or `.plans/`" in section
+                    or "Do not duplicate a wrapper-recorded execution or create `.reports/` or `.plans/` copies" in section
                 )
 
     def test_exact_stale_mandatory_per_lane_claims_are_absent(self) -> None:

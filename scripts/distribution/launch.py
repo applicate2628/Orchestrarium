@@ -50,8 +50,8 @@ def _manifest(root: Path) -> dict:
             result[key] = value
         return result
     data = json.loads(raw, object_pairs_hook=unique)
-    if (type(data) is not dict or set(data) != {'schemaVersion', 'product', 'release', 'target', 'python', 'entry', 'runtimeEvidence', 'runtimeEvidenceSha256'}
-        or type(data['schemaVersion']) is not int or data['schemaVersion'] != 2
+    if (type(data) is not dict or set(data) != {'schemaVersion', 'product', 'release', 'target', 'python', 'entry', 'runtimeProfile', 'runtimeEvidence', 'runtimeEvidenceSha256'}
+        or type(data['schemaVersion']) is not int or data['schemaVersion'] != 3 or data['runtimeProfile'] != 'cpython-stdlib-only'
         or data['product'] != 'Orche' or type(data['release']) is not str or not data['release'].strip()
         or data['runtimeEvidence'] != 'runtime-evidence.json'
         or type(data['runtimeEvidenceSha256']) is not str

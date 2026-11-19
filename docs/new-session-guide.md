@@ -78,6 +78,10 @@ Inside this monorepo, a missing project-local `.agents/` tree is not a misconfig
 
 Run the smallest useful check first, then the affected pack checks.
 
+- When a failure recurs, use the existing bug-hunting and review-loop owners to find which invariant or verification step let the class recur. Add the smallest regression check at that boundary instead of another workflow.
+- For independent verification, give the reviewer the frozen input and acceptance criteria before sharing the author's conclusion. Reconcile findings and conclusions against that same input afterward.
+- Release installation and rollback evidence names the exact source commit, platform, installed target and result of each scenario. A changed candidate, a dry run or a neighboring platform does not inherit that acceptance.
+
 | Change surface | Checks |
 |---|---|
 | Shared spine and affected derived consumers | `python scripts\validate-agents-spine.py --spine shared\AGENTS.shared.md`; follow existing producer/manifest dependencies and run each affected consumer's check (provider-prompt source parity: `python scripts/validate-provider-prompt-projections.py --require --scope source --source-root .`). |

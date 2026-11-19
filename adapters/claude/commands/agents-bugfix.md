@@ -9,13 +9,13 @@ Apply this command's flow automatically when the user's request matches any of:
 - explicit bug report: "fix this bug", "не работает", "crashes", "broken", error trace or stack pasted
 - defective behavior named without a proposed fix: "X is producing wrong output", "Y returns empty when it shouldn't"
 - regression flagged: "this used to work", "this broke after change Z"
-- bug filename reference: user mentions a `work-items/bugs/<file>` slug
+- bug record reference: the user identifies a record in the configured bug registry
 
 The user does not need to type `/agents-bugfix` for this flow to fire. Apply it transparently, announce the routing decision in your first response ("I'm routing this through the bugfix flow because..."), and let the user redirect if the auto-routing was wrong. If the bug's cause is not obvious from the description, load common-skill `$bug-hunting` before the analyst triage in Step 2; if the superpowers plugin is also installed, additionally invoke `Skill: superpowers:systematic-debugging` for the broader diagnostic methodology. The `$bug-hunting` common-skill is shipped by this pack and always available; `superpowers:systematic-debugging` is an external plugin and may not be present in every install.
 
 ## Steps
 
-1. **Get the bug description.** Use `$ARGUMENTS` as the bug description. If empty, check `work-items/bugs/` for files with `status: open`. If open bugs exist, list them (filename, severity, first line of Description) and ask the user to pick one or describe a new bug. If no open bugs and no arguments, ask the user to describe the bug.
+1. **Get the bug description.** Use `$ARGUMENTS` as the bug description. If empty, read current records from the configured bug registry (default `work-items/bugs/`) using the lifecycle owner's current-record statuses. List eligible records (filename, severity, first line of Description) and ask the user to pick one or describe a new bug. If none exist, ask the user to describe the bug.
 
 2. **Triage — classify the bug.** Invoke **Analyst** (`subagent_type: analyst`) to investigate: locate the root cause, affected files, and blast radius. The analyst's report must recommend a template:
 
@@ -43,7 +43,7 @@ The user does not need to type `/agents-bugfix` for this flow to fire. Apply it 
    - If reviewer returns `BLOCKED` → present to user with classification (`BLOCKED:dependency` or `BLOCKED:prerequisite`)
 
 7. **Save.** Persist per artifact persistence protocol (`operating-model.md`):
-   - If bug came from registry → update `work-items/bugs/<file>` status
+   - For an existing bug record, return evidence and proposed disposition to the root/lifecycle owner. The lifecycle owner alone applies the authorized status or archive transition.
    - With an active `work-items/active/<slug>/`, write only its canonical artifact and return concise result/provenance for the root ledger. With no active item, a meaningful standalone result MAY use one `.reports/` summary.
 
 8. **Report.** Present:
@@ -61,5 +61,5 @@ The user does not need to type `/agents-bugfix` for this flow to fire. Apply it 
 - When routing preferences favor external dispatch, `external-worker` may replace the chosen implementer and `external-reviewer` may replace the QA/review-side slot. Mandatory security and performance reviewers remain internal in their sensitive templates.
 - Follow evidence-based completion: show fresh execution evidence before claiming done.
 - **Do NOT commit after fixing.** Present the fix to the user with evidence. The user decides when to commit — only after they are satisfied with testing and fix reliability. Suggest running `/agents-test` or `/agents-review` before committing.
-- When fixing a bug from the registry, update its file: set `status: fixed` only after QA confirms the fix AND the user approves. If QA says REVISE, keep `status: open`. Two other terminal states exist for bugs that are not fixed: `wontfix` (the bug is acknowledged but deliberately not fixed — keep a one-line reason) and `duplicate` (the bug restates an existing one — name the surviving bug id). The canonical bug status enum (`open | fixed | wontfix | duplicate`) and its transition rules are defined once in `qa-engineer.md`'s bug status lifecycle; this command follows that enum, it does not redefine it. The `/agents-status` open-scan still lists only `status: open`.
+- Propose a fixed disposition only after QA confirms the fix and the user approves. An unresolved `REVISE` leaves the current record unresolved. For a declined disposition record its reason; for a duplicate name the surviving bug identity. Preserve the lifecycle owner's schema, status rules, and physical terminalization contract rather than updating the bug file directly.
 - **Second-cross-break stop:** If a second fix in the same session breaks a previously working neighbor, pause speculative changes to the affected mechanism. Diagnose its owner, sibling modes and shared-state/lifecycle interactions before the next behavior change; retain safe diagnostic edits and continue independent authorized work. Expand the pause only when evidence shows a shared dependency or safety risk. Preserve user data, required permissions and mandatory safety checks.

@@ -2029,11 +2029,12 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
 
     def test_selected_history_budget_preserves_object_and_time_bounds(self) -> None:
         module = _load_canonical_scanner("_scanner_selected_history_budget")
-        self.assertEqual(module._MAX_AGGREGATE_BLOB_BYTES, 2 * 1024 * 1024 * 1024)
+        self.assertEqual(module._MAX_BLOBS, 50_000)
+        self.assertEqual(module._MAX_BLOB_PATHS, 50_000)
         self.assertEqual(module._MAX_BLOB_BYTES, 64 * 1024 * 1024)
         self.assertEqual(module._SCAN_DEADLINE_SECONDS, 900.0)
 
-    def test_aggregate_blob_budget_is_inclusive_and_counts_unique_objects(self) -> None:
+    def test_blob_limits_are_inclusive_and_receipt_counts_only_unique_objects(self) -> None:
         module = _load_canonical_scanner("_scanner_aggregate_budget_boundary")
         with tempfile.TemporaryDirectory() as td:
             repo = self._init_range_repo(Path(td))
@@ -2046,19 +2047,23 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
                            check=True, capture_output=True)
             total = sum(map(len, set(payloads.values())))
             finder = module._path_finder(CANONICAL_SCANNER)
-            for cap, expected in ((total - 1, "refusal"), (total, "clean"), (total + 1, "clean")):
-                with self.subTest(cap=cap), contextlib.chdir(repo), mock.patch.object(
-                    module, "_MAX_AGGREGATE_BLOB_BYTES", cap
-                ):
+            largest = max(map(len, payloads.values()))
+            for budget, cap, reason in (
+                ("_MAX_BLOB_BYTES", largest - 1, "blob-bytes"),
+                ("_MAX_BLOBS", 1, "blob-count"),
+            ):
+                with self.subTest(budget=budget), contextlib.chdir(repo), mock.patch.object(module, budget, cap):
                     outcome = module._scan_range("origin", "refs/heads/main", finder, source_revision="HEAD")
-                self.assertEqual(outcome.kind, expected)
-                if expected == "refusal":
+                    self.assertEqual(outcome.kind, "refusal")
                     self.assertEqual(outcome.refusal.failure_id, "PS-MSG-LIMIT")
-                    self.assertEqual(outcome.refusal.reason, "aggregate-blob-bytes")
-                else:
-                    self.assertEqual(outcome.history.blob_bytes, total)
-                    self.assertEqual(len(outcome.history.blob_ids), 2)
-                    self.assertEqual(len(outcome.history.subjects), 3)
+                    self.assertEqual(outcome.refusal.reason, reason)
+            with (contextlib.chdir(repo), mock.patch.object(module, "_MAX_BLOB_BYTES", largest),
+                  mock.patch.object(module, "_MAX_BLOBS", 2)):
+                outcome = module._scan_range("origin", "refs/heads/main", finder, source_revision="HEAD")
+            self.assertEqual(outcome.kind, "clean")
+            self.assertEqual(outcome.history.blob_bytes, total)
+            self.assertEqual(len(outcome.history.blob_ids), 2)
+            self.assertEqual(len(outcome.history.subjects), 3)
 
     def test_history_blob_changed_between_acquisition_and_scan_refuses(self) -> None:
         module = _load_canonical_scanner("_scanner_history_blob_reread")
@@ -2083,7 +2088,7 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             self.assertEqual(len(rereads), 2)
             self.assertEqual(outcome.kind, "refusal")
             self.assertEqual(outcome.refusal.failure_id, "PS-MSG-COVERAGE")
-            self.assertEqual(outcome.refusal.reason, "blob-content-drift")
+            self.assertEqual(outcome.refusal.reason, "object-content-identity")
 
     def test_range_mode_same_raw_path_with_two_blobs_binds_two_detector_paths(self) -> None:
         with tempfile.TemporaryDirectory() as td:

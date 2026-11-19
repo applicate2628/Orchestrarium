@@ -1324,11 +1324,15 @@ class CopyMetadataTests(unittest.TestCase):
             with patch.object(PI._WindowsBoundNode, "set_copy_times", operation):
                 yield
         else:
+            actual = os.utime
             supported = os.supports_fd
-            def setter(descriptor, *, ns):
-                self.assertIs(type(descriptor), int)
-                return operation(descriptor, *ns)
-            with patch.object(os, "utime", setter), patch.object(os, "supports_fd", supported | {setter}):
+            def setter(target, *args, **kwargs):
+                if type(target) is int and not args and tuple(kwargs) == ("ns",):
+                    return operation(target, *kwargs["ns"])
+                return actual(target, *args, **kwargs)
+            if actual in supported:
+                supported = supported | {setter}
+            with patch.object(os, "utime", setter), patch.object(os, "supports_fd", supported):
                 yield
 
     @contextmanager
@@ -1354,15 +1358,34 @@ class CopyMetadataTests(unittest.TestCase):
         setter = self.actual_timestamp_setter()
         reader = PI._InstallTransaction._read_copy_metadata
         source_inode = self.source.stat().st_ino
+        target_inode = self.target.stat().st_ino
+        late_write = None
+
         def source_observation(metadata, descriptor, bound):
+            nonlocal late_write
             image = reader(metadata, descriptor, bound)
+            if late_write is not None and metadata.st_ino == target_inode:
+                atime, mtime = late_write
+                late_write = None
+                setter(descriptor, atime, mtime)
             return replace(image, atime_ns=1_650_000_000_123_456_700) if metadata.st_ino == source_inode else image
-        def mixed_effect(bound, atime, mtime):
-            # Preserve actual old atime and apply only projected mtime.
-            old = os.fstat(bound.descriptor if os.name == "nt" else bound)
+
+        def mixed_effect(target, atime, mtime):
+            nonlocal late_write
+            fd = target.descriptor if os.name == "nt" else target
+            old = os.fstat(fd)
+            if old.st_ino != target_inode:
+                return setter(target, atime, mtime)
             self.assertNotEqual(old.st_atime_ns, atime)
             self.assertNotEqual(old.st_mtime_ns, mtime)
-            setter(bound, old.st_atime_ns, mtime)
+            if os.name == "nt":
+                # The legacy adapter drops assignment proof.
+                setter(target, old.st_atime_ns, mtime)
+            else:
+                # Leave the descriptor unchanged until the POSIX same-operation
+                # observation is acquired. The next read then sees the partial
+                # timestamp drift, not an assignment supported by that proof.
+                late_write = (old.st_atime_ns, mtime)
         transaction = self.transaction()
         with patch.object(PI._InstallTransaction, "_read_copy_metadata", staticmethod(source_observation)), \
                 self.timestamp_effect(mixed_effect):

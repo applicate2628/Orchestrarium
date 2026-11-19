@@ -8,80 +8,61 @@ This file keeps only Codex-specific runtime and repository concretization for th
 
 ### Native context reuse
 
-Apply the shared **Context handoff economy** owner. Native role TOML files already reference AGENTS and the selected role instead of embedding the full corpus; preserve that thin overlay. Do not assume that an inherited skills catalog proves a loaded skill body, or that a new thread has the parent's full history. Use the supported invocation's actual context contract, supply missing instructions when uncertain, and send only changed task requirements on follow-up. This is dispatch guidance, not a new host setting or proof of token savings. Global/project automatic AGENTS concatenation remains a separate installation/loading compatibility question; never omit standalone project governance merely because a global file exists.
+Native role TOML files reference AGENTS and the selected role instead of embedding the full corpus; preserve that thin overlay and follow **Context handoff economy** in [Codex-specific runtime notes](#codex-specific-runtime-notes).
 
-The review binding can explicitly select fresh context or a handoff of selected
-task evidence; neither mode imports the parent conversation. See the owning
-SDK binding contract for current supported modes and continuation limitations.
+The review binding can explicitly select fresh context or a handoff of selected task evidence; neither mode imports the parent conversation. See the owning SDK binding contract for current supported modes and continuation limitations.
 
 ### Explicit Codex SDK review integration
 
-The repository-local `--sdk-review-binding` opt-in uses the official Python Codex
-App Server software development kit (SDK), not an ACP proxy or a new Agents
-coordinator. Only an admitted external-reviewer invocation selects it; other roles
-and invocations without the option retain their legacy paths. The same Host retains
-authority. A binding file is nonauthorizing, the current containment path is
-Windows-only, and this bridge selects an empty MCP scope. Installer-managed helper
-files do not install dependencies or qualify execution. Current installed-bridge
-qualification remains pending. Diagnostic recovery is implemented but not yet
-native-qualified; earlier native observations cover an older source snapshot.
-V3 SDK evidence keeps existing receiving/ledger owners and cannot close another run. See [the exact opt-in contract and limits](../docs/sdk-execution.md).
+The repository-local `--sdk-review-binding` opt-in uses the official Python Codex App Server software development kit (SDK), not an ACP proxy or a new Agents coordinator. Only
+an admitted external-reviewer invocation selects it; other roles and invocations without the option retain their legacy paths. The same Host retains authority. A binding file
+is nonauthorizing, the current containment path is Windows-only, and this bridge selects an empty MCP scope. Installer-managed helper files do not install dependencies or
+qualify execution. Current installed-bridge qualification remains pending. Diagnostic recovery is implemented but not yet native-qualified; earlier native observations cover
+an older source snapshot. V3 SDK evidence keeps existing receiving/ledger owners and cannot close another run. See [the exact opt-in contract and
+limits](../docs/sdk-execution.md).
 
-A Codex Host may separately use the existing Python SDK executor for an admitted
-Claude API/cloud Worker with explicit file-tool authority. Its
-`tool-restricted-workspace-write` provenance is not the Codex native
-`workspace-write` sandbox. The exact provider/access route and Host permission
-callback remain authoritative. The explicit public Claude Worker task route
-checks each file operation against its admitted workspace and protected control
-paths; Reviewer and Consultant command-line routes remain prompt-only. This does not enable a subscription CLI worker or a default-route
-change. See the shared guarantee distinction and SDK implementation boundary.
+A Codex Host may separately use the existing Python SDK executor for an admitted Claude API/cloud Worker with explicit file-tool authority. Its
+`tool-restricted-workspace-write` provenance is not the Codex native `workspace-write` sandbox. The exact provider/access route and Host permission callback remain
+authoritative. The explicit public Claude Worker task route checks each file operation against its admitted workspace and protected control paths; Reviewer and Consultant
+command-line routes remain prompt-only. This does not enable a subscription CLI worker or a default-route change. See the shared guarantee distinction and SDK implementation
+boundary.
 
-For a PR-bot SDK handoff, the existing Host authority binds the hosted revision
-and checks it again before the executor releases received output (`executor_result`).
-A failed currentness check retains execution history and the original runtime
-result without releasing it for application or rerunning the model. This adds
-no GitHub requirement to unrelated tasks and no SDK permission to publish or
-resolve threads; see the canonical PR-bot skill/protocol for hosted-state actions.
+For a PR-bot SDK handoff, the existing Host authority binds the hosted revision and checks it again before the executor releases received output (`executor_result`). A failed
+currentness check retains execution history and the original runtime result without releasing it for application or rerunning the model. This adds no GitHub requirement to
+unrelated tasks and no SDK permission to publish or resolve threads; see the canonical PR-bot skill/protocol for hosted-state actions.
 
-The Codex Host has an explicit read-only Consultant continuation route over a
-verified received predecessor. It resumes the observed thread and starts a new
-turn, with single-successor consumption in the existing work-item ledger. This
-is not independent-review context, interrupted-turn replay or child-Lead permission.
-Public task binding version 5 selects a prior evidence run, and the existing
-canonical received artifact/ledger restores native identity after restart. No
-arbitrary native IDs or reconstructed in-memory seals are accepted.
-The same public binding can select an explicit Consultant fork using the official
-last-turn snapshot selector. It creates a checked new native thread, preserves
-scope and derived session depth, and leaves child-Lead lifecycle authority and
-native subagent-depth controls separate. Repeated intents never automatically
-create another fork after an unknown outcome. Retain original outcomes and reconcile uncertainty through
-the same owners; API-key mode readback does not establish an account identity.
+The Codex Host has an explicit read-only Consultant continuation route over a verified received predecessor. It resumes the observed thread and starts a new turn, with
+single-successor consumption in the existing work-item ledger. This is not independent-review context, interrupted-turn replay or child-Lead permission. Public task binding
+version 5 selects a prior evidence run, and the existing canonical received artifact/ledger restores native identity after restart. No arbitrary native IDs or reconstructed
+in-memory seals are accepted. The same public binding can select an explicit Consultant fork using the official last-turn snapshot selector. It creates a checked new native
+thread, preserves scope and derived session depth, and leaves child-Lead lifecycle authority and native subagent-depth controls separate. Repeated intents never automatically
+create another fork after an unknown outcome. Retain original outcomes and reconcile uncertainty through the same owners; API-key mode readback does not establish an account
+identity.
 
 ### Scoped SDK child coordination
 
-An explicitly Root-admitted child assignment binds a child work-item and exact
-request catalog. Codex coordination decisions select among ready admitted tasks
-or propose child completion/cancellation; actual execution and ledger/lifecycle
-writes remain with the existing Host owners. The loop hands back received state,
-not self-certified model completion. Root may explicitly select fresh-handoff
-or native-persistent decisions. The persistent Codex route resumes the received
-native thread and starts a new turn; its evidence and single-successor claims use
-the existing ledger. Recovery first resolves saved decisions without replaying
-attempted tasks. This does not control native subagent depth or authorize tools
-inside the decision turn. Root/sibling mutation and global acceptance remain
-outside the child assignment; offline coverage is not native qualification. Dynamic
-proposals return to existing Root admission. Root-published additive receipts may
-extend the effective catalog while its native session remains bound to the original
-assignment; preserve pending/rejected outcomes and avoid duplicate admission or
-execution after restart.
+An explicitly Root-admitted child assignment binds a child work-item and exact request catalog. Codex coordination decisions select among ready admitted tasks or propose child
+completion/cancellation; actual execution and ledger/lifecycle writes remain with the existing Host owners. The loop hands back received state, not self-certified model
+completion. Root may explicitly select fresh-handoff or native-persistent decisions. The persistent Codex route resumes the received native thread and starts a new turn; its
+evidence and single-successor claims use the existing ledger. Recovery first resolves saved decisions without replaying attempted tasks. This does not control native subagent
+depth or authorize tools inside the decision turn. Root/sibling mutation and global acceptance remain outside the child assignment; offline coverage is not native
+qualification. Dynamic proposals return to existing Root admission. Root-published additive receipts may extend the effective catalog while its native session remains bound to
+the original assignment; preserve pending/rejected outcomes and avoid duplicate admission or execution after restart.
 
 ## Codex-specific runtime notes
 
 - Mechanical-plan filesystem preflight is a repo-local check, not host containment. An explicitly observed exact root may be located on an ordinary mounted volume; native identity is rechecked across its ancestor chain. Detected descendant mounts and all links/junctions/reparse points remain refused. Python documents that [os.path.ismount](https://docs.python.org/3/library/os.path.html#os.path.ismount) cannot reliably detect same-filesystem bind mounts and also treats Linux btrfs subvolumes as mount points. No stronger mount-detection guarantee is claimed; caller authority and host restrictions remain independent.
 
-The installed routing, recovery and role-resolution policy remains inline in [the Codex source addendum](../src.codex/AGENTS.codex.md#template-routing). Its ordered decision tree combines route shape and participants without adding first-match semantics. Shared quick-fix, primary-task continuity and physical lifecycle are already composed into the same instruction document. Main-conversation continuation saves recovery after each accepted stage; the additive Architect trigger for factual decisions, Architecture Decision Records (ADRs) or material alternatives is separate from the no-implementation research route, and Planner still requires an explicitly requested execution plan. This source consolidation adds no loader, read dependency or Lead activation and does not establish effective client-budget fit, actual loading or compaction behavior.
+The installed routing, recovery and role-resolution policy remains inline in [the Codex source addendum](../src.codex/AGENTS.codex.md#template-routing). Its ordered decision
+tree combines route shape and participants without adding first-match semantics. Shared quick-fix, primary-task continuity and physical lifecycle are already composed into the
+same instruction document. Main-conversation continuation saves recovery after each accepted stage; the additive Architect trigger for factual decisions, Architecture Decision
+Records (ADRs) or material alternatives is separate from the no-implementation research route, and Planner still requires an explicitly requested execution plan. This source
+consolidation adds no loader, read dependency or Lead activation and does not establish effective client-budget fit, actual loading or compaction behavior.
 
-Apply the shared **Context handoff economy** owner. Do not assume that an inherited skills catalog proves a loaded skill body, or that a new thread has the parent's full history. Use the supported invocation's actual context contract, supply missing instructions when uncertain, and send only changed task requirements on follow-up. This is dispatch guidance, not a new host setting or proof of token savings. Global-backed project rendering requires the exact matching-policy checks documented in INSTALL.md; never omit standalone project governance merely because a global file exists.
+Apply the shared **Context handoff economy** owner. Do not assume that an inherited skills catalog proves a loaded skill body, or that a new thread has the parent's full
+history. Use the supported invocation's actual context contract, supply missing instructions when uncertain, and send only changed task requirements on follow-up. This is
+dispatch guidance, not a new host setting or proof of token savings. Global-backed project rendering requires the exact matching-policy checks documented in INSTALL.md; never
+omit standalone project governance merely because a global file exists.
 
 - Codex native subagent dispatch is available when the current host exposes it. Admit those native lanes through the shared rolling lane-ready-set contract; do not assume sequential-only internal execution, and do not infer a numeric concurrency cap from an earlier refusal or another runtime.
 - Ordinary discovery presents admissible choices and a default suggestion. The caller evaluates task fit, honors genuine current custom controls, and consciously selects and supplies both model and effort when deciding by task, including when choosing the suggestion. An omitted pair remains compatible and resolves to an explicit default pair; rationale is not automatically classified and higher effort remains caller judgment. Resolution checks the resulting tuple before the generic carrier; old-generation factory migration requires positive stock provenance and preserves noncontrol bytes. Direct bare `default` calls inherit provider/parent settings instead; policy-requiring callers use the selector. Role policy owns exact profile membership and separate special-corridor/explicit-profile rules; the installed `Native Astra task-dependent route` owns explicit-tuple and custom-pin conflict semantics. Claim an override only when the host explicitly supports it and returned actual runtime metadata confirms the effective model and effort; otherwise record `unspecified by runtime`. The same ordinary selector exposes explicit supervised `luna-high` and `luna-xhigh` only at the existing exploration/engineering producer task-role intersection; it retains the profession and independent gates. Admission requires an eligible task-role pair and exact task/role profile membership, followed by host filtering; ordinary tier/effort metadata is descriptive. Shared task-first economics defaults Luna mechanics to Extra high; exact profile admission, caller contracts and final review/critical/recovery membership remain binding. No public benchmark claim proves universal speed or coding superiority. Product Manager uses the same generic skill-only route when policy admits its planning pair; its recommendation does not grant user consent or expand accepted delivery scope.
@@ -107,35 +88,15 @@ Apply the shared **Context handoff economy** owner. Do not assume that an inheri
 
 ## Global-backed project installation
 
-The Codex installer may omit the duplicate managed project policy only after an
-exact match with the selected native global managed block. A nonempty override
-hides the base; CODEX_HOME selects the global root. Failure to establish the match
-keeps the full local policy. `--standalone-instructions` explicitly keeps the
-complete project copy. User additions stay outside the managed replacement.
-New sessions receive the updated native instruction snapshot; running sessions
-are not retroactively rewritten. Global uninstall warns rather than inventing a
-complete dependent-project census. See INSTALL.md for the supported lifecycle.
+The Codex installer may omit the duplicate managed project policy only after an exact match with the selected native global managed block. A nonempty override hides the base; CODEX_HOME selects the global root. Failure to establish the match keeps the full local policy. `--standalone-instructions` explicitly keeps the complete project copy. User additions stay outside the managed replacement. New sessions receive the updated native instruction snapshot; running sessions are not retroactively rewritten. Global uninstall warns rather than inventing a complete dependent-project census. See INSTALL.md for the supported lifecycle.
 
-An explicitly Root-admitted SDK child may begin with an empty executable catalog
-and an immutable goal/context. Its real decision produces proposals for the
-existing Root admission owner; no fabricated seed execution or additional
-approval store is needed. Decision and task effects retain their exact current
-Root authorization. Empty catalog alone is not a completed outcome.
+An explicitly Root-admitted SDK child may begin with an empty executable catalog and an immutable goal/context. Its real decision produces proposals for the existing Root
+admission owner; no fabricated seed execution or additional approval store is needed. Decision and task effects retain their exact current Root authorization. Empty catalog
+alone is not a completed outcome.
 
-Durable SDK Root registration retains the exact explicitly selected task and
-runtime route in existing admission evidence. Restore those bytes rather than
-reselecting defaults; current permission checks still apply to each effect.
-Registration is not autonomous task-fit routing, historical consent is not
-current authorization, and private registration payload is not child handoff.
+Durable SDK Root registration retains the exact explicitly selected task and runtime route in existing admission evidence. Restore those bytes rather than reselecting defaults; current permission checks still apply to each effect. Registration is not autonomous task-fit routing, historical consent is not current authorization, and private registration payload is not child handoff.
 
-External CLI terminal recovery distinguishes durable receiving from delivery.
-The existing terminal ledger may bind committed receipt bytes with paired
-`terminalReceiptSha256` and `terminalReceiptSizeBytes`; these do not replace the
-separate reviewed artifact revision. Failed stdout delivery remains a failure
-with `resultDelivered=false`, even when the terminal is durably received.
-Read-only recovery verifies integrity, provenance, current permissions and
-output safety without another launch, terminal write or invented process proof.
-Legacy rows lacking the binding remain metadata-only for this recovery route.
+External CLI terminal recovery distinguishes durable receiving from delivery. The existing terminal ledger may bind committed receipt bytes with paired `terminalReceiptSha256` and `terminalReceiptSizeBytes`; these do not replace the separate reviewed artifact revision. Failed stdout delivery remains a failure with `resultDelivered=false`, even when the terminal is durably received. Read-only recovery verifies integrity, provenance, current permissions and output safety without another launch, terminal write or invented process proof. Legacy rows lacking the binding remain metadata-only for this recovery route.
 
 ## Terms and Abbreviations
 

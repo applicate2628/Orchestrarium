@@ -63,7 +63,7 @@ Include a proposed registry record in-band only for a concrete observed defect o
 
 - id: <date>-<slug>
 - context: <work-item slug | standalone | adjacent-finding>
-- status: open | fixed | wontfix | duplicate
+- status: open
 - severity: critical | high | medium | low
 - area: <file or module>
 - found-by: qa-engineer
@@ -73,12 +73,7 @@ Body is free-form; lead with the reproduction (steps or test command) and expect
 
 ## Bug status lifecycle
 
-- `open` — filed; the defect is recorded and unresolved.
-- `open -> fixed` — only after QA confirms the fix AND the user approves; a `REVISE` verdict keeps it `open`.
-- `open -> wontfix` — terminal; carry a one-line reason for not fixing.
-- `open -> duplicate` — terminal; name the surviving bug id it duplicates.
-
-Residual (honest): governance-enforced only — no hook validates that a `duplicate` names a real id or that a `wontfix` carries its reason.
+A newly filed defect starts unresolved. Propose a fixed disposition only after QA confirms the fix and the user approves; an unresolved `REVISE` does not change its status. Keep the reason for a declined disposition and the surviving identity for a duplicate. The lifecycle owner alone applies status transitions and physical terminalization under the shared lifecycle contract; this role does not define another status enum.
 
 ## Test failure classification
 

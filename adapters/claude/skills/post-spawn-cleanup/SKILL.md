@@ -1,6 +1,6 @@
 ---
 name: post-spawn-cleanup
-description: Settle resources owned by agent spawns after completion, failure, cancellation or interruption using supported lifecycle controls and stable ownership evidence. Apply inline for selected spawned resources, not general workstation cleanup or host repair.
+description: "Settle resources owned by completed, failed, cancelled, or interrupted agent spawns."
 ---
 
 # Post-spawn cleanup

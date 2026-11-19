@@ -1065,33 +1065,14 @@ externalOpinionCounts:
             self.ok(label)
 
     def check_skill_frontmatter_yaml(self, *roles: str) -> None:
-        bad = []
-        for role in roles:
-            path = self.layout.skills / role / "SKILL.md"
-            if not path.is_file():
-                continue
-            text = _read(path)
-            if not text.startswith("---"):
-                bad.append(str(path))
-                continue
-            parts = text.split("---", 2)
-            if len(parts) < 3:
-                bad.append(str(path))
-                continue
-            try:
-                import yaml  # type: ignore[import-not-found]
-
-                data = yaml.safe_load(parts[1])
-                if not isinstance(data, dict):
-                    bad.append(str(path))
-            except ImportError:
-                for line in parts[1].splitlines():
-                    if line.strip() and not line.lstrip().startswith("#") and ":" not in line:
-                        bad.append(str(path))
-                        break
-            except Exception:
-                bad.append(str(path))
-        (self.ok if not bad else self.fail)("Codex skill frontmatter is valid YAML")
+        bad = [
+            role for role in roles
+            if not skill_frontmatter_valid(self.layout.skills / role / "SKILL.md", role)
+        ]
+        if bad:
+            self.fail(f"Codex skill frontmatter invalid or missing: {', '.join(bad)}")
+        else:
+            self.ok("Codex skill frontmatter has valid string metadata")
 
     def check_openai_yaml_interface(self, file: str, label: str) -> None:
         text = self._read_or_fail(file, label)
@@ -1128,21 +1109,15 @@ externalOpinionCounts:
         oversized: list[str] = []
         total = 0
         for role in roles:
-            path = self.layout.skills / role / "SKILL.md"
-            if not path.is_file():
+            fields = _skill_frontmatter_fields(self.layout.skills / role / "SKILL.md")
+            raw = fields.get("description", "") if fields is not None else ""
+            if raw.startswith((">", "|")):
+                multiline.append(role)
                 continue
-            line = next(
-                (item for item in _read(path).splitlines() if item.startswith("description:")),
-                "",
-            )
-            value = line.partition(":")[2].strip()
+            value = _skill_string_scalar(raw)
             if not value:
                 missing.append(role)
                 continue
-            if value.startswith((">", "|")):
-                multiline.append(role)
-                continue
-            value = value.strip("\"'")
             total += len(value)
             if len(value) > per_limit:
                 oversized.append(role)
@@ -1193,21 +1168,104 @@ def layering_ids_resolve(path: Path) -> tuple[bool, tuple[str, ...]]:
     return not unresolved, tuple(unresolved)
 
 
+_YAML_TYPED_PLAIN_SCALAR = re.compile(
+    r"(?i:null|~|yes|no|true|false|on|off|[-+]?\.(?:inf|nan)"
+    r"|[-+]?(?:0[xob][0-9a-f_]+|[\d_]+(?::[\d_]+)+"
+    r"|[\d_]+(?:\.[\d_]*)?(?:e[-+]?[\d_]+)?"
+    r"|\.[\d_]+(?:e[-+]?[\d_]+)?)"
+    r"|\d{4}-\d{1,2}-\d{1,2}(?:[Tt ].*)?)",
+)
+
+
+def _skill_frontmatter_fields(path: Path) -> dict[str, str] | None:
+    if not path.is_file():
+        return None
+    lines = re.split(rb"\r\n|\r|\n", path.read_bytes())
+    if not lines or lines[0] != b"---":
+        return None
+    try:
+        end = lines.index(b"---", 1)
+        metadata = [line.decode("utf-8") for line in lines[1:end]]
+    except (ValueError, UnicodeDecodeError):
+        return None
+    fields: dict[str, str] = {}
+    for line in metadata:
+        if re.search(r"[\x00-\x08\x0a-\x1f\x7f-\x9f]", line):
+            return None
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_-]*):(?:[ \t]+(.*))?", line)
+        if match is None:
+            return None
+        key, value = match.groups()
+        if key in fields:
+            return None
+        raw = (value or "").strip()
+        if key not in {"name", "description"} and not _skill_optional_value_valid(raw):
+            return None
+        fields[key] = raw
+    return fields
+
+
+def _skill_plain_without_comment(raw: str) -> str:
+    return re.split(r"(?:^|[ \t]+)#", raw, maxsplit=1)[0].rstrip()
+
+
+def _skill_string_scalar(raw: str) -> str | None:
+    """Read a nonempty string in the shipped flat, single-line YAML subset."""
+    if not raw:
+        return None
+    if raw[0] in {"'", '"'}:
+        quoted = re.fullmatch(
+            r"""("(?:[^"\\]|\\.)*"|'(?:[^']|'')*')(?:[ \t]+#.*)?""", raw,
+        )
+        if quoted is None:
+            return None
+        value = quoted[1]
+        if value[0] == "'":
+            return value[1:-1].replace("''", "'").strip() or None
+        try:
+            return json.loads(value).strip() or None
+        except json.JSONDecodeError:
+            return None
+    value = _skill_plain_without_comment(raw)
+    if (not value or value[0] in "[{>|&*!@%\x60],}"
+            or re.search(r"(?:^[-?:](?:\s|$)|:\s|:$)", value)
+            or _YAML_TYPED_PLAIN_SCALAR.fullmatch(value)):
+        return None
+    return value
+
+
+def _skill_optional_value_valid(raw: str) -> bool:
+    if _skill_string_scalar(raw) is not None:
+        return True
+    plain = _skill_plain_without_comment(raw)
+    if not plain or plain == "''" or _YAML_TYPED_PLAIN_SCALAR.fullmatch(plain):
+        return True
+    try:
+        _, end = json.JSONDecoder().raw_decode(raw)
+    except json.JSONDecodeError:
+        pass
+    else:
+        return not raw[end:] or bool(re.fullmatch(r"[ \t]+#.*", raw[end:]))
+    try:
+        import yaml  # type: ignore[import-not-found]
+    except ImportError:
+        return False
+    try:
+        data = yaml.safe_load(f"value: {raw}")
+    except yaml.YAMLError:
+        return False
+    return isinstance(data, dict) and set(data) == {"value"}
+
+
 def skill_frontmatter_valid(path: Path, expected_name: str) -> bool:
-    text = _read(path)
-    if not text.startswith("---"):
-        return False
-    parts = text.split("---", 2)
-    if len(parts) < 3:
-        return False
-    name = ""
-    description = ""
-    for line in parts[1].splitlines():
-        if line.startswith("name:"):
-            name = line.partition(":")[2].strip().strip("\"'")
-        elif line.startswith("description:"):
-            description = line.partition(":")[2].strip().strip("\"'")
-    return name == expected_name and bool(description)
+    fields = _skill_frontmatter_fields(path)
+    return (
+        fields is not None
+        and _skill_string_scalar(fields.get("name", "")) == expected_name
+        and _skill_string_scalar(fields.get("description", "")) is not None
+    )
 
 
 def installer_choices_are_supported_production_packs(root: Path) -> bool:
@@ -1218,12 +1276,13 @@ def installer_choices_are_supported_production_packs(root: Path) -> bool:
         if len(rows) != 1:
             raise ValueError("missing or ambiguous inventory")
         return rows[0]
-    expected = (("codex", "Codex"), ("claude", "Claude Code"))
+    legacy_clients = (("codex", "Codex"), ("claude", "Claude Code"))
+    expected = (*legacy_clients, ("antigravity", "Antigravity"))
     try:
         module = ast.parse((root / "install.py").read_text(encoding="utf-8"))
         expression = assigned(module, "CLIENTS")
         if isinstance(expression, (ast.Tuple, ast.List)):
-            return ast.literal_eval(expression) == expected  # Historical static router.
+            return ast.literal_eval(expression) == legacy_clients  # Historical static router.
         projection = ast.parse('tuple((name, spec["label"]) for name, spec in CLIENT_CATALOG.items())', mode="eval").body
         if ast.dump(expression) != ast.dump(projection):
             return False
@@ -1374,6 +1433,21 @@ def _direct(
             "design-panel is registered in UTILITY_SKILLS",
             "design-panel is missing from UTILITY_SKILLS",
         )
+        return
+    if kind == "codex_skill_metadata":
+        names = (
+            codex_owned_skill_names(layout.agents_text, utility_skills)
+            | set(extract_roles(layout.agents_text, "## Common skills"))
+        )
+        if layout.dev_repo:
+            names |= {path.parent.name for path in layout.skills.glob("*/SKILL.md")}
+        catalog = sorted(names)
+        if label == "frontmatter":
+            validator.check_skill_frontmatter_yaml(*catalog)
+        elif label == "description_budget":
+            validator.check_skill_description_budget("460", "4000", *catalog)
+        else:
+            raise RuntimeError(f"unknown Codex skill metadata check: {label}")
         return
     if kind == "orphan_codex":
         owned = codex_owned_skill_names(layout.agents_text, utility_skills)

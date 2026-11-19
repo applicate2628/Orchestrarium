@@ -22,19 +22,30 @@ class Gpt62StockRoles(unittest.TestCase):
 
     def test_exact_old_roles_upgrade_and_customized_roles_stay_literal(self):
         sources = ROOT / "src.codex/agents"
-        # These roles preserve the old Sol payload except for the model ID.
-        # Other current Sol roles migrated from Terra; replacing their model ID
-        # would invent an unshipped prior rather than test a supported upgrade.
-        prior_sol_roles = ("architect", "architecture-reviewer",
-                           "scientific-software-engineer", "security-engineer",
-                           "security-reviewer")
-        changed = [sources / f"{role}.toml" for role in prior_sol_roles]
+        common_priors = ROOT / "tests/fixtures/sol-6-1-priors"
+        ranking_priors = ROOT / "tests/fixtures/native-luna-policy-priors/ranking-6-2-previous"
+        prior_fixtures = {
+            "architect": common_priors,
+            "architecture-reviewer": common_priors,
+            "backend-engineer": ranking_priors,
+            "platform-engineer": ranking_priors,
+            "scientific-software-engineer": common_priors,
+            "security-engineer": common_priors,
+            "security-reviewer": common_priors,
+            "worker": ranking_priors,
+        }
+        stock_sol = {
+            source.stem for source in sources.glob("*.toml")
+            if tomllib.loads(source.read_text(encoding="utf-8")).get("model") == "gpt-6.2-sol"
+        }
+        self.assertEqual(stock_sol, set(prior_fixtures))
         for customized in (False, True):
             with self.subTest(customized=customized), tempfile.TemporaryDirectory() as directory:
                 target = Path(directory); agents = target / "agents"; agents.mkdir()
                 old_bytes = {}
-                for source in changed:
-                    prior = source.read_bytes().replace(b'gpt-6.2-sol', b'gpt-6.1-sol')
+                for name, prior_root in prior_fixtures.items():
+                    source = sources / f"{name}.toml"
+                    prior = (prior_root / source.name).read_bytes()
                     self.assertIn(hashlib.sha256(prior).hexdigest(),
                                   installer._STOCK_NATIVE_ROLE_MIGRATION_SHA256[source.stem])
                     if customized:
@@ -43,13 +54,14 @@ class Gpt62StockRoles(unittest.TestCase):
                     (agents / source.name).write_bytes(prior)
                 plan = installer._preflight_codex_native_roles(
                     ROOT, sources, agents, target / "config.toml")
-                for item in plan.role_files:
-                    if item.relative_path.name not in old_bytes:
-                        continue
+                prior_rows = [item for item in plan.role_files if item.relative_path.name in old_bytes]
+                self.assertCountEqual([item.relative_path.name for item in prior_rows], old_bytes)
+                for item in prior_rows:
                     old = old_bytes[item.relative_path.name]
                     self.assertEqual((agents / item.relative_path).read_bytes(), old)
                     parsed = tomllib.loads(item.payload.decode())
-                    self.assertEqual(parsed["model"], "gpt-6.1-sol" if customized else "gpt-6.2-sol")
+                    previous_model = tomllib.loads(old.decode())["model"]
+                    self.assertEqual(parsed["model"], previous_model if customized else "gpt-6.2-sol")
                     if customized:
                         self.assertIsNone(item.accepted_prior)
                         self.assertEqual(item.payload, old)

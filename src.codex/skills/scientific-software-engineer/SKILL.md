@@ -1,6 +1,6 @@
 ---
 name: scientific-software-engineer
-description: "Use when an accepted mathematical, physical, or numerical model must be implemented as production scientific software."
+description: "Implement an accepted mathematical, physical, or numerical model in production code."
 ---
 
 # Scientific Software Engineer

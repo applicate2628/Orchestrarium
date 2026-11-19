@@ -40,6 +40,7 @@ Root confirms the genuine human review and consent for the selected publication 
 - `$security-reviewer`, `$knowledge-archivist`, or another relevant reviewer may also run the scan as part of a spot check or publication gate.
 - Any author may run the scan as a local self-check, but that does not replace the required human publication review.
 - Scan-derived push authorization requires one callback-owned, nonempty Version 3 union of the actual update commit/tree/blob graphs relative to content already disclosed to the same qualified receiver, and a separate Version 4 result covering newly disclosed actual update roots, including noncommit objects. Unknown old objects are conservatively included, not excluded. An ordinary clean result or the explicit reviewed-exception `qualified` result must satisfy the same nonempty coverage, target, currentness, complete evaluation and resource-settlement contract. Version 2, tracked, path, manual, zero-commit, incomplete, mixed, malformed, unresolved-finding, refusal, timeout, cancellation, relevant drift or cleanup-failed evidence is non-authorizing. A qualified staged result remains a pre-commit check and cannot authorize a later push.
+- A single new annotated tag that directly names a commit already available from the same qualified receiver may carry the native Version 4 positive proof that the exact tag is the whole newly disclosed object set. This proof requires a clean annotation; review exceptions cannot qualify it. Its annotation, absent destination and authoritative receiver advertisement must be verified and current. This is complete positive coverage, not a special exception or a zero-commit Version 3 result.
 - Prior-disclosure selection uses the union of actual callback old roots. For a standard HTTPS receiver with no helper override and effective redirects disabled, the gate may additionally qualify a fresh bounded inventory from that same endpoint. Both scan versions exclude only locally verified content-addressed closures of those roots; local tracking refs are not authority. Unknown objects remain included. New commits, tag annotations, newly disclosed tree metadata and residual findings retain their checks. Already disclosed bytes are not re-reviewed solely because a new ref or path reaches them. Custom or unqualified transports retain callback-only selection, not a prohibition. The probe pins redirects off without changing global settings; receiving revalidates qualification. This is a new-disclosure guarantee, not a prediction of physical pack bytes: subsequent ref deletion does not undo prior disclosure.
 - Range content inspection distinguishes text from binary payloads. Binary payloads remain acquired and bound into complete coverage, with filename checks and embedded credential detection retained. Bare symbol names and transcript markers are text-only heuristics, not evidence of a binary credential. The exact binary metadata assignment `publicKeyToken` denotes a public assembly identity; excluding that assignment must not suppress another credential in the same payload. Text and commit-message checks remain unchanged. This is not a vendor, path, hash, or publication exemption.
 - A generic source-text token value may be declared intentionally public only by placing `# orchestrarium:public-token` or `// orchestrarium:public-token` immediately after its matching single- or double-quoted value and the ordinary closing separators. The marker must end the line, stays outside the quotes, and binds only that candidate. It is never honored for credential-cued identifiers, binary content, or commit messages, and it does not suppress other candidates, known-secret signatures, sibling credential families, or machine-path checks. Credential classification uses the complete identifier, including separator and camelCase components; a public lexical component does not erase a separate credential cue.
@@ -84,7 +85,7 @@ The remaining bounds have distinct owners and purposes:
 | Traversal/context | 1,000,000 subjects/visits, 50,000 blob/path pairs, 4,096 path bytes, traversal | Bound path expansion, review contexts and rereads; exceeding a bound refuses instead of omitting contexts. |
 | Cached metadata | 1 MiB commit/tree object, 64 MiB tree cache, 16 MiB parent graph, reader/traversal | Bound retained structural data and parsing. These are engineering defaults, not Git protocol maxima. |
 | Messages/lines | 1 MiB message, 16 MiB aggregate messages, 8 MiB line, scanner | Bound retained message/line processing; no silent content truncation. |
-| Work deadline | 240 s scanner deadline; 300 s gate-owned child deadline | Scanner refuses late acquisition results. The gate independently supervises the scanner process and requires settled child execution before consuming evidence. |
+| Work deadline | 900 s scanner deadline; 960 s gate-owned child deadline | Scanner refuses late acquisition results. The gate independently supervises the scanner process and requires settled child execution before consuming evidence. |
 | Output | 32 displayed findings, diagnostic owner | Bound diagnostic output, not inspection scope or residual-finding evaluation. |
 | Transport/cleanup | 64 KiB read chunks; existing request/reap budgets, reader/supervisor | Bound allocation increments and waits; incomplete reads or unsettled children never authorize. |
 
@@ -137,14 +138,13 @@ same result. This is not evidence that complete native history meets its budget.
 
 ### Deferred timeout redesign and cancelled experiment
 
-The owner deferred timeout redesign until the Rust transition. Production
-scanner and supervisor budgets remain 240 and 300 seconds respectively. The
-scanner constant originated in 8f92dc73 (complete unpublished history, 2026-08-26);
-the supervisor constant originated in 1ac19a3f (process ownership and fail-closed
-publication, 2026-08-11). Those changes justify bounded work/settlement, but their
-inspected messages and diffs provide no measurement deriving the exact values.
-The supervisor budget also participates in authorization lifetime; it is not an
-isolated performance knob.
+The owner deferred timeout redesign until the Rust transition. The legacy source
+baseline used 240 seconds for the scanner and 300 seconds for the gate-owned
+child. The SDK branch retains its existing 900/960-second bounds from `347d1f5d`,
+which recorded approximately 485–530 seconds for its reference full-history
+Windows measurements. This does not introduce new timeout logic or qualify any
+other history. The supervisor budget also participates in authorization lifetime;
+it is not an isolated performance knob.
 
 One read-only internal experiment used a larger diagnostic-only budget with no
 callback, receipt, push or saved setting change. It was cancelled on the owner's

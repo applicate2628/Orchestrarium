@@ -71,11 +71,11 @@ def test_russian_typed_routing_documents_nonblocking_delivery() -> None:
         ),
         ("check-typed-routing.py", "check-typed-routing-drift.py", "CRM-HOOK-NAME-SET"),
         (
-            "**Хук PreToolUse bugfix-discipline.**",
-            "**Хук PreToolUse bugfix-discipline.** TEST-STATUS-DRIFT",
+            "**Аудит Typed-routing.**",
+            "**Аудит Typed-routing.** `CRM-SYNTHETIC-STATUS`",
             "CRM-STATUS-ID-SET",
         ),
-        ("[skip-bugfix-discipline]", "[skip-bugfix-drift]", "CRM-USER-MARKER-SET"),
+        ("[acknowledge-passive-stop]", "[acknowledge-passive-stop-drift]", "CRM-USER-MARKER-SET"),
     ),
 )
 def test_reference_mirror_refuses_contract_inventory_drift(

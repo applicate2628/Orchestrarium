@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-19
 
+- Reconcile the SDK development branch with the pre-SDK baseline. Preserve the exact host and provider-environment boundaries, keep the installer bundle limited to the Python standard library, and retain the reviewed publication bounds and separate annotated-tag verification. Align installation and pack checks with the combined source without changing launch permissions.
+
 - Explicit SDK setup now leaves a present package unchanged, installs only after checking for local absence, and refuses unclear metadata without assuming adapter compatibility. Guidance and preview still do not run a provider or install anything.
 
 - Correct the portable AGY streaming test to explicitly emulate its Windows-only admission boundary while retaining a real POSIX refusal check. This makes synthetic integration coverage portable without enabling or claiming native SDK support on another platform.
@@ -17,6 +19,21 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 - Update the Codex manual hook-trust instructions to the current hook browser instead of relying on a startup modal. Keep explicit user review separate from file installation and static health checks.
 
 - Add a separate exact-snapshot maintenance route for legacy Codex hook registrations without inventing an installation receipt. Bind the reviewed interpreter-only change to the original bytes, scripts and executable; preserve shared and foreign data, produce a local inventory through its existing owner, and retain failure rollback without granting client trust. Read-only cloud-file inputs require verified local data and identity; mutable path safeguards remain unchanged.
+
+- Recognize the Windows process token's exact eligible default owner when binding its working directory, without moving the directory or changing permissions. Unrelated or deny-only identities and filesystem drift are still rejected.
+
+- Optional bundle assembly now requires a separately qualified standalone CPython standard-library runtime. It rejects third-party package content before output and packages only selected CPython notices. Older lockfiles and evidence remain source history, not build inputs. Final verification rejects unexpected notice content anywhere in the assembled bundle before creating its launch manifest. The existing source installer and provider policies are unchanged.
+
+- The agents-mode reference now distinguishes read-only routing and status checks from authorized configuration writes. Reading legacy overlays leaves their bytes unchanged; explicit configuration changes and reinstall retain their existing normalization rules.
+
+- Align both Claude structural references and their validation with the current native publication and passive-polling contracts. The maintainer check now verifies current reference bytes and user controls without demanding a retired publication marker. Runtime authorization is unchanged.
+
+- Installer cleanup now releases private POSIX transaction snapshots of read-only directories after success or rollback. Only the private snapshot directory is made writable during a removal attempt; its original mode must be restored even if removal fails. A failed mode restoration is reported as incomplete cleanup, not as successful rollback.
+
+- Native publication can qualify creation of a new annotated tag on already disclosed history by verifying the complete new tag object and its message against the exact receiver, without pretending that an empty commit scan authorizes a push. Publication of new history still requires both ordinary scans.
+
+- Claude help now reads its role groups from the installed role index, and the performance and status commands read the configured bug registry instead of a discontinued separate directory. Bug-fix and QA guidance returns dispositions to the lifecycle owner rather than changing or archiving records directly. Role-migration and workflow tests use the retained factory files and current routing owners.
+- Validate the entire Codex skill catalog, including newly added source entries, while retaining its metadata budgets and excluding unrelated third-party skills from installed pack checks. Reconcile the stale fingerprint with the already accepted task-first routing addendum without changing its routing or authorization rules. Codex and Claude second-opinion status now consume layered configuration in memory and do not rewrite local or global settings. Maintainers now record installation and rollback against the exact candidate, obtain an independent first assessment, and address recurring failure classes at their owning verification boundary.
 
 ## 2026-11-18
 

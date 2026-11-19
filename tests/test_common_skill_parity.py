@@ -14,7 +14,7 @@ LIVE_PACKS = ("adapters/claude", "src.codex")
 GENERALIZE_SKILL = "generalize-from-instance"
 GENERALIZE_BODY_SHA256 = "c55e0d9389abce424e778c41816127c76948d67d92233e9afb26ab4d92cfaf97"
 IMPLEMENTATION_TO_THEORY_SKILL = "implementation-to-theory"
-IMPLEMENTATION_TO_THEORY_SHA256 = "ca4a632ee9ca469dd65415f98ac0fd94dd250cdadb77fb34fe26657627a5db46"
+IMPLEMENTATION_TO_THEORY_SHA256 = "eeadb535e12e4102a43291cb7544f9d1396a6fcfa4c9bf5079e41334299b58ae"
 IMPLEMENTATION_TO_THEORY_BODY_SHA256 = (
     "2a62f5489701d38a7252a9f3964a8b31f7fd064893075b95da34d17a5855bb78"
 )
@@ -77,10 +77,21 @@ def _live_common_skill_hashes(root: Path = ROOT) -> dict[str, dict[str, str]]:
 
 def _assert_authoritative_status(root: Path = ROOT) -> None:
     readme = (root / "README.md").read_text(encoding="utf-8")
-    assert "`src.codex/` — the production Codex provider-pack source" in readme
-    assert "Codex-first" in readme
-    assert "| Claude Code | Secondary adapter |" in readme
-    assert _runtime().installer_choices_are_supported_production_packs(root)
+    section = readme.partition("\n## Host integrations\n")[2]
+    table = section.lstrip("\n").partition("\n\n")[0]
+    clients = tuple(
+        tuple(part.strip() for part in line.strip("|").split("|")[:3])
+        for line in table.splitlines()
+        if line.startswith(("| Codex |", "| Antigravity |", "| Claude Code |"))
+    )
+    assert clients == (
+        ("Codex", "Primary", "`src.codex/`"),
+        ("Antigravity", "Native startup integration only", "`adapters/antigravity/`"),
+        ("Claude Code", "Secondary adapter", "`adapters/claude/`"),
+    ), "README client membership drifted"
+    assert _runtime().installer_choices_are_supported_production_packs(root), (
+        "installer client membership drifted"
+    )
 
 
 def _copy_contract_tree(tmp_path: Path) -> Path:
@@ -266,13 +277,37 @@ def test_authoritative_status_preserves_production_class() -> None:
 
 
 @pytest.mark.parametrize(
-    ("relative_path", "needle", "replacement"),
+    ("relative_path", "needle", "replacement", "failure"),
     (
-        ("README.md", "`src.codex/` — the production Codex provider-pack source", "`src.codex/` — example"),
+        (
+            "README.md",
+            "| Codex | Primary | `src.codex/` |",
+            "| Codex | Example | `src.codex/` |",
+            "README client membership drifted",
+        ),
+        (
+            "README.md",
+            "| Claude Code | Secondary adapter | `adapters/claude/` |",
+            "| Claude Code | Example | `adapters/claude/` |",
+            "README client membership drifted",
+        ),
         (
             "scripts/installation/clients.py",
             '"id": "claude", "label": "Claude Code", "primary": False,',
             '"id": "claude", "label": "Claude Code", "primary": True,',
+            "installer client membership drifted",
+        ),
+        (
+            "scripts/installation/clients.py",
+            '"id": "antigravity", "label": "Antigravity", "command": "agy", "primary": False,',
+            '"id": "antigravity", "label": "Antigravity", "command": "agy", "primary": True,',
+            "installer client membership drifted",
+        ),
+        (
+            "README.md",
+            "| Antigravity | Native startup integration only |",
+            "| Antigravity | Primary |",
+            "README client membership drifted",
         ),
     ),
 )
@@ -281,13 +316,14 @@ def test_authoritative_status_mutation_does_not_redefine_production_membership(
     relative_path: str,
     needle: str,
     replacement: str,
+    failure: str,
 ) -> None:
     root = _copy_contract_tree(tmp_path)
     path = root / relative_path
     text = path.read_text(encoding="utf-8")
     assert needle in text
     path.write_text(text.replace(needle, replacement, 1), encoding="utf-8")
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match=failure):
         _assert_authoritative_status(root)
 
 

@@ -29,7 +29,7 @@ The pack auto-installs thirteen `settings.json` entries: nine structural hooks a
 
 If `## Project policies` is missing or no `.agents-mode.yaml` exists at any layer, suggest `/agents-init-project` before implementation.
 
-Read per-key configuration in this order: project `.claude/.agents-mode.yaml`, local legacy `.claude/.agents-mode`, pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, shared cross-pack global `~/.agents-mode.yaml`, then defaults. Normalize the effective file before trusting decision-driving flags.
+Read per-key configuration in this order: project `.claude/.agents-mode.yaml`, local legacy `.claude/.agents-mode`, pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, shared cross-pack global `~/.agents-mode.yaml`, then defaults. Normalize values in memory; do not write on reads.
 
 1. Did the user explicitly name a role? → invoke that role directly.
 2. Otherwise classify the task and select `.claude/agents/team-templates/<template>.json`.

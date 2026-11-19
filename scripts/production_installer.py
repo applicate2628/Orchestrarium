@@ -4837,7 +4837,8 @@ class _InstallTransaction:
 
         The caller owns ancestor selection and journal advancement within the
         supported ordinary serialized-writer lifecycle.
-        No permission changes or recursive adoption occur in this primitive.
+        Only an owned private snapshot parent may be made writable for a
+        single disposal. No live-tree permissions or foreign state are adopted.
         """
         if (not isinstance(expected, _PhysicalNode)
                 or expected.evidence_role != "sealed"
@@ -4866,7 +4867,25 @@ class _InstallTransaction:
                         parent_identity, _CreateOnlyMutablePath._identity(path.parent))):
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: POSIX disposal binding")
             operation = os.rmdir if expected.kind == "directory" else os.unlink
-            operation(path.name, dir_fd=descriptor)
+            backup_parent = self._backup_root_state.get(path.parent)
+            if backup_parent is None or parent.st_uid != os.geteuid() or parent.st_mode & stat.S_IWUSR:
+                operation(path.name, dir_fd=descriptor)
+            else:
+                if (backup_parent.kind != "directory" or backup_parent.evidence_role != "sealed"
+                        or backup_parent.python_identity != bound_parent):
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: snapshot disposal parent")
+                mode = stat.S_IMODE(parent.st_mode)
+                writable = mode | stat.S_IWUSR
+                try:
+                    self._chmod_owned(path.parent, bound_parent, writable, descriptor=descriptor)
+                    operation(path.name, dir_fd=descriptor)
+                finally:
+                    # Restore the original mode on the same held object, even if
+                    # unlink or the writable transition raised.
+                    if stat.S_IMODE(os.fstat(descriptor).st_mode) != mode:
+                        os.fchmod(descriptor, mode)
+                    if stat.S_IMODE(os.fstat(descriptor).st_mode) != mode:
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: snapshot disposal mode")
             try:
                 os.stat(path.name, dir_fd=descriptor, follow_symlinks=False)
             except FileNotFoundError:

@@ -163,7 +163,7 @@ def _load_windows_job_module():
             script.parents[0].name == "scripts"
             and script.parents[1].name == "agents"
             and script.parents[2].name == "claude"
-        and script.parents[3].name == "adapters"
+            and script.parents[3].name == "adapters"
         ):
             candidates.append(script.parents[4] / "scripts" / "process_supervision" / "windows_job.py")
         available = tuple(path for path in candidates if path.is_file())
@@ -444,6 +444,7 @@ class NativePushSelection:
     object_format: GitObjectFormat
     roots: tuple[str, ...]
     expected_parents: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    tag_receiver_inventory: tuple[RemoteRefTip, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -717,6 +718,7 @@ class HistoryProof:
     subject_set: str
     path_set: str
     tag_ids: tuple[str, ...] = ()
+    direct_tag_commit: str | None = None
 
 
 @dataclass(frozen=True)
@@ -3409,8 +3411,20 @@ async def _range_selection(
     )
 
 
+def _native_new_same_name_tag(request: NativePushRequest) -> NativePushUpdate | None:
+    if not request.receiver_inventory or len(request.updates) != 1:
+        return None
+    row = request.updates[0]
+    zero = "0" * request.object_format.hex_length
+    if (row.remote_oid == zero and row.local_oid != zero
+            and row.remote_ref.startswith(b"refs/tags/") and row.local_ref == row.remote_ref):
+        return row
+    return None
+
+
 async def _native_prior_receiver_roots(
     request: NativePushRequest, deadline: float,
+    *, inventory: tuple[RemoteRefTip, ...] | None = None,
 ) -> tuple[str, ...] | Refusal:
     """Use actual old roots, plus inventory only for a qualified same receiver.
 
@@ -3422,13 +3436,14 @@ async def _native_prior_receiver_roots(
     prior = tuple(RemoteRefTip(row.remote_ref, row.remote_oid)
                   for row in request.updates if row.remote_oid != zero)
     loop_deadline = asyncio.get_running_loop().time() + _remaining_seconds(deadline)
-    if request.receiver_inventory:
+    if request.receiver_inventory and inventory is None:
         inventory = await _remote_ref_tip_oids(
             request.endpoint, deadline=loop_deadline, object_format=request.object_format,
             no_redirect=True,
         )
         if isinstance(inventory, Refusal):
             return inventory
+    if inventory is not None:
         prior += inventory
     return await _local_remote_commit_tip_oids(
         prior, deadline=loop_deadline, object_format=request.object_format,
@@ -3452,7 +3467,18 @@ async def _native_push_selection(request: NativePushRequest, deadline: float) ->
         return NativePushSelection(request, (), (), request.object_format, ())
     loop = asyncio.get_running_loop()
     loop_deadline = loop.time() + _remaining_seconds(deadline)
-    exclusions = await _native_prior_receiver_roots(request, deadline)
+    candidate = _native_new_same_name_tag(request)
+    inventory = None
+    if candidate is not None:
+        inventory = await _remote_ref_tip_oids(
+            request.endpoint, deadline=loop_deadline, object_format=request.object_format,
+            no_redirect=True,
+        )
+        if isinstance(inventory, Refusal):
+            return inventory
+        if any(tip.refname == candidate.remote_ref for tip in inventory):
+            return _refusal("PS-MSG-RANGE", "tag-destination-exists")
+    exclusions = await _native_prior_receiver_roots(request, deadline, inventory=inventory)
     if isinstance(exclusions, Refusal):
         return exclusions
     revisions = b"".join((oid.encode("ascii") + b"\n") for oid in roots)
@@ -3473,7 +3499,11 @@ async def _native_push_selection(request: NativePushRequest, deadline: float) ->
     commits = tuple(oid for oid, _parents in parent_graph)
     if not set(commits).issubset(objects):
         return _refusal("PS-MSG-COVERAGE", "commit-object-set")
-    return NativePushSelection(request, commits, objects, request.object_format, roots, parent_graph)
+    tag_inventory = (
+        inventory if inventory is not None and not commits and objects == roots else None
+    )
+    return NativePushSelection(request, commits, objects, request.object_format, roots, parent_graph,
+                               tag_inventory)
 
 
 async def _native_commit_range_selection(
@@ -4240,12 +4270,14 @@ async def _acquire_history(
     scan_deadline: float,
     *,
     review_evaluation: "ReviewEvaluation | None" = None,
+    excluded_tag_targets: dict[str, str] | None = None,
 ) -> tuple[HistoryProof, CoverageProof, tuple[Finding, ...]] | Refusal:
     commit_set = set(selection.expected_oids)
     native = isinstance(selection, NativePushSelection)
     object_types: dict[str, str] = {}
     commit_records: dict[str, CommitRecord] = {}
     tag_targets: dict[str, tuple[str, str]] = {}
+    direct_tag_commit = None
     tree_cache: dict[str, bytes] = {}
     blob_records: dict[str, tuple[int, bytes, bool]] = {}
     findings: list[Finding] = []
@@ -4321,6 +4353,13 @@ async def _acquire_history(
             ))
             coverage_recorder.record(CoverageEvent.SCANNED, oid)
             tag_targets[oid] = target
+            if selection.tag_receiver_inventory is not None:
+                tag_row = _native_new_same_name_tag(selection.request)
+                header = result.raw.split(b"\n\n", 1)[0].split(b"\n")
+                if (tag_row is not None and oid == tag_row.local_oid and target[1] == "commit"
+                        and [line[4:] for line in header if line.startswith(b"tag ")]
+                        == [tag_row.remote_ref.removeprefix(b"refs/tags/")]):
+                    direct_tag_commit = target[0]
         elif result.object_type == "tree":
             aggregate_trees += len(result.raw)
             if aggregate_trees > _MAX_TREE_CACHE_BYTES:
@@ -4357,22 +4396,13 @@ async def _acquire_history(
         coverage = coverage_recorder.proof()
         if isinstance(coverage, Refusal):
             return coverage
-    target_types = dict(object_types)
     for target_oid, declared_type in tag_targets.values():
-        actual_type = target_types.get(target_oid)
+        actual_type = object_types.get(target_oid)
         if actual_type is None:
-            # Reuse the active reader: another POSIX owned process would
-            # reacquire its lifecycle lock. Metadata-only info does not load
-            # excluded bodies or grant selected-content coverage.
-            classified = await reader.classify(
-                target_oid, object_format=selection.object_format,
-                scan_deadline=scan_deadline)
-            if isinstance(classified, Refusal):
-                return classified
-            if classified.returned_oid != target_oid or classified.object_type != declared_type:
+            if excluded_tag_targets is None:
                 return _refusal("PS-MSG-FRAME", "tag-target")
-            target_types[target_oid] = declared_type
-        elif actual_type != declared_type:
+            actual_type = excluded_tag_targets.setdefault(target_oid, declared_type)
+        if actual_type != declared_type:
             return _refusal("PS-MSG-FRAME", "tag-target")
 
     async def load_tree(oid: str) -> bytes | Refusal:
@@ -4632,6 +4662,7 @@ async def _acquire_history(
         _subject_set_digest(canonical_subjects),
         _path_set_digest(canonical_paths),
         tuple(sorted(tag_targets)),
+        direct_tag_commit,
     )
     # Synchronous detectors and proof hashing may cross the shared deadline.
     if asyncio.get_running_loop().time() >= scan_deadline:
@@ -4668,6 +4699,44 @@ async def _scan_range_async(
     )
 
 
+async def _verify_excluded_tag_targets(
+    targets: dict[str, str], object_format: GitObjectFormat, wall_deadline: float,
+) -> Refusal | None:
+    # Previously disclosed objects need exact identity and type, not a second
+    # scan of their payload. The content reader has already been reaped.
+    remaining = wall_deadline - time.monotonic()
+    if remaining <= 0:
+        return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+    deadline = asyncio.get_running_loop().time() + remaining
+    reader = _AsyncGitObjectReader(argv=_range_git_argv("cat-file", "--batch-check"))
+    try:
+        pending = await reader.start()
+        if pending is None:
+            for oid, declared_type in targets.items():
+                resolved = await reader.classify(oid, object_format=object_format, scan_deadline=deadline)
+                if isinstance(resolved, Refusal):
+                    pending = resolved
+                    break
+                if resolved.returned_oid != oid or resolved.object_type != declared_type:
+                    pending = _refusal("PS-MSG-FRAME", "tag-target")
+                    break
+    except asyncio.CancelledError:
+        pending = _refusal("PS-MSG-READ", "cancelled")
+    except Exception:
+        pending = _refusal("PS-MSG-READ", "unexpected")
+    finalization = await _finalize_reader(reader)
+    if finalization is not None and finalization.failure_id == "PS-MSG-REAP" and reader.state is ReaderState.REAP_PENDING:
+        finalization = await _finalize_reader(reader)
+    if finalization is not None:
+        return finalization
+    certificate = reader.reap_certificate
+    if certificate is None or not certificate.complete:
+        return _refusal("PS-MSG-REAP", "certificate")
+    if pending is None and asyncio.get_running_loop().time() >= deadline:
+        return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+    return pending
+
+
 async def _scan_selected_history_async(
     selection: RangeSelection | NativePushSelection,
     find_machine_paths,
@@ -4696,6 +4765,7 @@ async def _scan_selected_history_async(
         HistoryProof, CoverageProof, tuple[Finding, ...]
     ] | None = None
     reader: _AsyncGitObjectReader | None = None
+    excluded_tag_targets: dict[str, str] = {}
 
     if selection.object_oids:
         reader = reader_factory()
@@ -4715,6 +4785,8 @@ async def _scan_selected_history_async(
                         {"review_evaluation": review_evaluation}
                         if review_evaluation is not None else {}
                     )
+                    if native:
+                        review_arguments["excluded_tag_targets"] = excluded_tag_targets
                     acquisition = await _acquire_history(
                         selection,
                         reader,
@@ -4763,7 +4835,14 @@ async def _scan_selected_history_async(
         history, coverage, findings = acquired
         try:
             if native:
-                drift = None
+                if not excluded_tag_targets:
+                    drift = None
+                elif certificate is None or not certificate.complete:
+                    drift = _refusal("PS-MSG-REAP", "certificate")
+                else:
+                    drift = await _verify_excluded_tag_targets(
+                        excluded_tag_targets, selection.object_format, wall_deadline,
+                    )
             else:
                 resolver = tip_resolver or (
                     lambda timeout=None: _resolve_commit(selection.source, timeout, object_format=selection.object_format)
@@ -4860,6 +4939,16 @@ async def _scan_native_push_async(
             reader_factory=reader_factory, coverage_observer=coverage_observer,
             coverage_fault=coverage_fault, review_evaluation=review_evaluation,
         )
+        if (outcome.kind == "clean" and outcome.history is not None
+                and outcome.history.direct_tag_commit is not None):
+            current_inventory = await _remote_ref_tip_oids(
+                request.endpoint, deadline=asyncio.get_running_loop().time() + _remaining_seconds(deadline),
+                object_format=request.object_format, no_redirect=True,
+            )
+            if isinstance(current_inventory, Refusal):
+                return ScanOutcome("refusal", "native-push", refusal=current_inventory)
+            if selection.tag_receiver_inventory != current_inventory:
+                return ScanOutcome("refusal", "native-push", refusal=_refusal("PS-MSG-RANGE", "tag-receiver-currentness"))
         after, _exchanges = _capture_review_repository(policy, root, deadline)
         if after != before:
             return replace(outcome, kind="refusal", refusal=_refusal("PS-INPUT-REFUSAL", "native-repository-currentness"))
@@ -4909,8 +4998,22 @@ def _serialize_native_receipt_v4(outcome: ScanOutcome) -> str:
         raise ValueError("native coverage")
     request = selection.request
     review = outcome.review
+    tag_only = {}
+    if history.direct_tag_commit is not None:
+        row = _native_new_same_name_tag(request)
+        inventory = selection.tag_receiver_inventory
+        if (row is None or not inventory or history.commit_ids or history.blob_ids
+                or history.object_ids != (row.local_oid,) or history.tag_ids != history.object_ids
+                or history.direct_tag_commit == row.local_oid
+                or not selection.object_format.matches(history.direct_tag_commit)):
+            raise ValueError("native tag-only coverage")
+        tag_only["tagOnly"] = {"commit": history.direct_tag_commit, "tag": row.local_oid,
+            "inventorySha256": hashlib.sha256(_native_json_bytes([
+                [base64.b64encode(tip.refname).decode("ascii"), tip.oid, tip.peeled_oid]
+                for tip in inventory
+            ])).hexdigest()}
     return _native_json_bytes({
-        "kind": "publication-safety-native", "version": 4,
+        "kind": "publication-safety-native", "version": 4, **tag_only,
         "status": "clean" if review is None else "qualified",
         "objectFormat": selection.object_format.name,
         "selectionSha256": request.selection_sha256,

@@ -291,8 +291,7 @@ An active work-item means the current task has `work-items/active/<slug>/`, not 
 | Security review | `work-items/active/<slug>/security-review.md` |
 | Test report | `work-items/active/<slug>/test-report.md` |
 | Advisory memo | `work-items/active/<slug>/advisory.md` |
-| Bug finding | `work-items/bugs/<date>-<slug>.md` |
-| Performance issue | `work-items/performance/<date>-<slug>.md` |
+| Bug finding (including measured performance defects) | The configured bug registry, default `work-items/bugs/<date>-<slug>.md` |
 | Epic (groups work-items) | active: `work-items/epics/<date>-<slug>.md`; closed: `work-items/epics/archive/<YYYY-MM>/<date>-<slug>.md` |
 | Decision (cross-item ADR) | `work-items/decisions/<date>-<slug>.md` |
 | Lesson (delivery retrospective) | `work-items/lessons/<date>-<slug>.md` |

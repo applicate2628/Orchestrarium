@@ -651,6 +651,7 @@ class NativePushReceiptV4(NamedTuple):
     subject_set: str
     paths: int
     path_set: str
+    tag_only: tuple[str, str, str] | None = None
 
 
 def _verify_native_receipt_binding(receipt: NativePushReceiptV4, binding: NativePushScanBinding) -> None:
@@ -792,7 +793,7 @@ def _parse_native_publication_observation(text: str) -> PublicationSafetyObserva
     if (
         set(value) != {
             "kind", "version", "status", "coverageKind", "objectFormat", "endpointIdentity", "review",
-            *counts, *digests,
+            *counts, *digests, *({"tagOnly"} if "tagOnly" in value else set()),
         }
         or value.get("kind") != "publication-safety-native"
         or type(value.get("version")) is not int or value["version"] != 4
@@ -854,13 +855,29 @@ def _parse_native_publication_observation(text: str) -> PublicationSafetyObserva
         )
     elif review is not None:
         return PublicationSafetyObservation("malformed", None)
+    tag_only = None
+    if "tagOnly" in value:
+        proof = value["tagOnly"]
+        length = _SUPPORTED_OBJECT_FORMATS[value["objectFormat"]].hex_length
+        if (value["status"] != "clean"
+                or (value["updates"], value["commits"], value["objects"], value["tags"], value["blobs"])
+                != (1, 0, 1, 1, 0)
+                or type(proof) is not dict or set(proof) != {"commit", "tag", "inventorySha256"}
+                or any(type(proof[key]) is not str
+                       or re.fullmatch(rf"[0-9a-f]{{{length}}}", proof[key]) is None
+                       or not proof[key].strip("0") for key in ("commit", "tag"))
+                or proof["commit"] == proof["tag"]
+                or type(proof["inventorySha256"]) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", proof["inventorySha256"]) is None):
+            return PublicationSafetyObservation("malformed", None)
+        tag_only = (proof["tag"], proof["commit"], proof["inventorySha256"])
     receipt = NativePushReceiptV4(
         value["objectFormat"], value["endpointIdentity"], value["inputSha256"],
         value["updateSetSha256"], value["selectionSha256"], value["repositoryObservationSha256"],
         value["updates"], value["commits"], value["commitSetSha256"], value["objects"],
         value["objectSetSha256"], value["coverageSha256"], value["tags"], value["blobs"],
         value["blobSetSha256"], value["blobBytes"], value["text"], value["binary"],
-        value["subjects"], value["subjectSetSha256"], value["paths"], value["pathSetSha256"],
+        value["subjects"], value["subjectSetSha256"], value["paths"], value["pathSetSha256"], tag_only,
     )
     return PublicationSafetyObservation("qualified-v4" if qualification else "valid-v4", receipt, qualification)
 
@@ -3653,6 +3670,20 @@ def _native_callback_currentness(native: NativePushInput, root: str, git_exe: st
     return tuple(observations)
 
 
+def _single_new_named_tag_row(wire: bytes) -> str | None:
+    if not wire.endswith(b"\n") or wire.count(b"\n") != 1:
+        return None
+    fields = wire[:-1].rsplit(b" ", 3)
+    if len(fields) != 4:
+        return None
+    source, new, dest, old = fields
+    if (source != dest or not dest.startswith(b"refs/tags/")
+            or len(new) not in {40, 64} or len(old) != len(new) or old != b"0" * len(new)
+            or not new.strip(b"0") or re.fullmatch(rb"[0-9a-f]+", new) is None):
+        return None
+    return new.decode("ascii")
+
+
 def _native_pre_push_main(arguments: list[str]) -> int:
     """Git owns invocation and transfer; any failure here stops this callback."""
     try:
@@ -3682,15 +3713,35 @@ def _native_pre_push_main(arguments: list[str]) -> int:
             if source and set(source) == {"0"}:
                 continue
             result = _native_configuration_query(git_exe, (), root,
-                ("rev-parse", "--verify", "--end-of-options", source + "^{commit}"), accepted=(0, 128))
+                ("--no-replace-objects", "rev-parse", "--verify", "--end-of-options", source + "^{commit}"), accepted=(0, 128))
             if result.returncode == 0:
                 primary = _resolve_generic_scan_binding(native.remote_name,
                     os.fsdecode(fields[2]), result.stdout.decode("ascii").strip(), root, git_exe)
                 break
+        # A proof may only be earned from the actual wire, never as fallback
+        # after the ordinary commit-graph scan failed.
+        evidence = None
+        tag_row = _single_new_named_tag_row(native.wire)
+        if tag_row is not None and _native_receiver_inventory_qualified(native, root, git_exe):
+            evidence = _run_authoritative_scan(native, root, git_exe)
+            receipt = evidence.parsed_outcome.receipt
+            if (evidence.parsed_outcome.kind == "valid-v4" and evidence.execution is not None
+                    and isinstance(evidence.binding, NativePushScanBinding)
+                    and isinstance(receipt, NativePushReceiptV4) and receipt.tag_only is not None):
+                _verify_native_receipt_binding(receipt, evidence.binding)
+                if receipt.tag_only[0] != tag_row or primary is None or receipt.tag_only[1] != primary.source_oid:
+                    raise PrRouteDenied("PGG-NATIVE-RECEIPT-BINDING")
+                if _native_callback_currentness(native, root, git_exe) != current:
+                    raise PrRouteDenied("PGG-TARGET-CURRENTNESS")
+                sys.stdout.write(evidence.execution.stdout.decode("utf-8", errors="strict"))
+                return 0
+            if evidence.parsed_outcome.kind not in {"valid-v4", "qualified-v4"}:
+                raise PrRouteDenied("PGG-NATIVE-RECEIPT-VERSION")
         if primary is None:
             # V4 still owns annotations and other actual roots even when the
             # mandatory nonempty commit graph cannot qualify publication.
-            evidence = _run_authoritative_scan(native, root, git_exe)
+            if evidence is None:
+                _run_authoritative_scan(native, root, git_exe)
             raise PrRouteDenied("PGG-RANGE-RECEIPT-VERSION")
         range_evidence = _run_authoritative_scan(primary, root, git_exe, native_input=native)
         if (range_evidence.parsed_outcome.kind not in {"valid-v3", "qualified-v3"}
@@ -3698,7 +3749,8 @@ def _native_pre_push_main(arguments: list[str]) -> int:
             raise PrRouteDenied("PGG-RANGE-RECEIPT-VERSION")
         if _native_callback_currentness(native, root, git_exe) != current:
             raise PrRouteDenied("PGG-TARGET-CURRENTNESS")
-        evidence = _run_authoritative_scan(native, root, git_exe)
+        if evidence is None:
+            evidence = _run_authoritative_scan(native, root, git_exe)
         if (
             evidence.parsed_outcome.kind not in {"valid-v4", "qualified-v4"}
             or evidence.execution is None
