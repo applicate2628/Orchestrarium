@@ -133,7 +133,7 @@ def test_reparse_directory_is_refused_before_traversal(builder, tmp_path, monkey
     assert not (tmp_path / 'output').exists()
 
 
-def test_locked_codex_notices_are_version_bound_and_shipped(builder, tmp_path):
+def test_historical_codex_notices_are_version_bound_but_not_packaged(builder, tmp_path):
     import hashlib
     notice_root = SOURCE / 'scripts/distribution/notices/openai-codex'
     manifest = json.loads((notice_root / 'source.json').read_text())
@@ -153,8 +153,10 @@ def test_locked_codex_notices_are_version_bound_and_shipped(builder, tmp_path):
     (runtime / 'bin/python3').write_bytes(b'synthetic; never executed')
     output = tmp_path / 'bundle'
     build_synthetic_bundle(builder, SOURCE, runtime, output, target='linux-x64', release='development')
-    for name in ('LICENSE', 'NOTICE', 'source.json'):
-        assert (output / 'app/scripts/distribution/notices/openai-codex' / name).read_bytes() == (notice_root / name).read_bytes()
+    distribution = output / 'app/scripts/distribution'
+    assert not (distribution / 'notices/openai-codex').exists()
+    assert not (distribution / 'locks').exists()
+    assert not (distribution / 'runtime-evidence.md').exists()
 
 
 def test_vendor_notices_keep_exact_bytes_in_autocrlf_checkout(tmp_path):
@@ -215,8 +217,8 @@ def test_python_notices_bind_locked_runtime_and_ship(builder, tmp_path, target, 
         assert (output / 'app/scripts/distribution/notices/python-build-standalone' / (target + '-cp315') / name).read_bytes() == (notice_root / name).read_bytes()
 
 
-@pytest.mark.parametrize("target, omitted", [("linux-x64", True), ("windows-x64", False)])
-def test_sdk_runtime_omits_only_qualified_linux_optional_dbm(builder, tmp_path, target, omitted):
+@pytest.mark.parametrize("target", ["linux-x64", "windows-x64"])
+def test_runtime_retains_qualified_standard_library_extension_and_neighbors(builder, tmp_path, target):
     runtime = tmp_path / "runtime"
     interpreter = runtime / builder.TARGETS[target]
     interpreter.parent.mkdir(parents=True)
@@ -230,7 +232,7 @@ def test_sdk_runtime_omits_only_qualified_linux_optional_dbm(builder, tmp_path, 
     unrelated.write_bytes(b"must remain")
     output = tmp_path / "bundle"
     build_synthetic_bundle(builder, SOURCE, runtime, output, target=target, release="development")
-    assert (output / "python" / relative).exists() == (not omitted)
+    assert (output / "python" / relative).read_bytes() == b"synthetic optional extension"
     assert optional.read_bytes() == b"synthetic optional extension"
     assert (output / "python/user-data" / optional.name).read_bytes() == b"must remain"
 
@@ -272,42 +274,37 @@ def test_codex_native_notices_are_pinned_but_not_shipped(builder, tmp_path, targ
 
 
 @pytest.mark.parametrize("package_dir", ["lib/python3.15/site-packages", "lib/python3.16/dist-packages", "Lib/site-packages"])
-def test_sdk_only_runtime_selection_preserves_neighbors(builder, tmp_path, package_dir):
+def test_stdlib_profile_refuses_populated_package_locations_without_stripping_neighbors(builder, tmp_path, package_dir):
     source, runtime = small_inputs(builder, tmp_path)
     packages = runtime / package_dir
     packages.mkdir(parents=True)
-    for name in ('codex_cli_bin', 'openai_codex_cli_bin-0.163.0.dist-info', 'openai_codex', 'codex_cli_binary'):
-        (packages / name).mkdir()
-        (packages / name / 'payload').write_bytes(b'keep input')
-    (runtime / 'bin/codex').write_bytes(b'CLI entry')
-    (runtime / 'bin/codex-helper').write_bytes(b'neighbor')
-    output = tmp_path / 'output'
-    build_synthetic_bundle(builder, source, runtime, output, target='linux-x64', release='development')
-    copied = output / 'python' / package_dir
-    assert not (copied / 'codex_cli_bin').exists()
-    assert not (copied / 'openai_codex_cli_bin-0.163.0.dist-info').exists()
-    assert (copied / 'openai_codex/payload').read_bytes() == b'keep input'
-    assert (copied / 'codex_cli_binary/payload').read_bytes() == b'keep input'
-    assert not (output / 'python/bin/codex').exists()
-    assert (output / 'python/bin/codex-helper').read_bytes() == b'neighbor'
-    assert (runtime / 'bin/codex').read_bytes() == b'CLI entry'
+    package = packages / "unrelated-provider"
+    package.mkdir()
+    (package / "payload").write_bytes(b"keep input")
+    neighbor = runtime / "bin/ordinary-helper"
+    neighbor.write_bytes(b"unchanged")
+    output = tmp_path / "output"
+    with pytest.raises(ValueError, match="third-party package content"):
+        build_synthetic_bundle(builder, source, runtime, output, target="linux-x64", release="development")
+    assert not output.exists()
+    assert (package / "payload").read_bytes() == b"keep input"
+    assert neighbor.read_bytes() == b"unchanged"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX alias semantics; Windows reparse refusal is covered separately")
-@pytest.mark.parametrize("kind", ["package", "entry", "site", "bin-directory"])
-def test_linked_embedded_cli_is_refused_before_assembly(builder, tmp_path, kind):
+@pytest.mark.parametrize("kind", ["package", "metadata", "site", "path-extension"])
+def test_linked_third_party_admission_paths_are_refused_before_assembly(builder, tmp_path, kind):
     source, runtime = small_inputs(builder, tmp_path)
     payload = runtime / 'payload'; payload.mkdir()
-    (payload / 'codex').write_bytes(b'CLI')
-    (payload / 'codex_cli_bin').mkdir()
+    (payload / 'ordinary').write_bytes(b'fixture')
     if kind == 'package':
-        link = runtime / 'site-packages/codex_cli_bin'; target = payload
-    elif kind == 'entry':
-        link = runtime / 'bin/codex'; target = payload / 'codex'
+        link = runtime / 'site-packages/linked-package'; target = payload
+    elif kind == 'metadata':
+        link = runtime / 'fixture-1.0.dist-info'; target = payload
     elif kind == 'site':
         link = runtime / 'site-packages'; target = payload
     else:
-        link = runtime / 'Scripts'; target = payload
+        link = runtime / 'fixture.pth'; target = payload / 'ordinary'
     link.parent.mkdir(parents=True, exist_ok=True)
     try:
         link.symlink_to(os.path.relpath(target, link.parent), target_is_directory=target.is_dir())
@@ -315,7 +312,7 @@ def test_linked_embedded_cli_is_refused_before_assembly(builder, tmp_path, kind)
         if getattr(error, 'winerror', None) == 1314:
             pytest.skip('Windows symlink privilege required')
         raise
-    with pytest.raises(ValueError, match='Linked embedded Codex CLI'):
+    with pytest.raises(ValueError, match='third-party package content'):
         build_synthetic_bundle(builder, source, runtime, tmp_path / 'output', target='linux-x64', release='development')
     assert not (tmp_path / 'output').exists()
 

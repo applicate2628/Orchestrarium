@@ -159,10 +159,10 @@ def _notice_selection(root: Path, target: str):
     return ignore
 
 
-def _verify_runtime_evidence(runtime, notices, data, *, runtime_ignore=None):
+def _verify_runtime_evidence(runtime, notices, data, *, runtime_ignore=None, notice_ignore=None):
     if _payload_inventory(runtime, runtime_ignore) != data['runtime']:
         raise ValueError('Runtime payload does not match its qualified evidence')
-    if _payload_inventory(notices, _notice_selection(notices, data['target'])) != data['notices']:
+    if _payload_inventory(notices, notice_ignore) != data['notices']:
         raise ValueError('Runtime notices do not match their qualified evidence')
 
 
@@ -213,7 +213,8 @@ def build(source: Path, runtime: Path, output: Path, *, target: str, release: st
     _ordinary_directory_path(selected_notices)
     if not any(member[0] == 'file' for member in evidence['notices'].values()):
         raise ValueError('Selected CPython runtime notices are empty')
-    _verify_runtime_evidence(runtime, notices, evidence, runtime_ignore=IGNORE)
+    _verify_runtime_evidence(runtime, notices, evidence, runtime_ignore=IGNORE,
+                             notice_ignore=_notice_selection(notices, target))
     # Exclusive creation: never replace another output. An interrupted build is
     # retained for diagnosis and is not launchable until the manifest is written.
     output.mkdir(parents=True, exist_ok=False)

@@ -12,6 +12,8 @@ import tempfile
 import unittest
 from unittest import mock
 
+from synthetic_bundle_support import synthetic_notice_root
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -71,8 +73,9 @@ class BundleStructureReceivingTests(unittest.TestCase):
         interpreter.parent.mkdir(parents=True, exist_ok=True)
         interpreter.write_bytes(b"fake interpreter; never executed\n")
         self.notices = distribution / "notices"
-        self.notices.mkdir()
-        for root in (self.runtime, self.notices):
+        self.notice_leaf = synthetic_notice_root(self.source, self.target)
+        self.notice_leaf.mkdir(parents=True)
+        for root in (self.runtime, self.notice_leaf):
             for name in ("empty-a", "empty-b"):
                 (root / name).mkdir()
             for name in ("payload-a", "payload-b"):
@@ -83,7 +86,7 @@ class BundleStructureReceivingTests(unittest.TestCase):
                 (root / "executable").chmod(0o755)
                 (root / "file-link").symlink_to("payload-a")
                 (root / "directory-link").symlink_to("empty-a", target_is_directory=True)
-        self.data = {"schemaVersion": 1, "target": self.target,
+        self.data = {"schemaVersion": 2, "target": self.target, "runtimeProfile": self.builder.RUNTIME_PROFILE,
                      "runtime": snapshot(self.runtime), "notices": snapshot(self.notices)}
         self.record = self.base / "record.json"
         self.record.write_bytes(json.dumps(self.data, indent=2).encode() + b"\n")
@@ -120,7 +123,8 @@ class BundleStructureReceivingTests(unittest.TestCase):
                           self.output / "app/scripts/distribution/notices")
                 # The copied structure must be correct before this controlled fault.
                 self.assertEqual(snapshot(copied), self.data[section])
-                mutation(copied)
+                leaf = copied if section == "runtime" else copied / self.notice_leaf.relative_to(self.notices)
+                mutation(leaf)
                 injected.append(section)
             return original_validate(path, boundary, **kwargs)
 

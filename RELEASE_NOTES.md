@@ -6,7 +6,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 - Recognize the Windows process token's exact eligible default owner when binding its working directory, without moving the directory or changing permissions. Unrelated or deny-only identities and filesystem drift are still rejected.
 
-- Optional bundle assembly now requires a separately qualified standalone CPython standard-library runtime. It rejects third-party package content before output and packages only selected CPython notices. Older lockfiles and evidence remain source history, not build inputs. The existing source installer and provider policies are unchanged.
+- Optional bundle assembly now requires a separately qualified standalone CPython standard-library runtime. It rejects third-party package content before output and packages only selected CPython notices. Older lockfiles and evidence remain source history, not build inputs. Final verification rejects unexpected notice content anywhere in the assembled bundle before creating its launch manifest. The existing source installer and provider policies are unchanged.
 
 - The agents-mode reference now distinguishes read-only routing and status checks from authorized configuration writes. Reading legacy overlays leaves their bytes unchanged; explicit configuration changes and reinstall retain their existing normalization rules.
 

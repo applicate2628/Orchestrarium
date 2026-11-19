@@ -11,6 +11,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from synthetic_bundle_support import synthetic_notice_root, synthetic_record
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -43,8 +45,9 @@ class BundleCopyReceivingTests(unittest.TestCase):
             encoding="utf-8",
         )
         notices = self.source / "scripts/distribution/notices"
-        notices.mkdir(parents=True)
-        (notices / "LICENSE").write_bytes(b"Synthetic notice, not legal evidence.\n")
+        selected = synthetic_notice_root(self.source, "linux-x64")
+        selected.mkdir(parents=True)
+        (selected / "LICENSE").write_bytes(b"Synthetic notice, not legal evidence.\n")
         (self.source / "scripts/distribution/launch.py").write_bytes(
             b"# Synthetic launcher, never executed.\n"
         )
@@ -52,16 +55,7 @@ class BundleCopyReceivingTests(unittest.TestCase):
         (self.runtime / "bin").mkdir(parents=True)
         (self.runtime / "bin/python3").write_bytes(b"Synthetic interpreter, never executed.\n")
         self.record = self.root / "record.json"
-        self.evidence = {
-            "schemaVersion": 1,
-            "target": "linux-x64",
-            "runtime": self.builder._payload_inventory(
-                self.runtime, self.builder._runtime_ignore(self.runtime, "linux-x64")
-            ),
-            "notices": self.builder._payload_inventory(
-                notices, self.builder._notice_ignore(notices)
-            ),
-        }
+        self.evidence = synthetic_record(self.builder, self.runtime, notices, "linux-x64")
         self.record.write_text(json.dumps(self.evidence), encoding="utf-8")
         self.record_bytes = self.record.read_bytes()
         self.source_before = self.builder._payload_inventory(self.source)
@@ -94,7 +88,7 @@ class BundleCopyReceivingTests(unittest.TestCase):
 
     def assert_bad_copy_refused(self, section, corruption):
         relative = ("python/bin/python3" if section == "runtime"
-                    else "app/scripts/distribution/notices/LICENSE")
+                    else "app/scripts/distribution/notices/python-build-standalone/linux-x64-cp315/LICENSE")
         selected = self.output / relative
         original_copy = self.builder._copy_leaf
         effects = []
@@ -116,6 +110,8 @@ class BundleCopyReceivingTests(unittest.TestCase):
                     destination.unlink()
                 elif corruption == "extra":
                     (destination.parent / "unexpected-member").write_bytes(b"Synthetic extra.\n")
+                elif corruption == "extra-unselected":
+                    (destination.parents[2] / "unexpected-member").write_bytes(b"Synthetic extra.\n")
                 else:
                     raise AssertionError(corruption)
             return result
@@ -153,6 +149,9 @@ class BundleCopyReceivingTests(unittest.TestCase):
 
     def test_extra_notice_copy_refused(self):
         self.assert_bad_copy_refused("notices", "extra")
+
+    def test_unselected_notice_added_to_output_is_refused(self):
+        self.assert_bad_copy_refused("notices", "extra-unselected")
 
 
 if __name__ == "__main__":
