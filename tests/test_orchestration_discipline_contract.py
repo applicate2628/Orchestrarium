@@ -633,10 +633,16 @@ def native_route_duties(text: str) -> dict[str, bool]:
     # Ordinary invocations use a selected explicit tuple, not the historical
     # fixed named-role route. Keep configuration, policy and runtime truth apart.
     unit = selected_unit(text, "Native Astra task-dependent route", "For ordinary native and skill-only roles,")
-    requested = "The caller invokes the native host tool, records requested and resolved controls separately from actual runtime metadata"
+    requested = ("The caller invokes the native host tool with the returned exact pair and profession handoff, "
+                 "records requested and resolved controls separately from actual runtime metadata")
     missing = requested + ", treats missing actual metadata as unspecified by runtime"
     duties = relationships(unit, {
-        "ordinary-selectors": "For ordinary native and skill-only roles, callers first use describe_ordinary_native_role_options, then resolve_ordinary_native_dispatch",
+        "ordinary-selectors": (
+            "For ordinary native and skill-only roles, normal and Ultra Leads use the same caller-owned "
+            "procedure: classify the child task and profession, call describe_ordinary_native_role_options, "
+            "consciously choose the admissible model/effort pair, then call resolve_ordinary_native_dispatch "
+            "before submitting its returned invocation"
+        ),
         "task-profile-membership": "Ordinary admission requires an eligible task-role pair and exact task/role profile membership, followed by host filtering",
         "conscious-selection": "The caller evaluates task scope, uncertainty, expected cost and rework, then consciously selects and supplies both model and effort when deciding by task, including when choosing the suggestion",
         "omitted-explicit-default": "An omitted pair remains compatible and resolves to an explicit default pair",
@@ -646,7 +652,10 @@ def native_route_duties(text: str) -> dict[str, bool]:
         "policy-tuple-selector": "policy-requiring callers use the ordinary selector",
         "custom-pin-no-bypass": "Omitting the type alone does not bypass higher-precedence model/effort fields in a custom default carrier",
         "custom-pin-local-conflict": "a known conflicting pin is a configuration conflict for that invocation, not universal model unavailability",
-        "complete-custom-controls": "Genuine custom controls must form a complete configured tuple under existing task/role/profile and individual exact-launch Astra/Max approval",
+        "complete-custom-controls": (
+            "Genuine custom controls must form a complete configured tuple under existing task/role/profile "
+            "and applicable task-scoped Astra High/Extra high or exact-launch approval"
+        ),
         "partial-controls-unresolved": "partial controls remain unresolved rather than being filled from factory defaults",
         "custom-bytes-preserved": "The user owns compatible configuration bytes and descriptions, which the installer preserves without reserializing TOML",
         "full-host-discovery": "Reported model, effort, and agent-type lists must reflect the full availability actually enumerated by current host discovery, never a desired-model pre-filter that hides alternatives",
@@ -665,16 +674,17 @@ def native_route_duties(text: str) -> dict[str, bool]:
 
 def native_consumer_duties(text: str, section: str, marker: str, *, referral_only: bool = False, reference: bool = False) -> dict[str, bool]:
     unit = selected_unit(text, section, marker)
-    duties = relationships(unit, {
-        "actual-override-evidence": "Claim an override only when the host explicitly supports it and returned actual runtime metadata confirms the effective model and effort; otherwise record unspecified by runtime",
-    })
     if referral_only:
-        duties.update(relationships(unit, {
-            "profile-policy-owner": "role policy owns exact profile membership and separate special-corridor/explicit-profile rules",
-            "qualified-defaults": "Fixed native defaults are candidates rather than blanket authority when an explicit generic policy-admissible profile is available",
-            "authoritative-referral": "For the Codex native-host path, apply Native Astra task-dependent route in the sibling operating-model.md under the installed AGENTS native-dispatch kernel; do not restate or widen that owner here",
-        }))
+        duties = relationships(unit, {
+            "actual-override-evidence": "Record the route rationale in the existing launch event and actual reported identity in the terminal event",
+            "profile-policy-owner": "Role policy owns exact profile membership",
+            "scoped-vs-exact-approval": "Genuine task-scoped Astra High/Extra high authorization may cover repeated attempts within unchanged bounds; Max remains exact-attempt approved",
+            "authoritative-referral": "Use the sibling Native Astra task-dependent route procedure for native-host selection",
+        })
     else:
+        duties = relationships(unit, {
+            "actual-override-evidence": "Claim an override only when the host explicitly supports it and returned actual runtime metadata confirms the effective model and effort; otherwise record unspecified by runtime",
+        })
         duties.update(relationships(unit, {
             "profile-policy-owner": (
                 "Role policy owns exact profile membership and separate special-corridor/explicit-profile rules"
@@ -1029,7 +1039,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
             ("omitted-explicit-default", "resolves to an explicit default pair", "inherits an unspecified pair"),
             ("tuple-validation", "against task, role, host and configured controls", "against task and role alone"),
             ("generic-explicit-route", "no `agent_type`", "a fixed `agent_type`"),
-            ("generic-explicit-route", 'fork_turns="none"', 'fork_turns="all"'),
+            ("generic-explicit-route", '`fork_turns="none"` and no', '`fork_turns="all"` and no'),
             ("generic-explicit-route", "carries the selected profession instructions", "omits the selected profession instructions"),
             ("bare-default-inheritance", "instead inherits provider subagent defaults or parent settings", "instead guarantees the policy tuple"),
             ("policy-tuple-selector", "policy-requiring callers use the ordinary selector", "policy-requiring callers omit the ordinary selector"),
@@ -1054,10 +1064,10 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
         text = self._read("src.codex/skills/lead/SKILL.md")
         unit = selected_unit(text, "Parallelism rule", "Dispatch economics:")
         for duty, old, new in (
-            ("qualified-defaults", "candidates rather than blanket authority", "exclusive blanket authority"),
-            ("profile-policy-owner", "exact profile membership and separate special-corridor/explicit-profile rules", "selected effort settings"),
-            ("actual-override-evidence", "returned actual runtime metadata confirms", "the requested profile confirms"),
-            ("authoritative-referral", "apply `Native Astra task-dependent route` in the sibling `operating-model.md` under the installed AGENTS native-dispatch kernel; do not restate or widen that owner here", "apply the local default profile"),
+            ("scoped-vs-exact-approval", "Max remains exact-attempt approved", "Max inherits task-scoped approval"),
+            ("profile-policy-owner", "Role policy owns exact profile membership", "Role policy owns only selected effort settings"),
+            ("actual-override-evidence", "actual reported identity in the terminal event", "requested identity in the terminal event"),
+            ("authoritative-referral", "Use the sibling `Native Astra task-dependent route` procedure for native-host selection", "Use the local default profile"),
         ):
             with self.subTest(duty=duty):
                 self.assertEqual(unit.count(old), 1)
@@ -1689,10 +1699,15 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
                 if "**Dispatch economics**" in line
             )
             with self.subTest(lead_skill=lead_skill):
-                self.assertTrue(
-                    "agent-runs.jsonl" in dispatch_line,
-                    f"{lead_skill}: dispatch metadata does not use the existing ledger",
-                )
+                if lead_skill.startswith("src.codex/"):
+                    self.assertIn("existing launch event", dispatch_line)
+                    self.assertIn("actual reported identity in the terminal event", dispatch_line)
+                    self.assertIn(
+                        "agent-runs.jsonl",
+                        self._read("src.codex/skills/lead/subagent-contracts.md"),
+                    )
+                else:
+                    self.assertIn("agent-runs.jsonl", dispatch_line)
                 self.assertTrue(
                     "status.md` Active agents" not in dispatch_line,
                     f"{lead_skill}: dispatch still mandates the legacy Active agents table",
