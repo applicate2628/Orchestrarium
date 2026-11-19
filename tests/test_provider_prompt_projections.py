@@ -360,22 +360,16 @@ def _load_installer():
     return module
 
 
-def test_selected_legacy_peer_migration_uses_its_own_complete_ledger_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Explicit peer migration isolates its owner before another client updates."""
-    from test_provider_prompt_relocation import _load_owner
-    from test_ledger_resource_budget import fixture as ledger_fixture
-    # An elevated Windows token may create Administrators-owned directories.
-    # The runner intentionally requires user-owned cwd. An elevated harness can
-    # supply a fresh empty directory created by the same user without elevation.
-    prepared_cwd = os.environ.get('ORCHE_TEST_LEDGER_CWD') if os.name == 'nt' else None
-    decoy = Path(prepared_cwd) if prepared_cwd else tmp_path / 'decoy'
-    if prepared_cwd:
-        assert decoy.is_absolute() and decoy.is_dir() and not any(decoy.iterdir())
-    else:
-        decoy.mkdir()
-    if os.name == 'nt':
-        from scripts.process_supervision.process_runner import bind_cwd_identity
-        bind_cwd_identity(str(decoy))  # Fail at setup, never relax production admission.
+_PEER_LEDGER_HELPERS = (
+    'scripts/agent-run-ledger.py',
+    'scripts/mutate-work-item.py',
+    'scripts/validate-work-item-state.py',
+    'scripts/check-work-items-state.py',
+    'shared/schemas/agent-runs.schema.json',
+)
+
+
+def _archived_815e_ledger_source(tmp_path: Path) -> Path:
     old_source = tmp_path / 'predecessor-source'
     old_source.mkdir()
     public_repository = subprocess.run(['git', '--no-optional-locks', 'rev-parse', '--show-toplevel'],
@@ -387,8 +381,14 @@ def test_selected_legacy_peer_migration_uses_its_own_complete_ledger_owner(tmp_p
         assert not any(Path(member.name).parts[0] in {'.git', '.scratch', 'work-items', '.plans', '.reports'}
                        for member in package.getmembers())
         package.extractall(old_source, filter='data')
-    frozen_legacy = _load_owner(old_source / 'scripts/provider_prompt.py', 'admitted_frozen_legacy_ledger_owner')
-    assert frozen_legacy.ledger_helper().samefile(old_source / 'scripts/agent-run-ledger.py')
+    return old_source
+
+
+def test_selected_legacy_peer_materialization_does_not_admit_unsupported_upgrade(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Converting links does not authorize replacement of an unowned generation."""
+    old_source = _archived_815e_ledger_source(tmp_path)
     target = tmp_path / 'target'
     target.mkdir()
     arguments = ['--target', str(target), '--force', '--allow-unsafe-target', '--no-hypothesis-hook']
@@ -410,19 +410,66 @@ def test_selected_legacy_peer_migration_uses_its_own_complete_ledger_owner(tmp_p
     seeded = subprocess.run(seed_command, cwd=old_source, capture_output=True, text=True, timeout=180)
     assert seeded.returncode == 0, seeded.stdout + seeded.stderr
     peer = target / '.claude/agents'
-    retained_names = ('scripts/agent-run-ledger.py', 'scripts/mutate-work-item.py',
-        'scripts/validate-work-item-state.py', 'scripts/check-work-items-state.py',
-        'shared/schemas/agent-runs.schema.json')
+    retained_names = _PEER_LEDGER_HELPERS
     retained = {name: ((peer / name).read_bytes(), (peer / name).stat().st_ino) for name in retained_names}
     assert _sha(retained['scripts/mutate-work-item.py'][0]) == '27960edec46770328bf34bca9290576cda4aad861234dd596ac3f05b1a0e7228'
     installer = _load_installer()
-    assert installer.install('codex', arguments) != 0
+    errors = []
+    render = installer._installer_failure_text
+
+    def record_failure(error):
+        errors.append(str(error))
+        return render(error)
+
+    monkeypatch.setattr(installer, '_installer_failure_text', record_failure)
+
+    def refuse_without_effects(client):
+        before = installer._InstallTransaction._observe(target)
+        assert installer.install(client, arguments) == 1
+        assert installer._InstallTransaction._observe(target) == before
+
+    refuse_without_effects('codex')
     assert installer.install('claude', [*arguments, '--materialize-legacy-skills', '--apply']) == 0
     # Link conversion preserves bytes but does not yet upgrade a legacy binding.
     assert {name: ((peer / name).read_bytes(), (peer / name).stat().st_ino)
             for name in retained_names} == retained
-    assert installer.install('codex', arguments) != 0
+    refuse_without_effects('codex')
+    errors.clear()
+    refuse_without_effects('claude')
+    assert errors == ['E_ACCEPTED_PRIOR_COLLISION: architect']
+
+
+def test_current_ordinary_peer_uses_its_own_complete_ledger_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A supported ordinary Claude pair owns its ledger across a Codex-only update."""
+    from test_provider_prompt_relocation import _load_owner
+    from test_ledger_resource_budget import fixture as ledger_fixture
+    # An elevated Windows token may create Administrators-owned directories.
+    # The runner intentionally requires user-owned cwd. An elevated harness can
+    # supply a fresh empty directory created by the same user without elevation.
+    prepared_cwd = os.environ.get('ORCHE_TEST_LEDGER_CWD') if os.name == 'nt' else None
+    decoy = Path(prepared_cwd) if prepared_cwd else tmp_path / 'decoy'
+    if prepared_cwd:
+        assert decoy.is_absolute() and decoy.is_dir() and not any(decoy.iterdir())
+    else:
+        decoy.mkdir()
+    if os.name == 'nt':
+        from scripts.process_supervision.process_runner import bind_cwd_identity
+        bind_cwd_identity(str(decoy))  # Fail at setup, never relax production admission.
+    old_source = _archived_815e_ledger_source(tmp_path)
+    frozen_legacy = _load_owner(old_source / 'scripts/provider_prompt.py', 'admitted_frozen_legacy_ledger_owner')
+    assert frozen_legacy.ledger_helper().samefile(old_source / 'scripts/agent-run-ledger.py')
+    target = tmp_path / 'target'
+    target.mkdir()
+    arguments = ['--target', str(target), '--force', '--allow-unsafe-target', '--no-hypothesis-hook']
+    installer = _load_installer()
     assert installer.install('claude', arguments) == 0
+    peer = target / '.claude/agents'
+    retained_names = _PEER_LEDGER_HELPERS
+    # Only peer helper bytes are historical. The current transport and its proof
+    # were created by the ordinary installer and are not modified.
+    for name in retained_names:
+        (peer / name).write_bytes((old_source / name).read_bytes())
+    assert _sha((peer / 'scripts/mutate-work-item.py').read_bytes()) == '27960edec46770328bf34bca9290576cda4aad861234dd596ac3f05b1a0e7228'
     peer_after_migration = _tree_bytes(target / '.claude')
     retained = {name: ((peer / name).read_bytes(), (peer / name).stat().st_ino)
                 for name in retained_names}
@@ -435,6 +482,7 @@ def test_selected_legacy_peer_migration_uses_its_own_complete_ledger_owner(tmp_p
     assert (canonical / 'scripts/linked_runtime_subroots.py').read_bytes() == (ROOT / 'scripts/linked_runtime_subroots.py').read_bytes()
     assert (peer / 'scripts/provider_prompt.py').read_bytes() == (ROOT / 'scripts/provider_prompt.py').read_bytes()
     source_owner = _load_owner(canonical / 'scripts/provider_prompt.py', 'canonical_ledger_seed_owner')
+
     def qualify_local_helper(module):
         if os.name == "nt":
             return  # Preserve real ProcessRunner/Windows qualification there.
@@ -443,6 +491,7 @@ def test_selected_legacy_peer_migration_uses_its_own_complete_ledger_owner(tmp_p
         # installed helper while retaining its caller-owned before-start check.
         from types import SimpleNamespace
         def execute_helper(_runner, command, *, cwd, environment, timeout_secs, before_start):
+            assert Path(command[1]).samefile(canonical / 'scripts/agent-run-ledger.py')
             before_start()
             result = subprocess.run(command, cwd=cwd, env=environment,
                                     capture_output=True, timeout=timeout_secs)
@@ -463,14 +512,19 @@ def test_selected_legacy_peer_migration_uses_its_own_complete_ledger_owner(tmp_p
         '--terminal-class', 'external-nonauthorizing', '--authorizing', 'false',
         '--actual-execution-path', 'direct-external-cli', '--artifact-identity', 'synthetic-installed-owner',
         '--started-at', '2026-10-19T00:01:00Z', '--updated-at', '2026-10-19T00:01:00Z']
+    assert source_owner.ledger_helper().samefile(canonical / 'scripts/agent-run-ledger.py')
+    budget = dict(ledger_max_events=4200, ledger_max_bytes=len(before) + 400000)
+    source_control = source_owner.Control(ledger=str(item), **budget)
+    source_owner.prepare_ledger_admission(source_control, launch)
+    options = source_owner.ledger_resource_options(source_control)
     with source_owner.ProcessRunnerV1() as runner:
-        assert source_owner.run_ledger(runner, launch)
-        assert source_owner.run_ledger(runner, terminal)
+        assert source_owner.run_ledger(runner, [*options, *launch])
+        assert source_owner.run_ledger(runner, [*options, *terminal])
     after = (item / 'agent-runs.jsonl').read_bytes()
     assert after.startswith(before) and len(after.splitlines()) == 4102
     owner = _load_owner(peer / 'scripts/provider_prompt.py', 'updated_peer_ledger_owner')
     qualify_local_helper(owner)
-    received = owner.read_back_external_terminal(owner.Control(ledger=str(item)), 'codex', 'canonical-owner-launch')
+    received = owner.read_back_external_terminal(owner.Control(ledger=str(item), **budget), 'codex', 'canonical-owner-launch')
     assert received is not None and received['runId'] == 'canonical-owner-terminal'
     writer = owner._ledger_owner()
     validator = writer.load_validator()
@@ -485,12 +539,13 @@ def test_selected_legacy_peer_migration_uses_its_own_complete_ledger_owner(tmp_p
         f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\n", encoding='utf-8')
     monkeypatch.chdir(decoy)
     relative = os.path.relpath(item, decoy)
+    relative_control = owner.Control(ledger=relative, **budget)
     with owner.ProcessRunnerV1() as runner:
-        assert owner.run_ledger(runner, ['--work-item', relative, 'append', '--run-id', 'peer-relative-action',
+        assert owner.run_ledger(runner, [*owner.ledger_resource_options(relative_control), '--work-item', relative, 'append', '--run-id', 'peer-relative-action',
             '--role', 'analyst', '--execution-role', 'internal', '--status', 'completed', '--gate', 'none',
             '--event-kind', 'standalone', '--scope', 'synthetic relative peer action',
             '--evidence', 'manual-check:synthetic peer action'])
-    relative_result = owner.read_back_external_terminal(owner.Control(ledger=relative), 'codex', 'canonical-owner-launch')
+    relative_result = owner.read_back_external_terminal(relative_control, 'codex', 'canonical-owner-launch')
     assert relative_result == received and not marker.exists()
     assert {name: ((peer / name).read_bytes(), (peer / name).stat().st_ino)
             for name in retained_names} == retained
@@ -614,10 +669,24 @@ def test_unsupported_required_directory_move_refuses_before_coupled_effects(tmp_
     shutil.copytree(ROOT / "src.codex/skills/lead", source / "lead")
     before = installer._InstallTransaction._observe(canonical)
     peer_before = installer._InstallTransaction._observe(peer.parent)
-    monkeypatch.setattr(installer._InstallTransaction, "_native_publish_no_replace", staticmethod(lambda *_args: False))
+    attempted = []
+
+    def unavailable(source, destination, **_kwargs):
+        attempted.append((source, destination))
+        return False
+
+    monkeypatch.setattr(installer._InstallTransaction, "_native_publish_no_replace", staticmethod(unavailable))
+    # The probe also accepts the separately supported descriptor-relative fallback.
+    monkeypatch.setattr(os, "supports_dir_fd", os.supports_dir_fd - {os.rename})
     try:
-        with pytest.raises(ValueError, match="required directory no-replace capability unavailable"):
+        with pytest.raises(ValueError, match="E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained-object atomic capability"):
             installer._preflight_canonical_skills(source, canonical, root=ROOT, claude_transport_root=peer)
+        assert len(attempted) == 1
+        probe_source, probe_destination = attempted[0]
+        probe = probe_source.parent
+        assert probe.parent == canonical and probe.name.startswith(".orchestrarium-move-probe-")
+        assert probe_source == probe / "source" and probe_destination == probe / "destination"
+        assert not probe.exists()
         assert installer._InstallTransaction._observe(canonical) == before
         assert installer._InstallTransaction._observe(peer.parent) == peer_before
     finally:
