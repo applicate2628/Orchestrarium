@@ -362,12 +362,12 @@ def test_root_thin_wrapper_delivers_one_governance_frame_then_exact_task_bytes(
 @pytest.mark.parametrize(
     ("provider", "flags", "model", "effort"),
     (
-        ("codex", [], "gpt-6.1-sol", "xhigh"),
+        ("codex", [], "gpt-6.2-sol", "xhigh"),
         ("claude", [], "opus", "xhigh"),
         (
             "codex",
-            ["--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=max"],
-            "gpt-5.6-sol",
+            ["--model", "gpt-6.2-sol", "-c", "model_reasoning_effort=max"],
+            "gpt-6.2-sol",
             "max",
         ),
         (
@@ -386,11 +386,24 @@ def test_full_profile_resolves(
     assert (actual_model, actual_effort) == (model, effort)
 
 
+@pytest.mark.parametrize("model", ("gpt-5.6-sol", "gpt-6.1-sol"))
+def test_managed_launch_still_refuses_retired_sol_before_receipt(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], model: str,
+) -> None:
+    monkeypatch.setattr(provider_prompt.TerminalReceiptV1, "reserve",
+                        lambda *_args: pytest.fail("receipt before launch admission"))
+    assert provider_prompt.launch("codex", [
+        "fixture", "--terminal-receipt", "fixture-receipt", "--ledger-role", "qa-engineer",
+        "--user-approved-launch", "--", "--model", model, "-c", "model_reasoning_effort=max",
+    ]) == 1
+    assert "E_MODEL_LAUNCH_POLICY_DENIED: model-generation-not-admitted" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize(
     ("provider", "flags"),
     (
         ("codex", ["-c", "model_reasoning_effort=max"]),
-        ("codex", ["--model", "gpt-5.6-sol"]),
+        ("codex", ["--model", "gpt-6.2-sol"]),
         ("claude", ["--effort", "xhigh"]),
         ("claude", ["--model", "opus"]),
     ),
@@ -474,7 +487,7 @@ def test_default_profile_reaches_fake_provider_with_explicit_model_and_effort(
     assert result.returncode == 0, result.stderr
     received = json.loads(capture.read_text(encoding="utf-8"))
     expected = (
-        ["--model", "gpt-6.1-sol", "-c", "model_reasoning_effort=xhigh"]
+        ["--model", "gpt-6.2-sol", "-c", "model_reasoning_effort=xhigh"]
         if provider == "codex"
         else [
             "-p",
@@ -497,7 +510,7 @@ def test_full_profile_override_reaches_fake_provider_byte_for_byte(
     tmp_path: Path, provider: str
 ) -> None:
     override = (
-        ["--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=max"]
+        ["--model", "gpt-6.2-sol", "-c", "model_reasoning_effort=max"]
         if provider == "codex"
         else [
             "-p",
@@ -511,7 +524,8 @@ def test_full_profile_override_reaches_fake_provider_byte_for_byte(
             "Read,Grep",
         ]
     )
-    result, capture, _ = _run_transport(tmp_path, provider, ["--", *override])
+    approval = ["--user-approved-launch"] if provider == "codex" else []
+    result, capture, _ = _run_transport(tmp_path, provider, [*approval, "--", *override])
     assert result.returncode == 0, result.stderr
     received = json.loads(capture.read_text(encoding="utf-8"))
     expected = (
@@ -543,7 +557,7 @@ def test_launch_and_terminal_ledger_events_record_resolved_profile(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str
 ) -> None:
     override = (
-        ["--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=max"]
+        ["--model", "gpt-6.2-sol", "-c", "model_reasoning_effort=max"]
         if provider == "codex"
         else [
             "-p",
@@ -576,7 +590,7 @@ def test_launch_and_terminal_ledger_events_record_resolved_profile(
     ]
     assert [event["eventKind"] for event in selected] == ["launch", "terminal"]
     expected = (
-        ("gpt-5.6-sol", "max")
+        ("gpt-6.2-sol", "max")
         if provider == "codex"
         else ("sonnet", "high")
     )
@@ -601,7 +615,7 @@ def test_equal_model_effort_with_different_sandbox_flags_remain_distinguishable(
 ) -> None:
     common = [
         "--model",
-        "gpt-5.6-sol",
+        "gpt-6.2-sol",
         "-c",
         "model_reasoning_effort=max",
         "--sandbox",
@@ -635,9 +649,9 @@ def test_equal_model_effort_with_different_sandbox_flags_remain_distinguishable(
 @pytest.mark.parametrize(
     "unsafe_flags",
     (
-        ["--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=max", "--prompt", "secret body"],
-        ["--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=max", "--api-key=secret"],
-        ["--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=max", "-c", "api_key=secret"],
+        ["--model", "gpt-6.2-sol", "-c", "model_reasoning_effort=max", "--prompt", "secret body"],
+        ["--model", "gpt-6.2-sol", "-c", "model_reasoning_effort=max", "--api-key=secret"],
+        ["--model", "gpt-6.2-sol", "-c", "model_reasoning_effort=max", "-c", "api_key=secret"],
     ),
 )
 def test_resolved_profile_rejects_prompt_or_secret_bearing_launch_flags(
@@ -743,14 +757,14 @@ def test_claude_tool_selection_rejects_empty_other_flags_and_malformed_lists(sel
         (
             "codex",
             [
-                "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=max",
+                "--model", "gpt-6.2-sol", "-c", "model_reasoning_effort=max",
                 "-c", 'mcp_servers.demo.env={OPENAI_API_KEY="secret"}',
             ],
         ),
         (
             "codex",
             [
-                "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=max",
+                "--model", "gpt-6.2-sol", "-c", "model_reasoning_effort=max",
                 "--add-dir", "C:\\Users\\<you>\\repo",
             ],
         ),

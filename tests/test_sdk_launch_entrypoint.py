@@ -18,17 +18,18 @@ def private_capture_root(tmp_path, monkeypatch):
     monkeypatch.setattr(owner, "_capture_output_path", lambda _: root)
 
 
-def test_sdk_binding_is_wrapper_owned_path():
+@pytest.mark.parametrize("provider", ["codex", "claude", "copilot"])
+def test_sdk_binding_is_wrapper_owned_path(provider):
     control = owner.parse_control(
         ["review", "--sdk-review-binding", "binding.json", "--", "--model", "fixture"],
-        provider="codex",
+        provider=provider,
     )
     assert control.sdk_review_binding == Path("binding.json")
     assert control.provider_flags == ["--model", "fixture"]
 
 
-@pytest.mark.parametrize("provider", [None, "claude", "kimi", "grok"])
-def test_sdk_binding_cannot_select_another_provider(provider):
+@pytest.mark.parametrize("provider", [None, "kimi", "grok", "antigravity"])
+def test_sdk_binding_cannot_enable_an_unsupported_provider(provider):
     with pytest.raises(ValueError, match="E_SDK_REVIEW_PROVIDER_REQUIRED"):
         owner.parse_control(["review", "--sdk-review-binding", "binding.json"], provider=provider)
 
@@ -176,14 +177,17 @@ def test_sdk_incomplete_diagnostic_write_reports_retained_directory(tmp_path, mo
     assert list(reserved.lifecycle.run_dir.glob("sdk-recovery.json"))
 
 
-@pytest.mark.parametrize("model,effort,approved,allowed", [
-    ("gpt-6-astra", "high", False, False),
-    ("gpt-6-astra", "high", True, True),
-    ("gpt-6.1-terra", "max", False, False),
-    ("gpt-6.1-terra", "high", False, True),
-    ("gpt-6.1-terra", "low", True, False),
+@pytest.mark.parametrize("model,effort,approved,denial", [
+    ("gpt-6.2-astra", "high", False, "individual-launch-approval-required"),
+    ("gpt-6.2-astra", "high", True, None),
+    ("gpt-6-astra", "high", True, "model-generation-not-admitted"),
+    ("gpt-6.1-terra", "max", False, "individual-launch-approval-required"),
+    ("gpt-6.1-terra", "high", False, None),
+    ("gpt-6.1-terra", "low", True, "low-not-admitted"),
 ])
-def test_sdk_launch_policy_precedes_binding_receipt_and_worker(monkeypatch, model, effort, approved, allowed):
+def test_sdk_launch_policy_precedes_binding_receipt_and_worker(
+    monkeypatch, capsys, model, effort, approved, denial,
+):
     from sdk_execution import dispatch
     class ReachedBinding(Exception):
         pass
@@ -196,8 +200,9 @@ def test_sdk_launch_policy_precedes_binding_receipt_and_worker(monkeypatch, mode
     if approved:
         argv.append("--user-approved-launch")
     argv += ["--", "--model", model, "-c", "model_reasoning_effort=" + effort]
-    if allowed:
+    if denial is None:
         with pytest.raises(ReachedBinding):
             owner.launch("codex", argv)
     else:
         assert owner.launch("codex", argv) == 1
+        assert "E_MODEL_LAUNCH_POLICY_DENIED: " + denial in capsys.readouterr().err
