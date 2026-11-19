@@ -300,7 +300,7 @@ python scripts/install-hypothesis-hook.py --target <hooks.json path> --platform 
 python scripts/install-hypothesis-hook.py --target <hooks.json path> --platform codex --host-os posix --hook-event UserPromptSubmit --script-marker turn-anchor-reminder --script-path <ignored> --remove
 ```
 
-Windows example (replace placeholders with the actual absolute interpreter and canonical installed script paths):
+Windows example of the generated command shape. Replace placeholders with the actual absolute paths, use forward slashes and unquoted path tokens without spaces. Use the installer to register hooks; this example is not instructions for manually rewriting a trusted entry.
 
 ```json
 {
@@ -311,7 +311,7 @@ Windows example (replace placeholders with the actual absolute interpreter and c
         "hooks": [
           {
             "type": "command",
-            "command": "<absolute-python.exe> <user-home>\\.agents\\skills\\lead\\scripts\\check-bugfix-discipline.py"
+            "command": "<absolute-python.exe> <user-home>/.agents/skills/lead/scripts/check-bugfix-discipline.py"
           }
         ]
       }
@@ -321,7 +321,7 @@ Windows example (replace placeholders with the actual absolute interpreter and c
         "hooks": [
           {
             "type": "command",
-            "command": "<absolute-python.exe> <user-home>\\.agents\\skills\\lead\\scripts\\check-passive-polling-stop.py"
+            "command": "<absolute-python.exe> <user-home>/.agents/skills/lead/scripts/check-passive-polling-stop.py"
           }
         ]
       }
