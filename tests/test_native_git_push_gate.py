@@ -966,3 +966,113 @@ def test_named_remote_keeps_private_endpoint_inside_captured_stdin(native_reposi
     assert v3.kind == "valid-v3" and v3.receipt.remote == "origin"
     assert v4.kind == "valid-v4" and v4.receipt.endpoint_identity == owner._native_endpoint_identity(endpoint)
     assert canary not in output.getvalue() + errors.getvalue()
+
+
+@pytest.mark.parametrize("size", [40, 64])
+def test_tag_only_wire_requires_a_single_new_named_tag(size):
+    owner = module()
+    name, oid, zero = b"refs/tags/fixture", b"a" * size, b"0" * size
+    wire = b" ".join((name, oid, name, zero)) + b"\n"
+    assert owner._single_new_named_tag_row(wire) == oid.decode()
+    for invalid in (
+        wire + wire, wire[:-1], wire.replace(zero, b"b" * size),
+        wire.replace(name, b"refs/heads/fixture"),
+        b" ".join((b"refs/tags/other", oid, name, zero)) + b"\n",
+        b" ".join((b"(delete)", zero, name, oid)) + b"\n",
+    ):
+        assert owner._single_new_named_tag_row(invalid) is None
+
+
+@pytest.mark.parametrize("object_format", ["sha1", "sha256"])
+def test_v4_tag_only_proof_requires_exact_tag_coverage(object_format):
+    owner = module()
+    _, _, binding = selected(owner, object_format=object_format)
+    length = 40 if object_format == "sha1" else 64
+    tag, commit = "a" * length, "b" * length
+    evidence = {**receipt(binding), "tagOnly": {
+        "tag": tag, "commit": commit, "inventorySha256": "e" * 64,
+    }}
+    parse = lambda value: owner.parse_publication_safety_observation(json.dumps(value))
+    assert parse(evidence).receipt.tag_only == (tag, commit, "e" * 64)
+    assert parse(receipt(binding)).receipt.tag_only is None
+    for key, value in (("updates", 2), ("commits", 1), ("objects", 2), ("tags", 0),
+                       ("blobs", 1), ("status", "qualified"), ("tagOnly", None)):
+        assert parse({**evidence, key: value}).kind == "malformed"
+    for key, value in (("inventorySha256", "invalid"), ("commit", "0" * length),
+                       ("tag", commit), ("commit", "c" * (length + 1))):
+        assert parse({**evidence, "tagOnly": {**evidence["tagOnly"], key: value}}).kind == "malformed"
+
+
+@pytest.mark.parametrize("changed, result", [(False, 0), (True, 2)])
+def test_native_callback_uses_bound_positive_tag_proof_without_v3(monkeypatch, changed, result):
+    owner = module()
+    native, _, binding = selected(owner)
+    tag, commit = "a" * 40, "b" * 40
+    proof = {**receipt(binding), "tagOnly": {
+        "tag": tag, "commit": commit, "inventorySha256": "e" * 64,
+    }}
+    encoded = json.dumps(proof)
+    calls = []
+    def scan(request, root, git_exe):
+        calls.append(request)
+        return SimpleNamespace(
+            parsed_outcome=owner.parse_publication_safety_observation(encoded),
+            execution=SimpleNamespace(stdout=encoded.encode()),
+            binding=binding,
+        )
+    monkeypatch.setattr(owner, "_normalize_repository_workdir", lambda *args, **kwargs: ".")
+    monkeypatch.setattr(owner, "_resolve_executable", lambda *args: "git")
+    monkeypatch.setattr(owner, "_prove_repository_root", lambda *args, **kwargs: ".")
+    monkeypatch.setattr(owner, "_native_callback_currentness",
+                        mock.Mock(side_effect=[(b"start",), (b"changed" if changed else b"start",)]))
+    monkeypatch.setattr(owner, "_native_receiver_inventory_qualified", lambda *args: True)
+    monkeypatch.setattr(owner, "_native_configuration_query",
+                        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=commit.encode()))
+    monkeypatch.setattr(owner, "_resolve_generic_scan_binding",
+                        lambda *args: SimpleNamespace(source_oid=commit))
+    monkeypatch.setattr(owner, "_run_authoritative_scan", scan)
+    monkeypatch.setattr(sys, "stdin", SimpleNamespace(buffer=io.BytesIO(native.wire)))
+    assert owner._native_pre_push_main([native.remote_name, native.endpoint]) == result
+    assert calls == [native]
+
+
+@pytest.mark.parametrize("closure_drift,expected", [(False, 0), (True, 2)])
+def test_native_callback_reuses_new_graph_tag_scan_without_skipping_closure_check(
+    monkeypatch, capsys, closure_drift, expected,
+):
+    owner = module()
+    native, _, binding = selected(owner)
+    primary = SimpleNamespace(source_oid="b" * 40)
+    calls = []
+
+    def scan(request, root, git_exe, **kwargs):
+        calls.append((request, kwargs))
+        is_v4 = request == native
+        return SimpleNamespace(
+            parsed_outcome=SimpleNamespace(kind="valid-v4" if is_v4 else "valid-v3", receipt=None),
+            execution=SimpleNamespace(
+                stdout=b"V4\n" if is_v4 else b"V3\n",
+                closure_after="drift" if is_v4 and closure_drift else "closure",
+                pending=SimpleNamespace(captured_review=SimpleNamespace(repository_observation="repo")),
+            ),
+            binding=binding if is_v4 else primary,
+        )
+
+    monkeypatch.setattr(owner, "_normalize_repository_workdir", lambda *args, **kwargs: ".")
+    monkeypatch.setattr(owner, "_resolve_executable", lambda *args: "git")
+    monkeypatch.setattr(owner, "_prove_repository_root", lambda *args, **kwargs: ".")
+    monkeypatch.setattr(owner, "_native_callback_currentness", lambda *args: (b"current",))
+    monkeypatch.setattr(owner, "_native_receiver_inventory_qualified", lambda *args: True)
+    monkeypatch.setattr(owner, "_native_configuration_query",
+                        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=primary.source_oid.encode()))
+    monkeypatch.setattr(owner, "_resolve_generic_scan_binding", lambda *args: primary)
+    monkeypatch.setattr(owner, "_run_authoritative_scan", scan)
+    monkeypatch.setattr(sys, "stdin", SimpleNamespace(buffer=io.BytesIO(native.wire)))
+
+    assert owner._native_pre_push_main([native.remote_name, native.endpoint]) == expected
+    assert calls == [(native, {}), (primary, {"native_input": native})]
+    output = capsys.readouterr()
+    if closure_drift:
+        assert output.out == "" and "PGG-SCAN-IDENTITY-DRIFT" in output.err
+    else:
+        assert output.out == "V3\nV4\n" and output.err == ""

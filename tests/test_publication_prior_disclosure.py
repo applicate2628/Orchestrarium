@@ -116,3 +116,78 @@ class TestPriorDisclosure(native.TestNativePublicationEffects):
         self.assertIn(tree, selected.object_oids)
         self.assertNotIn(blob.decode(), selected.object_oids)
         self.assertEqual(self.scan(payload).kind, "clean")
+
+
+class TestAnnotationOnlyProof(native.TestNativePublicationEffects):
+    def tag_payload(self, *, target="HEAD", receiver_inventory=True):
+        self.git("tag", "-a", "release-boundary", "-m", "synthetic annotation", target)
+        name = b"refs/tags/release-boundary"
+        oid = self.git("rev-parse", name.decode()).strip().decode()
+        payload = self.payload([(name, oid, name, self.zero())])
+        payload["receiverInventory"] = receiver_inventory
+        return name, oid, payload
+
+    def test_known_target_produces_positive_bound_tag_proof(self):
+        _, oid, payload = self.tag_payload()
+        outcome = self.scan(payload)
+        self.assertEqual(outcome.kind, "clean", outcome)
+        self.assertEqual(outcome.history.object_ids, (oid,))
+        self.assertEqual(outcome.history.direct_tag_commit, self.commit)
+        import json
+        proof = json.loads(self.module._serialize_native_receipt_v4(outcome))["tagOnly"]
+        self.assertEqual((proof["tag"], proof["commit"]), (oid, self.commit))
+
+    def test_new_graph_and_unqualified_receiver_do_not_produce_tag_only_proof(self):
+        _, _, payload = self.tag_payload(receiver_inventory=False)
+        outcome = self.scan(payload)
+        self.assertEqual(outcome.kind, "clean", outcome)
+        self.assertIsNone(outcome.history.direct_tag_commit)
+        self.assertEqual(outcome.history.commit_ids, (self.commit,))
+        self.git("tag", "-d", "release-boundary")
+        self.git("commit", "--allow-empty", "-qm", "not yet transmitted")
+        _, _, payload = self.tag_payload()
+        outcome = self.scan(payload)
+        self.assertEqual(outcome.kind, "clean", outcome)
+        self.assertTrue(outcome.history.commit_ids)
+        self.assertIsNone(outcome.history.direct_tag_commit)
+
+    def test_nested_tag_target_does_not_produce_proof_even_if_already_disclosed(self):
+        self.git("tag", "-a", "inner-tag", "-m", "synthetic prior annotation")
+        self.git("push", "-q", "origin", "refs/tags/inner-tag")
+        _, oid, payload = self.tag_payload(target="refs/tags/inner-tag")
+        outcome = self.scan(payload)
+        self.assertEqual(outcome.kind, "clean", outcome)
+        self.assertEqual(outcome.history.object_ids, (oid,))
+        self.assertIsNone(outcome.history.direct_tag_commit)
+
+    def test_existing_destination_or_concurrent_creation_refuses(self):
+        name, oid, payload = self.tag_payload()
+        row = self.module.RemoteRefTip(b"refs/heads/main", self.commit)
+        appeared = self.module.RemoteRefTip(name, oid, self.commit)
+        for advertisements in [((row, appeared),), ((row,), (row, appeared))]:
+            with mock.patch.object(self.module, "_remote_ref_tip_oids", side_effect=advertisements):
+                outcome = self.scan(payload)
+            self.assertEqual(outcome.kind, "refusal", outcome)
+
+    def test_mixed_push_does_not_read_prior_disclosed_large_tag_target(self):
+        (self.root / "old-large.txt").write_bytes(b"x" * 128)
+        self.git("add", "old-large.txt")
+        self.git("commit", "-qm", "publish synthetic blob")
+        self.git("push", "-q", "origin", "HEAD:refs/heads/main")
+        self.git("tag", "-a", "old-blob", "-m", "synthetic annotation", "HEAD:old-large.txt")
+        tag = self.git("rev-parse", "refs/tags/old-blob").strip().decode()
+        target = self.git("rev-parse", "HEAD:old-large.txt").strip().decode()
+        self.git("commit", "--allow-empty", "-qm", "new history")
+        tip = self.git("rev-parse", "HEAD").strip().decode()
+        payload = self.payload([
+            (b"HEAD", tip, b"refs/heads/new", self.zero()),
+            (b"refs/tags/old-blob", tag, b"refs/tags/old-blob", self.zero()),
+        ])
+        payload["receiverInventory"] = True
+        with mock.patch.object(self.module, "_MAX_BLOB_BYTES", 64):
+            outcome = self.scan(payload)
+        self.assertEqual(outcome.kind, "clean", outcome)
+        self.assertIn(tip, outcome.history.commit_ids)
+        self.assertIn(tag, outcome.history.object_ids)
+        self.assertNotIn(target, outcome.history.object_ids)
+        self.assertIsNone(outcome.history.direct_tag_commit)

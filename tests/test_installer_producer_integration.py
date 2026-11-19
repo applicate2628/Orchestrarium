@@ -701,7 +701,9 @@ class ProducerIntegrationTests(unittest.TestCase):
                 backup.mkdir()
                 (backup / "leaf").write_bytes(b"historical")
                 foreign = transaction._capture_node(backup)
-                self.assertNotEqual(original.native_proof, foreign.native_proof)
+                self.assertNotEqual(original.python_identity, foreign.python_identity)
+                if os.name == "nt":
+                    self.assertNotEqual(original.native_proof, foreign.native_proof)
                 foreign_identity = PI._CreateOnlyMutablePath._identity(backup)
                 def observed(path, **kwargs):
                     if Path(path) == backup:

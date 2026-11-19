@@ -31,38 +31,31 @@ class AgentsModeContractTest(unittest.TestCase):
         codex_profile = scalars["externalCodexProfile"]
 
         # Shipped default is the best-effort profile (symmetric to externalClaudeProfile: opus-xhigh).
-        self.assertEqual(codex_profile["default"], "gpt-6.1-sol-xhigh")
-        # GPT-6.1 Sol is active; explicit GPT-6/GPT-5.6 Sol selections remain literal 1.x
-        # compatibility values. Terra remains an explicit distinct-model option.
-        # Keep this list in sync with the schema-owned enum.
+        self.assertEqual(codex_profile["default"], "gpt-6.2-sol-xhigh")
+        # Only current GPT-6.2 Sol profiles belong to this external Codex enum.
+        # Native task/profile selection and its other model families are separate.
         self.assertEqual(
             codex_profile["allowed"],
             [
                 "default",
-                "gpt-6.1-sol-high",
-                "gpt-6.1-sol-xhigh",
-                "gpt-6.1-sol-max",
-                "gpt-6-sol-high",
-                "gpt-6-sol-xhigh",
-                "gpt-6-sol-max",
-                "gpt-5.6-sol-xhigh",
-                "gpt-5.6-sol-max",
-                "gpt-5.6-terra",
+                "gpt-6.2-sol-high",
+                "gpt-6.2-sol-xhigh",
+                "gpt-6.2-sol-max",
             ],
         )
         self.assertNotIn("providers", codex_profile)
 
         # Per-preset assignments must correspond to each preset's intent:
-        #   best-effort presets → gpt-6.1-sol-xhigh
-        #   speed preset → gpt-6.1-sol-high
+        #   best-effort presets → gpt-6.2-sol-xhigh
+        #   speed preset → gpt-6.2-sol-high
         #   balanced everyday presets → default (inherit externalModelMode)
         expected_per_preset = {
-            "default": "gpt-6.1-sol-xhigh",
+            "default": "gpt-6.2-sol-xhigh",
             "absolute-balance": "default",
             "external-aggressive": "default",
-            "correctness-first": "gpt-6.1-sol-xhigh",
-            "power-mode": "gpt-6.1-sol-xhigh",
-            "max-speed": "gpt-6.1-sol-high",
+            "correctness-first": "gpt-6.2-sol-xhigh",
+            "power-mode": "gpt-6.2-sol-xhigh",
+            "max-speed": "gpt-6.2-sol-high",
         }
         for preset in presets["presetOrder"]:
             with self.subTest(preset=preset):
@@ -91,36 +84,48 @@ class AgentsModeContractTest(unittest.TestCase):
 
     def test_runtime_docs_include_full_read_order(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        expectations = {
-            "src.codex/AGENTS.codex.md": [
-                "local legacy `.agents/.agents-mode`",
-                "pack-local global legacy `~/.codex/.agents-mode`",
-                "shared cross-pack global `~/.agents-mode.yaml`",
-            ],
-            "src.claude/CLAUDE.md": [
-                "local legacy `.claude/.agents-mode`",
-                "pack-local global legacy `~/.claude/.agents-mode`",
-                "shared cross-pack global `~/.agents-mode.yaml`",
-            ],
-            "src.codex/skills/init-project/SKILL.md": [
-                "global legacy `~/.codex/.agents-mode`, then the shared cross-pack global",
-                "externalCodexProfile: gpt-6.1-sol-xhigh",
-            ],
-            "src.claude/commands/agents-init-project.md": [
-                "global legacy `~/.claude/.agents-mode`, then the shared cross-pack global",
-                "externalCodexProfile: gpt-6.1-sol-xhigh",
-            ],
-            "docs/agents-mode-reference.md": [
-                "Use `scripts/resolve-agents-mode.py --provider <provider> --json`",
-                "| Codex | `disabled` | `auto` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-6.1-sol-xhigh`",
-                "| Claude Code | `disabled` | `auto` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-6.1-sol-xhigh`",
-            ],
-        }
-        for relative, snippets in expectations.items():
-            text = (root / relative).read_text(encoding="utf-8")
-            for snippet in snippets:
-                with self.subTest(relative=relative, snippet=snippet):
-                    self.assertIn(snippet, text)
+        reference = (root / "docs/agents-mode-reference.md").read_text(encoding="utf-8")
+        provider_rows = reference.split("## Provider surfaces", 1)[1].split("## ", 1)[0]
+        maintenance = reference.split("## Canonical maintenance", 1)[1].split("## ", 1)[0]
+        first_write = reference.split("## First-write defaults", 1)[1].split("## ", 1)[0]
+        for provider, label, directory, overlay, initializer in (
+            ("codex", "Codex", ".agents", "src.codex/AGENTS.codex.md", "src.codex/skills/init-project/SKILL.md"),
+            ("claude", "Claude Code", ".claude", "src.claude/CLAUDE.md", "src.claude/commands/agents-init-project.md"),
+        ):
+            row = next(line for line in provider_rows.splitlines() if line.startswith(f"| {label} |"))
+            init = (root / initializer).read_text(encoding="utf-8")
+            init_read = next(line for line in init.splitlines() if line.startswith("- For decision-driving reads,"))
+            overlay_lines = (root / overlay).read_text(encoding="utf-8").splitlines()
+            overlay_read = next(line for line in overlay_lines if "shared cross-pack global" in line)
+            layers = (
+                f"`{directory}/.agents-mode.yaml`",
+                f"`{directory}/.agents-mode`",
+                f"`~/.{provider}/.agents-mode.yaml`",
+                f"`~/.{provider}/.agents-mode`",
+                "`~/.agents-mode.yaml`",
+            )
+            for owner, clause in (("provider reference", row.split("Decision-driving reads", 1)[1]),
+                                  (overlay, overlay_read), (initializer, init_read)):
+                with self.subTest(provider=provider, owner=owner):
+                    self.assertTrue(all(layer in clause for layer in layers))
+                    order = [clause.index(layer) for layer in layers]
+                    self.assertEqual(order, sorted(order))
+            with self.subTest(provider=provider, owner="first write"):
+                self.assertIn("externalCodexProfile: gpt-6.2-sol-xhigh", init)
+                default_row = next(line for line in first_write.splitlines() if line.startswith(f"| {label} |"))
+                self.assertIn("`runtime-default` | `gpt-6.2-sol-xhigh`", default_row)
+            with self.subTest(provider=provider, owner="read-only policy"):
+                self.assertIn("[Canonical maintenance](#canonical-maintenance)", row)
+                self.assertIn("inspection grants no write", init_read)
+                self.assertNotIn("must be normalized forward", row)
+        self.assertIn("Use `scripts/resolve-agents-mode.py --provider <provider> --json`", maintenance)
+        self.assertIn("normalize the effective values in memory", maintenance)
+        self.assertIn("must not create or modify an overlay", maintenance)
+        self.assertIn("reinstall must rewrite it to the current canonical form", maintenance)
+        self.assertIn("Only the authorized writer", maintenance)
+        for obsolete in ("Normalize whichever file supplied", "This maintenance rewrite happens on read",
+                         "Read-time normalization preserves"):
+            self.assertNotIn(obsolete, maintenance)
 
     def test_validator_rejects_init_canonical_shape_drift(self) -> None:
         root = Path(__file__).resolve().parents[1]

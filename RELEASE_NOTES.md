@@ -2,6 +2,19 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-19
+
+- The agents-mode reference now distinguishes read-only routing and status checks from authorized configuration writes. Reading legacy overlays leaves their bytes unchanged; explicit configuration changes and reinstall retain their existing normalization rules.
+
+- Align both Claude structural references and their validation with the current native publication and passive-polling contracts. The maintainer check now verifies current reference bytes and user controls without demanding a retired publication marker. Runtime authorization is unchanged.
+
+- Installer cleanup now releases private POSIX transaction snapshots of read-only directories after success or rollback. Only the private snapshot directory is made writable during a removal attempt; its original mode must be restored even if removal fails. A failed mode restoration is reported as incomplete cleanup, not as successful rollback.
+
+- Native publication can qualify creation of a new annotated tag on already disclosed history by verifying the complete new tag object and its message against the exact receiver, without pretending that an empty commit scan authorizes a push. Publication of new history still requires both ordinary scans.
+
+- Claude help now reads its role groups from the installed role index, and the performance and status commands read the configured bug registry instead of a discontinued separate directory. Bug-fix and QA guidance returns dispositions to the lifecycle owner rather than changing or archiving records directly. Role-migration and workflow tests use the retained factory files and current routing owners.
+- Validate the entire Codex skill catalog, including newly added source entries, while retaining its metadata budgets and excluding unrelated third-party skills from installed pack checks. Reconcile the stale fingerprint with the already accepted task-first routing addendum without changing its routing or authorization rules. Codex and Claude second-opinion status now consume layered configuration in memory and do not rewrite local or global settings. Maintainers now record installation and rollback against the exact candidate, obtain an independent first assessment, and address recurring failure classes at their owning verification boundary.
+
 ## 2026-11-18
 
 - The shared development workflow now requires GUI-independent functional operations and a replaceable presentation client through the existing common contract. Architecture guidance adds headless and client-replacement acceptance while preserving required approvals, presentation-only behavior and explicitly justified user-requested exceptions.
