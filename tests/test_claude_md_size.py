@@ -34,8 +34,8 @@ EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
         "1f2ab534399851a99b5f39caadec703b8ddf5118c73ea60bd27a3023c0a5209d",
     ),
     "hook-behavior-contracts": (
-        19_387,
-        "49304999e8668edbf3d697ec6a66c01faea27cb46905e02136e4efa434a55c37",
+        15025,
+        "2abd7e25beaeab7fc415969894dab386ea6718fd518e763e70931cf2e61304b2",
     ),
     # Payload pins force deliberate review of current hook behavior, placement,
     # and installer truth before a canonical-reference edit can pass.
@@ -90,7 +90,8 @@ EXPECTED_CLAUDE_MANIFEST: dict[str, tuple[str | re.Pattern[str], ...]] = {
         "Stop hooks do not replace the main conversation's current-turn status checks or work-item close/archive ownership",
         "Passive verdicts and the leaf/re-entry skips remain unchanged",
         "[skip-bugfix-discipline]",
-        "[approve-publication]",
+        "Root receives genuine publication review and consent for the actual source, repository and destination.",
+        "it does not reconstruct consent from chat history or require an approval marker.",
         "MCP control.",
         "discovery reminders are advisory in `auto` and subagent contexts.",
         "Root `force` still requires runtime discovery, the relevant tool schema, fitting MCP use",

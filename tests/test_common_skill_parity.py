@@ -81,9 +81,22 @@ def _live_common_skill_hashes(root: Path = ROOT) -> dict[str, dict[str, str]]:
 
 def _assert_authoritative_status(root: Path = ROOT) -> None:
     readme = (root / "README.md").read_text(encoding="utf-8")
-    assert "`src.codex/` — the production Codex provider-pack source" in readme
-    assert "`src.claude/` — the production Claude Code provider-pack source" in readme
-    assert _runtime().installer_choices_are_supported_production_packs(root)
+    section = readme.partition("\n## Provider Packs\n")[2]
+    table = section.lstrip("\n").partition("\n\n")[0]
+    production = tuple(
+        (cells[0], cells[2])
+        for line in table.splitlines()
+        if line.startswith("|")
+        for cells in ([part.strip() for part in line.strip("|").split("|")],)
+        if len(cells) >= 3 and cells[1] == "Production"
+    )
+    assert production == (
+        ("Codex", "`src.codex/`"),
+        ("Claude Code", "`src.claude/`"),
+    ), "README production pack membership drifted"
+    assert _runtime().installer_choices_are_supported_production_packs(root), (
+        "installer production pack membership drifted"
+    )
 
 
 def _copy_contract_tree(tmp_path: Path) -> Path:
@@ -241,13 +254,25 @@ def test_authoritative_status_preserves_production_class() -> None:
 
 
 @pytest.mark.parametrize(
-    ("relative_path", "needle", "replacement"),
+    ("relative_path", "needle", "replacement", "failure"),
     (
-        ("README.md", "`src.codex/` — the production Codex provider-pack source", "`src.codex/` — example"),
+        (
+            "README.md",
+            "| Codex | Production | `src.codex/` |",
+            "| Codex | Example | `src.codex/` |",
+            "README production pack membership drifted",
+        ),
+        (
+            "README.md",
+            "| Claude Code | Production | `src.claude/` |",
+            "| Claude Code | Example | `src.claude/` |",
+            "README production pack membership drifted",
+        ),
         (
             "install.py",
             '"3": ("codex", "claude"),',
             '"3": ("codex",),',
+            "installer production pack membership drifted",
         ),
     ),
 )
@@ -256,13 +281,14 @@ def test_authoritative_status_mutation_does_not_redefine_production_membership(
     relative_path: str,
     needle: str,
     replacement: str,
+    failure: str,
 ) -> None:
     root = _copy_contract_tree(tmp_path)
     path = root / relative_path
     text = path.read_text(encoding="utf-8")
     assert needle in text
     path.write_text(text.replace(needle, replacement, 1), encoding="utf-8")
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match=failure):
         _assert_authoritative_status(root)
 
 
