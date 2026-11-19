@@ -516,8 +516,8 @@ python .\install.py --clients codex --target "$ProjectRoot" --allow-unsafe-targe
 
 The host catalog is `codex`, `claude`, and `antigravity`. To use the interactive
 menu, omit `--clients` in a terminal: enter client numbers separated by commas
-or spaces, or enter `a` to select all. Empty input or `q` cancels; there is no
-default. The menu previews before asking whether to apply. Without a terminal,
+or spaces, or enter `a` to select all.
+Empty input or `q` cancels; there is no default. The menu previews before asking whether to apply. Without a terminal,
 `--clients` is required. After reviewing an explicit preview, rerun the same
 selection without `--dry-run` to apply. Selected clients are processed separately;
 a failure does not undo an earlier client's successful installation.

@@ -1,6 +1,7 @@
 """Codex vcpkg overlay-updater skill and create-only install contract."""
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import shutil
 import sys
@@ -44,10 +45,12 @@ def test_vcpkg_ports_updater_has_the_common_general_overlay_contract() -> None:
         if path.is_file()
     }
     assert claude_files == {"SKILL.md", "references/upstream-sync.md"}
-    assert (claude_root / "SKILL.md").read_bytes() == (SKILL_ROOT / "SKILL.md").read_bytes()
-    assert (claude_root / "references" / "upstream-sync.md").read_bytes() == (
-        SKILL_ROOT / "references" / "upstream-sync.md"
-    ).read_bytes()
+    # This comparison snapshot is a migration input, not a second live owner.
+    for name, expected in {
+        "SKILL.md": "117b66a7edce120b3ed9746698bbc93759180c9c901466b39f95c1965ddca57c",
+        "references/upstream-sync.md": "61408d18775b3b53b42b32c9ad7b14f374eed515d77e0b272fda7067f755d95e",
+    }.items():
+        assert hashlib.sha256((claude_root / name).read_bytes()).hexdigest() == expected
 
     skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
     reference = (SKILL_ROOT / "references" / "upstream-sync.md").read_text(
@@ -135,12 +138,15 @@ def test_new_skill_install_is_create_only_idempotent_and_collision_safe(
 
     with (installed / "SKILL.md").open("ab") as stream:
         stream.write(b"one byte of user drift\n")
+    drifted = (installed / "SKILL.md").read_bytes()
     with pytest.raises(
-        ValueError, match="E_ACCEPTED_PRIOR_COLLISION: vcpkg-ports-updater"
+        ValueError, match="E_CANONICAL_SKILLS_RECEIPT_DRIFT: vcpkg-ports-updater"
     ):
         installer._preflight_canonical_skills(
             ROOT / "src.codex" / "skills", skills_root, root=ROOT
         )
+
+    assert (installed / "SKILL.md").read_bytes() == drifted
 
 
 def test_claude_installer_projection_is_create_only_idempotent_and_collision_safe(

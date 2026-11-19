@@ -74,7 +74,7 @@ never accept the observed hash merely because repeated downloads agree.
 
 1. Read the repository contract, canonical catalog/scope records, target portfiles/manifests/patches, and overlay-resolution order. Use CodeGraph and vcpkg MCP where available; confirm index freshness after edits.
 2. Resolve the external vcpkg checkout and probe its policy. Refresh or pull it only when that exact mutation is authorized; otherwise use read-only local/remote comparison.
-3. Resolve each port's own official upstream. Select an immutable revision, obtain the archive digest, and preserve the port's established version scheme while proving the new manifest version sorts above the previous one.
+3. Resolve each port's own official upstream. Select an immutable revision, obtain the archive digest, and validate the upstream or packaging-only version transition and effective resolver choice using the existing version reference.
 4. Rebase the existing port onto that source. Reapply only `RETAIN` deltas at their owning seam; remove `ABSORBED`/`STALE` material and superseded files in the same change.
 5. Validate manifest/feature/source shape, overlay precedence, sequential patch application, fail-open text anchors, and the smallest affected compiler/platform matrix. Runtime builds require their own admitted `vcpkg-builder` gate.
 6. Return one sync package: port classifications, official-upstream identities, old/new immutable revisions and digests, delta dispositions, changed files, validation evidence, cleanup, and `PASS|REVISE|BLOCKED`.
@@ -85,12 +85,12 @@ never accept the observed hash merely because repeated downloads agree.
 - Never infer liveness or deletion from directory name, recency, builtin equality, or an unaccepted scope proposal.
 - Apply patch stacks in declared order to one accumulating extracted tree; a standalone patch check is not an acceptance oracle.
 - Re-verify every `vcpkg_replace_string`, patch context, and post-extract/project-include anchor against the selected source. A missing anchor is `REVISE`, not a silent no-op.
-- Preserve feature contracts, platform guards, version ordering, and intentional shadows. Remove an overlay directory only when its current owner is proven unnecessary and no custom/shadow contract remains.
+- Preserve feature contracts, platform guards, version schemes, and intentional shadows. Remove an overlay directory only when its current owner is proven unnecessary and no custom/shadow contract remains.
 - Keep raw downloads, extracted trees, and logs in the repository's scratch/transient boundary. Clean only exact inactive task-owned artifacts after evidence is accepted.
 
 ## Gate
 
-`PASS` requires official-upstream provenance, immutable revision plus digest, valid version ordering, explicit disposition of every prior local delta, current overlay-resolution evidence, required patch/anchor checks, affected-surface validation, protected-root compliance, and no stale live-tree residue.
+`PASS` requires official-upstream provenance, immutable revision plus digest, a valid version transition and resolver choice, explicit disposition of every prior local delta, current overlay-resolution evidence, required patch/anchor checks, affected-surface validation, protected-root compliance, and no stale live-tree residue.
 
 Read `references/upstream-sync.md` for source-authority, patch-stack, anchor, version, and validation matrices.
 

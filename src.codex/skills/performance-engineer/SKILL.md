@@ -26,6 +26,7 @@ description: "Latency, throughput, memory, slow: profiling, benchmarks, budgets.
 ## Gate
 
 - Success metrics, budgets, and measurement methodology are explicit. Budget or optimization claims use `N >= 5` repetitions (or duration-bounded sampling), report the median plus standard deviation or interquartile range, and state warm-up policy and environment controls for CPU governor, thermal state, and background load; a single-run claim is `ASSUMPTION (UNVERIFIED)`.
+- For material optimization claims, predeclare what counts as a meaningful change; interleave paired runs when system drift would affect the comparison. Keep raw per-run evidence and show sufficient tail samples for the accepted percentile. Treat effects indistinguishable from noise as inconclusive.
 - Expected or observed bottlenecks are documented with evidence or a clearly labeled model.
 - The result is sufficient for planning, implementation, and later `performance-reviewer` review.
 

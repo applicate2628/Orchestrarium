@@ -37,15 +37,21 @@ description: "External reviewer: run eligible review or QA externally."
 
 ## Execution recipe
 
+For the explicitly selected legacy CLI route:
+
 - Use the approved thin wrapper owned by `contracts/external-dispatch.md`; that owner supplies the strict V2 parser, full external-nonauthorizing tuple, and untrusted/potentially-sensitive resultText contract. Do not retype the schema, consume wrapper-private captures, or substitute a direct closure/manual sidecar path.
 - Set the wrapper-owned timeout, await its terminal return, and apply the owner's tracked-ledger rules before accepting the review. Never duplicate a launch; independent standalone watcher polling applies only to caller-managed background captures outside the wrapper.
 - Accept completion only when the shared run-completion oracle passes. A failed review run is `UNVERIFIED` under review-loop invariant 7 in `contracts/review-loop.md`; this role cites that lane-accounting owner instead of restating it.
+
+For the explicitly selected direct Codex SDK review route, use the admission and Version 3 (V3) terminal receiving in `contracts/external-dispatch.md`. Do not apply the legacy wrapper recipe, convert receipts or fall back automatically.
 
 ## Return exactly one artifact
 
 - Return one review artifact containing the reviewed surfaces, findings or approval, residual risk, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`. Every finding carries a file:line anchor, reproduction command or falsifying probe, and one of the shared evidence categories or `ASSUMPTION (UNVERIFIED)`; an approval names every surface actually examined.
 - If provenance is included inline, use the execution-record fields from `contracts/external-dispatch.md` verbatim instead of inventing a shorter custom header.
 - The returned verdict is input evidence for the orchestrating session, not stage closure: the orchestrator spot-checks load-bearing findings or the no-findings claim before pinning the gate.
+
+- Bind findings and no-findings claims to the frozen revision reviewed. For each material protected claim or accepted criterion in the assigned slice, mark it checked, not checked, or unverified and cite the evidence or limitation; do not treat silence as coverage.
 
 ## Working rules
 

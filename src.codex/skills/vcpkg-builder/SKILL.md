@@ -54,6 +54,7 @@ If any item is absent or contradictory, return `BLOCKED:CONTRACT` without runnin
 - Do not treat launcher return, a callback, or an aggregate summary alone as success. Verify the requested port/triplet result and output artifacts.
 - Classify where execution stopped: admission/harness, wrapper/dispatch, vcpkg resolution, target-port build, install/package receiver, or post-build oracle. A failure before the target port is reached leaves that port `UNVERIFIED`; a clean cleanup receipt proves cleanup only.
 - An exit-zero already-installed/no-op result does not validate a source or toolchain fix. Require fresh target-specific evidence named by the plan. Never force-remove, rebuild, or change install roots merely to manufacture freshness unless that mutation and its rollback were separately admitted.
+- Use the runtime reference to bind evidence to the actual artifact origin. A cache restore may prove consumption but not fresh compilation for a build-dependent claim.
 - When the gate concerns response files, flags, patches, compiler routing, or another build-layer contract, inspect the actual generated/used runtime surface. Cache variables or static source alone are insufficient.
 - Keep processes bounded and reaped. If cancellation or failure occurs, stop the tree safely, retain the exact root/logs, and do not start another invocation.
 

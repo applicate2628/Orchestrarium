@@ -6,7 +6,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 PERFORMANCE_ENGINEER_CONTRACTS = (
     "src.codex/skills/performance-engineer/SKILL.md",
-    "src.claude/agents/performance-engineer.md",
+    "adapters/claude/agents/performance-engineer.md",
 )
 
 
@@ -31,7 +31,7 @@ class TestRemainingRolePrerequisites(unittest.TestCase):
     def test_agents_test_returns_findings_in_band_until_registry_write_is_authorized(
         self,
     ) -> None:
-        text = self._read("src.claude/commands/agents-test.md")
+        text = self._read("adapters/claude/commands/agents-test.md")
 
         self.assertIn(
             "return an actionable proposed finding in-band for the root or lifecycle owner",

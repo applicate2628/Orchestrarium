@@ -40,16 +40,20 @@ description: "External worker: run eligible worker roles externally."
 
 ## Execution recipe
 
+For the explicitly selected legacy CLI route:
+
 - Use the approved thin wrapper owned by `../lead/external-dispatch.md`; that owner supplies the strict V2 parser, full external-nonauthorizing tuple, and untrusted/potentially-sensitive resultText contract. Do not retype the schema, consume wrapper-private captures, or substitute a direct closure/manual sidecar path.
 - When explicit Kimi engineering is policy-admitted, require the `engineering` mutation class and a taxonomy mapping from the assigned profession to `external-worker`. A validated capability file may select only the caller-scoped worker tools, cwd, and artifact needed by that assignment; cwd selection is not a sandbox, the result remains nonauthorizing, and the integration owner independently verifies every change. Omission of the file preserves empty tools, Model Context Protocol servers, and subagents with permission `reject`.
 - Await the wrapper's terminal return, then apply the owner's stall/timeout and tracked-ledger rules; never duplicate a still-running launch.
 - Accept completion only when the shared run-completion oracle passes; a failed oracle is `UNVERIFIED`, not a worker artifact.
+For an explicitly selected, supported SDK worker route, follow only the scoped-worker admission, currentness and terminal receiving linked by the shared dispatch owner. Do not apply the wrapper recipe, change authority or fall back to another transport.
 
 ## Return exactly one artifact
 
 - Return one external worker artifact containing the role-appropriate output, any changed files when code or docs were edited, relevant checks or verification evidence when they exist, explicit assumptions or risks, and a provenance header.
 - When a neutral-workdir run produced edits, return a reviewable edit payload and name whether it is a unified diff or a full-file set with repo-relative target paths; in-place editing follows the contract's isolation-worktree binding.
 - For the provenance header, use the canonical execution record in `../lead/external-dispatch.md` verbatim instead of defining local fields.
+- Before integrating an edit, independently match its frozen base revision or accepted input identity, and compare the observed changed paths and resulting bytes with the approved change surface. Use the existing artifact and provenance record; a provider success verdict alone is not evidence.
 
 ## Gate
 
@@ -72,6 +76,8 @@ description: "External worker: run eligible worker roles externally."
 - Do not become a shadow lead, product-manager, or consultant substitute.
 - Do not expand scope beyond the approved worker-side phase.
 
-Managed adapters supply actual assigned-role provenance and consume `--user-approved-launch` locally before `--`; that flag is only the caller projection of genuine exact-launch approval. Optional `--astra-task-authorization-json` instead carries a matching genuine Astra 6.2 High/Extra high task authorization; caller-checked scope, revocation and limits still bind before covered repeats, and Max never uses it. `provider_prompt.launch` and the native selector share the pure `model_routing/launch_policy.py` rule. A complete selected logical package includes that nested module, including relocated transports; a FILE link on R/P does not move its companion namespace to the referent directory. Missing/broken mandatory support fails truthfully before effects. Prefer completing the qualified package; declared same-owner Assistance with all canonical rule, scope, genuine permission where needed, resources and readback guarantees may be selected by Root without a new ordinary permission loop. There is no catch-and-allow, raw-flag authority or automatic retry. Roleless direct-user compatibility does not permit managed callers to omit their assigned profession.
+## Legacy CLI launcher details
+
+Managed CLI adapters supply actual assigned-role provenance and consume `--user-approved-launch` locally before `--`; that flag is only the caller projection of genuine exact-launch approval. Optional `--astra-task-authorization-json` instead carries a matching genuine Astra 6.2 High/Extra high task authorization; caller-checked scope, revocation and limits still bind before covered repeats, and Max never uses it. `provider_prompt.launch` and the native selector share the pure `model_routing/launch_policy.py` rule. A complete selected logical package includes that nested module, including relocated transports; a FILE link on R/P does not move its companion namespace to the referent directory. Missing/broken mandatory support fails truthfully before effects. Prefer completing the qualified package; declared same-owner Assistance with all canonical rule, scope, genuine permission where needed, resources and readback guarantees may be selected by Root without a new ordinary permission loop. There is no catch-and-allow, raw-flag authority or automatic retry. Roleless direct-user compatibility does not permit managed callers to omit their assigned profession.
 
 Public launchers retain their selected lexical script argument before importing P and pass the call-local `runtime_namespace` through `launch`/`kimi_main` to the shared rule. P correlates the actual runtime participant with that selected namespace. Direct P library calls without a launcher use the selected P module origin, never process argv0 or cwd. There is no provider/user namespace flag, search or physical-parent fallback; genuine task authority, package/native currentness and applicable exact-attempt or task-scoped user receiving remain separate.

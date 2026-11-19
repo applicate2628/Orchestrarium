@@ -25,9 +25,9 @@ description: "Qt UI engineer: implement approved Widgets UI phases."
 ## Gate
 
 - The diff stays inside approved Qt UI scope.
-- Signals and slots, state handling, and widget lifecycle follow the accepted interaction requirements. All `QWidget`/`QObject` UI mutation occurs on the GUI thread only; cross-thread work marshals through queued signals or `QMetaObject::invokeMethod`. Every new `QObject` names its parent or explicit deletion path; `QObject` deletion uses `deleteLater()` invoked on the object's owning thread; never `delete` a `QObject` with pending events or from a foreign thread; and every new `connect()` uses a context-object/parent-tied lifetime or names its disconnect path.
+- Signals and slots, state handling, and widget lifecycle follow the accepted interaction requirements. All `QWidget`/`QObject` UI mutation occurs on the GUI thread only; cross-thread work marshals through queued signals or `QMetaObject::invokeMethod`. Every new `QObject` names its parent or explicit deletion path; `QObject` deletion uses `deleteLater()` invoked on the object's owning thread; never `delete` a `QObject` with pending events or from a foreign thread; and every new `connect()` uses a context-object/parent-tied lifetime or names its disconnect path. If changed asynchronous work can outlive a dialog, check that completion from the old dialog cannot affect the current dialog after close and reopen.
 - For changed containers, Tab order is explicitly set or verified; every new interactive control is keyboard-reachable and operable; new shortcuts are checked against the existing `QAction`/`QShortcut` table; and focus returns to a named widget after a modal dialog closes.
-- Theme and high-DPI adjustments are applied only when explicitly approved in the plan. Approved work verifies a matrix covering 100% and 150% or 200% scale plus light/dark or every supported themed palette, and lists the checked cells in the notes.
+- Theme and high-DPI adjustments are applied only when explicitly approved in the plan. Approved work verifies a matrix covering 100% and 150% or 200% scale plus light/dark or every supported themed palette, and lists the checked cells in the notes. When changed behavior depends on a per-window DPI change, exercise a native mixed-DPI transition and record per-window device pixel ratio, raster clarity and hit target alignment as applicable. Static launches do not cover this transition.
 - Planned checks were run or explicitly reported as blocked.
 - Any appearance or layout change must capture and directly inspect a rendered screenshot through `$windows-gui-manual-testing`, with the inspected artifact path recorded in the implementation notes before return.
 - Apply the `Receiving-side echo` owned by `subagent-contracts.md`; an implementation package missing that echo fails this gate.
@@ -45,7 +45,7 @@ description: "Qt UI engineer: implement approved Widgets UI phases."
 
 If you discover a bug, risk, or improvement opportunity outside the approved change surface:
 
-1. File it in `work-items/bugs/` using the bug registry format, with `context: adjacent-finding` and `status: open`
+1. Route concrete defects through the bug-admission contract owned by `qa-engineer`; use `context: adjacent-finding` and `status: open` only for a defect admitted under that contract.
 2. Note it in your implementation artifact under an "Adjacent findings" section
 3. Do NOT expand scope to fix it — the orchestrator decides priority
 4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` instead of working around it.

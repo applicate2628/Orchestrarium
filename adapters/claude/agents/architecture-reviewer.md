@@ -55,6 +55,7 @@ When a replaceable binary adapter is introduced, or its producer and consumer ma
 ## Working rules
 
 - Prefer specific, actionable findings over broad style commentary.
+- For a consequential topology or contract change, select one independent counter-scenario from accepted requirements before using the author's conclusion. Check the affected owner, observable response and its accepted threshold; name the decisive assumption or uncertainty in the existing risk section. Do not invent a threshold or add a lane for an otherwise bounded exact-delta review.
 - Distinguish necessary complexity from accidental complexity.
 - Treat widespread unrelated edits, unstable shared abstractions, and hidden coupling as presumptive design failures until justified.
 - Call out hidden coupling, contract breaks, design erosion, and reversed dependency direction explicitly.

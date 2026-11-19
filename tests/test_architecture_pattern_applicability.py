@@ -504,9 +504,9 @@ def test_claude_architect_source_composition_has_one_universal_body() -> None:
 
     assert universal.is_file()
     assert not duplicate.exists()
-    assert "The universal Architect skill (`.agents/skills/architect/SKILL.md`, sourced from `src.codex/skills/architect/SKILL.md`) is the sole role-contract body owner" in _read(wrapper, FAILURE_IDS[0])
-    assert "Architect's sole role-contract body is the universal `.agents/skills/architect/SKILL.md` projection." in _read(inline_policy, FAILURE_IDS[0])
-    assert "('check_not_exists',\n  'src.claude/skills/architect/SKILL.md'" in _read(validator, FAILURE_IDS[0])
+    assert "The sole authored role-contract body is `src.codex/skills/architect/SKILL.md`; this Claude installation loads its ordinary copy at `.claude/skills/architect/SKILL.md`." in _read(wrapper, FAILURE_IDS[0])
+    assert "Architect's sole authored role-contract body is `src.codex/skills/architect/SKILL.md`, installed as an ordinary copy at `.claude/skills/architect/SKILL.md`." in _read(inline_policy, FAILURE_IDS[0])
+    assert "('check_not_exists',\n  'adapters/claude/skills/architect/SKILL.md'" in _read(validator, FAILURE_IDS[0])
 
 
 def test_claude_validator_maps_architect_apat_to_each_layout_owner() -> None:
@@ -526,7 +526,10 @@ def test_claude_validator_maps_architect_apat_to_each_layout_owner() -> None:
         line for line in validation.stdout.splitlines()
         if "PASS" in line and architect_label in line
     )
-    assert validation.returncode == 0 and len(architect_passes) == 8, (
+    expected_labels = {"AP0-AP5 projection file", "AP0-AP5 projection section marker",
+                       *(f"AP{number} marker" for number in range(6))}
+    labels = {line.split(architect_label, 1)[1] for line in architect_passes}
+    assert validation.returncode == 0 and expected_labels <= labels, (
         f"{FAILURE_IDS[5]}: full Claude source validation did not check the "
         f"universal Architect owner\n{validation.stdout}\n{validation.stderr}"
     )
@@ -543,7 +546,13 @@ def test_claude_validator_maps_architect_apat_to_each_layout_owner() -> None:
     # The owner now resolves the same @SKILLS contract for source and installed
     # layouts. Do not require two copied action lists with hardcoded paths.
     common_actions = architect_actions("all")
-    assert len(common_actions) == 8
+    assert expected_labels <= {action[-1].split(architect_label, 1)[1] for action in common_actions}
+    assert ("check_file", "@SKILLS/architect/SKILL.md", architect_label + "AP0-AP5 projection file") in common_actions
+    for number in range(6):
+        assert ("check_contains", "@SKILLS/architect/SKILL.md", f'<!-- APAT-SEMANTIC id="AP{number}.',
+                architect_label + f"AP{number} marker") in common_actions
+    assert ("check_contains", "@SKILLS/architect/SKILL.md", "<!-- APAT-BLOCK:ARCHITECT-DISPOSITION:BEGIN -->",
+            architect_label + "AP0-AP5 projection section marker") in common_actions
     assert {action[1] for action in common_actions} == {"@SKILLS/architect/SKILL.md"}
     assert not architect_actions("dev_repo")
     assert not architect_actions("installed")
@@ -648,8 +657,10 @@ def test_installed_parity_and_validator(
     if provider == "claude":
         claude_architect = target / ".claude/skills/architect"
         universal_architect = target / ".agents/skills/architect"
-        assert claude_architect.is_symlink(), "Claude Architect projection must remain a link"
-        assert claude_architect.resolve() == universal_architect.resolve()
+        for path in (target / ".claude/skills", claude_architect, claude_architect / "SKILL.md"):
+            assert not path.is_symlink()
+            assert not getattr(path.lstat(), "st_file_attributes", 0) & 0x400
+        assert not os.path.lexists(universal_architect), "Claude-only must not depend on a Codex tree"
 
     installed_validator = target / validator
     validation = subprocess.run(

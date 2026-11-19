@@ -184,7 +184,8 @@ python install.py --clients codex claude --global --dry-run
 The host catalog includes Codex, Claude Code, and Antigravity native startup.
 Use `python install.py --list-clients` to inspect it, and see
 [Quick install](INSTALL.md#quick-install) for project targets, the interactive
-menu, and apply behavior. Host installation is separate from SDK provisioning.
+menu, and apply behavior. Empty input or `q` cancels; there is no default.
+Host installation is separate from SDK provisioning.
 
 Windows Kimi execution uses the canonical thin wrapper, not executable enrollment. For each run the wrapper resolves the fixed per-user executable; `ProcessRunnerV1` binds the executable it opens, accepts an absent optional caller binding, and supports a junction or file symlink whose final ordinary executable has a different name. Normal launch does not consult an enrollment receipt, version/hash allowlist, live manifest, high-water record, or offline admission state. The enrollment-named maintenance entrypoints are optional non-writing version/help diagnostics; a supplied offline-policy value is obsolete and fails explicitly. The wrapper alone owns the fixed `kimi-code/k3` file prompt, optional validated capability file, ordinary failure reporting, and resource cleanup. Without that file, tools, Model Context Protocol servers, and subagents remain empty and permission is `reject`; selected capabilities remain caller-scoped and independently verified. The configured model identifier is not independent server-side model attestation, and this contract does not promise compatibility with an arbitrary future breaking Kimi command-line interface change. No vendor binary is downloaded or replaced.
 

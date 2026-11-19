@@ -542,7 +542,7 @@ When a reviewer finds a significant issue outside their domain:
 
 When any role discovers a bug, risk, or improvement outside the approved change surface:
 
-1. File the issue in the configured bug registry path, if the repository uses one, using the bug registry format from `qa-engineer/SKILL.md`, with `context: adjacent-finding` and `status: open`.
+1. Route concrete defects through the bug-admission contract owned by `qa-engineer`; use `context: adjacent-finding` and `status: open` only for a defect admitted under that contract.
 2. Note it in the current artifact under an "Adjacent findings" section.
 3. Do NOT expand scope to address it — the orchestrator decides priority and scheduling.
 4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` instead of working around it.

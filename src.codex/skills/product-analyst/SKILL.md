@@ -21,6 +21,7 @@ description: "Problem statement, user impact, metrics, scope, evidence."
 
 - Return one product brief containing the problem statement; affected user segments or workflows with observed or estimated frequency and severity; business or product constraints; evidence-backed scope; relevant metrics or signals; non-goals; and open questions that still need decision-making. A claim of `all users` requires evidence or is listed as an assumption.
 - For each problem statement, name at least one falsifiable success signal — a metric, count, duration, or error rate that would move if the problem were solved — or state explicitly that no measurable signal exists and acceptance is judgment-bound.
+- For a quantitative claim, name its population and denominator, time window and whether the signal measures the outcome directly or is a proxy. If pooling could reverse a material conclusion, report the affected segment separately and include a counter-signal or independent corroboration; label missing evidence instead of imputing it.
 
 ## Gate
 
@@ -41,7 +42,7 @@ description: "Problem statement, user impact, metrics, scope, evidence."
 
 When product-side investigation reveals a contradicting prior decision, latent defect, or other issue outside the asked question:
 
-1. File it in the configured bug registry path, if the repository uses a bug registry, using the bug registry format from `qa-engineer/SKILL.md`, with `context: adjacent-finding`, `status: open`, and `found-by: product-analyst`.
+1. Route concrete defects through the bug-admission contract owned by `qa-engineer`; use `context: adjacent-finding` and `status: open` only for a defect admitted under that contract. Set `found-by: product-analyst` for this role.
 2. Mention it under **Adjacent findings** in the product brief.
 3. Do not fold it into the current scope; scope expansion is the orchestrator's decision.
 4. If it blocks the current brief, return `BLOCKED:prerequisite` instead of working around it.

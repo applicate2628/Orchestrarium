@@ -34,7 +34,7 @@ When a replaceable binary adapter is introduced, or its producer and consumer ma
 - Build graph, compiler or SDK wiring, packaging, and reproducibility changes remain aligned with the accepted design and constraints.
 - Cross-platform verification matrix: every supported operating-system/toolchain cell is marked verified or `ASSUMPTION (UNVERIFIED)`; representative local or CI build validations were run or explicitly reported as blocked.
 - Toolchain assumptions, environment requirements, and expected developer workflow impact are explicit.
-- Two-build determinism probe: a reproducibility or hermeticity claim is backed by two builds with a clean cache and/or different workspace path plus matching artifact hashes; an unrun probe is reported blocked.
+- Two-build determinism probe: independently rebuild the named primary artifacts from the same declared inputs, in different workspace paths with isolated caches and outputs, and compare their hashes. Report narrower evidence when the full probe cannot run; matching results restored from one shared cache do not establish reproducibility or hermeticity.
 - A compiler, linker, or build-flag change states the intended effect and reports the observed flag delta through a build-log excerpt, binary-size change, warning count, or generated-code spot check.
 - Apply the `Receiving-side echo` owned by `subagent-contracts.md`; an implementation package missing that echo fails this gate.
 
@@ -42,7 +42,7 @@ When a replaceable binary adapter is introduced, or its producer and consumer ma
 
 - Prefer a coherent correction at the owning build invariant that restores or improves reproducible builds.
 - Make compiler, SDK, package-manager, cache, and environment assumptions easy to review.
-- A cache change enumerates key inputs—sources, flags, toolchain version, and relevant environment—and demonstrates a stale-hit test by mutating one input and showing the key changes.
+- A cache change enumerates key inputs—sources, flags, toolchain version, and relevant environment—and demonstrates a stale-hit test for the affected input and a positive identical-input cache-hit control.
 - A dependency or toolchain bump includes the lockfile diff, exact old-to-new versions, and changelog or vulnerability rationale; floating ranges and unrelated bundled bumps are `REVISE`.
 - Separate build and packaging concerns from deployment and runtime platform concerns.
 - If the approved plan conflicts with the actual toolchain or build graph, stop and return the exact conflict instead of improvising.
@@ -52,7 +52,7 @@ When a replaceable binary adapter is introduced, or its producer and consumer ma
 
 When implementation reveals bugs, risks, or improvement opportunities outside the approved change surface:
 
-1. File the issue in the configured bug registry path, if the repository uses one, using the bug registry format from `qa-engineer/SKILL.md`, with `context: adjacent-finding` and `status: open`.
+1. Route concrete defects through the bug-admission contract owned by `qa-engineer`; use `context: adjacent-finding` and `status: open` only for a defect admitted under that contract.
 2. Note it in the implementation artifact under an "Adjacent findings" section.
 3. Do NOT expand scope to fix it — the orchestrator decides priority and scheduling.
 4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` instead of working around it.

@@ -34,7 +34,7 @@ description: "Geometry engineer: implement spatial algorithms."
 ## Working rules
 
 - Prefer explicit treatment of tolerances, degeneracies, and coordinate conventions over implicit behavior.
-- For every touched predicate or construction, classify it as exact arithmetic or epsilon tolerance; for tolerance-based work name the value, units, and accepted-policy source. An inline ad-hoc tolerance without provenance fails the gate.
+- Separate topological predicates, constructed coordinates, and physical or snapping tolerance. For topology-changing decisions require an exact or certified sign (a filtered predicate needs a certified error bound and fallback, not a fixed epsilon). State whether constructed coordinates are exact or approximate, and show that downstream decisions preserve the accepted topology and coordinate error budget. Name the value, units, and accepted policy source for any physical tolerance; an inline ad-hoc tolerance without provenance fails the gate.
 - Outputs are independent of container iteration order and parallel scheduling, or name a canonical tie-break ordering; order-sensitive operations run a two-run same-output check.
 - Keep geometry contracts and error cases easy to reason about.
 - Escalate model or architecture conflicts instead of widening the phase locally.
@@ -51,7 +51,7 @@ description: "Geometry engineer: implement spatial algorithms."
 
 If you discover a bug, risk, or improvement opportunity outside the approved change surface:
 
-1. File it in `work-items/bugs/` using the bug registry format, with `context: adjacent-finding` and `status: open`
+1. Route concrete defects through the bug-admission contract owned by `qa-engineer`; use `context: adjacent-finding` and `status: open` only for a defect admitted under that contract.
 2. Note it in your implementation artifact under an "Adjacent findings" section
 3. Do NOT expand scope to fix it — the orchestrator decides priority
 4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` instead of working around it.

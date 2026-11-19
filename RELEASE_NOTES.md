@@ -4,6 +4,12 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-19
 
+- Align specialist instructions and native Claude wrappers with the existing QA-owned defect-admission contract. Roles report qualified adjacent findings in-band by default and use the configured registry only when explicitly authorized. The default directory is not a provider-specific requirement.
+
+- Raise the evidence bar in the specialist catalog without changing provider or model selection. Science separates code and solution verification from physical validation; delivery distinguishes settled effects and measured performance from replies and proxy signals; interface roles distinguish synthetic tests from actual device observations. Design, review and planning retain release authority and test scope while making their decision evidence more specific. The generic Review Loop now points Claude to its selected-root command where the native helper is installed.
+
+- Update pack verification to check the documented installation layout and the reviewed current common skill bodies. These checks verify packaging and contract alignment, not that a provider ran a role or that a model's answer improved.
+
 - Separate Copilot subscription authentication from explicitly selected BYOK for fresh SDK tasks. BYOK uses the chosen HTTPS model-provider endpoint, with GitHub login and account billing fallback disabled. It does not alter the existing GitHub-token route or enable native editor integration.
 
 - Allow the SDK worker protocol to forward an already-bound read-only Codex Consultant’s native thread fork to the parent authorization check. A refusal performs no fork or new turn; fresh and continuation requests cannot use the fork effect. The selected-client installer verifies the updated worker against the same transport manifest before installing it.

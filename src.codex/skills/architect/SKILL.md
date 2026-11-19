@@ -61,6 +61,7 @@ If the trigger does not apply, record the evidence that the boundary remains ins
 - Prefer additive extension at approved seams over cross-cutting edits to unrelated modules.
 - **CONDITIONAL SKILL:** Use `$generalize-from-instance` when deriving a reusable contract from a concrete fixture, geometry, dataset, user case, or one-off implementation. It is not required for unrelated design work.
 - Hand off a ready decision before optional prose polishing.
+- For a material choice with competing quality attributes, compare viable alternatives (including the existing mechanism when viable) against the same few scenarios: stimulus and operating condition → observable response and acceptable threshold. Reuse the accepted test strategy and claims rather than adding a separate artifact. Distinguish measured evidence, an agreed threshold, and a prediction; give a falsifier for consequential uncertainty.
 - Document rejected options when they materially affect future work. Each rejected alternative names its decisive rejection driver and traces it to a research-memo fact or named constraint; an unverifiable driver is `ASSUMPTION (UNVERIFIED)` with the probe that would resolve it.
 - When the design makes a cross-cutting or long-lived architecture decision (one that outlives this work-item or constrains others), file it in the `work-items/decisions/` registry as `status: proposed` (lead skill `## Decisions`) and REFERENCE it by id from this design package, rather than burying it in a `design.md` that will be archived with the item. Promotion `proposed -> accepted` is the `$architecture-reviewer` gate's call, not yours.
 - Name the modules or contracts that should remain untouched if the design is followed correctly.
@@ -91,7 +92,7 @@ Design as single-owner layers composed by thin assemblies, not per-feature silos
 
 When scope investigation reveals issues outside the admitted scope:
 
-1. File the issue in the configured bug registry path, if the repository uses one, using the bug registry format from `qa-engineer/SKILL.md`, with `context: adjacent-finding` and `status: open`.
+1. Route concrete defects through the bug-admission contract owned by `qa-engineer`; use `context: adjacent-finding` and `status: open` only for a defect admitted under that contract.
 2. Mention it in the current artifact under an "Adjacent findings" section.
 3. Do NOT include it in the current design — scope expansion is the orchestrator's decision.
 4. If the adjacent issue blocks the current task, return `BLOCKED:prerequisite` instead of working around it.

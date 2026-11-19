@@ -204,7 +204,7 @@ AI gates не заменяют внешнюю engineering policy.
 
 Когда любая роль обнаруживает баг, риск или возможность улучшения за пределами утверждённой change surface:
 
-1. Зафиксируйте issue в repository bug-registry path, определённом repo policy или соответствующим pack-local addendum, используя bug-registry format из `qa-engineer`, с `context: adjacent-finding` и `status: open`.
+1. Передайте подтверждённый дефект по правилам `qa-engineer`. Укажите `context: adjacent-finding` и `status: open` только для допущенного дефекта; по умолчанию верните его в отчёте. Запись в настроенный реестр возможна только с явным разрешением диспетчера и при доступе к этому пути.
 2. Упомяните её в текущем артефакте в разделе "Adjacent findings".
 3. НЕ расширяйте scope — orchestrator решает приоритет и планирование.
 4. Если смежная проблема блокирует текущую фазу, верните `BLOCKED:prerequisite` вместо того, чтобы обходить её.

@@ -294,7 +294,7 @@ Rules:
 - `Requested provider: internal` means no explicit external provider was requested by the caller and routing/default resolution picked the provider. It must not be rendered as `auto` in the artifact.
 - `internal consultant` is valid only for the consultant role when `consultantMode: internal`.
 - Provider-backed consultant execution in `external` mode plus `$external-worker` and `$external-reviewer` must show a direct external transport path. An internal agent/helper/subagent host means the route failed the contract and must be reported as disabled or rerouted.
-- For `$external-worker`, the supported external path remains CLI or a disabled-role outcome. A Codex `$external-reviewer` may additionally use the explicit SDK opt-in above under the same Host admission; no internal relay is implied.
+- This prompt-wrapper worker route remains CLI or disabled. Separately selected, supported scoped SDK worker routes use their own canonical receiving contract (see the repository source reference `docs/sdk-execution.md`, current source matrix and scoped-worker sections). A Codex `$external-reviewer` may use the explicit SDK opt-in above under the same Host admission. Neither case implies an internal relay, fallback, new grant, or native qualification.
 - `Actual execution path: internal subagent (provider-labeled)` is always invalid for external adapter roles and must be treated as a routing violation, not as partial success.
 - If a run is blocked because the provider is unavailable, report that explicitly and let the orchestrator reroute.
 
