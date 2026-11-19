@@ -1,28 +1,21 @@
 # ВАК norms reference
 
-⚠️ **These norms change.** Redactions, clause numbers and publication thresholds are amended
-periodically. The data below was verified for a 2026 review — re-verify the **current** redaction
-against the official text before relying on any clause, and cite the redaction date in the document.
-Cross-check every clause number by render of the official source (page-claim offsets are common).
+Treat this file as a map of authorities to consult, not as the authoritative text. For each
+normative finding, record the issuing authority, official source, act and exact clause,
+version and effective date, relevant application date, degree type, scientific specialty,
+and whether the council follows that national or a separately authorized regime. If the
+authority, applicability or operative text cannot be established, say so and leave the
+claim unverified. Do not claim eligibility or non-compliance from an undated checklist.
 
-## ПП РФ № 842 — «О порядке присуждения учёных степеней» (the «Положение»)
+## ПП РФ № 842 — «О порядке присуждения учёных степеней»
 
-The core government statute. Clauses that drove findings (verify numbers against current redaction —
-as of the 2026 review: ред. от 26.10.2023; действ. ред. от 16.10.2024 — п.14 и п.34 абз.3 не
-менялись; п.13 дополнен 25.01.2024 № 62, введены категории К1/К2):
-
-- **п.9–10** — the work must present *new scientific results* / a major scientific problem or
-  achievement, not a description of activity. Basis for "новизна не доказана / инженерная работа"
-  critique and for the "научная проблема — крупная, не «частично методическая»" point.
-- **п.13** — publication requirement (number + categories). Categories К1/К2/К3 introduced 25.01.2024
-  № 62. Typical threshold (verify): technical sciences ≥ 10 publications, of which ≥ 5 in К1–К2.
-- **п.14** — the candidate is *obliged to cite the author and/or source* of borrowed material or
-  results. This is the borrowings rule.
-- **п.34, абз.3** — consequence: *"В случае если отрицательное решение … связано с нарушением
-  требований … пунктом 14 … повторная защита … не допускается"* — and after defense, grounds for
-  stripping the degree (claim admissible within 10 years). Quote this verbatim for the borrowings
-  finding; it makes uncited borrowings a blocking defect.
-- ведущая организация — full legal name required; автореферат title requisites required.
+Find the applicable national rule and amendments on the [official legal publication portal](https://www.pravo.gov.ru/).
+Confirm which rules apply to the selected council and proceeding before matching criteria.
+Check the operative text for scientific novelty, attributable prior work, publication
+and category requirements, and the treatment of disclosed borrowings. Do not reuse a
+generic publication threshold, assume a quoted clause still has the same numbering or
+effect, or state a legal consequence without the current applicable source. The review
+remains advisory.
 
 ## ГОСТ Р 7.0.11-2011 — структура диссертации и автореферата
 
@@ -35,7 +28,7 @@ as of the 2026 review: ред. от 26.10.2023; действ. ред. от 16.10
   page numbering position. **п.5.4** — список сокращений. **п.5.6** — «Список литературы». **п.5.7.1**
   — список иллюстраций/таблиц. **п.7.3.3** — structured выводы/заключение. **п.9** — автореферат
   structure («Общая характеристика», «Основное содержание», «Заключение», список публикаций) and
-  title-page reqs. Verify exact clause text/numbers against the current standard.
+  title-page reqs. Verify the clause text and status with the [Rosstandart register](https://protect.gost.ru/gost/details/80cb3ff3-6f82-4267-9122-0873213d8d53) and the official standard before reporting a finding.
 
 ## ГОСТ Р 7.0.5-2008 — библиографическая ссылка
 
@@ -57,12 +50,11 @@ the work's specialty code.
 
 ## Publication list (Перечень ВАК) and indexing
 
-- Check each publication's journal against the **current** Перечень ВАК and its category for the
-  work's specialty code (lookups by ISSN, e.g. via vak.academy). A journal can be in-profile for one
-  specialty but not the candidate's.
-- **Temporal validity:** a journal that was on the Перечень at the *publication date* counts as ВАК
-  for that article even if its status later changed. Check the historical lists (e.g. 2010/2018).
+- Match each journal by ISSN, scientific specialty and verified category to the official list
+  applicable under the controlling rule. Record publication date and relevant listing window;
+  use a dated official or archived list when historical status matters. Do not assume either
+  present-day listing or past listing alone determines what counts.
 - **Indexing window:** Scopus/WoS coverage can be limited to a date range — a 2010 article in a
   journal indexed only 1999–2007 is not Scopus. Verify the actual coverage window.
-- Foreign journals "приравненные" to Scopus/WoS are accounted under ПП 842's equivalence clause, not
-  "по Перечню ВАК" — keep that distinction in the registry.
+- If a separate indexing or equivalence route applies, cite its controlling provision and keep
+  that route distinct from direct listing; lack of access remains unverified.

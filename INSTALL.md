@@ -65,7 +65,7 @@ Production installs:
   3) Codex + Claude (default production install)
 ```
 
-Pressing Enter selects the default, `Codex + Claude`. The router runs Codex first
+Pressing Enter selects the default production install, `Codex + Claude`. The router runs Codex first
 and Claude second. A successful Codex install is not rolled back if the later
 Claude install fails. Review the requested targets before rerunning without
 `--dry-run`.

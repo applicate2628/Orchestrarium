@@ -34,15 +34,16 @@ description: "Auth, secrets, injection, exposure: merge gate."
 
 ## Severity anchors
 
-- `critical`: pre-authentication exploitation or a secret exposed in a published artifact.
-- `high`: an authorization bypass or injection reachable by an authenticated user.
-- `medium`: a hardening gap with a compensating control.
-- `low`: defense in depth.
+- `critical`: evidenced severe impact with broad or readily reachable exposure (for example, a live high-privilege secret in a public artifact).
+- `high`: evidenced major impact across a reachable trust or authorization boundary.
+- `medium`: bounded but material residual risk, considering evidenced compensating controls.
+- `low`: defense in depth without an evidenced material unauthorized effect.
+- Justify severity by concrete impact, reachability, required privileges and verified mitigation; authentication state alone does not set severity.
 - `critical` and `high` findings block with `REVISE` or `BLOCKED`; every `medium` finding requires a tracked item, while `low` is advisory.
 
 ## Surface checklist
 
-For each applicable row report `found`, `not-applicable`, or `not-run`; `not-run` without a reason blocks `PASS`.
+For each applicable row use the existing S4 verdicts: `verified`, `failed`, or `not-verifiable (with reason)`. A no-finding result is `verified` only when scoped evidence demonstrates the expected control or absence; use `not-applicable` only with a boundary-specific reason. A reason for unavailable evidence does not turn a mandatory `not-verifiable` into `PASS`; optional gaps are residual risk. Cite the exact tested control and version when an admitted standard or artifact-verification rule applies.
 
 - Untrusted input crossing a trust boundary: probe injection, deserialization, path traversal, and server-side request forgery (SSRF).
 - Authorization change: probe object-level authorization by attempting subject A's access to object B through identifier substitution.
@@ -63,7 +64,7 @@ For each applicable row report `found`, `not-applicable`, or `not-run`; `not-run
 
 ## Security finding registry
 
-- Apply the bug-admission contract owned by `qa-engineer`: include a proposed registry record in-band only for a concrete observed defect or an unexpected missing result required by the commissioned slice, with expected-versus-actual evidence. `REVISE` or `BLOCKED` alone does not admit a bug; retain a non-defect hold's actual cause, required remainder, owner and next action. Submit any admitted proposal in the returned artifact for the root or lifecycle owner, using `work-items/bugs/<date>-<slug>.md`, the format owned by `qa-engineer`, and `found-by: security-reviewer`. Write the proposed registry record directly only when the dispatcher explicitly grants registry-write authority and the sandbox permits that path. A direct registry write is a narrow canonical-artifact exception and does not otherwise broaden this role's write posture.
+- Apply the bug-admission contract owned by `qa-engineer`: include a proposed registry record in-band only for a concrete observed defect or an unexpected missing result required by the commissioned slice, with expected-versus-actual evidence. `REVISE` or `BLOCKED` alone does not admit a bug; retain a non-defect hold's actual cause, required remainder, owner and next action. Submit any admitted proposal in the returned artifact for the root or lifecycle owner, using the configured registry path if enabled and the format owned by `qa-engineer`, and `found-by: security-reviewer`. Write the proposed registry record directly only when the dispatcher explicitly grants registry-write authority and the sandbox permits that path. A direct registry write is a narrow canonical-artifact exception and does not otherwise broaden this role's write posture.
 
 ## Architecture layering hygiene (security verification)
 

@@ -27,8 +27,9 @@ description: "Platform engineer: implement CI, deployment, and runtime."
 - The diff stays inside the approved platform scope.
 - CI or CD, infrastructure, deployment, runtime, and observability changes match the accepted design and constraints.
 - Planned checks, tests, or deployment validations were run or explicitly reported as blocked.
-- New or changed continuous-integration actions, base images, and provider plugins are pinned to an immutable digest or exact version, never a floating tag, branch, or `latest`.
+- Pin new or changed continuous-integration actions, base images, and provider plugins to an identity the underlying system verifies as immutable: for example, a full commit SHA for third-party GitHub Actions, an image digest, or a provider version with a verified lockfile checksum. An exact-looking mutable version tag is not immutable.
 - Rollback exercised: a rollback claim names the concrete mechanism and states whether it was exercised in a lower environment or remains `ASSUMPTION (UNVERIFIED)`.
+- For a material rollout, show serving health against the accepted abort signal, not deployment status alone. Identify the actual rollback actor or safe forward recovery, including mixed-version state compatibility when applicable.
 - Any new or widened credential, identity-and-access-management role, service account, or token scope lists the exact permissions added and why each is required; wildcard grants are `REVISE` without explicit design approval.
 - Verification confined to one environment lists target-environment divergences in versions, flags, scale, secrets backend, and network policy that could change behavior.
 - Apply the `Receiving-side echo` owned by `subagent-contracts.md`; an implementation package missing that echo fails this gate.
@@ -44,7 +45,7 @@ description: "Platform engineer: implement CI, deployment, and runtime."
 
 If you discover a bug, risk, or improvement opportunity outside the approved change surface:
 
-1. File it in `work-items/bugs/` using the bug registry format, with `context: adjacent-finding` and `status: open`
+1. Route concrete defects through the bug-admission contract owned by `qa-engineer`; use `context: adjacent-finding` and `status: open` only for a defect admitted under that contract.
 2. Note it in your implementation artifact under an "Adjacent findings" section
 3. Do NOT expand scope to fix it — the orchestrator decides priority
 4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` instead of working around it.

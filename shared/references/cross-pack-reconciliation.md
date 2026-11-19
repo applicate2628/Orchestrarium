@@ -22,7 +22,7 @@ Codex loads skills statically → contract docs must be self-contained lead guid
 | Research admission filter | §"Research admission filter" | §"Research admission filter" | Identical semantics, identical 8-item list + 3 gate owners |
 | Interaction types | §"Interaction types" table | §"Interaction types" table | Same 8 types; Claude has prose descriptions, Codex has compact table |
 | Cross-domain escalation | §"Cross-domain escalation protocol" | §"Cross-domain escalation protocol" | Identical 4-step protocol; Claude adds target-domain mapping table |
-| Adjacent-issue protocol | §"Adjacent-issue protocol" | §"Adjacent-issue protocol" | Identical semantics; Codex says "configured bug registry path" vs Claude's `work-items/bugs/` |
+| Adjacent-issue protocol | §"Adjacent-issue protocol" | §"Adjacent-issue protocol" | Both packs defer to the QA-owned bug-admission contract; no provider-specific registry path or standing write grant |
 | Artifact invalidation | §"Artifact invalidation protocol" | §"Artifact invalidation protocol" | Both blocks point to their platform-local canonical producing-scope and accepted-baseline handoff rule; neither defines another invalidation procedure. |
 | REVISE correction cap | §"REVISE iteration cap" | §"REVISE iteration cap procedure" | Both bindings cite the shared spine's consecutive same-role/same-artifact cap and escalation procedure; neither binding owns its numeric value |
 | Periodic controls | §"Periodic controls" table | §"Periodic controls" | Claude has full 11-row control matrix; Codex defers to repo-defined matrix |
@@ -41,7 +41,7 @@ Codex loads skills statically → contract docs must be self-contained lead guid
 | Artifact gate | §"Artifact gate" | §"Artifact gate — no delegation without brief" | Identical rules; Codex adds "if the repository uses one" qualifier |
 | status.md format | §"status.md format" | §"status.md format" | Identical format. Only diff: Codex says "role to invoke" vs Claude's "agent to launch" |
 | Response format | §"Response format" | §"Shared response format" | Same 5-line format. Codex adds fact-first note and consultant exception inline |
-| BLOCKED classification | §"BLOCKED classification" | §"BLOCKED classification" | Shared subagent operating model owns classification; QA owns conditional bug admission. Preserve the two classes and actual cause/owner/next action; admitted proposals use Codex's configured registry path or Claude's `work-items/bugs/` |
+| BLOCKED classification | §"BLOCKED classification" | §"BLOCKED classification" | Shared subagent operating model owns classification; QA owns conditional bug admission. Preserve the two classes and actual cause/owner/next action; admitted proposals use the repository's configured path, if enabled, on both packs |
 | Interaction rules | §"Interaction rules" | §"Interaction rules" | Same 5 rules; minor wording adaptation |
 | Test ownership boundary | §"Test ownership boundary" | — | **Claude only.** Codex has no equivalent. |
 | Structured completion report | §"Structured completion report" | §"Structured completion report" | Identical 4-item format |
@@ -130,8 +130,8 @@ When changing a shared semantic block:
 2. Find the matching row in this manifest
 3. Open the other pack's file at the anchored heading
 4. Apply the semantic change, adapting platform-specific language:
-   - Claude: "Agent tool", "subagent_type", `.claude/agents/`, `work-items/bugs/`
-   - Codex: "designated agent invocation mechanism", "role", `$CODEX_HOME/skills/`, "configured bug registry path"
+   - Claude: "Agent tool", "subagent_type", `.claude/agents/`
+   - Codex: "designated agent invocation mechanism", "role", `$CODEX_HOME/skills/`
 5. Verify the no-mechanical-application rule: the change must be independently valid in the target context
 
 ## Open items

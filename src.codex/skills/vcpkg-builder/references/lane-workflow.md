@@ -26,7 +26,7 @@ For every build record:
 - Coordinated Universal Time (UTC) start/end and pre-run cutoff;
 - selected buildtrees, packages, install, cache, and scratch roots;
 - relevant source/artifact hashes and current MCP facts;
-- wrapper exit and the port/triplet terminal result;
+- wrapper exit and the port/triplet terminal result; for build-dependent claims, record the resolved overlay, selected features and triplet, observed ABI identity when available, and whether the artifact came from fresh compilation, binary-cache reuse, already-installed/no-op, or an unverified origin;
 - requested generated-build evidence such as Ninja rules, response files, compiler commands, effective flags, patch order, or installed markers;
 - absence/presence checks bounded to current-run files and timestamps;
 - post-run process query proving descendants are reaped;
@@ -46,7 +46,7 @@ For a release gate, confirm the optimization invariant declared by the repositor
 | Target build | The named port/triplet reached configure/compile/link with current-run evidence | `PASS` or `REVISE` only for the proved build criteria |
 | Install/package receiver | Current artifacts were installed and inspected by the requested oracle | Eligible for the admitted runtime verdict |
 
-An already-installed exit-zero path is a no-op, not receiving-side proof of a new source/toolchain fix. Preserve the durable install family, and request a separately admitted fresh-build mechanism rather than deleting shared state implicitly.
+An already-installed exit-zero path is a no-op, not receiving-side proof of a new source/toolchain fix. For a receiving-boundary claim, use the admitted compile/link or runtime consumer when required; a successful consumer does not on its own prove fresh compilation. Preserve the durable install family, and request a separately admitted fresh-build mechanism rather than deleting shared state implicitly.
 
 Triplet names do not universally own storage identity. Repositories may strip release or feature suffixes for a shared durable install family while retaining full variant names for buildtrees and packages. Read the repository's resolver output and record every resolved identity explicitly.
 
@@ -67,6 +67,7 @@ Preserve the exact failing tree and logs. Return control to the root lead for di
 
 ## Terms and Abbreviations
 
+- `ABI`: Application Binary Interface; the vcpkg build identity tracks inputs for binary-cache equivalence.
 - `argv`: argument vector, the ordered command arguments passed to a wrapper.
 - `MCP`: Model Context Protocol, the tool and resource integration protocol.
 - `runtime oracle`: the admitted observation that proves the requested receiving-side behavior.

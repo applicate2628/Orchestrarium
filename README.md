@@ -142,7 +142,7 @@ monthly archive without inventing candidate, active, or closure history.
 ## Installation
 
 From the source checkout root, preview a user-wide installation first. The menu
-offers Codex, Claude Code, or both (the default).
+offers Codex, Claude Code, or both. Pressing Enter selects the default production install (Codex + Claude).
 
 ```bash
 bash install.sh --global --dry-run

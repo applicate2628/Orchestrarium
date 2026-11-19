@@ -45,6 +45,8 @@ description: "External worker: run eligible worker roles externally."
 - If provenance is included inline, use the execution-record fields from `contracts/external-dispatch.md` verbatim instead of inventing a shorter custom header.
 - When a neutral-workdir run produced edits, return a reviewable edit payload and name whether it is a unified diff or a full-file set with repo-relative target paths; in-place editing follows the contract's isolation-worktree binding.
 
+- Before integrating an edit, independently match its frozen base revision or accepted input identity, and compare the observed changed paths and resulting bytes with the approved change surface. Use the existing artifact and provenance record; a provider success verdict alone is not evidence.
+
 ## Working rules
 
 - Do not take review or QA ownership.

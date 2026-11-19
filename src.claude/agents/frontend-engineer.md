@@ -27,7 +27,7 @@ description: "Frontend engineer: implement approved web UI phases."
 - The diff stays inside approved frontend scope.
 - UI behavior, loading states, empty states, error states, success states, and responsiveness remain aligned with the design and acceptance criteria.
 - For every new or changed interactive element, verify keyboard reachability and operability, visible focus, an accessible name, and native-element-before-ARIA semantics; run the repo-standard automated accessibility check or report it blocked.
-- Planned tests and checks were run or explicitly reported as blocked.
+- Planned tests and checks were run or explicitly reported as blocked. For changed asynchronous web behavior, use the existing browser harness to verify the accepted user-visible settled state with semantic locators and retrying assertions instead of sleeps. Where applicable, make a stale completion arrive after cancellation, navigation, or a newer response and verify that it cannot overwrite the current state.
 - Apply the `Receiving-side echo` owned by `subagent-contracts.md`; an implementation package missing that echo fails this gate.
 
 ## Working rules
@@ -38,14 +38,14 @@ description: "Frontend engineer: implement approved web UI phases."
 - For a global style, design token, z-index or stacking-context, or shared-component change, grep and enumerate sibling consumers, smoke-check the top affected surfaces, and list any untested consumer as residual risk.
 - Any new external- or user-content sink is framework-default-escaped or names its sanitizer and test in the notes; a new raw-HTML sink, URL-derived navigation sink, or attribute/style-injection sink without that evidence is `REVISE`.
 - If the specification is ambiguous or the plan conflicts with reality, stop and return `BLOCKED` with the exact gap.
-- When fixing a runtime bug whose cause is not obvious from code, invoke `$bug-hunting` to load diagnostic-logging discipline. For UI/animation/layout bugs needing visual evidence, route through `$windows-gui-manual-testing` and `$analyzing-video-bugs` rather than reading raw video.
+- When fixing a runtime bug whose cause is not obvious from code, invoke `$bug-hunting` to load diagnostic-logging discipline. For web UI/animation/layout bugs needing visual evidence, use the existing browser capture path; route Windows desktop-host evidence through `$windows-gui-manual-testing` and video through `$analyzing-video-bugs`.
 - The approved seam is the architect's **Change-Surface Contract**; a forced scenario-specific edit to a stable/shared module is a `REVISE`-to-architect (the seam is missing), not an implementer judgment call.
 
 ## Adjacent findings protocol
 
 If you discover a bug, risk, or improvement opportunity outside the approved change surface:
 
-1. File it in `work-items/bugs/` using the bug registry format, with `context: adjacent-finding` and `status: open`
+1. Route concrete defects through the bug-admission contract owned by `qa-engineer`; use `context: adjacent-finding` and `status: open` only for a defect admitted under that contract.
 2. Note it in your implementation artifact under an "Adjacent findings" section
 3. Do NOT expand scope to fix it — the orchestrator decides priority
 4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` instead of working around it.

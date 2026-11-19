@@ -50,6 +50,7 @@ description: "External worker: run eligible worker roles externally."
 - Return one external worker artifact containing the role-appropriate output, any changed files when code or docs were edited, relevant checks or verification evidence when they exist, explicit assumptions or risks, and a provenance header.
 - When a neutral-workdir run produced edits, return a reviewable edit payload and name whether it is a unified diff or a full-file set with repo-relative target paths; in-place editing follows the contract's isolation-worktree binding.
 - For the provenance header, use the canonical execution record in `../lead/external-dispatch.md` verbatim instead of defining local fields.
+- Before integrating an edit, independently match its frozen base revision or accepted input identity, and compare the observed changed paths and resulting bytes with the approved change surface. Use the existing artifact and provenance record; a provider success verdict alone is not evidence.
 
 ## Gate
 

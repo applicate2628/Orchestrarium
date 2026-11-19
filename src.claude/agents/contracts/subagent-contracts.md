@@ -247,7 +247,7 @@ When returning BLOCKED, specify the class:
 | Class | Meaning | Orchestrator action |
 | --- | --- | --- |
 | `BLOCKED:dependency` | Cannot proceed — missing tool, environment, access, or information that no current agent can provide | Present to user for resolution |
-| `BLOCKED:prerequisite` | Required adjacent work or input must be resolved before the dependent action proceeds | Retain actual cause, required remainder, owner and next action in the existing artifact/recovery; propose a bug in `work-items/bugs/` only under `qa-engineer`'s bug-admission contract; route unadmitted scope/priority to its admission owner and resume only after the prerequisite is verified |
+| `BLOCKED:prerequisite` | Required adjacent work or input must be resolved before the dependent action proceeds | Retain actual cause, required remainder, owner and next action in the existing artifact/recovery; propose a bug only under `qa-engineer`'s bug-admission contract; route unadmitted scope/priority to its admission owner and resume only after the prerequisite is verified |
 
 If no class is specified, treat as `BLOCKED:dependency` (conservative default).
 

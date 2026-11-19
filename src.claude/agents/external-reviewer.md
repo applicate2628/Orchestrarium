@@ -47,6 +47,8 @@ description: "External reviewer: run eligible review or QA externally."
 - If provenance is included inline, use the execution-record fields from `contracts/external-dispatch.md` verbatim instead of inventing a shorter custom header.
 - The returned verdict is input evidence for the orchestrating session, not stage closure: the orchestrator spot-checks load-bearing findings or the no-findings claim before pinning the gate.
 
+- Bind findings and no-findings claims to the frozen revision reviewed. For each material protected claim or accepted criterion in the assigned slice, mark it checked, not checked, or unverified and cite the evidence or limitation; do not treat silence as coverage.
+
 ## Working rules
 
 - Do not take implementation ownership.
