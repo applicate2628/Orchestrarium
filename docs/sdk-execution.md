@@ -1472,6 +1472,44 @@ AGY-to-Codex continuation, mutating Worker operations, other provider workers,
 POSIX behavior or global rollout. Historical direct Codex fresh/continuation
 evidence remains separately scoped. PR19 is still draft/unmerged.
 
+### First-version delivery review, 2026-11-19
+
+The bounded comparison from observed installed `c835cc37` to `0564f567`
+contains fifteen changed files. Codex SDK adapters, dispatch, native session,
+process custody, capture/scanning, canonical receiving, request/model selection
+and the AGY public entrypoint have no source changes in that interval. The
+later functional changes are the Windows system-directory resolver and explicit
+installer maintenance routes; the rest are documentation and their regressions.
+The absolute native Codex executable route used by the observed handoff does
+not enter the changed CMD/BAT resolution branch.
+
+The final installer source and snapshot tests still match the qualified frozen
+digests recorded with `9eab68fe`. Its existing 49-test result and independently
+reviewed Wave localize/apply/readiness evidence remain scoped to that mechanism.
+Current source projection validation covers all 33 shared runtime files; required
+main revision `4191d8e9` is an ancestor. These checks bridge the selected source
+delta; they do not relabel the earlier model call as a new whole-HEAD run.
+
+On the delivery candidate, the three affected regression modules passed all 72
+cases; three selected real installer-producer neighbors also passed. The only
+warning was the configured cache directory being ignored with the pytest cache
+plugin disabled. No model calls, Actions, working-configuration changes or trust
+operations were performed; installer tests used isolated fixtures. Independent
+delta/document review found no release-blocking defect.
+
+No changed model-execution behavior currently justifies repeating the live pair.
+Remaining release order:
+1. Publish and verify the final pre-SDK tag on the latest stable main on GitHub
+   **before** merging SDK. This is a separately owned task, not completed here.
+2. Complete the requested independent pre-merge audit of the selected SDK v1
+   candidate, preserving the frozen runtime while review lanes inspect transport,
+   rollback and scope. Identify the exact reviewed revision and resolve findings.
+3. Merge and install only under their own authorization, preserving user data and
+   machine-local hook registration/trust. No merge, Actions, model calls or global
+   rollout are performed by this delivery review.
+4. Keep wider providers, roles and platforms deferred as above; do not turn them
+   into new first-version gates without an actual unmet criterion.
+
 ### Current execution state
 
 Completed source/offline milestones include setup apply/recovery; Codex public

@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-19
 
+- Reconcile the selected SDK v1 delivery delta with the observed native handoff, reusing unchanged execution evidence rather than requesting another model run. Require the final stable pre-SDK tag to be published and verified before any SDK merge; merge and rollout remain separate authorized steps.
+
 - Record the user-operated native Antigravity-to-Codex SDK fresh Consultant handoff and distinguish its completed canonical evidence from a private readback-wrapper error. Preserve earlier failed attempts, avoid another model call, and keep wider provider, role and rollout qualification explicitly separate.
 
 - Update the Codex manual hook-trust instructions to the current hook browser instead of relying on a startup modal. Keep explicit user review separate from file installation and static health checks.
