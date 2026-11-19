@@ -187,3 +187,22 @@ class AgentsModeContractTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_enum_scan_ignores_repo_relative_scratch_only(tmp_path):
+    from _module_loading_support import load_module
+
+    root = Path(__file__).resolve().parents[1]
+    validator = load_module(
+        root / "scripts/validate-agents-mode-contract.py", "agents_mode_enum_scope"
+    )
+    checkout = tmp_path / ".scratch" / "checkout"
+    included = checkout / "shared/references/active.md"
+    excluded = checkout / "shared/references/.scratch/temporary.md"
+    for path in (included, excluded):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+
+    scanned = validator._iter_enum_scan_files(checkout)
+    assert included in scanned
+    assert excluded not in scanned

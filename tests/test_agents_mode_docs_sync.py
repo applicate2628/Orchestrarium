@@ -5,14 +5,17 @@ import unittest
 from pathlib import Path
 from shutil import copy2
 
+from _module_loading_support import load_module
 
-CONTRACT_SURFACES = [
+
+ROOT = Path(__file__).resolve().parents[1]
+SYNC = load_module(ROOT / "scripts/sync-agents-mode-docs.py", "agents_mode_docs_sync")
+CONTRACT_SURFACES = (
     "shared/agents-mode.schema.json",
     "shared/agents-mode.presets.json",
-    "docs/agents-mode-reference.md",
-    "src.codex/skills/init-project/SKILL.md",
-    "src.claude/commands/agents-init-project.md",
-]
+    SYNC.REFERENCE_DOC,
+    *SYNC.INIT_SURFACES.values(),
+)
 
 
 class AgentsModeDocsSyncTest(unittest.TestCase):
@@ -44,7 +47,7 @@ class AgentsModeDocsSyncTest(unittest.TestCase):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 copy2(root / relative, target)
 
-            reference = tmp_root / "docs" / "agents-mode-reference.md"
+            reference = tmp_root / SYNC.REFERENCE_DOC
             reference.write_text(
                 reference.read_text(encoding="utf-8").replace(
                     "| `power-mode` | hardest-task maximum result |",
@@ -53,7 +56,7 @@ class AgentsModeDocsSyncTest(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            codex_init = tmp_root / "src.codex" / "skills" / "init-project" / "SKILL.md"
+            codex_init = tmp_root / SYNC.INIT_SURFACES["codex"]
             codex_init.write_text(
                 codex_init.read_text(encoding="utf-8").replace(
                     "externalClaudeProfile: {value}",

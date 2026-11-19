@@ -14,20 +14,25 @@ EXPECTED_HIT_FILES = frozenset({
     "INSTALL.md",
     "README.md",
     "docs/agents-mode-reference.md",
+    "docs/client-integrations.md",
+    "docs/provider-access-policy.md",
+    "docs/sdk-execution.md",
     "docs/external-worker-design.md",
     "docs/provider-runtime-layouts.md",
     "shared/AGENTS.shared.md",
     "shared/agents-mode.defaults.yaml",
-    "src.claude/CLAUDE.md",
-    "src.claude/agents/consultant.md",
-    "src.claude/agents/contracts/external-dispatch.md",
-    "src.claude/agents/contracts/operating-model.md",
-    "src.claude/agents/contracts/subagent-contracts.md",
-    "src.claude/agents/external-worker.md",
-    "src.claude/commands/agents-external-brigade.md",
-    "src.claude/commands/agents-help.md",
-    "src.claude/commands/agents-init-project.md",
-    "src.claude/commands/agents-second-opinion.md",
+    "adapters/claude/CLAUDE.md",
+    "adapters/claude/agents/consultant.md",
+    "adapters/claude/agents/contracts/external-dispatch.md",
+    "adapters/claude/agents/contracts/operating-model.md",
+    "adapters/claude/agents/contracts/subagent-contracts.md",
+    "adapters/claude/agents/external-worker.md",
+    "adapters/claude/commands/agents-external-brigade.md",
+    "adapters/claude/commands/agents-help.md",
+    "adapters/claude/commands/agents-init-project.md",
+    "adapters/claude/commands/agents-second-opinion.md",
+    "adapters/claude/references/ru/subagent-operating-model.md",
+    "adapters/claude/references/subagent-operating-model.md",
     "src.codex/AGENTS.codex.md",
     "src.codex/skills/consultant/SKILL.md",
     "src.codex/skills/consultant/agents/openai.yaml",
@@ -44,9 +49,21 @@ EXPECTED_HIT_FILES = frozenset({
     "shared/references/cross-pack-reconciliation.md",
     "shared/references/spine/governance-glossary.md",
 })
+# These documents describe different authorities from installed operator routing.
+# Keep them in the exact inventory and verify their distinction explicitly.
+CONTEXT_BOUNDARIES = {
+    "docs/client-integrations.md": ("not an execution-routing or credential grant",),
+    "docs/provider-access-policy.md": ("access findings, not adapter readiness or spending permission",),
+    "docs/sdk-execution.md": (
+        "not live-qualified execution",
+        "do not activate a public Grok worker",
+        "grok_receiving_unavailable",
+    ),
+}
+MARKDOWN_REFERENCE = re.compile(r"^ {0,3}\[[^]]+\]:\s*\S")
 KIMI_WORKER_SURFACES = frozenset(
     {
-        "src.claude/agents/external-worker.md",
+        "adapters/claude/agents/external-worker.md",
         "src.codex/skills/external-worker/SKILL.md",
     }
 )
@@ -86,21 +103,21 @@ GROK_NONEXECUTION_TERMS = re.compile(
     re.IGNORECASE,
 )
 KIMI_ADMISSION_TERMS = {
-    "explicit": re.compile(r"\bexplicit(?:-only)?\b", re.IGNORECASE),
+    "explicit": re.compile(r"\bexplicit(?:-only)?\b|явный выбор", re.IGNORECASE),
     "read-only/read-tools boundary": re.compile(
-        r"\b(?:read-only|read tools)\b", re.IGNORECASE
+        r"\b(?:read-only|read tools)\b|работы только на чтение", re.IGNORECASE
     ),
     "independent verification": re.compile(
-        r"\bindependent(?:ly)?\s+verif(?:y|ies|ied|ication)\b", re.IGNORECASE
+        r"\bindependent(?:ly)?\s+verif(?:y|ies|ied|ication)\b|независим\w+ провер", re.IGNORECASE
     ),
     "nonauthorizing": re.compile(
-        r"\bnon[- ]?authoriz(?:e[ds]?|ing)\b", re.IGNORECASE
+        r"\bnon[- ]?authoriz(?:e[ds]?|ing)\b|не да[её]т полномочий", re.IGNORECASE
     ),
 }
 KIMI_ADMISSION_TRIGGER = re.compile(
     r"(?:\bkimi\b\s+(?:is|may|can|uses?|remains)\b|"
     r"\b(?:choose|select(?:ed)?|route|use)\s+\bkimi\b|"
-    r"\bexplicit(?:-only)?\s+\bkimi\b)",
+    r"\bexplicit(?:-only)?\s+\bkimi\b|явный выбор\s+kimi\b)",
     re.IGNORECASE,
 )
 GROK_SELECTION = re.compile(
@@ -157,7 +174,7 @@ def test_global_codex_kimi_clauses_do_not_claim_unavailability() -> None:
 
 
 def test_kimi_grok_live_inventory_and_nonexecution_language() -> None:
-    """Every live mention must state its provider-specific safety boundary."""
+    """Check the complete inventory and each document role's policy boundary."""
 
     hits: dict[str, tuple[str, ...]] = {}
     for path in _live_docs_and_yaml():
@@ -171,7 +188,17 @@ def test_kimi_grok_live_inventory_and_nonexecution_language() -> None:
 
     assert set(hits) == EXPECTED_HIT_FILES
 
-    for relative_path, lines in hits.items():
+    for relative_path, required in CONTEXT_BOUNDARIES.items():
+        text = (ROOT / relative_path).read_text(encoding="utf-8")
+        for boundary in required:
+            assert boundary in text, f"missing contextual boundary {boundary!r} in {relative_path}"
+
+    runtime_hits = {
+        relative_path: tuple(line for line in lines if not MARKDOWN_REFERENCE.match(line))
+        for relative_path, lines in hits.items()
+        if relative_path not in CONTEXT_BOUNDARIES
+    }
+    for relative_path, lines in runtime_hits.items():
         for line in lines:
             # Sentence clauses prevent an unrelated earlier provider mode from
             # satisfying or violating the Kimi/Grok-only policy boundary.
@@ -191,7 +218,7 @@ def test_kimi_grok_live_inventory_and_nonexecution_language() -> None:
                         f"Grok selection wording in {relative_path}: {clause}"
                     )
 
-    for relative_path, lines in hits.items():
+    for relative_path, lines in runtime_hits.items():
         text = "\n".join(lines)
         if relative_path in KIMI_WORKER_SURFACES:
             for required in KIMI_WORKER_ADMISSION_TERMS:

@@ -256,8 +256,8 @@ def test_dual_safe_lead_definition_and_current_state_documentation() -> None:
     expected_current_state = {
         "README.md": "main-agent activation",
         "INSTALL.md": "settings.json",
-        "src.claude/README.md": "initialPrompt",
-        "src.claude/CLAUDE.md": "initialPrompt",
+        "adapters/claude/README.md": "initialPrompt",
+        "adapters/claude/CLAUDE.md": "initialPrompt",
         "docs/provider-runtime-layouts.md": "initialPrompt",
     }
     for relative, marker in expected_current_state.items():

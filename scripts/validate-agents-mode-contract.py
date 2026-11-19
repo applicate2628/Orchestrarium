@@ -713,7 +713,7 @@ def _iter_enum_scan_files(root: Path) -> list[Path]:
             files.extend(
                 p for p in d.rglob("*")
                 if p.is_file() and p.suffix in _ENUM_SCAN_EXTS
-                and "/.scratch/" not in p.as_posix()
+                and ".scratch" not in p.relative_to(root).parts[:-1]
                 # Adapter reference addenda were outside this runtime enum scan
                 # before relocation; moving them must not change its scope.
                 and not p.is_relative_to(root / "adapters/claude/references")

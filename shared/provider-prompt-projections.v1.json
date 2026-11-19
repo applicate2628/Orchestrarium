@@ -159,7 +159,7 @@
     },
     "sdk_execution/worker.py": {
       "source": "scripts/sdk_execution/worker.py",
-      "sha256": "e6aecfc3071d1b0241fa81bad8addb86347286315e9225fbf77175107a99c374",
+      "sha256": "8d23adbbf3672fadcfa82ab8a08ea0593434abf89f2322e615487d979728a25c",
       "destination": "scripts/sdk_execution/worker.py"
     },
     "sdk_execution/native_binding.py": {

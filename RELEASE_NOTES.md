@@ -4,6 +4,10 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-19
 
+- Allow the SDK worker protocol to forward an already-bound read-only Codex Consultant’s native thread fork to the parent authorization check. A refusal performs no fork or new turn; fresh and continuation requests cannot use the fork effect. The selected-client installer verifies the updated worker against the same transport manifest before installing it.
+
+- Validate the same agents-mode runtime documents even when the checkout is under a temporary workspace. The selected Claude guidance also makes clear that Kimi output requires independent verification and grants no authority.
+
 - Correct the SDK installation preview instructions, selected-client skill and transport ownership, and the documented Windows CLI parser boundary. Documentation now distinguishes common authored skills from independent installed copies and does not treat source-level parser admission as native provider acceptance. The installed Claude instructions and Architect wrapper now name Claude’s own Architect skill copy; Lead startup and native dispatch are unchanged.
 
 - Keep bundled installer launchers and their client-installation entry points from writing Python bytecode into the retained bundle during previews or installs. The separate SDK package setup and worker environment are unchanged.

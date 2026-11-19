@@ -20,6 +20,10 @@ from policy_text_contract import identifier_present, lexical, relationships, sel
 from test_codex_routing_instruction_kernel import codex_duties as routing_duties, shared_duties as routing_shared_duties
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+# Active SDK adapter authoring surfaces; historical src.claude is not an owner.
+CLAUDE_SOURCE = "adapters/claude"
+CLAUDE_BOOTSTRAP = f"{CLAUDE_SOURCE}/CLAUDE.md"
+CLAUDE_RUNTIME_ADDENDUM = f"{CLAUDE_SOURCE}/references/subagent-operating-model.md"
 
 
 class TestOwnerEquivalentExecutionContract(unittest.TestCase):
@@ -31,17 +35,17 @@ class TestOwnerEquivalentExecutionContract(unittest.TestCase):
                 "remains the only substantive transport source",
                 "engineering through the canonical fixed `kimi-code/k3` wrapper",
             ),
-            "src.claude/agents/contracts/external-dispatch.md": (
+            f"{CLAUDE_SOURCE}/agents/contracts/external-dispatch.md": (
                 "is the only approved Kimi launch surface",
                 "Substantive raw provider Command-Line Interface (CLI) prompt routes are unsupported: use",
             ),
             "src.codex/skills/review-loop/SKILL.md": (
                 "Every dispatched external angle on a TRACKED work-item uses the approved thin wrapper",
             ),
-            "src.claude/commands/agents-review-loop.md": (
+            f"{CLAUDE_SOURCE}/commands/agents-review-loop.md": (
                 "each external-provider lane uses the approved thin wrapper",
             ),
-            "src.claude/CLAUDE.md": (
+            CLAUDE_BOOTSTRAP: (
                 "Kimi is explicit-only through the approved thin wrapper",
             ),
         }
@@ -87,11 +91,11 @@ class TestOwnerEquivalentExecutionContract(unittest.TestCase):
 
     def test_lifecycle_and_launch_projections_apply_one_shared_contract(self):
         for relative in (
-            "src.codex/skills/lead/SKILL.md", "src.claude/skills/lead/SKILL.md",
+            "src.codex/skills/lead/SKILL.md", f"{CLAUDE_SOURCE}/skills/lead/SKILL.md",
             "src.codex/skills/lead/subagent-contracts.md",
-            "src.claude/agents/contracts/subagent-contracts.md",
+            f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md",
             "src.codex/skills/lead/external-dispatch.md",
-            "src.claude/agents/contracts/external-dispatch.md",
+            f"{CLAUDE_SOURCE}/agents/contracts/external-dispatch.md",
         ):
             with self.subTest(relative=relative):
                 text = (REPO_ROOT / relative).read_text(encoding="utf-8")
@@ -100,12 +104,12 @@ class TestOwnerEquivalentExecutionContract(unittest.TestCase):
                 self.assertNotIn("a failed append stops scheduling", text)
 
 SPINE = "shared/AGENTS.shared.md"
-CLAUDE_QUICK_FIX_TEMPLATE = "src.claude/agents/team-templates/quick-fix.json"
-CLAUDE_RESEARCH_TEMPLATE = "src.claude/agents/team-templates/research.json"
+CLAUDE_QUICK_FIX_TEMPLATE = f"{CLAUDE_SOURCE}/agents/team-templates/quick-fix.json"
+CLAUDE_RESEARCH_TEMPLATE = f"{CLAUDE_SOURCE}/agents/team-templates/research.json"
 
 HANDOFF_CONTRACTS = (
     "src.codex/skills/lead/subagent-contracts.md",
-    "src.claude/agents/contracts/subagent-contracts.md",
+    f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md",
 )
 
 IMPLEMENTATION_PROFESSIONS = (
@@ -126,7 +130,7 @@ IMPLEMENTATION_PROFESSION_FILES = tuple(
     for role in IMPLEMENTATION_PROFESSIONS
     for path in (
         f"src.codex/skills/{role}/SKILL.md",
-        f"src.claude/agents/{role}.md",
+        f"{CLAUDE_SOURCE}/agents/{role}.md",
     )
 )
 
@@ -161,66 +165,66 @@ PINS = [
     # P4 — spine stop-rule (Fable probe text) + operational bullet (Sol text)
     ("P4-spine", None, [SPINE]),
     ("P4-op", "**Second-cross-break stop:** If a second fix in the same session breaks a previously working neighbor, pause speculative changes to the affected mechanism.",
-     ["adapters/claude/commands/agents-bugfix.md", "src.codex/skills/bug-hunting/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/commands/agents-bugfix.md", "src.codex/skills/bug-hunting/SKILL.md"]),
 
     # A5 — shared dead-lane and missing-verdict duties
     ("A5-spine", None, [SPINE]),
 
     # P3 — N independent roots (both bug-hunting SKILLs)
     ("P3", "When N symptoms or failing cases are reported, keep N independent root hypotheses",
-     ["src.claude/skills/bug-hunting/SKILL.md", "src.codex/skills/bug-hunting/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/skills/bug-hunting/SKILL.md", "src.codex/skills/bug-hunting/SKILL.md"]),
 
     # P2+P5 — oracle-anchored, absolute QA (three bullets)
     ("P2P5-letpass", "Before any run, challenge each acceptance criterion with a falsifying case and its required property; if the criterion admits the known failure or a degenerate result, return `REVISE` with that evidence to the acceptance owner instead of rewriting accepted success semantics.",
-     ["src.claude/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
     ("P2P5-oracle", "Anchor expected behavior to a known-good oracle (a shipped release or independent ground truth)",
-     ["src.claude/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
     ("P2P5-absolute", "Relative agreement such as ON≈OFF cannot PASS by itself.",
-     ["src.claude/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
 
     # Batch 3 acceptance — role floors augment retained/canonical obligations.
     ("B1-S1-input", "inputs required by the canonical S1 `Receiving-side echo` in `subagent-contracts.md`",
-     ["src.claude/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
     ("B1-S1-class-audit", "actual defects outside admitted scope must be reported as `out-of-scope` or `unresolved`, never `not-affected`",
-     ["src.claude/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
     ("F2-receiving-classification", "actual defects outside admitted scope must be reported as `out-of-scope` or `unresolved`, never `not-affected`",
      list(HANDOFF_CONTRACTS)),
     ("B2-qt-delete-later", "`QObject` deletion uses `deleteLater()` invoked on the object's owning thread; never `delete` a `QObject` with pending events or from a foreign thread",
-     ["src.claude/agents/qt-ui-engineer.md", "src.codex/skills/qt-ui-engineer/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/agents/qt-ui-engineer.md", "src.codex/skills/qt-ui-engineer/SKILL.md"]),
     ("B3-model-view-settled-signals", "Model/view-specific settled-signal evidence names the applicable signal—`dataChanged`, `rowsInserted`, or `modelReset`",
-     ["src.claude/agents/model-view-engineer.md", "src.codex/skills/model-view-engineer/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/agents/model-view-engineer.md", "src.codex/skills/model-view-engineer/SKILL.md"]),
     ("B4-geometry-retained-rule", "Prefer explicit treatment of tolerances, degeneracies, and coordinate conventions over implicit behavior.",
-     ["src.claude/agents/geometry-engineer.md", "src.codex/skills/geometry-engineer/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/agents/geometry-engineer.md", "src.codex/skills/geometry-engineer/SKILL.md"]),
     ("B5-visualization-retained-frame", "Make units, color-scale choices, coordinate transforms, and aggregation assumptions explicit.",
-     ["src.claude/agents/visualization-engineer.md", "src.codex/skills/visualization-engineer/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/agents/visualization-engineer.md", "src.codex/skills/visualization-engineer/SKILL.md"]),
 
     # A2 — parallel-isolation protocol + marker (both operating-models)
     ("A2-declare", "**Declare each requested isolation worktree.**",
-     ["src.claude/agents/contracts/operating-model.md", "src.codex/skills/lead/operating-model.md"]),
+     [f"{CLAUDE_SOURCE}/agents/contracts/operating-model.md", "src.codex/skills/lead/operating-model.md"]),
     ("A2-marker", "# orchestrarium:requested-isolation-worktree",
-     ["src.claude/agents/contracts/operating-model.md", "src.codex/skills/lead/operating-model.md"]),
+     [f"{CLAUDE_SOURCE}/agents/contracts/operating-model.md", "src.codex/skills/lead/operating-model.md"]),
     ("A2-resource-surface", "Parallel lanes are independent only when each lane's mutation set is disjoint from every other lane's read, write, execute, install/copy, and baseline surfaces for the full overlap interval. If a mutation can reach any such surface, serialize the lanes or use explicitly requested, validated isolation.",
      ["shared/references/subagent-operating-model.md",
-      "src.claude/agents/contracts/operating-model.md",
+      f"{CLAUDE_SOURCE}/agents/contracts/operating-model.md",
       "src.codex/skills/lead/operating-model.md"]),
     ("A2-resource-spine", None, [SPINE]),
     # A2 — Lead SKILL pointer
     ("A2-pointer", "Apply the installed operating-model parallel-isolation protocol before launch; mutating or Git-using parallel lanes require one requested, cleanup-owned worktree each.",
-     ["src.claude/skills/lead/SKILL.md", "src.codex/skills/lead/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/skills/lead/SKILL.md", "src.codex/skills/lead/SKILL.md"]),
     # A2 — hook audit owner (Codex Lead procedure + INSTALL); the root referral is tested below.
     ("A2-doc", "warns on every confidently parsed `git worktree add` except one add whose command ends with the exact `# orchestrarium:requested-isolation-worktree` marker required by the installed parallel-isolation protocol; missing, near-match, quoted, reused, or batch markers do not suppress the audit.",
      ["src.codex/skills/lead/operating-model.md", "INSTALL.md"]),
     ("A2-doc-claude", "The worktree audit recognizes only an exact trailing `# orchestrarium:requested-isolation-worktree` marker.",
-     ["src.claude/CLAUDE.md"]),
+     [CLAUDE_BOOTSTRAP]),
     # A2 — hook marker constant present in BOTH hook copies
     ("A2-hook-const", 'REQUESTED_ISOLATION_MARKER = "# orchestrarium:requested-isolation-worktree"',
-     ["src.claude/agents/hooks/check-no-trash-in-repo.py", "src.codex/skills/lead/hooks/check-no-trash-in-repo.py"]),
+     [f"{CLAUDE_SOURCE}/agents/hooks/check-no-trash-in-repo.py", "src.codex/skills/lead/hooks/check-no-trash-in-repo.py"]),
 
     # A5b — hardening invariants 7 and 8 (both review-loop bindings)
     ("A5b-inv7", "**Failed lane is unverified.** Any expected lane that errors, dies, or hits a time/token/usage limit is UNVERIFIED.",
-     ["src.claude/agents/contracts/review-loop.md", "src.codex/skills/review-loop/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/agents/contracts/review-loop.md", "src.codex/skills/review-loop/SKILL.md"]),
     ("A5b-inv8", "**Fail-closed aggregation.** A missing/null sub-verdict or findings payload is NOT-clean.",
-     ["src.claude/agents/contracts/review-loop.md", "src.codex/skills/review-loop/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/agents/contracts/review-loop.md", "src.codex/skills/review-loop/SKILL.md"]),
     # A5b — invariants-7-8-are-the-runtime-enforcement step (command + codex skill);
     # the validator itself stays dev/CI-only, per the recorded operator directive
     # (RELEASE_NOTES.md, the 2026-06-03 entry "Kept the review-loop ledger validator
@@ -230,121 +234,121 @@ PINS = [
     # so every line number below an insertion point rots on the next release (this comment
     # previously said ":153", which had drifted to :281 by 2026-07-25).
     ("A5b-run", "hardening invariants 7-8 (failed-lane-is-unverified, fail-closed aggregation);",
-     ["src.claude/commands/agents-review-loop.md", "src.codex/skills/review-loop/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/commands/agents-review-loop.md", "src.codex/skills/review-loop/SKILL.md"]),
 
     # Decision C — reviewer fix-class triage and HOW→VERIFY independence.
     ("fix-class-A-field", "`fix-class: {inline-sufficient | design-decision}`",
-     ["src.claude/agents/architecture-reviewer.md",
+     [f"{CLAUDE_SOURCE}/agents/architecture-reviewer.md",
       "src.codex/skills/architecture-reviewer/SKILL.md",
-      "src.claude/agents/security-reviewer.md",
-      "src.claude/agents/performance-reviewer.md",
-      "src.claude/agents/ux-reviewer.md",
-      "src.claude/agents/accessibility-reviewer.md",
+      f"{CLAUDE_SOURCE}/agents/security-reviewer.md",
+      f"{CLAUDE_SOURCE}/agents/performance-reviewer.md",
+      f"{CLAUDE_SOURCE}/agents/ux-reviewer.md",
+      f"{CLAUDE_SOURCE}/agents/accessibility-reviewer.md",
       "src.codex/skills/security-reviewer/SKILL.md",
       "src.codex/skills/performance-reviewer/SKILL.md",
       "src.codex/skills/ux-reviewer/SKILL.md",
       "src.codex/skills/accessibility-reviewer/SKILL.md"]),
     ("fix-class-A-advisory", "inline HOW stays advisory (non-binding)",
-     ["src.claude/agents/architecture-reviewer.md",
+     [f"{CLAUDE_SOURCE}/agents/architecture-reviewer.md",
       "src.codex/skills/architecture-reviewer/SKILL.md",
-      "src.claude/agents/security-reviewer.md",
-      "src.claude/agents/performance-reviewer.md",
-      "src.claude/agents/ux-reviewer.md",
-      "src.claude/agents/accessibility-reviewer.md",
+      f"{CLAUDE_SOURCE}/agents/security-reviewer.md",
+      f"{CLAUDE_SOURCE}/agents/performance-reviewer.md",
+      f"{CLAUDE_SOURCE}/agents/ux-reviewer.md",
+      f"{CLAUDE_SOURCE}/agents/accessibility-reviewer.md",
       "src.codex/skills/security-reviewer/SKILL.md",
       "src.codex/skills/performance-reviewer/SKILL.md",
       "src.codex/skills/ux-reviewer/SKILL.md",
       "src.codex/skills/accessibility-reviewer/SKILL.md"]),
     ("fix-class-A-ratchet", "architecture-reviewer's current evidence-based classification/reclassification contract",
-     ["src.claude/agents/security-reviewer.md",
-      "src.claude/agents/performance-reviewer.md",
-      "src.claude/agents/ux-reviewer.md",
-      "src.claude/agents/accessibility-reviewer.md",
+     [f"{CLAUDE_SOURCE}/agents/security-reviewer.md",
+      f"{CLAUDE_SOURCE}/agents/performance-reviewer.md",
+      f"{CLAUDE_SOURCE}/agents/ux-reviewer.md",
+      f"{CLAUDE_SOURCE}/agents/accessibility-reviewer.md",
       "src.codex/skills/security-reviewer/SKILL.md",
       "src.codex/skills/performance-reviewer/SKILL.md",
       "src.codex/skills/ux-reviewer/SKILL.md",
       "src.codex/skills/accessibility-reviewer/SKILL.md"]),
     ("fix-class-A-reclassification", "Reverse classification is permitted only by the original tagging reviewer or owning architect with cited resolution or disproof of the original trigger, a fixed owner/seam, a named guard, and no current trigger; an implementer or Lead cannot waive an actual mandatory gate.",
-     ["src.claude/agents/architecture-reviewer.md",
+     [f"{CLAUDE_SOURCE}/agents/architecture-reviewer.md",
       "src.codex/skills/architecture-reviewer/SKILL.md"]),
     ("fix-class-A-current-trigger5", "(5) current sibling investigation leaves scope, owner, or repair uncertainty unresolved;",
-     ["src.claude/agents/architecture-reviewer.md",
+     [f"{CLAUDE_SOURCE}/agents/architecture-reviewer.md",
       "src.codex/skills/architecture-reviewer/SKILL.md"]),
     ("fix-class-A-f3", "Vague unsupported doubt alone adds no new gate; missing required evidence or risk is not silently waived.",
-     ["src.claude/skills/lead/SKILL.md", "src.codex/skills/lead/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/skills/lead/SKILL.md", "src.codex/skills/lead/SKILL.md"]),
     ("fix-class-A-independence", "HOW→VERIFY independence: VERIFY(F) owner/engine ≠ HOW(F) author",
-     ["src.claude/agents/contracts/review-loop.md",
+     [f"{CLAUDE_SOURCE}/agents/contracts/review-loop.md",
       "src.codex/skills/review-loop/SKILL.md",
       "shared/references/review-loop-methodology.md"]),
     ("fix-class-A-authorexcl", "Author-exclusion for design-class (`fix-class: design-decision`) fixes",
-     ["src.claude/agents/contracts/review-loop.md",
+     [f"{CLAUDE_SOURCE}/agents/contracts/review-loop.md",
       "src.codex/skills/review-loop/SKILL.md",
       "shared/references/review-loop-methodology.md"]),
     ("fix-class-invariant-WHAT", "The WHAT (defect class, failure scenario, severity, evidence, `file:line`) stays the gate-bearing object;",
-     ["src.claude/agents/architecture-reviewer.md",
+     [f"{CLAUDE_SOURCE}/agents/architecture-reviewer.md",
       "src.codex/skills/architecture-reviewer/SKILL.md"]),
     ("fix-class-invariant-S4", "The canonical S4 per-claim verdict vocabulary is `verified` | `failed` | `not-verifiable (with reason)`.",
-     ["src.claude/agents/architecture-reviewer.md",
+     [f"{CLAUDE_SOURCE}/agents/architecture-reviewer.md",
       "src.codex/skills/architecture-reviewer/SKILL.md"]),
     ("fix-class-invariant-loop-to-PASS", "**Loop-to-PASS is the gate, not a preference:**",
-     ["src.claude/agents/contracts/review-loop.md",
+     [f"{CLAUDE_SOURCE}/agents/contracts/review-loop.md",
       "src.codex/skills/review-loop/SKILL.md"]),
     ("fix-class-invariant-independent-review", None,
-     ["src.claude/agents/architecture-reviewer.md",
+     [f"{CLAUDE_SOURCE}/agents/architecture-reviewer.md",
       "src.codex/skills/architecture-reviewer/SKILL.md"]),
 
     # A8 — defect-class dispatch (both subagent-contracts)
     ("A8-field", "Defect-class inventory:",
-     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+     [f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
     ("A8-rule", "**Class-completeness trigger (mandatory):** when a reviewer, bot, or test cites one instance of a defect class",
-     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+     [f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
 
     # A7 — diff-invisible invariants + named regression guard (both subagent-contracts)
     ("A7-inv", "Diff-invisible invariants:",
-     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+     [f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
     ("A7-guard", "Named regression guard:",
-     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+     [f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
     ("A7-rule", "Before dispatch, fill `Diff-invisible invariants`, `Named regression guard`, `Dead/superseded code disposition`, and `Cleanup disposition`. For `Dead/superseded code disposition`, `none` is valid only with a one-line reason. When a change supersedes a mechanism, `none` is invalid. For `Cleanup disposition`, `preserved` requires a reason and `none` means the recipient owns no resource in that category. An implementation or review handoff with any field omitted is incomplete.",
-     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+     [f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
 
     # Resource cleanup ownership — shared lifecycle invariant plus one exact field/echo in both packs.
     ("cleanup-spine", None,
      [SPINE]),
     ("cleanup-echo", "report the Cleanup disposition for owned child process trees, temp/capture paths, and isolation worktrees as `cleaned`, `preserved` with its reason, or `none`",
-     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+     [f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
 
     # A9 — object-axis re-aim trigger (both subagent-contracts); the 2448-char block was a
     # hand-maintained byte-identical mirror with NO drift gate, unlike its five pinned A8/A7
     # siblings. These two pins freeze cross-pack parity AND the deliberate C1-only scope
     # (f1445ce0 narrowed it off the universal form) against a one-pack edit or a re-broadening.
     ("A9-trigger", "**Object-axis trigger (mandatory for C1-based clean verdicts, PRE-verdict).**",
-     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+     [f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
     ("A9-scope", "Dispatches and verdicts that do not rely on a C1 assessment owe no object-axis record.",
-     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+     [f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
 
     # A3 — physical-state reconciliation on every lifecycle state change (row + bullet)
     ("A3", "lifecycle state change (create, resume, stage transition, park, close, archive)",
-     ["src.claude/agents/contracts/operating-model.md", "src.codex/skills/lead/operating-model.md"]),
+     [f"{CLAUDE_SOURCE}/agents/contracts/operating-model.md", "src.codex/skills/lead/operating-model.md"]),
 
     # A9 — GitHub thread hosted-head owner rule
     ("A9", "Delegate authorized GitHub review-thread resolution to `$github-pr-review-bot`",
-     ["src.claude/commands/agents-review.md", "src.codex/skills/review-changes/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/commands/agents-review.md", "src.codex/skills/review-changes/SKILL.md"]),
 
     # A11 — mechanical Lead acceptance
     ("A11", "Lead acceptance is a mechanical completeness gate: confirm the required artifact exists, required fields/evidence are present, approved edits are in place, and configured state/ledger agrees.",
-     ["src.claude/skills/lead/SKILL.md", "src.codex/skills/lead/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/skills/lead/SKILL.md", "src.codex/skills/lead/SKILL.md"]),
 
     # A12 — explicit model/effort per launch
     ("A12", "Every provider-backed run MUST carry the resolved model/profile and effort as explicit launch flags in that invocation, even when they equal configured defaults; never rely on provider config defaults.",
-     ["src.claude/agents/contracts/external-dispatch.md", "src.codex/skills/lead/external-dispatch.md"]),
+     [f"{CLAUDE_SOURCE}/agents/contracts/external-dispatch.md", "src.codex/skills/lead/external-dispatch.md"]),
 
     # P7 — persisted stop-after-current-run (Lead SKILL ONLY, both packs)
     ("P7", "For stop-after-current-run intent, persist the stop across turns, allow only the in-flight run to finish, then stop before any new action.",
-     ["src.claude/skills/lead/SKILL.md", "src.codex/skills/lead/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/skills/lead/SKILL.md", "src.codex/skills/lead/SKILL.md"]),
 
     # A13 — preserve launched runs + choose effort before launch
     ("A13", "Once a provider or subagent run is launched, a later preference change to effort, model, or framing applies to the next dispatch.",
-     ["src.claude/agents/contracts/operating-model.md", "src.codex/skills/lead/operating-model.md"]),
+     [f"{CLAUDE_SOURCE}/agents/contracts/operating-model.md", "src.codex/skills/lead/operating-model.md"]),
 
     # P8 — writer-owner + conditionally required settlement observation.
     # Architect has one universal role-contract body. Claude routing authority remains in
@@ -352,21 +356,21 @@ PINS = [
     ("P8-architect", "For every pipeline touching shared mutable state (for example scroll, geometry, or cache), the Change-Surface Contract MUST name exactly one writer-owner. When another consumer observes or reconciles after the writer returns, the owning contract MUST expose authoritative settled state independently through an event, callback/future, versioned query, or equivalent; an ordinary synchronous return is sufficient for the sole caller. Missing the writer-owner or required settlement observation is `REVISE` at design input.",
      ["src.codex/skills/architect/SKILL.md"]),
     ("P8-reviewer", "Reject any pipeline touching shared mutable state unless the accepted design names exactly one writer-owner. When another consumer observes or reconciles after the writer returns, require independent observation of authoritative settled state through the owning contract; an event, callback/future, versioned query, or equivalent may satisfy it, while an ordinary synchronous return is sufficient for the sole caller. Verify the implementation preserves the writer-owner, required observation, and cross-surface convergence.",
-     ["src.claude/agents/architecture-reviewer.md", "src.codex/skills/architecture-reviewer/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/agents/architecture-reviewer.md", "src.codex/skills/architecture-reviewer/SKILL.md"]),
 
     # Single-writer orchestration — the root main conversation owns dispatch and lifecycle
     # state; specialists return a bounded result and recommendation without advance authority.
     ("single-writer-root", "Root retains global dispatch and lifecycle authority; an explicitly admitted scoped child coordinator uses the existing Host owner for exact assigned-child actions only, never Root or sibling state.",
      ["src.codex/skills/lead/subagent-contracts.md"]),
     ("single-writer-ledger", "Only the root main conversation holding Lead writes `agent-runs.jsonl`:",
-     ["src.claude/agents/contracts/subagent-contracts.md"]),
+     [f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md"]),
     ("root-owned-ledger", None, ["src.codex/skills/lead/subagent-contracts.md"]),
     ("single-writer-specialist", "A specialist completes one profession, artifact, and gate; it returns evidence plus an optional non-binding recommended next role to the root, then stops.",
-     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+     [f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
     ("single-writer-stop", "A specialist never adopts Lead, launches a peer or downstream stage, advances the pipeline, or writes `agent-runs.jsonl`.",
-     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+     [f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
     ("single-writer-wrapper", "The root may directly launch a configured external wrapper; no provider or leaf may recursively launch another wrapper.",
-     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md", "shared/references/subagent-operating-model.md"]),
+     [f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md", "shared/references/subagent-operating-model.md"]),
     ("single-writer-spine", None,
      [SPINE]),
     ("single-writer-shared", "Root owns global admission, integration and acceptance. An explicitly admitted scoped child coordinator may choose descendant dispatch and child-only lifecycle intents through the existing Host owner.",
@@ -376,30 +380,30 @@ PINS = [
     ("cross-lane-review-baseline", "Evaluate authored claims and review verdicts against the producing run's declared scope and accepted baseline: later independently owned lane deltas are reviewed in their own lane and do not retroactively falsify the earlier artifact; an actual material revision of the accepted upstream artifact still invalidates dependent `PASS` states and triggers dependent re-review.",
      ["shared/references/subagent-operating-model.md",
       SPINE,
-      "src.claude/agents/contracts/subagent-contracts.md",
+      f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md",
       "src.codex/skills/lead/subagent-contracts.md",
-      "src.claude/agents/architecture-reviewer.md",
+      f"{CLAUDE_SOURCE}/agents/architecture-reviewer.md",
       "src.codex/skills/architecture-reviewer/SKILL.md"]),
 
     # Batch B — route-appropriate handoffs and fixed-value criteria.
     ("batch-b-hardcoding", None,
      [SPINE, "shared/external-prompt-governance.md"]),
     ("batch-b-implementation-route", "Implementation and Quality Assurance receive route-appropriate accepted artifacts; a Plan is required only when the selected route admits a Plan stage.",
-     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+     [f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
     ("batch-b-qa-input", "Require the accepted artifact for the selected route, the implementation artifact being tested, any relevant specialist constraints, and the inputs required by the canonical S1 `Receiving-side echo` in `subagent-contracts.md`. A Plan is required only when the selected route admits a Plan stage.",
-     ["src.claude/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
     ("batch-b-external-review", "Require the approved reviewable artifact (implementation, governance/control-plane change, plan, or other routed artifact) to review.",
-     ["src.claude/agents/external-reviewer.md", "src.codex/skills/external-reviewer/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/agents/external-reviewer.md", "src.codex/skills/external-reviewer/SKILL.md"]),
     ("batch-b-analyst-taxonomy", "If a research admission gate fails without a real external prerequisite, return `REVISE` or `rejected` with the failed gate; reserve `BLOCKED` for a real external prerequisite.",
-     ["src.claude/skills/analyst/SKILL.md", "src.codex/skills/analyst/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/skills/analyst/SKILL.md", "src.codex/skills/analyst/SKILL.md"]),
     ("batch-b-analyst-adjacent-blocker", "If a real external prerequisite blocks the current task, return `BLOCKED:prerequisite` instead of working around it.",
-     ["src.claude/skills/analyst/SKILL.md", "src.codex/skills/analyst/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/skills/analyst/SKILL.md", "src.codex/skills/analyst/SKILL.md"]),
     ("batch-b-resource-free", "When no resource is selected, Cleanup disposition is `none` and no `ResourceRowV1` is required; do not invent a row.",
-     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+     [f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
     ("batch-b-inline-alternative", "For an `inline-sufficient` finding with one dominant correction, report `material alternative: none`.",
-     ["src.claude/agents/architecture-reviewer.md", "src.codex/skills/architecture-reviewer/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/agents/architecture-reviewer.md", "src.codex/skills/architecture-reviewer/SKILL.md"]),
     ("batch-b-planner-criteria", "Derive each acceptance criterion from the accepted contract or oracle; write it as an absolute observable assertion with the contract/oracle's value, count, order, or invariant. Do not invent literals.",
-     ["src.claude/skills/planner/SKILL.md", "src.codex/skills/planner/SKILL.md"]),
+     [f"{CLAUDE_SOURCE}/skills/planner/SKILL.md", "src.codex/skills/planner/SKILL.md"]),
 ]
 
 # P7 must NOT be in the spine (synthesis D-spine-P7: spine gets ONLY P4 + A5).
@@ -408,9 +412,9 @@ SPINE_MUST_NOT_CONTAIN = [
 ]
 
 DYNAMIC_ADMISSION_OWNERS = (
-    "src.claude/skills/lead/SKILL.md",
+    f"{CLAUDE_SOURCE}/skills/lead/SKILL.md",
     "src.codex/skills/lead/SKILL.md",
-    "src.claude/agents/contracts/operating-model.md",
+    f"{CLAUDE_SOURCE}/agents/contracts/operating-model.md",
     "src.codex/skills/lead/operating-model.md",
     "shared/references/subagent-operating-model.md",
     "shared/references/ru/subagent-operating-model.md",
@@ -432,11 +436,11 @@ DYNAMIC_ADMISSION_CLAUSES = (
 )
 
 PLAN_CHECKPOINT_LEAD_OWNERS = (
-    "src.claude/skills/lead/SKILL.md",
+    f"{CLAUDE_SOURCE}/skills/lead/SKILL.md",
     "src.codex/skills/lead/SKILL.md",
 )
 PLAN_CHECKPOINT_PLANNER_OWNERS = (
-    "src.claude/skills/planner/SKILL.md",
+    f"{CLAUDE_SOURCE}/skills/planner/SKILL.md",
     "src.codex/skills/planner/SKILL.md",
 )
 
@@ -802,9 +806,8 @@ def codex_hook_audit_unit(text: str) -> str:
 
 
 RUNTIME_OWNER_ROWS = (
-    "| `$HOME/.agents/skills/` | Shared canonical installed skill tree for the current monorepo producer; "
-    "`.claude/skills/` is its logical projection where the producer and actual binding establish it. "
-    "Other layouts require their actual materialization owner. |",
+    "| `$HOME/.agents/skills/` | Codex-owned installed skill tree. A selected secondary adapter has "
+    "independent ordinary skill copies under its own client root; legacy shared projections require explicit migration. |",
     "| `$HOME/.agents/contracts/` | Live canonical global Codex contract surface. |",
     "| `$HOME/.codex/` | Codex configuration, hooks, native-role metadata, and retained "
     "provider-root compatibility outputs; not the canonical skills/contracts tree. |",
@@ -824,7 +827,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
             path = REPO_ROOT / rel
             self.assertTrue(path.is_file(), f"owner file missing: {rel}")
             text = path.read_text(encoding="utf-8")
-            if rel == "src.claude/CLAUDE.md":
+            if rel == CLAUDE_BOOTSTRAP:
                 text = self._read(SPINE) + "\n" + text
             self._cache[rel] = text
         return self._cache[rel]
@@ -853,7 +856,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
 
     def test_independent_review_guards_reject_weakened_owner_duties(self) -> None:
         for owner in ("src.codex/skills/architecture-reviewer/SKILL.md",
-                      "src.claude/agents/architecture-reviewer.md"):
+                      f"{CLAUDE_SOURCE}/agents/architecture-reviewer.md"):
             text = self._read(owner)
             unit = selected_unit(text, "Anti-layering audit (multi-fix batch)", "Independent review:")
             for duty, old, new in (
@@ -945,7 +948,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
             ("src.codex/skills/architecture-reviewer/SKILL.md", independent_review_duties,
              "Anti-layering audit (multi-fix batch)", "Independent review:",
              "nonauthoring reviewer", "authoring reviewer"),
-            ("src.claude/agents/architecture-reviewer.md", independent_review_duties,
+            (f"{CLAUDE_SOURCE}/agents/architecture-reviewer.md", independent_review_duties,
              "Anti-layering audit (multi-fix batch)", "Independent review:",
              "nonauthoring reviewer", "authoring reviewer"),
         ):
@@ -1232,14 +1235,14 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
 
     def test_implementation_prerequisite_is_route_appropriate_without_relaxing_planner(self) -> None:
         codex = self._read("src.codex/skills/lead/subagent-contracts.md")
-        claude = self._read("src.claude/agents/contracts/subagent-contracts.md")
+        claude = self._read(f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md")
         route_rule = (
             "Implementation and Quality Assurance receive route-appropriate accepted artifacts; "
             "a Plan is required only when the selected route admits a Plan stage."
         )
         for owner, text in (
             ("src.codex/skills/lead/subagent-contracts.md", codex),
-            ("src.claude/agents/contracts/subagent-contracts.md", claude),
+            (f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md", claude),
         ):
             with self.subTest(owner=owner):
                 self.assertIn(route_rule, text)
@@ -1264,7 +1267,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
     def test_dynamic_admission_removes_fixed_caps_and_stale_sequential_claims(self) -> None:
         owners = DYNAMIC_ADMISSION_OWNERS + (
             "references-codex/subagent-operating-model.md",
-            "references-claude/subagent-operating-model.md",
+            CLAUDE_RUNTIME_ADDENDUM,
         )
         stale = (
             "practical limit of four",
@@ -1331,9 +1334,9 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
 
     def test_claude_model_and_effort_truth_is_host_selected_without_role_inference(self) -> None:
         owners = (
-            "src.claude/skills/lead/SKILL.md",
-            "src.claude/agents/contracts/operating-model.md",
-            "references-claude/subagent-operating-model.md",
+            f"{CLAUDE_SOURCE}/skills/lead/SKILL.md",
+            f"{CLAUDE_SOURCE}/agents/contracts/operating-model.md",
+            CLAUDE_RUNTIME_ADDENDUM,
         )
         stale = ("fixed installed profiles", "default effort floors")
         for owner in owners:
@@ -1362,7 +1365,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
 
     def test_handoff_requires_fresh_exact_tool_selection_on_both_packs(self) -> None:
         owners = (
-            "src.claude/agents/contracts/subagent-contracts.md",
+            f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md",
             "src.codex/skills/lead/subagent-contracts.md",
         )
         for owner in owners:
@@ -1389,7 +1392,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
 
         generic_clause = "an informational delivery does not schedule recipient execution"
         for owner in (
-            "src.claude/skills/lead/SKILL.md",
+            f"{CLAUDE_SOURCE}/skills/lead/SKILL.md",
             "shared/references/subagent-operating-model.md",
         ):
             with self.subTest(owner=owner):
@@ -1436,7 +1439,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
         owners = (
             "src.codex/AGENTS.codex.md",
             "src.codex/skills/lead/SKILL.md",
-            "src.claude/skills/lead/SKILL.md",
+            f"{CLAUDE_SOURCE}/skills/lead/SKILL.md",
             "docs/work-item-execution-tracking.md",
         )
         required = (
@@ -1468,7 +1471,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
         )
         for owner in (
             "src.codex/skills/lead/SKILL.md",
-            "src.claude/skills/lead/SKILL.md",
+            f"{CLAUDE_SOURCE}/skills/lead/SKILL.md",
         ):
             with self.subTest(owner=owner):
                 self.assertNotIn(stale_work_item_clause, self._read(owner))
@@ -1505,7 +1508,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
 
         for owner in (
             "src.codex/skills/qa-engineer/SKILL.md",
-            "src.claude/agents/qa-engineer.md",
+            f"{CLAUDE_SOURCE}/agents/qa-engineer.md",
         ):
             with self.subTest(owner=owner):
                 text = self._read(owner)
@@ -1526,7 +1529,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
             "`cleaned` | `preserved` + reason | `none`>"
         )
         owners = (
-            "src.claude/agents/contracts/subagent-contracts.md",
+            f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md",
             "src.codex/skills/lead/subagent-contracts.md",
         )
         for owner in owners:
@@ -1545,17 +1548,17 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
         self.assertFalse(claude_template["requiresLead"])
         self.assertEqual(claude_template["chain"], ["implement", "QA"])
 
-        for owner in ("src.claude/skills/lead/SKILL.md", "src.codex/skills/lead/SKILL.md"):
+        for owner in (f"{CLAUDE_SOURCE}/skills/lead/SKILL.md", "src.codex/skills/lead/SKILL.md"):
             text = self._read(owner)
             self.assertLess(text.index("**Classify before full task-memory recovery**"), text.index("**Verify work-items"))
             self.assertIn("route `implementation -> QA`", text)
             self.assertIn("create the minimal `work-items/active/<slug>/status.md`", text)
         self.assertIn(
             "For `requiresLead: false` routes",
-            self._read("src.claude/CLAUDE.md"),
+            self._read(CLAUDE_BOOTSTRAP),
         )
         self.assertIn("Evaluate the shared `quick-fix` predicate before invoking a process skill",
-                      self._read("src.claude/CLAUDE.md"))
+                      self._read(CLAUDE_BOOTSTRAP))
 
     def test_quick_fix_has_minimal_pre_mutation_recovery_without_heavy_preludes(self) -> None:
         spine = self._read(SPINE)
@@ -1567,11 +1570,11 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
         installed_mirrors = (
             "AGENTS.md",
             "src.codex/AGENTS.codex.md",
-            "src.claude/CLAUDE.md",
+            CLAUDE_BOOTSTRAP,
             "src.codex/skills/lead/SKILL.md",
-            "src.claude/skills/lead/SKILL.md",
+            f"{CLAUDE_SOURCE}/skills/lead/SKILL.md",
             "src.codex/skills/lead/subagent-contracts.md",
-            "src.claude/agents/contracts/subagent-contracts.md",
+            f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md",
         )
         legacy_no_memory_wording = (
             "no task-memory artifact is created",
@@ -1604,7 +1607,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
         ]
         contracts = (
             "src.codex/skills/lead/subagent-contracts.md",
-            "src.claude/agents/contracts/subagent-contracts.md",
+            f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md",
         )
         for contract in contracts:
             with self.subTest(contract=contract):
@@ -1654,7 +1657,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
                     self.assertTrue(duties[name], f"{entrypoint}: missing scoped duty {name}")
                 self.assertTrue(routing_shared_duties(self._read(SPINE))["continuity-owner"])
 
-        claude = self._read("src.claude/CLAUDE.md")
+        claude = self._read(CLAUDE_BOOTSTRAP)
         self.assertIn("1. Did the user explicitly name a role? → invoke that role directly.", claude)
         self.assertIn(".claude/agents/team-templates/<template>.json", claude)
 
@@ -1725,7 +1728,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
     def test_current_status_projections_use_scalar_fields_and_the_existing_ledger(self) -> None:
         response_heading = {
             "src.codex/skills/lead/subagent-contracts.md": "## Shared response format",
-            "src.claude/agents/contracts/subagent-contracts.md": "## Response format",
+            f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md": "## Response format",
         }
         for contract in HANDOFF_CONTRACTS:
             text = self._read(contract)
@@ -1750,7 +1753,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
 
         for lead_skill in (
             "src.codex/skills/lead/SKILL.md",
-            "src.claude/skills/lead/SKILL.md",
+            f"{CLAUDE_SOURCE}/skills/lead/SKILL.md",
         ):
             dispatch_line = next(
                 line
@@ -1772,7 +1775,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
                     f"{lead_skill}: dispatch still mandates the legacy Active agents table",
                 )
 
-        status_command = self._read("src.claude/commands/agents-status.md")
+        status_command = self._read(f"{CLAUDE_SOURCE}/commands/agents-status.md")
         current_status = status_command.split("1. **Active work-items.**", 1)[1].split(
             "2. **Project policies.**", 1
         )[0]
@@ -1802,7 +1805,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
             "agents-status dashboard still requires orchestration metadata",
         )
 
-        resume = self._read("src.claude/commands/agents-resume.md")
+        resume = self._read(f"{CLAUDE_SOURCE}/commands/agents-resume.md")
         load_state = resume.split("2. **Load state.**", 1)[1].split(
             "3. **Validate.**", 1
         )[0]
@@ -1822,7 +1825,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
             "agents-resume current reader still requires orchestration metadata",
         )
 
-        panel = self._read("src.claude/commands/agents-design-panel.md")
+        panel = self._read(f"{CLAUDE_SOURCE}/commands/agents-design-panel.md")
         preregistration = next(
             line for line in panel.splitlines() if "pre-register" in line
         )
@@ -1938,11 +1941,11 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
                     self.assertFalse(runtime_owner_rows_present(mutant)[row])
         skill_row = RUNTIME_OWNER_ROWS[0]
         for before, after in (
-            ("for the current monorepo producer", "for all producers"),
-            ("where the producer and actual binding establish it", "unconditionally"),
-            ("Other layouts require their actual materialization owner.", ""),
+            ("Codex-owned", "shared authoring and installed"),
+            ("independent ordinary skill copies", "shared skill aliases"),
+            ("under its own client root", "under the Codex client root"),
+            ("legacy shared projections require explicit migration", "legacy shared projections are adopted automatically"),
             ("$HOME/.agents/skills/", "$HOME/.codex/skills/"),
-            (".claude/skills/", ".claude/contracts/"),
         ):
             with self.subTest(loss=before):
                 self.assertIn(before, skill_row)
@@ -1984,8 +1987,8 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
             "shared/references/spine/delegation-principles.md",
             "shared/references/spine/governance-glossary.md",
             "src.codex/skills/lead/operating-model.md",
-            "src.claude/CLAUDE.md",
-            "src.claude/agents/team-templates/quick-fix.json",
+            CLAUDE_BOOTSTRAP,
+            f"{CLAUDE_SOURCE}/agents/team-templates/quick-fix.json",
         )
         for owner in owners:
             with self.subTest(owner=owner):
@@ -2030,7 +2033,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
     ) -> None:
         data_roles = (
             "src.codex/skills/data-engineer/SKILL.md",
-            "src.claude/agents/data-engineer.md",
+            f"{CLAUDE_SOURCE}/agents/data-engineer.md",
         )
         for path in data_roles:
             with self.subTest(path=path):

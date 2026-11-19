@@ -106,3 +106,119 @@ def test_cancel_after_new_fork_turn_targets_child_only():
     asyncio.run(instance.execute(request()))
     assert ("interrupt", "child-thread", "turn-1") in client.calls
     assert not any(c[0] == "interrupt" and c[1] == "thread-1" for c in client.calls)
+
+
+@pytest.mark.parametrize("mode,deny", [("fork", False), ("fork", True), ("continuation", False)])
+def test_native_context_effect_crosses_worker_and_parent_protocol(monkeypatch, mode, deny):
+    """Real duplex policy framing, fake provider client and native process receipt."""
+    from queue import Queue
+    import time
+    from process_supervision import process_runner as runner, sdk_worker
+    from sdk_execution import worker
+    from sdk_execution.codex import ClientBinding, CodexConsultantAdapter
+
+    value = request() if mode == "fork" else prior.request()
+    client = Client() if mode == "fork" else prior.Client()
+    checked = []
+
+    def authority(current, effect):
+        assert current == value
+        checked.append(effect)
+        if deny and effect == "fork":
+            raise ValueError("parent revoked fork")
+
+    async def exercise():
+        loop = asyncio.get_running_loop()
+        controls = asyncio.Queue()
+        outputs = Queue()
+
+        class Frames:
+            async def write(self, payload):
+                outputs.put_nowait(payload)
+
+        frames = Frames()
+
+        async def serve():
+            try:
+                current, selection = worker.read_execute_envelope(await controls.get())
+                assert current == value and selection is None
+                sink = worker.ObservationSink(current, frames)
+                adapter = CodexConsultantAdapter(
+                    client_factory=lambda _: ClientBinding(client, "fixture-version",
+                        client.read_configuration, client.list_mcp_status),
+                    assert_current=sink.authorize_from_thread,
+                    verify_account=lambda req, _: req.account_binding,
+                    record=sink.record_from_thread,
+                )
+                await worker.serve_operation(current, adapter, controls.get, frames.write, authority_sink=sink)
+            finally:
+                outputs.put_nowait(None)
+
+        class Channel:
+            def write_line(self, payload):
+                loop.call_soon_threadsafe(controls.put_nowait, payload)
+
+            def read_line(self):
+                payload = outputs.get(timeout=5)
+                if payload is None:
+                    raise EOFError()
+                return payload
+
+        def run(process_request, *, dialogue):
+            failure = runner.ProcessSupervisionError("PSV1-INTERNAL", "execution")
+            try:
+                dialogue.handler(Channel())
+            except runner.ProcessSupervisionError as error:
+                failure = error
+            return runner._request_failure(process_request, failure, time.monotonic())
+
+        with runner.ProcessRunnerV1() as owner:
+            monkeypatch.setattr(owner, "run", run)
+            _served, observed = await asyncio.wait_for(asyncio.gather(
+                serve(), asyncio.to_thread(sdk_worker.run_sdk_worker, owner, value,
+                    environment=(), deadline_monotonic=time.monotonic() + 10,
+                    job_memory_limit_bytes=256 * 1024 * 1024, authority=authority),
+            ), timeout=5)
+            return observed
+
+    observed = asyncio.run(exercise())
+    effect = "fork" if mode == "fork" else "resume"
+    assert checked.count(effect) == 1
+    assert observed.result is not None and observed.result.request == value
+    names = [c[0] for c in client.calls]
+    if deny:
+        assert observed.process.failure_id == "PSV1-SDK-WORKER-AUTHORITY"
+        assert observed.result.status == "incomplete"
+        assert "thread_fork" not in names and "turn_start" not in names
+    else:
+        assert observed.process.failure_id == "PSV1-INTERNAL"  # Synthetic process only.
+        assert observed.result.status == "completed", observed.result.execution_error
+        assert names.count("thread_" + effect) == 1
+        assert names.index("thread_" + effect) < names.index("turn_start")
+    assert not any(name in names for name in {"thread_start", "thread_resume" if mode == "fork" else "thread_fork"})
+
+
+@pytest.mark.parametrize("mode", ["fresh", "continuation"])
+def test_fork_effect_without_a_fork_binding_is_rejected_on_both_protocol_sides(monkeypatch, mode):
+    from sdk_execution import worker
+    from test_sdk_process_owner import simulated_exchange
+
+    value = (replace(prior.request(), context_mode="fresh", native_continuation=None)
+             if mode == "fresh" else prior.request())
+
+    async def exercise():
+        class Frames:
+            async def write(self, _payload):
+                pytest.fail("out-of-context worker request was written")
+
+        sink = worker.ObservationSink(value, Frames())
+        with pytest.raises((ValueError, worker.RuntimeBindingError)):
+            await sink.authorize(value, "fork")
+
+    asyncio.run(exercise())
+    frame = worker.encode_frame({"kind": "authority_request", "run_id": value.run_id,
+        "request_sha256": worker.request_binding(value), "sequence": 0, "effect": "fork"})
+    observed, channel = simulated_exchange(monkeypatch, [frame], value=value,
+        authority=lambda *_: pytest.fail("out-of-context effect reached parent policy"))
+    assert observed.process.failure_id == "PSV1-SDK-WORKER-PROTOCOL"
+    assert [f["kind"] for f in channel.written] == ["execute"]

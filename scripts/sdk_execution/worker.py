@@ -33,7 +33,7 @@ from sdk_execution.coordination import CoordinationInferenceRequest, Coordinatio
 
 MAX_FRAME_BYTES = MAX_STDIN_BYTES
 AUTHORITY_EFFECTS = frozenset({
-    "start", "client_start", "thread_start", "turn_start", "resume", "reconcile",
+    "start", "client_start", "thread_start", "turn_start", "resume", "fork", "reconcile",
     "connect", "query", "tool", "account",
     "copilot_start", "copilot_client_create", "copilot_session_create", "copilot_session_resume", "copilot_session_history",
     "copilot_profile_before", "copilot_send", "copilot_profile_after", "copilot_result",
@@ -46,6 +46,10 @@ def request_binding(request: ExecutionRequest) -> str:
 
 def authority_context(request: ExecutionRequest, effect: str, context: object) -> str | None:
     """Canonical bounded exact arguments/evidence, never an inferred permission."""
+    # The immutable request codec admits fork only for the bound read-only
+    # Codex Consultant. Framing recognizes it; the parent still owns timing.
+    if effect == "fork" and (type(request) is not ExecutionRequest or request.context_mode != "fork"):
+        raise ValueError("fork effect requires a bound native fork request")
     if context is None:
         if effect == "account":
             raise ValueError("account authority requires evidence context")
