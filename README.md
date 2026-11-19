@@ -64,8 +64,8 @@ included in a clone. Cleanup is a separate explicitly requested operation.
 
 Optional distribution assembly is documented in [the distribution guide](scripts/distribution/README.md).
 It binds the supplied runtime to its notice inventory; it does not change
-provider permissions. [Runtime evidence](scripts/distribution/runtime-evidence.md)
-records the bounded packaging checks, not general SDK acceptance.
+provider permissions. [Historical runtime evidence](https://github.com/applicate2628/Orchestrarium/blob/082d46cd83324117abcb965842005d3c15ab99ed/scripts/distribution/runtime-evidence.md)
+records only the exact earlier inputs and checks.
 
 ## SDK integration scope
 
