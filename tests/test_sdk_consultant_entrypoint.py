@@ -12,16 +12,17 @@ def consultant_payload():
     return data
 
 
-def test_task_selector_is_explicit_and_preserves_control_positional_api():
+@pytest.mark.parametrize("provider", ["codex", "claude", "copilot"])
+def test_task_selector_is_explicit_and_preserves_control_positional_api(provider):
     module = owner()
-    result = module.parse_control(["advice", "--sdk-task-binding", "task.json", "--", "--model", "fixture"], provider="codex")
+    result = module.parse_control(["advice", "--sdk-task-binding", "task.json", "--", "--model", "fixture"], provider=provider)
     assert result.sdk_task_binding == Path("task.json") and result.sdk_review_binding is None
     assert result.provider_flags == ["--model", "fixture"]
     assert inspect.signature(module.Control).parameters["sdk_task_binding"].kind is inspect.Parameter.KEYWORD_ONLY
     assert module.parse_control(["advice"], provider="codex").sdk_task_binding is None
 
 
-@pytest.mark.parametrize("provider", [None, "claude", "kimi", "grok"])
+@pytest.mark.parametrize("provider", [None, "kimi", "grok", "unknown"])
 def test_task_selector_rejects_unsupported_provider(provider):
     with pytest.raises(ValueError, match="E_SDK_TASK_PROVIDER_REQUIRED"):
         owner().parse_control(["advice", "--sdk-task-binding", "task.json"], provider=provider)
