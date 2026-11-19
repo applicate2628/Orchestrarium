@@ -452,12 +452,13 @@ concurrent leaf or ancestor replacement is outside this local contract; stronger
 confinement would require native-handle-bound acquisition/publication.
 
 Linux local no-hook installation is exercised separately from SDK native process
-containment, whose qualified SDK backend remains Windows-only. Windows bundle
-assembly, retained-interpreter startup and bounded no-hook project installation,
-repeat and uninstall have [recorded native evidence](scripts/distribution/runtime-evidence.md).
-Those checkpoints are not general global/hook-enabled acceptance; macOS remains
-documentation/static-only because no test machine is available.
-The builder's target list does not imply those platform checks have passed.
+containment, whose qualified SDK backend remains Windows-only. The
+[historical native packaging record](https://github.com/applicate2628/Orchestrarium/blob/31a68a50c15e2d5066da9970c91369b69a125ea3/scripts/distribution/runtime-evidence.md)
+covers earlier Windows runtime and packaging inputs: retained-interpreter startup
+and bounded no-hook project install, repeat and uninstall. It does not qualify
+the current standard-library bundle, global installation, or hook-enabled
+execution. The current bundle has no macOS-specific notice inventory or native
+acceptance; the builder's target list does not imply either.
 
 
 Windows directory projections select native junctions for OS-resolved local drive targets before acquiring creator handles. Other namespaces retain symbolic-link semantics and their existing privilege requirements; no error-triggered fallback or elevation occurs. Both representations keep native identity and target verification through creation, replacement and rollback. Junction recognition uses native reparse tags on every supported Python version. An owned projection inverse compares its no-follow identity and exact stored reparse bytes even after the owned target was removed; it does not acquire authority over a replacement referent.
