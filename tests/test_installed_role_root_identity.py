@@ -53,7 +53,7 @@ class InstalledRootIdentityTests(unittest.TestCase):
 
             ordinary = ["--ordinary-native-action", "resolve", "--task-class", "engineering",
                         "--role", "worker", "--host-controls", "explicit", "--caller-rationale", "test",
-                        "--approved-scope-json", '{"write":true}', "--requested-model", "gpt-6-astra",
+                        "--approved-scope-json", '{"write":true}', "--requested-model", "gpt-6.2-astra",
                         "--requested-effort", "high"]
             decision = call("codex", ordinary)
             self.assertEqual(decision["status"], "denied", decision)
@@ -232,10 +232,10 @@ class InstalledRootIdentityTests(unittest.TestCase):
             separate = dispatch(project, ordinary)
             self.assertIn("resolvedModel", separate, separate)
             self.assertEqual((separate["resolvedModel"], separate["resolvedEffort"]),
-                             ("gpt-6.1-terra", "medium"))
+                             ("gpt-6.2-sol", "high"))
             same = dispatch(home, ordinary)
             self.assertEqual((same["resolvedModel"], same["resolvedEffort"]),
-                             ("gpt-6.1-terra", "medium"))
+                             ("gpt-6.2-sol", "high"))
             mechanical_same = dispatch(home, mechanical)
             self.assertEqual(mechanical_same["status"], "native-required")
             self.assertEqual(mechanical_same, dispatch(project, mechanical))
