@@ -78,16 +78,57 @@ def test_simultaneous_first_claim_has_exactly_one_durable_winner(tmp_path, monke
 
 
 def test_default_fresh_handoff_keeps_independent_decision_claims(tmp_path, monkeypatch):
-    values = child_fixture(tmp_path, monkeypatch)
-    monkeypatch.setattr(runtime, "prepare_environment", lambda *a: ({}, ProviderOutputContext(())))
-    assert values[1].decision_session_mode == "fresh-handoff"
-    pairs = [decision(values, key) for key in ("fresh-a", "fresh-b")]
-    assert all("decision_session_mode" not in request.to_dict() for request, _ in pairs)
-    for request, selection in pairs:
-        runtime.claim_launch(request, selection, authority=values[0].assert_current, started_at=INSTANT)
-    launches = [row for row in runtime._events(pairs[0][1])[2] if row["eventKind"] == "launch"]
-    assert len(launches) == 2
-    assert all("childAssignmentSha256" not in row["sdkExecution"] for row in launches)
+    from process_supervision.process_runner import ProcessRunnerV1
+    from test_sdk_fresh_child_recovery import candidate, fresh_fixture, receive
+
+    owner, assignment, requests, selections, _ = fresh_fixture(tmp_path, monkeypatch)
+    assert assignment.decision_session_mode == "fresh-handoff"
+    claim_launch = runtime.claim_launch
+
+    with ProcessRunnerV1() as process:
+        worker, second, projection = candidate(
+            owner, assignment, requests, selections, process, "fresh-b",
+        )
+        owner.attach_decision_worker(assignment, worker, projection)
+
+        def claim_first_then_check_unsettled(first, selection, **kwargs):
+            assert first.operation_id == "fresh-a"
+            selected = claim_launch(first, selection, **kwargs)
+            recovery = owner.recover_child_decision(assignment, worker, projection)
+            assert recovery["status"] == "needs-reconciliation"
+            assert recovery["decision_run_ids"] == [first.external_dispatch_id]
+            with pytest.raises(ValueError, match="child_decision_needs_reconciliation"):
+                claim_launch(second, worker._selection, authority=owner.assert_current, started_at=INSTANT)
+            return selected
+
+        # Use the existing framed synthetic provider observation and the real
+        # receiver; the wrapper above only observes the interval before receipt.
+        with patch.object(runtime, "claim_launch", side_effect=claim_first_then_check_unsettled):
+            run, terminal, _ = receive(owner, assignment, requests, selections, process, monkeypatch, key="fresh-a")
+
+        assert terminal["status"] == "completed"
+        assert owner.recover_child_decision(assignment, worker, projection)["request_id"] == "task-one"
+        with pytest.raises(ValueError, match="child_received_intent_pending"):
+            claim_launch(second, worker._selection, authority=owner.assert_current, started_at=INSTANT)
+        claim_launch(requests["task-one"], selections["task-one"], authority=owner.assert_current, started_at=INSTANT)
+        assert owner.recover_child_decision(assignment, worker, projection) is None
+        claim_launch(second, worker._selection, authority=owner.assert_current, started_at=INSTANT)
+
+    first = run.request
+    assert first.native_continuation is second.native_continuation is None
+    assert all("decision_session_mode" not in request.to_dict() for request in (first, second))
+    dispatches = [first.external_dispatch_id, second.external_dispatch_id]
+    evidence = [first.external_evidence_run_id, second.external_evidence_run_id]
+    assert len(set(dispatches)) == len(set(evidence)) == 2
+    launches = [row for row in runtime._events(worker._selection)[2]
+                if row["eventKind"] == "launch" and row["runId"] in dispatches]
+    assert [row["runId"] for row in launches] == dispatches
+    assert [row["externalEvidenceRunId"] for row in launches] == evidence
+    for row in launches:
+        execution = row["sdkExecution"]
+        assert execution["childAssignmentSha256"] == assignment.assignment_sha256
+        assert "childDecisionContextSha256" in execution
+        assert {"decisionSessionMode", "continuationSourceSha256"}.isdisjoint(execution)
 
 
 @pytest.mark.parametrize("change", ["scope", "assignment", "admitted-id", "runtime"])
