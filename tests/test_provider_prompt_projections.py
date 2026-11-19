@@ -578,6 +578,7 @@ def test_source_manifest_binds_the_generated_governance_capsule() -> None:
     )
 
     assert result["files"] == [
+        "model_routing/launch_policy.py",
         "provider_prompt.py",
         "process_supervision/process_runner.py",
         "invoke-codex-prompt.py",
@@ -954,9 +955,9 @@ def test_project_scope_uses_its_paired_projections_without_reading_home(
         for name in TRANSPORT_FILES:
             _copy_transport(source, destination, name)
     home = tmp_path / "poisoned-home"
-    poisoned = home / ".agents" / "skills" / "lead" / "scripts"
-    poisoned.mkdir(parents=True)
-    (poisoned / TRANSPORT_FILES[0]).write_text("global drift\n", encoding="utf-8")
+    poisoned = home / ".agents" / "skills" / "lead" / "scripts" / "model_routing/launch_policy.py"
+    poisoned.parent.mkdir(parents=True)
+    poisoned.write_text("global drift\n", encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("USERPROFILE", raising=False)
 
@@ -1123,8 +1124,9 @@ def test_global_scope_rejects_linked_leaf_below_authorized_canonical_agents_root
     _logical_agents, agents_backing = _linked_global_canonical_agents(
         tmp_path, logical_claude.parent
     )
-    leaf = agents_backing / "skills" / "lead" / "scripts" / TRANSPORT_FILES[0]
-    replacement = tmp_path / "linked-canonical-provider-prompt.py"
+    policy = "model_routing/launch_policy.py"
+    leaf = agents_backing / "skills" / "lead" / "scripts" / policy
+    replacement = tmp_path / "linked-canonical-launch-policy.py"
     shutil.copyfile(leaf, replacement)
     leaf.unlink()
     try:
@@ -1138,7 +1140,7 @@ def test_global_scope_rejects_linked_leaf_below_authorized_canonical_agents_root
     assert result.stdout == ""
     assert result.stderr.startswith(
         "E_TRANSPORT_PROJECTION_PARITY: "
-        "canonical/provider_prompt.py linked runtime authority"
+        f"canonical/{policy} linked runtime authority"
     )
 
 
@@ -2511,11 +2513,9 @@ def test_immutable_canonical_plan_rejects_post_preflight_drift_before_write(
     installer = _load_installer()
     canonical = tmp_path / ".agents" / "skills"
 
-    class MutationSpy:
-        anchor = tmp_path
-        dry_run = False
-
+    class MutationSpy(installer._CreateOnlyMutablePath):
         def __init__(self) -> None:
+            super().__init__(tmp_path, installer._InstallTransaction([], enabled=False), dry_run=False)
             self.calls: list[str] = []
 
         def create_tree(self, *_args, **_kwargs) -> None:
@@ -2532,10 +2532,13 @@ def test_immutable_canonical_plan_rejects_post_preflight_drift_before_write(
         drift.mkdir(parents=True)
         (drift / "unowned.txt").write_text("collision\n", encoding="utf-8")
         owner = MutationSpy()
+        before = owner.transaction._observe(canonical)
 
         with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: preflight drift"):
             installer._apply_canonical_skills_plan(plan, canonical, owner, root=ROOT)
         assert owner.calls == []
+        assert owner.transaction._effects == []
+        assert owner.transaction._observe(canonical) == before
     finally:
         installer._discard_canonical_skills_plan(plan)
 
