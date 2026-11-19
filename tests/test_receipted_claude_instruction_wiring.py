@@ -124,11 +124,14 @@ class ReceiptedClaudeInstructionWiringTests(unittest.TestCase):
         self.one(install, "_record_fresh_provider_receipt")
         self.assertEqual(calls(prepare, "_plan_receipt_changes"), [])
 
-    def test_posix_hold_and_default_instruction_route_are_preserved(self):
+    def test_owner_platform_admission_and_default_instruction_route_are_preserved(self):
         install = self.fn("install")
-        hold = self.branch(install, 'os.name == "posix"')
-        self.assertIsInstance(hold.body[-1], ast.Return)
-        self.assertLess(hold.end_lineno, self.one(install, "_target").lineno)
+        owner = named(self.fn("_InstallTransaction"), "__enter__")
+        disabled = self.branch(owner, "not self.enabled")
+        self.assertIsInstance(disabled.body[-1], ast.Return)
+        guard = self.one(owner, "_require_transaction_disposal_backend")
+        self.assertEqual(shape(owner.body[1]), shape(ast.Expr(value=guard)))
+        self.assertLess(guard.lineno, self.one(owner, "_allocate_owned_directory").lineno)
         default = self.one(install, "_prepare_selected_claude_instructions")
         selected = self.one(install, "_prepare_receipted_claude_instructions")
         self.assertLess(default.lineno, selected.lineno)
