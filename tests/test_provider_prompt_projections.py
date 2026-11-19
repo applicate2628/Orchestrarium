@@ -169,14 +169,27 @@ def _stock_8521_blob(name: str) -> bytes:
     return payload
 
 
+def _remove_current_only_transport_members(
+    projection: Path, prior_digests: dict[str, str]
+) -> None:
+    for name in TRANSPORT_FILES:
+        if name not in prior_digests:
+            (projection / name).unlink(missing_ok=True)
+
+
+def _assert_current_only_transport_absent(
+    projection: Path, prior_paths: dict[str, Path]
+) -> None:
+    assert all(
+        not (projection / name).exists()
+        for name in TRANSPORT_FILES
+        if name not in prior_paths
+    )
+
+
 def _seed_stock_8521_transport(projection: Path) -> dict[str, Path]:
     projection.mkdir(parents=True, exist_ok=True)
-    for current_only in (
-        projection / "external-role-taxonomy.v1.json",
-        projection / "process_supervision" / "process_runner.py",
-    ):
-        if current_only.exists():
-            current_only.unlink()
+    _remove_current_only_transport_members(projection, STOCK_8521_PROJECTION_SHA256)
     paths: dict[str, Path] = {}
     for name in STOCK_8521_TRANSPORT_FILES:
         path = projection / name
@@ -191,12 +204,7 @@ def _seed_stock_8521_transport(projection: Path) -> dict[str, Path]:
 
 def _seed_stock_7872_transport(projection: Path) -> dict[str, Path]:
     projection.mkdir(parents=True, exist_ok=True)
-    for current_only in (
-        projection / "external-role-taxonomy.v1.json",
-        projection / "process_supervision" / "process_runner.py",
-    ):
-        if current_only.exists():
-            current_only.unlink()
+    _remove_current_only_transport_members(projection, STOCK_7872_PROJECTION_SHA256)
     paths: dict[str, Path] = {}
     for name in STOCK_8521_TRANSPORT_FILES:
         path = projection / name
@@ -1493,27 +1501,32 @@ def _current_canonical_with_historical_projection(
 
 def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> None:
     installer = _load_installer()
-    canonical, projection, _paths = _current_canonical_with_stock_8f92_projection(
+    canonical, projection, paths = _current_canonical_with_stock_8f92_projection(
         tmp_path
     )
 
+    before = {
+        name: (path.read_bytes(), installer._CreateOnlyMutablePath._identity(path))
+        for name, path in paths.items()
+    }
     staged = installer._stage_claude_transport_projection(ROOT, canonical, projection)
 
     assert staged.accepted_prior_set == "8f92dc73"
-    assert tuple(name for name, _payload in staged.pending_files) == (
-        "provider_prompt.py",
-        "process_supervision/process_runner.py",
-        "invoke-codex-prompt.py",
-        "invoke-kimi-prompt.py",
-        "external-prompt-governance.md",
-        "external-role-taxonomy.v1.json",
-    )
+    assert (
+        *(name for name, _payload in staged.pending_files),
+        "provider-prompt-projections.v1.json",
+    ) == _expected_transport_changes(STOCK_8F92_PROJECTION_SHA256)
     assert staged.manifest_pending is True
     assert {
         witness.path.name: witness.sha256
         for witness in staged.witnesses
         if witness.state == "regular"
     } == STOCK_8F92_PROJECTION_SHA256
+    assert {
+        name: (path.read_bytes(), installer._CreateOnlyMutablePath._identity(path))
+        for name, path in paths.items()
+    } == before
+    _assert_current_only_transport_absent(projection, paths)
 
 
 @pytest.mark.parametrize(
@@ -1849,6 +1862,20 @@ def test_8f92_transport_prior_rejects_every_non_exact_member(
         installer._stage_claude_transport_projection(ROOT, canonical, projection)
 
 
+def _current_transport_payload(name: str) -> bytes:
+    if name == "provider-prompt-projections.v1.json":
+        return (ROOT / "shared" / name).read_bytes()
+    return _authored_transport_path(ROOT, name).read_bytes()
+
+
+def _expected_transport_changes(prior_digests: dict[str, str]) -> tuple[str, ...]:
+    return tuple(
+        name
+        for name in (*TRANSPORT_FILES, "provider-prompt-projections.v1.json")
+        if prior_digests.get(name) != _sha(_current_transport_payload(name))
+    )
+
+
 def test_exact_8521_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> None:
     installer = _load_installer()
     canonical, projection, _paths = _current_canonical_with_stock_8521_projection(
@@ -1858,14 +1885,10 @@ def test_exact_8521_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
     staged = installer._stage_claude_transport_projection(ROOT, canonical, projection)
 
     assert staged.accepted_prior_set == "8521b638"
-    assert tuple(name for name, _payload in staged.pending_files) == (
-        "provider_prompt.py",
-        "process_supervision/process_runner.py",
-        "invoke-codex-prompt.py",
-        "invoke-kimi-prompt.py",
-        "external-prompt-governance.md",
-        "external-role-taxonomy.v1.json",
-    )
+    assert (
+        *(name for name, _payload in staged.pending_files),
+        "provider-prompt-projections.v1.json",
+    ) == _expected_transport_changes(STOCK_8521_PROJECTION_SHA256)
     assert staged.manifest_pending is True
     assert {
         witness.path.name: witness.sha256
@@ -1874,7 +1897,7 @@ def test_exact_8521_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
     } == STOCK_8521_PROJECTION_SHA256
 
 
-def test_exact_7872_six_member_transport_is_one_atomic_nine_member_plan(
+def test_exact_7872_transport_set_is_one_atomic_prior_plan(
     tmp_path: Path,
 ) -> None:
     installer = _load_installer()
@@ -1888,18 +1911,19 @@ def test_exact_7872_six_member_transport_is_one_atomic_nine_member_plan(
     staged = installer._stage_claude_transport_projection(ROOT, canonical, projection)
 
     assert staged.accepted_prior_set == "7872d36d"
-    assert tuple(name for name, _payload in staged.pending_files) == (
-        "provider_prompt.py",
-        "process_supervision/process_runner.py",
-        "invoke-codex-prompt.py",
-        "invoke-kimi-prompt.py",
-        "external-prompt-governance.md",
-        "external-role-taxonomy.v1.json",
-    )
+    assert (
+        *(name for name, _payload in staged.pending_files),
+        "provider-prompt-projections.v1.json",
+    ) == _expected_transport_changes(STOCK_7872_PROJECTION_SHA256)
     assert staged.manifest_pending is True
+    assert {
+        witness.path.name: witness.sha256
+        for witness in staged.witnesses
+        if witness.state == "regular"
+    } == STOCK_7872_PROJECTION_SHA256
 
 
-def test_exact_7872_migration_failure_restores_six_member_state(
+def test_exact_7872_migration_failure_restores_prior_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     installer = _load_installer()
@@ -1934,7 +1958,7 @@ def test_exact_7872_migration_failure_restores_six_member_state(
     assert installer.install("claude", args) == 1
     assert calls == 1
     assert {name: path.read_bytes() for name, path in paths.items()} == before
-    assert not (projection / "external-role-taxonomy.v1.json").exists()
+    _assert_current_only_transport_absent(projection, paths)
 
 
 @pytest.mark.parametrize("name", tuple(STOCK_8521_PROJECTION_SHA256))
@@ -2000,6 +2024,33 @@ def test_8521_transport_prior_rejects_mixed_old_and_current_sets(
         else _authored_transport_path(ROOT, current_member).read_bytes()
     )
     paths[current_member].write_bytes(current)
+
+    with pytest.raises(
+        ValueError, match="E_TRANSPORT_PROJECTION_PARITY: atomic projection state"
+    ):
+        installer._stage_claude_transport_projection(ROOT, canonical, projection)
+
+
+@pytest.mark.parametrize(
+    ("prior", "seed"),
+    (("7872d36d", _seed_stock_7872_transport), ("8521b638", _seed_stock_8521_transport)),
+)
+def test_transport_prior_rejects_current_only_launch_policy(
+    tmp_path: Path, prior: str, seed
+) -> None:
+    installer = _load_installer()
+    canonical = tmp_path / "canonical" / "scripts"
+    projection = tmp_path / "claude" / "agents" / "scripts"
+    for name in TRANSPORT_FILES:
+        _write_transport(canonical, name, _current_transport_payload(name))
+    seed(projection)
+    assert (
+        installer._stage_claude_transport_projection(ROOT, canonical, projection)
+        .accepted_prior_set == prior
+    )
+
+    name = "model_routing/launch_policy.py"
+    _write_transport(projection, name, _current_transport_payload(name))
 
     with pytest.raises(
         ValueError, match="E_TRANSPORT_PROJECTION_PARITY: atomic projection state"
@@ -2129,6 +2180,7 @@ def test_8521_transport_replacement_failure_restores_bytes_and_identities(
         )
         for name, path in paths.items()
     } == before
+    _assert_current_only_transport_absent(projection, paths)
     assert not tuple(projection.parent.rglob("*.prior"))
 
 
@@ -2147,7 +2199,11 @@ def test_8521_transport_final_parity_failure_restores_original_identities(
         for name, path in paths.items()
     }
 
+    parity_calls = 0
+
     def reject_final_parity(*_args, **_kwargs):
+        nonlocal parity_calls
+        parity_calls += 1
         raise ValueError("E_TRANSPORT_PROJECTION_PARITY: injected final parity")
 
     monkeypatch.setattr(
@@ -2155,6 +2211,7 @@ def test_8521_transport_final_parity_failure_restores_original_identities(
     )
 
     assert installer.install("claude", args) == 1
+    assert parity_calls == 1
     assert {
         name: (
             path.read_bytes(),
@@ -2162,10 +2219,11 @@ def test_8521_transport_final_parity_failure_restores_original_identities(
         )
         for name, path in paths.items()
     } == before
+    _assert_current_only_transport_absent(projection, paths)
     assert not tuple(projection.parent.rglob("*.prior"))
 
 
-def test_8521_transport_real_install_replaces_seven_members_then_is_noop(
+def test_8521_transport_real_install_upgrades_exact_members_then_is_noop(
     tmp_path: Path,
 ) -> None:
     installer = _load_installer()
@@ -2178,14 +2236,10 @@ def test_8521_transport_real_install_replaces_seven_members_then_is_noop(
     }
 
     assert installer.install("claude", args) == 0
-    current_manifest = ROOT / "shared" / "provider-prompt-projections.v1.json"
+    expected_changes = set(_expected_transport_changes(STOCK_8521_PROJECTION_SHA256))
+    paths.update({name: projection / name for name in TRANSPORT_FILES if name not in paths})
     for name, path in paths.items():
-        expected = (
-            current_manifest.read_bytes()
-            if name == current_manifest.name
-            else _authored_transport_path(ROOT, name).read_bytes()
-        )
-        assert path.read_bytes() == expected
+        assert path.read_bytes() == _current_transport_payload(name)
     after_first = {
         name: (
             path.read_bytes(),
@@ -2193,21 +2247,10 @@ def test_8521_transport_real_install_replaces_seven_members_then_is_noop(
         )
         for name, path in paths.items()
     }
-    assert after_first["provider_prompt.py"][1] != before_identities["provider_prompt.py"]
-    assert after_first["invoke-kimi-prompt.py"][1] != before_identities[
-        "invoke-kimi-prompt.py"
-    ]
-    assert after_first[current_manifest.name][1] != before_identities[current_manifest.name]
-    for name in set(paths) - {
-        "provider_prompt.py",
-        "process_supervision/process_runner.py",
-        "invoke-codex-prompt.py",
-        "invoke-kimi-prompt.py",
-        "external-prompt-governance.md",
-        "external-role-taxonomy.v1.json",
-        current_manifest.name,
-    }:
-        assert after_first[name][1] == before_identities[name]
+    assert {
+        name for name, prior_identity in before_identities.items()
+        if after_first[name][1] != prior_identity
+    } == expected_changes.intersection(before_identities)
     assert not tuple(projection.parent.rglob("*.prior"))
 
     assert installer.install("claude", args) == 0
@@ -2220,11 +2263,11 @@ def test_8521_transport_real_install_replaces_seven_members_then_is_noop(
     } == after_first
 
 
-def test_8521_transport_dry_run_reports_seven_replacements_without_mutation(
+def test_8521_transport_dry_run_reports_exact_replacements_without_mutation(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     installer = _load_installer()
-    _target, args, _projection, paths = _installed_target_with_stock_8521_transport(
+    _target, args, projection, paths = _installed_target_with_stock_8521_transport(
         tmp_path, installer
     )
     capsys.readouterr()
@@ -2238,7 +2281,9 @@ def test_8521_transport_dry_run_reports_seven_replacements_without_mutation(
 
     assert installer.install("claude", [*args, "--dry-run"]) == 0
     output = capsys.readouterr().out
-    assert "transport prior 8521b638: 7 replacements" in output
+    expected_count = len(_expected_transport_changes(STOCK_8521_PROJECTION_SHA256))
+    assert f"  [dry-run] transport prior 8521b638: {expected_count} replacements" in output.splitlines()
+    _assert_current_only_transport_absent(projection, paths)
     assert {
         name: (
             path.read_bytes(),
