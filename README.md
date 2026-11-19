@@ -19,17 +19,23 @@ to launch models or spend quota.
 - **Work on the project:** [maintainer starting point](docs/new-session-guide.md).
 - **See released changes:** [release notes](RELEASE_NOTES.md).
 
-## Current release and SDK development
+## Current source and runtime qualification
 
-| | Current `main` | SDK development in [PR #19](https://github.com/applicate2628/Orchestrarium/pull/19) |
-| --- | --- | --- |
-| Availability | The production source on `main`; use its [installation guide](https://github.com/applicate2628/Orchestrarium/blob/main/INSTALL.md). | A separate, unmerged development branch; not the current globally installed release. |
-| Clients and layout | Codex and Claude Code packs share governance. Their source remains in `src.codex/` and `src.claude/`. | Work toward a common core with client adapters, including Antigravity integration. Its changed paths do not apply to `main`. |
-| Delegation | Existing role selection and execution routes, with their documented permissions and platform limits. | Optional SDK (Software Development Kit) execution and child-session coordination are being developed and checked. They are not enabled by this README. |
-| Evidence | Use the current installation guide and source contracts for the operation being performed. | Offline checks do not establish live provider or platform acceptance. Read the PR's current evidence and remaining limits before testing. |
+This source includes the shared SDK (Software Development Kit) and installation
+core developed in [PR #19](https://github.com/applicate2628/Orchestrarium/pull/19).
+Source availability, installed versions and native execution evidence are distinct:
 
-The SDK branch is not a reason to reinstall or migrate a working setup early.
-This page does not announce SDK release readiness or enable quota-consuming runs.
+| Surface | Current scope |
+| --- | --- |
+| Clients and layout | Shared governance with Codex, Claude Code and Antigravity client adapters; see the source layout below. |
+| Installation | Use [this installation guide](INSTALL.md) for the selected source version. A source update does not update existing installations automatically. |
+| Delegation | Explicit SDK routes and scoped child-session coordination use existing Host permissions and lifecycle owners; no README enables a launch. |
+| Native evidence | One user-operated AGY-to-Codex fresh read-only Consultant handoff passed on installed `c835cc37`. The [checkpoint and source-delta review](docs/sdk-execution.md#user-operated-originating-lead-checkpoint-2026-11-19) distinguish that execution from current-source verification and remaining provider/platform work. |
+
+Offline checks do not establish general live acceptance, and the selected native
+checkpoint is not a global rollout or permission to consume quota. A pre-SDK tag
+preserves source, not machine configuration: see [hook recovery boundaries](INSTALL.md#machine-local-hook-registration)
+before treating a source downgrade as an installation rollback.
 
 ### Roles, models and cost
 
@@ -47,7 +53,7 @@ route does not authorize a model launch, external review or paid operation.
 
 The repository source is authoritative; installed files are runtime outputs.
 Start maintenance with [the source-first guide](docs/new-session-guide.md).
-On this SDK branch, the root installer selects Codex, Claude, and the bounded
+The root installer selects Codex, Claude, and the bounded
 Antigravity native startup integration, with separate qualification scopes.
 Removed Gemini and Qwen values remain migration identifiers, not install or
 execution routes.
@@ -61,18 +67,16 @@ It binds the supplied runtime to its notice inventory; it does not change
 provider permissions. [Runtime evidence](scripts/distribution/runtime-evidence.md)
 records the bounded packaging checks, not general SDK acceptance.
 
-## SDK branch scope
+## SDK integration scope
 
-This checkout is the SDK development branch in PR #19, not the current installed
-release. The current-main column above refers to `main`, not to this branch's
-changed paths. This branch has one shared governance, SDK and installation core;
+The source has one shared governance, SDK and installation core;
 client adapters integrate that core rather than creating separate products.
 Kimi and Grok remain higher secondary integration priorities than Claude, without
 automatically enabling a route, qualifying a platform or authorizing quota use.
 
-Official agent SDK installation is offered separately through `python install.py --sdk-setup <provider> --sdk-python <interpreter>`. This form prints a proposal, including vendor runtime dependencies; `--sdk-venv <directory> --apply` instead performs the disclosed official installation and checks the selected environment. Orchestrarium does not redistribute those SDKs or CLIs. See [official setup and environment selection](INSTALL.md#official-agent-sdk-setup). Antigravity has a separate native startup projection through the common installer; it is not a programmatically invoked consumer-subscription worker. See [startup scope and commands](INSTALL.md#antigravity-native-startup).
+For generic source development, official agent SDK installation is offered separately through `python install.py --sdk-setup <provider> --sdk-python <interpreter>`; this is not the audited retained-runtime delivery recipe. This form prints a proposal, including vendor runtime dependencies; `--sdk-venv <directory> --apply` instead performs the disclosed official installation and checks the selected environment. Orchestrarium does not redistribute those SDKs or CLIs. See [official setup and the audited retained-runtime recipe](INSTALL.md#official-agent-sdk-setup). Antigravity has a separate native startup projection through the common installer; it is not a programmatically invoked consumer-subscription worker. See [startup scope and commands](INSTALL.md#antigravity-native-startup).
 
-The SDK branch also provides [explicit AGY native-child assignment and association](INSTALL.md#explicit-agy-native-child-association), without claiming native execution or automatic task completion.
+The shared core also provides [explicit AGY native-child assignment and association](INSTALL.md#explicit-agy-native-child-association), without claiming native execution or automatic task completion.
 
 Optional software development kit (SDK) helpers are part of the installer-managed host-pack payload, without dependency provisioning or automatic activation. The explicit `--sdk-review-binding` Codex review path keeps the existing Host (invoking orchestration session) and default routes; the historical installed Windows success/receiving-collision checks and bounded live Codex review passed, while subsequent shared-owner changes retain separate regression evidence and broader scenarios remain unqualified. See [the opt-in contract and qualification boundaries](docs/sdk-execution.md). Maintainers can provision hash-verified public SDK source fixtures without installing or launching providers; see [the offline compatibility checks](docs/sdk-execution.md#reviewed-codex-source-fixtures). The separate `--sdk-task-binding` selector supports read-only Codex Consultant advice with `--ledger-role consultant`, using the same binding and existing launch/receiving owners. Version 5 selects a received predecessor by evidence-run identity for continuation after restart or an explicit native conversation fork; the existing canonical artifact/ledger carries the receipt, and completed turns are not replayed. Older artifacts without a continuation receipt remain readable but do not establish a resumable session. The Claude wrapper also supports an explicit prompt-only Consultant SDK task with a concrete model and selected official API/cloud credentials: it consumes supplied prompt/handoff context, grants no filesystem tools, and records auth-context selection rather than claiming account identity. The mutually exclusive `--sdk-review-binding` selector also supports prompt-only Claude review with a canonical reviewer profession. Review and task schemas stay separate; even a PASS review remains external-nonauthorizing evidence and cannot close obligations. The Python Host executor and explicit Claude Worker task route support Write/Edit through per-tool Host permission and protected-state custody. Public Worker file operations are checked against the admitted workspace and protected control paths; this is application-level enforcement, not an operating-system sandbox. Claude Reviewer and Consultant routes remain prompt-only. Claude Consultant version-5 bindings can resume an exactly received native transcript through its verified private path and canonical one-successor claim; missing or changed transcript evidence is not replaced with a fresh session. This does not enable Reviewer/Worker continuation and is not an OS-exclusive transcript lock. Persistent Claude child decisions use the separate scoped Host coordination route. Binding version 4 also admits an explicitly selected Codex Worker profession with a whole-workspace write boundary; binding, prompt, ledger, credentials, runtime, terminal and capture storage stay outside that workspace. Existing `CODEX_PROMPTS_DIR` selects an external capture directory. This source path has offline regression evidence only, not installed or live qualification; default routes and spending permissions are unchanged.
 
@@ -83,7 +87,7 @@ Scoped child Lead coordination is an explicit Python Host integration over exist
 
 Antigravity startup supplies shared governance, a distinct `orchestrarium-lead` skill and a native `SessionStart` context hook. It preserves Codex skills and unrelated customizations. Its narrow PreToolUse bridge also warns about machine-local paths in supported write/replacement content through the shared AUDIT classifier. A separate native command advisory applies the existing stray-artifact audit using the tool's actual working directory, without executing the command. Neither advisory enforces tool permissions, receives native subagent results, or qualifies a live SDK route.
 
-The AGY package also exposes the [existing external Codex SDK review entrypoint](INSTALL.md#agy-lead-to-external-codex-sdk-review) from its own managed runtime and canonical receiving owner. This is an explicitly admitted external reviewer, not an AGY-native subagent or an automatic launch; live acceptance and other roles remain separately qualified.
+The AGY package exposes the [existing external Codex SDK entrypoint](INSTALL.md#agy-lead-to-external-codex-sdk-review) for Reviewer, read-only Consultant and scoped Worker tasks through its own managed runtime and canonical receiving owner. The observed fresh Consultant handoff above is distinct from installed-path synthetic tests for other roles. These are explicitly admitted external tasks, not AGY-native subagents or automatic launches; continuation, writes and other native routes retain their separate qualification boundaries.
 
 ## Repository layout
 

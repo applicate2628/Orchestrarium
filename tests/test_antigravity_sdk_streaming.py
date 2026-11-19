@@ -1,5 +1,5 @@
 """Installed AGY bridge with real Codex stream parsing and canonical receiving.
-Vendor transport, hook-health probe and native process custody are synthetic.
+Native Windows platform admission, vendor transport, hook-health probe and process custody are synthetic.
 This does not launch an AGY session, a provider SDK, or a model.
 """
 import asyncio
@@ -18,12 +18,16 @@ from test_sdk_codex_stream_receiving import StreamingClient
 
 def test_installed_agy_consultant_stream_and_continuation(installed_bridge, monkeypatch, capsys):
     project, target, owner = installed_bridge
-    from sdk_execution import codex, runtime
+    from sdk_execution import codex, dispatch, runtime
     from sdk_execution.contracts import ExecutionRequest
     from sdk_execution.worker import encode_frame
     from process_supervision import sdk_worker, process_runner as processes
     assert Path(codex.__file__).is_relative_to(target)
     assert Path(runtime.__file__).is_relative_to(target)
+    assert Path(dispatch.__file__).is_relative_to(target)
+    # This portable integration exercises the Windows route with synthetic native custody.
+    # The separate unsupported-platform test retains the real POSIX refusal.
+    monkeypatch.setattr(dispatch, '_require_supported_platform', lambda: None)
     item, receipt, artifact, captures, argv = existing.setup_source(project, monkeypatch)
     argv[argv.index('--sdk-review-binding')] = '--sdk-task-binding'
     argv[argv.index('--ledger-role') + 1] = 'consultant'

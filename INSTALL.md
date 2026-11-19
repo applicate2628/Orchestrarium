@@ -1,17 +1,19 @@
-# Install Orche
+# Install Orchestrarium
 
 
 Scoped child Lead coordination is an explicit Python Host integration over existing admitted requests and lifecycle owners, not an automatically enabled CLI mode. Root can select separate fresh-handoff decisions through Codex, official Claude API or Copilot, or supported persistent Codex/Claude/Copilot native decision sessions with received-evidence recovery; no mode enables launches by itself. Claude persistent decisions reuse canonical native transcript custody and exact-path resume; received intent recovery does not require a new inference. A child may start from an explicit goal/context with no executable tasks yet. New child task proposals use durable handoff to existing Root admission; only Root-published admitted requests extend the executable catalog. Explicit Root task/route decisions can be registered and restored from existing admission evidence without reconstructing model defaults. See [child Lead integration and remaining boundaries](docs/sdk-execution.md#scoped-child-lead-host-integration). Offline coverage does not imply installed/native acceptance.
 
 ## Official agent SDK setup
 
-Orche supplies its integration code, not repackaged vendor SDKs or coding CLI
+Orchestrarium supplies its integration code, not repackaged vendor SDKs or coding CLI
 binaries. Agent SDKs are installed separately using each vendor's ordinary
 supported package installation, including its normal dependencies. Such a package
 may itself install or download a CLI/runtime; the setup proposal discloses that
 before presenting a command. No dependency metadata is rewritten and no
 `--no-deps` workaround is used in the current setup workflow.
 
+The following `python install.py` examples are generic source-development setup,
+not proof that an existing environment derives from the retained runtime.
 To print a proposal without installing anything:
 
 ```sh
@@ -46,9 +48,34 @@ appropriate separate environment first; the argument identifies its interpreter,
 not the immutable installer-bundle interpreter. The `--sdk-python` proposal prints the official
 package command and `pip check` without executing them. Neither mode registers a
 host, changes routing or launches a model. A successful package installation alone does
-not qualify Orche's adapter or authorize provider quota use. Package resolution
+not qualify Orchestrarium's adapter or authorize provider quota use. Package resolution
 selects available dependency-compatible releases; adapter/protocol compatibility
 still needs the existing checks, not an assumption that every latest release works.
+
+For the audited Windows delivery path, choose a **fresh** SDK venv created by
+retained Python, not an arbitrary existing venv. The setup helper can reuse a
+venv and resolve compatible releases; it does not itself establish retained-base
+provenance or reproduce the exact observed SDK/CLI version. For example, set
+`RETAINED_ROOT` to the verified retained bundle and `SDK_VENV` to the new SDK
+environment path, then preview through its public launcher:
+
+```powershell
+& "$RETAINED_ROOT/orche.ps1" --permanent-runtime --sdk-setup codex --sdk-venv $SDK_VENV
+```
+
+This uses the already retained bundle; it does not create another runtime copy.
+The SDK setup preview does not accept `--dry-run`; omit `--apply` for the
+proposal, and add `--apply` only for the authorized installation. Do not add
+`--retain-to` to this preview: that option creates a retained copy even when
+the underlying SDK setup is only a preview.
+
+Only the separately authorized `--apply` performs that installation. Before using
+the resulting `SDK_PYTHON` (the venv's `Scripts/python.exe`), verify that
+`sys.base_prefix` identifies `RETAINED_ROOT/python`. The observed Codex handoff
+used `openai-codex` and `openai-codex-cli-bin` **0.170.0**, including the selected
+CLI's `--version` result. A different version or base is not covered by that
+checkpoint; package setup success alone is not equivalent evidence. Do not fall
+back to a host interpreter if the selected retained-derived environment is absent.
 
 Run the existing SDK-enabled entrypoint with that same selected Python. The
 current worker profile uses its caller's `sys.executable`, fixed worker source
@@ -118,7 +145,7 @@ Multi-edit chunk decoding, other event hooks, native subagent handoff and
 installed/live behavior remain separate qualification work.
 Official contracts: [discovery](https://antigravity.google/docs/customization-discovery/)
 and [hooks](https://antigravity.google/docs/hooks/). The vendor discovery paths
-are distinct from Orche's chosen managed subtree and ownership identifiers.
+are distinct from Orchestrarium's chosen managed subtree and ownership identifiers.
 
 ## Explicit AGY native-child association
 
@@ -158,7 +185,7 @@ receipt or automatic closure.
 
 ## AGY Lead to external Codex SDK review
 
-The AGY managed package includes the existing Orche Codex review entrypoint at
+The AGY managed package includes the existing Orchestrarium Codex review entrypoint at
 `<managed-root>/scripts/invoke-codex-prompt.py`, with its shared lifecycle,
 schemas and receiving dependencies. Project and global managed roots are listed
 above. It neither copies Codex skills nor falls back to another client's runtime.
@@ -167,17 +194,21 @@ bound by the existing ledger owner; missing or changed owned components fail
 that operation rather than selecting a sibling Codex package.
 
 Use the same [explicit Codex review contract](docs/sdk-execution.md#explicit-codex-review-opt-in-repository-local-contract)
-and arguments from the native Lead's explicitly admitted task:
+and arguments from the native Lead's explicitly admitted task. Select the official
+SDK environment created from the [retained Python runtime](#bundled-python-entry-and-local-assembly)
+through [official SDK setup](#official-agent-sdk-setup); do not resolve a host
+`python` from PATH. In the example, `SDK_PYTHON` is the exact selected SDK
+environment interpreter, and `MANAGED_ROOT` is the installed AGY package:
 
-```text
-python <managed-root>/scripts/invoke-codex-prompt.py TOPIC --sdk-review-binding BINDING.json --prompt-file PROMPT --terminal-receipt ABSOLUTE_TERMINAL.json --ledger WORK_ITEM --ledger-role qa-engineer --ledger-artifact sdk-review.json --ledger-max-events TASK_EVENT_BOUND --ledger-max-bytes TASK_BYTE_BOUND --timeout-secs TASK_DEADLINE -- --model SELECTED_MODEL -c model_reasoning_effort=SELECTED_EFFORT
+```powershell
+& $SDK_PYTHON -I -B "$MANAGED_ROOT/scripts/invoke-codex-prompt.py" TOPIC --sdk-review-binding BINDING.json --prompt-file PROMPT --terminal-receipt ABSOLUTE_TERMINAL.json --ledger WORK_ITEM --ledger-role qa-engineer --ledger-artifact sdk-review.json --ledger-max-events TASK_EVENT_BOUND --ledger-max-bytes TASK_BYTE_BOUND --timeout-secs TASK_DEADLINE -- --model SELECTED_MODEL -c model_reasoning_effort=SELECTED_EFFORT
 ```
 
 Upper-case values are caller-selected placeholders, not a ready-to-run grant or
 arbitrary default limits. Use the actual Host permissions, account/native trust,
 work-item and task limits. The binding is not authorization. The Python environment
 must already contain the officially installed compatible SDK; installing this
-Orche integration neither provisions it nor calls a model. Existing Windows
+Orchestrarium integration neither provisions it nor calls a model. Existing Windows
 containment and current receiving checks still apply. This source slice qualifies
 an isolated installed Reviewer path with a synthetic native peer, not a live AGY
 session, all Codex roles, or native acceptance. See the
@@ -202,8 +233,13 @@ The returned evidence remains nonauthorizing and must be read by the originating
 Installed-path streaming tests exercise the actual installed entrypoint, Codex
 adapter, scanner and canonical receiving with a synthetic SDK peer and process
 boundary. They do not prove that a real AGY/Gemini Lead has invoked the route.
-That originating-session check is distinct from the bounded direct native Codex
-fresh/continuation proof and needs its own permitted execution.
+A separate user-operated originating-session checkpoint passed on 2026-11-19:
+one fresh read-only Consultant handoff through installed `c835cc37`, with
+GPT-6.2-Sol/medium/default and SDK/CLI 0.170.0. Its received result was verified
+without another inference. This does not qualify the whole current source,
+AGY-to-Codex continuation, Worker writes or global rollout. See the
+[exact checkpoint and source-delta review](docs/sdk-execution.md#user-operated-originating-lead-checkpoint-2026-11-19);
+historical direct Codex fresh/continuation evidence remains separate.
 
 ### Scoped external Codex Worker
 
@@ -247,6 +283,11 @@ No record means no inferred deletion authority. The bundled interpreter is retai
 automatic last-consumer runtime reclamation is not implemented.
 
 ### Machine-local hook registration
+
+A pre-SDK Git tag is a source checkpoint, not a backup or rollback of machine
+hooks, settings, inventories or trust. Preserve the selected installation's
+recovery objects; ordinary transaction failure rollback below does not provide
+a public post-success undo or authorize overwriting later user edits.
 
 For a Codex installation whose hook configuration is a leaf symlink into shared
 storage, the optional `--localize-hook-file` flag composes localization with the
@@ -334,8 +375,9 @@ batch-command protocol; native-hook registration is a separate capability check.
 
 ## Bundled Python entry and local assembly
 
-The public product is Orche (formerly Orchestrarium). Existing technical receipt,
-configuration and ownership identifiers remain unchanged. The source installer
+The current project is Orchestrarium and its mascot is Little Orche. The planned
+Orche rebrand follows the SDK and Rust transitions; it is not part of this release.
+Existing technical receipt, configuration and ownership identifiers remain unchanged. The source installer
 still supports the established Python entry points; the new distribution layer
 does not rewrite their file/update/rollback rules.
 
@@ -359,7 +401,7 @@ python scripts/distribution/build.py --runtime runtime \
 `development` denotes an unpublished local build, not a chosen product version
 or Git tag. This command does not download, sign, publish or activate a release.
 It preserves interpreter-relative layout and copies the installer/resources plus
-the Orche mascot. Build interruption leaves an incomplete output for diagnosis;
+Little Orche, the mascot. Build interruption leaves an incomplete output for diagnosis;
 a completed `bundle.json` is written last. Existing output is never overwritten.
 
 The bundle's `orche` shell entry or `orche.ps1` Windows entry invokes only its
@@ -405,8 +447,11 @@ concurrent leaf or ancestor replacement is outside this local contract; stronger
 confinement would require native-handle-bound acquisition/publication.
 
 Linux local no-hook installation is exercised separately from SDK native process
-containment, which remains Windows-only. Windows bundle execution awaits native
-tests; macOS is documentation/static-only because no test machine is available.
+containment, whose qualified SDK backend remains Windows-only. Windows bundle
+assembly, retained-interpreter startup and bounded no-hook project installation,
+repeat and uninstall have [recorded native evidence](scripts/distribution/runtime-evidence.md).
+Those checkpoints are not general global/hook-enabled acceptance; macOS remains
+documentation/static-only because no test machine is available.
 The builder's target list does not imply those platform checks have passed.
 
 

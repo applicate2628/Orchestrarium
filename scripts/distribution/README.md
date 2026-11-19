@@ -147,10 +147,12 @@ complete license clearance.
   the selected venv: a RAM-drive test environment also places those temporary files
   there, but must be rebuilt after RAM loss while its retained base stays durable.
 
-Independent review accepted these bounded results. Keep retained Python in place
-while installed hooks or derived environments refer to it. No live global hooks,
-shared configuration, client trust or security settings were changed. Wave/Comet
-rollout and the originating Lead-to-Codex handoff remain separate work; do not
+Independent review accepted these bounded historical results. Keep retained Python
+in place while installed hooks or derived environments refer to it. This packaging
+checkpoint did not change live global hooks, shared configuration, client trust
+or security settings. The later [November 19 user-operated Wave handoff](../../docs/sdk-execution.md#user-operated-originating-lead-checkpoint-2026-11-19)
+separately records the approved local hook repair, manual trust and fresh read-only
+AGY-to-Codex result. It is not general Wave/Comet rollout qualification. Do not
 repair shared generated registrations by substituting one workstation's Python.
 ## Local ownership and runtime lifetime
 

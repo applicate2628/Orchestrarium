@@ -1498,6 +1498,26 @@ operations were performed; installer tests used isolated fixtures. Independent
 delta/document review found no release-blocking defect.
 
 No changed model-execution behavior currently justifies repeating the live pair.
+The expanded pre-merge audit found documentation drift rather than a production
+SDK execution defect: branch-dependent release wording, premature rebranding,
+historical Windows/AGY evidence described as still future, and ambiguity between
+generic development setup and retained-runtime delivery. The delivery instructions
+now distinguish a fresh retained-derived provider environment and the observed
+SDK/CLI 0.170.0 pair from a generic latest-compatible install. A source tag is not
+machine-configuration rollback.
+
+A portable synthetic AGY streaming fixture also omitted its Windows-route test
+boundary. Only that fixture now stubs platform admission on the installed dispatch
+module; the production guard is unchanged. Windows: one streaming case passed
+and two real-POSIX refusal parameters were correctly skipped. Independent Linux:
+three focused cases passed, including the corrected streaming/continuation case,
+scanner rejection and the real POSIX refusal without side effects. These tests
+are synthetic and do not qualify native SDK execution on Linux.
+The independent installer lane also passed 33 Linux tests with 49 subtests on
+the unchanged installer source, including platform admission and recovery
+boundaries; these are not Linux model/process-custody qualification. The wider
+transport sweep originally exposed the fixture defect above; only the repaired
+focused cases are credited after that fix, not a rerun of the full sweep.
 Remaining release order:
 1. Publish and verify the final pre-SDK tag on the latest stable main on GitHub
    **before** merging SDK. This is a separately owned task, not completed here.

@@ -4,6 +4,10 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-19
 
+- Correct the portable AGY streaming test to explicitly emulate its Windows-only admission boundary while retaining a real POSIX refusal check. This makes synthetic integration coverage portable without enabling or claiming native SDK support on another platform.
+
+- Make SDK delivery instructions independent of branch/merge status, distinguish the observed fresh Consultant handoff from wider qualification, and use the selected provider environment derived from retained Python. Clarify that the pre-SDK tag is a source checkpoint, not an automatic undo of machine-local hook configuration.
+
 - Reconcile the selected SDK v1 delivery delta with the observed native handoff, reusing unchanged execution evidence rather than requesting another model run. Require the final stable pre-SDK tag to be published and verified before any SDK merge; merge and rollout remain separate authorized steps.
 
 - Record the user-operated native Antigravity-to-Codex SDK fresh Consultant handoff and distinguish its completed canonical evidence from a private readback-wrapper error. Preserve earlier failed attempts, avoid another model call, and keep wider provider, role and rollout qualification explicitly separate.
