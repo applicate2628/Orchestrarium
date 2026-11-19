@@ -1,6 +1,6 @@
 ---
 name: github-pr-review-bot
-description: "Use when operating a GitHub pull-request loop with the Codex review bot: triggering review, polling reactions/reviews/threads, addressing findings, or proving a clean current-head result."
+description: "Run and verify the Codex review bot loop on a GitHub pull request."
 ---
 
 # GitHub PR Review Bot
