@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-19
 
+- The agents-mode reference now distinguishes read-only routing and status checks from authorized configuration writes. Reading legacy overlays leaves their bytes unchanged; explicit configuration changes and reinstall retain their existing normalization rules.
+
 - Align both Claude structural references and their validation with the current native publication and passive-polling contracts. The maintainer check now verifies current reference bytes and user controls without demanding a retired publication marker. Runtime authorization is unchanged.
 
 - Installer cleanup now releases private POSIX transaction snapshots of read-only directories after success or rollback. Only the private snapshot directory is made writable during a removal attempt; its original mode must be restored even if removal fails. A failed mode restoration is reported as incomplete cleanup, not as successful rollback.
