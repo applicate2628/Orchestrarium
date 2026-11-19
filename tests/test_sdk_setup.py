@@ -1,5 +1,6 @@
 """Official agent SDK proposals have no installer/provider effects."""
 import importlib.util
+import os
 from pathlib import Path
 import shlex
 import sys
@@ -28,7 +29,7 @@ def test_official_package_proposal_not_api_client_substitute(provider, package):
     text = setup_guidance(provider, "my worker/bin/python", windows=False)
     lines = text.splitlines()
     command = next(line for line in lines if " -m pip install " in line)
-    assert shlex.split(command) == ["my worker/bin/python", "-m", "pip", "install", "--upgrade", package]
+    assert shlex.split(command) == ["my worker/bin/python", "-m", "pip", "install", package]
     assert "--no-deps" not in text
     assert "nothing installed" in text
     assert "does not claim a new adapter" in text
@@ -50,12 +51,13 @@ def test_explicit_worker_interpreter_required(python):
 
 def test_windows_command_quotes_exact_interpreter_not_shell_interpolation():
     text = setup_guidance("codex", "worker's $env/path/python.exe", windows=True)
-    assert "& 'worker''s $env/path/python.exe' '-m' 'pip' 'install' '--upgrade' 'openai-codex'" in text
+    assert "& 'worker''s $env/path/python.exe' '-m' 'pip' 'install' 'openai-codex'" in text
 
 
 def test_host_catalog_not_expanded_by_sdk_availability():
     from installation.clients import CLIENTS
-    assert tuple(CLIENTS) == ("codex", "claude")
+    assert tuple(CLIENTS) == ("codex", "claude", "antigravity")
+    assert {"copilot", "kimi", "grok"}.isdisjoint(CLIENTS)
     assert tuple(SDK_PROVIDERS)[0] == "antigravity"
 
 
@@ -136,18 +138,19 @@ def test_apply_isolated_normal_pip_and_same_interpreter(tmp_path, monkeypatch, p
         calls.append((command, env))
         if 'venv' in command:
             fake_venv(target)
-        return SimpleNamespace(returncode=0)
+        return SimpleNamespace(returncode=10 if len(calls) == 2 else 0)
     with patch('subprocess.run', side_effect=run):
         assert setup_environment(provider, str(target), apply=True) == 0
     assert calls[0][0] == [sys.executable, '-I', '-m', 'venv', str(target)]
-    assert calls[1][0][:3] == [str(environment_python(target)), '-I', '-c']
-    assert 'sys.prefix != sys.base_prefix' in calls[1][0][3]
-    assert calls[1][0][-1] == str(target)
+    assert calls[1][0][:5] == [str(environment_python(target)), '-I', '-S', '-B', '-c']
+    assert calls[1][0][-2:] == [str(target), package]
     install = calls[2][0]
-    assert install[:7] == [str(environment_python(target)), '-I', '-m', 'pip', '--isolated', 'install', '--upgrade']
+    assert install[:6] == [str(environment_python(target)), '-I', '-m', 'pip', '--isolated', 'install']
+    assert '--upgrade' not in install
     assert '--no-deps' not in install and install[-1] == package
     assert install[install.index('--index-url') + 1] == 'https://pypi.org/simple'
     assert calls[3][0][-1] == 'check'
+    assert calls[4][0] == calls[1][0]
     env = calls[0][1]
     assert env['PIP_CONFIG_FILE'] == os.devnull
     assert not any(key in env for key in ('PIP_TARGET', 'PIP_PREFIX', 'PIP_USER', 'PYTHONPATH', 'PYTHONHOME'))
@@ -164,11 +167,11 @@ def test_existing_selected_venv_reused_and_unrelated_files_preserved(tmp_path):
     marker.write_text('keep', encoding='utf-8')
     with patch('subprocess.run', return_value=SimpleNamespace(returncode=0)) as run:
         assert setup_environment('claude', str(tmp_path), apply=True) == 0
-    assert len(run.call_args_list) == 3
+    assert len(run.call_args_list) == 1
     assert marker.read_text(encoding='utf-8') == 'keep'
 
 
-@pytest.mark.parametrize('stage,status', [(0, 3), (1, 2), (2, 7), (3, 1)])
+@pytest.mark.parametrize('stage,status', [(0, 3), (1, 2), (2, 7), (3, 1), (4, 2)])
 def test_failure_retains_state_and_returns_stage_status(tmp_path, capsys, stage, status):
     from types import SimpleNamespace
     from installation.sdk_setup import setup_environment
@@ -179,7 +182,7 @@ def test_failure_retains_state_and_returns_stage_status(tmp_path, capsys, stage,
         calls.append(command)
         if index == 0:
             fake_venv(target)
-        return SimpleNamespace(returncode=status if index == stage else 0)
+        return SimpleNamespace(returncode=status if index == stage else 10 if index == 1 else 0)
     with patch('subprocess.run', side_effect=run):
         assert setup_environment('codex', str(target), apply=True) == status
     assert len(calls) == stage + 1
@@ -216,7 +219,7 @@ def test_cleanup_failure_does_not_mask_success(tmp_path, capsys):
     from types import SimpleNamespace
     from installation.sdk_setup import setup_environment
     fake_venv(tmp_path)
-    with patch('subprocess.run', return_value=SimpleNamespace(returncode=0)), patch('shutil.rmtree', side_effect=OSError('busy')):
+    with patch('subprocess.run', side_effect=[SimpleNamespace(returncode=value) for value in (10, 0, 0, 0)]), patch('shutil.rmtree', side_effect=OSError('busy')):
         assert setup_environment('codex', str(tmp_path), apply=True) == 0
     assert 'cleanup needs attention' in capsys.readouterr().err
 
@@ -250,3 +253,95 @@ def test_copilot_guidance_uses_current_official_package_without_runtime_executio
     assert "COPILOT_CLI_PATH" in text
     assert "first managed use" in text
     assert "download-runtime" not in text
+
+
+def test_present_metadata_has_no_install_effect(tmp_path, capsys):
+    from types import SimpleNamespace
+    from installation.sdk_setup import setup_environment
+    fake_venv(tmp_path)
+    with patch('subprocess.run', return_value=SimpleNamespace(returncode=0)) as run, \
+         patch('tempfile.mkdtemp', side_effect=AssertionError('present environment has no writes')):
+        assert setup_environment('codex', str(tmp_path), apply=True) == 0
+    assert len(run.call_args_list) == 1
+    assert 'pip' not in run.call_args.args[0]
+    assert 'compatibility' in capsys.readouterr().out
+
+
+def test_unknown_presence_leaves_environment_unchanged(tmp_path):
+    from types import SimpleNamespace
+    from installation.sdk_setup import setup_environment
+    fake_venv(tmp_path)
+    with patch('subprocess.run', return_value=SimpleNamespace(returncode=2)) as run, \
+         patch('tempfile.mkdtemp', side_effect=AssertionError('unknown environment has no writes')):
+        assert setup_environment('codex', str(tmp_path), apply=True) == 2
+    assert len(run.call_args_list) == 1
+    assert 'pip' not in run.call_args.args[0]
+
+
+def test_isolated_metadata_probe_does_not_execute_pth_or_import_provider(tmp_path):
+    import subprocess
+    import sysconfig
+    from installation.sdk_setup import _PRESENCE_PROBE, environment_python
+
+    target = tmp_path / "worker env"
+    subprocess.run([sys.executable, "-I", "-m", "venv", "--without-pip", str(target)], check=True)
+    python = environment_python(target)
+    site = Path(sysconfig.get_path("purelib", "venv", vars={"base": str(target), "platbase": str(target)}))
+    site.mkdir(parents=True, exist_ok=True)
+    sentinel = target / "startup-hook-ran"
+    poison = f"from pathlib import Path; Path({str(sentinel)!r}).write_text('must not run')\n"
+    (site / "startup.pth").write_text(
+        f"import pathlib; pathlib.Path({str(sentinel)!r}).write_text('must not run')\n", encoding="utf-8")
+    (site / "openai_codex.py").write_text(poison, encoding="utf-8")
+    command = [str(python), "-I", "-S", "-B", "-c", _PRESENCE_PROBE, str(target), "openai-codex"]
+    subprocess.run([str(python), "-I", "-B", "-c", "pass"], check=True, timeout=10)
+    assert sentinel.exists()  # Prove the fixture executes when site startup is enabled.
+    sentinel.unlink()
+
+    def check(expected, selected=command):
+        assert subprocess.run(selected, check=False, timeout=10).returncode == expected
+        assert not sentinel.exists()
+
+    check(10)
+    first = site / "openai_codex-1.0.dist-info"
+    first.mkdir()
+    check(2)  # The matching distribution directory lacks its metadata.
+    (first / "METADATA").write_text("Name: openai-codex\nVersion: 1.0\n", encoding="utf-8")
+    check(0)
+    check(2, [sys.executable, *command[1:]])  # Do not accept another environment's interpreter.
+    second = site / "openai_codex-2.0.dist-info"
+    second.mkdir()
+    (second / "METADATA").write_text("Name: openai-codex\nVersion: 2.0\n", encoding="utf-8")
+    check(2)
+    cfg = target / "pyvenv.cfg"
+    cfg.write_text(cfg.read_text(encoding="utf-8").replace(
+        "include-system-site-packages = false", "include-system-site-packages = true"),
+        encoding="utf-8")
+    check(2)
+
+
+def test_isolated_metadata_probe_rejects_linked_metadata_leaf(tmp_path):
+    import subprocess
+    import sysconfig
+    from installation.sdk_setup import _PRESENCE_PROBE, environment_python
+
+    target = tmp_path / "worker"
+    subprocess.run([sys.executable, "-I", "-m", "venv", "--without-pip", str(target)], check=True)
+    site = Path(sysconfig.get_path("purelib", "venv", vars={"base": str(target), "platbase": str(target)}))
+    distribution = site / "openai_codex-1.0.dist-info"
+    distribution.mkdir(parents=True, exist_ok=True)
+    leaf = distribution / "METADATA"
+    outside = tmp_path / "outside-metadata"
+    outside.write_text("Name: openai-codex\nVersion: 1.0\n", encoding="utf-8")
+    try:
+        leaf.symlink_to(outside)
+    except OSError as exc:
+        if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink privilege unavailable")
+        raise
+    command = [str(environment_python(target)), "-I", "-S", "-B", "-c",
+               _PRESENCE_PROBE, str(target), "openai-codex"]
+    assert subprocess.run(command, check=False, timeout=10).returncode == 2
+    leaf.unlink()
+    leaf.write_text(outside.read_text(encoding="utf-8"), encoding="utf-8")
+    assert subprocess.run(command, check=False, timeout=10).returncode == 0

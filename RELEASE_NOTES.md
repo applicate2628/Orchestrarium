@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-19
 
+- Explicit SDK setup now leaves a present package unchanged, installs only after checking for local absence, and refuses unclear metadata without assuming adapter compatibility. Guidance and preview still do not run a provider or install anything.
+
 - Correct the portable AGY streaming test to explicitly emulate its Windows-only admission boundary while retaining a real POSIX refusal check. This makes synthetic integration coverage portable without enabling or claiming native SDK support on another platform.
 
 - Make SDK delivery instructions independent of branch/merge status, distinguish the observed fresh Consultant handoff from wider qualification, and use the selected provider environment derived from retained Python. Clarify that the pre-SDK tag is a source checkpoint, not an automatic undo of machine-local hook configuration.

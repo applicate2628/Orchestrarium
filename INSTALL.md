@@ -20,21 +20,26 @@ To print a proposal without installing anything:
 python install.py --sdk-setup codex --sdk-python .venv-codex/bin/python
 ```
 
-To create or update a selected provider environment through the installer:
+To use or create a selected provider environment through the installer:
 
 ```sh
 python install.py --sdk-setup codex --sdk-venv .venv-codex
 python install.py --sdk-setup codex --sdk-venv .venv-codex --apply
 ```
 
-The first command is a preview. The explicit apply creates a venv using the
-current supported installer Python, or updates the selected existing venv. It
-runs ordinary official PyPI installation with normal dependencies and then
-`pip check`, returning the actual failure status if any stage fails. Codex's
+The first command prints a plan without invoking the selected interpreter.
+Explicit apply checks only the selected venv's local package metadata, without
+starting site hooks or importing the SDK. If the package is present, its bytes
+are left alone and adapter compatibility remains unverified. If metadata or
+environment ownership is ambiguous, setup stops without installing or upgrading
+a package. If the package is missing, apply installs the official package from
+PyPI with normal dependencies, runs `pip check` and verifies that the package is
+now present. A new venv uses the current supported installer Python. Codex's
 normal installation includes its declared CLI package; other vendor runtimes are
 disclosed by the selected proposal. Nothing logs in or calls a model.
 
-The selected interpreter's real environment prefix is checked before pip runs.
+The probe binds the selected interpreter to the selected venv before pip runs.
+Run setup serially for a given venv, with no other writers to that environment.
 Child processes do not inherit pip/Python install-redirection settings; pip uses
 its isolated mode and the official index, not ambient target/prefix configuration.
 Temporary installation data stays beside the selected environment. A failed
