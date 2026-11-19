@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-19
 
+- Update the Codex manual hook-trust instructions to the current hook browser instead of relying on a startup modal. Keep explicit user review separate from file installation and static health checks.
+
 - Add a separate exact-snapshot maintenance route for legacy Codex hook registrations without inventing an installation receipt. Bind the reviewed interpreter-only change to the original bytes, scripts and executable; preserve shared and foreign data, produce a local inventory through its existing owner, and retain failure rollback without granting client trust. Read-only cloud-file inputs require verified local data and identity; mutable path safeguards remain unchanged.
 
 ## 2026-11-18

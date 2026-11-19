@@ -714,10 +714,18 @@ python "$HOME/.agents/skills/lead/scripts/check-hook-health.py" --target "$HOME/
 
 #### Codex manual trust step
 
-After reinstall, start interactive `codex` — not `codex exec` — and choose **Trust all and continue** for every affected entry among the twelve current Codex entries.
-Do not press Esc and do not choose **`Continue without trusting`**, because all hooks and guards remain installed but inactive.
-`codex exec` silently skips untrusted hook entries instead of showing the trust prompt, so interactive `codex` must run first.
-The trust modal does not time out and the operator must review every affected entry before making the explicit choice. An unchanged registration identity requires no repeat trust step.
+After a hook command changes, review its current definition before trusting it.
+In interactive Codex, open `/hooks`; in the desktop app, open **Settings > Hooks**
+or **Review hooks**. Confirm the affected Orchestrarium entries use the intended
+retained Python and existing scripts. Do not grant trust to unrelated entries.
+
+Codex records trust against each hook's current hash. New or changed non-managed
+hooks are skipped until the user reviews and trusts their current definitions; installing files or generating an
+inventory does not grant trust. Noninteractive execution is not a substitute for
+this manual review. After explicitly trusting the intended entries, rerun the read-only trust report before the
+next provider task. Do not bypass hook trust to make a check pass.
+
+See the [official hook review instructions](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks).
 
 #### Hook implementation
 
