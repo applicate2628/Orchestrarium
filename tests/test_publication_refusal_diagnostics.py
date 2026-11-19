@@ -31,6 +31,23 @@ class TestRefusalDiagnostics(unittest.TestCase):
     def setUpClass(cls):
         cls.gate = load_owner()
 
+    def test_generic_exact_command_with_one_final_line_boundary(self):
+        import shlex
+        g = self.gate
+        owner = sys.modules[g.classify_generic_push.__module__]
+        command = shlex.join((str(ROOT / "git"), "-C", str(ROOT), "push", "origin",
+                             "HEAD:refs/heads/topic"))
+        def parsed(suffix):
+            return owner.parse_shell_command(command + suffix, "posix")
+        plain = owner.classify_generic_push(parsed(""))
+        terminal = parsed("\n")
+        self.assertEqual(plain.status, "PGG-ADMISSIBLE")
+        self.assertEqual(owner.classify_generic_push(terminal), plain)
+        self.assertFalse(owner._is_exact_direct_literal(terminal.raw_command, terminal))
+        for suffix in ("\n\n", "\r\n", " \n", "\n echo other", "; echo other"):
+            with self.subTest(suffix=suffix):
+                self.assertNotEqual(owner.classify_generic_push(parsed(suffix)).status, "PGG-ADMISSIBLE")
+
     def test_field_orders_and_line_endings(self):
         g = self.gate
         for identifier in g._ScannerRefusalDenied._IDS:

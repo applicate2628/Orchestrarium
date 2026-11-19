@@ -1318,6 +1318,9 @@ class TestPublicationSafetyTrustedScanR2(unittest.TestCase):
             (scripts / "linked_runtime_subroots.py").write_bytes(
                 (REPO_ROOT / "scripts" / "linked_runtime_subroots.py").read_bytes()
             )
+            (scripts / "transfer_binding.py").write_bytes(
+                CANONICAL_HOOK.with_name("transfer_binding.py").read_bytes()
+            )
             original_file = module.__file__
             try:
                 module.__file__ = str(gate)
@@ -1385,6 +1388,7 @@ class TestPublicationComponentRoot(unittest.TestCase):
                 ("scripts/process_supervision/windows_job.py", REPO_ROOT / "scripts/process_supervision/windows_job.py"),
                 ("scripts/publication_review_policy.py", CANONICAL_HOOK.with_name("publication_review_policy.py")),
                 ("scripts/linked_runtime_subroots.py", REPO_ROOT / "scripts/linked_runtime_subroots.py"),
+                ("scripts/transfer_binding.py", CANONICAL_HOOK.with_name("transfer_binding.py")),
             )
             for relative, source in sources:
                 target = physical / relative
@@ -1696,6 +1700,7 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
             "posix_helper": b"",
             "windows_job": b"WINDOWS_JOB_SENTINEL = True\n",
             "linked_runtime_subroots": b"LINKED_SUBROOT_SENTINEL = True\n",
+            "receiver_scope": CANONICAL_HOOK.with_name("transfer_binding.py").read_bytes(),
             "publication_review_policy": (
                 b"POLICY_MODULE_CONTRACT_ID = 'orchestrarium.publication-review-policy.module.v1'\n"
                 b"POLICY_MODULE_KEY = '_orchestrarium_publication_review_policy_v1'\n"
@@ -2021,6 +2026,7 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
                 "publication_review_policy.py"
             ),
             "linked_runtime_subroots": REPO_ROOT / "scripts" / "linked_runtime_subroots.py",
+            "receiver_scope": CANONICAL_HOOK.with_name("transfer_binding.py"),
         }
         sources = {role: path.read_bytes() for role, path in source_paths.items()}
         original_file = module.__file__
@@ -2891,6 +2897,7 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
                 "publication_review_policy.py"
             ),
             "linked_runtime_subroots": REPO_ROOT / "scripts" / "linked_runtime_subroots.py",
+            "receiver_scope": CANONICAL_HOOK.with_name("transfer_binding.py"),
         }
         sources = {role: path.read_bytes() for role, path in source_paths.items()}
         original_file = module.__file__
@@ -3273,7 +3280,7 @@ class TestPublicationReviewedExceptionGateR2(unittest.TestCase):
             + f"applied=1, applied-set={applied_set}, unresolved=0, evaluation=complete)\n"
         )
 
-    def test_four_declared_layouts_select_exact_roots_and_eight_roles(self) -> None:
+    def test_four_declared_layouts_select_exact_roots_and_nine_roles(self) -> None:
         module = self._module()
         expected = (
             (
@@ -3289,6 +3296,7 @@ class TestPublicationReviewedExceptionGateR2(unittest.TestCase):
                     ("scanner", "universal-hooks/scripts/check-publication-safety.py"),
                     ("publication_review_policy", "universal-hooks/scripts/publication_review_policy.py"),
                     ("linked_runtime_subroots", "linked_runtime_subroots.py"),
+                    ("receiver_scope", "universal-hooks/scripts/transfer_binding.py"),
                 ),
             ),
             (
@@ -3304,6 +3312,7 @@ class TestPublicationReviewedExceptionGateR2(unittest.TestCase):
                     ("scanner", "src.codex/skills/lead/scripts/check-publication-safety.py"),
                     ("publication_review_policy", "src.codex/skills/lead/scripts/publication_review_policy.py"),
                     ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
+                    ("receiver_scope", "src.codex/skills/lead/scripts/transfer_binding.py"),
                 ),
             ),
             (
@@ -3319,6 +3328,7 @@ class TestPublicationReviewedExceptionGateR2(unittest.TestCase):
                     ("scanner", "src.claude/agents/scripts/check-publication-safety.py"),
                     ("publication_review_policy", "src.claude/agents/scripts/publication_review_policy.py"),
                     ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
+                    ("receiver_scope", "src.claude/agents/scripts/transfer_binding.py"),
                 ),
             ),
             (
@@ -3334,6 +3344,7 @@ class TestPublicationReviewedExceptionGateR2(unittest.TestCase):
                     ("scanner", "scripts/check-publication-safety.py"),
                     ("publication_review_policy", "scripts/publication_review_policy.py"),
                     ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
+                    ("receiver_scope", "scripts/transfer_binding.py"),
                 ),
             ),
         )

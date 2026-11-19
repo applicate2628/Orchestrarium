@@ -4,7 +4,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-19
 
-- Target-local publication and portable review preparation now disable Git paging only for their own subprocesses, so an inherited interactive pager no longer prevents qualification. Both paths now pin and recheck the actual common Git configuration for linked worktrees. Existing destination, credentials and configuration checks stay in force. Native publication reports a vetted scanner refusal reason without exposing raw scanner output.
+- Target-local publication and portable review preparation now disable Git paging only for their own subprocesses, so an inherited interactive pager no longer prevents qualification. Both paths now pin and recheck the actual common Git configuration for linked worktrees. Existing destination, credentials and configuration checks stay in force. Native publication reports a vetted scanner refusal reason without exposing raw scanner output. A single terminal line break no longer rejects a proven literal POSIX command; strict rendering and compound-command checks are unchanged.
 
 ## 2026-11-12
 
