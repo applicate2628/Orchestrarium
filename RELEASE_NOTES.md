@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-19
 
+- Optional bundle assembly now requires a separately qualified standalone CPython standard-library runtime. It rejects third-party package content before output and packages only selected CPython notices. Older lockfiles and evidence remain source history, not build inputs. The existing source installer and provider policies are unchanged.
+
 - The agents-mode reference now distinguishes read-only routing and status checks from authorized configuration writes. Reading legacy overlays leaves their bytes unchanged; explicit configuration changes and reinstall retain their existing normalization rules.
 
 - Align both Claude structural references and their validation with the current native publication and passive-polling contracts. The maintainer check now verifies current reference bytes and user controls without demanding a retired publication marker. Runtime authorization is unchanged.
