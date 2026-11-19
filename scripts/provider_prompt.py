@@ -135,8 +135,12 @@ KIMI_REQUIRED_HELP_FLAGS = ("acp",)
 SETTINGS_SNAPSHOT_MAX_BYTES = 1024 * 1024
 CLEANUP_ISSUE_LIMIT = 32
 CLEANUP_ISSUE_TOKEN_MAX = 64
+COPILOT_BYOK_AUTH_MODE = "copilot-byok-openai"
+COPILOT_BYOK_ENDPOINT_ENV = "COPILOT_BYOK_BASE_URL"
+COPILOT_BYOK_KEY_ENV = "COPILOT_BYOK_API_KEY"
 PROVIDER_AUTH_SECRET_ENV_KEYS_V1 = {
     "copilot-explicit-token": ("COPILOT_GITHUB_TOKEN",),
+    COPILOT_BYOK_AUTH_MODE: (COPILOT_BYOK_KEY_ENV,),
     "codex-api-key": ("OPENAI_API_KEY",),
     "codex-auth-file": (),
     "claude-bedrock": (
@@ -4057,6 +4061,24 @@ def claude_programmatic_auth_mode_supported(mode: str) -> bool:
     )
 
 
+def _validate_copilot_byok_endpoint(value: str) -> None:
+    """One explicit HTTPS OpenAI-compatible root, with no URL credentials."""
+    from urllib.parse import urlsplit
+
+    try:
+        if type(value) is not str or not re.fullmatch(
+            r"https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?(?:/[A-Za-z0-9_~-]+)*/?", value,
+        ):
+            raise ValueError
+        url = urlsplit(value)
+        labels = url.hostname.split(".")
+        if (any(not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+                for label in labels) or (url.port is not None and url.port == 0)):
+            raise ValueError
+    except (AttributeError, ValueError):
+        raise ValueError("E_COPILOT_BYOK_ENDPOINT_INVALID") from None
+
+
 def resolve_provider_auth_configuration(
     provider: str, environment: dict[str, str] | None = None
 ) -> ProviderAuthConfiguration:
@@ -4078,9 +4100,28 @@ def resolve_provider_auth_configuration(
                 )
         mode = "codex-api-key" if source.get("OPENAI_API_KEY") else "codex-auth-file"
     elif provider == "copilot":
-        if not source.get("COPILOT_GITHUB_TOKEN", "").strip():
-            raise ValueError("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: explicit Copilot token required")
-        mode = "copilot-explicit-token"
+        selector = source.get("COPILOT_AUTH_MODE", "github-token")
+        token = source.get("COPILOT_GITHUB_TOKEN", "")
+        endpoint = source.get(COPILOT_BYOK_ENDPOINT_ENV, "")
+        api_key = source.get(COPILOT_BYOK_KEY_ENV, "")
+        if selector == "github-token":
+            if endpoint or api_key:
+                raise ValueError("E_COPILOT_AUTH_ROUTE_CONFLICT")
+            if not token.strip():
+                raise ValueError("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: explicit Copilot token required")
+            mode = "copilot-explicit-token"
+        elif selector == "byok":
+            if token:
+                raise ValueError("E_COPILOT_AUTH_ROUTE_CONFLICT")
+            if not api_key or not re.fullmatch(r"[!-~]+", api_key):
+                raise ValueError("E_COPILOT_BYOK_CREDENTIAL_REQUIRED")
+            _validate_copilot_byok_endpoint(endpoint)
+            if api_key in endpoint:
+                raise ValueError("E_COPILOT_BYOK_ENDPOINT_INVALID")
+            mode = COPILOT_BYOK_AUTH_MODE
+            child.update({"COPILOT_AUTH_MODE": selector, COPILOT_BYOK_ENDPOINT_ENV: endpoint})
+        else:
+            raise ValueError("E_COPILOT_AUTH_ROUTE_INVALID")
     elif provider == "claude":
         selected = []
         if _truthy(source.get("CLAUDE_CODE_USE_BEDROCK")):

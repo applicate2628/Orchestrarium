@@ -45,6 +45,12 @@ def _owner():
     return provider_prompt
 
 
+def _copilot_auth_snapshot(auth):
+    owner = _owner()
+    return (auth.mode, auth.child_environment.get(owner.COPILOT_BYOK_ENDPOINT_ENV),
+        tuple(auth.child_environment.get(key) for key in owner.PROVIDER_AUTH_SECRET_ENV_KEYS_V1[auth.mode]))
+
+
 def _auth_context_snapshot(auth):
     """Private selected auth controls, never a vendor identity or exported digest."""
     owner = _owner()
@@ -209,9 +215,7 @@ class CodexReviewDispatch:
     def _check_auth_context(self):
         if self.request.provider == "copilot":
             auth = _owner().resolve_provider_auth_configuration("copilot", dict(self._environment))
-            snapshot = (auth.mode, tuple((key,auth.child_environment.get(key)) for key in
-                _owner().PROVIDER_AUTH_SECRET_ENV_KEYS_V1[auth.mode]))
-            if snapshot != self._auth_snapshot:
+            if _copilot_auth_snapshot(auth) != self._auth_snapshot:
                 raise DispatchError("E_COPILOT_SDK_AUTH_CONTEXT_CHANGED")
             return
         if self.request.provider != "claude":
@@ -692,21 +696,26 @@ def _prepare_dispatch(prevalidated, binding_path: Path, *, source_environment: d
             installed_hook_root=binding.get("installedHookRoot"),
         )
     elif provider == "copilot":
-        from .copilot import CopilotRuntimeSelection
+        from .copilot import CopilotRuntimeSelection, require_supported_byok_sdk
         base = source_environment.get("COPILOT_BASE_DIRECTORY")
         if not base or not Path(base).is_absolute():
             raise DispatchError("E_COPILOT_SDK_BASE_DIRECTORY_REQUIRED")
         owner.validate_no_reparse_components(Path(base))
         if not Path(base).is_dir(): raise DispatchError("E_COPILOT_SDK_BASE_DIRECTORY_REQUIRED")
-        auth_snapshot = (auth.mode, tuple((key,auth.child_environment.get(key)) for key in
-            owner.PROVIDER_AUTH_SECRET_ENV_KEYS_V1[auth.mode]))
+        auth_snapshot = _copilot_auth_snapshot(auth)
+        endpoint = auth.child_environment.get(owner.COPILOT_BYOK_ENDPOINT_ENV)
+        if endpoint is not None:
+            if continuation_mode:
+                raise DispatchError("E_COPILOT_BYOK_CONTINUATION_UNQUALIFIED")
+            require_supported_byok_sdk()
         selection = CopilotRuntimeSelection(
             executable=str(executable), executable_sha256=digest.hexdigest(), base_directory=base,
             auth_mode=auth.mode, instructions=owner.assemble_external_prompt(b"").decode("utf-8"),
             work_item=str(item), ledger_max_events=int(options[1]) if options else None,
             ledger_max_bytes=int(options[3]) if options else None,
             job_memory_limit_bytes=binding["jobMemoryLimitBytes"],
-            timeout_seconds=c.timeout_secs, cleanup_timeout_seconds=c.timeout_secs)
+            timeout_seconds=c.timeout_secs, cleanup_timeout_seconds=c.timeout_secs,
+            byok_base_url=endpoint)
     else:
         from .claude import ClaudeRuntimeSelection
         if not owner.claude_programmatic_auth_mode_supported(auth.mode):

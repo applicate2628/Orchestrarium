@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import math
 import re
 from dataclasses import dataclass, asdict
@@ -25,6 +26,45 @@ from .coordination import CoordinationInferenceRequest, CoordinationInferenceRes
 
 class CopilotError(ValueError):
     """Closed diagnostic vocabulary; never export raw SDK exceptions."""
+
+
+_BYOK_PROVIDER = "orche-byok"
+_BYOK_SDK_VERSION = "2.0.1"
+
+
+def require_supported_byok_sdk() -> None:
+    """Qualify the exact distribution and import owner without importing the SDK."""
+    from importlib.metadata import PackageNotFoundError, distribution
+    from importlib.util import find_spec
+    import provider_prompt as owner
+
+    try:
+        selected = distribution("microsoft-copilot-sdk")
+    except PackageNotFoundError:
+        raise CopilotError("copilot_byok_sdk_version_unqualified") from None
+    if selected.version != _BYOK_SDK_VERSION:
+        raise CopilotError("copilot_byok_sdk_version_unqualified")
+    try:
+        distribution("github-copilot-sdk")
+    except PackageNotFoundError:
+        pass
+    else:
+        raise CopilotError("copilot_byok_sdk_import_owner_unqualified")
+    try:
+        entries = [path for path in (selected.files or ())
+                   if path.as_posix() == "copilot/__init__.py"]
+        if len(entries) != 1:
+            raise ValueError
+        expected = Path(selected.locate_file(entries[0])).absolute()
+        owner.validate_no_reparse_components(expected)
+        spec = find_spec("copilot")
+        if (spec is None or spec.origin is None or not expected.is_file()
+                or Path(spec.origin).absolute() != expected
+                or tuple(Path(path).absolute() for path in spec.submodule_search_locations or ())
+                   != (expected.parent,)):
+            raise ValueError
+    except (OSError, ValueError, TypeError):
+        raise CopilotError("copilot_byok_sdk_import_owner_unqualified") from None
 
 
 def _load_sdk():
@@ -51,6 +91,7 @@ class CopilotRuntimeSelection:
     timeout_seconds: float
     cleanup_timeout_seconds: float
     expected_launch_sha256: str | None = None
+    byok_base_url: str | None = None
 
     def __post_init__(self):
         for key in ("executable", "base_directory", "work_item"):
@@ -70,17 +111,26 @@ class CopilotRuntimeSelection:
         for value in (self.timeout_seconds,self.cleanup_timeout_seconds):
             if type(value) not in (int,float) or not math.isfinite(value) or value <= 0:
                 raise CopilotError("copilot_explicit_deadline_required")
-        if self.auth_mode != "copilot-explicit-token": raise CopilotError("copilot_explicit_auth_required")
+        import provider_prompt as owner
+        if self.auth_mode == owner.COPILOT_BYOK_AUTH_MODE:
+            owner._validate_copilot_byok_endpoint(self.byok_base_url)
+        elif self.auth_mode != "copilot-explicit-token" or self.byok_base_url is not None:
+            raise CopilotError("copilot_explicit_auth_required")
         if type(self.instructions) is not str or not self.instructions.strip():
             raise CopilotError("missing_governance_instructions")
-        import provider_prompt as owner
         owner._bounded_strict_utf8_snapshot(self.instructions.encode("utf-8"), "instructions")
 
-    def to_dict(self): return asdict(self)
+    def to_dict(self):
+        value = asdict(self)
+        if self.byok_base_url is None:
+            del value["byok_base_url"]  # Preserve legacy wire bytes and receipt hashes.
+        return value
 
     @classmethod
     def from_dict(cls,value):
-        if type(value) is not dict or set(value) != set(cls.__dataclass_fields__):
+        required = set(cls.__dataclass_fields__) - {"byok_base_url"}
+        if (type(value) is not dict or set(value) not in (required, required | {"byok_base_url"})
+                or ("byok_base_url" in value and value["byok_base_url"] is None)):
             raise CopilotError("invalid_runtime_selection_fields")
         return cls(**value)
 
@@ -120,7 +170,8 @@ class CopilotExecutor:
     Missing runtime/SDK does not install, download or select an alternate route.
     """
     def __init__(self, *, runtime_path, base_directory, environment, github_token,
-                 assert_current, output_context, timeout_seconds, cleanup_timeout_seconds, sdk=None, instructions="", authorize_tool=None, worker_selection=None):
+                 assert_current, output_context, timeout_seconds, cleanup_timeout_seconds, sdk=None, instructions="",
+                 authorize_tool=None, worker_selection=None, byok_api_key=None):
         import provider_prompt as owner
         self._runtime = Path(runtime_path)
         self._base = Path(base_directory)
@@ -130,8 +181,17 @@ class CopilotExecutor:
             raise CopilotError("copilot_explicit_base_directory_required")
         if type(environment) is not dict or any(type(k) is not str or type(v) is not str or not k or "\0" in k+v or "=" in k for k,v in environment.items()):
             raise CopilotError("copilot_explicit_environment_required")
-        if type(github_token) is not str or not github_token.strip():
-            raise CopilotError("copilot_explicit_credential_required")
+        self._byok_endpoint = (worker_selection.byok_base_url
+            if type(worker_selection) is CopilotRuntimeSelection else None)
+        if self._byok_endpoint is None:
+            if byok_api_key is not None or type(github_token) is not str or not github_token.strip():
+                raise CopilotError("copilot_explicit_credential_required")
+            credential = github_token
+        else:
+            if (github_token is not None or type(byok_api_key) is not str
+                    or not re.fullmatch(r"[!-~]+", byok_api_key) or byok_api_key in self._byok_endpoint):
+                raise CopilotError("copilot_explicit_credential_required")
+            credential = byok_api_key
         if not callable(assert_current) or any(inspect.isasyncgenfunction(v) for v in (assert_current,getattr(assert_current,"__call__",None))):
             raise CopilotError("copilot_invalid_authority")
         if type(output_context) is not owner.ProviderOutputContext:
@@ -143,7 +203,11 @@ class CopilotExecutor:
         self._identity = self._runtime_identity()
         self._environment = dict(environment)
         self._environment["COPILOT_SKIP_CLI_DOWNLOAD"] = "1"
-        self._token = github_token
+        for name in ("COPILOT_AUTH_MODE", owner.COPILOT_BYOK_ENDPOINT_ENV, owner.COPILOT_BYOK_KEY_ENV):
+            self._environment.pop(name, None)
+        if self._byok_endpoint is not None and "COPILOT_GITHUB_TOKEN" in self._environment:
+            raise CopilotError("copilot_explicit_credential_required")
+        self._credential = credential
         self._authority = assert_current
         if type(instructions) is not str: raise CopilotError("copilot_invalid_instructions")
         self._instructions = instructions
@@ -153,7 +217,7 @@ class CopilotExecutor:
         self._tool_calls = set()
         self._tools_closed = False
         self._tool_lock = asyncio.Lock()
-        self._output = owner.ProviderOutputContext(tuple(dict.fromkeys((*output_context.needles,github_token.encode("utf-8")))))
+        self._output = owner.ProviderOutputContext(tuple(dict.fromkeys((*output_context.needles,credential.encode("utf-8")))))
         self._timeout, self._cleanup_timeout = timeout_seconds, cleanup_timeout_seconds
         self._sdk = sdk
         self._observed_profile = None
@@ -250,9 +314,23 @@ class CopilotExecutor:
         await self._current(request,effect)
         if self._cancel_requested: raise asyncio.CancelledError()
         profile = await self._session.rpc.model.get_current(timeout=self._timeout)
-        if (getattr(profile,"model_id",None),getattr(profile,"reasoning_effort",None)) != (request.model,request.effort):
+        model = getattr(profile, "model_id", None)
+        if self._byok_endpoint is not None:
+            if getattr(profile, "provider_id", None) != _BYOK_PROVIDER:
+                raise CopilotError("copilot_byok_provider_mismatch")
+            # The model RPC reports providerId separately from modelId. Both
+            # the provider-local ID and its exact SDK selection ID name the
+            # same one registered model only after binding the provider.
+            allowed_models = (request.model, self._sdk_model(request))
+        else:
+            allowed_models = (request.model,)
+        if model not in allowed_models or getattr(profile, "reasoning_effort", None) != request.effort:
             raise CopilotError("copilot_profile_mismatch")
-        self._observed_profile = (profile.model_id,profile.reasoning_effort)
+        # Keep the existing ledger model identity, not the local registry qualifier.
+        self._observed_profile = (request.model,profile.reasoning_effort)
+
+    def _sdk_model(self, request):
+        return f"{_BYOK_PROVIDER}/{request.model}" if self._byok_endpoint is not None else request.model
 
     async def _authorize_file(self,name,arguments):
         from .runtime import authorize_workspace_file_tool
@@ -351,6 +429,8 @@ class CopilotExecutor:
 
     async def execute(self, request):
         validate_copilot_request(request)
+        if self._byok_endpoint is not None and request.native_continuation is not None:
+            raise CopilotError("copilot_byok_continuation_unqualified")
         if self._request is not None:
             raise CopilotError("operation_already_consumed")
         if request.write_workspace is not None:
@@ -360,12 +440,20 @@ class CopilotExecutor:
             self._workspace_identity = validate_worker_custody(request,self._worker_selection)
         self._request = request
         await self._current(request,"copilot_start")
-        task = asyncio.create_task(self._execute(request))
+        sdk_logger = logging.getLogger("copilot.client") if self._byok_endpoint is not None else None
+        prior_disabled = sdk_logger.disabled if sdk_logger is not None else None
+        if sdk_logger is not None:
+            sdk_logger.disabled = True  # SDK exception logs may include RPC fields.
         try:
-            return await asyncio.shield(task)
-        except asyncio.CancelledError:
-            await self.cancel(request.run_id)
-            return await drain_owned(task)
+            task = asyncio.create_task(self._execute(request))
+            try:
+                return await asyncio.shield(task)
+            except asyncio.CancelledError:
+                await self.cancel(request.run_id)
+                return await drain_owned(task)
+        finally:
+            if sdk_logger is not None:
+                sdk_logger.disabled = prior_disabled
 
     async def cancel(self, run_id):
         if self._request is None or self._request.run_id != run_id:
@@ -461,13 +549,19 @@ class CopilotExecutor:
                 if self._cancel_requested: raise asyncio.CancelledError()
                 runtime = sdk.RuntimeConnection.for_spawned_stdio(path=str(self._runtime),env=dict(self._environment),
                     working_directory=request.cwd,base_directory=str(self._base))
+                github = {"use_logged_in_user": False}
+                client_options = {}
+                if self._byok_endpoint is None:
+                    github["token"] = self._credential
+                else:
+                    client_options["observability"] = {"log_level": "none"}
                 self._client = sdk.CopilotClient(mode="empty",runtime=runtime,
-                    github={"token":self._token,"use_logged_in_user":False})
+                    github=github, **client_options)
                 await self._client.start()
                 if self._cancel_requested: raise asyncio.CancelledError()
                 await self._current(request,"copilot_session_resume" if request.native_continuation is not None else "copilot_session_create")
                 if self._cancel_requested: raise asyncio.CancelledError()
-                options = dict(model=request.model,
+                options = dict(model=self._sdk_model(request),
                     working_directory=request.cwd,enable_config_discovery=False,
                     system_message={"mode":"append","content":self._instructions},
                     tools=self._file_tools(sdk) if request.write_workspace is not None else {"available_tools":[]},permissions={"on_request":permission if request.write_workspace is not None else deny},
@@ -477,6 +571,14 @@ class CopilotExecutor:
                     skills={"enabled":False,"directories":[],"included_builtin_skills":[]},
                     mcp={"servers":{},"enable_apps":False},
                     execution={"autopilot":{"continuation_enabled":False}})
+                if self._byok_endpoint is not None:
+                    options["github"] = {"capi": {"enabled": False}, "telemetry_enabled": False}
+                    options["inference"].update(
+                        providers=[{"name": _BYOK_PROVIDER, "type": "openai", "wire_api": "responses",
+                                    "base_url": self._byok_endpoint, "api_key": self._credential}],
+                        default_provider=_BYOK_PROVIDER,
+                        models=[{"id": request.model, "provider": _BYOK_PROVIDER}],
+                    )
                 if request.native_continuation is None:
                     self._session = await self._client.create_session(**options)
                 else:
@@ -585,12 +687,18 @@ class CopilotExecutor:
 def create_copilot_adapter(request, sink, selection):
     """Fixed contained worker factory; no installation or credential fallback."""
     import os
+    import provider_prompt as owner
     from .runtime import assert_current_launch, prepare_environment, validate_admitted_request
     if request.provider != "copilot" or type(selection) is not CopilotRuntimeSelection:
         raise CopilotError("copilot_request_unsupported")
     validate_admitted_request(request, selection)
     assert_current_launch(request, selection, "worker_factory")
     environment, output_context = prepare_environment(selection, dict(os.environ))
+    if selection.byok_base_url is not None:
+        require_supported_byok_sdk()
+        # This fixed, one-operation worker passes the key through the session
+        # RPC only, even if the SDK builds runtime env on top of os.environ.
+        os.environ.pop(owner.COPILOT_BYOK_KEY_ENV, None)
 
     async def current(value, effect):
         if value != request: raise CopilotError("worker_request_binding_mismatch")
@@ -604,7 +712,8 @@ def create_copilot_adapter(request, sink, selection):
 
     return CopilotExecutor(runtime_path=selection.executable,
         base_directory=selection.base_directory, environment=environment,
-        github_token=environment["COPILOT_GITHUB_TOKEN"], assert_current=current,
+        github_token=environment.get("COPILOT_GITHUB_TOKEN"),
+        byok_api_key=environment.get(owner.COPILOT_BYOK_KEY_ENV), assert_current=current,
         output_context=output_context, timeout_seconds=selection.timeout_seconds,
         cleanup_timeout_seconds=selection.cleanup_timeout_seconds,
         instructions=selection.instructions,authorize_tool=tool,worker_selection=selection)

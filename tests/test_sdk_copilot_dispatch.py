@@ -18,7 +18,7 @@ from sdk_execution import copilot
 from sdk_execution.contracts import json_text
 
 
-def prepare(tmp_path, monkeypatch):
+def prepare(tmp_path, monkeypatch, *, authentication=None):
     # Base setup stubs the Codex auth resolver; restore the real owner for Copilot.
     auth_resolver = owner.resolve_provider_auth_configuration
     prior, path, _ = base_fixture(tmp_path, monkeypatch, ledger_role="consultant")
@@ -34,9 +34,10 @@ def prepare(tmp_path, monkeypatch):
     monkeypatch.setenv("COPILOT_PROMPTS_DIR", str(capture))
     monkeypatch.setenv("COPILOT_CLI_PATH", str(tmp_path / "fixture.exe"))
     fixture_token = "fixture-" + "private-credential"
-    environment = dict(COPILOT_GITHUB_TOKEN=fixture_token,
+    environment = dict(
         COPILOT_BASE_DIRECTORY=str(tmp_path),
         COPILOT_CLI_PATH=str(tmp_path / "fixture.exe"), COPILOT_PROMPTS_DIR=str(capture))
+    environment.update({"COPILOT_GITHUB_TOKEN":fixture_token} if authentication is None else authentication)
     return dispatch.prepare_dispatch(selected, path, provider="copilot",
         source_environment=environment, cancellation_probe=lambda: False)
 

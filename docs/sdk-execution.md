@@ -903,6 +903,33 @@ acceptance. The vendor documents automatic runtime download on first use;
 an already provisioned binary. Setup alone neither activates the executor nor
 qualifies an installed SDK/runtime.
 
+Choose one authorization and billing route before submitting an explicit task:
+
+- **GitHub user token:** The existing route uses the explicitly supplied private
+  `COPILOT_GITHUB_TOKEN` (or `COPILOT_AUTH_MODE=github-token`). Use a token
+  legitimately issued for the chosen GitHub identity. The runtime does not reuse
+  a stored login or a different GitHub CLI account. Usage is attributed to the
+  authorized Copilot plan, not to a separate model-provider key.
+- **BYOK:** Select `COPILOT_AUTH_MODE=byok`, an explicit OpenAI-compatible
+  Responses API endpoint in `COPILOT_BYOK_BASE_URL`, and that endpoint's private
+  key in `COPILOT_BYOK_API_KEY`. The endpoint must be HTTPS and contain no URL
+  credentials or query string. BYOK uses the selected API provider's terms and
+  billing, not the GitHub Copilot subscription. Orchestrarium's initial
+  source-qualified BYOK surface is a fresh explicit session using
+  `microsoft-copilot-sdk` 2.0.1 and an already provisioned compatible runtime.
+  This uses the vendor's experimental named-provider interface, pinned to the
+  reviewed SDK version rather than assumed forward-compatible.
+  BYOK continuation is not qualified; the existing GitHub-token continuation
+  contract is unchanged.
+
+Provision secrets through the authorized private environment, not by placing
+them in command lines, bindings, configuration files, or logs. A mixed
+authorization selection fails instead of switching accounts or billing routes.
+See [provider access and terms](provider-access-policy.md) and the
+[official SDK authentication](https://docs.github.com/en/copilot/how-tos/copilot-sdk/auth/authenticate)
+and [BYOK](https://docs.github.com/en/copilot/how-tos/copilot-sdk/auth/byok) references.
+These implementation checks do not qualify a live account or authorize spending.
+
 ### Explicit Copilot read-only execution
 
 `scripts/invoke-copilot-prompt.py` is a thin entry to the existing public launch
@@ -920,8 +947,8 @@ Host, runtime, permission, process and receiving owners.
 
 The Host selects an already provisioned runtime with `COPILOT_CLI_PATH`, an
 explicit `COPILOT_BASE_DIRECTORY`, and capture storage through
-`COPILOT_PROMPTS_DIR`. Private `COPILOT_GITHUB_TOKEN` authentication does not fall
-back to a logged-in subscription identity. Existing permission, launch, process,
+`COPILOT_PROMPTS_DIR`. The explicitly selected authorization mode above
+never falls back to an ambient account or another provider. Existing permission, launch, process,
 terminal and ledger owners retain authority. Common governance is appended to
 the official SDK system message; empty-mode tools and ambient features stay off.
 The delegated message is agent-originated, and actual model/effort are read back

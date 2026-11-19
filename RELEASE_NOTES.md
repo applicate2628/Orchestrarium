@@ -4,6 +4,8 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-11-19
 
+- Separate Copilot subscription authentication from explicitly selected BYOK for fresh SDK tasks. BYOK uses the chosen HTTPS model-provider endpoint, with GitHub login and account billing fallback disabled. It does not alter the existing GitHub-token route or enable native editor integration.
+
 - Allow the SDK worker protocol to forward an already-bound read-only Codex Consultant’s native thread fork to the parent authorization check. A refusal performs no fork or new turn; fresh and continuation requests cannot use the fork effect. The selected-client installer verifies the updated worker against the same transport manifest before installing it.
 
 - Validate the same agents-mode runtime documents even when the checkout is under a temporary workspace. The selected Claude guidance also makes clear that Kimi output requires independent verification and grants no authority.

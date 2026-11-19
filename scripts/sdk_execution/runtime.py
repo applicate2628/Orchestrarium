@@ -259,6 +259,9 @@ def _require_runtime_result_route(request: ExecutionRequest) -> None:
 
 
 def _require_task_auth_route(request: ExecutionRequest, selection: Any) -> None:
+    if (request.provider == "copilot" and selection.byok_base_url is not None
+            and request.native_continuation is not None):
+        raise RuntimeBindingError("copilot_byok_continuation_unqualified")
     if request.provider == "claude" and (request.result_kind == "task" or request.tool_profile == "prompt-only" or type(request) is CoordinationInferenceRequest):
         if not _owner().claude_programmatic_auth_mode_supported(selection.auth_mode):
             raise RuntimeBindingError("claude_programmatic_auth_mode_required")
@@ -350,6 +353,8 @@ def prepare_environment(selection: Any, source: dict[str, str]):
         if not home.is_dir(): raise RuntimeBindingError("selected_home_unavailable")
         auth = owner.resolve_provider_auth_configuration("copilot", source)
         if auth.mode != selection.auth_mode: raise RuntimeBindingError("selected_auth_mode_mismatch")
+        if auth.child_environment.get(owner.COPILOT_BYOK_ENDPOINT_ENV) != selection.byok_base_url:
+            raise RuntimeBindingError("selected_byok_endpoint_mismatch")
         return dict(auth.child_environment), owner.resolve_provider_output_context(auth)
     codex = isinstance(selection, CodexRuntimeSelection)
     provider = "codex" if codex else "claude"
