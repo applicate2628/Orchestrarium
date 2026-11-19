@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-19
 
+- The maintenance guide now directs changes to common skills through their single canonical source. Maintain provider-specific wrappers separately and verify the resulting installed projections; no runtime behavior changed.
+
 - The bundled installer now disables Python bytecode caching in both launch stages. Help, dry runs, and loading the runtime-retention builder no longer leave Python cache files in the source bundle.
 
 - Clarified how to identify a frozen pre-SDK baseline, preview an install without changing the target, and locate the canonical installed skill and hook files. These documentation changes do not switch the SDK track or change installer behavior.
