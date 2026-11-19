@@ -2726,7 +2726,7 @@ def test_codex_skill_metadata_checks_catalog_without_claiming_foreign_skills(
     "path",
     (
         ROOT / "src.codex/skills/second-opinion/SKILL.md",
-        ROOT / "src.claude/commands/agents-second-opinion.md",
+        ROOT / "adapters/claude/commands/agents-second-opinion.md",
     ),
 )
 def test_consultant_reporting_uses_memory_only_normalization(path):
