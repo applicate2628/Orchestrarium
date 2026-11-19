@@ -33,7 +33,11 @@ def test_copilot_admitted_consultant_crosses_coordinator_without_claiming_receiv
     assert output["task"]["content"] == "Bounded advice."
     assert output["review"] is None and output["authoritative"] is False
     assert output["process_settlement"] == "not_established"
-    assert state.executor.execution_result.sdk_execution is None
+    evidence = state.executor.execution_result.sdk_execution
+    assert evidence["adapter"] == "microsoft-copilot-sdk"
+    assert evidence["accountBinding"] == state.authority.current.account_binding
+    assert evidence["model"] == state.authority.current.model
+    assert not {"sdk_execution", "sdkExecution"} & output.keys()
     assert state.outer.model_calls == 1 and state.native.calls.count("send") == 1
     assert state.native.client_options["mode"] == "empty"
     assert state.native.client_options["github"]["use_logged_in_user"] is False
