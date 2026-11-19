@@ -29,8 +29,8 @@ def test_registration_commit_failure_never_turns_prepared_memory_into_permission
         tmp_path, monkeypatch, after_commit):
     values = registry_fixture(tmp_path, monkeypatch)
     registry, owner, assignment, requests, selections, root, proposal, candidate = values
-    original_ledger = runtime._ledger
-    original = original_ledger(root)[0]._append_event_transaction
+    writer = runtime._ledger(root)[0]
+    original = writer._append_event_transaction
     captured = {}
 
     def interrupted(item, *args, **kwargs):
@@ -47,12 +47,7 @@ def test_registration_commit_failure_never_turns_prepared_memory_into_permission
             original(item, *args, **kwargs)
         raise RuntimeError("injected registration acknowledgement loss")
 
-    def injected(selection):
-        writer, validator, budget = original_ledger(selection)
-        writer._append_event_transaction = interrupted
-        return writer, validator, budget
-
-    with patch.object(runtime, "_ledger", side_effect=injected):
+    with patch.object(writer, "_append_event_transaction", new=interrupted):
         if after_commit:
             outcome = admit(values)
             assert outcome["status"] == "accepted"

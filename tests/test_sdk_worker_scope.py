@@ -12,9 +12,10 @@ def worker_request(**changes):
     return request(**data)
 
 
+@pytest.mark.parametrize("provider", ["codex", "claude", "copilot"])
 @pytest.mark.parametrize("workspace", [r"D:\work\example\task", "/work/task"])
-def test_explicit_whole_workspace_roundtrips_and_is_immutable(workspace):
-    req = worker_request(cwd=workspace, write_workspace=workspace)
+def test_explicit_whole_workspace_roundtrips_and_is_immutable(provider, workspace):
+    req = worker_request(provider=provider, cwd=workspace, write_workspace=workspace)
     assert ExecutionRequest.from_dict(req.to_dict()) == req
     assert req.to_dict()["write_workspace"] == workspace
     with pytest.raises(FrozenInstanceError):
@@ -51,10 +52,16 @@ def test_workspace_never_infers_from_text_scope_or_different_cwd():
     assert json_text(a.to_dict()) != json_text(b.to_dict())
 
 
-@pytest.mark.parametrize("changes", [{"result_kind":"review"},{"provider":"claude"},{"provider":"grok"}])
-def test_write_contract_does_not_expand_other_result_kinds_or_providers(changes):
-    with pytest.raises(ValueError):
-        worker_request(**changes)
+@pytest.mark.parametrize("provider", ["codex", "claude", "copilot"])
+def test_review_requests_cannot_write_even_with_a_supported_worker_provider(provider):
+    with pytest.raises(ValueError, match="write workspace requires implemented task contract"):
+        worker_request(provider=provider, result_kind="review")
+
+
+@pytest.mark.parametrize("provider", ["kimi", "grok", "minimax", "mimo"])
+def test_write_contract_rejects_providers_without_a_worker_contract(provider):
+    with pytest.raises(ValueError, match="write workspace requires implemented task contract"):
+        worker_request(provider=provider)
 
 
 def test_workspace_change_changes_committed_request_representation():

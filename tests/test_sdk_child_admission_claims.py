@@ -89,8 +89,7 @@ def test_orphan_receipt_before_commit_does_not_admit_after_restart(tmp_path, mon
     values = proposed(tmp_path, monkeypatch)
     owner, assignment, requests, selections, root, proposal = values
     args = acceptance(values, "orphan-admission.json")
-    original_ledger = runtime._ledger
-    writer = original_ledger(root)[0]
+    writer = runtime._ledger(root)[0]
     original = writer._append_event_transaction
 
     def fail_root_commit(item, *args, **kwargs):
@@ -98,12 +97,7 @@ def test_orphan_receipt_before_commit_does_not_admit_after_restart(tmp_path, mon
             raise RuntimeError("injected loss before admission commit")
         return original(item, *args, **kwargs)
 
-    def injected_ledger(selection):
-        writer, validator, budget = original_ledger(selection)
-        writer._append_event_transaction = fail_root_commit
-        return writer, validator, budget
-
-    with patch.object(runtime, "_ledger", side_effect=injected_ledger):
+    with patch.object(writer, "_append_event_transaction", new=fail_root_commit):
         with pytest.raises(RuntimeError, match="injected loss"):
             runtime.publish_child_task_admission(**args)
     orphan = Path(root.work_item) / args["artifact"]
@@ -174,23 +168,22 @@ def test_lost_commit_ack_recovers_exact_decision_without_duplicate(tmp_path, mon
     values = proposed(tmp_path, monkeypatch)
     owner, assignment, requests, selections, root, proposal = values
     args = acceptance(values)
-    original_ledger = runtime._ledger
-    writer = original_ledger(root)[0]
+    writer = runtime._ledger(root)[0]
     original = writer._append_event_transaction
 
+    lost_root_acks = 0
+
     def lose_ack(item, *args, **kwargs):
+        nonlocal lost_root_acks
         result = original(item, *args, **kwargs)
         if Path(item) == Path(root.work_item):
+            lost_root_acks += 1
             raise RuntimeError("injected lost admission commit acknowledgement")
         return result
 
-    def injected_ledger(selection):
-        writer, validator, budget = original_ledger(selection)
-        writer._append_event_transaction = lose_ack
-        return writer, validator, budget
-
-    with patch.object(runtime, "_ledger", side_effect=injected_ledger):
+    with patch.object(writer, "_append_event_transaction", new=lose_ack):
         result = runtime.publish_child_task_admission(**args)
+    assert lost_root_acks == 1
     assert result["status"] == "accepted"
     assert len(decisions(root)) == 1
     assert runtime.publish_child_task_admission(**args) == result
