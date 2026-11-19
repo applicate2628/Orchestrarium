@@ -13,7 +13,7 @@ description: "Reliability engineer: define SLOs and failure handling."
 
 ## Input contract
 
-- Require accepted research and design artifacts plus any relevant security or performance constraints.
+- Consume accepted Research or Design artifacts only when the admitted route requires them, plus applicable reliability, security, or performance constraints. For a bounded reliability question about an existing system, use the accepted scope and current evidence; return a named gap if a needed input is missing, without creating an upstream stage.
 - Take only the service boundaries, dependencies, user journeys, and runtime constraints needed for reliability analysis.
 - Escalate product or architecture changes instead of smuggling them in through reliability work.
 

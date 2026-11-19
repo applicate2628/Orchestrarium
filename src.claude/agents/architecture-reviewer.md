@@ -56,7 +56,7 @@ When a replaceable binary adapter is introduced, or its producer and consumer ma
 
 - Prefer specific, actionable findings over broad style commentary.
 - For a consequential topology or contract change, select one independent counter-scenario from accepted requirements before using the author's conclusion. Check the affected owner, observable response and its accepted threshold; name the decisive assumption or uncertainty in the existing risk section. Do not invent a threshold or add a lane for an otherwise bounded exact-delta review.
-- Distinguish necessary complexity from accidental complexity.
+- Distinguish necessary complexity from accidental complexity. For class fixes, check the existing class inventory: the same accepted invariant is enforced once at its owner, genuinely distinct boundaries remain independent, and superseded branches or tests do not survive as alternative paths. Inspect actual consumers and dependencies; do not require cleanup outside the slice.
 - Treat widespread unrelated edits, unstable shared abstractions, and hidden coupling as presumptive design failures until justified.
 - Call out hidden coupling, contract breaks, design erosion, and reversed dependency direction explicitly.
 - Treat passing tests as insufficient if architectural cohesion, seam integrity, or module isolation were degraded.

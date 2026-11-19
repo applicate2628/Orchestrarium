@@ -73,3 +73,40 @@ def test_near_collinear_orientation_fixture_exposes_roundoff():
     n = 2**27
     assert n * n - (n + 1) * (n - 1) == 1
     assert float(n) * float(n) - float(n + 1) * float(n - 1) == 0
+
+
+def test_algorithm_allows_the_minimum_sufficient_independent_evidence():
+    text = skill("algorithm-scientist")
+    assert "smallest sufficient independent oracle or proof" in text
+    assert "Empirical cost claims" in text
+
+
+def test_scientific_taylor_check_cannot_cover_a_wrong_model():
+    text = skill("scientific-software-engineer")
+    assert "internal derivative consistency, not an independent model oracle" in text
+
+    x, h = 2.0, 2**-10
+    for sign in (1, -1):
+        def residual(u):
+            return sign * (u * u - 1)
+        assert (residual(x+h) - residual(x-h)) / (2*h) == sign * 2*x
+        assert residual(x) == sign * 3
+
+
+def test_viz_allows_dimensionless_directly_labeled_categories():
+    text = skill("visualization-engineer")
+    assert "data-bearing channel" in text and "units where applicable" in text
+    assert "Every encoded channel" not in text
+
+
+def test_vak_one_verification_owner_no_tool_or_count_shortcut():
+    body = skill("vak-dissertation-review")
+    refs = SKILLS / "vak-dissertation-review/references"
+    discipline = (refs / "verification-discipline.md").read_text(encoding="utf-8")
+    pipeline = (refs / "deliverables-and-pipeline.md").read_text(encoding="utf-8")
+    assert "Unicode-safe" in discipline
+    assert "matching counts cannot verify or close a finding" in discipline
+    assert "authorized independent reviewer" in discipline
+    assert "Bash `grep`, not PowerShell" not in body + discipline + pipeline
+    assert "edit the canonical `gen_*.js`" not in body
+    assert "selected DOCX toolchain" in body

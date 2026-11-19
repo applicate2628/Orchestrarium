@@ -25,7 +25,7 @@ description: "Scientific/data charts and visuals: axes, legends, scales, color."
 ## Gate
 
 - The diff stays inside approved visualization scope.
-- Every encoded channel—position, color, size, shape, and opacity—has a legend or axis label with units; a missing channel explanation fails the gate.
+- Each data-bearing channel has an interpretable cue (direct label, annotation, legend, axis, or equivalent), with units where applicable. Categorical labels and dimensionless values do not need invented units; decorative marks are not data encodings.
 - Planned checks for correctness, readability, and performance were run or explicitly reported as blocked.
 - Before return, render and directly inspect every changed chart or view at target size, record the inspected artifact path in the notes, and compare or update an existing golden-image test when present.
 - Apply the `Receiving-side echo` owned by `subagent-contracts.md`; an implementation package missing that echo fails this gate.

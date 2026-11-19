@@ -103,13 +103,11 @@ When checking whether a "new" result is actually new (что было ДО → �
 
 ## 6. Adversarial review-loop at the boundary
 
-Findings drift toward overclaim and mis-anchoring. Before merging any batch into the documents, run
-an independent skeptic pass — a different model or a fan-out of agents prompted to REFUTE each
-finding and re-check its anchor. The loop runs to convergence autonomously; the human gate is the
-final converged result, not each round. The gate repeatedly catches things like: a page anchor off by
-one (verify by render/footer, not blindly), an overstated Scopus/indexing claim, a patent called
-"active" that was actually terminated, a summed figure that doesn't add up, a wrong ГОСТ clause
-number. Merge only what survives.
+Use an authorized independent reviewer to challenge findings and replay the decisive evidence.
+A human is sufficient; do not assume access to another model or permission to transmit sources.
+Keep independently unchecked findings provisional. Review the applicable rendered page, source
+identity and authoritative clause or registry record; matching reviewer conclusions alone do not
+close a finding.
 
 ## 7. Reformulation examples must not contradict the sheet's own findings
 
@@ -121,14 +119,12 @@ warnings.
 
 ## 8. Tooling gotchas
 
-- **Cyrillic search:** use Bash `grep`, not PowerShell `Select-String` (it mangles Cyrillic and
-  em-dashes). `pdftotext` also mangles Cyrillic — grep only Latin tokens / digits in extracted text.
+- **Cyrillic search:** use available Unicode-safe extraction and search tools. Check a known
+  Cyrillic anchor, punctuation and encoding against the source before trusting search results.
+  If extraction is unreliable, inspect the rendered source; never infer absence from garbled text.
 - **Page-claim offset:** external models routinely report page numbers off by a constant. Verify
   every page anchor by rendering the page or reading its footer, not by trusting the claim.
-- **Convergence by class-exhaustion:** a defect class is closed when its grep count equals the
-  expected count and stray-class counts are 0 — not after "a few LLM passes". Make closure countable.
-- **Multi-agent fan-out in waves:** large parallel agent bursts hit rate limits. Fan out in waves of
-  ~2–4 independent agents, not 15+ at once.
+- **Counts are coverage, not verdicts:** omitted and duplicated markers can cancel; matching counts cannot verify or close a finding. Compare expected finding identities and anchors, then replay their decisive evidence. A changed or inaccessible source claim remains unverified.
 - **Don't claim done from a notification alone:** verify the actual output artifact (file present,
   expected markers grep-confirmed, 0 unresolved placeholders) before reporting completion.
 - **Check existing project notes before deep-debugging a tool.** Before reverse-engineering why a

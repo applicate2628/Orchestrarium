@@ -35,7 +35,7 @@ description: "Keyboard, focus, screen-reader, contrast, WCAG A/AA."
 ## Standards anchor
 
 - Use Web Content Accessibility Guidelines (WCAG) 2.2 success-criterion identifiers and levels A/AA for findings. `PASS` requires no failed A/AA criterion on the scoped surface.
-- Measure contrast numerically: 4.5:1 for normal text, 3:1 for large text and user-interface components under criteria 1.4.3 and 1.4.11.
+- Measure rendered contrast numerically: criterion 1.4.3 requires 4.5:1 for normal text and 3:1 for large text; criterion 1.4.11 requires 3:1 against adjacent colors for visual information needed to identify controls/states or meaningful graphics. Apply each criterion’s own applicability and exceptions, such as inactive controls and logotypes under 1.4.3, and unmodified user-agent appearance under 1.4.11.
 - For web surfaces verify target size under 2.5.8 (record any applicable 2.5.8 exceptions), focus not obscured under 2.4.11, a non-dragging pointer alternative under 2.5.7 when applicable, 200% text resize under 1.4.4, reflow at 320 CSS px under 1.4.10, and the reduced-motion preference for non-essential animation.
 - For desktop and Qt surfaces, use WCAG as the interpretive baseline and the platform accessibility application programming interface, including User Interface Automation (UIA) or Qt Accessibility, as the exposure contract.
 
@@ -45,7 +45,7 @@ description: "Keyboard, focus, screen-reader, contrast, WCAG A/AA."
 - Judge against accessibility outcomes and assistive-tech compatibility, not personal preference.
 - Verify assistive-technology exposure by inspecting the computed accessibility tree for each interactive element's accessible name, role, value, and state. Use the browser accessibility pane or the platform inspector (for example, Accessibility Insights for Windows); an automated scan complements but does not replace tree inspection. For changed critical announcements, record the actual announcement and the applicable assistive technology and browser or desktop host. Tree exposure alone does not prove what is announced. If this check is accepted but the pairing is unavailable, record it as `UNVERIFIED`.
 - An automated scan is the floor for web surfaces, never a substitute for the manual keyboard pass.
-- A visual criterion such as contrast or focus visibility cannot pass without a directly inspected artifact: a screenshot pair with computed ratio, a focus-stop capture, or an accessibility-tree excerpt. Route desktop capture through `$windows-gui-manual-testing` or `$analyzing-video-bugs` and apply the shared visual-artifact-verification rule before the capture counts.
+- Match the probe to the claim: inspect the rendered colors and measured ratio for contrast and a rendered focus-stop capture for visibility or obstruction. An accessibility-tree excerpt establishes exposure, not visual evidence. Use native capture for the selected host; use `$windows-gui-manual-testing` for Windows desktop capture and `$analyzing-video-bugs` for video analysis. Apply the shared visual-artifact-verification rule; an unavailable accepted probe remains `UNVERIFIED`.
 - Distinguish blocking issues from non-blocking improvements.
 - Design-level rework follows the `fix-class` routing above.
 

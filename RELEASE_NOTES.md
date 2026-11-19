@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-19
 
+- Route a demonstrated class of defects to its existing owner, whoever reported the example, and verify neighboring valid cases and required refusals. Preserve independent contracts and retire superseded branches and tests without authorizing wider work. Narrow the specialist rules that unintentionally required extra build stages, comparative data, output tooling, or a particular platform. Preserve native decoded-frame timing when verifying transient display defects and distinguish visual, assistive-technology and numerical evidence.
+
 - Align specialist instructions and native Claude wrappers with the existing QA-owned defect-admission contract. Roles report qualified adjacent findings in-band by default and use the configured registry only when explicitly authorized. The default directory is not a provider-specific requirement.
 
 - Raise the evidence bar in the specialist catalog without changing provider or model selection. Science separates code and solution verification from physical validation; delivery distinguishes settled effects and measured performance from replies and proxy signals; interface roles distinguish synthetic tests from actual device observations. Design, review and planning retain release authority and test scope while making their decision evidence more specific. The generic Review Loop now points Claude to its selected-root command where the native helper is installed.

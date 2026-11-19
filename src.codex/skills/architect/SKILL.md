@@ -57,7 +57,7 @@ If the trigger does not apply, record the evidence that the boundary remains ins
 
 ## Working rules
 
-- Prefer the smallest durable design that satisfies the validated requirements.
+- Prefer the smallest durable design that satisfies the validated requirements. For a shared defect class, compare direct repair at the confirmed owner with the next simplest option: name what becomes independent, which old paths stop existing, and any dependency you genuinely need. Reuse the existing class inventory and regression guard; do not require a new analysis for an ordinary local repair.
 - Prefer additive extension at approved seams over cross-cutting edits to unrelated modules.
 - **CONDITIONAL SKILL:** Use `$generalize-from-instance` when deriving a reusable contract from a concrete fixture, geometry, dataset, user case, or one-off implementation. It is not required for unrelated design work.
 - Hand off a ready decision before optional prose polishing.

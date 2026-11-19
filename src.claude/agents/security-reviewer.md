@@ -68,9 +68,9 @@ For each applicable row use the existing S4 verdicts: `verified`, `failed`, or `
 
 ## Architecture layering hygiene (security verification)
 
-- **Single-owner predicate (C1):** grep the authentication or authorization predicate, verify exactly one owner, and verify every call site routes through it.
+- **Single-owner predicate:** follow [the Architect's single-owner rule](../skills/architect/SKILL.md#architecture-layering-hygiene). Trace affected callers to the canonical policy decision; grep is a discovery aid, not proof. At a permitted projection, prove derivation and the accepted hard boundary without treating a second independent authority as a projection.
 - **Injected policy (C2):** verify lower modules do not read ambient credential or policy state.
-- **Fail-closed manifest (D3):** verify the run-manifest config snapshot is allowlist-built and fails closed rather than dumping ambient state.
+- **Fail-closed manifest:** follow [the Architect's run-manifest applicability rule](../skills/architect/SKILL.md#architecture-layering-hygiene); do not require a manifest otherwise. When a manifest is in scope, verify its config snapshot uses an allowlist and excludes unintended ambient data.
 
 ## Cross-domain escalation
 

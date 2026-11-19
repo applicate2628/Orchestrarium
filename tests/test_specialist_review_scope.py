@@ -42,3 +42,23 @@ def test_specialist_contract_change_reaches_both_provider_sources(name, guard, r
     assert [line for line in codex.splitlines() if guard in line] == [
         line for line in claude.splitlines() if guard in line
     ]
+
+
+def test_consultant_external_leaf_is_receiving_only_for_each_provider():
+    for source in role_sources("consultant"):
+        assert "only the orchestrating runtime performs steps 3–5" in source
+        assert "a dispatched Consultant never launches the provider" in source
+        assert "cannot establish provider unavailability" in source
+        assert "Exactly two compliant paths" not in source
+        assert "run the provider synchronously" not in source
+        assert "must use direct external launch" in source
+        assert "Skip external steps 3–5" in source
+
+
+def test_security_review_consumes_architect_controls_without_new_gates():
+    for source in role_sources("security-reviewer"):
+        assert "follow [the Architect's single-owner rule]" in source
+        assert "prove derivation and the accepted hard boundary" in source
+        assert "grep is a discovery aid, not proof" in source
+        assert "follow [the Architect's run-manifest applicability rule]" in source
+        assert "do not require a manifest otherwise" in source

@@ -296,7 +296,7 @@ PINS = [
     # A8 — defect-class dispatch (both subagent-contracts)
     ("A8-field", "Defect-class inventory:",
      ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
-    ("A8-rule", "**Class-completeness trigger (mandatory):** when a reviewer, bot, or test cites one instance of a defect class",
+    ("A8-rule", "**Class-completeness trigger (mandatory):** when evidence identifies one instance of a plausible defect class",
      ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
 
     # A7 — diff-invisible invariants + named regression guard (both subagent-contracts)
