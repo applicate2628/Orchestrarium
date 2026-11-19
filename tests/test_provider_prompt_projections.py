@@ -1530,84 +1530,20 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize(
-    ("commit", "expected", "pending"),
+    ("commit", "expected"),
     (
-        (
-            "d1309ee5",
-            STOCK_D130_PROJECTION_SHA256,
-            (
-                "provider_prompt.py",
-                "process_supervision/process_runner.py",
-                "invoke-codex-prompt.py",
-                "invoke-kimi-prompt.py",
-                "external-prompt-governance.md",
-                "external-role-taxonomy.v1.json",
-            ),
-        ),
-        (
-            "f87414e7",
-            STOCK_F874_PROJECTION_SHA256,
-            (
-                "provider_prompt.py",
-                "process_supervision/process_runner.py",
-                "invoke-codex-prompt.py",
-                "invoke-kimi-prompt.py",
-                "external-prompt-governance.md",
-                "external-role-taxonomy.v1.json",
-            ),
-        ),
-        (
-            "9a637574",
-            STOCK_9A63_PROJECTION_SHA256,
-            (
-                "provider_prompt.py",
-                "process_supervision/process_runner.py",
-                "invoke-codex-prompt.py",
-                "invoke-kimi-prompt.py",
-                "external-prompt-governance.md",
-                "external-role-taxonomy.v1.json",
-            ),
-        ),
-        (
-            "448e8c5a",
-            STOCK_448E_PROJECTION_SHA256,
-            (
-                "provider_prompt.py",
-                "process_supervision/process_runner.py",
-                "invoke-codex-prompt.py",
-                "external-prompt-governance.md",
-                "external-role-taxonomy.v1.json",
-            ),
-        ),
-        (
-            "1a56f81f",
-            STOCK_1A56_PROJECTION_SHA256,
-            (
-                "provider_prompt.py",
-                "process_supervision/process_runner.py",
-                "invoke-codex-prompt.py",
-                "external-prompt-governance.md",
-                "external-role-taxonomy.v1.json",
-            ),
-        ),
-        (
-            "7192c914",
-            STOCK_7192_PROJECTION_SHA256,
-            (
-                "provider_prompt.py",
-                "process_supervision/process_runner.py",
-                "invoke-codex-prompt.py",
-                "external-prompt-governance.md",
-                "external-role-taxonomy.v1.json",
-            ),
-        ),
+        ("d1309ee5", STOCK_D130_PROJECTION_SHA256),
+        ("f87414e7", STOCK_F874_PROJECTION_SHA256),
+        ("9a637574", STOCK_9A63_PROJECTION_SHA256),
+        ("448e8c5a", STOCK_448E_PROJECTION_SHA256),
+        ("1a56f81f", STOCK_1A56_PROJECTION_SHA256),
+        ("7192c914", STOCK_7192_PROJECTION_SHA256),
     ),
 )
 def test_exact_published_transport_set_is_one_atomic_prior_plan(
     tmp_path: Path,
     commit: str,
     expected: dict[str, str],
-    pending: tuple[str, ...],
 ) -> None:
     installer = _load_installer()
     source, canonical, paths = _current_canonical_with_historical_projection(
@@ -1624,7 +1560,11 @@ def test_exact_published_transport_set_is_one_atomic_prior_plan(
     )
 
     assert staged.accepted_prior_set == commit
-    assert tuple(name for name, _payload in staged.pending_files) == pending
+    # In all six archives each current member is either new or has different bytes.
+    assert staged.pending_files == tuple(
+        (name, _authored_transport_path(source, name).read_bytes())
+        for name in TRANSPORT_FILES
+    )
     assert staged.manifest_pending is True
     observed = {
         (
@@ -1781,67 +1721,70 @@ def test_published_transport_migration_failure_restores_bytes_and_identities(
     assert not tuple(projection.parent.rglob("*.prior"))
 
 
+@pytest.mark.parametrize("mode", ("clean", "mixed", "drift"))
 def test_immediate_448e_prior_applies_only_changed_transport_members_and_manifest(
-    tmp_path: Path,
+    tmp_path: Path, mode: str,
 ) -> None:
     installer = _load_installer()
     source, canonical, _paths = _current_canonical_with_historical_projection(
-        tmp_path,
-        "448e8c5a",
-        STOCK_448E_PROJECTION_SHA256,
+        tmp_path, "448e8c5a", STOCK_448E_PROJECTION_SHA256,
     )
     projection = tmp_path / "claude" / "agents" / "scripts"
-    staged = installer._stage_claude_transport_projection(
-        source,
-        canonical,
-        projection,
-    )
+    policy = "model_routing/launch_policy.py"
+    policy_bytes = _authored_transport_path(source, policy).read_bytes()
+    path = projection / policy
+    assert not path.exists()
+
+    def add_new_member() -> None:
+        path.parent.mkdir(exist_ok=True)
+        path.write_bytes(policy_bytes)
+
+    if mode == "mixed":
+        add_new_member()
+        before = _tree_bytes(projection.parent)
+        with pytest.raises(ValueError, match="E_TRANSPORT_PROJECTION_PARITY: atomic projection state"):
+            installer._stage_claude_transport_projection(source, canonical, projection)
+        assert _tree_bytes(projection.parent) == before
+        return
+
+    staged = installer._stage_claude_transport_projection(source, canonical, projection)
 
     class MigrationSpy:
         anchor = projection.parent
 
         def __init__(self) -> None:
-            self.calls: list[tuple[str, str]] = []
+            self.calls: list[tuple[str, str, str | None, bytes]] = []
 
-        def migrate_exact_file(
-            self, relative: Path, expected_digest: str, _payload: bytes
-        ) -> None:
-            self.calls.append((relative.as_posix(), expected_digest))
+        def migrate_exact_file(self, relative: Path, expected_digest: str, payload: bytes) -> None:
+            self.calls.append(("migrate", relative.as_posix(), expected_digest, payload))
 
-        def create_file(self, *_args, **_kwargs) -> None:
-            raise AssertionError("immediate prior attempted create-only publication")
+        def create_file(self, relative: Path, payload: bytes) -> None:
+            self.calls.append(("create", relative.as_posix(), None, payload))
 
         def replace_exact_file(self, *_args, **_kwargs) -> None:
             raise AssertionError("immediate prior attempted legacy replacement")
 
     owner = MigrationSpy()
-    installer._apply_claude_transport_projection(staged, projection, owner)
+    if mode == "drift":
+        add_new_member()
+        before = _tree_bytes(projection.parent)
+        with pytest.raises(ValueError, match="E_TRANSPORT_PROJECTION_PARITY: preflight drift"):
+            installer._apply_claude_transport_projection(staged, projection, owner)
+        assert owner.calls == []
+        assert _tree_bytes(projection.parent) == before
+        return
 
+    installer._apply_claude_transport_projection(staged, projection, owner)
     assert owner.calls == [
-        (
-            "scripts/provider_prompt.py",
-            STOCK_448E_PROJECTION_SHA256["provider_prompt.py"],
+        ("create", f"scripts/{policy}", None, policy_bytes),
+        *(
+            ("migrate", f"scripts/{name}", STOCK_448E_PROJECTION_SHA256[name],
+             _authored_transport_path(source, name).read_bytes())
+            for name in TRANSPORT_FILES if name != policy
         ),
-        (
-            "scripts/process_supervision/process_runner.py",
-            STOCK_448E_PROJECTION_SHA256["process_supervision/process_runner.py"],
-        ),
-        (
-            "scripts/invoke-codex-prompt.py",
-            STOCK_448E_PROJECTION_SHA256["invoke-codex-prompt.py"],
-        ),
-        (
-            "scripts/external-prompt-governance.md",
-            STOCK_448E_PROJECTION_SHA256["external-prompt-governance.md"],
-        ),
-        (
-            "scripts/external-role-taxonomy.v1.json",
-            STOCK_448E_PROJECTION_SHA256["external-role-taxonomy.v1.json"],
-        ),
-        (
-            "shared/provider-prompt-projections.v1.json",
-            STOCK_448E_PROJECTION_SHA256["provider-prompt-projections.v1.json"],
-        ),
+        ("migrate", "shared/provider-prompt-projections.v1.json",
+         STOCK_448E_PROJECTION_SHA256["provider-prompt-projections.v1.json"],
+         (source / "shared/provider-prompt-projections.v1.json").read_bytes()),
     ]
 
 
