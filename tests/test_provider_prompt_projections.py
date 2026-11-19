@@ -1718,6 +1718,14 @@ def _current_canonical_with_historical_projection(
     return source, canonical, paths
 
 
+def _receiving_transport_order(installer) -> tuple[str, ...]:
+    """Keep the fixture's authored membership independent of application order."""
+    order = installer.TRANSPORT_PROJECTION_FILES
+    assert len(order) == len(TRANSPORT_FILES)
+    assert set(order) == set(TRANSPORT_FILES)
+    return order
+
+
 def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> None:
     installer = _load_installer()
     canonical, projection, _paths = _current_canonical_with_stock_8f92_projection(
@@ -1840,7 +1848,7 @@ def test_exact_published_transport_set_is_one_atomic_prior_plan(
         "invoke-claude-prompt.py", "invoke-kimi-prompt.py", "invoke-grok-prompt.py",
     }
     assert tuple(name for name, _payload in staged.pending_files) == tuple(
-        name for name in TRANSPORT_FILES if name in updated)
+        name for name in _receiving_transport_order(installer) if name in updated)
     assert all(payload == _authored_transport_path(source, name).read_bytes()
                for name, payload in staged.pending_files)
     assert staged.manifest_pending is True
@@ -2042,7 +2050,7 @@ def test_immediate_448e_prior_applies_only_changed_transport_members_and_manifes
     owner = MigrationSpy()
     installer._apply_claude_transport_projection(staged, projection, owner)
 
-    assert owner.calls == [
+    expected_migrations = [
         (
             "scripts/provider_prompt.py",
             STOCK_448E_PROJECTION_SHA256["provider_prompt.py"],
@@ -2071,16 +2079,20 @@ def test_immediate_448e_prior_applies_only_changed_transport_members_and_manifes
         ),
     ]
 
+    assert owner.calls == expected_migrations
+
+    created = {"model_routing/launch_policy.py", *SDK_TRANSPORT_FILES}
+    migrated = {path.removeprefix("scripts/") for path, _digest in expected_migrations[:-1]}
+    assert created.isdisjoint(migrated)
+    order = _receiving_transport_order(installer)
     assert owner.created == [
         (f"scripts/{name}", _authored_transport_path(source, name).read_bytes())
-        for name in ("model_routing/launch_policy.py", *SDK_TRANSPORT_FILES)
+        for name in order if name in created
     ]
-    assert owner.operations == (
-        [("create", "scripts/model_routing/launch_policy.py")]
-        + [("migrate", path) for path, _digest in owner.calls[:-1]]
-        + [("create", f"scripts/{name}") for name in SDK_TRANSPORT_FILES]
-        + [("migrate", "shared/provider-prompt-projections.v1.json")]
-    )
+    assert owner.operations == [
+        ("create" if name in created else "migrate", f"scripts/{name}")
+        for name in order if name in created or name in migrated
+    ] + [("migrate", "shared/provider-prompt-projections.v1.json")]
 
 
 @pytest.mark.parametrize("name", tuple(STOCK_8F92_PROJECTION_SHA256))
@@ -2109,7 +2121,7 @@ def test_exact_8521_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
     staged = installer._stage_claude_transport_projection(ROOT, canonical, projection)
 
     assert staged.accepted_prior_set == "8521b638"
-    assert tuple(name for name, _payload in staged.pending_files) == TRANSPORT_FILES
+    assert tuple(name for name, _payload in staged.pending_files) == _receiving_transport_order(installer)
     assert all(payload == _authored_transport_path(ROOT, name).read_bytes()
                for name, payload in staged.pending_files)
     assert staged.manifest_pending is True
@@ -2134,7 +2146,7 @@ def test_exact_7872_six_member_transport_is_one_atomic_complete_plan(
     staged = installer._stage_claude_transport_projection(ROOT, canonical, projection)
 
     assert staged.accepted_prior_set == "7872d36d"
-    assert tuple(name for name, _payload in staged.pending_files) == TRANSPORT_FILES
+    assert tuple(name for name, _payload in staged.pending_files) == _receiving_transport_order(installer)
     assert all(payload == _authored_transport_path(ROOT, name).read_bytes()
                for name, payload in staged.pending_files)
     assert staged.manifest_pending is True
