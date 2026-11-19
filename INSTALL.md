@@ -1,10 +1,13 @@
 # Installation
 
-Windows directory projections select native junctions for OS-resolved local drive targets before acquiring creator handles. Other namespaces retain symbolic-link semantics and their existing privilege requirements; no error-triggered fallback or elevation occurs. Both representations keep native identity and target verification through creation, replacement and rollback. Junction recognition uses native reparse tags on every supported Python version. An owned projection inverse compares its no-follow identity and exact stored reparse bytes even after the owned target was removed; it does not acquire authority over a replacement referent.
+This monorepo ships a Python-owned root installer (`install.py`) plus the thin POSIX launcher `install.sh`. They require Python 3.11 or newer, offer the supported Codex and Claude Code packs, then forward arguments to the matching pack-specific installers in the `scripts/` directory.
+
+These instructions describe the pre-SDK source installer, not the separate SDK
+development branch. See the [version guide](README.md#which-version) to distinguish
+the frozen baseline tag from follow-up work. Installing a pack does not install
+provider executables or authorize provider launches.
 
 Optional local distribution assembly is documented in [the distribution guide](scripts/distribution/README.md). It requires an independently qualified standalone CPython standard-library runtime and binds its bytes and selected target notices before assembly. It packages this existing installer without changing its ownership or provider policies. Earlier distribution observations remain historical evidence and do not qualify the new runtime profile.
-
-This monorepo ships a Python-owned root installer (`install.py`) plus the thin POSIX launcher `install.sh`. They require Python 3.11 or newer, offer the supported Codex and Claude Code packs, then forward arguments to the matching pack-specific installers in the `scripts/` directory.
 
 ## Supported filesystem backends
 
@@ -13,6 +16,8 @@ The pre-SDK installer admits native Windows and POSIX hosts (Linux, macOS and Wi
 The supported contract is ordinary cooperating writers serialized by the caller. Observed foreign replacements and ambiguous settlement are refused or retained for recovery. This is not protection against hostile concurrent writers or a guarantee of atomic directory publication. No trust settings are granted and no live profile is changed by enabling the backend. See the [effect-bound owner contract](docs/effect-bound-filesystem-owner.md) for platform-specific evidence and limits.
 
 The Codex installer materializes 18 manifest native-role TOMLs and registers their compatible name/description/file mappings in `.codex/config.toml`. Ordinary role defaults follow the current role policy, including GPT-6.1 Terra and GPT-6.2 Sol profiles; scientific-software-engineer defaults to Sol high. The named Luna `mechanical-scout` and `mechanical-worker` roles have zero decision authority: when its feature is enabled and the caller supplies a valid exact plan, `resolve_role_dispatch` returns `native-required`; disabled state returns `E_NATIVE_V2_DISABLED`. This named corridor requires exact `gpt-6-luna` with `xhigh` as the default named-corridor effort; host rejection is the nonauthorizing `E_LUNA_UNAVAILABLE` handoff. Factory payload hashes and approved stock-only migrations remain exact. All 18 factory role TOMLs ship `[features] apps=false` and `plugins=false`; compatible user tuning remains supported, main-session settings stay unchanged, and these flags do not establish selective MCP-server startup isolation. Manifest version 2 separately binds the owned parsed profession instructions, so compatible user runtime tuning and descriptions are preserved byte-for-byte without re-signing or rewriting TOML. Incompatible profession instructions, logical names or ambiguous registration sources remain preserved and fail closed; a known configured model/effort conflict holds the affected invocation under existing policy rather than declaring the model unavailable. These roles are native shared-policy corridors, not agents-mode or external-provider settings. Named mechanical callers consume the policy-only `resolve_role_dispatch` contract before considering native launch; host outcomes are not replayed and no fallback exists. Ordinary producer professions may explicitly select nonauthorizing `luna-high` or `luna-xhigh` at the policy-admitted `exploration`/`engineering` intersection through `describe_ordinary_native_role_options` then `resolve_ordinary_native_dispatch`, retaining profession, scoped tools/effects, omitted defaults, independent gates and final review/critical/recovery membership. Follow the shared Task-first dispatch economics owner: Luna 6 Extra high for bounded mechanics, Terra 6.1 High as a task-fit candidate, Sol 6.2 High for ordinary coding, and Astra 6.2 High/Extra high directly for admitted scientific formulation, complex audit, architecture or security. Genuine matching task-scoped authorization may cover repeated Astra High/Extra high attempts within unchanged bounds; Max and other Astra efforts retain exact-launch approval. Separate launch/spending permissions and current user/host controls remain binding. Sol Max is neither a prerequisite nor an automatic substitute for Astra.
+
+Windows directory projections select native junctions for OS-resolved local drive targets before acquiring creator handles. Other namespaces retain symbolic-link semantics and their existing privilege requirements; no error-triggered fallback or elevation occurs. Both representations keep native identity and target verification through creation, replacement and rollback. Junction recognition uses native reparse tags on every supported Python version. An owned projection inverse compares its no-follow identity and exact stored reparse bytes even after the owned target was removed; it does not acquire authority over a replacement referent.
 
 ## Unsupported atomic directory publication
 
@@ -28,26 +33,26 @@ Claude supports ownership-aware uninstall through the existing installer. Instal
 
 ## Quick install
 
-Run the router installer from the repository root:
+Preview with the router installer from the repository root:
 
 For global installs, POSIX requires `HOME` and ignores `USERPROFILE`; Windows requires `USERPROFILE` and does not fall back to `HOME`.
 
 ```bash
-bash install.sh --global
+bash install.sh --global --dry-run
 ```
 
 ```powershell
-python .\install.py --global
+python .\install.py --global --dry-run
 ```
 
-Or install into a specific project:
+Or preview an installation into a specific project:
 
 ```bash
-bash install.sh --target /path/to/project --allow-unsafe-target
+bash install.sh --target /path/to/project --allow-unsafe-target --dry-run
 ```
 
 ```powershell
-python .\install.py --target "D:\path\to\project" --allow-unsafe-target
+python .\install.py --target "D:\path\to\project" --allow-unsafe-target --dry-run
 ```
 
 The router asks which pack to install:
@@ -60,7 +65,10 @@ Production installs:
   3) Codex + Claude (default production install)
 ```
 
-Pressing Enter selects the default production install, `Codex + Claude`.
+Pressing Enter selects the default, `Codex + Claude`. The router runs Codex first
+and Claude second. A successful Codex install is not rolled back if the later
+Claude install fails. Review the requested targets before rerunning without
+`--dry-run`.
 
 Every `--target` install requires the explicit `--allow-unsafe-target` acknowledgement; without it, the installer exits before mutation. The flag admits the named custom project target but does not disable path, reparse-point, collision, transaction, or rollback checks.
 
@@ -148,7 +156,7 @@ Notes:
 - Installed Codex validation treats preserved user-added skills as warnings rather than pack metadata-budget failures. The strict metadata budget applies to Orchestrarium-owned roles and utility skills, while extra global skills remain visible as non-blocking orphan warnings.
 - The Claude installer treats `agents-` as a RESERVED pack namespace in `commands/` and `skills/`: on reinstall it reclaims (removes) any target `commands/agents-*.md` file or `skills/agents-*/` directory the current pack no longer ships (a renamed/removed flow, or a stale generated skill from an older standalone-branch install — the monorepo path ships flows only as `commands/`). Non-namespaced user files are always preserved; do not author files under the `agents-` prefix. `--dry-run` prints the planned reclaim without deleting.
 - Claude installs copy `agent-run-ledger.*`, `validate-work-item-state.*`, and `check-work-items-state.*` into `.claude/agents/scripts/` for project installs or `~/.claude/agents/scripts/` for global installs so task-memory operators can use the helpers without the source checkout.
-- Both production installers also copy the pure Version 3 (V3) solution-attempt reducer to `solution_attempt/reducer.py` and the bounded process owner to `process_supervision/process_runner.py` below that provider's installed scripts directory. Process Runner Version 1 (`ProcessRunnerV1`) remains Windows-only: it owns provider-prompt operations and detached Slice A validation, while skill-pack validator child checks use it on Windows. On POSIX, the validator runtime, publication scanner, and installer hook-health runner own their private process groups through `process_supervision/posix_process_group.py`; generic `ProcessRunnerV1` remains unavailable there. On Windows, the migrated Python and Git child paths retain bounded output capture and descendant-process-tree settlement through runner-owned, executable-specific, same-run probes; adapters cannot supply their own attestation. Native Codex and Claude launches fail early with a typed unavailable result on Windows. Generic `ProcessRunnerV1` requests on POSIX fail at request validation with `PSV1-POSIX-ORACLE-UNAVAILABLE` before executable acquisition or subprocess creation. The returned result is non-success, does not claim an empty descendant tree, closes runner-owned resources, and starts no child. Kimi is explicit-only through fixed `kimi-code/k3` for policy-admitted read-only exploration/research/planning/review or mapped `external-worker` engineering. Its optional validated capability file may select admitted read tools/Model Context Protocol servers or scoped worker tools; omission preserves empty tools/servers/subagents and permission `reject`. Every result is independently verified, nonauthorizing, and outside `auto`. Grok remains unavailable in 1.x. The generic Windows command-line interface remains fail-closed unavailable, and a Rust implementation remains deferred to 2.0. The installers do not copy the source-only durable operation store at `scripts/agent_run_persistence/operation_store.py` or route activation registry at `scripts/process_supervision/route_activation_registry.py`.
+- Both production installers also copy the pure Version 3 (V3) solution-attempt reducer to `solution_attempt/reducer.py` and the bounded process owner to `process_supervision/process_runner.py` below that provider's installed scripts directory. Process Runner Version 1 (`ProcessRunnerV1`) remains Windows-only: it owns provider-prompt operations and detached Slice A validation, while skill-pack validator child checks use it on Windows. On POSIX, the validator runtime, publication scanner, and installer hook-health runner own their private process groups through `process_supervision/posix_process_group.py`; generic `ProcessRunnerV1` remains unavailable there. On Windows, the migrated Python and Git child paths retain bounded output capture and descendant-process-tree settlement through runner-owned, executable-specific, same-run probes; adapters cannot supply their own attestation. For direct single-executable Windows launches, the process owner qualifies the executable and argument-parser contract before reading the prompt. The Codex wrapper supplies its built-in parser contract; the ordinary Claude wrapper supplies none and refuses this route with `PSV1-ARGV-CODEC-UNSUPPORTED`. This contract is not proof of a live provider launch. Generic `ProcessRunnerV1` requests on POSIX fail at request validation with `PSV1-POSIX-ORACLE-UNAVAILABLE` before executable acquisition or subprocess creation. The returned result is non-success, does not claim an empty descendant tree, closes runner-owned resources, and starts no child. Kimi is explicit-only through fixed `kimi-code/k3` for policy-admitted read-only exploration/research/planning/review or mapped `external-worker` engineering. Its optional validated capability file may select admitted read tools/Model Context Protocol servers or scoped worker tools; omission preserves empty tools/servers/subagents and permission `reject`. Every result is independently verified, nonauthorizing, and outside `auto`. Grok remains unavailable in 1.x. The generic Windows command-line interface remains fail-closed unavailable, and a Rust implementation remains deferred to 2.0. The installers do not copy the source-only durable operation store at `scripts/agent_run_persistence/operation_store.py` or route activation registry at `scripts/process_supervision/route_activation_registry.py`.
 - Normal Windows Kimi launch resolves the already-installed fixed `~/.kimi-code/bin/kimi.exe` afresh for each run and does not depend on enrollment, a version/hash allowlist, a live manifest, high-water state, or offline admission policy. `ProcessRunnerV1` binds the executable it opens, accepts an absent optional caller binding, and supports a junction or file symlink whose final ordinary executable has a different name. The legacy enrollment, replacement, and verification names are optional non-writing version/help readiness diagnostics only; a non-null `--kimi-offline-policy` fails clearly as obsolete before diagnostic or state work. The canonical wrapper alone owns the fixed `kimi-code/k3` file prompt, optional validated capability file, and the existing failure, timeout, cancellation, process-tree settlement, capture, and cleanup contract. Without that file, tools, Model Context Protocol servers, and subagents remain empty and permission is `reject`; selected capabilities remain caller-scoped and independently verified. The configured model identifier is not independent server-side model attestation, and the wrapper does not promise compatibility with an arbitrary future breaking Kimi command-line interface change. Orchestrarium never downloads or replaces the vendor executable.
 - The canonical Codex-line operator file is `.agents/.agents-mode.yaml` for project installs and `~/.codex/.agents-mode.yaml` for global installs.
 - For this installer monorepo itself, the absence of project-local `.agents/.agents-mode.yaml` inside `Orchestrarium/` is not automatically a bug when the maintainer is working against the global install. Ordinary reads should fall back to `~/.codex/.agents-mode.yaml` before treating the state as missing.
@@ -318,7 +326,7 @@ The git-push marker now registers `check-git-push-gate-runner.py`, a minimal cac
 - The new `publication_review_policy.py` runtime module follows the existing universal-hook mirror/provider-tree installation path; it is not a second `RUNTIME_HELPERS` destination. It reuses the existing `linked_runtime_subroots.py` materialization and declared source-pack binding. Source, both source packs and installed components must provide the coherent eight-role closure before qualified receiving. Runtime reviewed-policy data remains separate at `$HOME/.agents/publication/reviewed-exceptions.json`: only the trusted caller promotes an actual security-reviewer decision received by Root. Installing or rolling back code never provisions a grant, overwrites that policy or restores a revoked grant. Host-required hook trust remains the existing separate host step.
 
 - **Stop passive-polling hook** (`check-passive-polling-stop.py`): catches the model about to end its turn by saying it is waiting for an async external source (bot/review/CI/job/notification/reply) without a relevant current-turn state check. It reads `last_assistant_message` from the Stop envelope, respects `stop_hook_active=true`, exempts user handoffs like `waiting for your response` / `жду твоего подтверждения`, supports the per-stop `[acknowledge-passive-stop]` override, and otherwise requires a relevant probe such as `date`, `Get-Date`, `gh pr view`, `gh run list`, `gh api`, `curl`, process/task output, or reading an output/log/task file. After preserving that decision, one stable staged `status.md` explicitly armed with the exact current `session_id` and `turn_id`, `Continuation intent: ready`, active state, and a nonempty `Next action` produces one `STOP-CONTINUITY-READY` continuation; missing, stale, ambiguous, or drifting intent allows Stop.
-- **Work-item lifecycle.** No archival Stop adapter is installed or registered. The installed lifecycle owner moves and reconciles records; only physical archive placement makes a record terminal. Status and closure text supply required evidence but do not substitute for the move. For an already-`fixed` current flat bug whose parent remains active, use the installed owner's explicit-apply `archive-fixed-bug` command documented in [the operator contract](docs/work-item-execution-tracking.md#archive-an-already-fixed-flat-bug-while-its-parent-stays-active); installation of this source change does not itself grant apply authority.
+- **Work-item lifecycle.** No archival Stop adapter is installed or registered. The installed lifecycle owner moves and reconciles records; only physical archive placement makes a record terminal. Status and closure text supply required evidence but do not substitute for the move. For an already-`fixed` current flat bug whose parent remains active, use the installed owner's explicit-apply `archive-fixed-bug` command documented in [the operator contract](docs/work-item-execution-tracking.md#archive-an-already-fixed-flat-bug-under-an-active-or-archived-parent); installation of this source change does not itself grant apply authority.
 - **PreToolUse machine-local-path hook** (`check-machine-local-path.py`; lives in the typed `agents/hooks/` (Claude) / `skills/lead/hooks/` (Codex) dir and imports `hook_common` from the sibling `scripts/`): a **warn-only AUDIT** hook that flags a machine-local absolute path (a concrete user home or workstation dev root; placeholders like `<you>`, `%USERPROFILE%`, `${CLAUDE_PROJECT_DIR}` are allowed) written into a non-`.scratch/` tracked file. It matches the edit's own `tool_input`, delivers the warning to the model as `hookSpecificOutput.additionalContext` JSON on standard output, and returns exit 0 on both a hit and a clean check. It never blocks (never exit 2) and fails open on any internal error.
 - **PreToolUse no-trash-in-repo hook** (`check-no-trash-in-repo.py`; same typed `hooks/` dir, registered with a `Bash`/`PowerShell`-inclusive matcher so it sees the `git worktree add` command from either shell tool): a **warn-only AUDIT** hook — the stray-artifact guard (filename and install-marker retained for install continuity; a rename to `check-stray-artifact` is a tracked follow-up) — that warns on four things. It warns on every confidently parsed `git worktree add` except one add whose command ends with the exact `# orchestrarium:requested-isolation-worktree` marker required by the installed parallel-isolation protocol; missing, near-match, quoted, reused, or batch markers do not suppress the audit. `git worktree list/remove/prune`, `git add` (not `git worktree add`), `git` inside a quoted string, and non-git commands never warn; the parser is shell-aware (shlex tokenization, command-position tracking across `&&`/`;`/`|`/`(`, env-assignment-prefix and git-global-option skipping) and fails open on any tokenizer error. This replaced a name-based version that warned only on new dirs named `kosyaks`/`mistake-log` — useless, because those are the *user's* personal-process vocabulary, not names the *agent* (the actor a PreToolUse hook guards) ever creates, so it never fired; the real reported problem was the agent creating stray artifacts, chiefly unrequested worktrees, so the guard now keys on the OPERATION. (2) A **mangled Windows redirect target** — a drive-letter prefix carrying no path separator (`> r:Tempxbuild.log`), the signature of a shell eating the backslashes of `r:\Temp\x\build.log` and silently creating one file named after the whole mangled path while the command reports success; always a mistake, so this trigger is not gated on where the process is running. (3) A **build/log artifact redirected into the repository ROOT** (`> build.log`, `> probe.obj`) — a target with no directory component lands in the process working directory, which for a tool-run command is the repo root. (4) A **compiler invocation whose output lands in the repository root** — `ifx`/`ifort`/`icx`/`gfortran`/`cl`/`gcc` with at least one source operand and no output-directing flag, which is how a recorded cleanup of 54 untracked build artifacts (16 MB, 47 of them in two days) accumulated in a consuming repo's root. Triggers (3) and (4) fire only when the process CWD is CONFIRMED to be a repository root (`cwd/.git` exists — directory for a clone, file for a worktree/submodule) **and** the command contains no `cd`/`pushd`/`popd`; a directory change makes the destination undecidable, so the guard stays silent (running a tool from inside its own `.scratch/` output dir is the correct pattern, not a defect). Redirect destinations are judged from the RAW command text because posix tokenization eats backslashes — `> r:\Temp\x\build.log` and `> r:Tempxbuild.log` tokenize identically, and a legitimate `> .scratch\t\build.log` would otherwise collapse to a bare name and look root-destined. Deferred: the Claude `Agent` tool's `isolation: "worktree"` form. Dropped: outside-repo writes (allow-list FP-floods) and arbitrary in-repo trash (no reliable non-name signal) — note triggers (2)-(4) do NOT repeat that mistake: "writes outside the repo" is an OPEN set needing an unenumerable allow-list, whereas an artifact extension written to the ROOT is CLOSED on both axes (enumerable extensions, one destination directory), so no allow-list is required. Matches its own `tool_input`, and (like the sibling audit hooks above) delivers its warning to the MODEL as one line of `hookSpecificOutput.additionalContext` JSON on stdout with exit 0 — never a stderr-plus-exit-1 form, which was measured to reach nobody on either provider line — never blocks (never exit 2), and fails open on any tokenizer or internal error.
 - **PreToolUse stale-relation-residue hook** (`check-stale-relation-residue.py`; same typed `hooks/` dir): a **warn-only AUDIT** hook — the structural backstop for architecture law C6 ("a superseding change leaves only the correct current state") — that flags an `Edit`/`Write` ADDING a stale-relation residue phrase (`deprecated alias`, `former alias`/`former name`, `(was X)`/`(formerly X)` parentheticals, `misregistered as`, arrow+alias, "is wrong, the correct is") into a LIVE-tree file. For diff/apply_patch payloads it scans ONLY added lines (erasing residue never warns). Exempt: provenance surfaces (`work-items/`, changelogs/release notes, `/archive/`+`/legacy/` trees, `.scratch/`, `.git/`) where recording a superseded relation IS the point. The stale-vs-live discriminator is review-bound. On a hit it emits `hookSpecificOutput.additionalContext` JSON on standard output and returns exit 0; a clean check and internal failure also return 0. It never blocks (never exit 2).
@@ -391,6 +399,32 @@ The always-composed Codex `AGENTS.md` keeps the universal native-dispatch kernel
 
 The existing Lead package/receipt update carries these sections for Codex and the common skill tree; they remain Codex-specific and do not alter Claude Agent or external dispatch. No installer mechanism, user-owned document handling, ordering or client limit changes. This reduces the eager payload but does not establish complete effective-budget coverage, runtime loading or post-compaction compliance; the standalone instruction-budget issue remains open.
 
+## Bounded pre-SDK Claude removal
+
+For Claude target paths, `python scripts/install-claude.py --global --uninstall`
+previews the exact currently selected receipt and objects. Review its file/control lists,
+then repeat with `--apply --uninstall-selection <SHA256>` only for that selection.
+Project mode uses the existing target option. The token is current-state selection,
+not historical root ownership; changing the receipt or selected objects invalidates it.
+Newly created control files are recorded only from transaction creator witnesses.
+Pre-existing or subsequently edited controls are not adopted: their presence preserves
+the runtime and returns a partial result. Modified payload and unrecorded user files
+remain; directories and the residual receipt are retained. Removal uses the existing
+transaction, and a late failure restores its effects. Preview performs no target writes.
+Global agents/skills/commands junctions use the existing linked-root authority.
+The selection binds their current logical and physical identities and link chain;
+retargeting invalidates the preview. Junctions and neighboring files remain untouched.
+Project links, nested links, and shared Codex runtime removal remain outside this route.
+An old receipt is not promoted into proof of historical physical ownership.
+Receipted document blocks are removed through the shared configuration renderer;
+bytes outside the markers are preserved exactly. Edited or ambiguous owned blocks
+preserve the installation. An already absent block is a no-op, not document deletion.
+
+Receipted linked documents bind their physical file and full link chain to the
+preview, then use the existing scalar transaction owner. The link remains in
+place. This does not change the platform admission boundary: public POSIX
+installation still depends on the separate effect-bound backend qualification.
+
 ## Terms and Abbreviations
 
 - `AGENTS.md`: agent governance file installed for Codex and materialized as a shared-governance module for example providers.
@@ -417,30 +451,3 @@ The existing Lead package/receipt update carries these sections for Codex and th
 - `stdin`: standard input stream used by CLIs and wrappers.
 - `status.md`: human-readable recovery summary for the active work item.
 - `winerror`: native Windows error code; the installer reports only an exact integer in the unsigned 32-bit range.
-
-
-### Bounded pre-SDK Claude removal
-
-For Claude target paths, `python scripts/install-claude.py --global --uninstall`
-previews the exact currently selected receipt and objects. Review its file/control lists,
-then repeat with `--apply --uninstall-selection <SHA256>` only for that selection.
-Project mode uses the existing target option. The token is current-state selection,
-not historical root ownership; changing the receipt or selected objects invalidates it.
-Newly created control files are recorded only from transaction creator witnesses.
-Pre-existing or subsequently edited controls are not adopted: their presence preserves
-the runtime and returns a partial result. Modified payload and unrecorded user files
-remain; directories and the residual receipt are retained. Removal uses the existing
-transaction, and a late failure restores its effects. Preview performs no target writes.
-Global agents/skills/commands junctions use the existing linked-root authority.
-The selection binds their current logical and physical identities and link chain;
-retargeting invalidates the preview. Junctions and neighboring files remain untouched.
-Project links, nested links, and shared Codex runtime removal remain outside this route.
-An old receipt is not promoted into proof of historical physical ownership.
-Receipted document blocks are removed through the shared configuration renderer;
-bytes outside the markers are preserved exactly. Edited or ambiguous owned blocks
-preserve the installation. An already absent block is a no-op, not document deletion.
-
-Receipted linked documents bind their physical file and full link chain to the
-preview, then use the existing scalar transaction owner. The link remains in
-place. This does not change the platform admission boundary: public POSIX
-installation still depends on the separate effect-bound backend qualification.

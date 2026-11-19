@@ -74,7 +74,7 @@ python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --pla
 python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --platform claude --hook-event UserPromptSubmit --script-marker turn-anchor-reminder --script-path <ignored> --remove
 ```
 
-На Windows и POSIX авто-устанавливаемые записи используют одну direct-Python exec-форму; различаются только абсолютные пути:
+На Windows и POSIX используется одинаковый прямой запуск Python. В примере для Windows стоят заполнители: подставьте фактические абсолютные пути к интерпретатору и установленным скриптам:
 
 ```json
 {
@@ -85,9 +85,9 @@ python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --pla
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Python314\\python.exe",
+            "command": "<absolute-python.exe>",
             "args": [
-              "C:\\Users\\<you>\\.claude\\agents\\scripts\\check-bugfix-discipline.py"
+              "<user-home>\\.claude\\agents\\scripts\\check-bugfix-discipline.py"
             ]
           }
         ]
@@ -98,9 +98,9 @@ python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --pla
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Python314\\python.exe",
+            "command": "<absolute-python.exe>",
             "args": [
-              "C:\\Users\\<you>\\.claude\\agents\\scripts\\check-passive-polling-stop.py"
+              "<user-home>\\.claude\\agents\\scripts\\check-passive-polling-stop.py"
             ]
           }
         ]

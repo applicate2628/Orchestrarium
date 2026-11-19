@@ -19,17 +19,17 @@ to launch models or spend quota.
 - **Work on the project:** [maintainer starting point](docs/new-session-guide.md).
 - **See released changes:** [release notes](RELEASE_NOTES.md).
 
-## Current release and SDK development
+## Which version?
 
-| | Current `main` | SDK development in [PR #19](https://github.com/applicate2628/Orchestrarium/pull/19) |
-| --- | --- | --- |
-| Availability | The production source described by this README and its installation guide. | A separate, unmerged development branch; not the current globally installed release. |
-| Clients and layout | Codex and Claude Code packs share governance. Their source remains in `src.codex/` and `src.claude/`. | Work toward a common core with client adapters, including Antigravity integration. Its changed paths do not apply to `main`. |
-| Delegation | Existing role selection and execution routes, with their documented permissions and platform limits. | Optional SDK (Software Development Kit) execution and child-session coordination are being developed and checked. They are not enabled by this README. |
-| Evidence | Use the current installation guide and source contracts for the operation being performed. | Offline checks do not establish live provider or platform acceptance. Read the PR's current evidence and remaining limits before testing. |
+This guide describes the **pre-SDK source installer** for Codex and Claude Code.
+For the frozen reference, use the
+[`baseline-pre-sdk-2026-11-19` tag](https://github.com/applicate2628/Orchestrarium/tree/baseline-pre-sdk-2026-11-19).
+[Draft PR #52](https://github.com/applicate2628/Orchestrarium/pull/52) tracks
+follow-up verification and fixes; its contents are not part of the tag. Neither
+the tag nor the draft establishes what is installed on a particular computer.
 
-The SDK branch is not a reason to reinstall or migrate a working setup early.
-This page does not announce SDK release readiness or enable quota-consuming runs.
+The [Software Development Kit (SDK) work in draft PR #19](https://github.com/applicate2628/Orchestrarium/pull/19)
+is separate. Its adapters and installation paths do not apply to this guide.
 
 ### Roles, models and cost
 
@@ -60,9 +60,15 @@ It binds the supplied runtime to its notice inventory; it does not change
 provider permissions. [Historical runtime evidence](https://github.com/applicate2628/Orchestrarium/blob/082d46cd83324117abcb965842005d3c15ab99ed/scripts/distribution/runtime-evidence.md)
 records only the exact earlier inputs and checks.
 
-## WARNING: Claude external authentication
+## Claude Code: interactive use and automated workers
 
-The Python-owned `invoke-claude-prompt.py` transport (also exposed through the thin POSIX launcher `invoke-claude-prompt.sh`) runs automated, headless `claude -p`. Orchestrarium currently admits only `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` for automated Claude runs; subscription sign-in (OAuth), the subscription override, Amazon Bedrock, and Google Vertex AI fail closed. Claude authentication is irrelevant when the Codex route is selected, so absent Claude credentials do not block Codex. Orchestrarium 1.x refuses `apiKeyHelper` before prompt capture or provider lookup because a helper-generated credential cannot be bound to the transport's exact output scan. For the secret-backed path, use `invoke-claude-api.py` or its thin `invoke-claude-api.sh` launcher with the credentials documented in `SECRET.md`. See [Anthropic's Claude Code legal and compliance guidance](https://code.claude.com/docs/en/legal-and-compliance).
+Installing the Claude Code pack does not start Claude or authorize paid use.
+An interactive Claude Code session and an automated worker are different routes.
+Use only an authorized commercial authentication mode for automated Claude work;
+a Claude subscription alone is not permission. Prefer the documented API route
+for programmatic workers. See the
+[Claude execution contract](src.claude/agents/contracts/external-dispatch.md)
+and [Anthropic's compliance guidance](https://code.claude.com/docs/en/legal-and-compliance).
 
 ## Repository layout
 
@@ -126,7 +132,7 @@ receipt, and refreshes the derived README as one rollback-safe operation.
 An already-`fixed` current flat bug can instead be archived while its parent
 stays active through the lifecycle owner's explicit-apply `archive-fixed-bug`
 command, with incoming physical-link repair and a bound receipt; see
-[the operator contract](docs/work-item-execution-tracking.md#archive-an-already-fixed-flat-bug-while-its-parent-stays-active).
+[the operator contract](docs/work-item-execution-tracking.md#archive-an-already-fixed-flat-bug-under-an-active-or-archived-parent).
 Two owner-managed legacy transitions handle the old directory-shaped backlog:
 `convert-legacy-candidate` creates one visible flat candidate while preserving
 every accepted source text and digest as an appendix, and
@@ -135,29 +141,22 @@ monthly archive without inventing candidate, active, or closure history.
 
 ## Installation
 
-The pre-SDK installer uses its existing Windows and POSIX transaction backends under the ordinary serialized-writer contract. Capability, ownership and recovery checks remain active; see [Installation](INSTALL.md) for platform-specific limits.
-
-Use the root router installers for the common path:
+From the source checkout root, preview a user-wide installation first. The menu
+offers Codex, Claude Code, or both (the default).
 
 ```bash
-bash install.sh --global
+bash install.sh --global --dry-run
 ```
 
 ```powershell
-python .\install.py --global
+python .\install.py --global --dry-run
 ```
 
-Each router asks what to install:
-
-```text
-What to install?
-Production installs:
-  1) Codex pack
-  2) Claude Code
-  3) Codex + Claude (default production install)
-```
-
-Pressing Enter selects the default production install, `Codex + Claude`. The router then forwards the same arguments to the selected provider-specific installer in `scripts/`. Use `scripts/install-codex.*` or `scripts/install-claude.*` directly when you want deterministic automation on one line.
+If the preview matches the intended scope, omit `--dry-run` to apply. The two
+packs run in order when both are selected; this is not a single cross-pack
+transaction. Use the [installation guide](INSTALL.md#quick-install) for
+project-local install, supported platforms, custom-file preservation and
+ownership limits.
 
 Windows Kimi execution uses the canonical thin wrapper, not executable enrollment. For each run the wrapper resolves the fixed per-user executable; `ProcessRunnerV1` binds the executable it opens, accepts an absent optional caller binding, and supports a junction or file symlink whose final ordinary executable has a different name. Normal launch does not consult an enrollment receipt, version/hash allowlist, live manifest, high-water record, or offline admission state. The enrollment-named maintenance entrypoints are optional non-writing version/help diagnostics; a supplied offline-policy value is obsolete and fails explicitly. The wrapper alone owns the fixed `kimi-code/k3` file prompt, optional validated capability file, ordinary failure reporting, and resource cleanup. Without that file, tools, Model Context Protocol servers, and subagents remain empty and permission is `reject`; selected capabilities remain caller-scoped and independently verified. The configured model identifier is not independent server-side model attestation, and this contract does not promise compatibility with an arbitrary future breaking Kimi command-line interface change. No vendor binary is downloaded or replaced.
 
@@ -296,7 +295,7 @@ For a historical Claude instruction set, --replace-claude-receipted-instructions
 
 Codex can separately replace a reviewed current document interval with --replace-codex-document SHA256:START:END, using exact full-document bytes and Python character offsets. The strict selected renderer preserves surrounding text and ignores literal END examples inside closed code, while the ordinary no-selection renderer stays unchanged. The shared transaction receives selected content and its receipt together; this is selected acquisition, not historical ownership. See the [Codex selection contract](docs/provider-receipt-planning.md#explicit-selected-current-codex-document-replacement). Physical replacement/recovery qualification remains open.
 
-The runtime helper surface is installed with production Codex and Claude packs as well: Codex gets the scripts under `$HOME/.agents/skills/lead/scripts/` or `<repo>/.agents/skills/lead/scripts/`, while Claude Code gets them under `~/.claude/agents/scripts/` or `<repo>/.claude/agents/scripts/`. That payload includes the pure Version 3 (V3) solution-attempt reducer at `solution_attempt/reducer.py` and the bounded process owner at `process_supervision/process_runner.py`. Process Runner Version 1 (`ProcessRunnerV1`) remains Windows-only: it owns provider-prompt operations and detached Slice A validation, while skill-pack validator child checks use it on Windows. On POSIX, the validator runtime, publication scanner, and installer hook-health runner own their private process groups through `process_supervision/posix_process_group.py`; generic `ProcessRunnerV1` remains unavailable there. Each external provider-prompt launch requires an absolute caller-owned `--terminal-receipt` path, reserved before provider/capture/ledger side effects. On POSIX, every path ancestor must be owned by root or the current user, and the final parent must be current-user-owned without group/other write access. A group/other-writable ancestor is accepted only for a root-owned sticky shared directory such as `/tmp` whose next held component is a current-user-owned nonwritable boundary. The wrapper holds every opened component identity, revalidates owner, mode, path, and leaf before and after durable commit/readback, and removes only the exact descriptor-identified leaf if reservation setup fails. A raced replacement or unverifiable descriptor identity is preserved and fails with `E_EXTERNAL_TERMINAL_RECEIPT_CLEANUP_UNVERIFIED`. After settlement and secure cleanup, the wrapper safety-scans one serialized V2 envelope, durably commits and reads it back, writes and flushes the identical line to stdout, then appends the optional ledger event; the caller owns receipt retention and deletion. On Windows, the migrated Python and Git child paths retain bounded output capture and descendant-process-tree settlement through runner-owned, executable-specific probes performed for the same run; adapters cannot self-attest. Native Codex and Claude launches fail early with a typed unavailable result on Windows. Generic `ProcessRunnerV1` requests on POSIX fail at request validation with `PSV1-POSIX-ORACLE-UNAVAILABLE` before executable acquisition or subprocess creation. The returned result is non-success, does not claim an empty descendant tree, closes runner-owned resources, and starts no child. Kimi is explicit-only through fixed `kimi-code/k3` for policy-admitted read-only exploration/research/planning/review or mapped `external-worker` engineering. Its optional validated capability file may select admitted read tools/Model Context Protocol servers or scoped worker tools; omission preserves empty tools/servers/subagents and permission `reject`. Every result is independently verified, nonauthorizing, and outside `auto`. Grok remains unavailable in 1.x. The generic Windows command-line interface remains fail-closed unavailable, and a Rust implementation remains deferred to 2.0. The source-only durable operation store at `scripts/agent_run_persistence/operation_store.py` and route activation registry at `scripts/process_supervision/route_activation_registry.py` are not installed. See [docs/work-item-execution-tracking.md](docs/work-item-execution-tracking.md) for the sole operator runbook, including invalid-closure recovery. To group several work-items under one goal or milestone, see [docs/epics.md](docs/epics.md) (the epic -> work-item -> phase hierarchy). For durable cross-item architecture decisions see [docs/decisions.md](docs/decisions.md) (the ADR registry), and for standing cross-work-item dependencies see [docs/dependencies.md](docs/dependencies.md) (`Depends-on` edges + blocked/ready derivation). For the in-repo delivery-lessons registry see [docs/lessons.md](docs/lessons.md) (capture lessons learned so they survive a work-item's archival), and for the DoR/DoD vocabulary map onto existing admission and close gates see [docs/definition-of-ready-done.md](docs/definition-of-ready-done.md).
+The runtime helper surface is installed with production Codex and Claude packs as well: Codex gets the scripts under `$HOME/.agents/skills/lead/scripts/` or `<repo>/.agents/skills/lead/scripts/`, while Claude Code gets them under `~/.claude/agents/scripts/` or `<repo>/.claude/agents/scripts/`. That payload includes the pure Version 3 (V3) solution-attempt reducer at `solution_attempt/reducer.py` and the bounded process owner at `process_supervision/process_runner.py`. Process Runner Version 1 (`ProcessRunnerV1`) remains Windows-only: it owns provider-prompt operations and detached Slice A validation, while skill-pack validator child checks use it on Windows. On POSIX, the validator runtime, publication scanner, and installer hook-health runner own their private process groups through `process_supervision/posix_process_group.py`; generic `ProcessRunnerV1` remains unavailable there. Each external provider-prompt launch requires an absolute caller-owned `--terminal-receipt` path, reserved before provider/capture/ledger side effects. On POSIX, every path ancestor must be owned by root or the current user, and the final parent must be current-user-owned without group/other write access. A group/other-writable ancestor is accepted only for a root-owned sticky shared directory such as `/tmp` whose next held component is a current-user-owned nonwritable boundary. The wrapper holds every opened component identity, revalidates owner, mode, path, and leaf before and after durable commit/readback, and removes only the exact descriptor-identified leaf if reservation setup fails. A raced replacement or unverifiable descriptor identity is preserved and fails with `E_EXTERNAL_TERMINAL_RECEIPT_CLEANUP_UNVERIFIED`. After settlement and secure cleanup, the wrapper safety-scans one serialized V2 envelope, durably commits and reads it back, writes and flushes the identical line to stdout, then appends the optional ledger event; the caller owns receipt retention and deletion. On Windows, the migrated Python and Git child paths retain bounded output capture and descendant-process-tree settlement through runner-owned, executable-specific probes performed for the same run; adapters cannot self-attest. For direct single-executable Windows launches, the process owner qualifies the executable and argument-parser contract before reading the prompt. The Codex wrapper supplies its built-in parser contract; the ordinary Claude wrapper supplies none and refuses this route with `PSV1-ARGV-CODEC-UNSUPPORTED`. This contract is not proof of a live provider launch. Generic `ProcessRunnerV1` requests on POSIX fail at request validation with `PSV1-POSIX-ORACLE-UNAVAILABLE` before executable acquisition or subprocess creation. The returned result is non-success, does not claim an empty descendant tree, closes runner-owned resources, and starts no child. Kimi is explicit-only through fixed `kimi-code/k3` for policy-admitted read-only exploration/research/planning/review or mapped `external-worker` engineering. Its optional validated capability file may select admitted read tools/Model Context Protocol servers or scoped worker tools; omission preserves empty tools/servers/subagents and permission `reject`. Every result is independently verified, nonauthorizing, and outside `auto`. Grok remains unavailable in 1.x. The generic Windows command-line interface remains fail-closed unavailable, and a Rust implementation remains deferred to 2.0. The source-only durable operation store at `scripts/agent_run_persistence/operation_store.py` and route activation registry at `scripts/process_supervision/route_activation_registry.py` are not installed. See [docs/work-item-execution-tracking.md](docs/work-item-execution-tracking.md) for the sole operator runbook, including invalid-closure recovery. To group several work-items under one goal or milestone, see [docs/epics.md](docs/epics.md) (the epic -> work-item -> phase hierarchy). For durable cross-item architecture decisions see [docs/decisions.md](docs/decisions.md) (the ADR registry), and for standing cross-work-item dependencies see [docs/dependencies.md](docs/dependencies.md) (`Depends-on` edges + blocked/ready derivation). For the in-repo delivery-lessons registry see [docs/lessons.md](docs/lessons.md) (capture lessons learned so they survive a work-item's archival), and for the DoR/DoD vocabulary map onto existing admission and close gates see [docs/definition-of-ready-done.md](docs/definition-of-ready-done.md).
 
 For release-relevant tracked changes, update `RELEASE_NOTES.md` in the same change before publication and explain the practical effect of the change, not just its title. Keep release notes in reverse-chronological `## YYYY-MM-DD` sections instead of one long-lived `## Unreleased` bucket, and run the repo-local gate before publication:
 
@@ -308,11 +307,13 @@ bash scripts/check-publication-gate.sh
 python .\scripts\check-publication-gate.py
 ```
 
+## External launch permissions
+
+Managed adapters supply actual assigned-role provenance and consume `--user-approved-launch` locally before `--`; that flag is only the caller projection of genuine exact-launch approval. Optional `--astra-task-authorization-json` instead carries a matching genuine Astra 6.2 High/Extra high task authorization; caller-checked scope, revocation and limits still bind before covered repeats, and Max never uses it. `provider_prompt.launch` and the native selector share the pure `model_routing/launch_policy.py` rule. A complete selected logical package includes that nested module, including relocated transports; a FILE link on R/P does not move its companion namespace to the referent directory. Missing/broken mandatory support fails truthfully before effects. Prefer completing the qualified package; declared same-owner Assistance with all canonical rule, scope, genuine permission where needed, resources and readback guarantees may be selected by Root without a new ordinary permission loop. There is no catch-and-allow, raw-flag authority or automatic retry. Roleless direct-user compatibility does not permit managed callers to omit their assigned profession.
+
 ## License
 
 This repository is licensed under the Mozilla Public License 2.0. See [LICENSE](LICENSE).
-
-Managed adapters supply actual assigned-role provenance and consume `--user-approved-launch` locally before `--`; that flag is only the caller projection of genuine exact-launch approval. Optional `--astra-task-authorization-json` instead carries a matching genuine Astra 6.2 High/Extra high task authorization; caller-checked scope, revocation and limits still bind before covered repeats, and Max never uses it. `provider_prompt.launch` and the native selector share the pure `model_routing/launch_policy.py` rule. A complete selected logical package includes that nested module, including relocated transports; a FILE link on R/P does not move its companion namespace to the referent directory. Missing/broken mandatory support fails truthfully before effects. Prefer completing the qualified package; declared same-owner Assistance with all canonical rule, scope, genuine permission where needed, resources and readback guarantees may be selected by Root without a new ordinary permission loop. There is no catch-and-allow, raw-flag authority or automatic retry. Roleless direct-user compatibility does not permit managed callers to omit their assigned profession.
 
 ## Codex native instruction ownership
 

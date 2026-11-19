@@ -10,19 +10,12 @@ At the start of a new maintenance session, read [`docs/new-session-guide.md`](do
 - **documentation**: always-update
 - **language-style**: english (code, comments, docs), russian OK in user-facing session reports
 
-## Skill development checklist
+## Skills and Claude slash commands
 
-When adding, renaming, or removing a skill (`src.claude/commands/agents-*.md`):
-
-1. Create/edit the skill file in `src.claude/commands/`
-2. Update `src.claude/commands/agents-help.md` — add to the skills table
-3. Update `README.md` and `INSTALL.md` if the change affects documented pack structure, counts, install surface, or entry points
-4. Update `RELEASE_NOTES.md` if the skill change is release-relevant under repo policy
-5. Verify `python scripts/install-claude.py` install output totals after adding/removing a skill (installers count pack items dynamically — no hardcoded threshold to edit)
-6. Verify `scripts/install-claude.sh` delegates to the same Python owner (same dynamic count)
-7. Update `src.claude/agents/scripts/validate-skill-pack.sh` — add the skill to validation only if it is not auto-discovered
-8. Run `/agents-validate` to confirm structural integrity
-9. Run `python scripts/install-claude.py --global` to install and verify when install behavior or pack structure changed materially
+- Edit the canonical skill body in `src.codex/skills/<name>/SKILL.md`, with its supporting files. The installer projects that body into the Claude skill tree. Do not maintain a second active skill body under `src.claude/skills/`: those files are historical migration inputs.
+- For a Claude-specific slash command, edit the relevant `src.claude/commands/agents-*.md` file and its help entry if applicable. Commands, Claude agent entrypoints and canonical skill bodies are different installation surfaces.
+- If the pack's structure, counts or entrypoints change, update [README.md](README.md) and [INSTALL.md](INSTALL.md). Record release-relevant changes in [RELEASE_NOTES.md](RELEASE_NOTES.md).
+- Run `python src.claude/agents/scripts/validate-skill-pack.py` for the source pack. If installation behavior changes, exercise the supported installer in an isolated target first. A global install is deployment, not a documentation or source-validation step.
 
 ## Role development checklist
 

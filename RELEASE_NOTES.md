@@ -1,8 +1,13 @@
 # Release Notes
 
-This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
+This log records user-facing changes in the Orchestrarium source tree by date.
+A dated entry is not a release tag, publication notice, or confirmation of a
+local installation. For the frozen pre-SDK baseline and draft follow-up, see
+[Which version?](README.md#which-version).
 
 ## 2026-11-19
+
+- Clarified how to identify a frozen pre-SDK baseline, preview an install without changing the target, and locate the canonical installed skill and hook files. These documentation changes do not switch the SDK track or change installer behavior.
 
 - The scratch recovery hook now compares original file bytes with Git, without clean filters or line-ending conversion. It quotes paths with special characters and enables Git's Windows long-path support, so preserved work is not mistaken for a committed copy merely because conversion makes the contents look alike.
 

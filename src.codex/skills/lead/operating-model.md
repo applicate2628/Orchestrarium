@@ -300,7 +300,7 @@ python scripts/install-hypothesis-hook.py --target <hooks.json path> --platform 
 python scripts/install-hypothesis-hook.py --target <hooks.json path> --platform codex --host-os posix --hook-event UserPromptSubmit --script-marker turn-anchor-reminder --script-path <ignored> --remove
 ```
 
-The auto-installed entries on Windows have this direct-Python shape:
+Windows example (replace placeholders with the actual absolute interpreter and canonical installed script paths):
 
 ```json
 {
@@ -311,7 +311,7 @@ The auto-installed entries on Windows have this direct-Python shape:
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Python314\\python.exe C:\\Users\\<you>\\.codex\\skills\\lead\\scripts\\check-bugfix-discipline.py"
+            "command": "<absolute-python.exe> <user-home>\\.agents\\skills\\lead\\scripts\\check-bugfix-discipline.py"
           }
         ]
       }
@@ -321,7 +321,7 @@ The auto-installed entries on Windows have this direct-Python shape:
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Python314\\python.exe C:\\Users\\<you>\\.codex\\skills\\lead\\scripts\\check-passive-polling-stop.py"
+            "command": "<absolute-python.exe> <user-home>\\.agents\\skills\\lead\\scripts\\check-passive-polling-stop.py"
           }
         ]
       }
