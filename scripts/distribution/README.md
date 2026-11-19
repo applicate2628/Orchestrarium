@@ -52,14 +52,11 @@ to the existing installer. Applying an installation requires explicit
 --retain-to ABSOLUTE_DIRECTORY or --permanent-runtime; retain the selected
 interpreter while installed hooks reference it.
 
-Historical wheel locks, SDK-era notices and earlier evidence are retained in
-the source repository for recovery and provenance, not as current requirements.
-They are excluded from assembled bundles; earlier assembly guidance remains
-in the corresponding Git checkpoints. Older evidence records and bundle
-manifests are not accepted by the new profile; do not edit their hashes or
-metadata to relabel earlier qualification. Historical releases are not rewritten.
+Earlier distribution assets and qualification records are preserved only in the
+[original Git checkpoint](https://github.com/applicate2628/Orchestrarium/tree/082d46cd83324117abcb965842005d3c15ab99ed/scripts/distribution).
+They are not current build inputs and must not be applied to new runtimes.
+Do not relabel earlier records or rewrite historical releases.
 
 ## Terms and abbreviations
 
 - CPython: the reference implementation of the Python interpreter.
-- SDK: software development kit; not part of this runtime profile.
