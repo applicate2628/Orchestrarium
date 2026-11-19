@@ -1429,14 +1429,48 @@ trust state are machine-local outputs, not shared configuration templates. A
 changed identity requires the client's normal trust flow; neither PATH fallback
 nor copying trust from another machine proves admission.
 
-The Wave user-operated handoff stopped before the Codex worker because the shared
-installed hook registration selected an absent interpreter. The failed attempt
-remains preserved and is not successful SDK or originating-Lead acceptance.
-Do not automatically retry it or rewrite shared registrations as part of an offline check.
+The first Wave user-operated handoff stopped before the Codex worker because
+a shared installed hook registration selected an absent interpreter. That failed
+attempt remains preserved. A separately approved machine-local repair and the
+user's manual trust review preceded the successful new handoff recorded below;
+the earlier failure is not relabelled or automatically retried.
 
 The bounded retained-runtime evidence at source `7075132c` is recorded in the
 [distribution qualification record](../scripts/distribution/README.md#windows-pristine-base-and-hook-registration-checkpoint).
 It does not qualify global rollout, native hook trust or the real AGY-to-Codex handoff.
+
+### User-operated originating Lead checkpoint, 2026-11-19
+
+Dmitry manually invoked the prepared one-shot from his native Antigravity (AGY)
+Lead session. The assistant did not automate AGY or repeat the model call.
+The new Codex Consultant completed through the installed public SDK entrypoint:
+GPT-6.2-Sol, medium effort, read-only sandbox, deny-all approval policy, default
+service tier (not Fast), SDK and CLI 0.170.0. The account route was the existing
+user-selected subscription binding; the binding label is not independent proof
+of billing or account identity.
+The execution used the prepared installed payload from `c835cc37`; it is not live
+qualification of the entire current PR HEAD.
+
+The retained child exit is zero and the canonical terminal is completed,
+non-authorizing, with no cleanup issues. Its launch/evidence links, artifact
+revision, selected and reported SDK configuration, and native fresh thread/turn
+receipt are checked by readback without inference. The user also reported the
+returned test marker and explanation in the originating AGY session. The old
+blocked attempt remains separate and unchanged.
+
+The private one-shot wrapper initially exited nonzero after successful receiving:
+its readback incorrectly required an artifact filename on the launch record,
+where the schema supplies artifact identity and the expected evidence run ID.
+The corrected readback joins the terminal to its exact launch and binding,
+checks the terminal artifact filename and digest, and rejects duplicate or
+crossed records. Offline negative cases and read-only reconciliation qualify
+this correction; no historical result, marker or ledger row is rewritten.
+
+This is one observed external native Lead-to-Codex fresh read-only handoff, not
+synthetic caller evidence. It does not qualify AGY-native child management,
+AGY-to-Codex continuation, mutating Worker operations, other provider workers,
+POSIX behavior or global rollout. Historical direct Codex fresh/continuation
+evidence remains separately scoped. PR19 is still draft/unmerged.
 
 ### Current execution state
 
@@ -1457,7 +1491,7 @@ as release blockers:
 
 | Scope | Concrete remaining work | Verification/delivery boundary |
 |---|---|---|
-| First version: other-provider Lead to Codex | Verify the native Lead entry point delegates through the existing Codex SDK owner and receives the correctly bound result, including failure/recovery and user permissions. | Source/offline bridge evidence and the direct native Codex pair are separate from a real originating Lead execution. Do not label the whole path native-qualified from either alone. |
+| First version: other-provider Lead to Codex | The user-operated AGY-to-Codex fresh read-only Consultant handoff is observed on Windows; preserve its exact result and finish selected-payload release reconciliation. | The user confirms the originating AGY session; retained launch, terminal and artifact records prove the bounded Codex SDK execution and receiving. This does not qualify every role, continuation, platform or provider. |
 | First version: Codex delivery | Integrate current main fixes, verify the selected payload and shared owner regressions, synchronize this plan and PR evidence. | The bounded Windows Codex Consultant pair is live-qualified at its recorded revision. PR remains draft/unmerged and not globally installed; installation and further model calls retain their own authorization. |
 | Deferred: non-Codex workers and sessions | Non-Codex worker/runtime, account/tool enforcement, receiving and broader native session qualification beyond the selected originating Lead-to-Codex handoff. | Retain existing implementations and offline evidence without claiming live success. Not a first-version blocker under the revised decision. |
 | Deferred: wider platforms | Intended macOS/Linux SDK process custody and lifecycle qualification. | Windows success does not qualify POSIX or promise an operating-system sandbox. Preserve the exact platform evidence gaps. |
