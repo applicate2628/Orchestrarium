@@ -1,5 +1,6 @@
 """Fresh-effect inverse without native moves; isolated Windows qualification."""
 from pathlib import Path
+from types import SimpleNamespace
 import os
 import pytest
 from test_provider_prompt_projections import _load_installer
@@ -168,20 +169,22 @@ def test_fresh_tree_failed_inverse_tracks_remaining_owned_nodes(tmp_path, monkey
         assert (target / "foreign").read_bytes() == b"preserve foreign"
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Checks the non-Windows transaction admission hold")
-def test_unqualified_transaction_preserves_prepared_image(tmp_path):
-    """The held platform must refuse before transaction writes, not report inverse success."""
+def test_unqualified_transaction_preserves_prepared_image(tmp_path, monkeypatch):
+    """An unsupported platform must refuse before transaction writes."""
     installer = _load_installer()
     target, prepared = tmp_path / "installed", tmp_path / "prepared"
     prepared.mkdir()
     payload = prepared / "data"
     payload.write_bytes(b"preserve prepared bytes")
     identity = (prepared.stat().st_dev, prepared.stat().st_ino)
+    transaction = installer._InstallTransaction([target], enabled=True)
+    monkeypatch.setattr(installer, "os", SimpleNamespace(name="unsupported-platform"))
     entered = False
     with pytest.raises(ValueError, match="E_EFFECT_BOUND_DISPOSAL_UNQUALIFIED"):
-        with installer._InstallTransaction([target], enabled=True):
+        with transaction:
             entered = True
     assert not entered
+    assert transaction._temporary is None
     assert not target.exists()
     assert list(tmp_path.iterdir()) == [prepared]
     assert list(prepared.iterdir()) == [payload]
