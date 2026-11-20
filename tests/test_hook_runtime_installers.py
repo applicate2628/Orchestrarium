@@ -33,7 +33,8 @@ INFORMATIONAL_REMINDER_HOOK_STEMS = frozenset(
 )
 CWD_SCANNING_HOOK_STEMS = frozenset({"check-scratch-valuables"})
 INSTALL_TRUST_GUIDANCE = (
-    "normalized registration identity: event, matcher, handler type, command, and registration source path",
+    "registration source path, event, matcher-group index, and handler index",
+    "normalized definition hash, which includes the matcher, handler type, and command",
     "start `codex` interactively and choose **Trust all and continue** for the affected entries",
     "editing Python source behind an unchanged registered command does not by itself change that identity",
     "may report `PENDING_MANUAL_TRUST` only for complete identities created or replaced by that transaction",
@@ -1029,9 +1030,10 @@ def test_trust_guidance_contract() -> None:
 
 def test_trust_guidance_contract_rejects_trust_bypass_wording() -> None:
     text = (ROOT / "INSTALL.md").read_text(encoding="utf-8")
+    guidance = next(line for line in INSTALL_TRUST_GUIDANCE if "Trust all and continue" in line)
     mutated = text.replace(
-        INSTALL_TRUST_GUIDANCE[1],
-        INSTALL_TRUST_GUIDANCE[1].replace(
+        guidance,
+        guidance.replace(
             "Trust all and continue", "Continue without trusting"
         ),
         1,
