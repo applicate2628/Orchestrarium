@@ -169,6 +169,10 @@ def run(backend, root: Path, provider: str, args) -> int:
             current_documents[relative] = after
         for relative in control_remove:
             owner.remove_exact_file(Path(relative), configs[relative]["sha256"])
+            if relative in current_documents:
+                # Expect absence at the same storage, with the same traversal witnesses.
+                storage, _, chain, leaf = current_documents[relative]
+                current_documents[relative] = (storage, None, chain, leaf)
         for relative in remove:
             selected, suffix = destination(relative)
             selected.remove_exact_file(suffix, record["files"][relative])

@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-20
 
+- Fix uninstall of untouched documents created by a fresh install. After exact removal, the installer expects the document to be absent at its validated location instead of treating its own removal as drift. Edited or unrelated files remain protected, and a late failure still rolls back the removal.
+
 - Extend the shared Responsibility-Driven Engineering rule to prevent defect classes at their owner and verify both supported transitions and safe refusal. No new workflow gate or skill is required. The existing architecture roles now pair an accepted transition with a rejected case and verify protected state. Windows parity checks recognize the supported directory junction while still verifying the exact shared target. Retirement regression tests now distinguish harmless empty-group retention from forbidden movement of another hook.
 
 - Support an explicit, verified predecessor for shared hook upgrades between retained releases. Preview and apply use the same ownership checks; unrelated hooks and native trust remain unchanged. The prior package evidence, hook catalog and hook files must be direct members of the selected release. The installer compares the two releases' own catalogs so retired hooks do not remain active and unrelated native slots are preserved. The same group can retire or move multiple owned handlers together, including when only the matcher changes, without shifting a retained handler.
