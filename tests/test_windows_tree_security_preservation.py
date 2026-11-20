@@ -221,12 +221,17 @@ class WindowsTreeSecurityPreservationTests(unittest.TestCase):
             with create(path, **kwargs) as node:
                 yield node
         with mock.patch.object(installer._WindowsBoundNode, "create", drop_security):
-            with self.assertRaisesRegex(ValueError, "file security creation"):
+            with self.assertRaises(installer._InstallFailure) as caught:
                 with installer._InstallTransaction([self.target], enabled=True) as transaction:
                     owner = installer._CreateOnlyMutablePath(self.root, transaction, dry_run=False)
                     owner.replace_exact_tree(self.target.relative_to(self.root),
                                              self.expected_digest, self.source)
         self.assertEqual(len(injected), 1)
+        self.assertEqual(caught.exception.stable_id, "E_WINDOWS_SECURITY_CREATION_MISMATCH")
+        self.assertEqual(caught.exception.context, "security-creation")
+        terminal = installer._installer_failure_text(caught.exception)
+        self.assertIn("E_WINDOWS_SECURITY_CREATION_MISMATCH | context=security-creation", terminal)
+        self.assertNotIn(str(self.root), terminal)
         self.assert_original()
 
     def test_failure_after_retention_restores_original_security(self):

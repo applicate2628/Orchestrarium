@@ -1841,7 +1841,7 @@ def _installer_failure_text(error: BaseException) -> str:
                     "native-acquisition", "native-security-release", "native-close", "creator-capture", "borrowed-content",
                     "copy-close", "scalar-parent-close", "descriptor-read-reset", "scalar-close", "scalar-acquisition",
                     "file-copy", "file-acquisition", "file-close", "construction", "disposal-close", "snapshot-acquisition",
-                    "residual-creator", "retention-acquisition", "migration-stage", "capability", "prepared", "projection-set"}
+                    "residual-creator", "retention-acquisition", "migration-stage", "capability", "prepared", "projection-set", "security-creation"}
         def safe_context(value):
             return value if type(value) is str and value in contexts else "unavailable"
         filesystem_types = (
@@ -2115,6 +2115,7 @@ SLICE_A_FAILURE_IDS = frozenset(
     {
         "E_ATOMIC_DIRECTORY_PUBLISH_UNSUPPORTED",
         "E_CODEX_HOOK_SLOT_SHIFT",
+        "E_WINDOWS_SECURITY_CREATION_MISMATCH",
         "E_CODEX_DOCUMENT_LEGACY_OWNERSHIP_REQUIRED",
         "E_NATIVE_PROJECTION_SET_FAILED",
         "E_CREATE_ONLY_COLLISION",
@@ -4305,7 +4306,8 @@ class _InstallTransaction:
                             node = replace(node, security=created.security_image())
                             record(path, node)
                     if security_image is not None and node.security != security_image:
-                        raise ValueError("E_MUTABLE_PATH_POSTCONDITION: directory security creation")
+                        raise _InstallFailure("E_WINDOWS_SECURITY_CREATION_MISMATCH", "security-creation",
+                                              ValueError("directory security creation"))
                 return node
         if parent_descriptor is None:
             os.mkdir(path, mode)
@@ -4452,7 +4454,8 @@ class _InstallTransaction:
                                 node = replace(node, security=created.security_image())
                                 record(target, node)
                         if security_image is not None and node.security != security_image:
-                            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: file security creation")
+                            raise _InstallFailure("E_WINDOWS_SECURITY_CREATION_MISMATCH", "security-creation",
+                                                  ValueError("file security creation"))
                     fill(incoming, created.descriptor, node.security)
             else:
                 outgoing = (os.open(target.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
