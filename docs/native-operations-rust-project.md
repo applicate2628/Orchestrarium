@@ -66,7 +66,7 @@ that either generic entrypoint works. A source-only store/activation registry is
 also not evidence of a live durable execution service.
 
 The native entry dispatcher exposes deterministic operation commands. Optional
-coordination uses PR18's separately owned interface; it can consume current Python
+coordination follows PR19's implementation contract; it can consume current Python
 operations before their native replacement and does not require Rust to start.
 The native component uses one Cargo package (Rust build/package unit) and one CLI
 per supported target, not one crate/service per script. This map names logical
@@ -125,7 +125,9 @@ Dependencies run from adapters to existing domain owners to pure decisions/platf
 operations; the process layer grants no dispatch authority. Each child has one
 lifecycle owner: Rust supervision for Rust-created children, SDK adapter supervision
 for SDK-created children; any native containment must assign noncompeting guarantees.
-SDK design/qualification tracking is owned by PR18; PR19 contains the implementation. Native operations must preserve their own
+PR18 retains the historical SDK design. PR19 and its SDK execution document own
+current implementation status, qualification evidence and remaining delivery work.
+This plan owns Rust-operation parity and cutover. Native operations must preserve their own
 capture, private-path, cancellation and settlement contracts; an SDK caller cannot
 bypass them. Current unavailable generic Windows paths stay unavailable.
 The installer does not launch provider tasks/model inference. Preserve its existing
@@ -749,7 +751,7 @@ byte equality wherever the interface contract demands it. Structural comparison 
 preserve all contract-visible distinctions; normalize only specifically justified
 nondeterministic fields, never broad masking. Adjudicate known baseline defects
 separately; neither enshrine them blindly nor disguise intentional semantic changes
-as migration. SDK behavior/outcome criteria are owned by PR18; native parity here concerns
+as migration. Current SDK behavior/outcome criteria belong to PR19; native parity here concerns
 deterministic operations, not stochastic model prose.
 Compare deterministic implementations only on isolated cloned fixtures/replayed
 inputs with providers stubbed, never with
@@ -770,7 +772,7 @@ Require source-to-installed/package parity, upgrade/removal and recovery evidenc
 on each platform/architecture claimed by that slice, with bounded-parallel versus
 serial checks. A simple hook need not wait for every generic process target. Verify
 Windows/macOS/Linux support individually before advertising it. Verify native dependencies and interface compatibility with declared SDK consumers
-without duplicating PR18's adapter/account/tracing qualification. No whole-product Python-free claim,
+without duplicating PR19's adapter/account/tracing qualification. No whole-product Python-free claim,
 duplicate execution owner or second authoritative state store is introduced.
 
 
@@ -783,9 +785,10 @@ Matched benchmarks must include packaging/update/bridge maintenance and actual
 platform behavior before claiming speed or reliability improvements.
 
 The [independent delivery task (PR17)](https://github.com/applicate2628/Orchestrarium/pull/17) owns PowerShell/bootstrap and npm distribution; this task consumes
-only the existing installer's minimal retained payload contract. SDK design is
-[PR18](https://github.com/applicate2628/Orchestrarium/pull/18), source implementation
-is [PR19](https://github.com/applicate2628/Orchestrarium/pull/19). Neither activates
+only the existing installer's minimal retained payload contract. Historical SDK design is
+in [PR18](https://github.com/applicate2628/Orchestrarium/pull/18). Current SDK implementation,
+qualification and remaining work are tracked in [PR19](https://github.com/applicate2628/Orchestrarium/pull/19)
+and its [SDK execution document](https://github.com/applicate2628/Orchestrarium/blob/c444277e0faa4f3875adc7c11252f29064ecf092/docs/sdk-execution.md). Neither activates
 an unavailable route or grants native/provider launch authority.
 
 ## Terms and Abbreviations
