@@ -7,10 +7,10 @@ or a supported-platform declaration.
 
 ## One operation owner, staged implementation
 
-First integrate optional SDK execution with the existing installer. The base
-installer ships with a qualified, standard-library-only CPython runtime. Rust migration in
-[PR21](https://github.com/applicate2628/Orchestrarium/pull/21) comes afterward.
-Rust is not a prerequisite for this delivery release.
+First qualify and tag the standalone pre-SDK installer with a minimal,
+standard-library-only CPython runtime. Integrate optional SDK execution next.
+Rust migration in [PR21](https://github.com/applicate2628/Orchestrarium/pull/21)
+comes afterward and is not a prerequisite for the pre-SDK release.
 
 The canonical Python installer owns selection, installation, updates, receipts,
 hook registration, preservation, rollback and uninstall. npm, PowerShell and POSIX
