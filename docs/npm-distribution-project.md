@@ -7,8 +7,8 @@ or a supported-platform declaration.
 
 ## One operation owner, staged implementation
 
-First integrate the SDK and the existing Python installer with a qualified,
-minimal bundled CPython runtime and its required dependencies. Rust migration in
+First integrate optional SDK execution with the existing installer. The base
+installer ships with a qualified, standard-library-only CPython runtime. Rust migration in
 [PR21](https://github.com/applicate2628/Orchestrarium/pull/21) comes afterward.
 Rust is not a prerequisite for this delivery release.
 
@@ -32,12 +32,15 @@ Every channel delivers the same versioned, platform-specific release:
   normal-GIL CPython 3.15.2; freeze interpreter source, version and digest per target.
 - The common installer, selected-client resources, schemas, validators and other
   dynamically loaded files required by that release.
-- The exact dependency closure for the admitted SDK routes, with hashes, licenses
-  and provenance. A provider's native CLI remains present when its SDK requires it.
-  Optional future adapters must not silently make every installation larger.
 - A bundle-relative manifest and thin entrypoint. Resolve executable and resource
   paths relative to the installed bundle, never to a developer machine, current
   working directory, ambient PATH or a system Python installation.
+
+The base launcher is installer-only. The [provider installation boundary in PR19](https://github.com/applicate2628/Orchestrarium/blob/c444277e0faa4f3875adc7c11252f29064ecf092/docs/sdk-execution.md#provider-installation-boundary)
+requires a separate, optional provider environment using official installation.
+Qualify the complete dependency closure of each admitted SDK route there, with
+hashes, licenses and provenance. Retain any vendor CLI and runtime required by
+that route in its supported installation; the base bundle does not repackage them.
 
 The prototype owner in PR19 is `scripts/distribution/build.py` for assembly and
 `scripts/distribution/launch.py` for bundle-relative launch and retention.
@@ -84,9 +87,10 @@ use optional dependencies, but absence of the selected platform must fail clearl
 No postinstall model calls, downloads, compilation, Python setup, login, hook
 registration or project mutation.
 
-Python and SDK dependencies are delivered in the qualified payload, not installed
-from the network on the user's first run. A user need not install system Python.
-Do not silently omit native CLI dependencies to advertise a smaller package.
+The npm payload supplies the base installer's Python; no system Python or
+provider dependency download is needed to run the installer. Optional SDK setup
+happens separately through the provider's supported installation, not in npm
+postinstall or on the base installer's first run.
 
 Use the common installer's current selection and lifecycle semantics rather than
 introducing a second npm-only command language. The eventual entrypoint maps to
@@ -128,8 +132,9 @@ registration evidence, not guessed reference counts or a new daemon.
 - macOS: documentation/static review only until a real macOS runner is available.
   Never report Windows/Linux results as macOS execution evidence.
 - Architecture and operating-system tuples are qualification candidates, not a
-  claim that every archive exists. State the Linux libc floor from the complete
-  wheel/runtime closure; Alpine/musl requires separate evidence.
+  claim that every archive exists. State the Linux libc floor for the base
+  runtime and qualify each optional provider environment separately against its
+  complete wheel/runtime closure; Alpine/musl requires separate evidence.
 - Complete license inventory and measured minimization before release. Preserve
   required parsers/validators and runtime resources rather than weakening checks.
 - Installer qualification does not authorize model/API calls, activate SDK routes,
