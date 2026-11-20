@@ -94,25 +94,15 @@ On Windows, an admitted exact-tree replacement preserves owner, group and the di
 
 Maintainer note for this monorepo: `Orchestrarium/` is the installer/source tree, not automatically a repo-local installed Codex runtime. When you are editing this repository itself, a missing local `.agents/` tree can be perfectly valid if you are using the global install under `~/.codex/`. If you want this repository to behave as a repo-local install target, create that state intentionally through `scripts/install-codex.*` or the root router instead of hand-writing `.agents/` files.
 
-## Init-time preset shortcuts
+## Optional project preferences
 
-After first-time project bootstrap, the provider init helpers can start from one of these preset shortcuts before writing canonical `agents-mode` keys:
-
-- `default`
-- `absolute-balance`
-- `external-aggressive`
-- `correctness-first`
-- `power-mode`
-- `max-speed`
-
-The preset name itself is not persisted; the helper writes the resolved canonical key values instead. Full preset expansion tables live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md), with machine-readable copies in `shared/agents-mode.presets.json`.
-If the user wants the preset unchanged, the helper should write the preset-expanded `.agents-mode.yaml` directly; key-by-key fine-tuning is optional rather than mandatory.
+Project init offers only a consultant preference (external preferred or off) and use of fitting tools (as needed or required). Force requires actual use of selected relevant, available skills, plugins and MCP, but grants no permission to install, enable, make network requests or spend. Init writes only explicitly selected local keys and does not expand presets, pin inherited values or launch providers.
 
 Canonical operator-overlay output now uses `.agents-mode.yaml` on every provider line. Legacy extensionless `.agents-mode` files remain compatibility input only: decision-driving reads should resolve provider overlays in this read order (highest to lowest precedence, per-key resolution) — local `.agents-mode.yaml`, local legacy `.agents-mode`, matching pack-local global `~/.<provider>/.agents-mode.yaml`, matching pack-local global legacy `.agents-mode`, shared cross-pack global `~/.agents-mode.yaml`, then built-in defaults — each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale; normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope, and not recreate any legacy path.
 
 Installation does not create preference files or copy defaults into them. Project overlays stay untouched. Global installation checks selected existing files and preserves explicit legacy reserve disable; only the existing shared extensionless-to-YAML migration changes a filename. Unset values continue to inherit.
 
-Maintainers changing scalar keys, provider sets, priority profiles, opinion counts, or preset expansions must keep `shared/agents-mode.defaults.yaml`, `shared/agents-mode.schema.json`, `shared/agents-mode.presets.json`, and the provider init surfaces aligned; `python scripts/validate-agents-mode-contract.py --root .` checks that contract directly, the pack validators invoke it in source-mode validation, and runtime normalization reads the schema for provider/lane policy while preserving the YAML exemplar as emitted install shape. Run `python scripts/sync-agents-mode-docs.py --root . --write` to refresh generated reference/init tables and snippets after intentional schema or preset edits. For installer-path regression coverage, run `python scripts/validate-agents-mode-installers.py --root .`; it creates disposable targets under `/.scratch/`, runs the Bash installers, and verifies the emitted provider overlays.
+Maintainers changing scalar keys, provider sets, priority profiles, opinion counts, or preset expansions must keep `shared/agents-mode.defaults.yaml`, `shared/agents-mode.schema.json`, `shared/agents-mode.presets.json`, and the provider init surfaces aligned; `python scripts/validate-agents-mode-contract.py --root .` checks that contract directly, the pack validators invoke it in source-mode validation, and runtime normalization reads the schema for provider/lane policy while preserving the YAML exemplar as emitted install shape. Run `python scripts/sync-agents-mode-docs.py --root . --write` to refresh generated reference/init selection snippets after intentional schema or preset edits. For installer-path regression coverage, run `python scripts/validate-agents-mode-installers.py --root .`; it creates disposable targets under `/.scratch/`, runs the Python installers against disposable profiles, and checks inheritance.
 
 Project repositories that use Orchestrarium task-memory closeout should keep `agent-runs.jsonl` beside each active `status.md`. The file is local task memory, not publication content; run `scripts/agent-run-ledger.* --work-item <path> init` for one-time status/ledger migration, `scripts/agent-run-ledger.* --work-item <path> append ...` to append one validated event with rollback on failure, `scripts/validate-work-item-state.* --work-item <path>` before single-item closeout, and `scripts/check-work-items-state.* --root . --stale-hours 24` before broad closeout or interruption recovery to reconcile active work items, subagent execution, artifacts, gates, and evidence. The sole invalid-closure recovery procedure is in [docs/work-item-execution-tracking.md](docs/work-item-execution-tracking.md); this installation guide does not duplicate it.
 
@@ -173,7 +163,7 @@ Notes:
 - `reserve` is the advisory/review-only supplemental profile candidate after primary `claude`/`codex`. It is symbolic rather than a scalar provider key: `reserveResolver: claude-sonnet | claude-wrapper | wrapper:<command> | disabled` binds it to a concrete read-only resolver. Use `wrapper:<command>` for a PATH-resolved command or repo-relative wrapper path, and keep it out of implementation/editing fallback.
 - `externalClaudeProfile` is Codex-line only and selects or overrides the Claude CLI execution profile: `sonnet-high` maps to Sonnet with `--effort high`, `opus-xhigh` (the shipped default) maps to Opus with `--effort xhigh`, `opus-max` maps to Opus with `--effort max` (max-depth escalation for especially hard tasks at caller discretion), and `fable-xhigh` maps to Fable with `--effort xhigh` (the current Claude flagship-family best-effort tier; the `fable` flagship alias as of 2026-07). New Codex installs seed `opus-xhigh` by default unless a preset or explicit operator choice overrides it.
 - Full mode tables live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).
-- After first-time Codex project install, run `$init-project` in Codex to write `## Project policies` to the root `AGENTS.md` and set project preferences explicitly when needed at `.agents/.agents-mode.yaml`.
+- After first-time Codex project install, run `$init-project` in Codex to write `## Project policies` to the root `AGENTS.md` and optionally select two project preferences in `.agents/.agents-mode.yaml`.
 - If a repo-local lane policy explicitly asks for consultant input at closeout, it follows the configured `consultantMode`. `consultantMode: disabled` waives consultant closeout instead of blocking the batch, and any requested consultant sweep stays advisory-only rather than replacing review or human gates.
 - The design-panel technique installs as `$HOME/.agents/skills/design-panel/` (global) or `<project>/.agents/skills/design-panel/` (project), source `src.codex/skills/design-panel/`. No dedicated panel-state validator is installed; the pack validator checks only file presence and invariant markers (`DP1`-`DP8`).
 - Validation commands: `python src.codex/skills/lead/scripts/validate-skill-pack.py` or its POSIX launcher `bash src.codex/skills/lead/scripts/validate-skill-pack.sh`.
@@ -205,7 +195,7 @@ Notes:
 - For Codex commit review, use `codex review --commit <sha>` without a free-form prompt; if custom review instructions are needed, prefer a narrower `codex exec` run on the admitted scope.
 - For wide release or parity audits, split the admitted scope by repo, file set, or lane instead of launching one mega neutral-dir prompt across the whole pack family.
 - Full mode tables live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).
-- After first-time Claude project install, run `/agents-init-project` in Claude Code to write `## Project policies` in `.claude/CLAUDE.md` and set project preferences explicitly when needed at `.claude/.agents-mode.yaml`.
+- After first-time Claude project install, run `/agents-init-project` in Claude Code to write `## Project policies` in `.claude/CLAUDE.md` and optionally select two project preferences in `.claude/.agents-mode.yaml`.
 - If a repo-local lane policy explicitly asks for consultant input at closeout, it follows the configured `consultantMode`. `consultantMode: disabled` waives consultant closeout instead of blocking the batch, and any requested consultant sweep stays advisory-only rather than replacing review or human gates.
 - The design-panel technique installs as `~/.claude/agents/contracts/design-panel.md` + `~/.claude/commands/agents-design-panel.md` (global) or the `<project>/.claude/` equivalents (project), source `src.claude/agents/contracts/design-panel.md` + `src.claude/commands/agents-design-panel.md`. No dedicated panel-state validator is installed; the pack validator checks only file presence and invariant markers (`DP1`-`DP8`).
 - Validation commands: `python src.claude/agents/scripts/validate-skill-pack.py` or its POSIX launcher `bash src.claude/agents/scripts/validate-skill-pack.sh`.
@@ -447,7 +437,7 @@ installation still depends on the separate effect-bound backend qualification.
 - `ledger`: append-only record of agent runs, gates, artifacts, and evidence for a work item.
 - `MCP`: Model Context Protocol; provider/runtime mechanism for tool and resource servers.
 - `POSIX`: Portable Operating System Interface; here the Python `os.name == "posix"` host family, including Linux, macOS and Windows Subsystem for Linux.
-- `power-mode`: init-time preset for hardest tasks where maximum useful result matters more than latency; starts from the `quality-first` provider-order profile.
+- `power-mode`: historical init preset for hardest tasks where maximum useful result matters more than latency; starts from the `quality-first` provider-order profile.
 - `runtime`: installed provider-facing files and directories read by the provider tool.
 - `schema`: structured contract describing allowed keys, values, defaults, provider sets, and routing shapes.
 - `stdin`: standard input stream used by CLIs and wrappers.

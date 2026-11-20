@@ -111,7 +111,13 @@ class AgentsModeContractTest(unittest.TestCase):
                     order = [clause.index(layer) for layer in layers]
                     self.assertEqual(order, sorted(order))
             with self.subTest(provider=provider, owner="first write"):
-                self.assertIn("externalCodexProfile: gpt-6.2-sol-xhigh", init)
+                self.assertIn("only the explicitly selected local mode keys", init)
+                self.assertIn("Preserve all unrelated bytes", init)
+                self.assertIn("if absent, do not create it", init)
+                self.assertIn("Init itself does not launch external providers", init)
+                self.assertIn("require actual use of selected relevant, available skills, plugins and MCP tools", init)
+                self.assertNotIn("externalCodexProfile:", init)
+                self.assertNotIn("## Preset expansion table", init)
                 default_row = next(line for line in first_write.splitlines() if line.startswith(f"| {label} |"))
                 self.assertIn("`runtime-default` | `gpt-6.2-sol-xhigh`", default_row)
             with self.subTest(provider=provider, owner="read-only policy"):
@@ -149,8 +155,8 @@ class AgentsModeContractTest(unittest.TestCase):
             codex_init = tmp_root / "src.codex" / "skills" / "init-project" / "SKILL.md"
             text = codex_init.read_text(encoding="utf-8")
             text = text.replace(
-                "   externalClaudeProfile: {value}  # allowed: sonnet-high | opus-xhigh | opus-max | fable-xhigh; default: opus-xhigh",
-                "   externalFastProfile: {value}  # invalid drift from Codex-only scalar",
+                "   consultantMode: {value}  # selectable here: external | disabled",
+                "   externalProvider: {value}  # invalid third init control",
                 1,
             )
             codex_init.write_text(text, encoding="utf-8")

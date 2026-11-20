@@ -11,50 +11,12 @@ You are guiding the user through project policy configuration for the Claude Cod
 - Before claiming completion, reconcile the current result against the original request and any still-open required follow-up inside the same task.
 - If a required next action is already known and still inside the current task, keep the task open instead of stopping at a partial batch.
 
-## Preset expansion table
-
-Presets are init-time shortcuts only. They expand into canonical `agents-mode` keys. The preset name is NOT persisted in the file.
-
-| Key | `default` (safe-init) | `absolute-balance` (everyday center) | `external-aggressive` (aggressive external use) | `correctness-first` (no-time-limit correctness) | `power-mode` (hardest-task maximum result) | `max-speed` (speed-first) |
-|---|---|---|---|---|---|---|
-| `consultantMode` | `disabled` | `internal` | `external` | `external` | `external` | `disabled` |
-| `delegationMode` | `auto` | `auto` | `force` | `force` | `force` | `auto` |
-| `parallelMode` | `auto` | `auto` | `force` | `auto` | `force` | `force` |
-| `mcpMode` | `auto` | `auto` | `auto` | `force` | `force` | `auto` |
-| `preferExternalWorker` | `false` | `false` | `true` | `true` | `true` | `false` |
-| `preferExternalReviewer` | `false` | `true` | `true` | `true` | `true` | `false` |
-| `externalProvider` | `auto` | `auto` | `auto` | `auto` | `auto` | `auto` |
-| `externalPriorityProfile` | `balanced` | `balanced` | `balanced` | `balanced` | `quality-first` | `balanced` |
-| `reserveResolver` | `claude-sonnet` | `claude-sonnet` | `claude-sonnet` | `claude-sonnet` | `claude-sonnet` | `claude-sonnet` |
-| `externalPriorityProfiles` | shipped as-is | shipped as-is | shipped as-is | shipped as-is | shipped as-is | shipped as-is |
-| `externalOpinionCounts` | all `1` | all `1` | all `1` | advisory+review lanes `2`, others `1` | advisory+review lanes `2`, others `1` | all `1` |
-| `externalCodexWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
-| `externalClaudeWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
-| `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `pinned-top-pro` | `runtime-default` |
-| `externalCodexProfile` | `gpt-6.2-sol-xhigh` | `default` | `default` | `gpt-6.2-sol-xhigh` | `gpt-6.2-sol-xhigh` | `gpt-6.2-sol-high` |
-
-`correctness-first` and `power-mode` lane-specific opinion counts:
-- `advisory.repo-understanding: 2`
-- `advisory.design-adr: 2`
-- `review.pre-pr: 2`
-- `review.security: 2`
-- `review.performance-architecture: 2`
-- `review.ui-visual-correctness: 2`
-- all other lanes: `1`
-
-Routing conventions (not persisted as keys):
-- **same-host fast-path**: under `external-aggressive` and `max-speed`, when neutral isolation is not required, allow per-invocation explicit self-provider override. Keep the stored file canonical; this is a routing rule, not a persisted key.
-- **overflow means spill, not serialize**: under `external-aggressive`, internal slot saturation pushes independent eligible lanes into `$external-worker`, `$external-reviewer`, or `$external-brigade` by default.
-- **power-mode means hardest-task maximum useful result**: start from the `quality-first` provider-priority profile, then combine `correctness-first` validation density with `external-aggressive` fan-out, while keeping neutral workdirs and production-only `auto` routing so the extra power does not become a hidden project-state or example-provider shortcut.
-
 ## Steps
 
 1. **Read current state.**
    - Read `.claude/CLAUDE.md` and check if a `## Project policies` section already exists.
-   - Read `.claude/.agents-mode.yaml` first.
-   - If it is missing, read legacy `.claude/.agents-mode` as compatibility input only.
-   - Normalize effective values in memory through the dispatch owner's existing per-key read order before presenting or trusting them. Use any global fallback as the starting point for project-local review; do not rewrite borrowed/global configuration on read. Persist the explicitly selected project configuration to the canonical project-local `.yaml` path only within the authorized configuration write in Step 7, and do not recreate legacy files.
-   - If either surface already exists, show the current values and ask whether to keep them, review them, or start fresh.
+   - Use the installed dispatch owner's effective read order to inspect only `consultantMode` and `mcpMode` in memory. Show their effective values and origins without creating or rewriting any file.
+   - Inspect `.claude/.agents-mode.yaml` only as needed to plan a requested local edit. An inherited or preexisting value does not authorize a write.
 
 2. **Read the installed canonical sources.**
    - Read `.claude/agents/contracts/policies-catalog.md`.
@@ -68,86 +30,26 @@ Routing conventions (not persisted as keys):
    - Ask the user to pick (or accept default)
    - If the user says "defaults for the rest" or similar, apply defaults to all remaining policies
 
-4. **Select a preset (optional).**
-    - Ask the user if they want to start from a preset: `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, `power-mode`, or `max-speed`.
-    - If the user picks a preset, apply its full key expansion from the table above as the starting values.
-    - After applying a preset, ask whether to write that preset as-is or fine-tune individual keys first.
-    - If the user says `use the preset`, `preset only`, `apply as-is`, or otherwise declines manual tweaking, skip the key-by-key operator-mode walkthrough and carry the preset-expanded values straight to confirmation.
-    - If the user says "custom" or skips this step, start from the `default` baseline.
-    - The preset name is NOT persisted — only the expanded canonical keys are written.
+4. **Select optional project preferences.**
+   - Consultant: leave unchanged, prefer external (`consultantMode: external`), or off (`consultantMode: disabled`). An existing legacy `internal` value is not external authorization; leave it intact unless explicitly changed.
+   - Relevant tools: leave unchanged, use fitting available tools as needed (`mcpMode: auto`), or require actual use of selected relevant, available skills, plugins and MCP tools (`mcpMode: force`). Force imposes no tool count or authority to install, enable, make network requests or spend. If fitting tools are unavailable, report the limit and continue unaffected work.
+   - Neither choice authorizes launch, fallback or spending. Init itself does not launch external providers.
 
-5. **Configure operator modes.**
-    - Run this step only when the user started from `custom`, skipped preset selection, or explicitly asked to fine-tune after selecting a preset.
-    - Walk through the canonical Claude-line `agents-mode` keys one at a time:
-      - `consultantMode`
-      - `delegationMode`
-      - `parallelMode`
-      - `mcpMode`
-      - `preferExternalWorker`
-      - `preferExternalReviewer`
-      - `externalProvider`
-      - `externalPriorityProfile`
-      - `reserveResolver`
-      - `externalPriorityProfiles`
-      - `externalOpinionCounts`
-      - `externalCodexWorkdirMode`
-      - `externalClaudeWorkdirMode`
-      - `externalModelMode`
-      - `externalCodexProfile`
-    - Use the existing value when present, the preset-expanded value if one was selected, or otherwise default to:
-      - `consultantMode: disabled`
-      - `delegationMode: auto`
-      - `parallelMode: auto`
-      - `mcpMode: auto`
-      - `preferExternalWorker: false`
-      - `preferExternalReviewer: false`
-      - `externalProvider: auto`
-      - `externalPriorityProfile: balanced`
-      - `reserveResolver: claude-sonnet`
-      - shipped `externalPriorityProfiles`
-      - `externalOpinionCounts` defaulting each documented lane to `1`
-      - `externalCodexWorkdirMode: neutral`
-      - `externalClaudeWorkdirMode: neutral`
-      - `externalModelMode: runtime-default`
-      - `externalCodexProfile: gpt-6.2-sol-xhigh`
-    - `externalProvider: auto` resolves by lane type through the active named production priority profile rather than a Claude-line default provider. Shipped `auto` stays on the Codex/Claude pair. Kimi is explicit-only through fixed `kimi-code/k3` for policy-admitted read-only exploration/research/planning/review or mapped `external-worker` engineering. Omitting the capability file keeps tools/servers/subagents empty with permission `reject`; a validated file may select admitted read tools/Model Context Protocol servers or scoped worker tools. Every result remains independently verified and nonauthorizing, while Grok remains unavailable in 1.x.
-    - Accept shorthand answers such as `force`, `external reviewer only`, or `defaults for the rest`.
+5. **Confirm the intended writes.**
+   - Show the policy changes and only the explicitly selected local mode keys. Omission means no edit for that key. Ask before writing.
 
-6. **Confirm choices.**
-   - Present one summary table for `## Project policies`.
-   - Present one summary table for `.claude/.agents-mode.yaml`.
-   - Ask for confirmation before writing.
+6. **Write only selected project-local keys.**
+   - If neither mode key changes, leave `.claude/.agents-mode.yaml` untouched; if absent, do not create it.
+   - Update only the selected top-level scalars. Preserve all unrelated bytes, including unknown or old keys, comments and formatting. Do not copy inherited values, expand presets, normalize the whole file, recreate legacy files, or modify global files. If the edit cannot safely preserve other content, leave the file unchanged and say why.
 
-7. **Write `.claude/.agents-mode.yaml`.**
-   - Write the canonical file to `.claude/.agents-mode.yaml`.
-   - Preserve unknown keys when updating an existing file.
-   - Treat comment-free, partial, or older-layout files as legacy input and rewrite them to the current canonical format instead of preserving stale layout.
-   - Do not recreate legacy `.claude/.agents-mode`; write the canonical output only to `.claude/.agents-mode.yaml`.
-   - Keep one key per line and include inline comments for every canonical scalar key plus every shipped `externalPriorityProfiles` / `externalOpinionCounts` entry.
-   - Refresh the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks to the current pack version while preserving the effective values of known keys and any unknown keys.
-   - Do not recreate retired legacy operator-overlay files.
-
-   Use this canonical shape:
+   Use this canonical shape for selected keys only:
 
    ```yaml
-   consultantMode: {value}  # allowed: external | internal | disabled; default: disabled
-   delegationMode: {value}  # allowed: manual | auto | force; default: auto
-   parallelMode: {value}  # allowed: manual | auto | force; default: auto
-   mcpMode: {value}  # allowed: auto | force; default: auto
-   preferExternalWorker: {value}  # allowed: false | true; default: false
-   preferExternalReviewer: {value}  # allowed: false | true; default: false
-   externalProvider: {value}  # selectable here: auto | codex | claude; default: auto; kimi is explicit-only and is not initialized as a project-local scalar; grok remains unavailable in 1.x; removed gemini/qwen values fail closed with E_EXTERNAL_PROVIDER_REMOVED
-   externalPriorityProfile: {value}  # allowed: balanced | quality-first | <repo-local production profile>; default: balanced
-   reserveResolver: {value}  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
-   externalPriorityProfiles: {value}  # allowed: structured profile map
-   externalOpinionCounts: {value}  # allowed: structured lane-count map
-   externalCodexWorkdirMode: {value}  # allowed: neutral | project; default: neutral
-   externalClaudeWorkdirMode: {value}  # allowed: neutral | project; default: neutral
-   externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
-   externalCodexProfile: {value}  # allowed: default | gpt-6.2-sol-high | gpt-6.2-sol-xhigh | gpt-6.2-sol-max; default: gpt-6.2-sol-xhigh
+   consultantMode: {value}  # selectable here: external | disabled
+   mcpMode: {value}  # selectable here: auto | force
    ```
 
-8. **Write to CLAUDE.md.** Add or replace the `## Project policies` section in `.claude/CLAUDE.md`. Place it between `## Engineering hygiene` and `## Publication safety`. Use this format:
+7. **Write to CLAUDE.md.** Add or replace the `## Project policies` section in `.claude/CLAUDE.md`. Place it between `## Engineering hygiene` and `## Publication safety`. Use this format:
 
 ```markdown
 ## Project policies
@@ -163,8 +65,8 @@ Routing conventions (not persisted as keys):
 - **Dependencies:** {policy description}
 ```
 
-9. **Confirm completion.**
-   - Tell the user the policies and operator mode file are saved.
+8. **Confirm completion.**
+   - Report saved policy changes and whether a preference was updated.
    - Mention `/agents-policies` to view project policies later.
    - Mention `.claude/.agents-mode.yaml` for future operator-mode changes.
 
@@ -175,5 +77,5 @@ Routing conventions (not persisted as keys):
 - If the user gives a custom answer that doesn't match an option, record it as-is.
 - Do not invent extra `agents-mode` keys beyond the canonical Claude-line schema.
 - Preserve unknown keys in `.claude/.agents-mode.yaml` when updating.
-- For decision-driving reads, use the dispatch owner's per-key precedence (local `.claude/.agents-mode.yaml`, local legacy `.claude/.agents-mode`, pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, shared cross-pack global `~/.agents-mode.yaml`, then built-in defaults) and the in-memory normalization in Step 1; inspection grants no write to the source overlay. Persist only the explicitly selected authorized project configuration in Step 7.
+- For decision-driving reads, use the dispatch owner's per-key precedence (local `.claude/.agents-mode.yaml`, local legacy `.claude/.agents-mode`, pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, shared cross-pack global `~/.agents-mode.yaml`, then built-in defaults) and the read-only resolution in Step 1; inspection grants no write to the source overlay. Persist only the explicitly selected authorized project configuration in Step 6.
 - Do not change any other section of CLAUDE.md.
