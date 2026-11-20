@@ -146,3 +146,97 @@ def test_refuses_custom_predecessor_arguments_even_when_inventory_matches(shared
     assert "E_SHARED_HOOK_RUNTIME" in capsys.readouterr().err
     assert (s.common.read_bytes(), s.sidecar.read_bytes()) == before
     assert not s.calls
+
+def test_update_between_retained_releases_is_idempotent_and_never_adopts_wrong_owner(shared_prior, monkeypatch):
+    s = shared_prior
+    args = ["--global", "--shared-hook-runtime", "--hooks-only"]
+    assert PI.install("codex", args) == 0
+    registered = (s.common.read_bytes(), s.sidecar.read_bytes())
+    _stems, identities = s.health._load_codex_inventory(s.sidecar, target=s.alias, host_os=s.host)
+    old_python = Path(json.loads(next(iter(identities)))["command"].split("\0")[0])
+    replacement = s.tmp_path / "other-release" / "lead"
+    previous_specs = PI._hook_specs("codex", s.retained)
+    retired, moved = previous_specs[:2]
+    desired_specs = [
+        (stem, replacement / script.relative_to(s.retained),
+         "PostToolUse" if stem == moved[0] else event, matcher)
+        for stem, script, event, matcher in previous_specs if stem != retired[0]
+    ]
+    added = "new-release-hook"
+    desired_specs.append((added, replacement / "hooks" / f"{added}.py", "SessionStart", None))
+    monkeypatch.setitem(PI._CODEX_HOOK_STATUS_MESSAGES, added, "Fixture hook")
+    original_specs = PI._hook_specs
+    monkeypatch.setattr(PI, "_hook_specs", lambda provider, lead:
+                        desired_specs if lead == replacement else original_specs(provider, lead))
+    for _stem, script, _event, _matcher in desired_specs:
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text("pass\n", encoding="utf-8")
+    monkeypatch.setattr(PI, "_retained_codex_hook_root", lambda *_args: replacement)
+
+    def select(_root, package):
+        return s.retained, (old_python if package == s.retained.parent else old_python.with_name("wrong")), previous_specs
+    monkeypatch.setattr(PI, "_previous_retained_hook_root", select)
+
+    chosen = [*args, "--previous-retained-release", str(s.retained.parent)]
+    wrong = [*args, "--previous-retained-release", str(replacement.parent)]
+    assert PI.install("codex", wrong) == 1
+    assert (s.common.read_bytes(), s.sidecar.read_bytes()) == registered
+    with monkeypatch.context() as fault:
+        fault.setattr(PI, "_run_hook_health_bounded", lambda *_args: SimpleNamespace(returncode=1))
+        assert PI.install("codex", chosen) == 1
+    assert (s.common.read_bytes(), s.sidecar.read_bytes()) == registered
+    assert all(p.read_bytes() == s.before[p] for p in (s.settings, s.owner_receipt))
+    select_targets = s.health._selected_hook_targets
+
+    def select_non_direct(specs):
+        targets, witnesses = select_targets(specs)
+        stem = next(iter(witnesses))
+        script, (resolved, _chain, node) = witnesses[stem]
+        witnesses[stem] = (script, (resolved, ("non-direct-fixture",), node))
+        return targets, witnesses
+
+    with monkeypatch.context() as fault:
+        fault.setattr(PI, "_hook_health_module", lambda _root: s.health)
+        fault.setattr(s.health, "_selected_hook_targets", select_non_direct)
+        assert PI.install("codex", chosen) == 1
+    assert (s.common.read_bytes(), s.sidecar.read_bytes()) == registered
+    assert PI.install("codex", [*chosen, "--dry-run"]) == 0
+    assert (s.common.read_bytes(), s.sidecar.read_bytes()) == registered
+    assert PI.install("codex", chosen) == 0
+    assert json.loads(s.common.read_bytes())["hooks"][s.event][0] == s.foreign
+    assert (s.common.read_bytes(), s.sidecar.read_bytes()) != registered
+    items = json.loads(s.common.read_bytes())
+    targets, _ = s.health._selected_hook_targets(previous_specs)
+    assert list(s.health._iter_owned_hooks(items, {stem for stem, *_ in previous_specs},
+                                          "codex", s.host, targets)) == []
+    assert items["hooks"]["PostToolUse"]
+    assert any(added + ".py" in handler["command"]
+               for group in items["hooks"]["SessionStart"] for handler in group["hooks"])
+
+    published = {p: (p.read_bytes(), p.stat().st_ino) for p in (s.common, s.sidecar)}
+    assert PI.install("codex", chosen) == 0
+    assert all((p.read_bytes(), p.stat().st_ino) == before for p, before in published.items())
+@pytest.mark.parametrize("member", ["bundle.json", "runtime-evidence.json", "app/install.py"])
+def test_previous_release_rejects_non_direct_package_evidence(tmp_path, member):
+    package = tmp_path / "previous"
+    selected = package / member
+    selected.parent.mkdir(parents=True)
+    elsewhere = tmp_path / "not-in-package"
+    elsewhere.write_text("not package evidence", encoding="utf-8")
+    _make_file_symlink(selected, elsewhere)
+    with pytest.raises(ValueError, match="redirected package evidence"):
+        PI._previous_retained_hook_root(ROOT, package)
+
+def test_retained_catalog_reads_its_own_literals_without_executing(tmp_path):
+    catalog = tmp_path / "universal_hooks_manifest.py"
+    catalog.write_text(
+        'raise RuntimeError("past release must not run")\n'
+        'REGISTERED_HOOK_STEMS_BY_PLATFORM = {"codex": frozenset({"old-hook"})}\n'
+        'HOOK_METADATA = (("old-hook", "hooks", "Stop", None),)\n'
+        'HOOK_DIRECTORY_OVERRIDES = {("codex", "old-hook"): "scripts"}\n'
+        'HOOK_SCRIPT_OVERRIDES = {"old-hook": "other.py"}\n',
+        encoding="utf-8",
+    )
+    assert PI._HOOK_MANIFEST.retained_hook_specs(catalog, "codex", tmp_path) == [
+        ("old-hook", tmp_path / "scripts" / "other.py", "Stop", None),
+    ]

@@ -3940,11 +3940,7 @@ def _target_local_push_main(arguments: list[str]) -> int:
         root = _prove_repository_root(selected, git_exe, source="native-git")
         # Git is the owner of ref grammar; do not maintain a second validator.
         _native_configuration_query(git_exe, (), root, ("check-ref-format", destination))
-        if os.name == "nt":
-            from receiver_transport import run_target
-            outcome = run_target(sys.modules[__name__], root, remote, source, destination, dry_run=dry_run)
-            if outcome is not None:
-                return outcome
+        # The native callback owns both mandatory publication proofs.
         receiver_config = _native_default_receiver_config(remote, root, git_exe)
         argv = (git_exe, "-C", root, *receiver_config, *native_git_config_arguments(),
                 "push", "--verify", *(("--dry-run",) if dry_run else ()), "--", remote, source + ":" + destination)
@@ -3987,7 +3983,7 @@ def main(preflight: PreflightResult | None = None) -> int:
 
 
 
-# V5 is admitted only through the qualified target-local transport owner.
+# Experimental V5 evidence is not an authorization route for owned pushes.
 class ReceiverScopedReceiptV5(NamedTuple):
     native: NativePushReceiptV4
     receiver_scope_sha256: str

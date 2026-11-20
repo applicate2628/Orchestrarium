@@ -753,6 +753,8 @@ def _parser(provider: str) -> argparse.ArgumentParser:
         "--hooks-only", action="store_true",
         help="With --global --shared-hook-runtime: update only the owned hook registrations and inventory",
     )
+    parser.add_argument("--previous-retained-release", type=Path,
+                        help="With --hooks-only: select the already trusted previous retained bundle")
     kimi_maintenance = parser.add_mutually_exclusive_group()
     kimi_maintenance.add_argument("--enroll-kimi", action="store_true")
     kimi_maintenance.add_argument("--replace-kimi-enrollment", action="store_true")
@@ -12480,6 +12482,8 @@ def _install_hooks(
     mutable_owner: _CreateOnlyMutablePath | None = None,
     prior_installed_root: Path | None = None,
     hooks_only_recheck=None,
+    prior_specs=None,
+    scoped_retirements=(),
     preview: bool = False,
 ) -> None:
     installer = root / "scripts" / "install-hypothesis-hook.py"
@@ -12578,11 +12582,11 @@ def _install_hooks(
     predecessor_witnesses = {}
     if portable_inventory:
         prior_targets, predecessor_witnesses = health_module._selected_hook_targets(
-            _hook_specs("codex", prior_installed_root)
+            prior_specs if prior_specs is not None else _hook_specs("codex", prior_installed_root)
         )
         for marker, targets in prior_targets.items():
-            if marker in managed_targets:
-                managed_targets[marker].update(targets)
+            if hooks_only or marker in managed_targets:
+                managed_targets.setdefault(marker, set()).update(targets)
 
     before_definitions = (
         health_module.owned_definition_snapshots(
@@ -12597,6 +12601,14 @@ def _install_hooks(
         if health_module is not None and not preview and registration.is_file()
         else {}
     )
+    for marker, event, expected_entry in scoped_retirements:
+        require_namespace()
+        try:
+            if not helper.remove(staged_data, event, marker, expected_entry=expected_entry,
+                                 platform=provider, host_os=host):
+                raise ValueError("E_SHARED_HOOK_RUNTIME: predecessor hook could not be retired exactly")
+        except helper.CodexHookSlotShift as exc:
+            raise _InstallFailure(exc.stable_id, "migration", exc) from exc
     for marker, event, identity_arguments in retired_specs:
         if owned:
             try:
@@ -13408,7 +13420,34 @@ def _finish_install_result(provider, target, dry_run, applied, primary, cleanup_
     return 0
 
 
-def _apply_shared_hooks_only(root: Path, target: Path, *, dry_run: bool) -> None:
+def _previous_retained_hook_root(root: Path, package: Path) -> tuple[Path, Path, list]:
+    """Resolve the operator-selected predecessor without running its code."""
+    if not package.is_absolute() or _contains_reparse(package):
+        raise ValueError("previous release must be a direct absolute package path")
+    package = package.resolve(strict=True)
+    for member in ("bundle.json", "runtime-evidence.json", "app/install.py"):
+        if _contains_reparse(package / member):
+            raise ValueError("previous release has redirected package evidence")
+    launcher = _load_module_from_path(
+        "orchestrarium_retained_hook_launcher", root.parent / "launch.py"
+    )
+    data = launcher._manifest(package)
+    python_slot = "python/python.exe" if os.name == "nt" else "python/bin/python3"
+    if data["python"] != python_slot:
+        raise ValueError("previous release interpreter slot is not canonical")
+    installer = launcher._member(package, data["entry"])
+    lead = installer.parent / "src.codex" / "skills" / "lead"
+    if _contains_reparse(lead):
+        raise ValueError("previous release has redirected managed paths")
+    # A missing predecessor interpreter does not change the old command's identity.
+    catalog = installer.parent / "scripts" / "universal_hooks_manifest.py"
+    if _contains_reparse(catalog):
+        raise ValueError("previous release has a redirected hook catalog")
+    catalog = launcher._member(package, "app/scripts/universal_hooks_manifest.py")
+    return lead, package / python_slot, _HOOK_MANIFEST.retained_hook_specs(catalog, "codex", lead)
+
+def _apply_shared_hooks_only(root: Path, target: Path, *, dry_run: bool,
+                             previous_release: Path | None = None) -> None:
     health = _hook_health_module(root)
     host = "windows" if os.name == "nt" else "posix"
     registration = target / "hooks.json"
@@ -13423,8 +13462,24 @@ def _apply_shared_hooks_only(root: Path, target: Path, *, dry_run: bool) -> None
     skills = target.parent / ".agents" / "skills"
     receipt = None
     link = None
+    expected, identities = health._load_codex_inventory(
+        inventory, target=registration, host_os=host, authority=authority,
+    )
+    previous_python = None
+    previous_specs = None
     if _find_portable_codex_inventory(root, registration) is not None:
         predecessor = retained
+        owned_scripts = {
+            health._command_identity([str(script)], host)
+            for _stem, script, _event, _matcher in _hook_specs("codex", retained)
+        }
+        registered_commands = [json.loads(identity)["command"].split("\0") for identity in identities]
+        registered_scripts = {argv[1] for argv in registered_commands if len(argv) == 2}
+        if registered_scripts != owned_scripts and previous_release is not None:
+            try:
+                predecessor, previous_python, previous_specs = _previous_retained_hook_root(root, previous_release)
+            except (OSError, ValueError) as exc:
+                raise _InstallFailure("E_SHARED_HOOK_RUNTIME", "previous-release", exc) from exc
     else:
         logical = skills.parent
         link = _linked_runtime_subroots_module(root).LinkedRuntimeSubrootAuthority.bind(
@@ -13437,13 +13492,17 @@ def _apply_shared_hooks_only(root: Path, target: Path, *, dry_run: bool) -> None
         if receipt is None:
             raise ValueError("E_SHARED_HOOK_RUNTIME: missing canonical predecessor receipt")
 
-    specs = list(_hook_specs("codex", predecessor))
+    specs = previous_specs if previous_specs is not None else _hook_specs("codex", predecessor)
+    if previous_python is not None and any(_contains_reparse(script) for _, script, _, _ in specs):
+        raise _InstallFailure("E_SHARED_HOOK_RUNTIME", "previous-release",
+                              ValueError("previous release has redirected hook files"))
     targets, witnesses = health._selected_hook_targets(specs)
     if set(witnesses) != set(targets):
         raise ValueError("E_SHARED_HOOK_RUNTIME: predecessor hook files are missing")
-    expected, identities = health._load_codex_inventory(
-        inventory, target=registration, host_os=host, authority=authority,
-    )
+    if previous_python is not None and any(chain or resolved != script
+                                         for script, (resolved, chain, _node) in witnesses.values()):
+        raise _InstallFailure("E_SHARED_HOOK_RUNTIME", "previous-release",
+                              ValueError("previous release hook witness is not a direct package file"))
     data = health._load(authority.resolved_target)
     rows = list(health._iter_owned_hooks(data, expected, "codex", host, targets))
     observed = {
@@ -13464,9 +13523,14 @@ def _apply_shared_hooks_only(root: Path, target: Path, *, dry_run: bool) -> None
     # Require inventory, package and actual registration to agree without
     # resolving/running the old executable; replacing that path is the repair.
     if (observed != identities or len(rows) != len(expected) or expected != set(targets)
-            or observed_shapes != expected_shapes):
+            or observed_shapes != expected_shapes
+            or (previous_python is not None and any(
+                health._command_identity([argv[0]], host) != health._command_identity([str(previous_python)], host)
+                for _event, _stem, argv, _matcher in rows))):
         raise ValueError("E_SHARED_HOOK_RUNTIME: predecessor registrations do not match their inventory")
     def recheck():
+        if previous_python is not None and _previous_retained_hook_root(root, previous_release) != (predecessor, previous_python, specs):
+            raise ValueError("E_SHARED_HOOK_RUNTIME: previous package changed during planning")
         if link is not None:
             link.assert_current()
         if receipt is not None and (
@@ -13483,7 +13547,14 @@ def _apply_shared_hooks_only(root: Path, target: Path, *, dry_run: bool) -> None
         return authority
 
     recheck()
-    kwargs = {"prior_installed_root": predecessor, "hooks_only_recheck": recheck}
+    desired_events = {stem: event for stem, _script, event, _matcher in _hook_specs("codex", retained)}
+    retirements = [
+        (record.marker, event, {"matcher": group.get("matcher"), "hooks": [handler]})
+        for event, _, _, group, handler, record in health._owned_records(data, expected, "codex", host, targets)
+        if desired_events.get(record.marker) != event
+    ]
+    kwargs = {"prior_installed_root": predecessor, "hooks_only_recheck": recheck,
+              "prior_specs": specs, "scoped_retirements": retirements}
     if dry_run:
         _install_hooks(root, "codex", registration, retained, "global", inventory,
                        preview=True, **kwargs)
@@ -13511,12 +13582,15 @@ def install(provider: str, argv: list[str] | None = None) -> int:
         and not os.environ.get("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK")
     )
     if args.hooks_only:
-        compatible = {"global_install", "shared_hook_runtime", "hooks_only", "dry_run"}
+        compatible = {"global_install", "shared_hook_runtime", "hooks_only", "dry_run", "previous_retained_release"}
         if not args.shared_hook_runtime or any(
             value for key, value in vars(args).items() if key not in compatible
         ):
             print("FAIL: E_SHARED_HOOK_RUNTIME: hooks-only must be a separate shared operation", file=sys.stderr)
             return 1
+    if args.previous_retained_release is not None and not args.hooks_only:
+        print("FAIL: E_SHARED_HOOK_RUNTIME: previous release requires hooks-only", file=sys.stderr)
+        return 1
     if args.shared_hook_runtime and (
         provider != "codex" or not args.global_install or args.uninstall
         or not register_hooks
@@ -13595,7 +13669,8 @@ def install(provider: str, argv: list[str] | None = None) -> int:
     if args.hooks_only:
         try:
             _mode, target, _project = _target(provider, args)
-            _apply_shared_hooks_only(root, target, dry_run=args.dry_run)
+            _apply_shared_hooks_only(root, target, dry_run=args.dry_run,
+                                     previous_release=args.previous_retained_release)
         except (OSError, RuntimeError, ValueError) as exc:
             print("FAIL: " + _installer_failure_text(exc), file=sys.stderr)
             return 1

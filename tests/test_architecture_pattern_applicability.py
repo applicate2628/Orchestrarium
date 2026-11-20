@@ -657,7 +657,10 @@ def test_installed_parity_and_validator(
     if provider == "claude":
         claude_architect = target / ".claude/skills/architect"
         universal_architect = target / ".agents/skills/architect"
-        assert claude_architect.is_symlink(), "Claude Architect projection must remain a link"
+        is_directory_link = claude_architect.is_symlink() or (
+            os.name == "nt" and claude_architect.is_junction()
+        )
+        assert is_directory_link, "Claude Architect projection must remain a directory link"
         assert claude_architect.resolve() == universal_architect.resolve()
 
     installed_validator = target / validator

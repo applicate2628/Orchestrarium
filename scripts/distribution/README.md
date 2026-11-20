@@ -65,15 +65,25 @@ Run the bundle launcher with `--retain-only ABSOLUTE_DIRECTORY` on every host
 first. This stages the checked release without changing any provider profile.
 For a registration-only update, preview from the existing retained bundle with
 `--permanent-runtime --global --shared-hook-runtime --hooks-only --dry-run`.
+For an upgrade from a different retained bundle, supply
+--previous-retained-release ABSOLUTE_DIRECTORY with the already trusted bundle
+that owns the current registrations. Use the same selection for preview and apply;
+the previous bundle is inspected, never launched. Repeating the same update
+cannot rewrite an already matched registration. An unchanged registration is
+not evidence of Codex trust; complete any pending approval natively before
+expecting a successful health check on a repeat run.
 On the host owning publication of the common file, remove only `--dry-run` to
 apply. This requires the current shared file and its neighboring installer
 inventory to agree with the current retained release or with a receipt-verified
 ordinary installation. The older interpreter may be missing, but its complete
 owned registration and script paths must still be independently identifiable.
+Each retained release supplies its own hook catalog. The installer can add,
+update or retire its own entries without moving unrelated native handler slots.
 Only those registrations and the generated portable inventory can change.
 The installer preserves the Codex profile link, unrelated hooks, skills,
 roles, documents, settings and trust. Legacy commands outside the qualified
 inventory are not part of this operation.
+
 
 Omit `--hooks-only` for the existing full Codex pack installation with shared
 hook registration. It selects Codex without the provider menu. The shared
@@ -94,6 +104,26 @@ Earlier distribution assets and qualification records are preserved only in the
 [original Git checkpoint](https://github.com/applicate2628/Orchestrarium/tree/082d46cd83324117abcb965842005d3c15ab99ed/scripts/distribution).
 They are not current build inputs and must not be applied to new runtimes.
 Do not relabel earlier records or rewrite historical releases.
+
+### Shared upgrade contract
+
+The installer owns the transition: the verified previous release identifies
+which existing registrations may be changed; the desired release supplies the
+replacement. Preview and apply evaluate the same selection. An already matched
+registration needs no rewrite. Hook trust is separate and remains owned by
+Codex; an unchanged registration does not establish that trust.
+
+The regression probe runs the normal entry point for A-to-B upgrade, wrong
+predecessor, and repeat. Check the shared files and unrelated profile state,
+not just the exit code. Keep product-native health distinct from fixture
+results; a repeat while Codex approval is pending is not proof of readiness.
+
+For design background, see [Effective ML Revisited](https://blog.janestreet.com/effective-ml-revisited/#make-illegal-states-unrepresentable),
+[Parse, Don't Validate](https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/),
+and [Applying Design by Contract](https://www.kth.se/social/files/59526bfb56be5b4f17000807/meyer-92-contracts.pdf).
+[Hypothesis stateful testing](https://hypothesis.readthedocs.io/en/latest/stateful.html)
+describes a way to explore longer operation sequences if focused probes cease
+to cover the risk; it is not a dependency of this installer.
 
 ## Terms and abbreviations
 

@@ -4,7 +4,11 @@
 keeps Git in charge of native hooks and the final transfer. No hook files or
 persistent Git configuration are changed. Other hooks retain their veto.
 
-The qualified Windows HTTPS route holds one actual Git/official HTTPS-helper
+## Experimental held-helper transport (not used for publication)
+
+The transport described below is not connected to the published CLI. Owned pushes use the native Git callback and its required proofs. A V5 receipt by itself cannot authorize transfer.
+
+The experimental Windows HTTPS route holds one actual Git/official HTTPS-helper
 lifecycle. It captures that helper's complete advertisement before callbacks,
 checks the native callback through held process identities, runs the captured
 scanner and consumes its V5 receipt once, then admits only the exact immutable
@@ -13,7 +17,7 @@ local tracking refs supplies exclusion authority. Missing local objects remain
 in the conservative scan. A rejected, replayed, changed or unqualified scope
 never turns into an empty successful scan.
 
-The first supported profile is the qualified Git for Windows 2.56 build and
+The experimental qualification profile is the qualified Git for Windows 2.56 build and
 canonical GitHub HTTPS endpoint, SHA-1 repositories, the observed plain config
 origins and recognized preserved GH credential helper/Schannel configuration.
 Executable identities and config inputs remain pinned. Includes, worktree

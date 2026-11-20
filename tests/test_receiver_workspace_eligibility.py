@@ -14,6 +14,10 @@ SOURCE = (
 )
 
 
+def _profile_path(name):
+    return str(Path(SOURCE.anchor, "Users", name, "AppData", "Local"))
+
+
 def _load_transport():
     # Isolate unrelated Windows-only imports; no native transport is exercised.
     imports = {
@@ -37,7 +41,7 @@ def _load_transport():
 class ReceiverWorkspaceEligibilityTest(unittest.TestCase):
     def test_unsupported_spelling_declines_before_any_optional_attempt(self):
         transport = _load_transport()
-        for profile in ("C:/Users/Example Name/AppData/Local", "C:/Users/Exämple/AppData/Local"):
+        for profile in (_profile_path("Example Name"), _profile_path("Exämple")):
             with (
                 self.subTest(profile=profile),
                 mock.patch.dict(transport.os.environ, {"LOCALAPPDATA": profile}),
@@ -54,7 +58,7 @@ class ReceiverWorkspaceEligibilityTest(unittest.TestCase):
     def test_existing_spelling_still_invokes_qualification(self):
         transport = _load_transport()
         with (
-            mock.patch.dict(transport.os.environ, {"LOCALAPPDATA": "C:/Users/Example/AppData/Local"}),
+            mock.patch.dict(transport.os.environ, {"LOCALAPPDATA": _profile_path("Example")}),
             mock.patch.object(transport, "qualify", return_value=types.SimpleNamespace(eligible=False)) as qualify,
             mock.patch.object(transport.pathlib.Path, "mkdir") as mkdir,
         ):
@@ -63,19 +67,18 @@ class ReceiverWorkspaceEligibilityTest(unittest.TestCase):
             mkdir.assert_not_called()
 
 
-    @unittest.skipUnless(sys.platform == "win32", "Windows selects the optional receiver")
-    def test_ordinary_route_is_still_admitted_once_after_workspace_decline(self):
+    @unittest.skipUnless(sys.platform == "win32", "Windows previously selected the optional receiver")
+    def test_owned_publication_always_uses_native_admission(self):
         from test_git_push_gate_hook import CANONICAL_HOOK, _load_gate_module
 
         transport = _load_transport()
         gate = _load_gate_module(CANONICAL_HOOK, "receiver_workspace_fallback_test")
-        args = ("C:/synthetic", "origin", "a" * 40, "refs/heads/topic")
+        args = (str(Path(SOURCE.anchor, "synthetic")), "origin", "a" * 40, "refs/heads/topic")
         for admitted in (False, True):
             with (
                 self.subTest(admitted=admitted),
                 mock.patch.dict(sys.modules, {"receiver_transport": transport}),
-                mock.patch.dict(transport.os.environ, {"LOCALAPPDATA": "C:/Users/Fixture Name/Local"}),
-                mock.patch.object(transport, "qualify") as optional,
+                mock.patch.object(transport, "run_target", return_value=0) as optional,
                 mock.patch.object(gate, "_normalize_repository_workdir", return_value=args[0]),
                 mock.patch.object(gate, "_prove_repository_root", return_value=args[0]),
                 mock.patch.object(gate, "_resolve_executable", return_value="git.exe"),

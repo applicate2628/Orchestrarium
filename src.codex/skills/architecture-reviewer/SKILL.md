@@ -63,7 +63,7 @@ When a replaceable binary adapter is introduced, or its producer and consumer ma
 - Call out hidden coupling, contract breaks, design erosion, and reversed dependency direction explicitly.
 - Treat passing tests as insufficient if architectural cohesion, seam integrity, or module isolation were degraded.
 - For semantic control-plane docs, focus on ownership boundaries, independent gates, route coherence, policy blast radius, and contradictions between source-of-truth files.
-- On re-review after a defect-class finding, verify that the correction enumerated and covered every participant in that class, including parallel arms, sibling return paths, and read sites, rather than checking only the first reported line.
+- On re-review after a defect-class finding, verify that the correction enumerated and covered every participant in that class, including parallel arms, sibling return paths, and read sites, rather than checking only the first reported line. For state-transition claims, exercise the same owned entry point with a supported case and a rejected case; verify protected state, not just the exit status. If only fixture evidence is available, keep native behavior unverified.
 
 ## Re-review
 
