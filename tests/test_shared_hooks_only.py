@@ -227,6 +227,66 @@ def test_previous_release_rejects_non_direct_package_evidence(tmp_path, member):
     with pytest.raises(ValueError, match="redirected package evidence"):
         PI._previous_retained_hook_root(ROOT, package)
 
+@pytest.mark.parametrize("foreign_between", [False, True])
+def test_shared_upgrade_retires_joint_owned_group_without_shifting_foreign(
+    shared_prior, monkeypatch, capsys, foreign_between,
+):
+    s = shared_prior
+    args = ["--global", "--shared-hook-runtime", "--hooks-only"]
+    assert PI.install("codex", args) == 0
+    previous = PI._hook_specs("codex", s.retained)
+    selected = {stem for stem, _, event, matcher in previous
+                if event == "SessionStart" and matcher is None}
+    selected = set(sorted(selected)[:2])
+    assert len(selected) == 2
+    data = json.loads(s.common.read_bytes())
+    targets, _ = s.health._selected_hook_targets(previous)
+    rows = list(s.health._owned_records(data, selected, "codex", s.host, targets))
+    assert len(rows) == 2
+    first, second = rows
+    groups = data["hooks"]["SessionStart"]
+    foreign = {"type": "command", "command": "unrelated-operator-hook"}
+    owners = [first[4], second[4]]
+    groups[first[1]]["hooks"] = ([owners[0], foreign, owners[1]]
+                                  if foreign_between else [foreign, *owners])
+    groups[second[1]]["hooks"] = []
+    s.common.write_bytes(HELPER.encode_hook_config(data))
+    before = (s.common.read_bytes(), s.sidecar.read_bytes(), s.settings.read_bytes())
+    alias = (s.alias.lstat().st_ino, os.readlink(s.alias))
+    _, identities = s.health._load_codex_inventory(s.sidecar, target=s.alias, host_os=s.host)
+    old_python = Path(json.loads(next(iter(identities)))["command"].split("\0")[0])
+    replacement = s.tmp_path / "next-release" / "lead"
+    desired = [(stem, replacement / script.relative_to(s.retained), event, matcher)
+               for stem, script, event, matcher in previous if stem not in selected]
+    for _, script, _, _ in desired:
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text("pass\n", encoding="utf-8")
+    original_specs = PI._hook_specs
+    monkeypatch.setattr(PI, "_hook_specs", lambda provider, lead:
+                        desired if lead == replacement else original_specs(provider, lead))
+    monkeypatch.setattr(PI, "_retained_codex_hook_root", lambda *_args: replacement)
+    monkeypatch.setattr(PI, "_previous_retained_hook_root",
+                        lambda *_args: (s.retained, old_python, previous))
+    chosen = [*args, "--previous-retained-release", str(s.retained.parent)]
+
+    expected = int(foreign_between)
+    assert PI.install("codex", [*chosen, "--dry-run"]) == expected
+    assert (s.common.read_bytes(), s.sidecar.read_bytes(), s.settings.read_bytes()) == before
+    assert PI.install("codex", chosen) == expected
+    assert (s.alias.lstat().st_ino, os.readlink(s.alias)) == alias
+    assert s.settings.read_bytes() == before[2]
+    if foreign_between:
+        assert (s.common.read_bytes(), s.sidecar.read_bytes()) == before[:2]
+        assert "E_CODEX_HOOK_SLOT_SHIFT" in capsys.readouterr().err
+    else:
+        result = json.loads(s.common.read_bytes())
+        assert result["hooks"]["SessionStart"][first[1]]["hooks"] == [foreign]
+        assert not list(s.health._owned_records(result, selected, "codex", s.host, targets))
+        published = (s.common.read_bytes(), s.sidecar.read_bytes())
+        assert PI.install("codex", chosen) == 0
+        assert (s.common.read_bytes(), s.sidecar.read_bytes()) == published
+
+
 def test_retained_catalog_reads_its_own_literals_without_executing(tmp_path):
     catalog = tmp_path / "universal_hooks_manifest.py"
     catalog.write_text(

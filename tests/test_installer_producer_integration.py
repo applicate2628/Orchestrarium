@@ -313,6 +313,32 @@ class ProducerIntegrationTests(unittest.TestCase):
                     self.assertEqual(injected, [True])
                     self.assertEqual((effect.quarantine / "__pycache__/raced.pyc").read_bytes(), b"unobserved race bytes")
 
+    @unittest.skipUnless(os.name == "nt", "Windows archive attribute")
+    def test_native_tree_write_declines_before_any_inplace_effect_if_archive_is_clear(self):
+        from stat import FILE_ATTRIBUTE_ARCHIVE
+
+        for name in ("first.txt", "second.txt"):
+            (self.target / name).write_bytes(b"before")
+            (self.source / name).write_bytes(b"after")
+        first = self.target / "first.txt"
+        second = self.target / "second.txt"
+        self.assertTrue(first.stat().st_file_attributes & FILE_ATTRIBUTE_ARCHIVE)
+        subprocess.run(["attrib.exe", "-A", str(second)], check=True, timeout=10)
+        self.assertFalse(second.stat().st_file_attributes & FILE_ATTRIBUTE_ARCHIVE)
+        before = PI._InstallTransaction._observe(self.target)
+        digest = PI._tree_sha256(self.target)
+        expected = PI._tree_sha256(self.source)
+        tx = self.transaction([self.target])
+        with self.assertRaisesRegex(RuntimeError, "fixture abort"), \
+                patch.object(tx, "transform_scalar", wraps=tx.transform_scalar) as scalar, tx:
+            self.owner(tx).replace_exact_tree(Path("target"), digest, self.source)
+            scalar.assert_not_called()
+            self.assertEqual(PI._tree_sha256(self.target), expected)
+            self.assertNotEqual(first.stat().st_ino, before[first].python_identity[1])
+            raise RuntimeError("fixture abort")
+        self.assertTrue(tx._image_matches(self.target, before))
+        self.assert_clean()
+
     def test_typed_recovery_rewrap_preserves_custody_and_exact_primary_fields(self):
         for committed in (False, True):
             with self.subTest(committed=committed):

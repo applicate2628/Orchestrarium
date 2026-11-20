@@ -7231,6 +7231,9 @@ class _CreateOnlyMutablePath:
                         raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: tree member origin")
                     if not bound.ordinary_single_link():
                         return False  # Replacement, unlike an in-place write, cannot update an alias.
+                    # An ordinary write can set Archive and invalidate the bound image.
+                    if not bound.basic().attributes & stat.FILE_ATTRIBUTE_ARCHIVE:
+                        return False
                     transaction._assert_scalar_security(bound, secured[path].security)
                 plan.append((path, payload, digest))
         for path, payload, digest in plan:
@@ -13553,6 +13556,9 @@ def _apply_shared_hooks_only(root: Path, target: Path, *, dry_run: bool,
         for event, _, _, group, handler, record in health._owned_records(data, expected, "codex", host, targets)
         if desired_events.get(record.marker) != event
     ]
+    # _owned_records walks each group from first slot to last. Retire from
+    # the end so a jointly retired handler is never mistaken for a survivor.
+    retirements.reverse()
     kwargs = {"prior_installed_root": predecessor, "hooks_only_recheck": recheck,
               "prior_specs": specs, "scoped_retirements": retirements}
     if dry_run:

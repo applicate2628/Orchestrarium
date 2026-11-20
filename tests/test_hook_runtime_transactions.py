@@ -303,8 +303,7 @@ class AbortPolicyOwnershipContract:
         {
             ("scripts/install-hypothesis-hook.py", "TestAbortPolicy.resolve_and_preflight", "mapping", None),
             ("scripts/install-hypothesis-hook.py", "main", "get", "ORCHESTRARIUM_NO_HYPOTHESIS_HOOK"),
-            ("scripts/production_installer.py", "_run", "copy", None),
-            ("scripts/production_installer.py", "_run_hook_health_bounded", "copy", None),
+            ("scripts/production_installer.py", "_installer_child_environment", "copy", None),
             ("scripts/production_installer.py", "_install_hooks", "get", "CODEX_BIN"),
             ("scripts/production_installer.py", "_resolve_global_home", "get", "USERPROFILE"),
             ("scripts/production_installer.py", "_resolve_global_home", "get", "HOME"),
@@ -1265,7 +1264,6 @@ _VERIFY_FAILURE_IDS = (
 @pytest.mark.parametrize("stable_id", _VERIFY_FAILURE_IDS)
 def test_rollback_identity_failure_settles_independent_state(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     stable_id: str,
 ) -> None:
     """F6: one identity refusal cannot suppress disjoint cleanup or the cause."""
@@ -1279,15 +1277,6 @@ def test_rollback_identity_failure_settles_independent_state(
     inventory_before = b'{"inventory": "before"}\n'
     hooks.write_bytes(hooks_before)
     inventory.write_bytes(inventory_before)
-    backup_paths: list[Path] = []
-    real_mkdtemp = tempfile.mkdtemp
-
-    def record_mkdtemp(suffix=None, prefix=None, dir=None):
-        path = Path(real_mkdtemp(suffix=suffix, prefix=prefix, dir=tmp_path))
-        backup_paths.append(path)
-        return str(path)
-
-    monkeypatch.setattr(production_installer.tempfile, "mkdtemp", record_mkdtemp)
     failure_type = getattr(production_installer, "_InstallFailure", None)
     original = (
         failure_type(stable_id, "verify", "forced")
@@ -1296,12 +1285,19 @@ def test_rollback_identity_failure_settles_independent_state(
     )
     bad = project / ".agents" / "bad.txt"
     good = project / ".agents" / "good.txt"
+    bad.parent.mkdir()
+    changed_hooks = project / "changed-hooks.json"
+    changed_inventory = project / "changed-inventory.json"
+    changed_hooks.write_bytes(b"mutated hooks\n")
+    changed_inventory.write_bytes(b"mutated inventory\n")
 
     with pytest.raises(BaseException) as caught:
         transaction = production_installer._InstallTransaction(
-            [hooks, inventory], enabled=True
+            [hooks, inventory], enabled=True, copy_paths=(hooks, inventory)
         )
         with transaction:
+            backup = transaction._temporary
+            assert backup is not None and backup.is_dir()
             owner = production_installer._CreateOnlyMutablePath(
                 project, transaction, dry_run=False
             )
@@ -1309,8 +1305,8 @@ def test_rollback_identity_failure_settles_independent_state(
             owner.create_file(Path(".agents/good.txt"), b"created good\n")
             bad.unlink()
             bad.write_bytes(b"replacement preserved\n")
-            hooks.write_bytes(b"mutated hooks\n")
-            inventory.write_bytes(b"mutated inventory\n")
+            owner.copy_file(hooks.relative_to(project), changed_hooks)
+            owner.copy_file(inventory.relative_to(project), changed_inventory)
             raise original
 
     aggregate = caught.value
@@ -1320,11 +1316,25 @@ def test_rollback_identity_failure_settles_independent_state(
     assert inventory.read_bytes() == inventory_before
     assert bad.read_bytes() == b"replacement preserved\n"
     assert not good.exists()
-    member_ids = [member.stable_id for member in aggregate.members]
-    assert member_ids
-    assert set(member_ids) == {"E_ROLLBACK_CREATED_IDENTITY_CHANGED"}
-    assert aggregate.recovery_path is None
-    assert backup_paths and all(not path.exists() for path in backup_paths)
+    created = [member for member in aggregate.members if member.phase == "created"]
+    assert [(member.stable_id, Path(member.path)) for member in created] == [
+        ("E_ROLLBACK_CREATED_IDENTITY_CHANGED", bad)
+    ]
+    blocked = [member for member in aggregate.members if member.phase != "created"]
+    assert all(member.stable_id == "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY" for member in blocked)
+    assert all(
+        Path(member.path) == bad
+        or (Path(member.path).parent == bad.parent
+            and Path(member.path).name.startswith(".orchestrarium-migration-retention-"))
+        for member in blocked
+    ), [(m.stable_id, Path(m.path).name) for m in blocked]
+    if blocked:
+        assert aggregate.recovery_path == backup
+        assert {hooks_before, inventory_before} <= {
+            member.read_bytes() for member in backup.rglob("*") if member.is_file()
+        }
+    else:
+        assert aggregate.recovery_path is None and not backup.exists()
 
 
 def test_rollback_restore_failure_retains_complete_backup(
@@ -1334,15 +1344,6 @@ def test_rollback_restore_failure_retains_complete_backup(
 
     target = tmp_path / "hooks.json"
     target.write_bytes(b"before\n")
-    backup_paths: list[Path] = []
-    real_mkdtemp = tempfile.mkdtemp
-
-    def record_mkdtemp(suffix=None, prefix=None, dir=None):
-        path = Path(real_mkdtemp(suffix=suffix, prefix=prefix, dir=tmp_path))
-        backup_paths.append(path)
-        return str(path)
-
-    monkeypatch.setattr(production_installer.tempfile, "mkdtemp", record_mkdtemp)
     failure_type = getattr(production_installer, "_InstallFailure", None)
     original = (
         failure_type("E_INSTALL_VERIFY_FILES_MISSING", "verify", "forced")
@@ -1353,7 +1354,7 @@ def test_rollback_restore_failure_retains_complete_backup(
         monkeypatch.setattr(
             production_installer._InstallTransaction,
             "_restore_entry",
-            lambda _self, _entry: (_ for _ in ()).throw(OSError("restore denied")),
+            lambda _self, _entry, **_kwargs: (_ for _ in ()).throw(OSError("restore denied")),
         )
     else:
         monkeypatch.setattr(
@@ -1369,7 +1370,8 @@ def test_rollback_restore_failure_retains_complete_backup(
                 [target], enabled=True
             )
             with transaction:
-                target.write_bytes(b"mutated\n")
+                owner = production_installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+                owner.replace_file_atomic(Path(target.name), b"mutated\n")
                 raise original
         aggregate = caught.value
         assert getattr(aggregate, "stable_id", None) == "E_ROLLBACK_SETTLEMENT_FAILED"
@@ -1379,14 +1381,14 @@ def test_rollback_restore_failure_retains_complete_backup(
         ]
         recovery_path = aggregate.recovery_path
         assert recovery_path is not None and recovery_path.is_dir()
-        assert recovery_path in backup_paths
+        assert recovery_path == transaction._temporary
     finally:
         if recovery_path is not None:
             shutil.rmtree(recovery_path, ignore_errors=True)
 
 
 def test_install_transaction_excludes_dry_run_and_committed_success_from_rollback(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     """F6: disabled dry-run and committed success never enter rollback settlement."""
 
@@ -1396,25 +1398,19 @@ def test_install_transaction_excludes_dry_run_and_committed_success_from_rollbac
         dry_target.write_bytes(b"dry-run owner did not mutate this path\n")
     assert dry_target.read_bytes() == b"dry-run owner did not mutate this path\n"
 
-    backup_paths: list[Path] = []
-    real_mkdtemp = tempfile.mkdtemp
-
-    def record_mkdtemp(suffix=None, prefix=None, dir=None):
-        path = Path(real_mkdtemp(suffix=suffix, prefix=prefix, dir=tmp_path))
-        backup_paths.append(path)
-        return str(path)
-
-    monkeypatch.setattr(production_installer.tempfile, "mkdtemp", record_mkdtemp)
     committed = tmp_path / "committed.txt"
     committed.write_bytes(b"before\n")
     transaction = production_installer._InstallTransaction(
         [committed], enabled=True
     )
     with transaction:
-        committed.write_bytes(b"committed\n")
+        backup = transaction._temporary
+        assert backup is not None and backup.is_dir()
+        owner = production_installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+        owner.replace_file_atomic(Path(committed.name), b"committed\n")
         transaction.commit()
     assert committed.read_bytes() == b"committed\n"
-    assert backup_paths and all(not path.exists() for path in backup_paths)
+    assert not backup.exists()
 
 
 def test_hook_health_deadline_failure_rolls_back_before_transaction_settles(
@@ -1431,7 +1427,8 @@ def test_hook_health_deadline_failure_rolls_back_before_transaction_settles(
             [target], enabled=True
         )
         with transaction:
-            target.write_bytes(b'{"hooks":"mutated"}\n')
+            owner = production_installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            owner.replace_file_atomic(Path(target.name), b'{"hooks":"mutated"}\n')
             raise production_installer._hook_health_failure(
                 "hook health child deadline exceeded"
             )
@@ -1462,40 +1459,39 @@ def test_every_precommit_verification_path_enters_rollback_with_typed_cause(
     monkeypatch.setattr(
         production_installer._InstallTransaction, "__exit__", observe_exit
     )
-    if stable_id == "E_INSTALL_VERIFY_FILES_MISSING":
-        monkeypatch.setattr(
-            production_installer, "_verify_files", lambda *_args, **_kwargs: ["missing"]
-        )
-        monkeypatch.setattr(
-            production_installer, "_reclaim_retired", lambda *_args, **_kwargs: None
-        )
-    else:
-        def remove_validation_target(*_args, **_kwargs):
-            if stable_id == "E_INSTALL_VERIFY_RUNTIME_MISSING":
-                path = (
-                    project
-                    / ".agents"
-                    / "skills"
-                    / "lead"
-                    / "scripts"
-                    / "agent-run-ledger.py"
-                )
-            elif stable_id == "E_INSTALL_VERIFY_HOOK_RUNTIME_MISSING":
-                path = (
-                    project
-                    / ".agents"
-                    / "skills"
-                    / "lead"
-                    / "scripts"
-                    / "check-hook-health.py"
-                )
-            else:
-                path = project / "AGENTS.md"
-            path.unlink()
+    # Report a missing path to its verification branch once. Removing a file
+    # directly would introduce an unrelated ownership violation during rollback.
+    helper_root = project / ".agents" / "skills" / "lead" / "scripts"
+    missing_path = {
+        "E_INSTALL_VERIFY_RUNTIME_MISSING": helper_root / "agent-run-ledger.py",
+        "E_INSTALL_VERIFY_HOOK_RUNTIME_MISSING": helper_root / "check-hook-health.py",
+        "E_INSTALL_VERIFY_CONTROL_FILES_MISSING": project / "AGENTS.md",
+    }.get(stable_id)
+    verify_files = production_installer._verify_files
+    is_file = Path.is_file
+    armed = False
+    misses = []
 
-        monkeypatch.setattr(
-            production_installer, "_reclaim_retired", remove_validation_target
-        )
+    def verify_then_arm(*args, **kwargs):
+        nonlocal armed
+        if missing_path is None:
+            return ["missing"]
+        missing = verify_files(*args, **kwargs)
+        assert not missing
+        armed = True
+        return missing
+
+    def report_missing_once(path):
+        nonlocal armed
+        if armed and path == missing_path:
+            assert is_file(path)
+            armed = False
+            misses.append(path)
+            return False
+        return is_file(path)
+
+    monkeypatch.setattr(production_installer, "_verify_files", verify_then_arm)
+    monkeypatch.setattr(Path, "is_file", report_missing_once)
 
     result = production_installer.install(
         "codex",
@@ -1511,3 +1507,4 @@ def test_every_precommit_verification_path_enters_rollback_with_typed_cause(
     assert result == 1
     assert len(observed) == 1
     assert getattr(observed[0], "stable_id", None) == stable_id
+    assert misses == ([] if missing_path is None else [missing_path])
