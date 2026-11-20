@@ -60,6 +60,15 @@ def _owner_push_endpoint(git,source,remote,cfg,env):
 def run_target(gate,source,remote,tip,destination,*,dry_run=False):
  source=pathlib.Path(source)
  env=_owner_git_environment(os.environ)
+ # The pinned native callback requires a directly invocable launcher spelling.
+ # Test the fixed prefix before creating any owner workspace or transfer process.
+ local_appdata=env.get('LOCALAPPDATA')
+ if local_appdata is not None:
+  root=pathlib.Path(local_appdata)/'Orche'/'workspaces'/'receiver-owner'
+  spelling=root.as_posix()
+  if shlex.quote(spelling)!=spelling:
+   print('Receiver scope: unsupported owner workspace path; using ordinary publication checks.',file=sys.stderr)
+   return None
  cfg=('-c','http.followRedirects=false')
  gh=r'C:\Program Files\GitHub CLI\gh.exe'
  preliminary=qualify(GIT,source,remote,env=env,config_args=cfg,approved_gh=gh)
@@ -71,7 +80,7 @@ def run_target(gate,source,remote,tip,destination,*,dry_run=False):
   raise ValueError('unsupported config origin namespace')
  endpoint=_owner_push_endpoint(GIT,source,remote,cfg,env)
  # All runtime scratch belongs to Orche, never the user's project root.
- root=pathlib.Path(os.environ['LOCALAPPDATA'])/'Orche'/'workspaces'/'receiver-owner';root.mkdir(parents=True,exist_ok=True)
+ root=pathlib.Path(env['LOCALAPPDATA'])/'Orche'/'workspaces'/'receiver-owner';root.mkdir(parents=True,exist_ok=True)
  base=pathlib.Path(tempfile.mkdtemp(prefix='push-',dir=root))
  pipe=r'\\.\pipe\orche-transfer-'+os.urandom(12).hex();broker=Broker(pipe,deadline=time.monotonic()+gate.SCAN_TIMEOUT_SECONDS+120)
  helperdir=base/'helpers';helperdir.mkdir();payload=helperdir/'relay.py';launcher=helperdir/'git-remote-orche-receiver'
