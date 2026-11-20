@@ -2116,6 +2116,7 @@ SLICE_A_FAILURE_IDS = frozenset(
         "E_ATOMIC_DIRECTORY_PUBLISH_UNSUPPORTED",
         "E_CODEX_HOOK_SLOT_SHIFT",
         "E_WINDOWS_SECURITY_CREATION_MISMATCH",
+        "E_SHARED_HOOK_RUNTIME",
         "E_CODEX_DOCUMENT_LEGACY_OWNERSHIP_REQUIRED",
         "E_NATIVE_PROJECTION_SET_FAILED",
         "E_CREATE_ONLY_COLLISION",
@@ -13277,9 +13278,13 @@ def _installer_platform_admitted() -> bool:
 
 def install(provider: str, argv: list[str] | None = None) -> int:
     args = _parser(provider).parse_args(argv)
+    register_hooks = (
+        not args.no_hypothesis_hook
+        and not os.environ.get("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK")
+    )
     if args.shared_hook_runtime and (
         provider != "codex" or not args.global_install or args.uninstall
-        or args.no_hypothesis_hook or os.environ.get("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK")
+        or not register_hooks
     ):
         print("FAIL: E_SHARED_HOOK_RUNTIME: retained linked hooks require global Codex registration", file=sys.stderr)
         return 1
@@ -13398,14 +13403,16 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             installed_hook_root = skills_target / "lead"
             registration = target / "hooks.json"
             prior_installed_hook_root = installed_hook_root if args.shared_hook_runtime else None
-            shared_inventory = (
-                _find_portable_codex_inventory(root, registration) if mode == "global" else None
-            )
+            shared_inventory = None
+            if mode == "global" and register_hooks:
+                try:
+                    shared_inventory = _find_portable_codex_inventory(root, registration)
+                except ValueError as exc:
+                    raise _InstallFailure("E_SHARED_HOOK_RUNTIME", "inventory", exc) from exc
             if shared_inventory is not None and not args.shared_hook_runtime:
-                if not args.no_hypothesis_hook and not os.environ.get("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK"):
-                    raise ValueError(
-                        "E_SHARED_HOOK_RUNTIME: reuse the retained shared-hook installation"
-                    )
+                raise ValueError(
+                    "E_SHARED_HOOK_RUNTIME: reuse the retained shared-hook installation"
+                )
             if args.shared_hook_runtime:
                 installed_hook_root = _retained_codex_hook_root(root, registration)
                 if shared_inventory is not None:
@@ -13473,10 +13480,6 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             # not something a pack sync is allowed to repair after mutation.
             _load_claude_settings(registration)
 
-        register_hooks = (
-            not args.no_hypothesis_hook
-            and not os.environ.get("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK")
-        )
         hooks_enabled = register_hooks and not args.dry_run
         canonical_lead = canonical_skills_target / "lead"
         codex_post_tree_runtime: tuple[tuple[Path, Path], ...] = ()
