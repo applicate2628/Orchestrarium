@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-20
 
+- For an owned push to one ordinary HTTPS destination with no explicit redirect policy, default that destination to no redirects for this invocation only. The native hook still requires the exact receiver before using verified prior history. Explicit settings and unqualified transports are unchanged; no Git configuration file is edited.
+
 - On Windows, updates that change only the contents of an owned skill tree keep the original files and their inherited access policy. The installer verifies both trees and rolls back interrupted updates; topology changes still use the checked staged publisher.
 
 - Add an explicit registration-only update for a retained shared Codex hook bundle. It previews the same proposed registration and inventory before writing, can replace a proven older hook command whose interpreter disappeared, and leaves the rest of each Codex profile and native trust unchanged.

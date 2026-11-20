@@ -2980,29 +2980,62 @@ def _refresh_scan_binding(
     )
 
 
-def _native_receiver_inventory_qualified(native: NativePushInput, cwd: str | None, git_exe: str | None) -> bool:
-    """Admit only the ordinary nonredirecting HTTPS receiver; otherwise fallback."""
-    if not cwd or not git_exe:
-        return False
-    # Git chooses its helper from the raw spelling, unlike urlsplit's normalization.
-    if (not native.endpoint.startswith("https://")
-        or any(ord(char) <= 32 or ord(char) == 127 for char in native.endpoint)):
+def _ordinary_https_receiver(endpoint: str) -> bool:
+    # Git chooses its helper from the raw spelling, unlike urlsplit.
+    if (not endpoint.startswith("https://")
+        or any(ord(char) <= 32 or ord(char) == 127 for char in endpoint)):
         return False
     try:
-        url = urlsplit(native.endpoint)
-        if (url.scheme != "https" or not url.hostname or url.username is not None
-            or url.password is not None or url.query or url.fragment):
-            return False
+        url = urlsplit(endpoint)
+        return bool(url.scheme == "https" and url.hostname and url.username is None
+                    and url.password is None and not url.query and not url.fragment)
+    except ValueError:
+        return False
+
+
+def _native_redirect_setting(git_exe: str, cwd: str, endpoint: str) -> ProcessResult:
+    return _native_configuration_query(
+        git_exe, (), cwd,
+        ("config", "--type=bool", "--get-urlmatch", "http.followRedirects", endpoint),
+        accepted=(0, 1),
+    )
+
+
+def _native_receiver_inventory_qualified(native: NativePushInput, cwd: str | None, git_exe: str | None) -> bool:
+    """Admit only the actual ordinary nonredirecting HTTPS receiver."""
+    if not cwd or not git_exe or not _ordinary_https_receiver(native.endpoint):
+        return False
+    try:
         if _native_config_values(git_exe, (), cwd, f"remote.{native.remote_name}.vcs"):
             return False
-        redirects = _native_configuration_query(
-            git_exe, (), cwd,
-            ("config", "--type=bool", "--get-urlmatch", "http.followRedirects", native.endpoint),
-            accepted=(0, 1),
-        )
+        redirects = _native_redirect_setting(git_exe, cwd, native.endpoint)
         return redirects.returncode == 0 and redirects.stdout == b"false\n"
     except (PrRouteDenied, ValueError, OSError):
         return False
+
+
+def _native_default_receiver_config(remote: str, cwd: str, git_exe: str) -> tuple[str, ...]:
+    """The owned command defaults to no redirects without rewriting Git config."""
+    try:
+        if _native_config_values(git_exe, (), cwd, f"remote.{remote}.vcs"):
+            return ()
+        result = _native_configuration_query(
+            git_exe, (), cwd, ("remote", "get-url", "--push", "--all", remote),
+        )
+        urls = result.stdout.decode("utf-8", "strict").split("\n")
+        if len(urls) != 2 or urls[-1] or not _ordinary_https_receiver(urls[0]):
+            return ()
+        endpoint = urls[0]
+        if "=" in endpoint:  # Git splits its -c argument at the first equals sign.
+            return ()
+        setting = _native_redirect_setting(git_exe, cwd, endpoint)
+        if setting.returncode == 1 and not setting.stdout:
+            # Native callback independently rechecks the actual URL and
+            # effective redirect setting before granting receiver credit.
+            return ("-c", f"http.{endpoint}.followRedirects=false")
+    except (PrRouteDenied, ValueError, OSError):
+        pass  # Unqualified routes keep ordinary full-coverage behavior.
+    return ()
 
 
 def _native_push_selection(
@@ -3912,7 +3945,8 @@ def _target_local_push_main(arguments: list[str]) -> int:
             outcome = run_target(sys.modules[__name__], root, remote, source, destination, dry_run=dry_run)
             if outcome is not None:
                 return outcome
-        argv = (git_exe, "-C", root, *native_git_config_arguments(),
+        receiver_config = _native_default_receiver_config(remote, root, git_exe)
+        argv = (git_exe, "-C", root, *receiver_config, *native_git_config_arguments(),
                 "push", "--verify", *(("--dry-run",) if dry_run else ()), "--", remote, source + ":" + destination)
         parsed = parse_native_argument_vector(argv, "target-local-push", 0)
         # Snapshot both selection and executable identity. The callback resolves
