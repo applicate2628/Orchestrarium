@@ -10,6 +10,35 @@ On the Representational State Transfer (REST) issue-comment surface, use `IssueC
 
 Cross-surface timestamps do not inherit the REST tie-breaker. Same-time evidence from a REST review, REST issue comment, and Graph Query Language (GraphQL) review thread is incomparable unless that surface provides an independent exact correlation.
 
+## Optional SDK task handoff
+
+The owning skill may delegate an already authorized correction or fresh independent
+review through an admitted software development kit (SDK) executor. Keep the
+repository identity, pull-request number, full hosted `headRefOid`, selected
+finding/thread identities and requested correction/review scope in the existing
+admitted request and artifact identity. Select fresh review context explicitly;
+do not pass the implementation author's private working conversation as an
+independent review. This is a PR-specific binding, not a GitHub prerequisite for
+unrelated SDK tasks.
+
+Before consuming the result, the existing Host authority owner re-reads the
+hosted head for this PR and compares the exact admitted revision. The SDK executor
+calls that owner at `executor_result` after retaining/receiving/scanning the result
+and before returning it for use. A generic successful callback alone does not
+prove that GitHub was checked: the PR-owning caller must perform that check.
+If the head changed or current authority cannot be established, retain the original
+runtime result and terminal as historical evidence; withhold it from application
+as stale/unusable. Do not rewrite completed execution history into a failure,
+discard the result, or automatically repeat a model call. Reconcile through the
+same owner using a newly admitted task only when appropriate and authorized.
+
+Immediately before applying a correction or changing PR state, re-read current
+hosted state again under this skill's existing rules; the earlier check is not an
+atomic GitHub transaction. SDK output cannot resolve threads, post review triggers,
+run CI, publish, merge or declare the hosted bot run clean. These actions retain
+their existing skill, GitHub and human authorization owners. Incomplete or stale
+SDK evidence does not block unrelated authorized work.
+
 ## Connector author identity
 
 Use one author predicate for success, failure, finding, and in-progress evidence:

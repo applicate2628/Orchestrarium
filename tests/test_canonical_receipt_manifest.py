@@ -8,6 +8,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import re
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import unittest
 
@@ -42,7 +43,7 @@ class ExpectedLeadManifestTests(unittest.TestCase):
                            names=[ast.alias(name="annotations")], level=0),
             *nodes,
         ], type_ignores=[]))
-        scope = {"hashlib": hashlib, "json": json}
+        scope = {"hashlib": hashlib, "json": json, "re": re}
         exec(compile(module, "<pure-receipt-manifest>", "exec"), scope)
         cls.expected = staticmethod(scope["_canonical_lead_expected_manifest"])
         cls.digest = staticmethod(scope["_tree_manifest_sha256"])
@@ -57,9 +58,9 @@ class ExpectedLeadManifestTests(unittest.TestCase):
 
     def test_bound_inside_removal_only(self):
         lead = PurePosixPath("/skills/lead")
-        manifest = (("keep", "k"), ("scripts/retired.py", "r"))
+        manifest = (("keep", "k"), ("scripts/retired.py", "a" * 64))
         self.assertEqual(self.expected(
-            manifest, lead, ((lead / "scripts/retired.py", "r"),)),
+            manifest, lead, ((lead / "scripts/retired.py", "a" * 64),)),
             (("keep", "k"),))
 
     def test_outside_removals_are_ignored(self):
@@ -73,24 +74,32 @@ class ExpectedLeadManifestTests(unittest.TestCase):
         lead = PurePosixPath("/skills/lead")
         with self.assertRaisesRegex(
                 ValueError, "^E_MUTABLE_PATH_POSTCONDITION: unbound Lead reclamation$"):
-            self.expected((("retired", "right"),), lead,
-                          ((lead / "retired", "wrong"),))
+            self.expected((("retired", "a" * 64),), lead,
+                          ((lead / "retired", "b" * 64),))
+
+    def test_matching_but_malformed_reclamation_digest_refused(self):
+        lead = PurePosixPath("/skills/lead")
+        for digest in ("r", "g" * 64, "a" * 63, "A" * 64, None):
+            with self.subTest(digest=digest):
+                with self.assertRaisesRegex(ValueError, "unbound Lead reclamation"):
+                    self.expected((("retired", digest),), lead,
+                                  ((lead / "retired", digest),))
 
     def test_missing_member_refused(self):
         lead = PurePosixPath("/skills/lead")
         with self.assertRaisesRegex(ValueError, "unbound Lead reclamation"):
-            self.expected((("keep", "k"),), lead, ((lead / "missing", "x"),))
+            self.expected((("keep", "k"),), lead, ((lead / "missing", "a" * 64),))
 
     def test_duplicate_removal_refused(self):
         lead = PurePosixPath("/skills/lead")
-        removal = (lead / "retired", "r")
+        removal = (lead / "retired", "a" * 64)
         with self.assertRaisesRegex(ValueError, "unbound Lead reclamation"):
-            self.expected((("retired", "r"),), lead, (removal, removal))
+            self.expected((("retired", "a" * 64),), lead, (removal, removal))
 
     def test_success_does_not_modify_inputs(self):
         lead = PurePosixPath("/skills/lead")
-        manifest = [["z", "z"], ["retired", "r"], ["a", "a"]]
-        reclaimed = [(lead / "retired", "r")]
+        manifest = [["z", "z"], ["retired", "a" * 64], ["a", "a"]]
+        reclaimed = [(lead / "retired", "a" * 64)]
         snapshot = [row[:] for row in manifest]
         removals = reclaimed[:]
         self.expected(manifest, lead, reclaimed)
@@ -99,8 +108,8 @@ class ExpectedLeadManifestTests(unittest.TestCase):
 
     def test_refusal_does_not_modify_inputs(self):
         lead = PurePosixPath("/skills/lead")
-        manifest = [["first", "f"], ["keep", "k"]]
-        reclaimed = [(lead / "first", "f"), (lead / "absent", "x")]
+        manifest = [["first", "f" * 64], ["keep", "k"]]
+        reclaimed = [(lead / "first", "f" * 64), (lead / "absent", "a" * 64)]
         snapshot = [row[:] for row in manifest]
         removals = reclaimed[:]
         with self.assertRaises(ValueError):
@@ -111,21 +120,21 @@ class ExpectedLeadManifestTests(unittest.TestCase):
     def test_windows_relative_keys_use_forward_slashes(self):
         lead = PureWindowsPath("Q:/synthetic/skills/lead")
         self.assertEqual(self.expected(
-            (("scripts/retired.py", "r"), ("keep", "k")), lead,
-            ((lead / "scripts" / "retired.py", "r"),
+            (("scripts/retired.py", "a" * 64), ("keep", "k")), lead,
+            ((lead / "scripts" / "retired.py", "a" * 64),
              (PureWindowsPath("R:/elsewhere/keep"), "wrong"))),
             (("keep", "k"),))
 
     def test_path_flavors_preserve_their_case_rules(self):
         windows = PureWindowsPath("Q:/synthetic/Lead")
         self.assertEqual(self.expected(
-            (("old", "r"),), windows,
-            ((PureWindowsPath("q:/SYNTHETIC/lead/old"), "r"),)), ())
+            (("old", "a" * 64),), windows,
+            ((PureWindowsPath("q:/SYNTHETIC/lead/old"), "a" * 64),)), ())
         posix = PurePosixPath("/synthetic/Lead")
         self.assertEqual(self.expected(
-            (("old", "r"),), posix,
-            ((PurePosixPath("/synthetic/lead/old"), "r"),)),
-            (("old", "r"),))
+            (("old", "a" * 64),), posix,
+            ((PurePosixPath("/synthetic/lead/old"), "a" * 64),)),
+            (("old", "a" * 64),))
 
     def test_digest_uses_existing_tagged_json_encoding(self):
         for members in ((), (("a", "a" * 64),),
@@ -173,9 +182,10 @@ class FinalizerStaticWiringTests(unittest.TestCase):
                      "_image_file_bytes"):
             self.assertEqual(_calls(self.node, name), [])
 
-    def test_actual_manifest_is_compared_and_hashed_once(self):
+    def test_every_hash_uses_the_compared_actual_manifest(self):
         hashes = _calls(self.node, "_tree_manifest_sha256")
-        self.assertEqual(len(hashes), 1)
+        self.assertTrue(hashes)
+        self.assertTrue(all(ast.unparse(call) == "_tree_manifest_sha256(actual)" for call in hashes))
         self.assertEqual(len(hashes[0].args), 1)
         actual = hashes[0].args[0]
         self.assertIsInstance(actual, ast.Name)
@@ -186,7 +196,8 @@ class FinalizerStaticWiringTests(unittest.TestCase):
                        and any(isinstance(v, ast.Name) and v.id == actual.id
                                for v in [n.left, *n.comparators])]
         self.assertEqual(len(comparisons), 1)
-        self.assertLess(comparisons[0].lineno, hashes[0].lineno)
+        for call in hashes:
+            self.assertLess(comparisons[0].lineno, call.lineno)
         self.assertEqual(_calls(self.node, "_tree_sha256"), [])
         scans = _calls(self.node, "_admitted_tree_manifest")
         self.assertEqual(len(scans), 1)
@@ -198,10 +209,19 @@ class FinalizerStaticWiringTests(unittest.TestCase):
             self.assertEqual(ast.literal_eval(keywords["ignore_runtime_cache"]), True)
 
     def test_receipt_writer_tail_is_retained(self):
-        for name in ("_lead_receipt_bytes", "_read_lead_receipt",
+        for name in ("_lead_receipt_bytes",
                      "create_file", "replace_exact_file"):
             self.assertEqual(len(_calls(self.node, name)), 1, name)
+        currentness = _calls(self.node, "_assert_lead_receipt_current")
+        self.assertEqual(len(currentness), 2)
+        self.assertTrue(all(ast.unparse(call) ==
+            "_assert_lead_receipt_current(plan.lead_receipt, receipt_path, owner.transaction)"
+            for call in currentness))
+        self.assertLess(currentness[0].lineno, _calls(self.node, "create_file")[0].lineno)
+        self.assertGreater(currentness[1].lineno, _calls(self.node, "replace_exact_file")[0].lineno)
         text = ast.unparse(self.node)
+        self.assertIn("published is None or published[0] != payload", text)
+        self.assertIn("E_CANONICAL_LEAD_RECEIPT_DRIFT: receipt publication", text)
         self.assertIn("prior_receipt = plan.lead_receipt.observed", text)
         self.assertIn("relative = target.relative_to(owner.anchor) / _LEAD_RECEIPT_NAME", text)
         self.assertIn("owner.create_file(relative, payload)", text)
@@ -242,13 +262,14 @@ return _stage_tree_manifest(storage_path, ignore_runtime_cache=ignore_runtime_ca
         self.assertIsNone(args.vararg)
         self.assertIsNone(args.kwarg)
 
-    def test_exactly_two_real_consumers(self):
+    def test_admitted_reader_consumers(self):
         consumers = [(node.name, call) for node in self.tree.body
                      if isinstance(node, ast.FunctionDef)
                      for call in _calls(node, "_admitted_tree_manifest")]
         self.assertEqual(sorted(name for name, _ in consumers),
                          ["_apply_canonical_skills_plan",
-                          "_finalize_canonical_lead_receipt"])
+                          "_finalize_canonical_lead_receipt",
+                          "_selected_lead_prior_files"])
 
     def test_ordinary_tuple_branch_and_selection_bypasses(self):
         loop = next(n for n in ast.walk(self.apply)
@@ -385,7 +406,7 @@ if actual != expected:
         expected = {
             "_assert_skill_projection_plan_current":
                 "_assert_canonical_member_state(member, item.canonical_target, after=True)",
-            "_assert_codex_legacy_skill_projection_plan_current":
+            "_assert_codex_legacy_canonical_current":
                 "_assert_canonical_member_state(canonical, item.canonical_target, after=True)",
         }
         for name, call in expected.items():
@@ -393,6 +414,13 @@ if actual != expected:
                 calls = _calls(_function(self.tree, name),
                                "_assert_canonical_member_state")
                 self.assertEqual([ast.unparse(n) for n in calls], [call])
+
+    def test_projection_guard_delegates_currentness_to_its_new_owner(self):
+        wrapper = _function(self.tree, "_assert_codex_legacy_skill_projection_plan_current")
+        calls = _calls(wrapper, "_assert_codex_legacy_canonical_current")
+        self.assertEqual([ast.unparse(call) for call in calls], [
+            "_assert_codex_legacy_canonical_current(plan, canonical_plan, dry_run=dry_run, finalized_lead_digest=finalized_lead_digest)"
+        ])
 
     def test_all_member_callers_preserve_transaction_and_phase(self):
         callers = [(node.name, ast.unparse(call))
@@ -413,7 +441,7 @@ if actual != expected:
              "_assert_canonical_member_state(skill, target / skill.name, after=True, transaction=owner.transaction)"),
             ("_assert_skill_projection_plan_current",
              "_assert_canonical_member_state(member, item.canonical_target, after=True)"),
-            ("_assert_codex_legacy_skill_projection_plan_current",
+            ("_assert_codex_legacy_canonical_current",
              "_assert_canonical_member_state(canonical, item.canonical_target, after=True)"),
         ]
         self.assertCountEqual(callers, expected)

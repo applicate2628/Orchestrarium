@@ -12,6 +12,7 @@ import os
 import re
 import stat as stat_module
 import sys
+import threading
 from collections import deque
 from dataclasses import dataclass, field, fields, is_dataclass, replace
 from datetime import datetime
@@ -42,6 +43,8 @@ FINDING_CLASSES = {"publication-safety", "security", "correctness", "performance
 PROTECTED_CLASSES = {"publication-safety", "security", "legacy-unclassified"}  # non-user-waivable (spine: $security-reviewer only)
 LEGACY_MIGRATION_KIND = "legacy-obligation-migration"
 LEGACY_MIGRATION_SCOPE = ["ledger-migration:invalid-finding-class"]
+
+
 LEGACY_MIGRATION_NORMALIZATIONS = {
     "invalid-finding-class": {
         "scope": ["ledger-migration:invalid-finding-class"],
@@ -65,6 +68,9 @@ V2_ONLY_FIELDS = {
     "launchRunId",
     "closesRunIds",
     "artifactRevision",
+    "artifactSizeBytes",
+    "terminalReceiptSha256",
+    "terminalReceiptSizeBytes",
     "lane",
     "effort",
     "findingClass",
@@ -88,6 +94,7 @@ V2_ONLY_FIELDS = {
     "externalEvidenceRunId",
     "effortMappingLoss",
     "launchFlags",
+    "sdkExecution",
     "closerRunId",
     "targetTuple",
 }
@@ -148,6 +155,9 @@ ALLOWED_FIELDS = {
     "launchRunId",
     "closesRunIds",
     "artifactRevision",
+    "artifactSizeBytes",
+    "terminalReceiptSha256",
+    "terminalReceiptSizeBytes",
     "lane",
     "effort",
     "findingClass",
@@ -171,6 +181,7 @@ ALLOWED_FIELDS = {
     "externalEvidenceRunId",
     "effortMappingLoss",
     "launchFlags",
+    "sdkExecution",
     "closerRunId",
     "targetTuple",
 }
@@ -349,6 +360,182 @@ def validate_launch_profile(
     return exact, model, effort
 
 
+
+def validate_sdk_execution(
+    value: object, *, provider: object, model: object, effort: object
+) -> dict[str, object]:
+    """Validate selected SDK configuration, not observed execution or authority.
+
+    The existing ledger schema owns the shape. Provider adapters and result
+    parsers reuse this callable rather than copying its validation. Native SDK
+    availability, current permissions and process settlement remain other owners.
+    """
+    schema = AGENT_RUN_SCHEMA["properties"]["sdkExecution"]
+    if (type(value) is not dict or not set(schema["required"]) <= set(value)
+        or not set(value) <= set(schema["properties"])):
+        raise ValueError("sdkExecution requires its exact versioned fields")
+    revision = next((branch for branch in schema["oneOf"]
+                     if type(value["schemaVersion"]) is int
+                     and value["schemaVersion"] == branch["properties"]["schemaVersion"]["const"]), None)
+    if (revision is None or not set(revision.get("required", [])) <= set(value)
+        or any(name in value for name, rule in revision["properties"].items() if rule is False)):
+        raise ValueError("sdkExecution requires its exact versioned fields")
+    # The observed Copilot profile omits versions not observed by its SDK.
+    # Keep historical providers' version requirements owned by the same schema.
+    if revision is not None and "if" in revision:
+        matches = all(value.get(name) == rule.get("const")
+                      for name, rule in revision["if"]["properties"].items())
+        conditional = revision.get("then" if matches else "else", {})
+        if not set(conditional.get("required", [])) <= set(value):
+            raise ValueError("sdkExecution requires its exact versioned fields")
+    for name, rules in schema["properties"].items():
+        if name not in value:
+            continue
+        field = value[name]
+        if "const" in rules and (type(field) is not type(rules["const"]) or field != rules["const"]):
+            raise ValueError(f"sdkExecution {name} is unsupported")
+        if "enum" in rules and not any(type(field) is type(allowed) and field == allowed for allowed in rules["enum"]):
+            raise ValueError(f"sdkExecution {name} is unsupported")
+        if rules.get("type") == "string" and (
+            type(field) is not str
+            or not rules["minLength"] <= len(field) <= rules["maxLength"]
+            or re.fullmatch(rules["pattern"], field, re.ASCII) is None
+        ):
+            raise ValueError(f"sdkExecution {name} must be one safe domain token")
+    supported_binding = (
+        (provider, value["adapter"], value["sandboxMode"], value["approvalPolicy"])
+        in (
+            ("codex", "openai-codex", "read-only", "deny_all"),
+            ("codex", "openai-codex", "workspace-write", "deny_all"),
+            ("claude", "claude-agent-sdk", "tool-restricted-read-only", "deny_unadmitted"),
+            ("copilot", "microsoft-copilot-sdk", "tool-restricted-read-only", "deny_all"),
+            ("copilot", "microsoft-copilot-sdk", "tool-restricted-workspace-write", "deny_unadmitted"),
+            ("claude", "claude-agent-sdk", "tool-restricted-workspace-write", "deny_unadmitted"),
+        )
+    )
+    if not supported_binding or value["model"] != model or value["effort"] != effort:
+        raise ValueError("sdkExecution must bind the declared provider, model, effort and adapter controls")
+    writing = value["sandboxMode"] in {"workspace-write", "tool-restricted-workspace-write"}
+    if writing != ("writeWorkspaceSha256" in value) or (writing and value["schemaVersion"] not in {1, 2}):
+        raise ValueError("sdkExecution workspace binding does not match its sandbox")
+    if value["schemaVersion"] in {3, 5} and (
+        (provider != "codex" and not (provider in {"copilot", "claude"} and value["schemaVersion"] == 5))
+        or value["outerBudgetBinding"] == value["innerBudgetBinding"]
+    ):
+        raise ValueError("coordination inference requires a supported scoped provider and distinct turn reservations")
+    if {"continuationSourceSha256", "forkSourceSha256"} <= value.keys():
+        raise ValueError("native context source modes are mutually exclusive")
+    persistent=(value.get("schemaVersion")==5 and value.get("decisionSessionMode")=="native-persistent" and "childAssignmentSha256" in value)
+    fresh = (value.get("schemaVersion") == 5 and "childAssignmentSha256" in value
+             and "childDecisionContextSha256" in value and "decisionSessionMode" not in value
+             and not {"continuationSourceSha256", "forkSourceSha256"} & value.keys())
+    if {"decisionSessionMode", "childAssignmentSha256", "childDecisionContextSha256"} & value.keys():
+        if not (fresh or (persistent and "childDecisionContextSha256" not in value)):
+            raise ValueError("scoped child decision requires exact fresh or persistent assignment binding")
+    if {"continuationSourceSha256", "forkSourceSha256"} & value.keys():
+        codex_context = (provider == "codex" and value["sandboxMode"] == "read-only"
+                         and (value["schemaVersion"] in {1, 2} or persistent)
+                         and not (persistent and "forkSourceSha256" in value))
+        copilot_context = (provider == "copilot" and value["sandboxMode"] == "tool-restricted-read-only"
+                           and "forkSourceSha256" not in value
+                           and (value["schemaVersion"] in {1, 2} or persistent))
+        claude_context = (provider == "claude" and value["sandboxMode"] == "tool-restricted-read-only"
+                          and "forkSourceSha256" not in value
+                          and (value["schemaVersion"] in {1, 2} or persistent))
+        if not (codex_context or copilot_context or claude_context):
+            raise ValueError("continuation metadata requires a supported read-only native context")
+    if value["schemaVersion"] in {3, 5} and value["operationKind"] != {
+        3: "coordination-inference", 5: "scoped-child-coordination"}[value["schemaVersion"]]:
+        raise ValueError("coordination operation kind does not match selected schema")
+    return dict(value)
+
+
+def _validate_sdk_event(event: Mapping[str, object], errors: list[str]) -> None:
+    """Receive supported SDK routes through the existing event owner only."""
+    run_id = event.get("runId")
+    if "sdkExecution" not in event and event.get("actualExecutionPath") != "direct-external-sdk":
+        return
+    try:
+        validate_sdk_execution(
+            event.get("sdkExecution"), provider=event.get("provider"),
+            model=event.get("model"), effort=event.get("effort"),
+        )
+    except ValueError as exc:
+        fail(errors, f"{run_id}: {exc}")
+    selected = event.get("sdkExecution")
+    if event.get("provider") == "copilot" and type(selected) is dict and selected.get("schemaVersion") != 5:
+        try:
+            import provider_prompt
+            _roles, reviewers, workers, _unsupported = provider_prompt._external_role_taxonomy()
+            lane = event.get("executionRole")
+            valid_role = ((lane == "consultant" and event.get("assignedRole") == "consultant"
+                           and event.get("gate") == "none")
+                          or (lane == "external-reviewer" and event.get("assignedRole") in reviewers)
+                          or (lane == "external-worker" and event.get("assignedRole") in workers
+                              and event.get("gate") == "none"
+                              and selected.get("sandboxMode") == "tool-restricted-workspace-write"))
+            if selected.get("schemaVersion") != 2 or event.get("role") != lane or not valid_role:
+                raise ValueError("Copilot requires selected nonauthorizing role provenance")
+        except (ValueError, ImportError) as exc:
+            fail(errors, f"{run_id}: {exc}")
+    if type(selected) is dict and selected.get("sandboxMode") in {"workspace-write", "tool-restricted-workspace-write"}:
+        try:
+            # Reuse the canonical role owner rather than another role allowlist.
+            import provider_prompt
+            _roles, _reviewers, workers, _unsupported = provider_prompt._external_role_taxonomy()
+            if (selected.get("schemaVersion") != 2
+                    or event.get("executionRole") != "external-worker"
+                    or event.get("role") != "external-worker"
+                    or event.get("assignedRole") not in workers
+                    or event.get("gate") != "none"):
+                raise ValueError("workspace-write requires selected worker provenance and gate none")
+        except (ValueError, ImportError) as exc:
+            fail(errors, f"{run_id}: {exc}")
+    if type(selected) is dict and ({"continuationSourceSha256", "forkSourceSha256"} & selected.keys()):
+        scoped=(selected.get("schemaVersion")==5 and selected.get("decisionSessionMode")=="native-persistent" and "forkSourceSha256" not in selected
+            and event.get("executionRole")=="main" and event.get("assignedRole")=="lead")
+        consultant=(selected.get("schemaVersion")==2 and event.get("executionRole")=="consultant" and event.get("assignedRole")=="consultant")
+        if not (scoped or consultant) or event.get("gate") != "none":
+            fail(errors, f"{run_id}: continuation requires selected Consultant provenance")
+    if type(selected) is dict and selected.get("schemaVersion") in {3, 5}:
+        if any(event.get(k) != expected for k, expected in
+               (("role", "lead"), ("executionRole", "main"),
+                ("assignedRole", "lead"), ("gate", "none"))):
+            fail(errors, f"{run_id}: coordination inference requires its nonauthorizing main/lead operation binding")
+    if event.get("schemaVersion") != 2 or event.get("actualExecutionPath") != "direct-external-sdk":
+        fail(errors, f"{run_id}: sdkExecution requires the V2 direct-external-sdk route")
+    if event.get("eventKind") not in ("launch", "terminal"):
+        fail(errors, f"{run_id}: sdkExecution requires a launch/terminal pair")
+    if "launchFlags" in event:
+        fail(errors, f"{run_id}: sdkExecution forbids fabricated launchFlags")
+    for field in ("assignedRole", "artifactIdentity", "externalDispatchId", "externalEvidenceRunId", "effortMappingLoss"):
+        if not isinstance(event.get(field), str) or not event[field].strip():
+            fail(errors, f"{run_id}: sdkExecution requires {field}")
+    if event.get("externalDispatchId") == event.get("externalEvidenceRunId"):
+        fail(errors, f"{run_id}: SDK dispatch and terminal identities must be distinct")
+    if event.get("eventKind") == "launch":
+        if event.get("externalDispatchId") != run_id:
+            fail(errors, f"{run_id}: SDK launch runId must equal externalDispatchId")
+        if event.get("status") != "running" or event.get("gate") != "none":
+            fail(errors, f"{run_id}: SDK launch requires running status and gate none")
+        if event.get("externalEvidenceRunId") == run_id:
+            fail(errors, f"{run_id}: SDK launch and terminal identities must be distinct")
+        for field in ("terminalClass", "authorizing", "closesRunIds", "closerRunId", "targetTuple"):
+            if field in event:
+                fail(errors, f"{run_id}: SDK launch forbids terminal authority field {field}")
+    elif event.get("eventKind") == "terminal":
+        if event.get("launchRunId") != event.get("externalDispatchId"):
+            fail(errors, f"{run_id}: SDK terminal launchRunId must equal externalDispatchId")
+        if event.get("status") not in ("completed", "revise", "blocked", "cancelled"):
+            fail(errors, f"{run_id}: SDK terminal requires terminal status")
+        if event.get("terminalClass") != "external-nonauthorizing":
+            fail(errors, f"{run_id}: SDK terminal requires external-nonauthorizing")
+        if event.get("authorizing") is not False or event.get("closesRunIds") != []:
+            fail(errors, f"{run_id}: SDK terminal cannot authorize or close another run")
+        if event.get("externalEvidenceRunId") != run_id:
+            fail(errors, f"{run_id}: SDK terminal evidence run must equal its runId")
+
+
 def _kimi_empty_flags_resolved_effort(event: Mapping[str, object]) -> bool:
     return (
         event.get("provider") == "kimi"
@@ -358,8 +545,40 @@ def _kimi_empty_flags_resolved_effort(event: Mapping[str, object]) -> bool:
     )
 
 
+_paired_source_binding = None
+_paired_validator_module = None
+_PAIRED_LIFECYCLE_LOCK = threading.RLock()
+
+
 def load_lifecycle_owner():
     global _LIFECYCLE_OWNER
+    binding = _paired_source_binding
+    if binding is not None:
+        binding.assert_current()
+        with _PAIRED_LIFECYCLE_LOCK:
+            binding.assert_current()
+            if _LIFECYCLE_OWNER is not None:
+                return _LIFECYCLE_OWNER
+            # Each paired generation owns its registration, including concurrent
+            # scopes. The lifecycle module captures this exact identity at import.
+            name = f"work_item_lifecycle_owner_for_validation_{id(_PAIRED_LIFECYCLE_LOCK):x}"
+            owner_path = Path(__file__).with_name("mutate-work-item.py")
+            spec = importlib.util.spec_from_file_location(name, owner_path)
+            if spec is None or spec.loader is None:
+                raise RuntimeError(f"Unable to load lifecycle owner from {owner_path}")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            try:
+                spec.loader.exec_module(module)
+                binding.assert_current()
+                module._paired_source_binding = binding
+                module._paired_validator_module = _paired_validator_module
+                _LIFECYCLE_OWNER = module
+            except BaseException:
+                if sys.modules.get(name) is module:
+                    del sys.modules[name]
+                raise
+            return module
     if _LIFECYCLE_OWNER is not None:
         return _LIFECYCLE_OWNER
     owner_path = Path(__file__).with_name("mutate-work-item.py")
@@ -1377,6 +1596,8 @@ def _artifact_archive_locator(root, candidate, recorded):
         if locator.selected.exists():
             return locator
     return None
+
+
 
 
 def _resolve_active_slug_in_archive(root: Path, candidate: Path) -> Path | None:
@@ -2664,13 +2885,13 @@ class _CurrentEvidenceV1:
                 self.predicates[key] = selected
                 self.selection_inputs.append(selected)
 
-    def bind_bytes(self, path, raw, *, snapshot=None):
-        key = ("bytes", path, raw)
+    def bind_bytes(self, path, raw, *, snapshot=None, _locator=None):
+        key = ("bytes", path, raw) if _locator is None else ("bytes", path, raw, _locator)
         if key not in self.predicates:
             if self.received:
                 raise ValueError("WI-LEDGER-CUSTODY-STALE-TARGET: unprepared selected bytes")
             self.predicates[key] = _CurrentPredicateV1("bytes", path, True,
-                snapshot=snapshot, expected_bytes=raw)
+                snapshot=snapshot, expected_bytes=raw, artifact_locator=_locator)
         return self.predicates[key]
 
     def bind_selection(self, path, raw, *, snapshot=None):
@@ -3711,7 +3932,10 @@ def _prepare_review_proof_inputs(rows, item, inputs):
     """
     index = {}
     for row in rows:
-        index.setdefault(row.event.get("runId"), []).append(row.event)
+        run_id = row.event.get("runId")
+        # Opaque historical IDs remain diagnostic data, never proof references.
+        if type(run_id) is str and run_id:
+            index.setdefault(run_id, []).append(row.event)
     for row in rows:
         event = row.event
         if "reviewClosureProofs" not in event:
@@ -4882,6 +5106,43 @@ def _validate_event_fields(
     elif "artifact" in event and not isinstance(artifact, str):
         fail(errors, f"{run_id}: artifact must be a string")
 
+    if "terminalReceiptSha256" in event or "terminalReceiptSizeBytes" in event:
+        digest, size = event.get("terminalReceiptSha256"), event.get("terminalReceiptSizeBytes")
+        if (event.get("eventKind") != "terminal" or event.get("terminalClass") != "external-nonauthorizing"
+            or event.get("actualExecutionPath") != "direct-external-cli" or event.get("authorizing") is not False
+            or not isinstance(digest,str) or SHA256_RE.fullmatch(digest) is None
+            or type(size) is not int or size <= 0):
+            fail(errors, f"{run_id}: external CLI receipt requires paired exact SHA-256 and positive byte count")
+
+    sdk_terminal = (event.get("actualExecutionPath") == "direct-external-sdk"
+                    and event.get("eventKind") == "terminal")
+    internal_artifact = (event.get("eventKind") == "standalone" and event.get("terminalClass") is None
+                         and event.get("actualExecutionPath") is None and not event.get("provider"))
+    if "artifactSizeBytes" in event and not ((sdk_terminal or internal_artifact) and artifact):
+        fail(errors, f"{run_id}: artifactSizeBytes requires a persisted SDK terminal or internal standalone artifact")
+    if (sdk_terminal or (internal_artifact and "artifactSizeBytes" in event)) and artifact:
+        digest, size = event.get("artifactRevision"), event.get("artifactSizeBytes")
+        if (not isinstance(digest, str) or SHA256_RE.fullmatch(digest) is None
+            or type(size) is not int or size < 0):
+            fail(errors, f"{run_id}: SDK artifact requires exact SHA-256 artifactRevision and artifactSizeBytes (WI-SDK-ARTIFACT-BINDING)")
+        elif artifact_path is not None:
+            owner = load_lifecycle_owner()
+            try:
+                if isinstance(artifact_path, _CapturedHistoryPath):
+                    raw, snapshot = artifact_path.read_bytes(), None
+                else:
+                    snapshot = owner._capture_file_snapshot(artifact_path,
+                        failure_id="WI-SDK-ARTIFACT-BINDING", maximum_bytes=size)
+                    raw = snapshot.data
+                if len(raw) != size or hashlib.sha256(raw).hexdigest() != digest:
+                    raise ValueError("received SDK artifact content differs")
+                predicate = _inputs.bind_bytes(artifact_path, raw, snapshot=snapshot,
+                                               _locator=artifact_locator)
+                _evidence.require(predicate,
+                    f"{run_id}: received SDK artifact or locator changed (WI-SDK-ARTIFACT-BINDING)")
+            except (OSError, ValueError, owner.LifecycleError) as exc:
+                fail(errors, f"{run_id}: WI-SDK-ARTIFACT-BINDING: {exc}")
+
     if evidence is not None:
         validate_evidence(evidence, run_id, errors, gate == "PASS")
         for entry, profile in retained_preimage_profiles(event, item, errors):
@@ -5125,6 +5386,8 @@ def _validate_event_fields(
             fail(errors, f"{run_id}: launchRunId is only legal on eventKind terminal")
     if event_kind == "terminal" and "launchRunId" not in event:
         fail(errors, f"{run_id}: eventKind terminal requires launchRunId")
+    _validate_sdk_event(event, errors)
+    sdk_route = event.get("actualExecutionPath") == "direct-external-sdk"
     terminal_class = event.get("terminalClass")
     typed_terminal_fields = {
         "terminalClass", "authorizing", "actualExecutionPath", "artifactIdentity",
@@ -5146,17 +5409,26 @@ def _validate_event_fields(
                 fail(errors, f"{run_id}: external terminal requires {key}")
             if event.get("authorizing") is not False:
                 fail(errors, f"{run_id}: external terminal requires authorizing=false")
-            if event.get("actualExecutionPath") != "direct-external-cli":
-                fail(errors, f"{run_id}: external terminal requires direct-external-cli")
+            if event.get("actualExecutionPath") not in {"direct-external-cli", "direct-external-sdk"}:
+                fail(errors, f"{run_id}: external terminal requires a direct external execution path")
+            selected_sdk = event.get("sdkExecution")
+            coordination_actor = (
+                sdk_route and type(selected_sdk) is dict
+                and (event.get("provider") == "codex" and selected_sdk.get("schemaVersion") in {3, 5}
+                     or event.get("provider") in {"copilot", "claude"} and selected_sdk.get("schemaVersion") == 5)
+                and selected_sdk.get("operationKind") == {3:"coordination-inference",5:"scoped-child-coordination"}.get(selected_sdk.get("schemaVersion"))
+                and event.get("role") == event.get("assignedRole") == "lead"
+                and event.get("gate") == "none"
+            )
             if event.get("executionRole") not in {
                 "external-worker", "external-reviewer", "consultant", "none",
-            }:
+            } and not (coordination_actor and event.get("executionRole") == "main"):
                 fail(errors, f"{run_id}: external terminal has invalid executionRole")
             if event.get("closesRunIds") != []:
                 fail(errors, f"{run_id}: external terminal requires empty closesRunIds")
             provider = event.get("provider")
             extended = {"externalDispatchId", "externalEvidenceRunId", "effortMappingLoss"}
-            if provider in {"codex", "claude"}:
+            if provider in {"codex", "claude"} and not sdk_route:
                 for key in sorted(extended & set(event)):
                     fail(errors, f"{run_id}: {provider} external terminal forbids {key}")
             elif provider in {"kimi", "grok"}:
@@ -5164,7 +5436,7 @@ def _validate_event_fields(
                     fail(errors, f"{run_id}: {provider} external terminal requires {key}")
                 if event.get("externalEvidenceRunId") != run_id:
                     fail(errors, f"{run_id}: external terminal evidence run must equal its runId")
-            else:
+            elif not sdk_route:
                 fail(errors, f"{run_id}: external terminal provider must be codex, claude, kimi, or grok")
         elif terminal_class == "internal-authorizing":
             required = {
@@ -5222,6 +5494,8 @@ def _validate_event_fields(
             and event.get("invalidationMode") in {"invalid-current-nonauthorizing", "historical-custody"}
         )
         unexpected_typed = typed_terminal_fields & set(event)
+        if sdk_route and event_kind == "launch":
+            unexpected_typed -= {"actualExecutionPath", "artifactIdentity", "externalDispatchId", "externalEvidenceRunId", "effortMappingLoss"}
         internal_closer_identity = (
             event.get("schemaVersion") == 2
             and unexpected_typed == {"artifactIdentity"}
@@ -5413,6 +5687,13 @@ def launch_terminal_binding_mismatches(launch, terminal) -> tuple[str, ...]:
         "workItem", "role", "executionRole", "assignedRole", "provider", "model",
         "scope", "promptFile", "effort", "launchFlags",
     )
+    if (launch.get("actualExecutionPath") == "direct-external-sdk"
+        or terminal.get("actualExecutionPath") == "direct-external-sdk"
+        or "sdkExecution" in launch or "sdkExecution" in terminal):
+        binding_fields += (
+            "sdkExecution", "actualExecutionPath", "artifactIdentity",
+            "externalDispatchId", "externalEvidenceRunId", "effortMappingLoss",
+        )
     return tuple(key for key in binding_fields
                  if (key in launch) != (key in terminal)
                  or (key in launch and not equal(launch[key], terminal[key])))
@@ -5530,7 +5811,10 @@ def _derive_authority_masks(
         binding_matches = False
         mismatches = ()
         if target is not None:
-            if not historical_definition:
+            if (not historical_definition
+                or target.get("actualExecutionPath") == "direct-external-sdk"
+                or event.get("actualExecutionPath") == "direct-external-sdk"
+                or "sdkExecution" in target or "sdkExecution" in event):
                 mismatches = launch_terminal_binding_mismatches(target, event)
                 binding_matches = not mismatches
             elif "launchFlags" not in target:
@@ -8875,6 +9159,8 @@ def _history_hold_errors(holds: Sequence[HistoricalLedgerHoldV1], errors: list[s
 
 def _unresolved_history(holds: Sequence[HistoricalLedgerHoldV1]) -> tuple[HistoricalLedgerHoldV1, ...]:
     return tuple(hold for hold in holds if hold.disposition_run_id is None)
+
+
 
 
 def _ordinary_current_disposition_rows(
@@ -12792,11 +13078,22 @@ def _obligations_observation(
     acquisition_complete: list[bool] = []
     try:
         captured = None
-        selected_absent = False
+        owner = load_lifecycle_owner()
+        selection_evidence = []
         try:
-            captured = read_ledger_bytes(selected, ledger_resource_budget)
-        except FileNotFoundError:
-            selected_absent = True
+            # Capture absence through its owner, not a failed file capture:
+            # missing, unreadable and drifting files share the latter's error.
+            selected_absent = owner._observe_project_path_at(
+                selected, "file", selection_evidence, "WI-LEDGER-RESOURCE-DRIFT"
+            ) is None
+            if not selected_absent:
+                captured = read_ledger_bytes(selected, ledger_resource_budget)
+            owner._verify_project_binding_evidence(
+                tuple(selection_evidence), "WI-LEDGER-RESOURCE-DRIFT"
+            )
+        except owner.LifecycleError as exc:
+            raise ValueError(f"{exc.failure_id}: {exc}") from exc
+        if selected_absent:
             if ledger_path is None:
                 status = item / "status.md"
                 if status.exists() and is_quick_fix_status(status.read_text(encoding="utf-8")):

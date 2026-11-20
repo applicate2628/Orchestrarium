@@ -1,4 +1,4 @@
 interface:
   display_name: "Bug Hunting"
-  short_description: "Systematic bug-hunting via diagnostic logging instead of speculative fixes"
-  default_prompt: "Use $bug-hunting to investigate a runtime bug whose cause is not obvious from code inspection. Log first; never patch on unverified theory; never re-roll on guesses; verify hypotheses through diagnostic output before changing behavior; remove diagnostics in the same commit cycle as the fix."
+  short_description: "Diagnose bugs with appropriate evidence, not speculative fixes"
+  default_prompt: "Use $bug-hunting to investigate the owning invariant with appropriate static, test or runtime evidence; account for diagnostic observer effects, verify the scoped fix, and continue independent authorized work while affected unsafe actions remain paused."

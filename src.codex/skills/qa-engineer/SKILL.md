@@ -15,7 +15,7 @@ description: "Tests, coverage, regressions, bugs, phase verdicts."
 
 - Require the accepted artifact for the selected route, the implementation artifact being tested, any relevant specialist constraints, and the inputs required by the canonical S1 `Receiving-side echo` in `subagent-contracts.md`. A Plan is required only when the selected route admits a Plan stage. Return a handoff that does not satisfy that contract as incomplete.
 - Take only the acceptance criteria, test strategy, allowed change surface, must-not-break surfaces, and verification scope needed for the phase.
-- Limit writes to tests, fixtures, harnesses, and QA-only helpers unless explicitly approved otherwise.
+- A read-only QA dispatch reports the missing falsifier to the existing test owner; it cannot author tests or product fixes. Only a separately and explicitly admitted writable QA assignment may edit its scoped tests, fixtures, harnesses or QA-only helpers. Do not treat a self-authored test result as independent gate evidence.
 
 ## Return exactly one artifact
 
@@ -24,6 +24,7 @@ description: "Tests, coverage, regressions, bugs, phase verdicts."
 ## Gate
 
 - Every acceptance criterion is mapped to evidence or an explicit gap.
+- For a high-risk regression with a suspicious green suite, demonstrate a discriminating oracle: observe a known-bad prior result or an inert, non-equivalent synthetic behavior mutation fail and the valid control pass. Reuse immutable existing evidence where adequate; do not mutate admitted source to create evidence in a read-only role.
 - Before any run, challenge each acceptance criterion with a falsifying case and its required property; if the criterion admits the known failure or a degenerate result, return `REVISE` with that evidence to the acceptance owner instead of rewriting accepted success semantics.
 - Apply S1 Result restriction receiving before treating a rejection as expected behavior. For an introduced compatibility restriction in this slice, use a variation that preserves the admitted preconditions and a negative case that violates an actual required precondition; derive both expected results from the accepted contract, not the implementation. If a required case cannot be checked, report its evidence gap. Do not require support outside the admission or expand this slice.
 - Anchor expected behavior to a known-good oracle (a shipped release or independent ground truth), never to a sibling mode or branch that can share the same defect.
@@ -58,6 +59,8 @@ description: "Tests, coverage, regressions, bugs, phase verdicts."
 
 Include a proposed registry record in-band only for a concrete observed defect or unexpected missing required result against the commissioned slice, with expected-versus-actual evidence. `REVISE`/`BLOCKED` alone is not bug admission; intentional deferral and external/host denial retain their actual gate cause and remainder, not a fabricated product defect. Use the configured bug registry path, normally `work-items/bugs/<date>-<slug>.md`, and the canonical bug-style list-item frontmatter (`- key:` bullets, NO `---` YAML fences — the same shape on disk and in `docs/decisions.md`, a maintainer reference not installed at runtime), with the title carried by a `# Bug:` H1 and a free-form body:
 
+When no registry is configured, keep the finding in the returned artifact; do not invent a registry. An adjacent observation, risk or improvement is not automatically a defect. When a registry is configured, use that path rather than inferring a provider default.
+
 ```markdown
 # Bug: <short description>
 
@@ -83,7 +86,7 @@ When existing tests fail after implementation changes, classify each failure:
 | --- | --- | --- |
 | **regression** | Code broke existing behavior that should be preserved | Return `REVISE` — implementer fixes code |
 | **contract-change** | Implementation intentionally changed behavior, tests reflect the old contract | Return `REVISE` — the **same implementer** who changed the behavior updates the tests (QA does NOT fix these) |
-| **test-rot** | Test was always wrong, irrelevant, or testing an implementation detail rather than behavior | File a low-severity bug in `work-items/bugs/`, continue — do not block the phase |
+| **test-rot** | Test was always wrong, irrelevant, or testing an implementation detail rather than behavior | Propose a low-severity defect under the bug-admission contract, continue — do not block the phase |
 | **flaky** | The same test fails and passes across identical re-runs | Quarantine only with a bug-registry entry recording the observed seed, ordering, timing, and parallelism asymmetry; block must-not-break coverage until deterministic |
 
 Include the classification in the verification report for each failing test. For `contract-change`: do NOT attempt to fix tests yourself — return `REVISE` so the implementer can update them under the new contract.

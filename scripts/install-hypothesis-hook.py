@@ -64,8 +64,6 @@ DEFAULT_SCRIPT_MARKER = "check-bugfix-discipline"
 # detected from the session transcript.
 TOOL_MATCHER_REGEX = "Edit|Write|NotebookEdit|apply_patch"
 
-WINDOWS_UNQUOTED_PATH_RE = re.compile(r"^[A-Za-z0-9_:\\./-]+$")
-
 
 class TestTransactionAbort(RuntimeError):
     """Intentional, scratch-contained installer interruption for regression tests."""
@@ -192,17 +190,11 @@ def _validate_spawnable_executable(path_value: str, host_os: str) -> Path:
 
 
 def _codex_windows_command_tokens(target: HookTarget) -> HookTarget:
-    """Render the operator-verified Codex Windows token spelling.
+    """Normalize logical Windows paths without changing existing simple bytes.
 
-    The verified unquoted Windows grammar spells absolute paths with forward
-    separators. Both cmd.exe and PowerShell resolve either separator for an
-    absolute command token, so this is not a correctness fix -- it is a byte
-    fidelity one. Codex derives each hook's trust hash from the entry content,
-    so emitting exactly the spelling the operator already trusted lets a
-    reinstall reproduce the stored `trusted_hash` instead of re-keying all 12
-    entries and raising a blocking review modal.
-
-    The direct-Python registration is the only supported hook command shape.
+    Rendering belongs to the shared invocation owner. Keeping the established
+    forward-separator spelling avoids gratuitous registration changes; unchanged
+    bytes alone never establish the native host's current trust.
     """
     return HookTarget(
         PureWindowsPath(target.executable).as_posix(),
@@ -210,13 +202,8 @@ def _codex_windows_command_tokens(target: HookTarget) -> HookTarget:
     )
 
 
-def _validate_windows_unquoted_tokens(target: HookTarget) -> None:
-    for token in (target.executable, *target.args):
-        if not WINDOWS_UNQUOTED_PATH_RE.fullmatch(token):
-            raise ValueError(
-                "unsupported Windows hook command token for the verified unquoted "
-                f"serialization: {token!r}"
-            )
+def _validate_windows_command_tokens(target: HookTarget) -> None:
+    _hook_health_owner().serialize_windows_hook_command((target.executable, *target.args))
 
 
 def resolve_hook_target(
@@ -246,7 +233,7 @@ def resolve_hook_target(
     target = HookTarget(str(executable), (str(script),))
     if platform == "codex" and host_os == "windows":
         target = _codex_windows_command_tokens(target)
-        _validate_windows_unquoted_tokens(target)
+        _validate_windows_command_tokens(target)
     return target
 
 
@@ -304,7 +291,7 @@ def build_codex_entry(
     """Build the Codex shell-form entry for a resolved HookTarget."""
     tokens = (target.executable, *target.args)
     command_str = (
-        " ".join(tokens)
+        _hook_health_owner().serialize_windows_hook_command(tokens)
         if host_os == "windows"
         else " ".join(shlex.quote(token) for token in tokens)
     )
@@ -335,7 +322,8 @@ def _hook_health_owner():
         spec.loader.exec_module(module)
     except (OSError, ImportError) as exc:
         raise ValueError("hook invocation owner could not be loaded") from exc
-    if not callable(getattr(module, "classify_hook_invocation", None)):
+    if not all(callable(getattr(module, name, None)) for name in
+               ("classify_hook_invocation", "serialize_windows_hook_command")):
         raise ValueError("hook invocation owner is incompatible")
     return module
 

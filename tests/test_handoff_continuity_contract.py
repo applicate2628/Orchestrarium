@@ -16,22 +16,20 @@ ROOT = Path(__file__).resolve().parent.parent
 
 HANDOFFS = (
     ROOT / "src.codex" / "skills" / "lead" / "subagent-contracts.md",
-    ROOT / "src.claude" / "agents" / "contracts" / "subagent-contracts.md",
+    ROOT / 'adapters/claude' / "agents" / "contracts" / "subagent-contracts.md",
 )
-# Both providers install this canonical Lead body. The historical Claude
-# skill tree is migration evidence, not a live handoff-contract projection.
-LEADS = (
-    ROOT / "src.codex" / "skills" / "lead" / "SKILL.md",
-)
+# The production installer uses this body for both Codex and Claude.
+CANONICAL_LEAD = ROOT / "src.codex" / "skills" / "lead" / "SKILL.md"
+# Retained historical migration input, not a current Claude runtime projection.
+LEGACY_CLAUDE_LEAD = ROOT / "adapters/claude" / "skills" / "lead" / "SKILL.md"
 OPERATING_MODELS = (
     ROOT / "src.codex" / "skills" / "lead" / "operating-model.md",
-    ROOT / "src.claude" / "agents" / "contracts" / "operating-model.md",
+    ROOT / 'adapters/claude' / "agents" / "contracts" / "operating-model.md",
 )
-CODEX_LEAD = LEADS[0]
-CLAUDE_AGENT = ROOT / "src.claude" / "agents" / "lead.md"
+CLAUDE_AGENT = ROOT / "adapters/claude" / "agents" / "lead.md"
 SHARED = ROOT / "shared" / "references" / "subagent-operating-model.md"
 CLAUDE_FULL_DELIVERY = (
-    ROOT / "src.claude" / "agents" / "team-templates" / "full-delivery.json"
+    ROOT / 'adapters/claude' / "agents" / "team-templates" / "full-delivery.json"
 )
 
 
@@ -60,7 +58,9 @@ def test_pao_revision_and_scenario_reject_stale_environment_evidence() -> None:
 
 
 def test_upstream_claim_owner_survives_implementation_and_review() -> None:
-    for path in LEADS + OPERATING_MODELS:
+    # Both installed providers receive this canonical skill body; the Claude
+    # skills tree is historical migration input, not a current policy owner.
+    for path in (CANONICAL_LEAD,) + OPERATING_MODELS:
         _requires(
             path,
             "accepted Architect or domain artifact/revision unchanged in `Approved inputs`",
@@ -90,7 +90,7 @@ def test_context_dependent_tool_requires_its_existing_scope_binding() -> None:
 
 def test_pending_init_remains_unsettled_without_invented_failure_semantics() -> None:
     _requires(
-        CODEX_LEAD,
+        CANONICAL_LEAD,
         "`pending_init` is an observed non-terminal host state with undocumented cause",
         "does not prove model, provider, or executable unavailability",
         "Perform one bounded current-state probe",
@@ -103,8 +103,14 @@ def test_pending_init_remains_unsettled_without_invented_failure_semantics() -> 
     assert "`pending_init`" not in _read(CLAUDE_AGENT)
 
 
+def test_historical_claude_migration_input_has_no_codex_pending_init_rule() -> None:
+    # This guards the retained migration input, not the installed Claude body.
+    assert "`pending_init`" not in _read(LEGACY_CLAUDE_LEAD)
+
+
 def test_ordinary_required_effort_does_not_override_exact_profile_membership() -> None:
-    for path in LEADS:
+    # Keep compatibility-input coverage separate from current source ownership.
+    for path in (CANONICAL_LEAD, LEGACY_CLAUDE_LEAD):
         _requires(
             path,
             "exact membership in task `admissibleProfiles` intersected with role `allowedProfiles`",

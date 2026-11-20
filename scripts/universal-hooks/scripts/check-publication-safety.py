@@ -94,10 +94,11 @@ def _load_posix_process_group_module():
     elif (
         script.parents[0].name == "scripts"
         and script.parents[1].name == "agents"
-        and script.parents[2].name == "src.claude"
+        and script.parents[2].name == "claude"
+        and script.parents[3].name == "adapters"
     ):
         candidates.append(
-            script.parents[3]
+            script.parents[4]
             / "scripts"
             / "process_supervision"
             / "posix_process_group.py"
@@ -161,9 +162,10 @@ def _load_windows_job_module():
         elif (
             script.parents[0].name == "scripts"
             and script.parents[1].name == "agents"
-            and script.parents[2].name == "src.claude"
+            and script.parents[2].name == "claude"
+            and script.parents[3].name == "adapters"
         ):
-            candidates.append(script.parents[3] / "scripts" / "process_supervision" / "windows_job.py")
+            candidates.append(script.parents[4] / "scripts" / "process_supervision" / "windows_job.py")
         available = tuple(path for path in candidates if path.is_file())
         if len(available) != 1:
             raise RuntimeError("Windows Job helper unavailable or ambiguous")
@@ -212,7 +214,7 @@ else:
 _SCANNER_EXEMPT_PATHS = frozenset({
     "scripts/universal-hooks/scripts/check-publication-safety.py",
     "src.codex/skills/lead/scripts/check-publication-safety.py",
-    "src.claude/agents/scripts/check-publication-safety.py",
+    "adapters/claude/agents/scripts/check-publication-safety.py",
 })
 _SIMPLE_RULES = (
     (True, re.compile(r"AKIA[0-9A-Z]{16}")),
@@ -295,6 +297,7 @@ _VALUE_RULES = (("token", _CONCATENATED_CREDENTIAL_TOKEN),) + tuple(
     for family, keyword, title, upper in _KEYWORDS
 )
 _VALUE_PATTERNS = tuple(pattern for _family, pattern in _VALUE_RULES)
+_VALUE_ASSIGNMENT_HINT = re.compile(r"(?:password|secret|token|key)\s*[:=]")
 _IDENTIFIER_COMPONENT = re.compile(
     r"[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+|[A-Z]+|[0-9]+"
 )
@@ -320,7 +323,8 @@ _MAX_LINE_BYTES = 8 * 1_048_576
 _MAX_PARENT_GRAPH_BYTES = 16 * 1_048_576
 _MAX_FINDINGS = 32
 _READ_CHUNK_BYTES = 64 * 1_024
-_SCAN_DEADLINE_SECONDS = 240.0
+# Full baseline scans measured 485–530 seconds; retain a finite 15-minute ceiling.
+_SCAN_DEADLINE_SECONDS = 900.0
 _MAX_TREE_VISITS = _MAX_SUBJECTS
 _MAX_TREE_FRONTIER = _MAX_OBJECTS
 _MAX_TREE_CACHE_ENTRIES = _MAX_OBJECTS
@@ -1459,7 +1463,15 @@ def _line_observations(
             continue
         for match in _matching_starts(pattern, line):
             yield _TextObservation(line, line_number, line_start, None, index, pattern, match)
+    # Every value rule requires its family keyword. ASCII-only prefiltering
+    # preserves Python re's additional Unicode IGNORECASE equivalents.
+    ascii_lower = line.lower() if line.isascii() else None
+    if ascii_lower is not None and _VALUE_ASSIGNMENT_HINT.search(ascii_lower) is None:
+        return
     for index, (family, pattern) in enumerate(_VALUE_RULES):
+        required = "key" if family == "api-key" else family
+        if ascii_lower is not None and required not in ascii_lower:
+            continue
         for match in _matching_starts(pattern, line):
             # Callable syntax is meaningful in blob text. Retain the legacy
             # commit-message contract without granting it to new metadata.
@@ -3630,7 +3642,7 @@ class _ReaderFinalizerResult:
 
 
 class _AsyncGitObjectReader:
-    """One owned asynchronous `git cat-file --batch` session.
+    """One owned asynchronous `git cat-file --batch-command` session.
 
     The reader owns the child and all three pipe transitions. Every request is
     bounded by one monotonic deadline; the caller owns exactly one finalizer.
@@ -3639,11 +3651,12 @@ class _AsyncGitObjectReader:
     def __init__(
         self,
         *,
-        argv: tuple[str, ...] = _range_git_argv("cat-file", "--batch"),
+        argv: tuple[str, ...] | None = None,
         request_timeout: float = _OBJECT_REQUEST_TIMEOUT_SECONDS,
         settle_timeout: float = OBJECT_REAP_ATTEMPT_SECONDS,
     ) -> None:
-        self._argv = argv
+        self._command_mode = argv is None
+        self._argv = _range_git_argv("cat-file", "--batch-command") if argv is None else argv
         self._request_timeout = request_timeout
         self._settle_timeout = settle_timeout
         self._process: asyncio.subprocess.Process | None = None
@@ -3725,7 +3738,7 @@ class _AsyncGitObjectReader:
         if scan_deadline is not None:
             deadline = min(deadline, scan_deadline)
         try:
-            process.stdin.write(oid.encode("ascii") + b"\n")
+            process.stdin.write((b"contents " if self._command_mode else b"") + oid.encode("ascii") + b"\n")
             await self._within(process.stdin.drain(), deadline)
             header = await self._within(process.stdout.readline(), deadline)
             if not header.endswith(b"\n"):
@@ -3801,7 +3814,7 @@ class _AsyncGitObjectReader:
         if scan_deadline is not None:
             deadline = min(deadline, scan_deadline)
         try:
-            process.stdin.write(encoded_name + b"\n")
+            process.stdin.write((b"info " if self._command_mode else b"") + encoded_name + b"\n")
             await self._within(process.stdin.drain(), deadline)
             header = await self._within(process.stdout.readline(), deadline)
             if not header.endswith(b"\n") or len(header) > 256:
@@ -4619,6 +4632,8 @@ async def _acquire_history(
                 max_findings=max(0, _MAX_FINDINGS - len(findings)),
             )
         _append_findings(findings, content_findings)
+        if asyncio.get_running_loop().time() >= scan_deadline:
+            return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
 
     if native:
         for oid in selection.object_oids:

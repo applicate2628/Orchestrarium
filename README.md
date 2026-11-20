@@ -19,17 +19,23 @@ to launch models or spend quota.
 - **Work on the project:** [maintainer starting point](docs/new-session-guide.md).
 - **See released changes:** [release notes](RELEASE_NOTES.md).
 
-## Current release and SDK development
+## Current source and runtime qualification
 
-| | Current `main` | SDK development in [PR #19](https://github.com/applicate2628/Orchestrarium/pull/19) |
-| --- | --- | --- |
-| Availability | The production source described by this README and its installation guide. | A separate, unmerged development branch; not the current globally installed release. |
-| Clients and layout | Codex and Claude Code packs share governance. Their source remains in `src.codex/` and `src.claude/`. | Work toward a common core with client adapters, including Antigravity integration. Its changed paths do not apply to `main`. |
-| Delegation | Existing role selection and execution routes, with their documented permissions and platform limits. | Optional SDK (Software Development Kit) execution and child-session coordination are being developed and checked. They are not enabled by this README. |
-| Evidence | Use the current installation guide and source contracts for the operation being performed. | Offline checks do not establish live provider or platform acceptance. Read the PR's current evidence and remaining limits before testing. |
+This source includes the shared SDK (Software Development Kit) and installation
+core developed in [PR #19](https://github.com/applicate2628/Orchestrarium/pull/19).
+Source availability, installed versions and native execution evidence are distinct:
 
-The SDK branch is not a reason to reinstall or migrate a working setup early.
-This page does not announce SDK release readiness or enable quota-consuming runs.
+| Surface | Current scope |
+| --- | --- |
+| Clients and layout | Shared governance with Codex, Claude Code and Antigravity client adapters; see the source layout below. |
+| Installation | Use [this installation guide](INSTALL.md) for the selected source version. A source update does not update existing installations automatically. |
+| Delegation | Explicit SDK routes and scoped child-session coordination use existing Host permissions and lifecycle owners; no README enables a launch. |
+| Native evidence | One user-operated AGY-to-Codex fresh read-only Consultant handoff passed on installed `c835cc37`. The [checkpoint and source-delta review](docs/sdk-execution.md#user-operated-originating-lead-checkpoint-2026-11-19) distinguish that execution from current-source verification and remaining provider/platform work. |
+
+Offline checks do not establish general live acceptance, and the selected native
+checkpoint is not a global rollout or permission to consume quota. A pre-SDK tag
+preserves source, not machine configuration: see [hook recovery boundaries](INSTALL.md#machine-local-hook-registration)
+before treating a source downgrade as an installation rollback.
 
 ### Roles, models and cost
 
@@ -47,9 +53,10 @@ route does not authorize a model launch, external review or paid operation.
 
 The repository source is authoritative; installed files are runtime outputs.
 Start maintenance with [the source-first guide](docs/new-session-guide.md).
-The root installer currently selects Codex, Claude, or both. Removed Gemini and
-Qwen values are migration identifiers, not supported installation or execution
-routes.
+The root installer selects Codex, Claude, and the bounded
+Antigravity native startup integration, with separate qualification scopes.
+Removed Gemini and Qwen values remain migration identifiers, not install or
+execution routes.
 
 For repository transfer, `$manual-repo-transfer` uses a verified Git clone plus
 only the required current local-state overlay; ignored `work-items/` is not
@@ -57,12 +64,30 @@ included in a clone. Cleanup is a separate explicitly requested operation.
 
 Optional distribution assembly is documented in [the distribution guide](scripts/distribution/README.md).
 It binds the supplied runtime to its notice inventory; it does not change
-provider permissions. [Runtime evidence](scripts/distribution/runtime-evidence.md)
-records the bounded packaging checks, not general SDK acceptance.
+provider permissions. [Historical runtime evidence](https://github.com/applicate2628/Orchestrarium/blob/082d46cd83324117abcb965842005d3c15ab99ed/scripts/distribution/runtime-evidence.md)
+records only the exact earlier inputs and checks.
 
-## WARNING: Claude external authentication
+## SDK integration scope
 
-The Python-owned `invoke-claude-prompt.py` transport (also exposed through the thin POSIX launcher `invoke-claude-prompt.sh`) runs automated, headless `claude -p`. Orchestrarium currently admits only `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` for automated Claude runs; subscription sign-in (OAuth), the subscription override, Amazon Bedrock, and Google Vertex AI fail closed. Claude authentication is irrelevant when the Codex route is selected, so absent Claude credentials do not block Codex. Orchestrarium 1.x refuses `apiKeyHelper` before prompt capture or provider lookup because a helper-generated credential cannot be bound to the transport's exact output scan. For the secret-backed path, use `invoke-claude-api.py` or its thin `invoke-claude-api.sh` launcher with the credentials documented in `SECRET.md`. See [Anthropic's Claude Code legal and compliance guidance](https://code.claude.com/docs/en/legal-and-compliance).
+The source has one shared governance, SDK and installation core;
+client adapters integrate that core rather than creating separate products.
+Kimi and Grok remain higher secondary integration priorities than Claude, without
+automatically enabling a route, qualifying a platform or authorizing quota use.
+
+For generic source development, official agent SDK installation is offered separately through `python install.py --sdk-setup <provider> --sdk-python <interpreter>`; this is not the audited retained-runtime delivery recipe. This form prints a proposal, including vendor runtime dependencies; `--sdk-venv <directory> --apply` instead performs the disclosed official installation and checks the selected environment. Orchestrarium does not redistribute those SDKs or CLIs. See [official setup and the audited retained-runtime recipe](INSTALL.md#official-agent-sdk-setup). Antigravity has a separate native startup projection through the common installer; it is not a programmatically invoked consumer-subscription worker. See [startup scope and commands](INSTALL.md#antigravity-native-startup).
+
+The shared core also provides [explicit AGY native-child assignment and association](INSTALL.md#explicit-agy-native-child-association), without claiming native execution or automatic task completion.
+
+Optional software development kit (SDK) helpers are part of the installer-managed host-pack payload, without dependency provisioning or automatic activation. The explicit `--sdk-review-binding` Codex review path keeps the existing Host (invoking orchestration session) and default routes; the historical installed Windows success/receiving-collision checks and bounded live Codex review passed, while subsequent shared-owner changes retain separate regression evidence and broader scenarios remain unqualified. See [the opt-in contract and qualification boundaries](docs/sdk-execution.md). Maintainers can provision hash-verified public SDK source fixtures without installing or launching providers; see [the offline compatibility checks](docs/sdk-execution.md#reviewed-codex-source-fixtures). The separate `--sdk-task-binding` selector supports read-only Codex Consultant advice with `--ledger-role consultant`, using the same binding and existing launch/receiving owners. Version 5 selects a received predecessor by evidence-run identity for continuation after restart or an explicit native conversation fork; the existing canonical artifact/ledger carries the receipt, and completed turns are not replayed. Older artifacts without a continuation receipt remain readable but do not establish a resumable session. The Claude wrapper also supports an explicit prompt-only Consultant SDK task with a concrete model and selected official API/cloud credentials: it consumes supplied prompt/handoff context, grants no filesystem tools, and records auth-context selection rather than claiming account identity. The mutually exclusive `--sdk-review-binding` selector also supports prompt-only Claude review with a canonical reviewer profession. Review and task schemas stay separate; even a PASS review remains external-nonauthorizing evidence and cannot close obligations. The Python Host executor and explicit Claude Worker task route support Write/Edit through per-tool Host permission and protected-state custody. Public Worker file operations are checked against the admitted workspace and protected control paths; this is application-level enforcement, not an operating-system sandbox. Claude Reviewer and Consultant routes remain prompt-only. Claude Consultant version-5 bindings can resume an exactly received native transcript through its verified private path and canonical one-successor claim; missing or changed transcript evidence is not replaced with a fresh session. This does not enable Reviewer/Worker continuation and is not an OS-exclusive transcript lock. Persistent Claude child decisions use the separate scoped Host coordination route. Binding version 4 also admits an explicitly selected Codex Worker profession with a whole-workspace write boundary; binding, prompt, ledger, credentials, runtime, terminal and capture storage stay outside that workspace. Existing `CODEX_PROMPTS_DIR` selects an external capture directory. This source path has offline regression evidence only, not installed or live qualification; default routes and spending permissions are unchanged.
+
+Client-specific authentication restrictions are documented in [client integration notes](docs/client-integrations.md). They do not block the primary Codex route.
+
+Scoped child Lead coordination is an explicit Python Host integration over existing admitted requests and lifecycle owners, not an automatically enabled CLI mode. Root can select separate fresh-handoff decisions through Codex, official Claude API or Copilot, or supported persistent Codex/Claude/Copilot native decision sessions with received-evidence recovery; no mode enables launches by itself. Claude persistent decisions reuse canonical native transcript custody and exact-path resume; received intent recovery does not require a new inference. A child may start from an explicit goal/context with no executable tasks yet. New child task proposals use durable handoff to existing Root admission; only Root-published admitted requests extend the executable catalog. Explicit Root task/route decisions can be registered and restored from existing admission evidence without reconstructing model defaults. See [child Lead integration and remaining boundaries](docs/sdk-execution.md#scoped-child-lead-host-integration). Offline coverage does not imply installed/native acceptance.
+
+
+Antigravity startup supplies shared governance, a distinct `orchestrarium-lead` skill and a native `SessionStart` context hook. It preserves Codex skills and unrelated customizations. Its narrow PreToolUse bridge also warns about machine-local paths in supported write/replacement content through the shared AUDIT classifier. A separate native command advisory applies the existing stray-artifact audit using the tool's actual working directory, without executing the command. Neither advisory enforces tool permissions, receives native subagent results, or qualifies a live SDK route.
+
+The AGY package exposes the [existing external Codex SDK entrypoint](INSTALL.md#agy-lead-to-external-codex-sdk-review) for Reviewer, read-only Consultant and scoped Worker tasks through its own managed runtime and canonical receiving owner. The observed fresh Consultant handoff above is distinct from installed-path synthetic tests for other roles. These are explicitly admitted external tasks, not AGY-native subagents or automatic launches; continuation, writes and other native routes retain their separate qualification boundaries.
 
 ## Repository layout
 
@@ -70,9 +95,10 @@ The Python-owned `invoke-claude-prompt.py` transport (also exposed through the t
 shared/             Shared cross-provider governance and canonical reference cores
 docs/               Common branch-level docs index and operator/runtime references
 src.codex/          Codex provider-pack source
-src.claude/         Claude Code provider-pack source
+adapters/claude/         Claude Code provider-pack source
+adapters/antigravity/    Native Antigravity startup instructions and hook source
 references-codex/   Codex-specific addenda and compatibility pointers
-references-claude/  Claude Code-specific addenda and compatibility pointers
+adapters/claude/references/  Claude Code-specific addenda and compatibility pointers
 RELEASE_NOTES.md    Canonical tracked release log
 install.py          Python-owned entry-point installer (asks which pack to install)
 install.sh          Thin POSIX launcher for `install.py`
@@ -81,24 +107,38 @@ AGENTS.md           Dev overlay for Codex pack maintenance
 CLAUDE.md           Dev overlay for Claude Code pack maintenance
 ```
 
-## Provider Packs
+## Host integrations
 
 | Pack | Status in this monorepo | Source | Runtime entrypoint in source | Packaging in this branch | Validation |
 | --- | --- | --- | --- | --- | --- |
-| Codex | Production | `src.codex/` | assembled installed `AGENTS.md` from `shared/AGENTS.shared.md` + `src.codex/AGENTS.codex.md` | root Python router plus `scripts/install-codex.py` and its POSIX launcher | `validate-skill-pack.py` and its POSIX launcher |
-| Claude Code | Production | `src.claude/` | `src.claude/CLAUDE.md` | root Python router plus `scripts/install-claude.py` and its POSIX launcher | `validate-skill-pack.py` and its POSIX launcher |
+| Codex | Primary | `src.codex/` | assembled installed `AGENTS.md` from `shared/AGENTS.shared.md` + `src.codex/AGENTS.codex.md` | root Python router plus `scripts/install-codex.py` and its POSIX launcher | `validate-skill-pack.py` and its POSIX launcher |
+| Antigravity | Native startup integration only | `adapters/antigravity/` | shared governance plus native addendum through `SessionStart` | common selected-client installer and ownership-aware removal | isolated projection/hook checks; live native qualification separate |
+| Claude Code | Secondary adapter | `adapters/claude/` | `adapters/claude/CLAUDE.md` | root Python router plus `scripts/install-claude.py` and its POSIX launcher | `validate-skill-pack.py` and its POSIX launcher |
 
-Shared design references now live in `shared/references/`. Provider-local `references-codex/` and `references-claude/` keep provider-specific addenda plus compatibility pointers where older paths still need to resolve. The clearest example is `subagent-operating-model`: the canonical blueprint core now lives in `shared/references/subagent-operating-model.md`, while each production provider tree keeps only its runtime and repository concretization addendum. Shared governance is maintained across provider lines; the repository-level overlays in `AGENTS.md` and `CLAUDE.md` exist only for maintaining this monorepo.
+Shared design references now live in `shared/references/`. Provider-local `references-codex/` and `adapters/claude/references/` keep provider-specific addenda plus compatibility pointers where older paths still need to resolve. The clearest example is `subagent-operating-model`: the canonical blueprint core now lives in `shared/references/subagent-operating-model.md`, while each production provider tree keeps only its runtime and repository concretization addendum. Shared governance is maintained across provider lines; the repository-level overlays in `AGENTS.md` and `CLAUDE.md` exist only for maintaining this monorepo.
 
 Dynamic user-interface roles in both live packs consume one neutral installed leaf, `contracts/ui-transition-continuity.md`, sourced from the sole normative English source at `shared/references/ui-transition-continuity.md`. The mandatory Russian file at `shared/references/ru/ui-transition-continuity.md` is a non-authoritative maintainer/operator mirror and is not installed. The full `shared/references/` tree is not installed, and there is no provider-specific semantic copy. This is a pack-structure projection; the root README does not own the continuity semantics.
 
 The maintainer-only [cross-pack reconciliation manifest](shared/references/cross-pack-reconciliation.md) maps shared semantic blocks between provider contracts. It is intentionally excluded from standalone provider branches and packages.
 
-Installed Codex now follows the same compact-entrypoint pattern that Claude already uses: the installed `AGENTS.md` is intentionally the compact universal minimum, while installed runtime guidance lives in the Codex skill bodies under `skills/<role>/SKILL.md`. Shared and provider-specific reference trees remain source-maintainer canon rather than installed target-project docs. Claude keeps a short `CLAUDE.md` entrypoint and leaf-role files under `.claude/agents/`; the deliberate exception is the five curated role-skills — `lead`, `product-manager`, `analyst`, `architect`, `planner` — whose canonical contracts live at `.claude/skills/<role>/SKILL.md`. In `delegationMode: force`, an absent user `settings.json.agent` receives the `lead` default; this main-agent activation uses `agents/lead.md` frontmatter `initialPrompt: /lead`, while a stale dispatched `subagent_type: lead` still fails closed. The other four keep thin delegate wrappers under `.claude/agents/` that load the same-named skill.
+The compact installed Codex `AGENTS.md` and Claude `CLAUDE.md` entrypoints keep
+detailed role contracts in their installed locations. The authored common skill
+bodies live under [`src.codex/skills/`](src.codex/skills/), including Lead and
+Architect. Claude's native agent wrappers load its own installed copies;
+`agents/lead.md` uses `initialPrompt: /lead` for main-agent activation and
+rejects stale subagent dispatch. See the
+[runtime layout reference](docs/provider-runtime-layouts.md) for the owned
+source and installed paths.
 
 Maintainer note: this repository is the installer/source monorepo, not automatically a repo-local Codex install target. When working inside `Orchestrarium/`, it is valid to rely on the global Codex skill/contract install under `$HOME/.agents/` together with Codex configuration and runtime metadata under `$HOME/.codex/`. A missing local `.agents/` tree in this monorepo does not by itself mean the Codex runtime is misconfigured; create `.agents/` here only by running the installers intentionally.
 
-Global Codex and Claude upgrades share installer-owned receipts beside canonical skills under `$HOME/.agents/skills/`: a Lead receipt and one name-to-digest map for non-Lead skills. Clean receipted versions upgrade normally; an unlisted pre-receipt tree needs the corresponding global-only, exact-digest `--replace-unreceipted-lead-sha256` or `--replace-unreceipted-skill-sha256 NAME=SHA256` choice after a read-only `--dry-run`. Modified valid-v2 receipted Lead trees require a separate explicit `--replace-modified-lead` selection binding the raw receipt, current authored tree and intended composed source; the default remains refusal, and its diagnostic candidate is not approval. See [INSTALL.md](INSTALL.md) for exact selection, paired-backup, unrelated-state and downgrade limits. The global Codex compatibility flag `--migrate-legacy-skill NAME` can also retain an explicitly selected noncanonical absolute directory link before projecting that name to the canonical skill, without moving the linked data.
+Each selected client receives an independent ordinary copy of the canonical
+skills: Codex uses `.agents/skills`, and the secondary Claude adapter uses
+`.claude/skills`. Install, update and uninstall do not mutate an unselected
+client. Source reuse stays in the repository; installed shared links are legacy
+migration inputs. See [installation and migration](INSTALL.md).
+
+Each selected client keeps its own installer-owned Lead and non-Lead receipts. Clean receipted trees upgrade normally; unreceipted or modified trees need the exact reviewed selection described in [INSTALL.md](INSTALL.md), not inferred ownership or automatic retry.
 
 Installed governance now requires a cited repository-orientation record before the first run, build, or mutation in an unfamiliar repository or subtree. The record names scope, live/archive status, canonical workflow, protected surfaces, and `file:line` evidence; names, file counts, recency, and layout never prove liveness. The production Claude Code and Codex installers also register a warn-only, fail-open process audit that detects a skipped or conflicting record without scanning repository prose or inferring canon from deprecation words.
 
@@ -135,29 +175,17 @@ monthly archive without inventing candidate, active, or closure history.
 
 ## Installation
 
-The pre-SDK installer uses its existing Windows and POSIX transaction backends under the ordinary serialized-writer contract. Capability, ownership and recovery checks remain active; see [Installation](INSTALL.md) for platform-specific limits.
-
-Use the root router installers for the common path:
+From the repository root, preview the selected client integrations first:
 
 ```bash
-bash install.sh --global
+python install.py --clients codex claude --global --dry-run
 ```
 
-```powershell
-python .\install.py --global
-```
-
-Each router asks what to install:
-
-```text
-What to install?
-Production installs:
-  1) Codex pack
-  2) Claude Code
-  3) Codex + Claude (default production install)
-```
-
-Pressing Enter selects the default production install, `Codex + Claude`. The router then forwards the same arguments to the selected provider-specific installer in `scripts/`. Use `scripts/install-codex.*` or `scripts/install-claude.*` directly when you want deterministic automation on one line.
+The host catalog includes Codex, Claude Code, and Antigravity native startup.
+Use `python install.py --list-clients` to inspect it, and see
+[Quick install](INSTALL.md#quick-install) for project targets, the interactive
+menu, and apply behavior. Empty input or `q` cancels; there is no default.
+Host installation is separate from SDK provisioning.
 
 Windows Kimi execution uses the canonical thin wrapper, not executable enrollment. For each run the wrapper resolves the fixed per-user executable; `ProcessRunnerV1` binds the executable it opens, accepts an absent optional caller binding, and supports a junction or file symlink whose final ordinary executable has a different name. Normal launch does not consult an enrollment receipt, version/hash allowlist, live manifest, high-water record, or offline admission state. The enrollment-named maintenance entrypoints are optional non-writing version/help diagnostics; a supplied offline-policy value is obsolete and fails explicitly. The wrapper alone owns the fixed `kimi-code/k3` file prompt, optional validated capability file, ordinary failure reporting, and resource cleanup. Without that file, tools, Model Context Protocol servers, and subagents remain empty and permission is `reject`; selected capabilities remain caller-scoped and independently verified. The configured model identifier is not independent server-side model attestation, and this contract does not promise compatibility with an arbitrary future breaking Kimi command-line interface change. No vendor binary is downloaded or replaced.
 
@@ -236,7 +264,7 @@ Two archetypes:
 - **Knowledge-style** — loaded into the caller's current context to inform how the caller performs the work.
 - **Delegate-style** — additionally spawnable as a fresh-context subagent that executes the workflow and returns one self-contained artifact.
 
-The governance index and runtime layout are defined in [`shared/AGENTS.shared.md`](shared/AGENTS.shared.md) under `## Common skills`. Each provider source tree carries its native form under `src.<provider>/skills/<name>/`, and Claude delegate-style skills additionally register a thin Agent-tool wrapper at `src.claude/agents/<name>.md`.
+The governance index and runtime layout are defined in [`shared/AGENTS.shared.md`](shared/AGENTS.shared.md) under `## Common skills`. Each provider source tree carries its native form under `src.<provider>/skills/<name>/`, and Claude delegate-style skills additionally register a thin Agent-tool wrapper at `adapters/claude/agents/<name>.md`.
 
 Currently shipped:
 - `$windows-gui-manual-testing` — delegate-style; Windows desktop GUI manual visual verification with screen capture, hard crop validation, and theme/state evidence across toolkit/runtime variants.
@@ -261,7 +289,7 @@ Currently shipped:
 - `docs/README.md` is the common branch-level docs entrypoint for operator semantics and runtime-layout references.
 - [`docs/provider-runtime-layouts.md`](docs/provider-runtime-layouts.md) records the installed production runtime layout for Codex and Claude Code, with `global` and `local` scopes split explicitly so install/runtime paths are not confused with repo source trees.
 - `references-codex/` contains Codex-specific addenda plus compatibility pointers for older reference paths.
-- `references-claude/` contains Claude-specific addenda plus compatibility pointers for older reference paths.
+- `adapters/claude/references/` contains Claude-specific addenda plus compatibility pointers for older reference paths.
 - `subagent-operating-model` is no longer duplicated per provider pack: use the shared core for the canonical blueprint and the provider-local file only for runtime and repository concretization.
 - `AGENTS.md` is the root development overlay for Codex provider-pack maintenance.
 - `CLAUDE.md` is the root development overlay for Claude Code provider-pack maintenance.
@@ -270,14 +298,14 @@ Before publishing maintenance changes, validate the active provider surfaces:
 
 ```bash
 bash src.codex/skills/lead/scripts/validate-skill-pack.sh
-bash src.claude/agents/scripts/validate-skill-pack.sh
+bash adapters/claude/agents/scripts/validate-skill-pack.sh
 python scripts/sync-agents-mode-docs.py --root . --check
 python scripts/validate-agents-mode-installers.py --root .
 ```
 
 ```powershell
 python .\src.codex\skills\lead\scripts\validate-skill-pack.py
-python .\src.claude\agents\scripts\validate-skill-pack.py
+python .\adapters/claude\agents\scripts\validate-skill-pack.py
 python .\scripts\sync-agents-mode-docs.py --root . --check
 python .\scripts\validate-agents-mode-installers.py --root .
 ```
@@ -296,7 +324,9 @@ For a historical Claude instruction set, --replace-claude-receipted-instructions
 
 Codex can separately replace a reviewed current document interval with --replace-codex-document SHA256:START:END, using exact full-document bytes and Python character offsets. The strict selected renderer preserves surrounding text and ignores literal END examples inside closed code, while the ordinary no-selection renderer stays unchanged. The shared transaction receives selected content and its receipt together; this is selected acquisition, not historical ownership. See the [Codex selection contract](docs/provider-receipt-planning.md#explicit-selected-current-codex-document-replacement). Physical replacement/recovery qualification remains open.
 
-The runtime helper surface is installed with production Codex and Claude packs as well: Codex gets the scripts under `$HOME/.agents/skills/lead/scripts/` or `<repo>/.agents/skills/lead/scripts/`, while Claude Code gets them under `~/.claude/agents/scripts/` or `<repo>/.claude/agents/scripts/`. That payload includes the pure Version 3 (V3) solution-attempt reducer at `solution_attempt/reducer.py` and the bounded process owner at `process_supervision/process_runner.py`. Process Runner Version 1 (`ProcessRunnerV1`) remains Windows-only: it owns provider-prompt operations and detached Slice A validation, while skill-pack validator child checks use it on Windows. On POSIX, the validator runtime, publication scanner, and installer hook-health runner own their private process groups through `process_supervision/posix_process_group.py`; generic `ProcessRunnerV1` remains unavailable there. Each external provider-prompt launch requires an absolute caller-owned `--terminal-receipt` path, reserved before provider/capture/ledger side effects. On POSIX, every path ancestor must be owned by root or the current user, and the final parent must be current-user-owned without group/other write access. A group/other-writable ancestor is accepted only for a root-owned sticky shared directory such as `/tmp` whose next held component is a current-user-owned nonwritable boundary. The wrapper holds every opened component identity, revalidates owner, mode, path, and leaf before and after durable commit/readback, and removes only the exact descriptor-identified leaf if reservation setup fails. A raced replacement or unverifiable descriptor identity is preserved and fails with `E_EXTERNAL_TERMINAL_RECEIPT_CLEANUP_UNVERIFIED`. After settlement and secure cleanup, the wrapper safety-scans one serialized V2 envelope, durably commits and reads it back, writes and flushes the identical line to stdout, then appends the optional ledger event; the caller owns receipt retention and deletion. On Windows, the migrated Python and Git child paths retain bounded output capture and descendant-process-tree settlement through runner-owned, executable-specific probes performed for the same run; adapters cannot self-attest. Native Codex and Claude launches fail early with a typed unavailable result on Windows. Generic `ProcessRunnerV1` requests on POSIX fail at request validation with `PSV1-POSIX-ORACLE-UNAVAILABLE` before executable acquisition or subprocess creation. The returned result is non-success, does not claim an empty descendant tree, closes runner-owned resources, and starts no child. Kimi is explicit-only through fixed `kimi-code/k3` for policy-admitted read-only exploration/research/planning/review or mapped `external-worker` engineering. Its optional validated capability file may select admitted read tools/Model Context Protocol servers or scoped worker tools; omission preserves empty tools/servers/subagents and permission `reject`. Every result is independently verified, nonauthorizing, and outside `auto`. Grok remains unavailable in 1.x. The generic Windows command-line interface remains fail-closed unavailable, and a Rust implementation remains deferred to 2.0. The source-only durable operation store at `scripts/agent_run_persistence/operation_store.py` and route activation registry at `scripts/process_supervision/route_activation_registry.py` are not installed. See [docs/work-item-execution-tracking.md](docs/work-item-execution-tracking.md) for the sole operator runbook, including invalid-closure recovery. To group several work-items under one goal or milestone, see [docs/epics.md](docs/epics.md) (the epic -> work-item -> phase hierarchy). For durable cross-item architecture decisions see [docs/decisions.md](docs/decisions.md) (the ADR registry), and for standing cross-work-item dependencies see [docs/dependencies.md](docs/dependencies.md) (`Depends-on` edges + blocked/ready derivation). For the in-repo delivery-lessons registry see [docs/lessons.md](docs/lessons.md) (capture lessons learned so they survive a work-item's archival), and for the DoR/DoD vocabulary map onto existing admission and close gates see [docs/definition-of-ready-done.md](docs/definition-of-ready-done.md).
+The optional `invoke-copilot-prompt.py` entrypoint supports explicitly bound, fresh prompt-only SDK Consultant and Reviewer tasks through the existing Windows launch and canonical receiving owners. It requires a preprovisioned runtime and explicit private authentication; it never falls back to a native CLI, downloads a runtime, or claims account identity or OS sandboxing. An explicit scoped Worker binding additionally uses Host-owned Read/Write/Edit tools with the existing per-effect permission and protected-path checks; it does not grant native shell or unrestricted filesystem access. Version-5 Consultant task bindings can continue an exactly received predecessor by evidence-run identity, using the actual completed session tip and existing single-successor claim; fork, Reviewer continuation and Worker continuation are not enabled. The existing Python Host child-Lead composition also supports explicitly selected Copilot decision sessions with canonical recovery; this is not a new CLI Lead mode or native-subagent control. These paths have offline evidence only, not installed/native acceptance. See [SDK execution](docs/sdk-execution.md).
+
+The runtime helper surface is installed with production Codex and Claude packs as well: Codex gets the scripts under `$HOME/.agents/skills/lead/scripts/` or `<repo>/.agents/skills/lead/scripts/`, while Claude Code gets them under `~/.claude/agents/scripts/` or `<repo>/.claude/agents/scripts/`. That payload includes the pure Version 3 (V3) solution-attempt reducer at `solution_attempt/reducer.py` and the bounded process owner at `process_supervision/process_runner.py`. Process Runner Version 1 (`ProcessRunnerV1`) remains Windows-only: it owns provider-prompt operations and detached Slice A validation, while skill-pack validator child checks use it on Windows. On POSIX, the validator runtime, publication scanner, and installer hook-health runner own their private process groups through `process_supervision/posix_process_group.py`; generic `ProcessRunnerV1` remains unavailable there. Each external provider-prompt launch requires an absolute caller-owned `--terminal-receipt` path, reserved before provider/capture/ledger side effects. On POSIX, every path ancestor must be owned by root or the current user, and the final parent must be current-user-owned without group/other write access. A group/other-writable ancestor is accepted only for a root-owned sticky shared directory such as `/tmp` whose next held component is a current-user-owned nonwritable boundary. The wrapper holds every opened component identity, revalidates owner, mode, path, and leaf before and after durable commit/readback, and removes only the exact descriptor-identified leaf if reservation setup fails. A raced replacement or unverifiable descriptor identity is preserved and fails with `E_EXTERNAL_TERMINAL_RECEIPT_CLEANUP_UNVERIFIED`. After settlement and secure cleanup, the wrapper safety-scans one serialized V2 envelope, durably commits and reads it back, writes and flushes the identical line to stdout, then appends the optional ledger event; the caller owns receipt retention and deletion. On Windows, the migrated Python and Git child paths retain bounded output capture and descendant-process-tree settlement through runner-owned, executable-specific probes performed for the same run; adapters cannot self-attest. On the direct single-executable Windows CLI route, the Codex wrapper supplies a built-in argument-parser contract and the process owner must qualify the executable and that contract before reading the prompt. The ordinary Claude wrapper supplies no such contract and refuses that route with `PSV1-ARGV-CODEC-UNSUPPORTED`. This is not native vendor execution acceptance; explicit SDK routes retain their own qualification. Generic `ProcessRunnerV1` requests on POSIX fail at request validation with `PSV1-POSIX-ORACLE-UNAVAILABLE` before executable acquisition or subprocess creation. The returned result is non-success, does not claim an empty descendant tree, closes runner-owned resources, and starts no child. Kimi is explicit-only through fixed `kimi-code/k3` for policy-admitted read-only exploration/research/planning/review or mapped `external-worker` engineering. Its optional validated capability file may select admitted read tools/Model Context Protocol servers or scoped worker tools; omission preserves empty tools/servers/subagents and permission `reject`. Every result is independently verified, nonauthorizing, and outside `auto`. Grok remains unavailable in 1.x. The generic Windows command-line interface remains fail-closed unavailable, and a Rust implementation remains deferred to 2.0. The source-only durable operation store at `scripts/agent_run_persistence/operation_store.py` and route activation registry at `scripts/process_supervision/route_activation_registry.py` are not installed. See [docs/work-item-execution-tracking.md](docs/work-item-execution-tracking.md) for the sole operator runbook, including invalid-closure recovery. To group several work-items under one goal or milestone, see [docs/epics.md](docs/epics.md) (the epic -> work-item -> phase hierarchy). For durable cross-item architecture decisions see [docs/decisions.md](docs/decisions.md) (the ADR registry), and for standing cross-work-item dependencies see [docs/dependencies.md](docs/dependencies.md) (`Depends-on` edges + blocked/ready derivation). For the in-repo delivery-lessons registry see [docs/lessons.md](docs/lessons.md) (capture lessons learned so they survive a work-item's archival), and for the DoR/DoD vocabulary map onto existing admission and close gates see [docs/definition-of-ready-done.md](docs/definition-of-ready-done.md).
 
 For release-relevant tracked changes, update `RELEASE_NOTES.md` in the same change before publication and explain the practical effect of the change, not just its title. Keep release notes in reverse-chronological `## YYYY-MM-DD` sections instead of one long-lived `## Unreleased` bucket, and run the repo-local gate before publication:
 
@@ -312,7 +342,17 @@ python .\scripts\check-publication-gate.py
 
 This repository is licensed under the Mozilla Public License 2.0. See [LICENSE](LICENSE).
 
+Optional Codex coordination Model: [implemented boundary, observed qualification and remaining work](docs/codex-coordination-model.md). One bounded Windows cycle is qualified; arbitrary orchestration is not. It is not automatically activated and does not provision dependencies.
+
 Managed adapters supply actual assigned-role provenance and consume `--user-approved-launch` locally before `--`; that flag is only the caller projection of genuine exact-launch approval. Optional `--astra-task-authorization-json` instead carries a matching genuine Astra 6.2 High/Extra high task authorization; caller-checked scope, revocation and limits still bind before covered repeats, and Max never uses it. `provider_prompt.launch` and the native selector share the pure `model_routing/launch_policy.py` rule. A complete selected logical package includes that nested module, including relocated transports; a FILE link on R/P does not move its companion namespace to the referent directory. Missing/broken mandatory support fails truthfully before effects. Prefer completing the qualified package; declared same-owner Assistance with all canonical rule, scope, genuine permission where needed, resources and readback guarantees may be selected by Root without a new ordinary permission loop. There is no catch-and-allow, raw-flag authority or automatic retry. Roleless direct-user compatibility does not permit managed callers to omit their assigned profession.
+
+## Codex instruction layout
+
+Project installs reuse an exact matching native global Orche policy while keeping
+project-specific additions. Missing or different global rules retain the complete
+local policy. Use `--standalone-instructions` for a portable project independent
+of that global installation. See [instruction lifecycle](INSTALL.md#codex-global-backed-project-instructions)
+for override precedence, preview, reapply and global uninstall implications.
 
 ## Codex native instruction ownership
 
@@ -321,6 +361,9 @@ The always-composed Codex `AGENTS.md` keeps the universal native-dispatch kernel
 The existing Lead package/receipt update carries these sections for Codex and the common skill tree; they remain Codex-specific and do not alter Claude Agent or external dispatch. No installer mechanism, user-owned document handling, ordering or client limit changes. This reduces the eager payload but does not establish complete effective-budget coverage, runtime loading or post-compaction compliance; the standalone instruction-budget issue remains open.
 
 ## Terms and Abbreviations
+
+- `SDK`: Software Development Kit; optional provider integration helpers, not launch authority.
+- `Host`: existing invoking orchestration session that retains authorization.
 
 - `AGENTS.md`: agent governance entrypoint assembled or read by Codex-compatible runtimes.
 - `agent-run-ledger.*`: helper script family that initializes legacy work-item ledger files and appends validated `agent-runs.jsonl` events.

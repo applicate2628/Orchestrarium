@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CLAUDE = ROOT / "src.claude" / "agents" / "contracts" / "design-panel.md"
+CLAUDE = ROOT / 'adapters/claude' / "agents" / "contracts" / "design-panel.md"
 CODEX = ROOT / "src.codex" / "skills" / "design-panel" / "SKILL.md"
 MARKER = "DP3-NATIVE-ROUTE-UNVERIFIED"
 SESSION_REUSE_ROUTES = (

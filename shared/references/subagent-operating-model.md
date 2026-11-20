@@ -4,6 +4,28 @@ This file is the canonical shared core for the repository's subagent operating m
 
 Visual companion remains pack-local: use the corresponding `operating-model-diagram.md` next to the pack-local addendum.
 
+Context selection is a dispatch decision, not extra authority. A fresh review
+receives explicit requirements/artifacts/evidence without the author's private
+conversation; a handoff transfers only selected authorized context, not cloned
+history. The provider addendum identifies implemented modes and remaining gaps.
+
+### Optional SDK execution representation
+
+The source-mode SDK integration retains this methodology and its existing admission,
+review, resource and receiving owners. It does not create a second Lead or make
+provider output authorizing. Versioned SDK records use actual SDK configuration,
+not fabricated CLI arguments; older CLI records keep their original representation.
+See [SDK implementation boundaries](../../docs/sdk-execution.md). A transport result,
+SDK paused approval or test fixture does not authorize a new effect or lifecycle closure.
+
+A selected writable workspace and protected-state custody do not replace the
+current tool-effect permission owner. Provider tool restrictions and operating-system
+isolation are different guarantees: record the actual mechanism, keep exact
+per-effect authorization where required, and do not infer race-proof filesystem
+confinement from a hook or path check. Worker results remain nonauthorizing and
+require independent verification of actual changes; uncertain effects are not
+a reason to replay or roll back automatically.
+
 Provider instruction kernels may route action-specific procedures to their existing installed responsibility owner while retaining universal safeguards, exact caller triggers, priority and permission boundaries. This is not an eager multi-file import, new policy framework, role activation or grant of delegation authority. Each already-authorized caller needs applicable current procedure content before the dependent decision/action, including receiving an outstanding result. Restore missing obligations after handoff or compaction; reuse unchanged content actually present under shared Context handoff economy. Missing, stale or conflicting selected-layout inputs hold only that action, without cross-layout fallback or installation authority. Source coverage and smaller entrypoint bytes do not establish native selection, effective budget, runtime reading or compliance. Codex native dispatch uses its existing Lead operating-model, as identified by the Codex addendum; shared universal engineering rules remain in the shared spine. Claude Agent and external-adapter routing keep their own contracts.
 
 Inline provider routing may consolidate repeated presentation against shared rules already composed in the same instruction document. This adds no procedure load or role activation: the shared quick-fix, primary-task continuity and physical-lifecycle owners remain binding, and missing actual context still requires restoration. The Codex addendum identifies the inline owner; this maintainer reference is not a runtime dependency.
@@ -18,7 +40,7 @@ Short version:
 
 > **One subagent = one profession + one artifact + one gate.**
 
-> **The root main conversation holding Lead alone dispatches downstream roles and writes work-item lifecycle state.** A specialist returns evidence plus an optional non-binding recommended next role to the root, then stops; it never adopts Lead, launches a peer or downstream stage, advances the pipeline, or writes `agent-runs.jsonl`. The root may directly launch a configured external wrapper; no provider or leaf may recursively launch another wrapper.
+> **Root owns global admission, integration and acceptance. An explicitly admitted scoped child coordinator may choose descendant dispatch and child-only lifecycle intents through the existing Host owner.** A specialist returns evidence plus an optional non-binding recommended next role to the root, then stops; it never adopts Lead, launches a peer or downstream stage, advances the pipeline, or writes `agent-runs.jsonl`. The root may directly launch a configured external wrapper; no provider or leaf may recursively launch another wrapper.
 
 Shortest version:
 
@@ -219,7 +241,7 @@ A subagent `PASS` still requires verification by the orchestrating owner or the 
 
 When any role discovers a bug, risk, or improvement outside the approved change surface:
 
-1. File the issue in the repository bug-registry path defined by repo policy or the corresponding pack-local addendum, using the bug-registry format from `qa-engineer`, with `context: adjacent-finding` and `status: open`.
+1. Route concrete defects through the `qa-engineer` bug-admission contract. Use `context: adjacent-finding` and `status: open` only for an admitted defect; report in-band unless the dispatcher explicitly grants a registry write and the sandbox permits the configured path.
 2. Note it in the current artifact under an "Adjacent findings" section.
 3. Do NOT expand scope — the orchestrator decides priority and scheduling.
 4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` instead of working around it.
@@ -271,9 +293,11 @@ Field meanings:
 
 **Result restriction receiving.** Before introducing a compatibility restriction, its author must identify the original-admission requirement or evidenced safety precondition in the accepted governing contract that makes it necessary. A sampled version/hash or unfamiliar input alone is not such a precondition; unsupported narrowing returns to the decision owner before implementation, not only during QA. Before Root/Lead accepts or forwards implementation or QA, compare newly introduced input, version, or environment restrictions with the original admission, genuine user amendments and accepted governing contracts. Carry those references through the existing `Approved inputs`, `Scope` and `Acceptance criteria`; implementation labels and a passing test do not establish authority. A sample version, digest or path is evidence, not authority to narrow supported inputs. Preserve explicit compatibility contracts and operation-scoped identity/integrity checks. A fail-closed refusal must identify a concrete violated precondition, missing required proof or reachable safety risk under the governing contract, not merely unfamiliar sample identity. QA derives rejection expectations from that contract rather than the implemented restriction; unsupported narrowing returns `REVISE` to its decision owner before dependent acceptance or delivery. Scoped `PASS` cannot authorize a narrower contract, even with the whole-outcome remainder retained. Unavailable required compatibility evidence remains `UNVERIFIED` with its owner and next action; do not widen support or weaken safety to make the variation pass. Apply this comparison within the existing implementation and receiving steps, with no new field, artifact, stage or checker.
 
-**Reuse-assessment carry-forward.** Apply shared `Reuse before hand-rolling` through the existing task fields. Before choosing a new design/mechanism, doing nontrivial implementation directly, or assigning it, check the current owner, needed methods, relevant callers/rollback and ready existing solutions. An accepted plan is an input, not proof the capability is still missing. Under shared Reuse before hand-rolling, include evidenced neighboring owners and implementations and route materially invalidated architectural assumptions for bounded revalidation before dependent action or dispatch. Carry the current accepted decision, actual implementation and remaining gap through the same task fields; generic continuation is not re-admission of superseded scope. Age or unchanged resumed work alone adds no gate. Reuse adequate architecture; resolve stale creation scope before action or assignment, and use/extend the existing owner or name its verified inadequacy and the missing behavior. Root/Lead carries the minimum current evidence through existing Approved inputs, Scope and Acceptance criteria. Before designing or coding, the receiver checks that comparison and returns reuse or the verified gap when an assignment is stale or duplicates existing behavior. Direct-root, light/non-Lead and specialist execution applies the same check within its authorized role and scope. Preserve original useful behavior and required safety, performance, data, authority and publication guarantees; this adds no field, report, stage, checker, standing review or inventory ritual for trivial work. The accepted assessment records the mechanisms checked, meaningful ready alternatives, selected option, evidence-backed rejection reasons and integration tradeoffs. `Constraints` carries the decisive fit requirements and any accepted determining-quality priorities; `Acceptance criteria` preserves the accepted choice and its verification. The assessment follows the shared Reuse card's short selection sequence and fit requirements. An unfamiliar candidate receives a factual fit assessment rather than rejection by a fixed list; tools and dependencies retain normal reason-and-repository-fit admission. If a needed fact is missing, route that bounded question through the existing factual role before deciding the affected choice. The implementer consumes the accepted choice and raises a material conflict to its decision owner rather than inventing a replacement. For admitted adoption of a ready solution, use that solution as the baseline before nontrivial reimplementation, with the smallest safely authorized check at the requested entry path; a concrete source/API incompatibility or safety defect may justify a bounded correction without unsafe execution. Unavailable execution leaves that behavior unverified, not failed, and permits independent work that does not assume replacement is necessary. Root/Lead receiving and any already-required review compare the chosen route and next actual operation with the original reuse outcome; passing tests of newly written scaffolding cannot justify that scaffolding. After a user redirects the approach, make the next ready substantive operation serve that correction or state the exact hold; name the actual tested artifact and entry path, never credit an extracted-component harness as the ready product. Ordinary edits and extension of an existing accepted owner gain no new report, web search, stage, checker, or tracking file.
+**Reuse-assessment carry-forward.** The shared Reuse card also owns proactive discovery of ready solutions, libraries, tools, skills and MCP integrations and proposals for useful missing candidates; carry findings and approval status in existing fields, not implicit installation authority. Apply shared `Reuse before hand-rolling` through the existing task fields. Before choosing a new design/mechanism, doing nontrivial implementation directly, or assigning it, check the current owner, needed methods, relevant callers/rollback and ready existing solutions. An accepted plan is an input, not proof the capability is still missing. Under shared Reuse before hand-rolling, include evidenced neighboring owners and implementations and route materially invalidated architectural assumptions for bounded revalidation before dependent action or dispatch. Carry the current accepted decision, actual implementation and remaining gap through the same task fields; generic continuation is not re-admission of superseded scope. Age or unchanged resumed work alone adds no gate. Reuse adequate architecture; resolve stale creation scope before action or assignment, and use/extend the existing owner or name its verified inadequacy and the missing behavior. Root/Lead carries the minimum current evidence through existing Approved inputs, Scope and Acceptance criteria. Before designing or coding, the receiver checks that comparison and returns reuse or the verified gap when an assignment is stale or duplicates existing behavior. Direct-root, light/non-Lead and specialist execution applies the same check within its authorized role and scope. Preserve original useful behavior and required safety, performance, data, authority and publication guarantees; this adds no field, report, stage, checker, standing review or inventory ritual for trivial work. The accepted assessment records the mechanisms checked, meaningful ready alternatives, selected option, evidence-backed rejection reasons and integration tradeoffs. `Constraints` carries the decisive fit requirements and any accepted determining-quality priorities; `Acceptance criteria` preserves the accepted choice and its verification. The assessment follows the shared Reuse card's short selection sequence and fit requirements. An unfamiliar candidate receives a factual fit assessment rather than rejection by a fixed list; tools and dependencies retain normal reason-and-repository-fit admission. If a needed fact is missing, route that bounded question through the existing factual role before deciding the affected choice. The implementer consumes the accepted choice and raises a material conflict to its decision owner rather than inventing a replacement. For admitted adoption of a ready solution, use that solution as the baseline before nontrivial reimplementation, with the smallest safely authorized check at the requested entry path; a concrete source/API incompatibility or safety defect may justify a bounded correction without unsafe execution. Unavailable execution leaves that behavior unverified, not failed, and permits independent work that does not assume replacement is necessary. Root/Lead receiving and any already-required review compare the chosen route and next actual operation with the original reuse outcome; passing tests of newly written scaffolding cannot justify that scaffolding. After a user redirects the approach, make the next ready substantive operation serve that correction or state the exact hold; name the actual tested artifact and entry path, never credit an extracted-component harness as the ready product. Ordinary edits and extension of an existing accepted owner gain no new report, web search, stage, checker, or tracking file.
 
 **Conditional PAO carry-forward.** Only when accepted work already has a Primary Acceptance Oracle (PAO), `Approved inputs` names its accepted revision, `Scope` carries its exact scenario plus source/configuration/environment and invocation bounds, and `Acceptance criteria` carries success, failure, safety, cleanup, evidence, and owner requirements. The receiver records actual source/configuration/environment and compares it with the approved revision and scenario. Any PAO revision, scoped scenario, source, configuration, or environment mismatch makes evidence stale and nonauthorizing. Trivial work and work with no PAO gain no requirement or new field.
+
+**Domain evidence for an existing assignment.** Choose only methods relevant to the accepted slice and available on the actual route; provide bounded source evidence as an approved input when the recipient cannot retrieve it. A catalog entry is not proof of activation, and an unmet optional method does not create a new prerequisite. For material claims, distinguish command replies from durable effects, simulated measurements from native observations, and numeric verification from independent physical validation. In an exploratory handoff, report observed facts with exact source anchors and the limits of the search; hand requested mutations back to the appropriate owner rather than treating an evidence-only lane as an implementation grant. Existing exact mechanical contracts and independent review requirements are unchanged.
 
 **Upstream claim ownership.** When an accepted Architect or domain artifact carries numbered `{ guarantee, single-owner, enforcement-probe }` claims, pass that artifact/revision unchanged to implementation and review. The implementer does not author, reorder, replace, or become owner of those claims; it maps each claim number to implementation surface and observed evidence/result. Review compares the upstream claims and implementation evidence side by side, receives the accepted constraints and claim identity needed for independent challenge without requiring the entire unused design prose, and preserves claim owner and order. No upstream claims means no synthetic set.
 
@@ -377,10 +401,10 @@ Do not design the technical solution and do not produce the delivery plan.
 ### 7.2 `lead`
 
 ```text
-You hold the `lead` role as the main conversation — lead is never dispatched as a subagent.
+You hold the Lead coordination role under Root global authority or an explicit scoped child assignment; ordinary specialists do not adopt Lead.
 
 Your task is not to write code. Your task is to route work through roles and artifacts.
-You alone dispatch downstream stages and write work-item lifecycle state, including `agent-runs.jsonl`; a main-owned helper or wrapper may write only on your behalf.
+Root retains global admission and final acceptance. For a scoped child assignment, select only admitted descendant requests and child-only lifecycle intents; the existing Host owner validates and performs effects. Never mutate Root/sibling work or manufacture admission.
 
 For a staged or full-delivery route, turn the request into a canonical brief:
 - goal
@@ -946,6 +970,110 @@ A fresh external provider is a separate trust boundary. Its adapter keeps the ve
 Short team formula:
 
 > **One role. One artifact. One gate. One explicit owner for every critical risk.**
+
+
+## Installed native policy reuse
+
+Avoid duplicate policy only where the selected host's native loading contract
+supplies the complete applicable policy. Preserve task-specific instructions and
+standalone installation; missing or unproved global policy retains the complete
+local form. Reuse creates an explicit dependency on that global installation,
+not a guarantee that a neighboring file will be read. Client-specific selection,
+updates and removal belong to the existing installer and its ownership receipts.
+
+## Scoped child coordination
+
+Root records an explicit assignment to one child work-item and a catalog of
+already admitted immutable requests. The child chooses among ready catalog IDs,
+consumes received outcomes, and may propose completing or cancelling its own
+assignment. The Host rechecks the assignment and exact request bindings before
+effects and uses existing execution, ledger receiving and lifecycle owners.
+Neither a role label, descriptive scope text nor a permissive model response is
+a grant. New tasks outside the catalog remain proposals for Root admission.
+Root-published decisions may add concrete admitted requests to the effective
+catalog without rewriting the base assignment. Persist proposal/admission identity
+and exact request provenance through the existing artifact/ledger owners; a child
+proposal or callback approval boolean is not authority. Unknown admission holds
+only dependent work, and does not imply a mandatory human approval for routine
+work already within the Root's permissions.
+
+Root and sibling items cannot be selected by a child lifecycle argument. Actual
+close still requires canonical child outcome and independent acceptance under the
+existing lifecycle contract; child completion is not global project acceptance.
+Cancellation stops new dispatch before targeting only identified descendants;
+uncertain outcomes remain recoverable and are not silently rerun. Restore uses
+existing assignment artifacts and execution ledgers, not conversational memory
+or a second task store. An unresolved descendant holds dependent completion,
+not unrelated ready catalog work.
+
+Child-assignment depth follows verified parent assignments. It is distinct from
+native conversation fork depth and vendor-owned subagent depth. No universal
+numeric ceiling is introduced. A separately admitted scope/resource policy must
+be carried with its actual units and owner, not inferred from a model prompt.
+The selected route must distinguish separate native decision sessions with
+received-state handoff from a supported persistent native conversation. Persistence
+must use observed provider thread/turn identity and canonical receiving evidence,
+not a prompt pretending to restore history. Restore a saved unconsumed intent
+before requesting another decision; do not replay attempted effects or silently
+switch session modes after uncertainty. Persistence grants no extra permissions
+and does not establish provider-native subagent control.
+
+## Native task continuation
+
+A native continuation starts a new admitted turn on an actually observed prior
+session. It is neither fresh independent review nor rereading/replaying an old
+turn. Preserve the existing request, selected runtime/account/scope and receiving
+owners; bind new operation identities to verified predecessor evidence. Use the
+existing work-item ledger transaction for single-successor consumption, not a
+parallel session store. Unknown outcomes require reconciliation, not automatic
+replay; this affects the selected chain, not unrelated authorized tasks.
+Durable continuation derives session identity from the existing canonical received
+artifact and its exact ledger commitment, not caller-supplied native IDs or a
+fabricated in-memory observation. Revalidate current context/permissions and the
+predecessor inside the existing atomic claim. A retained old result or restart
+never authorizes replay. Missing legacy receipts affect only that continuation;
+independent admitted fresh/handoff work remains available. Durable continuation
+does not grant child-Lead authority or control unrelated native clients.
+An explicit native fork is a new session from a verified received snapshot,
+not permission to delegate as a Lead. Different admitted fork intents may share
+an ancestor; the same intent must not be replayed after uncertainty. Preserve
+source linkage and derive logical session depth from received evidence; propagate
+unknown legacy depth rather than fabricate zero. Native subagent depth remains
+vendor-owned and distinct from this lineage. Verify copied history and selected
+controls before the first new turn, and retain observed child identity on failure.
+
+## Explicit Worker file effects
+
+A public SDK Worker route may implement its existing Host tool authorization
+callback against the explicitly admitted workspace and protected control paths.
+This does not turn task text, a binding file, or a tool name into user permission.
+Distinguish read access needed for project context from mutation of governance,
+credentials, runtime and receiving state. Application-level path checks are not
+an operating-system sandbox or atomic protection from concurrent path replacement.
+Independent verification and existing publication authority remain required.
+The invoking Host supplies applicable current project guidance through the
+existing trusted handoff; readable files do not prove instructions were loaded.
+
+An explicitly Root-admitted SDK child may begin with an empty executable catalog
+and an immutable goal/context. Its real decision produces proposals for the
+existing Root admission owner; no fabricated seed execution or additional
+approval store is needed. Decision and task effects retain their exact current
+Root authorization. Empty catalog alone is not a completed outcome.
+
+Durable SDK Root registration retains the exact explicitly selected task and
+runtime route in existing admission evidence. Restore those bytes rather than
+reselecting defaults; current permission checks still apply to each effect.
+Registration is not autonomous task-fit routing, historical consent is not
+current authorization, and private registration payload is not child handoff.
+
+External CLI terminal recovery distinguishes durable receiving from delivery.
+The existing terminal ledger may bind committed receipt bytes with paired
+`terminalReceiptSha256` and `terminalReceiptSizeBytes`; these do not replace the
+separate reviewed artifact revision. Failed stdout delivery remains a failure
+with `resultDelivered=false`, even when the terminal is durably received.
+Read-only recovery verifies integrity, provenance, current permissions and
+output safety without another launch, terminal write or invented process proof.
+Legacy rows lacking the binding remain metadata-only for this recovery route.
 
 ## Terms and Abbreviations
 

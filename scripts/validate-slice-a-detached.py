@@ -1292,12 +1292,12 @@ def _platform_commands() -> tuple[SliceACommand, ...]:
         ),
         SliceACommand(
             "claude-pack",
-            (bash, "src.claude/agents/scripts/validate-skill-pack.sh"),
+            (bash, "adapters/claude/agents/scripts/validate-skill-pack.sh"),
             600,
         ),
         SliceACommand(
             "compile",
-            (python, "-m", "compileall", "-q", "scripts", "src.codex", "src.claude"),
+            (python, "-m", "compileall", "-q", "scripts", "src.codex", "adapters/claude"),
             120,
         ),
         SliceACommand(

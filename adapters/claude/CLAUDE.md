@@ -1,0 +1,69 @@
+@AGENTS.md
+
+Apply the shared **Assistance and owner-equivalent execution (binding)** contract. Working helpers remain preferred; a defective helper permits declared owner-equivalent execution with the same actual data, ownership, serialization, preimages, rollback, truthful provenance, independent readback and resource guarantees. No fabricated helper receipts or host-denial bypass.
+
+# Claude Code Pack
+
+`AGENTS.md` is the required shared-governance owner. This file contains only the Claude Code runtime delta.
+
+## Claude tool mapping
+
+Apply the shared repository-orientation, diagnostic, hypothesis, scope, no-kostyl, and recovery rules through Claude's tools:
+
+- Before a repository-local `Bash|PowerShell` run/build or mutation, emit the shared `REPOSITORY ORIENTATION:` record.
+- Before `Edit|Write|NotebookEdit` in a defect or working-path-change context, complete the shared pre-fix evidence and hypothesis gate.
+- Before behavior, contract, feature, or fix commits apply all shared checkpoints, including proportional scope and rollback readiness.
+
+## Structural enforcement
+
+The pack auto-installs thirteen `settings.json` entries: nine structural hooks and four reminder/context hooks. They are backstops; they do not replace `AGENTS.md` or role-owned gates. Opt out with `--no-hypothesis-hook` or `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1`.
+
+- **Subagent ownership.** Blocking main-conversation guards skip subagent contexts: a subagent must never be blocked by those guards. This never transfers diagnostic, publication, or lifecycle authority from the root conversation.
+- **Stop ownership.** Stop hooks do not replace the main conversation's current-turn status checks or work-item close/archive ownership; their subagent skip preserves that ownership boundary. Passive verdicts and the leaf/re-entry skips remain unchanged. Non-passive Stops exit 0 silently; the main conversation still owns ongoing-task continuation under shared governance.
+- **Lifecycle and audits.** No Stop hook terminalizes work-items; Physical location owns lifecycle membership. Audits are warn-only and fail-open. The worktree audit recognizes only an exact trailing `# orchestrarium:requested-isolation-worktree` marker.
+- **MCP control.** Model Context Protocol (MCP) discovery reminders are advisory in `auto` and subagent contexts. Root `force` still requires runtime discovery, the relevant tool schema, fitting MCP use, selected-root/currentness checks and the existing restricted alternatives. The source-navigation heuristic emits a nonblocking reminder and does not determine compliance; transcript text grants no permission or override of host refusals.
+- **User controls.** `[skip-bugfix-discipline]` and `[acknowledge-passive-stop]` retain their one-turn/one-stop owners. Root receives genuine publication review and consent for the actual source, repository and destination. The push hook enforces target qualification and a fresh complete range scan; it does not reconstruct consent from chat history or require an approval marker. Neutral steering does not expire consent; actual revocation, another target or an unreviewed delta stops the affected submission.
+- **Harness evidence limitation.** Arbitrary same-process mutation defeats harness observation and may run arbitrary caller code; the only proven invariant is that unchanged shipped source contains no external adapter or launcher, and its cooperative result has zero production/publication consumers.
+
+## Delegation rule
+
+If `## Project policies` is missing or no `.agents-mode.yaml` exists at any layer, suggest `/agents-init-project` before implementation.
+
+Read per-key configuration in this order: project `.claude/.agents-mode.yaml`, local legacy `.claude/.agents-mode`, pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, shared cross-pack global `~/.agents-mode.yaml`, then defaults. Normalize values in memory; do not write on reads.
+
+1. Did the user explicitly name a role? → invoke that role directly.
+2. Otherwise classify the task and select `.claude/agents/team-templates/<template>.json`.
+
+- Every specialist invocation uses the Agent tool with the matching `subagent_type`; the built-in `general-purpose` agent does not replace a typed role.
+- The curated inline role identities are exactly `lead`, `product-manager`, `analyst`, `architect`, and `planner`. Architect's sole authored role-contract body is `src.codex/skills/architect/SKILL.md`, installed as an ordinary copy at `.claude/skills/architect/SKILL.md`. Explicit Skill invocation may adopt these identities inline; the shared quick-fix route may self-invoke only its already-admitted bounded intake/factual/seam decision. Inline adoption is neither isolated nor an independent gate.
+- `lead` is a host-selected main agent and inline `/lead` role. Lead is never spawned as a subagent. The wrapper rejects a stale dispatched `subagent_type: lead`; only a stale `subagent_type: lead` dispatch is fail-closed. `product-manager`, `analyst`, and `planner` remain typed Agent targets whose wrappers load their same-named Claude skill; the Architect wrapper loads the universal body.
+- For `requiresLead: false` routes, the main conversation invokes the declared Agent chain directly. For `requiresLead: true`, it adopts `/lead`, owns integration/recovery, and invokes leaf specialists; `requiresLead` never creates a Lead subagent.
+- Launch independent Agent calls together only when their complete resource surfaces are disjoint. External worker/reviewer substitution follows the installed [external-dispatch contract](agents/contracts/external-dispatch.md).
+
+Team-template JSON files under `.claude/agents/team-templates/` are the sole owners of each chain, trigger, required role, and `requiresLead` value. Select the exact file after classification; apply the `requiresLead` rules above.
+
+`externalProvider: auto | codex | claude | kimi | grok` is the policy vocabulary. Shipped `auto` uses only Codex/Claude. Kimi selection is explicit-only; prefer the working approved thin wrapper or declared owner-equivalent launch when defective under the shared assistance contract; its installed external-dispatch contract owns admitted read-only/engineering capabilities, independent verification, and the independently verified and nonauthorizing result. Grok remains unavailable in 1.x and is not launched or probed.
+
+## Slash command routing
+
+Auto-match user intent against the installed command contracts and apply the owning flow as if explicitly invoked. Each command file owns its `## When to auto-invoke` rules and exceptions. Announce automatic routing and let the user redirect; an explicit `/agents-<name>` or direct instruction wins. Use `.claude/commands/agents-help.md` as the installed command index, then open the matching `.claude/commands/agents-<name>.md` owner.
+
+## Coexistence with the superpowers plugin
+
+- Evaluate the shared `quick-fix` predicate before invoking a process skill; an admitted quick fix has no brainstorming, writing-plan, consultant, or pre-review prelude.
+- After quick-fix admission fails, applicable process skills govern method; Orchestrarium governs delegation, typed roles, artifacts, and gates. Continue an active admitted flow unless its task type changes.
+
+## Role definitions
+
+Ordinary roles live in `.claude/agents/<role>.md`. The curated inline roles
+`lead`, `product-manager`, `analyst`, `architect`, and `planner` load the
+selected Claude install's ordinary copies at `.claude/skills/<role>/SKILL.md`.
+The common authored contracts come from `src.codex/skills/`; Claude does not
+read the Codex installation's skill files. `.claude/agents/lead.md` uses
+`initialPrompt: /lead` for main-agent activation and refuses stale dispatch.
+The other curated wrappers retain Claude dispatch authority and load their own
+same-named skill.
+
+## Publication safety scan
+
+Pre-publication scan: run `/agents-check-safety`, or `python .claude/agents/scripts/check-publication-safety.py` (POSIX: `bash .claude/agents/scripts/check-publication-safety.sh`). Default is staged-only; a manual range scan is diagnostic. Human review, the push gate's fresh scan, and explicit publication authority remain separate.

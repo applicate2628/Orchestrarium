@@ -22,9 +22,9 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VALIDATOR = REPO_ROOT / "scripts" / "validate-claude-md.py"
-CLAUDE_MD = REPO_ROOT / "src.claude" / "CLAUDE.md"
+CLAUDE_MD = REPO_ROOT / 'adapters/claude' / "CLAUDE.md"
 AGENTS_MD = REPO_ROOT / "shared" / "AGENTS.shared.md"
-REFERENCE = REPO_ROOT / "references-claude" / "claude-md-structural-enforcement.md"
+REFERENCE = REPO_ROOT / 'adapters/claude/references' / "claude-md-structural-enforcement.md"
 CLAUDE_DELTA_SIZE_CAP = 8_192
 NON_BINDING_SIZE_CAP = 1_000_000
 
@@ -44,8 +44,8 @@ EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
         "0398b801e77a3bcdd96d22818272e57d61446ffeeac526fc15612a42f519a5d1",
     ),
     "installer-removal-json-path": (
-        5_254,
-        "1810bf29901fcf68b0efabc55aacafbd9b5f49aed5da325afb8b79cd7bce27fa",
+        5_412,
+        "952ef2c5e64cfc169994c5b60d38fede3a48e69b49cb7d085609b1add7018f0f",
     ),
 }
 
@@ -91,7 +91,9 @@ EXPECTED_CLAUDE_MANIFEST: dict[str, tuple[str | re.Pattern[str], ...]] = {
         "Passive verdicts and the leaf/re-entry skips remain unchanged",
         "[skip-bugfix-discipline]",
         "Root receives genuine publication review and consent for the actual source, repository and destination.",
+        "The push hook enforces target qualification and a fresh complete range scan",
         "it does not reconstruct consent from chat history or require an approval marker.",
+        "actual revocation, another target or an unreviewed delta stops the affected submission.",
         "MCP control.",
         "discovery reminders are advisory in `auto` and subagent contexts.",
         "Root `force` still requires runtime discovery, the relevant tool schema, fitting MCP use",
@@ -385,7 +387,7 @@ def test_live_and_created_tracked_text_files_are_lf_only() -> None:
         Path(__file__),
         VALIDATOR,
         REFERENCE,
-        REPO_ROOT / "references-claude" / "README.md",
+        REPO_ROOT / 'adapters/claude/references' / "README.md",
         REPO_ROOT / "RELEASE_NOTES.md",
     )
     for path in candidates:

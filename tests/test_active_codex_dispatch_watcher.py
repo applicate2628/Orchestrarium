@@ -20,9 +20,9 @@ from tests.fixtures.provider_prompt_projection import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-WATCH = ROOT / "src.claude/agents/scripts/await-codex-dispatch.py"
-CODEX = ROOT / "src.claude/agents/scripts/invoke-codex-prompt.py"
-CLAUDE = ROOT / "src.claude/agents/scripts/invoke-claude-prompt.py"
+WATCH = ROOT / 'adapters/claude/agents/scripts/await-codex-dispatch.py'
+CODEX = ROOT / 'adapters/claude/agents/scripts/invoke-codex-prompt.py'
+CLAUDE = ROOT / 'adapters/claude/agents/scripts/invoke-claude-prompt.py'
 
 
 def _watch(tmp_path: Path, *extra: str):

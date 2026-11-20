@@ -8,6 +8,17 @@ from pathlib import Path
 import pytest
 
 
+NATIVE_ROLE_DISABLED_FEATURES = {
+    "computer_use": False,
+    "browser_use": False,
+    "browser_use_external": False,
+    "browser_use_full_cdp_access": False,
+    "in_app_browser": False,
+    "plugins": False,
+    "apps": False,
+}
+
+
 requires_windows_process_runner = pytest.mark.skipif(
     os.name != "nt",
     reason="requires the Windows ProcessRunnerV1 runtime",

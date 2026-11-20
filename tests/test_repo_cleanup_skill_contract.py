@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SPINE = ROOT / "shared" / "AGENTS.shared.md"
 REFERENCE = ROOT / "shared" / "references" / "repository-cleanup.md"
 CODEX_SKILL = ROOT / "src.codex" / "skills" / "repo-cleanup" / "SKILL.md"
-CLAUDE_SKILL = ROOT / "src.claude" / "skills" / "repo-cleanup" / "SKILL.md"
+CLAUDE_SKILL = ROOT / 'adapters/claude' / "skills" / "repo-cleanup" / "SKILL.md"
 CODEX_INTERFACE = (
     ROOT / "src.codex" / "skills" / "repo-cleanup" / "agents" / "openai.yaml"
 )
@@ -44,12 +44,14 @@ def _common_skills() -> tuple[str, ...]:
     return tuple(re.findall(r"`\$([a-z][a-z0-9-]+)`", match.group(1)))
 
 
-def test_repo_cleanup_has_one_current_body_and_a_frozen_migration_source() -> None:
+def test_repo_cleanup_has_one_live_owner_and_frozen_adapter_migration_input() -> None:
     assert "repo-cleanup" in _common_skills()
     assert CODEX_SKILL.is_file()
     assert CLAUDE_SKILL.is_file()
     assert CODEX_INTERFACE.is_file()
+    # The adapter tree is migration evidence, not a second live skill owner.
     assert hashlib.sha256(CLAUDE_SKILL.read_bytes()).hexdigest() == "06fe776be7a9c75ec5491fdf8a54e16c65e2586ab0f04ec972d3501cae55c060"
+    assert "trash-first" in _body(CODEX_SKILL)
     assert _body(CODEX_SKILL) != _body(CLAUDE_SKILL)
 
     codex_members = {
@@ -120,7 +122,7 @@ def test_scratch_is_temporary_until_canonical_results_are_promoted() -> None:
 
     for relative in (
         "src.codex/skills/lead/SKILL.md",
-        "src.claude/skills/lead/SKILL.md",
+        "adapters/claude/skills/lead/SKILL.md",
     ):
         text = (ROOT / relative).read_text(encoding="utf-8")
         for required in (
@@ -134,7 +136,7 @@ def test_scratch_is_temporary_until_canonical_results_are_promoted() -> None:
 
     for relative in (
         "src.codex/skills/manual-repo-transfer/SKILL.md",
-        "src.claude/skills/manual-repo-transfer/SKILL.md",
+        "adapters/claude/skills/manual-repo-transfer/SKILL.md",
     ):
         text = (ROOT / relative).read_text(encoding="utf-8")
         for required in (
@@ -205,7 +207,7 @@ def test_repo_cleanup_fixed_hysteresis_and_report_rows_are_complete() -> None:
 def test_lead_and_receiving_contracts_fail_closed_on_self_residue() -> None:
     for relative in (
         "src.codex/skills/lead/SKILL.md",
-        "src.claude/skills/lead/SKILL.md",
+        "adapters/claude/skills/lead/SKILL.md",
     ):
         text = (ROOT / relative).read_text(encoding="utf-8")
         assert "RepoCleanupReportV1" in text
@@ -214,7 +216,7 @@ def test_lead_and_receiving_contracts_fail_closed_on_self_residue() -> None:
 
     for relative in (
         "src.codex/skills/lead/subagent-contracts.md",
-        "src.claude/agents/contracts/subagent-contracts.md",
+        "adapters/claude/agents/contracts/subagent-contracts.md",
     ):
         text = (ROOT / relative).read_text(encoding="utf-8")
         assert "ResourceRowV1" in text
@@ -226,7 +228,7 @@ def test_lead_and_receiving_contracts_fail_closed_on_self_residue() -> None:
 def test_lead_intermediate_acceptance_uses_producer_owned_resource_echo() -> None:
     for relative in (
         "src.codex/skills/lead/SKILL.md",
-        "src.claude/skills/lead/SKILL.md",
+        "adapters/claude/skills/lead/SKILL.md",
     ):
         text = (ROOT / relative).read_text(encoding="utf-8")
         acceptance = text.split(
@@ -276,7 +278,7 @@ def test_transfer_receiving_contract_enforces_one_ordered_cleanup_chain() -> Non
     )
     for relative in (
         "src.codex/skills/manual-repo-transfer/SKILL.md",
-        "src.claude/skills/manual-repo-transfer/SKILL.md",
+        "adapters/claude/skills/manual-repo-transfer/SKILL.md",
     ):
         text = (ROOT / relative).read_text(encoding="utf-8")
         assert expected in text
@@ -294,7 +296,7 @@ def test_action_local_blockers_and_final_transfer_classification() -> None:
 
     for relative in (
         "src.codex/skills/lead/SKILL.md",
-        "src.claude/skills/lead/SKILL.md",
+        "adapters/claude/skills/lead/SKILL.md",
     ):
         lead = (ROOT / relative).read_text(encoding="utf-8")
         assert "grouped gate is not a global stop" in lead
@@ -307,7 +309,7 @@ def test_action_local_blockers_and_final_transfer_classification() -> None:
 
     for relative in (
         "src.codex/skills/manual-repo-transfer/SKILL.md",
-        "src.claude/skills/manual-repo-transfer/SKILL.md",
+        "adapters/claude/skills/manual-repo-transfer/SKILL.md",
     ):
         transfer = (ROOT / relative).read_text(encoding="utf-8")
         assert "provisional recovery snapshot, not final handoff" in transfer
@@ -335,10 +337,13 @@ def test_turn_anchor_uses_the_universal_policy_owner() -> None:
     policy_path = (
         ROOT / "scripts" / "universal-hooks" / "scripts" / "mcp_continuity_policy.py"
     )
-    spec = importlib.util.spec_from_file_location("repo_cleanup_anchor_policy", policy_path)
-    assert spec is not None and spec.loader is not None
-    policy = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(policy)
+    expected = subprocess.run(
+        [sys.executable, "-I", "-c",
+         "import sys; sys.path.insert(0, sys.argv[1]); "
+         "from mcp_continuity_policy import TURN_ANCHOR_CONTEXT; "
+         "print(TURN_ANCHOR_CONTEXT, end='')", str(policy_path.parent)],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True,
+    )
     emitted = subprocess.run(
         [sys.executable, str(TURN_ANCHOR)],
         cwd=ROOT,
@@ -348,7 +353,7 @@ def test_turn_anchor_uses_the_universal_policy_owner() -> None:
         check=False,
     )
     context = json.loads(emitted.stdout)["hookSpecificOutput"]["additionalContext"]
-    assert context == policy.TURN_ANCHOR_CONTEXT
+    assert context == expected.stdout
 
 
 def test_installer_accepts_only_the_exact_immediate_predecessor_skill_trees() -> None:
@@ -374,6 +379,44 @@ def test_installer_accepts_only_the_exact_immediate_predecessor_skill_trees() ->
     ) not in installer.ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256[
         "manual-repo-transfer"
     ]
+
+
+def test_important_state_has_durable_custody_before_pause_or_handoff() -> None:
+    spine = SPINE.read_text(encoding="utf-8")
+    for required in (
+        "Important edits, unpublished commits, and required evidence must not depend on disposable storage",
+        "before pause, handoff, acceptance, or cleanup",
+        "Git alternates",
+        "Existing durable canonical storage suffices",
+    ):
+        assert required in spine
+
+
+def test_evidence_prompts_require_canonical_retention_not_scratch_only() -> None:
+    for relative in (
+        "shared/AGENTS.shared.md",
+        "src.codex/skills/lead/subagent-contracts.md",
+        "adapters/claude/agents/contracts/subagent-contracts.md",
+    ):
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        if relative == "shared/AGENTS.shared.md":
+            assert "retained by its canonical artifact owner" in text
+        else:
+            # K5 references shared governance instead of duplicating all rules.
+            assert "Apply the binding shared **Workflow economy (binding)** rule" in text
+            assert "one-canonical-artifact/concise-root-ledger boundary" in text
+        assert "smoke test preserved under .scratch/" not in text
+        assert "smoke preserved under `/.scratch/`" not in text
+
+
+def test_repository_guidance_covers_independent_git_and_evidence_custody() -> None:
+    text = (ROOT / "shared/references/repository-source-hygiene.md").read_text(encoding="utf-8")
+    for required in ("Scratch-independent recovery", "Git common directory",
+                     "staged, unstaged, and required untracked", "re-read",
+                     "not off-site backup", "does not authorize publication"):
+        assert required in text
+    guide = (ROOT / "docs/new-session-guide.md").read_text(encoding="utf-8")
+    assert "outside disposable storage" in guide
 
 
 def test_general_disposition_moves_disposable_artifacts_to_purgable_trash_first() -> None:
@@ -445,7 +488,7 @@ def test_cleanup_validator_binds_current_and_historical_sources(
     """Neither a unilateral edit nor identical tampering restores false parity."""
     relative = (
         "src.codex/skills/lead/scripts/validate-skill-pack.py"
-        if provider == "codex" else "src.claude/agents/scripts/validate-skill-pack.py"
+        if provider == "codex" else "adapters/claude/agents/scripts/validate-skill-pack.py"
     )
     adapter = _load_source_module(ROOT / relative, f"cleanup_validator_{provider}")
     root = tmp_path / "repo"
@@ -454,7 +497,7 @@ def test_cleanup_validator_binds_current_and_historical_sources(
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(source.read_bytes())
     (root / "src.codex/skills/lead/scripts").mkdir(parents=True)
-    (root / "src.claude/agents/scripts").mkdir(parents=True)
+    (root / "adapters/claude/agents/scripts").mkdir(parents=True)
     canonical = root / CODEX_SKILL.relative_to(ROOT)
     historical = root / CLAUDE_SKILL.relative_to(ROOT)
     if mutation == "canonical":
@@ -539,7 +582,7 @@ def test_installed_cleanup_validator_requires_current_body_without_source_tree(
 ) -> None:
     relative = (
         "src.codex/skills/lead/scripts/validate-skill-pack.py"
-        if provider == "codex" else "src.claude/agents/scripts/validate-skill-pack.py"
+        if provider == "codex" else "adapters/claude/agents/scripts/validate-skill-pack.py"
     )
     adapter = _load_source_module(ROOT / relative, f"installed_cleanup_{provider}")
     root = tmp_path / "installed"

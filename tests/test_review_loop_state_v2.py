@@ -2284,8 +2284,8 @@ def test_runtime_engine_is_projected_and_observability_record_is_current() -> No
     live_surfaces = (
         ROOT / "shared" / "references" / "review-loop-methodology.md",
         ROOT / "shared" / "references" / "ru" / "review-loop-methodology.md",
-        ROOT / "src.claude" / "agents" / "contracts" / "review-loop.md",
-        ROOT / "src.claude" / "commands" / "agents-review-loop.md",
+        ROOT / 'adapters/claude' / "agents" / "contracts" / "review-loop.md",
+        ROOT / 'adapters/claude' / "commands" / "agents-review-loop.md",
         ROOT / "src.codex" / "skills" / "review-loop" / "SKILL.md",
     )
     old_bug = "work-items/bugs/2026-07-26-nothing-observes-a-review-loop-that-ran-without-a-ledger.md"
@@ -2299,6 +2299,14 @@ def test_runtime_engine_is_projected_and_observability_record_is_current() -> No
     claude = live_surfaces[-2].read_text(encoding="utf-8")
     assert "ORCHESTRARIUM_REVIEW_LOOP_STATE_V2" in codex
     assert "ORCHESTRARIUM_REVIEW_LOOP_STATE_V2" in claude
+    common_step = next(line for line in codex.splitlines() if line.startswith("4. **Admit the frozen round.**"))
+    command_step = next(line for line in claude.splitlines() if line.startswith("4. **Use the state owner"))
+    assert "`../lead/scripts/review_loop_state.py`" in common_step
+    assert "`/agents-review-loop`" in common_step
+    assert "same selected Claude installation root" in command_step
+    assert "`agents/scripts/review_loop_state.py`" in command_step
+    assert "not permission to switch" in command_step
+    assert "same Claude installation root as the selected command and this contract" in live_surfaces[-3].read_text(encoding="utf-8")
     assert "absence observer" not in codex
     assert "only launchable attempt IDs" not in claude
 

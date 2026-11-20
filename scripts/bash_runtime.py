@@ -8,14 +8,28 @@ import subprocess
 from pathlib import Path
 
 
+def _system_windows_directory() -> str | None:
+    if os.name != "nt":
+        return None
+    import ctypes
+
+    buffer = ctypes.create_unicode_buffer(32768)
+    length = ctypes.windll.kernel32.GetSystemWindowsDirectoryW(buffer, len(buffer))
+    return buffer.value if 0 < length < len(buffer) else None
+
+
 def _is_windows_wsl_bash(path: Path) -> bool:
     normalized = str(path.resolve(strict=False)).replace("/", "\\").casefold()
+    system_root = _system_windows_directory()
+    if os.name == "nt" and not system_root:
+        # Do not misclassify the Windows WSL shim when the OS root is unknown.
+        return True
     windows_roots = {
         str(Path(value).resolve(strict=False)).replace("/", "\\").rstrip("\\").casefold()
         for value in (
             os.environ.get("SystemRoot"),
             os.environ.get("windir"),
-            r"C:\Windows",
+            system_root,
         )
         if value
     }

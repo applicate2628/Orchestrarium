@@ -22,7 +22,7 @@ CLIENTS = {
     "claude": {
         "id": "claude", "label": "Claude Code", "primary": False,
         "canonical_runtime": ".claude/skills/lead", "transport_runtime": ".claude/agents",
-        "source_root": "src.claude", "references_root": "references-claude",
+        "source_root": "adapters/claude", "references_root": "adapters/claude/references",
         "roots": (".claude",), "provider_root": ".claude",
         "payload_roots": (".claude/skills", ".claude/agents", ".claude/commands", ".claude/contracts"),
         "documents": {"global": {".claude/CLAUDE.md": "claude", ".claude/AGENTS.md": "shared"},
@@ -31,6 +31,24 @@ CLIENTS = {
         "registration": ".claude/settings.json", "hook_format": "exec",
         "native_config": None, "default_agent_key": "agent", "feature_defaults": {},
         "legacy_shared_roots": ((".claude/skills", ".agents/skills"),),
+    },
+    "antigravity": {
+        "id": "antigravity", "label": "Antigravity", "command": "agy", "primary": False,
+        "canonical_runtime": ".agents/orchestrarium-antigravity/runtime",
+        "transport_runtime": ".agents/orchestrarium-antigravity/runtime",
+        "source_root": "adapters/antigravity", "references_root": "shared/references",
+        "roots": (".agents", ".gemini"), "provider_root": ".agents/orchestrarium-antigravity",
+        "scope_prefixes": {"project": ".agents/orchestrarium-antigravity/",
+                           "global": ".gemini/config/orchestrarium-antigravity/"},
+        "projection_configs": {"project": (".agents/hooks.json", ".agents/skills.json", ".agents/rules.json"),
+                               "global": (".gemini/config/hooks.json", ".gemini/config/skills.json", ".gemini/config/rules.json")},
+        "payload_roots": (".agents/orchestrarium-antigravity", ".gemini/config/orchestrarium-antigravity"),
+        "documents": {"global": {}, "project": {}},
+        "mode_file": {"global": ".gemini/config/orchestrarium-antigravity/.agents-mode.yaml",
+                      "project": ".agents/orchestrarium-antigravity/.agents-mode.yaml"},
+        "registration": ".agents/hooks.json", "hook_format": "named-command",
+        "native_config": None, "default_agent_key": None, "feature_defaults": {},
+        "legacy_shared_roots": (),
     },
 }
 

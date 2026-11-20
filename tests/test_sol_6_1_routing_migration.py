@@ -6,6 +6,9 @@ Time, locale, random seeds and scheduling do not affect these byte/value oracles
 from contextlib import nullcontext
 import hashlib
 import json
+import os
+import shutil
+import subprocess
 from pathlib import Path
 import tomllib
 
@@ -201,3 +204,26 @@ class MigrationTests(unittest.TestCase):
         # Native bounded medium must stay available behind the role/task selector;
         # security/review/recovery negatives are asserted by the selector test above.
         check_bounded_medium_corridors_preserve_critical_floors()
+
+
+class FrozenPriorCheckoutTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("git"), "Git is required for checkout qualification")
+    def test_frozen_prior_bytes_survive_autocrlf_checkout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            prior = root / "tests/fixtures/sol-6-1-priors/probe.toml"
+            prior.parent.mkdir(parents=True)
+            payload = b'name = "synthetic-prior"\n# exact historical bytes\n'
+            prior.write_bytes(payload)
+            (root / ".gitattributes").write_bytes((ROOT / ".gitattributes").read_bytes())
+            env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+            env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1", GIT_ATTR_NOSYSTEM="1")
+            def git(*args):
+                subprocess.run([shutil.which("git"), "-c", "core.autocrlf=true",
+                    "-c", "core.attributesFile=" + os.devnull, *args], cwd=root,
+                    env=env, check=True, capture_output=True, timeout=30)
+            git("init", "-q")
+            git("add", "--", ".gitattributes", prior.relative_to(root).as_posix())
+            prior.unlink()
+            git("checkout-index", "--all", "--force")
+            self.assertEqual(prior.read_bytes(), payload)

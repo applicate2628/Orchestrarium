@@ -7,7 +7,14 @@ Apply the shared **Assistance and owner-equivalent execution (binding)** contrac
 
 # Lead
 
-Hold `$lead` as the orchestration role in the main Codex session. Codex loads roles as in-context skills, and `$lead` is never one of them: by policy, one context owns delegation, gate integrity, and artifact acceptance across the whole chain, so the orchestration owner stays in the main session with this `$lead` skill active; only leaf specialist roles are activated per stage. `$lead` is never itself a separate spawned agent — the main session IS the lead.
+Hold `$lead` in the main orchestration session. Root owns global admission,
+integration and final acceptance. An explicitly Root-admitted scoped child
+coordinator may choose among its immutable admitted descendant requests and
+propose lifecycle actions only for its assigned work-item through the existing
+Host owner. This exception is not permission for an ordinary specialist to
+adopt Lead, invent grants or close Root/sibling work. Child evidence remains
+subject to independent acceptance. The shared scoped-child contract owns the
+boundary; existing SDK execution and lifecycle owners enforce effects.
 
 ## Bootstrap — first action
 
@@ -231,6 +238,7 @@ Before choosing an approach for a new design/mechanism or nontrivial implementat
 
 - **Evidence discipline required**: the handoff must include the template's `Evidence discipline` field with the four accepted evidence categories, `ASSUMPTION (UNVERIFIED)` fallback, and banned correctness-drivers; a handoff without it is incomplete.
 - **Tool selection recorded**: immediately before each native spawn, discover the current tool surface and fill `Allowed tools` exactly as required by the installed `AGENTS.md`; inherited availability does not widen that recorded selection. When the selected tool schema requires a context-dependent argument, bind that argument from the existing `Scope` or `Approved inputs` rather than recording only its name.
+- In the existing handoff or result, distinguish the selected role and method from actual activation on the executing host; catalog visibility is not activation. At acceptance, tie returned evidence to the same pinned inputs and authorized scope. An absent optional method does not create a new gate.
 - **Actionable handoff activation**: Treat informational delivery and task activation as distinct operations. A successful informational send proves only delivery, not that execution was scheduled or progress resumed. Use the host’s task-scheduling or resume mechanism for actionable work assigned to an idle or completed agent, and wait only after scheduling succeeds or current-running evidence exists. On Codex, `collaboration.send_message` is informational delivery and `collaboration.followup_task` schedules an idle agent; never substitute the former for the latter. On other hosts, use the actual host-equivalent operations and semantics, not the Codex tool names.
 - **Conditional external-run monitoring**: When an approved external job outlives one model turn or otherwise needs polling, Lead designates exactly one root polling owner and uses event-driven or non-model waiting when the host exposes it. Before monitoring, existing recovery state records the external run ID, exact approved input bindings, completion oracle, and next authorized action. Emit no duplicate unchanged-state update. If the observer fails or exhausts quota, first probe the recorded job and outputs; never restart successful computation. Before dispatching continuation, reconcile whether the next authorized action already started and record any handoff in existing state; check an ambiguous launch authoritatively before retry. This coordinates recovery but promises no host exactly-once guarantee, and observer quota follows the existing no-automatic-profile-escalation policy.
 - **Unsettled initialization**: `pending_init` is an observed non-terminal host state with undocumented cause; it does not prove model, provider, or executable unavailability. Perform one bounded current-state probe. If the state advances, use the existing running/completed handling. If it remains `pending_init`, preserve the run as unsettled and use the existing bounded wait, stall, cancel, or resume posture; do not infer retry, replacement, or provider-failure semantics from the label. Record missing actual model/effort as `unspecified by runtime`; `unspecified by runtime` alone neither denies nor authorizes the result. Absence of an in-repository host adapter does not admit a new runtime subsystem.
@@ -443,7 +451,7 @@ Invoke `$consultant` when the lead wants a second opinion on ambiguity, tradeoff
 
 ## Using Consultant
 
-`$consultant` is the independent advisory consultant for this repository. All usage rules, toggle check, and execution paths are in `$HOME/.agents/skills/consultant/SKILL.md`.
+`$consultant` is the independent advisory consultant for this repository. All usage rules, toggle check, and execution paths are in the installed sibling [consultant skill](../consultant/SKILL.md).
 
 Lead rules for `$consultant`:
 

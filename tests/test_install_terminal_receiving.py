@@ -17,15 +17,16 @@ ROOT=Path(__file__).resolve().parents[1]
 SOURCE=Path(os.environ.get('TERMINAL_TEST_SOURCE',ROOT/'scripts/production_installer.py'))
 
 class TerminalTests(unittest.TestCase):
-    def run_tail(self, *, primary=None, cleanup=None, compatibility=None, dry=False, global_install=False, exit_error=None, real_formatter=False, stderr=None):
+    def run_tail(self, *, primary=None, cleanup=None, postcommit=None, dry=False, global_install=False, exit_error=None, real_formatter=False, stderr=None):
         tree=ast.parse(SOURCE.read_bytes())
         install=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='install')
         outer=next(n for n in install.body if isinstance(n,ast.Try))
-        at=next(i for i,n in enumerate(outer.body) if isinstance(n,ast.If) and
-                '_install_codex_legacy_skill_compatibility' in ast.unparse(n))
-        if at and isinstance(outer.body[at-1],ast.Assign) and ast.unparse(outer.body[at-1]).startswith('applied ='):
-            at-=1
+        at=next(i for i,n in enumerate(outer.body) if isinstance(n,ast.Assign) and
+                any(isinstance(t,ast.Name) and t.id=='applied' for t in n.targets))
+        # Preserve the real applied/except/finally tail. Inject failures at the
+        # post-commit boundary, not through a removed compatibility installer.
         outer.body=ast.parse('with transaction:\n    transaction_body()\n    transaction.commit()').body+outer.body[at:]
+        outer.body += ast.parse('postcommit_boundary()').body
         final=install.body[install.body.index(outer)+1:]
         init=ast.parse('primary = cleanup_error = None\napplied = False').body
         fn=ast.FunctionDef(name='tail',args=ast.arguments(posonlyargs=[],args=[],kwonlyargs=[],kw_defaults=[],defaults=[]),body=init+[outer]+final,decorator_list=[])
@@ -34,9 +35,10 @@ class TerminalTests(unittest.TestCase):
         def tx():
             self.events.append('transaction-exit')
             if primary is not None:raise primary
-        def compat(*a,**kw):
-            self.events.append('compatibility')
-            if compatibility is not None:raise compatibility
+        def postcommit_boundary():
+            if postcommit is not None:
+                self.events.append('postcommit')
+                raise postcommit
         def discard(*a,**kw):
             self.events.append('cleanup')
             if cleanup is not None:raise cleanup
@@ -58,7 +60,7 @@ class TerminalTests(unittest.TestCase):
         scope={'transaction':Tx(),'sys':sys,'args':SimpleNamespace(dry_run=dry),'provider':'codex',
                'mode':'global' if global_install else 'project','target':'target','home':'home','root':'root',
                'canonical_plan':object(),'canonical_skills_target':'skills','legacy_codex_skill_migrations':(),
-               'transaction_body':tx,'_install_codex_legacy_skill_compatibility':compat,
+               'transaction_body':tx,'postcommit_boundary':postcommit_boundary,
                '_discard_canonical_skills_plan':discard,'_installer_failure_text':lambda e:type(e).__name__}
         if real_formatter:
             names={'_InstallFailure','_RollbackFailureMember','_CopySetterDiagnostic',
@@ -85,7 +87,7 @@ class TerminalTests(unittest.TestCase):
         with contextlib.redirect_stdout(self.out),contextlib.redirect_stderr(self.err):return scope['tail']()
     def test_real_sanitizer_primary_cleanup_private_text(self):
         primary=ValueError('PRIVATE_PRIMARY_SENTINEL');cleanup=OSError(13,'PRIVATE_CLEANUP_SENTINEL')
-        self.assertEqual(self.run_tail(global_install=True,compatibility=primary,cleanup=cleanup,real_formatter=True),1)
+        self.assertEqual(self.run_tail(global_install=True,postcommit=primary,cleanup=cleanup,real_formatter=True),1)
         text=self.out.getvalue()+self.err.getvalue()
         self.assertNotIn('PRIVATE_',text)
         self.assertIn('installation applied',text)
@@ -103,7 +105,7 @@ class TerminalTests(unittest.TestCase):
             with self.subTest(exception=factory.__name__):
                 primary=factory('PRIVATE_INTERRUPT_SENTINEL')
                 with self.assertRaises(factory) as got:
-                    self.run_tail(global_install=True,compatibility=primary,real_formatter=True)
+                    self.run_tail(global_install=True,postcommit=primary,real_formatter=True)
                 self.assertIs(got.exception,primary)
                 self.assertIn('installation applied',self.err.getvalue())
                 self.assertIn('Do not retry blindly.',self.err.getvalue())
@@ -134,7 +136,7 @@ class TerminalTests(unittest.TestCase):
                 secondary=ValueError('PRIVATE_SECONDARY')
                 stream=BrokenStderr(write_error)
                 with self.assertRaises(KeyboardInterrupt) as got:
-                    self.run_tail(global_install=True,compatibility=primary,cleanup=secondary,stderr=stream)
+                    self.run_tail(global_install=True,postcommit=primary,cleanup=secondary,stderr=stream)
                 self.assertIs(got.exception,primary)
                 self.assertIs(primary.__cause__,original)
                 self.assertEqual(primary._installer_terminal_errors,(secondary,write_error))
@@ -147,7 +149,7 @@ class TerminalTests(unittest.TestCase):
         class BrokenStderr:
             def write(self,text):raise write_error
         with self.assertRaises(SystemExit) as got:
-            self.run_tail(global_install=True,compatibility=primary,cleanup=interruption,stderr=BrokenStderr())
+            self.run_tail(global_install=True,postcommit=primary,cleanup=interruption,stderr=BrokenStderr())
         self.assertIs(got.exception,interruption)
         self.assertEqual(interruption.code,0)
         self.assertEqual(interruption._installer_terminal_errors,(primary,write_error))
@@ -167,8 +169,8 @@ class TerminalTests(unittest.TestCase):
         self.assertEqual(self.run_tail(primary=ValueError(),cleanup=OSError()),1)
         self.assertNotIn('installation applied',self.err.getvalue());self.assertIn('ValueError',self.err.getvalue());self.assertIn('OSError',self.err.getvalue())
     def test_global_failure_after_commit(self):
-        self.assertEqual(self.run_tail(global_install=True,compatibility=ValueError(),cleanup=OSError()),1)
-        self.assertIn('installation applied',self.err.getvalue());self.assertEqual(self.events,['transaction-exit','compatibility','cleanup'])
+        self.assertEqual(self.run_tail(global_install=True,postcommit=ValueError(),cleanup=OSError()),1)
+        self.assertIn('installation applied',self.err.getvalue());self.assertEqual(self.events,['transaction-exit','postcommit','cleanup'])
     def test_primary_interrupt_preserved(self):
         primary=KeyboardInterrupt();secondary=OSError()
         with self.assertRaises(KeyboardInterrupt) as got:self.run_tail(primary=primary,cleanup=secondary)

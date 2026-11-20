@@ -767,7 +767,7 @@ class LifecycleTransaction:
             self._selected_ledger_scope_token = None
 
     def admit_ledger_operation(self, item, *, selected_snapshot=None, participant_snapshots=(),
-            known_row_bytes=(), unknown_terminal_rows=0):
+            known_row_bytes=(), unknown_terminal_rows=0, historical_pass_custody_blobs=None):
         """Hold one final pair from actual selected captures and producer effects."""
         self.ensure_selected_ledger_scope()
         snapshot = (selected_snapshot if selected_snapshot is not None else
@@ -777,7 +777,8 @@ class LifecycleTransaction:
         try:
             budget, predicates = _admit_ledger_operation(item, snapshot.path, snapshot.data,
                 ledger_resource_budget=self.ledger_resource_budget, participants=participants,
-                known_row_bytes=known_row_bytes, unknown_terminal_rows=unknown_terminal_rows)
+                known_row_bytes=known_row_bytes, unknown_terminal_rows=unknown_terminal_rows,
+                historical_pass_custody_blobs=historical_pass_custody_blobs)
         except ValueError as exc:
             message = str(exc)
             failure_id = message.split(":", 1)[0] if message.startswith("WI-LEDGER-RESOURCE-") else "WI-LEDGER-UNSETTLED"
@@ -10851,6 +10852,10 @@ def _capture_runtime_source(relative: Path, *, failure_id: str, authority=None):
         raise
 
 
+_paired_source_binding = None
+_paired_validator_module = None
+
+
 def _validator_module():
     path = Path(__file__).with_name("validate-work-item-state.py")
     transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
@@ -10887,6 +10892,10 @@ def _validator_module():
             return transaction._validator_reuse
     if transaction is None:
         owner = actual_lifecycle_owner()
+        if _paired_source_binding is not None:
+            _paired_source_binding.assert_current()
+            verify_cached_lifecycle_owner(_paired_validator_module, owner)
+            return _paired_validator_module
         spec = importlib.util.spec_from_file_location("work_item_state_validator", path)
         if spec is None or spec.loader is None:
             raise LifecycleError("WI-VALIDATOR-LOAD", f"cannot load validator: {path}")
@@ -15298,12 +15307,19 @@ def _retain_historical_pass_custody(
             item / "agent-runs.jsonl", failure_id=stale,
             maximum_bytes=None, ledger_resource_budget=ledger_resource_budget,
         )
-        ledger_resource_budget, captured = _CURRENT_LIFECYCLE_TRANSACTION.get().admit_ledger_operation(
-            item, selected_snapshot=captured)
         raw = captured.data
+        # Parse the exact captured image under its derived acquisition budget.
+        # Final H1 admission must see the selected custody bytes: the original
+        # artifact may already be missing, which is what this operation repairs.
+        demand = validator.inspect_ledger_resource_demand(
+            captured.path, ledger_resource_budget, source_bytes=raw)
+        parse_budget = validator.resolve_ledger_resource_budget(
+            ledger_resource_budget.max_events if ledger_resource_budget is not None else None,
+            ledger_resource_budget.max_ledger_bytes if ledger_resource_budget is not None else None,
+            demand=demand)
         errors: list[str] = []
         metadata: list[dict[str, object]] = []
-        events = validator.load_jsonl(captured.path, errors, metadata, raw, ledger_resource_budget=ledger_resource_budget)
+        events = validator.load_jsonl(captured.path, errors, metadata, raw, ledger_resource_budget=parse_budget)
         targets = [
             event for event, identity in zip(events, metadata)
             if identity["line"] == raw_line_ordinal
@@ -15328,6 +15344,8 @@ def _retain_historical_pass_custody(
                 or envelope.get("snapshotSha256") != expected_original_sha256
             ):
                 raise LifecycleError(stale, "replay request conflicts with immutable association")
+            ledger_resource_budget, captured = _CURRENT_LIFECYCLE_TRANSACTION.get().admit_ledger_operation(
+                item, selected_snapshot=captured)
             _, replay_errors = validator.resolve_historical_pass_custody(item, raw, events, metadata, ledger_resource_budget=ledger_resource_budget)
             if replay_errors:
                 raise LifecycleError(replay_errors[0].split(":", 1)[0], "; ".join(replay_errors))
@@ -15346,6 +15364,8 @@ def _retain_historical_pass_custody(
         envelope = _historical_pass_association(raw, target, raw_line_ordinal, expected_raw_line_sha256, expected_original_sha256)
         envelope_bytes = validator._canonical_projection_bytes(envelope)
         candidates = {association_key: envelope_bytes, snapshot_key: original_bytes}
+        ledger_resource_budget, captured = _CURRENT_LIFECYCLE_TRANSACTION.get().admit_ledger_operation(
+            item, selected_snapshot=captured, historical_pass_custody_blobs=candidates)
         states, acquired = [], []
         errors = validator.validate_work_item(
             item, strict_revise=False, historical_pass_custody_blobs=candidates,
@@ -21990,7 +22010,8 @@ def _verify_structural_node(node: tuple, failure_id: str) -> None:
 def _admit_ledger_operation(item, ledger_path, selected_bytes, *, ledger_resource_budget=None,
         known_row_bytes=(), unknown_terminal_rows=0, validator=None, transition_resource_budget=None,
         participants=None, selected_snapshot=None, transfer_source_item=None,
-        transfer_operation_id=None, selected_transfer_snapshots_out=None):
+        transfer_operation_id=None, selected_transfer_snapshots_out=None,
+        historical_pass_custody_blobs=None):
     """Freeze one operation's finite capacity from its exact selected image.
 
     The caller owns the primary capture (or permitted creation absence). This
@@ -22006,7 +22027,8 @@ def _admit_ledger_operation(item, ledger_path, selected_bytes, *, ledger_resourc
         selected_identity = (item / "agent-runs.jsonl").relative_to(root).as_posix()
         resolution = validator._resolve_ledger_h1_selected(root, item, selected_identity,
             selected_ledger_bytes=selected_bytes, ledger_resource_budget=ledger_resource_budget,
-            transition_resource_budget=transition_resource_budget, resource_artifacts_out=artifacts)
+            transition_resource_budget=transition_resource_budget, resource_artifacts_out=artifacts,
+            historical_pass_custody_blobs=historical_pass_custody_blobs)
         if resolution.classification == "invalid":
             failure_ids = resolution.context.observation.failure_ids
             raise LifecycleError(failure_ids[0] if failure_ids else "WI-LEDGER-UNSETTLED",

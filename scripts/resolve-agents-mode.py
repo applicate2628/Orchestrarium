@@ -328,15 +328,19 @@ def _luna_stable_ordinary_chain(
     chain: list[Path] | None,
     *,
     leaf_kind: str,
+    selected_root: Path,
 ) -> tuple[Path, Any] | None:
     if not chain:
         return None
+    # A selected POSIX volume is analogous to a drive anchor, not a child escape.
+    # Reparse/link checks remain unconditional; both passes bind native identity.
     snapshots: list[tuple[Path, tuple[Any, ...]]] = []
     leaf_metadata: Any = None
     for index, path in enumerate(chain):
         metadata = _luna_component_metadata(
             path,
-            allow_anchor_mount=path == Path(path.anchor),
+            allow_anchor_mount=(path == Path(path.anchor) or path == selected_root
+                                or path in selected_root.parents),
         )
         if metadata is None:
             return None
@@ -357,7 +361,8 @@ def _luna_stable_ordinary_chain(
     for index, (path, signature) in enumerate(snapshots):
         metadata = _luna_component_metadata(
             path,
-            allow_anchor_mount=path == Path(path.anchor),
+            allow_anchor_mount=(path == Path(path.anchor) or path == selected_root
+                                or path in selected_root.parents),
         )
         if metadata is None or _luna_metadata_signature(metadata) != signature:
             return None
@@ -374,7 +379,7 @@ def _luna_existing_target(
     if not _valid_relative_probe_path(value):
         return None
     root_chain = _luna_absolute_chain(exact_root)
-    if _luna_stable_ordinary_chain(root_chain, leaf_kind="directory") is None:
+    if _luna_stable_ordinary_chain(root_chain, leaf_kind="directory", selected_root=exact_root) is None:
         return None
     components = value.split("/")
     candidate = exact_root.joinpath(*components)
@@ -389,16 +394,16 @@ def _luna_existing_target(
     for component in components:
         cursor = cursor / component
         target_chain.append(cursor)
-    existing = _luna_stable_ordinary_chain(target_chain, leaf_kind=leaf_kind)
+    existing = _luna_stable_ordinary_chain(target_chain, leaf_kind=leaf_kind, selected_root=exact_root)
     if existing is not None or not allow_missing_leaf:
         return existing
     parent_chain = target_chain[:-1]
-    if _luna_stable_ordinary_chain(parent_chain, leaf_kind="directory") is None:
+    if _luna_stable_ordinary_chain(parent_chain, leaf_kind="directory", selected_root=exact_root) is None:
         return None
     try:
         os.lstat(candidate)
     except FileNotFoundError:
-        if _luna_stable_ordinary_chain(parent_chain, leaf_kind="directory") is None:
+        if _luna_stable_ordinary_chain(parent_chain, leaf_kind="directory", selected_root=exact_root) is None:
             return None
         return candidate, None
     except OSError:
@@ -607,6 +612,8 @@ def validate_luna_execution_plan(
 
     The caller owns discovery of the actual Git root.  This function only
     checks the supplied observation against the exact, non-reparse plan root.
+    Ordinary mounts at or above that selected root may define its volume;
+    mounts below the root, links, reparse points and identity drift still refuse.
     """
 
     if not isinstance(plan, dict):
@@ -640,7 +647,7 @@ def validate_luna_execution_plan(
         observed_root != expected_root
         or _luna_stable_ordinary_chain(
             _luna_absolute_chain(Path(expected_root)),
-            leaf_kind="directory",
+            leaf_kind="directory", selected_root=Path(expected_root),
         )
         is None
     ):

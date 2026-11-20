@@ -10,11 +10,11 @@ DETAIL = ROOT / "shared/references/spine/functional-first-delivery.md"
 ARCHITECT_SKILLS = (
     ROOT / "src.codex/skills/architect/SKILL.md",
 )
-CLAUDE_ARCHITECT_WRAPPER = ROOT / "src.claude/agents/architect.md"
-CLAUDE_INLINE_POLICY = ROOT / "src.claude/CLAUDE.md"
+CLAUDE_ARCHITECT_WRAPPER = ROOT / 'adapters/claude/agents/architect.md'
+CLAUDE_INLINE_POLICY = ROOT / 'adapters/claude/CLAUDE.md'
 LEAD_SKILLS = (
     ROOT / "src.codex/skills/lead/SKILL.md",
-    ROOT / "src.claude/skills/lead/SKILL.md",
+    ROOT / 'adapters/claude/skills/lead/SKILL.md',
 )
 
 
@@ -36,12 +36,12 @@ class TestEarlyArchitectRouting(unittest.TestCase):
         claude_inline_policy = self._read(CLAUDE_INLINE_POLICY)
 
         self.assertIn(
-            "Unsettled structure=>`$architect`; implementer cannot invent",
+            "Unsettled structure: architect, never implementer invention",
             spine,
         )
-        self.assertIn("architecture before implementation", spine)
+        self.assertIn("changes require architecture first", spine)
         self.assertIn(
-            "accepted requirement or declared future direction/evidenced domain variability/current second consumer/verified external-contract evolution",
+            "Accepted requirement/future direction/domain variation/current second consumer/verified contract evolution",
             spine,
         )
         self.assertIn(
@@ -65,7 +65,7 @@ class TestEarlyArchitectRouting(unittest.TestCase):
             "For a bounded early package, the decision, owner, seam, protected surface, material-alternative disposition, and falsifying probe are explicit",
         )
         self.assertIn(
-            "The universal Architect skill (`.agents/skills/architect/SKILL.md`, sourced from `src.codex/skills/architect/SKILL.md`) is the sole role-contract body owner",
+            "The sole authored role-contract body is `src.codex/skills/architect/SKILL.md`; this Claude installation loads its ordinary copy at `.claude/skills/architect/SKILL.md`.",
             claude_wrapper,
         )
         self.assertIn(
@@ -73,7 +73,7 @@ class TestEarlyArchitectRouting(unittest.TestCase):
             claude_wrapper,
         )
         self.assertIn(
-            "Architect's sole role-contract body is the universal `.agents/skills/architect/SKILL.md` projection.",
+            "Architect's sole authored role-contract body is `src.codex/skills/architect/SKILL.md`, installed as an ordinary copy at `.claude/skills/architect/SKILL.md`.",
             claude_inline_policy,
         )
 
@@ -105,13 +105,13 @@ class TestEarlyArchitectRouting(unittest.TestCase):
         spine = self._read(SPINE)
         detail = self._read(DETAIL)
 
-        self.assertIn("local correction=no ceremony", spine)
+        self.assertIn("local preserved-contract correction adds no ceremony", spine)
         self.assertIn(
             "A fix inside a known function that preserves its accepted contract stays on `quick-fix`",
             detail,
         )
         self.assertIn(
-            "Model/math/units only=>domain owner, not Architect",
+            "Pure model/math/units: domain owner",
             spine,
         )
         self.assertIn(
@@ -124,8 +124,8 @@ class TestEarlyArchitectRouting(unittest.TestCase):
         )
 
         for marker in (
-            "security-, performance-, or geometry-sensitive template requirements",
-            "confidentiality/integrity/authentication/authorization/trust/injection/untrusted-execution/data-loss/corruption/irreversible/publication=>fail closed",
+            "security/performance/geometry template gates stay binding",
+            "confidentiality/integrity/authentication/authorization/trust/injection/untrusted-execution/data-loss/corruption/irreversible/publication risk requires fail-closed",
             "Human approval/leak mandatory",
         ):
             with self.subTest(spine_gate=marker):

@@ -23,7 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 OWNER = ROOT / "scripts/universal-hooks/scripts/check-git-push-gate.py"
 
 CHILD = r"""
-import asyncio, importlib.util, json, os, sys, time
+import asyncio, ctypes, importlib.util, json, os, sys, time
+from ctypes import wintypes
 from pathlib import Path
 source = Path(sys.argv[1])
 spec = importlib.util.spec_from_file_location("native_timeout_scanner", source)
@@ -36,8 +37,16 @@ async def run():
     if refused is not None:
         raise RuntimeError(repr(refused))
     assert isinstance(reader.process, scanner._WindowsOwnedAsyncProcess)
-    print(json.dumps({"scanner_pid": os.getpid(), "git_pid": reader.process.pid,
-                      "reader_state": reader.state.name, "windows_job": True}), flush=True)
+    job = reader.process.job
+    in_job = wintypes.BOOL()
+    if not job._api.k32.IsProcessInJob(
+        job._handles["process"], job._handles["job"], ctypes.byref(in_job)
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+    print(json.dumps({"scanner_pid": os.getpid(), "scanner_ppid": os.getppid(),
+                      "git_pid": reader.process.pid,
+                      "reader_state": reader.state.name,
+                      "windows_job": bool(in_job.value)}), flush=True)
     # Stand in for a synchronous detector that cannot yield to its deadline.
     time.sleep(60)
 asyncio.run(run())
@@ -115,7 +124,12 @@ class NativeTimeoutTests(unittest.TestCase):
             observed = json.loads(record.stdout.decode("utf-8"))
             self.assertEqual(observed["reader_state"], "ACTIVE")
             self.assertTrue(observed["windows_job"])
-            self.assertEqual(observed["scanner_pid"], launched.child_handle)
+            # Windows venv Python can be a redirector: Popen owns the launcher,
+            # while os.getpid() reports its interpreter child. Bind that actual
+            # lineage instead of assuming that both identities must be equal.
+            self.assertIn(launched.child_handle,
+                          (observed["scanner_pid"], observed["scanner_ppid"]))
+            self.assertTrue(process_has_exited(launched.child_handle))
             self.assertNotEqual(observed["scanner_pid"], observed["git_pid"])
             self.assertTrue(process_has_exited(observed["scanner_pid"]))
             self.assertTrue(process_has_exited(observed["git_pid"]))
@@ -125,7 +139,7 @@ class NativeTimeoutTests(unittest.TestCase):
                     launched, records, closure, interpreter, binding, time.monotonic())
             self.assertIsNone(pending.consumption_id)
             print("native timeout receiving:", observed,
-                  "both processes exited; incomplete scan cannot authorize")
+                  "launcher, scanner and Git exited; incomplete scan cannot authorize")
 
 
 if __name__ == "__main__":

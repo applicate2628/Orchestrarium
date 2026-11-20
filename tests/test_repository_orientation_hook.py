@@ -25,7 +25,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 HOOKS = (
-    ROOT / "src.claude" / "agents" / "hooks" / "check-repository-orientation.py",
+    ROOT / 'adapters/claude' / "agents" / "hooks" / "check-repository-orientation.py",
     ROOT / "src.codex" / "skills" / "lead" / "hooks" / "check-repository-orientation.py",
 )
 CANONICAL_HOOK = ROOT / "scripts" / "universal-hooks" / "hooks" / "check-repository-orientation.py"

@@ -38,8 +38,13 @@ def test_pinned_source_bytes_survive_checkout_settings(tmp_path, autocrlf, eol):
     # Existing mixed-newline payloads must retain their bytes too; normalizing
     # every source to LF would change accepted-prior tree identities.
     paths.update({"src.codex/skills/architect/agents/openai.yaml",
-                  "src.claude/agents/hooks/dispatch_sentinels.py",
+                  "adapters/claude/agents/hooks/dispatch_sentinels.py",
                   "scripts/arch-layering-slices.stamp"})
+    prior_root = "tests/fixtures/provider-prompt-priors/pre-e7"
+    prior_manifest = json.loads((ROOT / prior_root / "manifest.json").read_text())
+    prior_payload = prior_root + "/" + prior_manifest["payload"]
+    paths.update({prior_payload, prior_root + "/manifest.json"})
+    assert hashlib.sha256((ROOT / prior_payload).read_bytes()).hexdigest() == prior_manifest["sha256"]
     expected = {}
     for relative in sorted(paths):
         data = (ROOT / relative).read_bytes()

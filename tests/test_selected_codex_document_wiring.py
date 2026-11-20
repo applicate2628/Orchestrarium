@@ -55,9 +55,9 @@ class SelectedCodexDocumentWiringTests(unittest.TestCase):
         self.assertEqual(len(parse.args), 1)
         self.assertEqual(parse.keywords, [])
 
-    def test_posix_hold_remains_before_target_resolution(self):
+    def test_unsupported_platform_hold_remains_before_target_resolution(self):
         install = self.definition("install")
-        hold = self.branch(install, 'os.name == "posix"')
+        hold = self.branch(install, 'not _installer_platform_admitted()')
         self.assertIsInstance(hold.body[-1], ast.Return)
         self.assertLess(hold.end_lineno, self.one(install, "_target").lineno)
 
@@ -234,15 +234,13 @@ class SelectedCodexDocumentWiringTests(unittest.TestCase):
         transaction = self.one(install, "_InstallTransaction")
         self.require(transaction, "fresh_receipt is not None or selected_requested")
         self.assertLess(selected.lineno, transaction.lineno)
-        final = self.branch(install, "selected_updates is not None")
-        selected_call = self.one(final, "_record_selected_provider_receipt")
-        fresh_call = self.one(final, "_record_fresh_provider_receipt")
-        self.assertIs(final.body[0].value, selected_call)
-        self.assertIs(final.orelse[0].value, fresh_call)
+        final = self.one(install, "_record_provider_install")
+        self.require(final, "selected_updates")
         scope = next(node for node in ast.walk(install) if isinstance(node, ast.With)
                      and any(contains(item.context_expr, "transaction") for item in node.items))
-        self.assertIs(scope.body[-2], final)
+        self.assertIs(scope.body[-2].value, final)
         self.assertEqual(ast.unparse(scope.body[-1]), "transaction.commit()")
+
 
 
 if __name__ == "__main__":

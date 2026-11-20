@@ -13,7 +13,7 @@ from typing import Any
 REFERENCE_DOC = Path("docs/agents-mode-reference.md")
 INIT_SURFACES = {
     "codex": Path("src.codex/skills/init-project/SKILL.md"),
-    "claude": Path("src.claude/commands/agents-init-project.md"),
+    "claude": Path("adapters/claude/commands/agents-init-project.md"),
 }
 
 INIT_ROLE_LABELS = {

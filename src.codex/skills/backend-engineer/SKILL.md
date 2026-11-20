@@ -28,6 +28,7 @@ description: "Backend APIs, HTTP/RPC, databases, queues, caches, handlers."
 - Backend contracts, invariants, and error handling remain aligned with the accepted design and constraints.
 - Planned tests and checks were run or explicitly reported as blocked.
 - Every new or modified outbound HTTP, database, queue, cache, or RPC operation has an effective finite timeout owned at the narrowest coherent boundary—call site, shared client or driver, request or transaction context, or composition policy—plus a bounded-backoff retry or explicit no-retry decision and failure mapping. Name the timeout owner and prove inheritance; a default infinite timeout or unverified inheritance is a finding.
+- For changed downstream mutations, show the caller deadline and cancellation behavior, the retry owner and the effective attempt limit across all layers. A timeout does not prove the write failed: demonstrate one durable outcome when the reply is lost, using the accepted idempotency or reconciliation mechanism, or prohibit retries and surface the ambiguous outcome.
 - Every new or changed endpoint or handler includes an Authorization statement naming the enforced authorization rule, or states `public by design` and cites the approving artifact; a route with neither is `REVISE`.
 - Every new query or object-relational-mapping path states expected cardinality and its index or query-plan expectation. An N+1 remote-call loop or unbounded result set without `LIMIT`/pagination is fixed or explicitly justified in the notes.
 - Apply the `Receiving-side echo` owned by `subagent-contracts.md`; an implementation package missing that echo fails this gate.
@@ -37,7 +38,7 @@ description: "Backend APIs, HTTP/RPC, databases, queues, caches, handlers."
 - Prefer the smallest coherent correction at the owning invariant over a smaller symptom-level diff or an opportunistic refactor.
 - Keep API, storage, and integration changes explicit.
 - If the design or plan conflicts with reality, stop and return the exact conflict instead of patching around it.
-- When fixing a runtime bug whose cause is not obvious from code inspection, invoke `$bug-hunting` to load diagnostic-logging discipline — log first, never patch on unverified theory, never re-roll on guesses.
+- When fixing a runtime bug whose cause is not obvious from code inspection, invoke `$bug-hunting` to load hypothesis-appropriate evidence discipline; use focused tests or runtime diagnostics as needed, account for observer effects, and do not stack speculative fixes.
 - When porting backend logic between languages or libraries (regex case sensitivity, locale handling, JSON tag conventions, error semantics, encoding defaults), compare documented semantics of source and destination primitives, do not assume surface syntax preserves behavior, and verify with a target-environment smoke test before claiming the port works.
 - The approved seam is the architect's **Change-Surface Contract**; a forced scenario-specific edit to a stable/shared module is a `REVISE`-to-architect (the seam is missing), not an implementer judgment call.
 
@@ -45,7 +46,7 @@ description: "Backend APIs, HTTP/RPC, databases, queues, caches, handlers."
 
 When implementation reveals bugs, risks, or improvement opportunities outside the approved change surface:
 
-1. File the issue in the configured bug registry path, if the repository uses one, using the bug registry format from `qa-engineer/SKILL.md`, with `context: adjacent-finding` and `status: open`.
+1. Route concrete defects through the bug-admission contract owned by `qa-engineer`; use `context: adjacent-finding` and `status: open` only for a defect admitted under that contract.
 2. Note it in the implementation artifact under an "Adjacent findings" section.
 3. Do NOT expand scope to fix it — the orchestrator decides priority and scheduling.
 4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` instead of working around it.

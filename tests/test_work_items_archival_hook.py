@@ -12,8 +12,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 ADAPTER_PATHS = (
     REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-work-items-archival-stop.py",
     REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-work-items-archival-stop.sh",
-    REPO_ROOT / "src.claude" / "agents" / "scripts" / "check-work-items-archival-stop.py",
-    REPO_ROOT / "src.claude" / "agents" / "scripts" / "check-work-items-archival-stop.sh",
+    REPO_ROOT / 'adapters/claude' / "agents" / "scripts" / "check-work-items-archival-stop.py",
+    REPO_ROOT / 'adapters/claude' / "agents" / "scripts" / "check-work-items-archival-stop.sh",
     REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-work-items-archival-stop.py",
     REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-work-items-archival-stop.sh",
 )

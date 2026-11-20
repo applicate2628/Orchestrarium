@@ -321,4 +321,3 @@ def test_projection_inverse_never_disposes_replacement_target(tmp_path):
     assert not os.path.lexists(provider / "projection")
     assert marker.read_text(encoding="utf-8") == "Replacement user data."
     assert retained.is_dir()
-

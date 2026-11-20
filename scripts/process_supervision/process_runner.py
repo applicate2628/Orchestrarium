@@ -75,6 +75,9 @@ FAILURE_IDS = frozenset(
         "PSV1-STDIN-SHORT-WRITE",
         "PSV1-STDIN-BROKEN-PIPE",
         "PSV1-KIMI-ACP-PROTOCOL",
+        "PSV1-GROK-ACP-PROTOCOL",
+        "PSV1-SDK-WORKER-PROTOCOL",
+    "PSV1-SDK-WORKER-AUTHORITY",
         "PSV1-CAPTURE-LIMIT",
         "PSV1-CAPTURE-IO",
         "PSV1-DEADLINE",
@@ -138,9 +141,32 @@ class KimiWindowsProfileV1:
         return ["acp"]
 
 
+class GrokAcpProfileV1:
+    """Dormant dialogue grammar; native parser attestation remains mandatory."""
+
+    protocol_id = "grok-acp-one-shot-v1"
+
+    @staticmethod
+    def build_argv(executable: Path, model: str) -> tuple[str, ...]:
+        if not isinstance(model, str) or not model or model.startswith("-") or any(ord(c) < 32 for c in model):
+            raise ValueError("invalid Grok model")
+        return (str(executable), "--no-auto-update", "agent", "--no-leader", "--model", model, "stdio")
+
+
+class SdkWorkerWindowsProfileV1:
+    """One isolated worker image; never a caller-selected script or module."""
+
+    profile_id = "python-sdk-worker-v1"
+
+    @staticmethod
+    def build_argv() -> tuple[str, ...]:
+        worker = Path(__file__).resolve().parents[1] / "sdk_execution" / "worker.py"
+        return (os.path.abspath(sys.executable), "-I", "-u", str(worker))
+
+
 _WINDOWS_ARGV_PROFILES = _WINDOWS_ARGV_PROFILES | frozenset(
     {KimiWindowsProfileV1.profile_id, KimiWindowsProfileV1.probe_profile_id,
-     "native-parser-contract-v1"}
+     SdkWorkerWindowsProfileV1.profile_id, "native-parser-contract-v1"}
 )
 
 
@@ -598,6 +624,13 @@ class ProcessRequestV1:
     policy_id: str | None = None
     expected_executable_binding: ExecutableBindingV1 | None = None
     windows_parser_contract: WindowsParserContractV1 | None = None
+
+
+@dataclass(frozen=True)
+class SdkWorkerProcessRequestV1(ProcessRequestV1):
+    """SDK buffers share the existing Job's explicit committed-memory budget."""
+
+    job_memory_limit_bytes: int = field(kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -1161,6 +1194,21 @@ def _is_reparse(metadata: os.stat_result) -> bool:
     return bool(getattr(metadata, "st_file_attributes", 0) & 0x400)
 
 
+def _windows_owner_attributed(owner: bytes, user: bytes, default_owner: bytes | None,
+                              groups: tuple[tuple[bytes, int], ...] | None) -> bool:
+    """Accept the process user or its exact Windows-permitted default owner.
+
+    TOKEN_OWNER group semantics require SE_GROUP_OWNER and not DENY_ONLY.
+    This is owner attribution, not an exclusive-user DACL or sandbox claim.
+    """
+    if owner == user:
+        return True
+    return owner == default_owner and groups is not None and any(
+        sid == owner and attributes & 0x8 and not attributes & 0x10
+        for sid, attributes in groups
+    )
+
+
 def _windows_owner_digest(path: Path) -> str:
     from ctypes import wintypes
 
@@ -1194,9 +1242,9 @@ def _windows_owner_digest(path: Path) -> str:
         ctypes.POINTER(wintypes.DWORD),
     ]
     read_process_identity.restype = wintypes.BOOL
-    equal_sid = advapi32.EqualSid
-    equal_sid.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-    equal_sid.restype = wintypes.BOOL
+    valid_sid = advapi32.IsValidSid
+    valid_sid.argtypes = [ctypes.c_void_p]
+    valid_sid.restype = wintypes.BOOL
     sid_length = advapi32.GetLengthSid
     sid_length.argtypes = [ctypes.c_void_p]
     sid_length.restype = wintypes.DWORD
@@ -1217,20 +1265,54 @@ def _windows_owner_digest(path: Path) -> str:
             kernel32.GetCurrentProcess(), 0x0008, ctypes.byref(token)
         ):
             raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-        needed = wintypes.DWORD()
-        read_process_identity(token, 1, None, 0, ctypes.byref(needed))
-        if not needed.value:
+        def token_information(kind: int, minimum: int):
+            needed = wintypes.DWORD()
+            read_process_identity(token, kind, None, 0, ctypes.byref(needed))
+            if needed.value < minimum:
+                raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+            buffer = ctypes.create_string_buffer(needed.value)
+            capacity = len(buffer)
+            if (not read_process_identity(token, kind, buffer, capacity, ctypes.byref(needed))
+                    or not minimum <= needed.value <= capacity):
+                raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+            return buffer, needed.value
+
+        def sid_bytes(pointer):
+            if not pointer or not valid_sid(pointer):
+                raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+            length = sid_length(pointer)
+            if not length:
+                raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+            return ctypes.string_at(pointer, length)
+
+        # Keep returned buffers alive while their embedded SID pointers are read.
+        user_buffer, _ = token_information(1, ctypes.sizeof(ctypes.c_void_p))  # TokenUser
+        actual_owner = sid_bytes(owner_sid)
+        user = sid_bytes(ctypes.cast(user_buffer, ctypes.POINTER(ctypes.c_void_p))[0])
+        default_owner = None
+        groups = None
+        if actual_owner != user:
+            owner_buffer, _ = token_information(4, ctypes.sizeof(ctypes.c_void_p))  # TokenOwner
+            default_owner = sid_bytes(ctypes.cast(owner_buffer, ctypes.POINTER(ctypes.c_void_p))[0])
+            if actual_owner != default_owner:
+                raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+
+            class SidAndAttributes(ctypes.Structure):
+                _fields_ = [("sid", ctypes.c_void_p), ("attributes", wintypes.DWORD)]
+
+            class TokenGroups(ctypes.Structure):
+                _fields_ = [("count", wintypes.DWORD), ("groups", SidAndAttributes * 1)]
+
+            offset = TokenGroups.groups.offset
+            group_buffer, returned = token_information(2, offset)  # TokenGroups
+            count = ctypes.cast(group_buffer, ctypes.POINTER(wintypes.DWORD))[0]
+            if count > (returned - offset) // ctypes.sizeof(SidAndAttributes):
+                raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+            rows = (SidAndAttributes * count).from_buffer(group_buffer, offset)
+            groups = tuple((sid_bytes(row.sid), row.attributes) for row in rows)
+        if not _windows_owner_attributed(actual_owner, user, default_owner, groups):
             raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-        buffer = ctypes.create_string_buffer(needed.value)
-        if not read_process_identity(token, 1, buffer, needed, ctypes.byref(needed)):
-            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-        token_sid = ctypes.cast(buffer, ctypes.POINTER(ctypes.c_void_p))[0]
-        if not equal_sid(owner_sid, token_sid):
-            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-        length = sid_length(owner_sid)
-        if not length:
-            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-        return hashlib.sha256(ctypes.string_at(owner_sid, length)).hexdigest()
+        return hashlib.sha256(actual_owner).hexdigest()
     finally:
         if token:
             close(token)
@@ -1673,6 +1755,14 @@ class WindowsArgvAdmissionOwnerV1:
             probe_kind, requested, observed = self._python_probe(
                 lifecycle, request, executable, launch_owner
             )
+        elif profile_id == SdkWorkerWindowsProfileV1.profile_id:
+            if request.argv != SdkWorkerWindowsProfileV1.build_argv():
+                raise ProcessSupervisionError(
+                    "PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation"
+                )
+            probe_kind, requested, observed = self._python_probe(
+                lifecycle, request, executable, launch_owner
+            )
         elif profile_id == "git-rev-parse-sq-quote-v1":
             probe_kind, requested, observed = self._git_probe(
                 lifecycle, request, executable, launch_owner
@@ -2019,6 +2109,16 @@ def _validate_request_shape_before_executable_acquisition(
 ) -> None:
     if not isinstance(request, ProcessRequestV1) or request.schema_version != 1:
         raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+    sdk_profile = request.windows_argv_profile_id == SdkWorkerWindowsProfileV1.profile_id
+    if sdk_profile != (type(request) is SdkWorkerProcessRequestV1):
+        raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+    if sdk_profile:
+        try:
+            if request.job_memory_limit_bytes is None:
+                raise ValueError("SDK worker memory budget is required")
+            _WINDOWS_JOB.validate_job_memory_limit(request.job_memory_limit_bytes)
+        except (ValueError, _WINDOWS_JOB.WindowsJobError) as exc:
+            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation") from exc
     if request.windows_argv_profile_id == "native-parser-contract-v1" and type(request.argv) is not tuple:
         raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
     if not 1 <= len(request.argv) <= MAX_ARGV_COUNT:
@@ -2598,6 +2698,20 @@ def _environment_mapping(request: ProcessRequestV1) -> dict[str, str]:
     return {row.name: row.value for row in request.environment}
 
 
+def _dialogue_failure_id(protocol_id: str) -> str:
+    if protocol_id == GrokAcpProfileV1.protocol_id:
+        return "PSV1-GROK-ACP-PROTOCOL"
+    return (
+        "PSV1-SDK-WORKER-PROTOCOL"
+        if protocol_id == SdkWorkerWindowsProfileV1.profile_id
+        else "PSV1-KIMI-ACP-PROTOCOL"
+    )
+
+
+class DialogueReadStoppedV1(Exception):
+    """Local consumer shutdown, not provider EOF or process settlement."""
+
+
 def _convert_windows_handle_to_fd(
     handle: int,
     flags: int,
@@ -2646,18 +2760,28 @@ def _convert_windows_handle_to_fd(
         raise
     return descriptor
 
+
 class _DialogueLineRouterV1:
-    def __init__(self) -> None:
+    def __init__(self, failure_id: str = "PSV1-KIMI-ACP-PROTOCOL") -> None:
+        self.failure_id = failure_id
         self._condition = threading.Condition()
         self._buffer = bytearray()
         self._lines: deque[bytes] = deque()
         self._queued_bytes = 0
         self._eof = False
         self._failed = False
+        self._reads_stopped = False
+
+    def stop_reads(self) -> None:
+        with self._condition:
+            self._reads_stopped = True
+            self._condition.notify_all()
+            if self._failed:
+                raise ProcessSupervisionError(self.failure_id, "stdin-delivery")
 
     def feed(self, data: bytes) -> None:
         with self._condition:
-            if self._failed:
+            if self._failed or self._reads_stopped:
                 return
             retained_bytes = self._queued_bytes + len(self._buffer)
             if len(data) > MAX_STDIN_BYTES - retained_bytes:
@@ -2697,8 +2821,10 @@ class _DialogueLineRouterV1:
             while True:
                 if self._failed:
                     raise ProcessSupervisionError(
-                        "PSV1-KIMI-ACP-PROTOCOL", "stdin-delivery"
+                        self.failure_id, "stdin-delivery"
                     )
+                if self._reads_stopped:
+                    raise DialogueReadStoppedV1("dialogue reader stopped locally")
                 if self._lines:
                     line = self._lines.popleft()
                     self._queued_bytes -= len(line)
@@ -2739,6 +2865,10 @@ class ProcessDialogueChannelV1:
             self._cancellation_probe is not None and self._cancellation_probe()
         )
 
+    def stop_reads(self) -> None:
+        """Wake this dialogue consumer only; capture and descriptor owners continue."""
+        self._lines.stop_reads()
+
     def begin_cleanup(self) -> None:
         if self._cleanup_mode:
             return
@@ -2759,7 +2889,7 @@ class ProcessDialogueChannelV1:
             or reserve_cleanup_fraction
             and (self._cleanup_end is None or self._cleanup_span is None)
         ):
-            raise ProcessSupervisionError("PSV1-KIMI-ACP-PROTOCOL", "stdin-delivery")
+            raise ProcessSupervisionError(self._lines.failure_id, "stdin-delivery")
         deadline = (
             self._cleanup_end - self._cleanup_span * reserve_cleanup_fraction
             if reserve_cleanup_fraction
@@ -2775,7 +2905,7 @@ class ProcessDialogueChannelV1:
             or time.monotonic() >= deadline
         ):
             raise ProcessSupervisionError(
-                "PSV1-KIMI-ACP-PROTOCOL", "stdin-delivery"
+                self._lines.failure_id, "stdin-delivery"
         )
         written = write_all_bytes(payload, lambda view: os.write(self._stdin_fd, view))
         self.written_bytes += written
@@ -2789,7 +2919,7 @@ class ProcessDialogueChannelV1:
             or reserve_cleanup_fraction
             and (self._cleanup_end is None or self._cleanup_span is None)
         ):
-            raise ProcessSupervisionError("PSV1-KIMI-ACP-PROTOCOL", "stdin-delivery")
+            raise ProcessSupervisionError(self._lines.failure_id, "stdin-delivery")
         deadline = (
             self._cleanup_end - self._cleanup_span * reserve_cleanup_fraction
             if reserve_cleanup_fraction
@@ -2830,7 +2960,7 @@ def _dialogue_fd(
         )
     except BaseException:
         observation.update(
-            failure="PSV1-KIMI-ACP-PROTOCOL",
+            failure=_dialogue_failure_id(dialogue.protocol_id),
             written=channel.written_bytes,
             complete=False,
         )
@@ -3192,6 +3322,10 @@ class _WindowsBackendV1:
                 before_resume=before_resume,
                 coordinator=self.coordinator,
                 api=self.api,
+                job_memory_limit_bytes=(
+                    request.job_memory_limit_bytes
+                    if type(request) is SdkWorkerProcessRequestV1 else None
+                ),
             )
             handles = job_process._handles
             ownership_confirmed = True
@@ -3223,7 +3357,10 @@ class _WindowsBackendV1:
             stdin_fd, stdin_resource = take_parent("stdin")
             stdout_fd, stdout_resource = take_parent("stdout")
             stderr_fd, stderr_resource = take_parent("stderr")
-            dialogue_lines = _DialogueLineRouterV1() if dialogue is not None else None
+            dialogue_lines = (
+                _DialogueLineRouterV1(_dialogue_failure_id(dialogue.protocol_id))
+                if dialogue is not None else None
+            )
             for fd, name, resource_name in (
                 (stdout_fd, "stdout", stdout_resource),
                 (stderr_fd, "stderr", stderr_resource),
@@ -3371,6 +3508,7 @@ class _WindowsBackendV1:
                     "WJOB-INHERITANCE-POISONED": "PSV1-INHERITANCE-POISONED",
                     "WJOB-PROCESS-CREATE": "PSV1-PROCESS-CREATE",
                     "WJOB-MEMBERSHIP": "PSV1-TREE-VERIFICATION",
+                    "WJOB-JOB-BOUNDARY": "PSV1-TREE-VERIFICATION",
                     "WJOB-RESUME": "PSV1-PROCESS-RESUME",
                     "WJOB-JOB-TERMINATE": "PSV1-JOB-TERMINATE",
                     "WJOB-HANDLE-CLOSE": "PSV1-RESOURCE-CLOSE",
@@ -3786,20 +3924,36 @@ class ProcessRunnerV1:
             _validate_request_shape_before_executable_acquisition(request)
             if dialogue is not None and (
                 type(dialogue) is not ProcessDialogueV1
-                or dialogue.protocol_id != KimiWindowsProfileV1.profile_id
+                or dialogue.protocol_id not in {
+                    GrokAcpProfileV1.protocol_id,
+                    KimiWindowsProfileV1.profile_id,
+                    SdkWorkerWindowsProfileV1.profile_id,
+                }
                 or not callable(dialogue.handler)
                 or type(dialogue.continue_after_stdout_capture_limit) is not bool
-                or request.windows_argv_profile_id
-                != KimiWindowsProfileV1.profile_id
+                or request.windows_argv_profile_id != (
+                    "native-parser-contract-v1" if dialogue.protocol_id == GrokAcpProfileV1.protocol_id
+                    else dialogue.protocol_id
+                )
                 or request.stdin_bytes is not None
+                or (dialogue.protocol_id in {SdkWorkerWindowsProfileV1.profile_id, GrokAcpProfileV1.protocol_id}
+                    and dialogue.continue_after_stdout_capture_limit)
             ):
                 raise ProcessSupervisionError(
                     "PSV1-REQUEST-INVALID", "request-validation"
                 )
+            if dialogue is not None and dialogue.protocol_id == GrokAcpProfileV1.protocol_id:
+                _validate_windows_parser_contract(request.windows_parser_contract)
+                if (len(request.argv) != 7
+                    or request.argv != GrokAcpProfileV1.build_argv(request.resolved_executable, request.argv[5])
+                    or type(request.expected_executable_binding) is not ExecutableBindingV1):
+                    raise ProcessSupervisionError("PSV1-ARGV-ATTESTATION", "request-validation")
             if (
                 dialogue is None
-                and request.windows_argv_profile_id
-                == KimiWindowsProfileV1.profile_id
+                and request.windows_argv_profile_id in {
+                    KimiWindowsProfileV1.profile_id,
+                    SdkWorkerWindowsProfileV1.profile_id,
+                }
             ):
                 raise ProcessSupervisionError(
                     "PSV1-REQUEST-INVALID", "request-validation"
@@ -4840,6 +4994,9 @@ __all__ = [
     "WindowsArgvAdmissionOwnerV1",
     "WindowsArgvAdmissionV1",
     "KimiWindowsProfileV1",
+    "GrokAcpProfileV1",
+    "SdkWorkerWindowsProfileV1",
+    "SdkWorkerProcessRequestV1",
     "WindowsCreateOwnerV1",
     "WindowsInheritanceCoordinatorV1",
     "ValidatedCwdV1",

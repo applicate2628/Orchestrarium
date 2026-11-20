@@ -20,11 +20,11 @@ ROLE_PAIRS = {
     ),
     "architecture-reviewer": (
         ROOT / "src.codex" / "skills" / "architecture-reviewer" / "SKILL.md",
-        ROOT / "src.claude" / "agents" / "architecture-reviewer.md",
+        ROOT / 'adapters/claude' / "agents" / "architecture-reviewer.md",
     ),
     "toolchain-engineer": (
         ROOT / "src.codex" / "skills" / "toolchain-engineer" / "SKILL.md",
-        ROOT / "src.claude" / "agents" / "toolchain-engineer.md",
+        ROOT / 'adapters/claude' / "agents" / "toolchain-engineer.md",
     ),
 }
 
@@ -148,7 +148,7 @@ def test_cabig06_reviewer_and_toolchain_ownership_stays_distinct() -> None:
 
 def test_cabig07_reference_has_one_canonical_copy() -> None:
     candidates = []
-    for root in (ROOT / "shared" / "references", ROOT / "references-codex", ROOT / "references-claude"):
+    for root in (ROOT / "shared" / "references", ROOT / "references-codex", ROOT / 'adapters/claude/references'):
         candidates.extend(root.rglob(REFERENCE.name))
 
     assert sorted(candidates) == sorted((REFERENCE, RUSSIAN_MIRROR))

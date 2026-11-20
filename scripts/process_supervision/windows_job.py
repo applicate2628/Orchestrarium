@@ -122,6 +122,37 @@ class JOBOBJECT_BASIC_ACCOUNTING_INFORMATION(ctypes.Structure):
     ]
 
 
+def validate_job_memory_limit(value: int | None) -> None:
+    """A caller-chosen committed-memory budget, representable by native SIZE_T."""
+    if value is not None and (
+        type(value) is not int or not 0 < value < 1 << (8 * ctypes.sizeof(SIZE_T))
+    ):
+        raise WindowsJobError("WJOB-REQUEST", "launch")
+
+
+def _set_job_limits(api: "WindowsKernelV1", job: int, memory_bytes: int | None) -> None:
+    validate_job_memory_limit(memory_bytes)
+    limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+    limits.BasicLimitInformation.LimitFlags = api.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    if memory_bytes is not None:
+        limits.BasicLimitInformation.LimitFlags |= api.JOB_OBJECT_LIMIT_JOB_MEMORY
+        limits.JobMemoryLimit = memory_bytes
+    if not api.k32.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
+        raise WindowsJobError("WJOB-JOB-LIMIT", "handle-preparation")
+    if memory_bytes is not None:
+        # Query our retained outer Job, not a worker's immediate Job. Windows
+        # venv redirectors create an inner Job with independent local flags;
+        # ancestor memory and no-breakaway limits still govern the whole tree.
+        observed = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+        returned = wintypes.DWORD()
+        if not api.k32.QueryInformationJobObject(
+            job, 9, ctypes.byref(observed), ctypes.sizeof(observed), ctypes.byref(returned),
+        ) or (returned.value != ctypes.sizeof(observed)
+              or observed.BasicLimitInformation.LimitFlags != limits.BasicLimitInformation.LimitFlags
+              or observed.JobMemoryLimit != memory_bytes):
+            raise WindowsJobError("WJOB-JOB-BOUNDARY", "handle-preparation")
+
+
 class WindowsKernelV1:
     WAIT_OBJECT_0 = 0
     WAIT_TIMEOUT = 258
@@ -132,6 +163,9 @@ class WindowsKernelV1:
     CREATE_UNICODE_ENVIRONMENT = 0x400
     EXTENDED_STARTUPINFO_PRESENT = 0x80000
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+    JOB_OBJECT_LIMIT_JOB_MEMORY = 0x0200
+    JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x0800
+    JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK = 0x1000
     PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x00020002
     PROC_THREAD_ATTRIBUTE_JOB_LIST = 0x0002000D
     STILL_ACTIVE = 259
@@ -180,6 +214,8 @@ class WindowsKernelV1:
         k.CreateFileW.restype = wintypes.HANDLE
         k.IsProcessInJob.argtypes = [wintypes.HANDLE, wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)]
         k.IsProcessInJob.restype = wintypes.BOOL
+        k.GetCurrentProcess.argtypes = []
+        k.GetCurrentProcess.restype = wintypes.HANDLE
         k.ResumeThread.argtypes = [wintypes.HANDLE]
         k.ResumeThread.restype = wintypes.DWORD
         k.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
@@ -407,6 +443,7 @@ class WindowsJobOwnerV1:
         before_resume: Callable[[], None] | None = None,
         coordinator: WindowsInheritanceCoordinatorV1 | None = None,
         api: WindowsKernelV1 | None = None,
+        job_memory_limit_bytes: int | None = None,
     ) -> WindowsJobProcessV1:
         if os.name != "nt":
             raise WindowsJobError("WJOB-UNAVAILABLE", "launch")
@@ -415,6 +452,7 @@ class WindowsJobOwnerV1:
             raise WindowsJobError("WJOB-REQUEST", "launch")
         if any(mode not in ("pipe", "null") for mode in (stdin, stdout, stderr)):
             raise WindowsJobError("WJOB-REQUEST", "launch")
+        validate_job_memory_limit(job_memory_limit_bytes)
         if coordinator is None:
             coordinator = WindowsInheritanceCoordinatorV1()
         if coordinator.poisoned:
@@ -449,10 +487,7 @@ class WindowsJobOwnerV1:
             if not job:
                 raise WindowsJobError("WJOB-JOB-CREATE", "handle-preparation")
             h["job"] = int(job)
-            limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
-            limits.BasicLimitInformation.LimitFlags = process._api.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-            if not k.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
-                raise WindowsJobError("WJOB-JOB-LIMIT", "handle-preparation")
+            _set_job_limits(process._api, job, job_memory_limit_bytes)
             size = SIZE_T()
             k.InitializeProcThreadAttributeList(None, 2, 0, ctypes.byref(size))
             if not size.value:

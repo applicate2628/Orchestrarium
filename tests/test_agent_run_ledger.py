@@ -178,6 +178,38 @@ def test_historical_pass_custody_preserves_live_and_revoked_h1_authority(
     assert (actual, errors) == (baseline, baseline_errors)
     assert (item / "agent-runs.jsonl").read_bytes() == raw
     assert context.historical_pass_custody
+    # Once retained, replay uses the durable association even without the source.
+    source.unlink()
+    replay = subprocess.run(result.args, capture_output=True, text=True)
+    assert replay.returncode == 0, (replay.stdout, replay.stderr)
+    assert (item / "agent-runs.jsonl").read_bytes() == raw
+
+
+@pytest.mark.parametrize("state", ["active", "revoked"])
+@pytest.mark.parametrize("invalid", ["source-digest", "ledger-digest", "resource-cap"])
+def test_historical_pass_missing_original_rejects_invalid_admission(tmp_path, state, invalid):
+    _, root, item, source, raw, target_raw, target, _ = historical_pass_h1_fixture(tmp_path, state)
+    (item / "target.md").unlink()
+    command = [
+        sys.executable, str(ROOT / "scripts" / "mutate-work-item.py"),
+        "retain-pass-artifact", "--root", str(root), "--slug", item.name,
+        "--run-id", target["runId"], "--raw-line-ordinal", "4",
+        "--expected-raw-line-sha256", hashlib.sha256(target_raw).hexdigest(),
+        "--expected-ledger-sha256", "0" * 64 if invalid == "ledger-digest" else hashlib.sha256(raw).hexdigest(),
+        "--source-artifact", "original-copy.md", "--expected-original-sha256",
+        "0" * 64 if invalid == "source-digest" else hashlib.sha256(source.read_bytes()).hexdigest(),
+        "--apply",
+    ]
+    if invalid == "resource-cap":
+        command += ["--ledger-max-events", "1", "--ledger-max-bytes", "1"]
+    result = subprocess.run(command, capture_output=True, text=True)
+    assert result.returncode != 0
+    expected = {"source-digest": "WI-LEDGER-CUSTODY-SOURCE-DRIFT",
+                "ledger-digest": "WI-LEDGER-CUSTODY-STALE-TARGET",
+                "resource-cap": "WI-LEDGER-RESOURCE-INCOMPLETE"}[invalid]
+    assert expected in result.stdout + result.stderr
+    assert (item / "agent-runs.jsonl").read_bytes() == raw
+    assert not (item / "review-artifact-custody" / "historical-pass").exists()
 
 
 def test_custody_refuses_dirty_w_drift_at_unchanged_head(tmp_path: Path) -> None:
@@ -494,6 +526,8 @@ def test_kimi_unsupported_effort_is_durable_and_validator_accepted(tmp_path: Pat
         "--run-id", "dispatch-kimi-unsupported",
         "--event-kind", "launch",
         *common,
+        "--status", "running",
+        "--gate", "none",
     )
     assert launch.returncode == 0, launch.stderr
     terminal = run_ledger(
@@ -548,6 +582,8 @@ def test_kimi_configured_max_with_empty_flags_is_durable_and_validator_accepted(
         "--run-id", "dispatch-kimi-configured-max",
         "--event-kind", "launch",
         *common,
+        "--status", "running",
+        "--gate", "none",
     )
     assert launch.returncode == 0, launch.stderr
     terminal = run_ledger(

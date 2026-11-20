@@ -35,6 +35,18 @@ class TestNativePublicationEffects(unittest.TestCase):
     object_format = "sha1"
 
     def setUp(self):
+        # Restore module ownership before later captured-native-gate tests.
+        absent = object()
+        slots = ("_orchestrarium_publication_review_policy_v1",
+                 "_orchestrarium_linked_runtime_subroots_v1")
+        previous = {name: sys.modules.get(name, absent) for name in slots}
+        def restore_slots():
+            for name, value in previous.items():
+                if value is absent:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = value
+        self.addCleanup(restore_slots)
         self.temp = tempfile.TemporaryDirectory(prefix="publication-native-")
         temporary_root = Path(self.temp.name)
         def cleanup():
@@ -91,6 +103,88 @@ class TestNativePublicationEffects(unittest.TestCase):
 
     def zero(self):
         return "0" * len(self.commit)
+
+    def test_owned_command_reader_alternates_info_and_contents_without_body_credit(self):
+        blob = self.git("rev-parse", "HEAD:safe.txt").strip().decode()
+        expected = self.git("cat-file", "blob", blob)  # Git bytes, not checkout CRLF.
+        async def exercise():
+            reader = self.module._AsyncGitObjectReader()
+            try:
+                self.assertIsNone(await reader.start())
+                fmt = self.module._SHA1_OBJECT_FORMAT if len(blob) == 40 else self.module._SHA256_OBJECT_FORMAT
+                with mock.patch.object(self.module, "_MAX_BLOB_BYTES", 1):
+                    classified = await reader.classify(blob, object_format=fmt)
+                self.assertEqual(classified.returned_oid, blob)
+                self.assertEqual(classified.object_type, "blob")
+                body = await reader.read(blob, "blob")
+                self.assertEqual(body.raw, expected)
+                missing = await reader.classify("f" * len(blob), object_format=fmt)
+                self.assertIsNone(missing.returned_oid)
+                again = await reader.read(blob, "blob")
+                self.assertEqual(again.raw, expected)
+            finally:
+                self.assertIsNone(await reader.finalize())
+                self.assertTrue(reader.reap_certificate.complete)
+        with self.in_root():
+            asyncio.run(exercise())
+
+    def _native_union_fixture(self, annotation="public baseline"):
+        private = self.root / "historical.txt"
+        private.write_text("TOKEN=" + "aB9" * 16 + "\n", encoding="utf-8")
+        self.git("add", "historical.txt"); self.git("commit", "-qm", "historical synthetic fixture")
+        old = self.git("rev-parse", "HEAD").strip().decode()
+        self.git("push", "-q", "origin", "HEAD:refs/heads/main")
+        self.git("tag", "-a", "baseline", old, "-m", annotation)
+        tag = self.git("rev-parse", "refs/tags/baseline").strip().decode()
+        private.unlink(); self.git("add", "-u"); self.git("commit", "-qm", "current safe fixture")
+        tip = self.git("rev-parse", "HEAD").strip().decode()
+        rows = [(b"refs/heads/main", tip, b"refs/heads/main", old),
+                (b"refs/tags/baseline", tag, b"refs/tags/baseline", self.zero())]
+        return rows, old, tip, tag
+
+    def _native_v3_selection(self, payload, tip):
+        request = self.module._native_push_request(payload)
+        primary = self.module._range_request("origin", "refs/heads/main", tip)
+        async def select():
+            return await self.module._native_commit_range_selection(
+                primary, request, self.module.time.monotonic() + 30)
+        with self.in_root():
+            return asyncio.run(select())
+
+    def test_native_old_union_excludes_same_receiver_history_for_new_tag(self):
+        rows, old, tip, tag = self._native_union_fixture()
+        payload = self.payload(rows)
+        selected = self._native_v3_selection(payload, tip)
+        self.assertEqual(selected.expected_oids, (tip,))
+        self.assertNotIn(old, selected.object_oids)
+        outcome = self.scan(payload)
+        self.assertEqual(outcome.kind, "clean")
+        self.assertIn(tag, outcome.native_selection.object_oids)
+        self.assertEqual(set(outcome.native_selection.expected_oids), {tip})
+
+    def test_native_old_union_keeps_new_annotation_findings(self):
+        rows, old, tip, tag = self._native_union_fixture("TOKEN=" + "bC8" * 16)
+        outcome = self.scan(self.payload(rows))
+        self.assertEqual(outcome.kind, "findings")
+        self.assertTrue(any(f.subject_kind == "tag-object" for f in outcome.findings))
+
+    def test_native_old_blob_base_does_not_refuse_branch_commit_selection(self):
+        rows, old, tip, tag = self._native_union_fixture()
+        old_blob = self.git("rev-parse", old + ":historical.txt").strip().decode()
+        rows.append((b"(delete)", self.zero(), b"refs/archive/retired-blob", old_blob))
+        selected = self._native_v3_selection(self.payload(rows), tip)
+        self.assertEqual(selected.expected_oids, (tip,))
+        self.assertNotIn(old_blob, selected.object_oids)
+
+    def test_native_missing_old_or_tag_only_never_borrows_remote_advertisement(self):
+        rows, old, tip, tag = self._native_union_fixture()
+        missing = "f" * len(old)
+        unknown_rows = [(rows[0][0], tip, rows[0][2], missing), rows[1]]
+        selected = self._native_v3_selection(self.payload(unknown_rows), tip)
+        self.assertIn(old, selected.expected_oids)
+        outcome = self.scan(self.payload([rows[1]]))
+        self.assertEqual(outcome.kind, "findings")
+        self.assertIn(old, outcome.native_selection.expected_oids)
 
     def test_tag_annotation_is_scanned_even_when_target_commit_is_remote(self):
         annotation = "TOKEN=" + "aB9" * 16

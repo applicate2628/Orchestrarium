@@ -50,8 +50,8 @@ def _manifest(root: Path) -> dict:
             result[key] = value
         return result
     data = json.loads(raw, object_pairs_hook=unique)
-    if (type(data) is not dict or set(data) != {'schemaVersion', 'product', 'release', 'target', 'python', 'entry', 'runtimeEvidence', 'runtimeEvidenceSha256'}
-        or type(data['schemaVersion']) is not int or data['schemaVersion'] != 2
+    if (type(data) is not dict or set(data) != {'schemaVersion', 'product', 'release', 'target', 'python', 'entry', 'runtimeProfile', 'runtimeEvidence', 'runtimeEvidenceSha256'}
+        or type(data['schemaVersion']) is not int or data['schemaVersion'] != 3 or data['runtimeProfile'] != 'cpython-stdlib-only'
         or data['product'] != 'Orche' or type(data['release']) is not str or not data['release'].strip()
         or data['runtimeEvidence'] != 'runtime-evidence.json'
         or type(data['runtimeEvidenceSha256']) is not str
@@ -121,12 +121,12 @@ def main(argv: list[str] | None = None) -> int:
             python, entry = retain_bundle(root, Path(args[1]))
             # Explicit retention is the lifetime decision for the retained launch.
             args = ['--permanent-runtime', *args[2:]]
-        elif not permanent and not any(flag in args for flag in ('--help', '-h', '--dry-run')):
+        elif not permanent and not any(flag in args for flag in ('--list-clients', '--help', '-h', '--dry-run')):
             print('Orche: apply requires --retain-to ABSOLUTE_DIRECTORY or '
                   '--permanent-runtime. Keep the selected runtime while installed hooks use it.',
                   file=sys.stderr)
             return 2
-        return _exec_child(str(python), [str(python), '-I', str(entry), *args],
+        return _exec_child(str(python), [str(python), '-I', '-B', str(entry), *args],
                            child_environment(dict(os.environ)))
     except (OSError, ValueError, UnicodeError):
         print('Orche: bundled runtime is unavailable or inconsistent. No pack installation started; an incomplete retained copy may remain.', file=sys.stderr)

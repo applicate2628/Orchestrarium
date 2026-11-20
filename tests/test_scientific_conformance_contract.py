@@ -15,7 +15,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 ROLE_PATHS = (
     ROOT / "src.codex" / "skills" / "computational-scientist" / "SKILL.md",
-    ROOT / "src.claude" / "agents" / "computational-scientist.md",
+    ROOT / 'adapters/claude' / "agents" / "computational-scientist.md",
 )
 
 

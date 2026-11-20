@@ -467,9 +467,24 @@ def _host_identity(record: dict[str, Any], host_os: str) -> str:
     )
 
 
+def _system_command_processor() -> Path | None:
+    import ctypes
+
+    buffer = ctypes.create_unicode_buffer(32768)
+    length = ctypes.windll.kernel32.GetSystemDirectoryW(buffer, len(buffer))
+    if 0 < length < len(buffer):
+        directory = Path(buffer.value)
+        if directory.is_absolute():
+            return directory / "cmd.exe"
+    return None
+
+
 def resolve_codex_command(value: str | None = None) -> list[str]:
     """Resolve one absolute command prefix that both inventory and launch can reuse."""
-    resolved = shutil.which(value or "codex")
+    # Windows PATH may contain an unrelated npm "codex.cmd" before the native
+    # Codex executable. An explicit operator selection still takes precedence.
+    resolved = shutil.which("codex.exe") if value is None and os.name == "nt" else None
+    resolved = resolved or shutil.which(value or "codex")
     if not resolved:
         candidate = Path(value).expanduser() if value else None
         if candidate is None or not candidate.is_file():
@@ -481,8 +496,10 @@ def resolve_codex_command(value: str | None = None) -> list[str]:
     if path.suffix.casefold() == ".py":
         return [str(Path(sys.executable).resolve()), str(path)]
     if os.name == "nt" and path.suffix.casefold() in {".cmd", ".bat"}:
-        comspec = Path(os.environ.get("COMSPEC", "C:/Windows/System32/cmd.exe")).resolve()
-        if not comspec.is_file():
+        override = os.environ.get("COMSPEC")
+        processor = Path(override) if override is not None else _system_command_processor()
+        comspec = processor.resolve() if processor is not None else None
+        if comspec is None or not comspec.is_file():
             raise ValueError("FAIL CODEX_HOOK_LIST_UNAVAILABLE: command processor is unavailable")
         return [str(comspec), "/d", "/s", "/c", str(path)]
     return [str(path)]
@@ -1157,7 +1174,45 @@ def _load(path: Path) -> dict[str, Any]:
     return data
 
 
+def serialize_windows_hook_command(tokens: Iterable[str]) -> str:
+    """Literal paths for cmd and PowerShell; keep accepted simple bytes stable."""
+    rendered = []
+    for token in tokens:
+        if type(token) is not str or not token:
+            raise ValueError("unsupported Windows hook command token")
+        if re.fullmatch(r"[A-Za-z0-9_:\\./-]+", token):
+            rendered.append(token)
+            continue
+        normalized = token.replace("\\", "/")
+        prefix = (normalized[:3] if re.match(r"^[A-Za-z]:/", normalized)
+                  else "//" if normalized.startswith("//") else None)
+        # No shell expansion, wildcard interpretation, quotes or line controls.
+        # Unicode code points are retained exactly; there is no language filter.
+        if (prefix is None or any(c in normalized for c in '"%$!&|<>^?*' + chr(96) + "\u201c\u201d\u201e")
+                or any(ord(c) < 32 or 127 <= ord(c) <= 159
+                       or 0xD800 <= ord(c) <= 0xDFFF or c in "\u2028\u2029"
+                       for c in normalized)
+                or ":" in normalized[len(prefix):]):
+            raise ValueError(f"unsupported Windows hook command token: {token!r}")
+        # A bare path prefix keeps PowerShell in invocation mode. Quoting the
+        # whole executable would instead create a string expression.
+        rendered.append(prefix + '"' + normalized[len(prefix):] + '"')
+    if not rendered:
+        raise ValueError("unsupported Windows hook command token")
+    return " ".join(rendered)
+
+
 def _split_windows_command(command: str) -> list[str]:
+    if re.search(r'(?:^|\s)(?:[A-Za-z]:/|//)"', command):
+        lexer = shlex.shlex(command, posix=True)
+        lexer.whitespace_split = True
+        lexer.quotes = '"'
+        lexer.escape = ""
+        lexer.commenters = ""
+        tokens = list(lexer)
+        if serialize_windows_hook_command(tokens) != command:
+            raise ValueError("noncanonical Windows literal hook command")
+        return tokens
     return [
         token[1:-1].replace("''", "'")
         if len(token) >= 2 and token[0] == token[-1] and token[0] in {"'", '"'}

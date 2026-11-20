@@ -9,6 +9,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -41,7 +42,12 @@ INVALID_CURRENT_DISPOSITION_SUCCESS_MARKER = "RESULT: PASS dispose-invalid-curre
 NONCANONICAL_HISTORY_SUCCESS_MARKER = "RESULT: PASS recover-noncanonical-history"
 
 
-def load_validator():
+_paired_source_binding = None
+_VALIDATOR_MODULE = None
+_VALIDATOR_MODULE_LOCK = threading.RLock()
+
+
+def _load_validator_module():
     validator_path = Path(__file__).with_name("validate-work-item-state.py")
     spec = importlib.util.spec_from_file_location("validate_work_item_state", validator_path)
     if spec is None or spec.loader is None:
@@ -49,6 +55,26 @@ def load_validator():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def load_validator():
+    """Reuse code only under the complete paired source generation binding."""
+    global _VALIDATOR_MODULE
+    binding = _paired_source_binding
+    if binding is None:
+        # The standalone CLI has no paired binding: retain its fresh-load
+        # semantics rather than assume a path-only cache is authoritative.
+        return _load_validator_module()
+    binding.assert_current()
+    with _VALIDATOR_MODULE_LOCK:
+        binding.assert_current()
+        if _VALIDATOR_MODULE is None:
+            module = _load_validator_module()
+            binding.assert_current()
+            module._paired_source_binding = binding
+            module._paired_validator_module = module
+            _VALIDATOR_MODULE = module
+        return _VALIDATOR_MODULE
 
 
 def utc_timestamp() -> str:
@@ -153,6 +179,7 @@ def build_event(args: argparse.Namespace, validator: Any | None = None) -> dict[
             getattr(args, "closes", None),
             getattr(args, "reviewed_role", None),
             getattr(args, "artifact_revision", None),
+            getattr(args, "artifact_size_bytes", None),
             getattr(args, "lane", None),
             getattr(args, "effort", None),
             getattr(args, "finding_class", None),
@@ -165,6 +192,7 @@ def build_event(args: argparse.Namespace, validator: Any | None = None) -> dict[
             getattr(args, "external_evidence_run_id", None),
             getattr(args, "effort_mapping_loss", None),
             getattr(args, "launch_flags_json", None),
+            getattr(args, "sdk_execution_json", None),
             getattr(args, "closer_run_id", None),
             getattr(args, "target_tuple_json", None),
             getattr(args, "review_closure_proof_json", None),
@@ -196,6 +224,9 @@ def build_event(args: argparse.Namespace, validator: Any | None = None) -> dict[
         "launchRunId": getattr(args, "launch_run_id", None),
         "closesRunIds": getattr(args, "closes", None),
         "artifactRevision": getattr(args, "artifact_revision", None),
+        "artifactSizeBytes": getattr(args, "artifact_size_bytes", None),
+        "terminalReceiptSha256": getattr(args, "terminal_receipt_sha256", None),
+        "terminalReceiptSizeBytes": getattr(args, "terminal_receipt_size_bytes", None),
         "lane": getattr(args, "lane", None),
         "effort": getattr(args, "effort", None),
         "findingClass": getattr(args, "finding_class", None),
@@ -215,6 +246,11 @@ def build_event(args: argparse.Namespace, validator: Any | None = None) -> dict[
     if getattr(args, "launch_flags_json", None) is not None:
         event["launchFlags"] = parse_launch_flags_json(
             args.launch_flags_json, validator
+        )
+    if getattr(args, "sdk_execution_json", None) is not None:
+        event["sdkExecution"] = validator.validate_sdk_execution(
+            validator.decode_json_object(args.sdk_execution_json, source="--sdk-execution-json"),
+            provider=event.get("provider"), model=event.get("model"), effort=event.get("effort"),
         )
     if getattr(args, "target_tuple_json", None) is not None:
         event["targetTuple"] = validator.decode_json_object(
@@ -521,6 +557,46 @@ def _noncanonical_fail(failure_id: str, message: str) -> None:
     )
 
 
+def _create_ledger_lock(lock_path: Path) -> int:
+    """Acquire one cooperative lock; unwind failed metadata acquisition.
+
+    As with normal release, live holders must not be replaced concurrently. The
+    identity check rejects observed replacement; it is not atomic reclamation
+    against another actor replacing the path between observation and unlink.
+    """
+    fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    acquired = None
+    try:
+        acquired = os.fstat(fd)
+        metadata = f"pid={os.getpid()} at={utc_timestamp()}\n".encode()
+        offset = 0
+        while offset < len(metadata):
+            written = os.write(fd, metadata[offset:])
+            if written <= 0:
+                raise OSError("ledger lock metadata write made no progress")
+            offset += written
+        return fd
+    except BaseException as error:
+        # Windows requires closing before unlink. If close or identity acquisition
+        # is uncertain, preserve the path rather than removing an unproven lock.
+        try:
+            os.close(fd)
+        except BaseException as cleanup:
+            error.add_note(f"ledger lock descriptor cleanup: {cleanup}")
+        else:
+            if acquired is not None:
+                try:
+                    current = lock_path.lstat()
+                    if (stat.S_ISREG(current.st_mode) and
+                            (current.st_dev, current.st_ino) == (acquired.st_dev, acquired.st_ino)):
+                        lock_path.unlink()
+                except FileNotFoundError:
+                    pass
+                except BaseException as cleanup:
+                    error.add_note(f"ledger lock path cleanup: {cleanup}")
+        raise
+
+
 @contextmanager
 def ledger_write_lock(item: Path):
     """The existing per-item writer lock, reusable by the lifecycle owner."""
@@ -529,8 +605,7 @@ def ledger_write_lock(item: Path):
     lock_fd = None
     for _attempt in range(50):
         try:
-            lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(lock_fd, f"pid={os.getpid()} at={utc_timestamp()}\n".encode())
+            lock_fd = _create_ledger_lock(lock_path)
             break
         except FileExistsError:
             time.sleep(0.1)
@@ -1604,8 +1679,7 @@ def _append_event_transaction(
     lock_fd = None
     for _attempt in range(50):  # ~5s bounded retry
         try:
-            lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(lock_fd, f"pid={os.getpid()} at={utc_timestamp()}\n".encode())
+            lock_fd = _create_ledger_lock(lock_path)
             break
         except FileExistsError:
             time.sleep(0.1)
@@ -1966,6 +2040,14 @@ def command_append(args: argparse.Namespace, *, ledger_resource_budget=None, tra
     return 0
 
 
+
+def launch_event_sha256(event: dict[str, Any], validator: Any | None = None) -> str:
+    """Bind the complete admitted launch using the existing canonical encoding."""
+    if validator is None:
+        validator = load_validator()
+    return hashlib.sha256(validator._canonical_projection_bytes(event)).hexdigest()
+
+
 def _settlement_event(
     args: argparse.Namespace, launch: dict[str, Any], validator: Any
 ) -> dict[str, Any]:
@@ -1999,7 +2081,30 @@ def _settlement_event(
             "WI-LEDGER-SETTLE-TARGET: launch lacks immutable event metadata"
         )
 
-    terminal = argparse.Namespace(**vars(args), **immutable)
+    values = {**vars(args), **immutable}
+    if launch.get("actualExecutionPath") == "direct-external-sdk":
+        validator.validate_sdk_execution(
+            launch.get("sdkExecution"), provider=launch.get("provider"),
+            model=launch.get("model"), effort=launch.get("effort"),
+        )
+        bound = {
+            "actual_execution_path": launch["actualExecutionPath"],
+            "artifact_identity": launch.get("artifactIdentity"),
+            "external_dispatch_id": launch.get("externalDispatchId"),
+            "external_evidence_run_id": launch.get("externalEvidenceRunId"),
+            "effort_mapping_loss": launch.get("effortMappingLoss"),
+            "terminal_class": "external-nonauthorizing",
+            "authorizing": "false",
+        }
+        for name, expected in bound.items():
+            supplied = getattr(args, name, None)
+            if supplied is not None and supplied != expected:
+                raise ValueError(f"WI-LEDGER-SETTLE-CONFLICT: SDK {name} differs from admitted launch")
+        if args.run_id != launch.get("externalEvidenceRunId"):
+            raise ValueError("WI-LEDGER-SETTLE-CONFLICT: SDK terminal differs from admitted evidence run")
+        values.update(bound)
+        values["sdk_execution_json"] = json.dumps(launch["sdkExecution"], separators=(",", ":"))
+    terminal = argparse.Namespace(**values)
     terminal.event_kind = "terminal"
     terminal.closes = None
     return build_event(terminal, validator)
@@ -2020,6 +2125,15 @@ def _settle_launch_from_ledger(
         raise ValueError(
             "WI-LEDGER-SETTLE-TARGET: launch must identify one V2 launch event"
         )
+    expected_launch = getattr(args, "expected_launch_sha256", None)
+    if expected_launch is None and launches[0].get("actualExecutionPath") == "direct-external-sdk":
+        raise ValueError("WI-LEDGER-SETTLE-LAUNCH-DRIFT: SDK settlement requires expected launch SHA-256")
+    if expected_launch is not None and (
+        not isinstance(expected_launch, str)
+        or re.fullmatch(r"[0-9a-f]{64}", expected_launch, re.ASCII) is None
+        or expected_launch != launch_event_sha256(launches[0], validator)
+    ):
+        raise ValueError("WI-LEDGER-SETTLE-LAUNCH-DRIFT: admitted launch changed before settlement")
     event = _settlement_event(args, launches[0], validator)
     requested = [value for value in events if value.get("runId") == args.run_id]
     if len(requested) > 1:
@@ -2035,7 +2149,7 @@ def _settle_launch_from_ledger(
     return event
 
 
-def command_settle_launch(args: argparse.Namespace, *, ledger_resource_budget=None, transition_resource_budget=None) -> int:
+def command_settle_launch(args: argparse.Namespace, *, ledger_resource_budget=None, transition_resource_budget=None, output_stream=None) -> int:
     item = active_work_item(args, "settle-launch")
     if item is None or not item.exists():
         print(f"FAIL: missing work item: {item}", file=sys.stderr)
@@ -2054,9 +2168,9 @@ def command_settle_launch(args: argparse.Namespace, *, ledger_resource_budget=No
             print(f"FAIL: {note}", file=sys.stderr)
         return 1
     if appended:
-        print(f"{SETTLE_SUCCESS_MARKER} ({item / 'agent-runs.jsonl'})")
+        print(f"{SETTLE_SUCCESS_MARKER} ({item / 'agent-runs.jsonl'})", file=output_stream)
     else:
-        print(f"{SETTLE_ALREADY_MARKER} ({item / 'agent-runs.jsonl'})")
+        print(f"{SETTLE_ALREADY_MARKER} ({item / 'agent-runs.jsonl'})", file=output_stream)
     return 0
 
 
@@ -2137,8 +2251,7 @@ def _commit_recovery_append(
     lock_fd = None
     for _attempt in range(50):
         try:
-            lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(lock_fd, f"pid={os.getpid()} at={utc_timestamp()}\n".encode())
+            lock_fd = _create_ledger_lock(lock_path)
             break
         except FileExistsError:
             time.sleep(0.1)
@@ -2424,18 +2537,22 @@ def build_parser() -> argparse.ArgumentParser:
             "WAIVED:security-reviewer event discharges. Repeatable."
         ),
     )
-    append.add_argument("--artifact-revision", help="Revision of the reviewed artifact at review time (git sha or content digest).")
+    append.add_argument("--artifact-revision", help="Revision of the reviewed artifact; SDK terminals bind the received output bytes with SHA-256.")
+    append.add_argument("--artifact-size-bytes", type=int, help="Exact received SDK artifact byte count, used as its bounded read size.")
+    append.add_argument("--terminal-receipt-sha256", help="Exact committed external CLI terminal receipt digest.")
+    append.add_argument("--terminal-receipt-size-bytes", type=int, help="Exact committed external CLI terminal receipt byte count.")
     append.add_argument("--lane", help="Review angle label (e.g. architecture-adversarial).")
     append.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max", "unsupported"], help="Typed declared reasoning-effort tier, or unsupported when an external provider exposes no native effort control.")
     append.add_argument("--finding-class", choices=["publication-safety", "security", "correctness", "performance", "other"], help="REVISE finding classification (publication-safety/security are non-user-waivable).")
     append.add_argument("--terminal-class", choices=["external-nonauthorizing", "internal-authorizing"], help="Typed durable terminal authority class.")
     append.add_argument("--authorizing", choices=["true", "false"], help="Whether this terminal may authorize lifecycle closure.")
-    append.add_argument("--actual-execution-path", choices=["direct-external-cli", "internal"], help="Actual terminal execution path.")
+    append.add_argument("--actual-execution-path", choices=["direct-external-cli", "direct-external-sdk", "internal"], help="Actual terminal execution path.")
     append.add_argument("--artifact-identity", help="Frozen identity of the reviewed artifact.")
     append.add_argument("--external-dispatch-id", help="Frozen external dispatch identity.")
     append.add_argument("--external-evidence-run-id", help="External evidence run consumed by an internal closer.")
     append.add_argument("--effort-mapping-loss", help="Frozen external provider effort-mapping disposition.")
     append.add_argument("--launch-flags-json", help="Exact resolved provider argv flags as a JSON array of strings.")
+    append.add_argument("--sdk-execution-json", help="Exact versioned SDK configuration; never CLI argv or execution permission.")
     append.add_argument("--closer-run-id", help="Distinct internal closer run identity.")
     append.add_argument("--target-tuple-json", help="Exact external target tuple as a JSON object.")
     append.add_argument("--review-closure-proof-json", action="append",
@@ -2447,10 +2564,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Append one terminal event derived from a unique open V2 launch.",
     )
     settle.add_argument("--launch-run-id", required=True)
+    settle.add_argument("--expected-launch-sha256", help="Exact admitted launch digest checked while the existing ledger lock is held; required for SDK settlement.")
     settle.add_argument("--run-id", required=True)
     settle.add_argument("--status", required=True)
     settle.add_argument("--gate", required=True)
     settle.add_argument("--artifact")
+    settle.add_argument("--artifact-revision", help="SHA-256 of the exact received SDK artifact bytes.")
+    settle.add_argument("--artifact-size-bytes", type=int, help="Exact received SDK artifact byte count, used as its bounded read size.")
+    settle.add_argument("--terminal-receipt-sha256", help="Exact committed external CLI terminal receipt digest.")
+    settle.add_argument("--terminal-receipt-size-bytes", type=int, help="Exact committed external CLI terminal receipt byte count.")
     settle.add_argument("--evidence", action="append")
     settle.add_argument("--evidence-json", action="append")
     settle.add_argument("--scratch-evidence-json", action="append")
@@ -2463,7 +2585,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     settle.add_argument("--authorizing", choices=["true", "false"])
     settle.add_argument(
-        "--actual-execution-path", choices=["direct-external-cli", "internal"]
+        "--actual-execution-path", choices=["direct-external-cli", "direct-external-sdk", "internal"]
     )
     settle.add_argument("--artifact-identity")
     settle.add_argument("--external-dispatch-id")
@@ -2540,7 +2662,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str], *, settlement_output=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     validator = load_validator()
@@ -2564,8 +2686,10 @@ def main(argv: list[str]) -> int:
                 read_admission=args.transition_read_admission, acquisition_ceiling=transition_resource_budget,
                 output_ceiling=transition_output_ceiling)
             transition_resource_budget = transition_inputs.acquisition
+        output_options = ({"output_stream": settlement_output}
+                          if args.command == "settle-launch" else {})
         result = args.func(args, ledger_resource_budget=ledger_resource_budget,
-            transition_resource_budget=transition_resource_budget)
+            transition_resource_budget=transition_resource_budget, **output_options)
         if transition_inputs is not None:
             transition_inputs.verify()
         return result

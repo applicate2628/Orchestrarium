@@ -15,7 +15,7 @@ from tests.fixtures.runtime_capabilities import requires_windows_process_runner
 
 
 ROOT = Path(__file__).resolve().parents[1]
-WRAPPER = ROOT / "src.claude/agents/scripts/invoke-claude-prompt.py"
+WRAPPER = ROOT / 'adapters/claude/agents/scripts/invoke-claude-prompt.py'
 
 
 def _projected_wrapper(tmp_path: Path) -> Path:

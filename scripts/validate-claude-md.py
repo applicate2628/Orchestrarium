@@ -70,7 +70,9 @@ CLAUDE_MANIFEST: dict[str, tuple[str, ...]] = {
         "Passive verdicts and the leaf/re-entry skips remain unchanged",
         "[skip-bugfix-discipline]",
         "Root receives genuine publication review and consent for the actual source, repository and destination.",
+        "The push hook enforces target qualification and a fresh complete range scan",
         "it does not reconstruct consent from chat history or require an approval marker.",
+        "actual revocation, another target or an unreviewed delta stops the affected submission.",
         "MCP control.",
         "discovery reminders are advisory in `auto` and subagent contexts.",
         "Root `force` still requires runtime discovery, the relevant tool schema, fitting MCP use",
@@ -340,8 +342,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--claude-md",
         type=Path,
-        default=repo_root / "src.claude" / "CLAUDE.md",
-        help="Claude Code entrypoint to validate (default: src.claude/CLAUDE.md).",
+        default=repo_root / "adapters/claude" / "CLAUDE.md",
+        help="Claude Code entrypoint to validate (default: adapters/claude/CLAUDE.md).",
     )
     parser.add_argument(
         "--agents-md",
@@ -361,7 +363,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--reference",
         type=Path,
-        default=repo_root / "references-claude" / "claude-md-structural-enforcement.md",
+        default=repo_root / "adapters/claude/references" / "claude-md-structural-enforcement.md",
         help="English structural-enforcement maintainer reference.",
     )
     parser.add_argument(
@@ -369,7 +371,7 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=(
             repo_root
-            / "references-claude"
+            / "adapters/claude/references"
             / "ru"
             / "claude-md-structural-enforcement.md"
         ),

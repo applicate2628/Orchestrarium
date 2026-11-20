@@ -260,7 +260,7 @@ Per the source-hygiene placement law, the four warn-only audits and the PreToolU
 
 **The installer auto-installs all twelve Codex hook entries by default** into `~/.codex/hooks.json` (`--global`) or `<project>/.codex/hooks.json` (`--target`): seven structural/audit entries, three informational `SessionStart` entries (`mcp-usage-reminder` + `agents-mode-reminder` + `check-scratch-valuables`), one `UserPromptSubmit` entry (`turn-anchor-reminder`), and the root-only soft `PreToolUse` parallel/MCP reminder. Every owned command handler carries a short English `statusMessage`; no handler `name` or `description` is synthesized. The JSON merge is idempotent and preserves all other user keys, top-level metadata, and hooks. Opt out with `--no-hypothesis-hook` (legacy flag kept for back-compat) or `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1` in the environment.
 
-The installer invokes each installed `.py` target directly with the absolute `sys.executable` of the Python process running the installer. Before registration mutation, the interpreter and `.py` target must be absolute regular files; on Windows the interpreter must be a non-reparse `.exe`, and on POSIX it must have execute permission. The later health gate actually launches every registered hook. The reserved native profile requires a real native executable and fails before mutation because no native hook binaries ship. On Windows, the registered command is the verified `cmd.exe`/PowerShell-compatible unquoted absolute interpreter followed by the unquoted absolute `.py` path; unsupported whitespace or metacharacters fail the install instead of creating a dead registration.
+The installer invokes each installed `.py` target directly with the absolute `sys.executable` of the Python process running the installer. Before registration mutation, the interpreter and `.py` target must be absolute regular files; on Windows the interpreter must be a non-reparse `.exe`, and on POSIX it must have execute permission. The later health gate actually launches every registered hook. The reserved native profile requires a real native executable and fails before mutation because no native hook binaries ship. On Windows, simple absolute paths retain the accepted unquoted command bytes. Unicode/spaced paths use a bare drive/share prefix and quoted tail through the shared invocation owner; shell expansion/control syntax is refused. This remains direct Python execution and does not change native trust or host permissions.
 
 Upgrade ordering is strictly **SYNC → REGISTER → VERIFY → RECLAIM**. `scripts/check-hook-health.py` verifies every registered executable and target, then reconciles current owned Codex registrations one-to-one with host `hooks/list` before reclaim can run. Installer VERIFY uses `report`: only complete registration identities changed by that transaction may remain `untrusted` or `modified`, reported as `PENDING_MANUAL_TRUST`; the identity includes event, matcher, handler type, exact command, and exact registration source, while pre-existing drift fails. The installed helper's `require` mode derives `codex-hook-inventory.json` beside the final ordinary `hooks.json` storage file. A selected file symlink and directory symlink/junction components in its referent path remain intact; one bounded component walk binds every supported link identity, kind, and raw target plus the resolved file, real parent, and ordinary inventory. Dangling components, directory leaf targets, link cycles, opaque reparse points, and alternate or linked inventories fail closed. Reclaim is last, idempotent, and dry-run-visible; it removes only byte-identical retired shell copies and preserves customized files.
 
@@ -281,7 +281,7 @@ The installer's normalized registration identity is a correlation key, not nativ
 
 On observed Codex CLI 0.159.2, deleting a matcher group shifted later native keys despite unchanged peer hashes. Exact retirement therefore retains the original group slot with `hooks: []`: valid configuration with no runnable handler, preserving unchanged peer-group coordinates. This does not establish in-group handler-index stability or native consent; the trust and health checks above still apply.
 
-**Windows hook command shape.** The command is `<absolute-python.exe> <absolute-script.py>`, with both tokens unquoted. That exact form was verified under both `cmd.exe` and PowerShell. The installer rejects unsupported tokens instead of guessing a quoting form.
+**Windows hook command shape.** Simple paths retain their previous unquoted bytes. Unicode/spaced absolute paths retain a bare prefix with a quoted tail, so cmd and PowerShell preserve literal operands without selecting a shell wrapper. There are no language-specific branches or Unicode normalization. Expansion/control tokens fail before registration; unknown command spellings never mint ownership. Local-drive shell tests are not native hook trust or UNC execution qualification.
 
 To remove already-installed entries independently:
 
@@ -300,7 +300,7 @@ python scripts/install-hypothesis-hook.py --target <hooks.json path> --platform 
 python scripts/install-hypothesis-hook.py --target <hooks.json path> --platform codex --host-os posix --hook-event UserPromptSubmit --script-marker turn-anchor-reminder --script-path <ignored> --remove
 ```
 
-The auto-installed entries on Windows have this direct-Python shape:
+The auto-installed entries on Windows have this direct-Python shape. The placeholders show the two installed paths, not values to paste. Use the installer to register and verify the executable and script on the current host.
 
 ```json
 {
@@ -311,7 +311,7 @@ The auto-installed entries on Windows have this direct-Python shape:
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Python314\\python.exe C:\\Users\\<you>\\.codex\\skills\\lead\\scripts\\check-bugfix-discipline.py"
+            "command": "<registered Python executable> <client config root>\\skills\\lead\\scripts\\check-bugfix-discipline.py"
           }
         ]
       }
@@ -321,7 +321,7 @@ The auto-installed entries on Windows have this direct-Python shape:
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Python314\\python.exe C:\\Users\\<you>\\.codex\\skills\\lead\\scripts\\check-passive-polling-stop.py"
+            "command": "<registered Python executable> <client config root>\\skills\\lead\\scripts\\check-passive-polling-stop.py"
           }
         ]
       }
@@ -511,6 +511,11 @@ When `$product-manager` admits a new candidate approach into discovery, the road
 
 Every role EXCEPT `$lead` MUST use the designated agent invocation mechanism (skill activation) with the matching role; the main session holds the `$lead` orchestration skill in-context and is never activated as a separate subagent. Every OTHER INTERNAL leaf specialist is activated per stage; the provider-backed external adapter routes (`$external-worker` / `$external-reviewer`) launch the selected external provider directly instead. Do not simulate those other roles in the main conversation or emulate a specialist by "acting as" that role. Independent roles (e.g., security-engineer and performance-engineer) SHOULD be launched in parallel when their scopes do not overlap. Sequential dependencies must wait for the previous role to return its accepted artifact.
 
+The explicitly Root-admitted logical SDK child coordinator is the scoped exception:
+it submits admitted-child dispatch/lifecycle intents through the existing Host
+owner. It is not an ordinary native specialist adopting Lead or a new global
+owner, and does not relax the provider access or independent-review rules.
+
 ## Interaction types
 
 | Symbol | Type | Description | Authorization |
@@ -537,7 +542,7 @@ When a reviewer finds a significant issue outside their domain:
 
 When any role discovers a bug, risk, or improvement outside the approved change surface:
 
-1. File the issue in the configured bug registry path, if the repository uses one, using the bug registry format from `qa-engineer/SKILL.md`, with `context: adjacent-finding` and `status: open`.
+1. Route concrete defects through the bug-admission contract owned by `qa-engineer`; use `context: adjacent-finding` and `status: open` only for a defect admitted under that contract.
 2. Note it in the current artifact under an "Adjacent findings" section.
 3. Do NOT expand scope to address it — the orchestrator decides priority and scheduling.
 4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` instead of working around it.
@@ -663,3 +668,42 @@ Managed adapters supply actual assigned-role provenance and consume `--user-appr
 
 
 Public launchers retain their selected lexical script argument before importing P and pass the call-local `runtime_namespace` through `launch`/`kimi_main` to the shared rule. P correlates the actual runtime participant with that selected namespace. Direct P library calls without a launcher use the selected P module origin, never process argv0 or cwd. There is no provider/user namespace flag, search or physical-parent fallback; genuine task authority, package/native currentness and applicable exact-attempt or task-scoped user receiving remain separate.
+
+
+### Scoped child coordination boundary
+
+Root retains global admission, integration and final acceptance. The explicitly
+admitted SDK child coordinator selects only its Root-admitted request catalog and
+child lifecycle intents; existing Host execution/receiving/lifecycle owners check
+the current recorded assignment before effects. Descriptive scope is not a file
+sandbox. Child outcomes require independent acceptance and cannot close Root or
+siblings. Parent assignment depth, conversation-fork depth and vendor subagent
+depth are distinct. See the shared scoped-child contract and SDK execution
+runbook for current implemented routes and recovery limits.
+
+For an explicitly selected persistent SDK child session, use its canonical received
+decision and native thread/turn lineage. Resolve an outstanding saved intent before
+requesting another decision. Never manufacture a fresh session as automatic
+recovery, replay an attempted catalog task, or treat session persistence as broader
+permission. The existing SDK execution runbook owns the concrete native route and
+its qualification limits.
+
+Dynamic task proposals are data for the existing Root admission owner, not
+self-issued permission. Root-published admission receipts may extend the effective
+catalog while preserving the immutable assignment and native session. Restore
+pending/declined proposals from canonical evidence and continue independent ready
+work; use the same request identity for execution rather than replaying admission
+or creating duplicate tasks. A machine needs-admission handoff does not introduce
+a new mandatory human-approval gate for already authorized routine work.
+
+An explicitly Root-admitted SDK child may begin with an empty executable catalog
+and an immutable goal/context. Its real decision produces proposals for the
+existing Root admission owner; no fabricated seed execution or additional
+approval store is needed. Decision and task effects retain their exact current
+Root authorization. Empty catalog alone is not a completed outcome.
+
+Durable SDK Root registration retains the exact explicitly selected task and
+runtime route in existing admission evidence. Restore those bytes rather than
+reselecting defaults; current permission checks still apply to each effect.
+Registration is not autonomous task-fit routing, historical consent is not
+current authorization, and private registration payload is not child handoff.

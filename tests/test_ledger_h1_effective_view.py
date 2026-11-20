@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import hashlib
 import importlib.util
@@ -928,9 +929,15 @@ class LedgerH1EffectiveViewTests(unittest.TestCase):
         checker = load_checker()
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            artifacts, items, _paths, _expected = synthetic_artifacts(module, root)
+            artifacts, items, paths, _expected = synthetic_artifacts(module, root)
             materialize_live_artifacts(root, artifacts)
 
+            context = module.load_effective_ledger_view(root, items[1], paths[1])
+            self.assertEqual(context.observation.activation_state, "active")
+            self.assertEqual(
+                context.observation.diagnostics,
+                (SYNTHETIC_READER_B_INVALID_LAUNCH_OBSERVATION,),
+            )
             errors = checker.stale_running_errors(
                 items[1],
                 datetime(2026, 9, 10, tzinfo=UTC),
@@ -939,8 +946,51 @@ class LedgerH1EffectiveViewTests(unittest.TestCase):
             )
 
             self.assertEqual(len(errors), 1)
-            self.assertIn("launch-b-open", errors[0])
+            self.assertIn("launch-b-open: stale running agent", errors[0])
+            self.assertNotIn("launch-b-bad1: stale running agent", "\n".join(errors))
             self.assertNotIn("legacy-running", "\n".join(errors))
+
+            # Only eligible, stale launches enter this age-specific diagnostic;
+            # the full public checker retains unrelated validation errors below.
+            self.assertEqual(
+                checker.stale_running_errors(
+                    items[1], datetime(2026, 9, 8, 1, 0, 1, tzinfo=UTC),
+                    timedelta(hours=1), module,
+                ),
+                [],
+            )
+            self.assertEqual(
+                checker.stale_running_errors(
+                    items[0], datetime(2026, 9, 10, tzinfo=UTC),
+                    timedelta(hours=1), module,
+                ),
+                [],
+            )
+            checked = subprocess.run(
+                [sys.executable, str(CHECKER), "--root", str(root),
+                 "--stale-hours", "1", "--now", "2026-09-10T00:00:00Z"],
+                capture_output=True, text=True, timeout=30,
+            )
+            self.assertEqual(checked.returncode, 1)
+            self.assertEqual(
+                checked.stdout.count(SYNTHETIC_READER_B_INVALID_LAUNCH_OBSERVATION), 1,
+            )
+            self.assertEqual(checked.stdout.count("launch-b-open: stale running agent"), 1)
+
+            # A broken receipt still yields no qualified launches or raw fallback.
+            receipt_path, receipt_bytes = next(iter(artifacts.receipt_bytes_by_path.items()))
+            receipt = json.loads(receipt_bytes)
+            receipt["registryAfterSha256"] = "0" * 64
+            (root / receipt_path).write_bytes(canonical(receipt) + b"\n")
+            invalid = module.load_effective_ledger_view(root, items[1], paths[1])
+            self.assertEqual(invalid.observation.activation_state, "invalid")
+            self.assertEqual(
+                checker.stale_running_errors(
+                    items[1], datetime(2026, 9, 10, tzinfo=UTC),
+                    timedelta(hours=1), module,
+                ),
+                [],
+            )
 
     def test_active_status_requires_current_closure_result(self):
         module = load_validator()
@@ -1793,22 +1843,63 @@ def test_rejected_artifact_escape_never_queries_owned_outside_namespace(tmp_path
     assert not [path for path in directory_reads
                 if path != root_key and not path.startswith(root_key + ntpath.sep)]
 
-    # The allowed alias owner must reject its outside target before querying it.
-    alias = items[0] / "outside-alias.md"
-    alias.symlink_to(outside[0])
-    seen.clear()
-    alias_errors = []
-    with mock.patch.object(ntpath, "_getfinalpathname", observe):
-        assert module.resolve_work_item_path(items[0], alias.name, "artifact", "outside-alias", alias_errors) is None
-    assert any("escape" in value.lower() for value in alias_errors)
-    assert not [path for path in seen if any(path == parent or path.startswith(parent + ntpath.sep)
+
+def _create_test_symlink(link, target, *, target_is_directory=False):
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except OSError as exc:
+        if sys.platform == "win32" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink creation requires a privilege unavailable to this process")
+        raise
+
+
+def test_rejected_artifact_symlink_never_queries_owned_outside_namespace(tmp_path):
+    outer = tmp_path / "owned-outer"
+    root = outer / "l1/l2/l3/repo"
+    item = root / "work-items/active/reader-a"
+    item.mkdir(parents=True)
+    outside = [root.parent / "outside/report.md", outer / "outside/report.md"]
+    for path in outside:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"owned synthetic outside target\n")
+    alias = item / "outside-alias.md"
+    _create_test_symlink(alias, outside[0])
+    module = load_validator()
+    seen = []
+    real_lstat = os.lstat
+
+    def observe_lstat(path, *args, **kwargs):
+        seen.append(os.path.normcase(os.path.abspath(os.fsdecode(path))))
+        return real_lstat(path, *args, **kwargs)
+
+    native_observer = contextlib.nullcontext()
+    if sys.platform == "win32":
+        import ntpath
+        real_final = ntpath._getfinalpathname
+
+        def observe_final(path):
+            seen.append(ntpath.normcase(ntpath.abspath(os.fsdecode(path))))
+            return real_final(path)
+
+        native_observer = mock.patch.object(ntpath, "_getfinalpathname", observe_final)
+    errors = []
+    with mock.patch.object(os, "lstat", observe_lstat), native_observer:
+        assert module.resolve_work_item_path(item, alias.name, "artifact", "outside-alias", errors) is None
+    assert any("escape" in value.lower() for value in errors)
+    parents = [os.path.normcase(os.path.abspath(path.parent)) for path in outside]
+    assert not [path for path in seen if any(path == parent or path.startswith(parent + os.sep)
                                            for parent in parents)]
-    # A self-expanding directory-link cycle terminates by visited state, without a hop cap.
-    cycle = items[0] / "expanding-cycle"
-    cycle.symlink_to("expanding-cycle/tail", target_is_directory=True)
-    cycle_errors = []
-    assert module.resolve_work_item_path(items[0], cycle.name, "artifact", "cycle", cycle_errors) is None
-    assert any("cycle" in value.lower() for value in cycle_errors)
+
+
+def test_rejected_artifact_symlink_cycle_terminates(tmp_path):
+    root = tmp_path / "repo"
+    item = root / "work-items/active/reader-a"
+    item.mkdir(parents=True)
+    cycle = item / "expanding-cycle"
+    _create_test_symlink(cycle, "expanding-cycle/tail", target_is_directory=True)
+    errors = []
+    assert load_validator().resolve_work_item_path(item, cycle.name, "artifact", "cycle", errors) is None
+    assert any("cycle" in value.lower() for value in errors)
 
 
 def test_composite_status_consumes_parent_diagnostics_once(tmp_path):
@@ -2813,16 +2904,22 @@ def test_accounted_known_pair_retains_audit_and_allows_current_close(tmp_path, m
     module = load_validator()
     lifecycle = module.load_lifecycle_owner()
     observation = "WI-LEDGER-LAUNCH-BINDING: revise-a-0001: own launch launch-c-0001 differs in scope"
-    with pytest.raises(lifecycle.LifecycleError, match="WI-LEDGER-LAUNCH-BINDING|WI-LEDGER-HISTORY-UNRESOLVED|open REVISE"):
-        lifecycle._validate_item_before_close(item)
+    # Ordinary close validates current acceptance, not historical bookkeeping.
+    # Explicit ledger receiving below still retains its strict history contract.
+    before_close_check = ledger.read_bytes()
+    lifecycle._validate_item_before_close(item)
+    assert ledger.read_bytes() == before_close_check
     (item / "current-independent-review.md").write_text("Synthetic distinct current analyst review.\n", encoding="utf-8")
     assert load_writer().main(["--work-item", str(item), "append", "--run-id", "independent-current-review-closer",
         "--role", old["role"], "--execution-role", "internal", "--status", "completed", "--gate", "PASS",
         "--event-kind", "standalone", "--artifact", old["artifact"], "--evidence", "review:current-independent-review.md",
         "--closes", old["runId"], "--scope", *old["scope"],
         "--started-at", "2026-10-04T12:01:00Z", "--updated-at", "2026-10-04T12:01:01Z"]) == 0
-    with pytest.raises(lifecycle.LifecycleError, match="WI-LEDGER-LAUNCH-BINDING|WI-LEDGER-HISTORY-UNRESOLVED"):
-        lifecycle._validate_item_before_close(item)
+    # Ordinary close validates current acceptance, not historical bookkeeping.
+    # Explicit ledger receiving below still retains its strict history contract.
+    before_close_check = ledger.read_bytes()
+    lifecycle._validate_item_before_close(item)
+    assert ledger.read_bytes() == before_close_check
     admission = {"schemaVersion": 2, "workItem": "work-items/active/reader-a",
         "operationId": "claim4-sealed-noncloser", "recordedAt": "2026-10-04T12:00:00Z",
         "expectedLedgerSha256": digest(original), "targets": [{"action": "custody-invalid-history",

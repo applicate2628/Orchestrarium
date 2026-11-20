@@ -235,7 +235,7 @@ class CodexDocumentPreparationTests(unittest.TestCase):
         self.scope["_prepare_codex_agents"] = spy
         output = self.merge_result(project_scope=True)
         spy.assert_called_once_with(self.root, self.source, self.target,
-                                    mutable_owner=self.owner, project_scope=True)
+                                    mutable_owner=self.owner, project_scope=True, prefer_global=False)
         self.adapter.assert_called_once()
         self.assertEqual(len(self.writes), 1)
         target, content, owner = self.writes[0]

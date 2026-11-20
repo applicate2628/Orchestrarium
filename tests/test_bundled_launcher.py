@@ -27,7 +27,8 @@ def bundle(tmp_path, launcher):
     (root / 'app/install.py').write_text('# synthetic entry')
     evidence = b'{}'
     (root / 'runtime-evidence.json').write_bytes(evidence)
-    data = {'schemaVersion': 2, 'product': 'Orche', 'release': 'development',
+    data = {'schemaVersion': 3, 'product': 'Orche', 'release': 'development',
+            'runtimeProfile': 'cpython-stdlib-only',
             'target': launcher.current_target(), 'python': 'python/bin/python3',
             'entry': 'app/install.py',
             'runtimeEvidence': 'runtime-evidence.json',
@@ -103,10 +104,10 @@ def test_child_reexec_uses_bundle_and_preserves_argument_boundaries(launcher, tm
     monkeypatch.setenv('PYTHONHOME','hostile')
     calls=[]
     monkeypatch.setattr(launcher,'_exec_child',lambda path,args,env:(calls.append((path,args,env)),0)[1])
-    assert launcher.main(['--permanent-runtime','--clients','codex','--target','path with spaces'])==0
+    assert launcher.main(['--permanent-runtime','--target','path with spaces','--allow-unsafe-target'])==0
     path,args,env=calls[0]
     assert path==str(exe)
-    assert args==[str(exe),'-I',str(root/'app/install.py'),'--clients','codex','--target','path with spaces']
+    assert args==[str(exe),'-I','-B',str(root/'app/install.py'),'--target','path with spaces','--allow-unsafe-target']
     assert 'PYTHONHOME' not in env and env['PYTHONNOUSERSITE']=='1'
 
 
@@ -124,9 +125,21 @@ def test_explicit_retention_runs_before_reexec(launcher,tmp_path,monkeypatch):
         return target/'python/bin/python3',target/'launch.py'
     monkeypatch.setattr(launcher,'retain_bundle',retain,raising=False)
     calls=[];monkeypatch.setattr(launcher,'_exec_child',lambda *args:(calls.append(args),0)[1])
-    assert launcher.main(['--retain-to',str(destination),'--clients','codex'])==0
+    assert launcher.main(['--retain-to',str(destination),'--global'])==0
     assert prepared==[(root,destination)]
-    assert calls[0][1]==[str(destination/'python/bin/python3'),'-I',str(destination/'launch.py'),'--permanent-runtime','--clients','codex']
+    assert calls[0][1]==[str(destination/'python/bin/python3'),'-I','-B',str(destination/'launch.py'),'--permanent-runtime','--global']
+
+
+def test_official_sdk_setup_preview_keeps_selected_worker_path(launcher, tmp_path, monkeypatch):
+    root, exe, _ = bundle(tmp_path, launcher)
+    monkeypatch.setattr(launcher, '__file__', str(root/'launch.py'))
+    monkeypatch.setattr(launcher.sys, 'executable', str(exe))
+    calls = []
+    monkeypatch.setattr(launcher, '_exec_child', lambda *args: (calls.append(args), 0)[1])
+    arguments = ['--sdk-setup', 'claude', '--sdk-venv', str(tmp_path/'selected worker')]
+    assert launcher.main(['--permanent-runtime', *arguments]) == 0
+    assert calls[0][1] == [str(exe), '-I', '-B', str(root/'app/install.py'), *arguments]
+    assert not (tmp_path/'selected worker').exists()
 
 
 def test_missing_retention_target_never_executes(launcher,tmp_path,monkeypatch):
@@ -138,6 +151,23 @@ def test_missing_retention_target_never_executes(launcher,tmp_path,monkeypatch):
     assert not calls
 
 
+def synthetic_application(builder, tmp_path):
+    source = tmp_path / 'source'
+    template = PATH.parents[2]
+    for entry in builder.APP_INPUTS:
+        selected = source / entry
+        if (template / entry).is_dir():
+            selected.mkdir(parents=True)
+        else:
+            selected.parent.mkdir(parents=True, exist_ok=True)
+            selected.write_bytes((template / entry).read_bytes())
+    distribution = source / 'scripts/distribution'
+    distribution.mkdir()
+    for name in ('build.py', 'launch.py'):
+        (distribution / name).write_bytes(PATH.with_name(name).read_bytes())
+    return source
+
+
 def test_retention_uses_shared_builder_and_refuses_existing_target(launcher,tmp_path):
     spec=importlib.util.spec_from_file_location('build_fixture',PATH.with_name('build.py'))
     builder=importlib.util.module_from_spec(spec);spec.loader.exec_module(builder)
@@ -145,7 +175,7 @@ def test_retention_uses_shared_builder_and_refuses_existing_target(launcher,tmp_
     runtime=tmp_path/'runtime'
     exe=runtime/builder.TARGETS[target];exe.parent.mkdir(parents=True)
     exe.write_bytes(b'synthetic interpreter; never executed')
-    source=build_synthetic_bundle(builder, PATH.parents[2],runtime,tmp_path/'original',target=target,release='development')
+    source=build_synthetic_bundle(builder, synthetic_application(builder, tmp_path),runtime,tmp_path/'original',target=target,release='development')
     (tmp_path/'parent').mkdir()
     destination=tmp_path/'parent'/'..'/'permanent Ω'
     python,entry=launcher.retain_bundle(source,destination)
@@ -169,7 +199,7 @@ def test_retention_failure_does_not_start_installer(launcher,tmp_path,monkeypatc
     def fail(*args):raise FileExistsError('occupied destination')
     monkeypatch.setattr(launcher,'retain_bundle',fail)
     calls=[];monkeypatch.setattr(launcher,'_exec_child',lambda *args:(calls.append(args),0)[1])
-    assert launcher.main(['--retain-to',str(tmp_path/'occupied'),'--clients','codex'])==2
+    assert launcher.main(['--retain-to',str(tmp_path/'occupied'),'--global'])==2
     assert calls==[]
 
 
@@ -190,7 +220,7 @@ def test_dangling_retention_name_is_not_followed(launcher, tmp_path):
     runtime = tmp_path / 'runtime'
     exe = runtime / builder.TARGETS[launcher.current_target()]
     exe.parent.mkdir(parents=True); exe.write_bytes(b'synthetic; never executed')
-    root = build_synthetic_bundle(builder, PATH.parents[2], runtime, tmp_path / 'original',
+    root = build_synthetic_bundle(builder, synthetic_application(builder, tmp_path), runtime, tmp_path / 'original',
                          target=launcher.current_target(), release='development')
     redirect = tmp_path / 'outside-selected-name'
     chosen = tmp_path / 'chosen'
@@ -217,7 +247,7 @@ def test_apply_requires_explicit_runtime_lifetime(launcher, tmp_path, monkeypatc
     assert '--retain-to' in capsys.readouterr().err
 
 
-@pytest.mark.parametrize('args', [['--help'], ['--dry-run']])
+@pytest.mark.parametrize('args', [['--list-clients'], ['--help'], ['--clients', 'codex', '--dry-run']])
 def test_read_only_launch_needs_no_permanent_placement(launcher, tmp_path, monkeypatch, args):
     root, exe, _ = bundle(tmp_path, launcher)
     monkeypatch.setattr(launcher, '__file__', str(root / 'launch.py'))
@@ -225,7 +255,7 @@ def test_read_only_launch_needs_no_permanent_placement(launcher, tmp_path, monke
     calls = []
     monkeypatch.setattr(launcher, '_exec_child', lambda *values: (calls.append(values), 0)[1])
     assert launcher.main(args) == 0
-    assert calls[0][1][3:] == args
+    assert calls[0][1] == [str(exe), '-I', '-B', str(root/'app/install.py'), *args]
 
 
 def test_windows_child_waits_and_propagates_failure(launcher, monkeypatch):
