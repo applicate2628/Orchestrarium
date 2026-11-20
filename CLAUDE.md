@@ -56,7 +56,7 @@ When modifying `shared/AGENTS.shared.md`, `src.claude/CLAUDE.md`, `operating-mod
 - Run `/agents-validate` after changes.
 - **Full-suite gate for skill/hook commits:** any commit touching `src.*/skills/` or the hook/safety scripts (`scripts/universal-hooks/`, `src.claude/agents/scripts/` + `agents/hooks/`, `src.codex/skills/lead/scripts/` + `lead/hooks/`) must run the FULL `python -B -m pytest tests/` suite to completion before commit — a timed-out or partial suite run is UNVERIFIED, not clean (cross-pack parity and canon-mirror drift are only caught by the full suite).
 - **Propagation, not hand-copying, for the universal-hooks mirrors:** `scripts/universal-hooks/{scripts,hooks}/` is the stated canon for `src.claude/agents/{scripts,hooks}/` and `src.codex/skills/lead/{scripts,hooks}/` (evidence: `tests/test_universal_hook_surfaces.py:10-11`, `shared/references/repository-source-hygiene.md`). Edit ONLY the canon copy, then run `python scripts/sync-universal-hooks.py --sync` to propagate it and `--check` in your own targeted pass before reporting a result — do not hand-copy from memory and do not edit a mirror directly; the tool refuses (not guesses) when a mirror carries uncommitted local changes it cannot safely overwrite.
-- Test install: `python scripts/install-claude.py --global` and verify CLAUDE.md sections.
+- For install verification, use an isolated target and check the resulting CLAUDE.md sections. A real global install is deployment, not a test.
 
 ## File layout
 

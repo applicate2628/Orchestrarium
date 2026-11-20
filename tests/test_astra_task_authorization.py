@@ -65,7 +65,7 @@ class ScopedAstraTests(unittest.TestCase):
         self.assertEqual(description["status"], "available", description)
         grant = self.grant("review")
         args = dict(requested_model="gpt-6.2-astra", requested_effort="high",
-                    caller_rationale="substantive audit", approved_execution_scope={"read": True},
+                    caller_rationale="substantive audit", preference_deviation_reason="The proof needs stronger reasoning than the QA default.", approved_execution_scope={"read": True},
                     astra_task_authorization=grant)
         decision = resolver.resolve_ordinary_native_dispatch(description, **args)
         self.assertEqual(decision["status"], "resolved", decision)

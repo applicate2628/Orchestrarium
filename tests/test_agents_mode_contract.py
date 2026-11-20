@@ -127,8 +127,8 @@ class AgentsModeContractTest(unittest.TestCase):
         self.assertIn("Use `scripts/resolve-agents-mode.py --provider <provider> --json`", maintenance)
         self.assertIn("normalize the effective values in memory", maintenance)
         self.assertIn("must not create or modify an overlay", maintenance)
-        self.assertIn("reinstall must rewrite it to the current canonical form", maintenance)
-        self.assertIn("Only the authorized writer", maintenance)
+        self.assertIn("Installation does not create preference files or copy defaults into them", maintenance)
+        self.assertIn("Full normalization is a separate, explicit maintenance action", maintenance)
         for obsolete in ("Normalize whichever file supplied", "This maintenance rewrite happens on read",
                          "Read-time normalization preserves"):
             self.assertNotIn(obsolete, maintenance)

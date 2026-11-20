@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-20
 
+- Remove the contradictory maintainer instruction to test in a live Claude global installation. Installation checks use isolated targets; deployment remains a separate operation.
+
 - Run independent ready work in parallel within authorized capacity and safe isolation. Legacy mode values no longer silence the advisory, and do not authorize extra work.
 
 - Preserve inherited project and global settings during installation. Do not create missing overlays or alter explicit Claude main-agent selection. Handle existing legacy preference compatibility at the owning transaction.

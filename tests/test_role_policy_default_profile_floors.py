@@ -203,7 +203,7 @@ def test_ordinary_resolver_uses_generic_for_default_and_explicit_tuple() -> None
         description,
         requested_model="gpt-6.2-astra",
         requested_effort="medium",
-        caller_rationale="The contract is bounded, clear, and directly testable.",
+        caller_rationale="The contract is bounded, clear, and directly testable.", preference_deviation_reason="The bounded written requirements make the requested lower effort sufficient.",
         approved_execution_scope=scope,
         user_approved_launch=True,
     )
@@ -271,7 +271,7 @@ def test_analyst_exploration_uses_terra_default_and_keeps_current_medium_choice(
         description,
         requested_model="gpt-6.1-terra",
         requested_effort="medium",
-        caller_rationale="Routine bounded classification favors moderate reasoning.",
+        caller_rationale="Routine bounded classification favors moderate reasoning.", preference_deviation_reason="Moderate effort covers the deterministic classification oracle.",
         approved_execution_scope=scope,
     )
 
@@ -326,7 +326,7 @@ def test_ordinary_discovery_filters_reported_host_capabilities_and_max_needs_app
         description,
         requested_model="gpt-6.2-astra",
         requested_effort="max",
-        caller_rationale="The user explicitly approved maximum effort.",
+        caller_rationale="The user explicitly approved maximum effort.", preference_deviation_reason="This commissioning case requires a separately explained maximum-depth pass.",
         approved_execution_scope=_scientific_scope(),
         user_approved_max=True,
     )
@@ -406,6 +406,7 @@ def test_ordinary_native_cli_projects_explicit_host_controls_without_launching()
             "xhigh",
             "--caller-rationale",
             "Demanding accepted implementation contract.",
+            "--preference-deviation-reason", "The demanding proof needs Astra rather than the engineering default.",
             "--approved-scope-json",
             '{"authority":"parent-dispatcher-only","allowedTools":[]}',
             "--user-approved-launch",
@@ -447,7 +448,7 @@ def test_skill_only_catalog_resolves_default_and_explicit_choices_without_agent_
         description,
         requested_model="gpt-6.2-astra",
         requested_effort="medium",
-        caller_rationale="The accepted UI change is bounded and directly testable.",
+        caller_rationale="The accepted UI change is bounded and directly testable.", preference_deviation_reason="Bounded UI behavior makes the requested alternate pair a deliberate fit.",
         approved_execution_scope=_scientific_scope(),
         user_approved_launch=True,
     )
@@ -1102,7 +1103,7 @@ def test_supervised_luna_producers_use_ordinary_explicit_route_keep_defaults(
         )
         explicit = RESOLVER.resolve_ordinary_native_dispatch(
             description, requested_model="gpt-6-luna", requested_effort=effort,
-            caller_rationale="Accepted bounded contract; supervise time to verified result.",
+            caller_rationale="Accepted bounded contract; supervise time to verified result.", preference_deviation_reason="Use the bounded Luna pilot rather than the profession default; the test oracle is explicit.",
             approved_execution_scope=scope,
         )
         assert default["status"] == explicit["status"] == "resolved", role
@@ -1208,7 +1209,7 @@ def test_individual_launch_projection_uses_one_effective_tuple_guard(model, effo
     description = RESOLVER.describe_ordinary_native_role_options(
         "scientific-software-engineer", "engineering", _unknown_astra_host(), repo_root=ROOT)
     inputs = dict(requested_model=model, requested_effort=effort,
-                  caller_rationale="Synthetic exact-launch receiving projection, not a genuine user grant.",
+                  caller_rationale="Synthetic exact-launch receiving projection, not a genuine user grant.", preference_deviation_reason="Exercise each separately authorized alternate without changing the default.",
                   approved_execution_scope=_scientific_scope())
     assert RESOLVER.resolve_ordinary_native_dispatch(description, **inputs)["status"] == "denied"
     selected = RESOLVER.resolve_ordinary_native_dispatch(description, user_approved_launch=True, **inputs)
@@ -1227,7 +1228,7 @@ def test_sol_default_preserves_current_terra_medium_choice():
     assert all(option["effort"] != "low" for option in description["options"])
     decision = RESOLVER.resolve_ordinary_native_dispatch(description,
         requested_model="gpt-6.1-terra", requested_effort="medium",
-        caller_rationale="Actual task fit and whole verified-result economics, not the host default.",
+        caller_rationale="Actual task fit and whole verified-result economics, not the host default.", preference_deviation_reason="Terra Medium is sufficient for this bounded variant rather than the stronger default.",
         approved_execution_scope=_scientific_scope())
     assert decision["status"] == "resolved", decision
     assert decision["resolvedProfile"] == "terra-6.1-medium"
@@ -1267,7 +1268,7 @@ def test_public_role_option_order_is_advisory_and_retains_scientific_choice(role
     assert max(ordinary) < min(agreement)
     science = RESOLVER.resolve_ordinary_native_dispatch(description,
         requested_model="gpt-6.2-sol", requested_effort="high",
-        caller_rationale="The actual scientific/complex-code commission fits primary Sol despite advisory presentation order.",
+        caller_rationale="The actual scientific/complex-code commission fits primary Sol despite advisory presentation order.", preference_deviation_reason="Use Sol for the scoped code review rather than the recommended scientific pair.",
         approved_execution_scope=_scientific_scope())
     assert science["status"] == "resolved", science
     assert science["resolvedModel"] == "gpt-6.2-sol"
