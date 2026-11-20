@@ -8,17 +8,19 @@ release, a measured improvement, or permission to launch providers or publish.
 
 ## Current delivery order and completed work
 
-1. Finish the approved multivendor SDK scope in [PR19](https://github.com/applicate2628/Orchestrarium/pull/19).
+1. Finish and verify the independent pre-SDK release from [PR52](https://github.com/applicate2628/Orchestrarium/pull/52). The final pre-SDK tag must precede SDK merge; the pre-SDK package has no SDK dependency.
+2. Finish the approved multivendor SDK scope in [PR19](https://github.com/applicate2628/Orchestrarium/pull/19).
    Its `docs/sdk-execution.md` owns the implementation roadmap and current evidence;
    [PR18](https://github.com/applicate2628/Orchestrarium/pull/18) retains the design,
    not a competing implementation checklist. Current source/offline results are
    distinct from native provider acceptance and installation. Do not reopen
    implemented SDK contracts as research into an absent adapter or Model backend.
-2. Reconcile the delivery dependency contract in [PR17](https://github.com/applicate2628/Orchestrarium/pull/17),
-   then qualify its separately admitted payload and channels. SDK owns required
-   dependencies; distribution delivers the qualified payload. This is not a
-   second installer or a blanket prerequisite for PR19 implementation.
-3. After SDK acceptance, select one native operation under [PR21](https://github.com/applicate2628/Orchestrarium/pull/21).
+3. Reconcile the delivery dependency contract in [PR17](https://github.com/applicate2628/Orchestrarium/pull/17),
+   then qualify its separately admitted payload and channels. The base installer
+   bundles standard-library CPython only; PR19 qualifies optional official
+   provider environments separately. This is not a second installer or a blanket
+   prerequisite for PR19 implementation.
+4. After SDK acceptance, select one native operation under [PR21](https://github.com/applicate2628/Orchestrarium/pull/21).
    Preserve its frozen inventories and reconcile subsequent source changes before
    implementation. Migrate rules and hooks only with covered consumers and
    incident regressions; an affected failure must not stop independent work.
@@ -37,9 +39,10 @@ preferences (outcome 7) remain independently scoped future outcomes. They do not
 block current SDK delivery without an identified dependency. Rule-volume reduction
 belongs to the successive SDK/Rust transitions, not a new pre-SDK rewrite.
 
-The existing PR31 Windows replacement-security correction remains a separate
-installer acceptance item; its source review, native fixtures and actual installed
-receiving must not be conflated with SDK or model-ranking completion.
+The merged PR31 Windows replacement-security correction is historical. Actual
+Windows installer acceptance remains a pre-SDK item in PR52. Do not conflate
+source review, isolated fixtures, and installed receiving with SDK or
+model-ranking completion.
 
 ## Goal and boundary
 
@@ -275,7 +278,7 @@ checkable disagreement; majority agreement does not establish truth.
 ### 5. Hybrid SDK coordination, native operations and portability
 
 **Disposition:** extracted into the
-[SDK design/status PR18](https://github.com/applicate2628/Orchestrarium/pull/18),
+[Historical SDK design PR18](https://github.com/applicate2628/Orchestrarium/pull/18),
 [SDK implementation PR19](https://github.com/applicate2628/Orchestrarium/pull/19) and
 [npm PR17](https://github.com/applicate2628/Orchestrarium/pull/17) and
 [native Rust PR21](https://github.com/applicate2628/Orchestrarium/pull/21),
@@ -448,5 +451,6 @@ Later implementation needs the probes under its own outcome and current gates.
 - PR: pull request; a proposal is not evidence that its changes have landed.
 - Admission: existing permission and policy eligibility, distinct from ranking.
 - Empirical arbitration: settling checkable disagreement with observed evidence.
-- SDK: software development kit; [PR18](https://github.com/applicate2628/Orchestrarium/pull/18) owns design/status and
-  [PR19](https://github.com/applicate2628/Orchestrarium/pull/19) owns the implementation, not this remaining 2.0 roadmap.
+- SDK: software development kit; [PR18](https://github.com/applicate2628/Orchestrarium/pull/18) owns historical design.
+  [PR19](https://github.com/applicate2628/Orchestrarium/pull/19) owns current SDK
+  implementation and qualification, not this remaining 2.0 roadmap.
