@@ -13550,11 +13550,17 @@ def _apply_shared_hooks_only(root: Path, target: Path, *, dry_run: bool,
         return authority
 
     recheck()
-    desired_events = {stem: event for stem, _script, event, _matcher in _hook_specs("codex", retained)}
+    helper = _load_module_from_path(
+        "orchestrarium_install_hypothesis_hook", root / "scripts" / "install-hypothesis-hook.py"
+    )
+    desired_groups = {
+        stem: (event, helper._with_event_matcher({}, event, matcher).get("matcher"))
+        for stem, _script, event, matcher in _hook_specs("codex", retained)
+    }
     retirements = [
         (record.marker, event, {"matcher": group.get("matcher"), "hooks": [handler]})
         for event, _, _, group, handler, record in health._owned_records(data, expected, "codex", host, targets)
-        if desired_events.get(record.marker) != event
+        if desired_groups.get(record.marker) != (event, group.get("matcher"))
     ]
     # _owned_records walks each group from first slot to last. Retire from
     # the end so a jointly retired handler is never mistaken for a survivor.

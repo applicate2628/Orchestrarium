@@ -13,7 +13,21 @@ from test_hook_runtime_installers import HELPER, PRODUCTION_INSTALLER as PI, ROO
 
 
 @pytest.fixture
-def shared_prior(tmp_path, monkeypatch):
+def shared_prior(tmp_path, monkeypatch, request):
+    if getattr(request, "param", False):
+        original_specs = PI._hook_specs
+
+        def specs_with_tool_pair(provider, lead):
+            specs = original_specs(provider, lead)
+            selected = sorted(stem for stem, _, event, matcher in specs
+                              if event == "SessionStart" and matcher is None)[:2]
+            assert len(selected) == 2
+            return [(stem, script, "PostToolUse", "OldTool") if stem in selected
+                    else (stem, script, event, matcher)
+                    for stem, script, event, matcher in specs]
+
+        monkeypatch.setattr(PI, "_hook_specs", specs_with_tool_pair)
+
     home = tmp_path / "operator-home"
     profile = home / ".codex"
     profile.mkdir(parents=True)
@@ -227,6 +241,7 @@ def test_previous_release_rejects_non_direct_package_evidence(tmp_path, member):
     with pytest.raises(ValueError, match="redirected package evidence"):
         PI._previous_retained_hook_root(ROOT, package)
 
+@pytest.mark.parametrize("shared_prior", [False, True], indirect=True, ids=["remove", "matcher-change"])
 @pytest.mark.parametrize("foreign_between", [False, True])
 def test_shared_upgrade_retires_joint_owned_group_without_shifting_foreign(
     shared_prior, monkeypatch, capsys, foreign_between,
@@ -235,8 +250,10 @@ def test_shared_upgrade_retires_joint_owned_group_without_shifting_foreign(
     args = ["--global", "--shared-hook-runtime", "--hooks-only"]
     assert PI.install("codex", args) == 0
     previous = PI._hook_specs("codex", s.retained)
+    matcher_change = any(matcher == "OldTool" for _, _, _, matcher in previous)
+    affected_event, old_matcher = ("PostToolUse", "OldTool") if matcher_change else ("SessionStart", None)
     selected = {stem for stem, _, event, matcher in previous
-                if event == "SessionStart" and matcher is None}
+                if (event, matcher) == (affected_event, old_matcher)}
     selected = set(sorted(selected)[:2])
     assert len(selected) == 2
     data = json.loads(s.common.read_bytes())
@@ -244,7 +261,7 @@ def test_shared_upgrade_retires_joint_owned_group_without_shifting_foreign(
     rows = list(s.health._owned_records(data, selected, "codex", s.host, targets))
     assert len(rows) == 2
     first, second = rows
-    groups = data["hooks"]["SessionStart"]
+    groups = data["hooks"][affected_event]
     foreign = {"type": "command", "command": "unrelated-operator-hook"}
     owners = [first[4], second[4]]
     groups[first[1]]["hooks"] = ([owners[0], foreign, owners[1]]
@@ -256,8 +273,10 @@ def test_shared_upgrade_retires_joint_owned_group_without_shifting_foreign(
     _, identities = s.health._load_codex_inventory(s.sidecar, target=s.alias, host_os=s.host)
     old_python = Path(json.loads(next(iter(identities)))["command"].split("\0")[0])
     replacement = s.tmp_path / "next-release" / "lead"
-    desired = [(stem, replacement / script.relative_to(s.retained), event, matcher)
-               for stem, script, event, matcher in previous if stem not in selected]
+    desired = [(stem, replacement / script.relative_to(s.retained), event,
+                "NewTool" if matcher_change and stem in selected else matcher)
+               for stem, script, event, matcher in previous
+               if matcher_change or stem not in selected]
     for _, script, _, _ in desired:
         script.parent.mkdir(parents=True, exist_ok=True)
         script.write_text("pass\n", encoding="utf-8")
@@ -280,8 +299,13 @@ def test_shared_upgrade_retires_joint_owned_group_without_shifting_foreign(
         assert "E_CODEX_HOOK_SLOT_SHIFT" in capsys.readouterr().err
     else:
         result = json.loads(s.common.read_bytes())
-        assert result["hooks"]["SessionStart"][first[1]]["hooks"] == [foreign]
+        assert result["hooks"][affected_event][first[1]]["hooks"] == [foreign]
         assert not list(s.health._owned_records(result, selected, "codex", s.host, targets))
+        desired_targets, _ = s.health._selected_hook_targets(desired)
+        registered = list(s.health._owned_records(result, selected, "codex", s.host, desired_targets))
+        assert {row[5].marker for row in registered} == (selected if matcher_change else set())
+        assert all(row[0] == affected_event and row[3].get("matcher") == "NewTool"
+                   for row in registered)
         published = (s.common.read_bytes(), s.sidecar.read_bytes())
         assert PI.install("codex", chosen) == 0
         assert (s.common.read_bytes(), s.sidecar.read_bytes()) == published
