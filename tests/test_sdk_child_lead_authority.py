@@ -13,13 +13,17 @@ from provider_prompt import ProviderOutputContext
 INSTANT='2026-10-23T10:05:00Z'
 
 
-def fixture(tmp_path,monkeypatch):
+def fixture(tmp_path,monkeypatch,*,with_optional_sibling=False):
     request,root_selection=base(tmp_path)
     root=Path(root_selection.work_item);(root/'status.md').write_text(quick_status())
     child=root.parent/'child-lane';child.mkdir();(child/'status.md').write_text(quick_status())
     req=runtime.prepare_codex_request(replace(request,work_item_id=child.name,cwd=str(child),role='consultant',result_kind='task',coordinator_binding='child-coordinator'))
     selections={'task-one':replace(root_selection,work_item=str(child))}
     requests={'task-one':req}
+    if with_optional_sibling:
+        requests['task-optional']=replace(req,external_dispatch_id='optional-dispatch',
+            external_evidence_run_id='optional-evidence',artifact_id='sha256:'+'d'*64)
+        selections['task-optional']=selections['task-one']
     root_owner=SimpleNamespace(resolve=lambda i:requests[i],assert_current=lambda r,e:None)
     assignment=runtime.publish_child_assignment(root_selection=root_selection,root_authority=root_owner,selections=selections,
         child_id='child-grant',coordinator_binding=req.coordinator_binding,scope=req.scope,required_request_ids=('task-one',),
@@ -38,10 +42,30 @@ def test_root_grant_is_durable_and_catalog_changes_rejected(tmp_path,monkeypatch
     with pytest.raises(ValueError,match='catalog_changed'):owner.resolve('task-one')
 
 
+def test_sibling_revocation_checks_only_selected_effect_authority(tmp_path,monkeypatch):
+    owner,_,requests,_,_=fixture(tmp_path,monkeypatch,with_optional_sibling=True)
+    selected=requests['task-one']
+    sibling=requests['task-optional']
+    checked=[]
+    def current(request,effect):
+        checked.append((request,effect))
+        if request==sibling:
+            raise ValueError('optional task revoked')
+    owner._root_authority.assert_current=current
+    owner.assert_current(selected,'turn_start')
+    assert checked==[(selected,'turn_start')]
+    with pytest.raises(ValueError,match='optional task revoked'):
+        owner.assert_current(sibling,'turn_start')
+    requests['task-optional']=replace(sibling,prompt='changed sibling')
+    with pytest.raises(ValueError,match='child_catalog_changed'):
+        owner.assert_current(selected,'turn_start')
+
+
 def test_revocation_is_durable_before_any_more_delegation(tmp_path,monkeypatch):
     owner,assignment,requests,selections,root=fixture(tmp_path,monkeypatch)
     asyncio.run(owner.cancel_child(assignment))
     with pytest.raises(ValueError,match='cancelled'):owner.resolve('task-one')
+    with pytest.raises(ValueError,match='cancelled'):owner.assert_current(requests['task-one'],'turn_start')
 
 
 def test_actual_received_child_task_archives_only_child_and_recovers_result(tmp_path,monkeypatch):

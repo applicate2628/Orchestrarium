@@ -1697,7 +1697,6 @@ class ChildLeadAuthority:
                 or not set(request.scope)<=set(assignment.scope)
                 or request_sha256(request,selection)!=catalog[request_id]):
                 raise RuntimeBindingError('child_catalog_changed')
-            _require_authority(self._root_authority.assert_current,request,effect)
 
     def resolve(self,request_id):
         assignment=_load_child_assignment(self._root_selection,self._child_id)
@@ -1716,9 +1715,11 @@ class ChildLeadAuthority:
     def assert_current(self,request,effect):
         assignment=self.resolve_child(self._child_id)
         self.assert_child_current(assignment,effect)
+        requests=self._decision_workers if type(request) is CoordinationInferenceRequest else self._selections
+        if 'delegate' not in assignment.lifecycle_permissions or not any(self.resolve(i)==request for i in requests):
+            raise RuntimeBindingError('child_delegation_not_admitted')
+        _require_authority(self._root_authority.assert_current,request,effect)
         if type(request) is CoordinationInferenceRequest:
-            admitted=any(self.resolve(i)==request for i in self._decision_workers)
-            _require_authority(self._root_authority.assert_current,request,effect)
             if effect=="sdk_launch_commit" and request.decision_session_mode=="fresh-handoff":
                 worker=next(w for key,w in self._decision_workers.items() if self._decision_requests[key]==request)
                 pending=self._fresh_received_decision(assignment,request,worker._selection)
@@ -1736,10 +1737,6 @@ class ChildLeadAuthority:
                         if intent["proposal"]["proposal_id"] not in self.proposal_results(assignment):raise RuntimeBindingError("child_received_intent_pending")
                     elif intent["action"]!="execute" or intent["request_id"] not in self.attempted_requests(assignment):
                         raise RuntimeBindingError("child_received_intent_pending")
-        else:
-            admitted=any(self.resolve(i)==request for i in self._selections)
-        if 'delegate' not in assignment.lifecycle_permissions or not admitted:
-            raise RuntimeBindingError('child_delegation_not_admitted')
 
     def attach_executors(self,executors):
         if self._executors is not None:raise RuntimeBindingError('child_executors_already_bound')
