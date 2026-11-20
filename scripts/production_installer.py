@@ -2114,6 +2114,7 @@ class _InstallFailure(RuntimeError):
 SLICE_A_FAILURE_IDS = frozenset(
     {
         "E_ATOMIC_DIRECTORY_PUBLISH_UNSUPPORTED",
+        "E_CODEX_HOOK_SLOT_SHIFT",
         "E_CODEX_DOCUMENT_LEGACY_OWNERSHIP_REQUIRED",
         "E_NATIVE_PROJECTION_SET_FAILED",
         "E_CREATE_ONLY_COLLISION",
@@ -12478,6 +12479,8 @@ def _install_hooks(
                     expected_entry = helper.build_codex_entry(hook_target, host, event, identity_arguments[3])
                 _transform_hook_registration(helper, registration, mutable_owner, marker, event,
                     provider, host, expected_entry=expected_entry, staged_data=staged_data)
+            except helper.CodexHookSlotShift as exc:
+                raise _InstallFailure(exc.stable_id, "migration", exc) from exc
             except (OSError, ValueError, SystemExit) as exc:
                 raise RuntimeError(f"obsolete hook removal failed for {marker}") from exc
             continue
@@ -12523,6 +12526,8 @@ def _install_hooks(
                 recheck_legacy(marker)
                 if portable_inventory:
                     health_module._recheck_selected_hook_targets(predecessor_witnesses, marker)
+            except helper.CodexHookSlotShift as exc:
+                raise _InstallFailure(exc.stable_id, "migration", exc) from exc
             except (OSError, ValueError, SystemExit) as exc:
                 raise RuntimeError(f"hook registration failed for {marker}") from exc
             continue
