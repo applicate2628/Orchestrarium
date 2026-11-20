@@ -407,7 +407,7 @@ When an accepted artifact asserts a root cause, a fix verification, or `diagnosi
 ## Parallelism rule
 
 - Parallelize read-heavy work such as research, triage, summarization, and test analysis when the scopes are independent.
-- `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes eligible refill a standing instruction whenever scopes are independent and the merge cost is justified.
+- Run ready, independent, authorized work in parallel whenever capacity and safe isolation permit; serialize only genuinely dependent or held work. Do not fabricate tasks or spawn a helper for indivisible work.
 - Apply the installed operating-model parallel-isolation protocol before launch; mutating or Git-using parallel lanes require one requested, cleanup-owned worktree each.
 - Be conservative with write-heavy work. Parallel edits are acceptable only when write scopes and contracts are already fixed.
 - Same-provider external helper reuse is allowed when each parallel external item owns a different admitted artifact or disjoint slice; `externalOpinionCounts` still governs distinct-provider requirements for one lane on top of the general `parallelMode` rule.

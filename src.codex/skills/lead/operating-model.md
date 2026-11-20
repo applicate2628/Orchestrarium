@@ -74,8 +74,8 @@ Before routing a resumed plan with materially changed architectural assumptions,
 - An explicit request for `external` on an unsupported owner role changes the disclosure, not the eligibility. The lead must say the route is unsupported and reroute honestly.
 - `externalProvider: auto` is the ordinary default only; it resolves through the active production profile and uses the shipped Codex/Claude pair only. Explicit user or Lead override may choose Kimi for a policy-admitted read-only lane or mapped `external-worker` engineering lane; its validated capability selection and fixed transport remain independently verified and nonauthorizing. Grok remains unavailable and must not be launched or probed in 1.x.
 - Shipped and repo-local production profiles must keep explicit-only and unavailable providers out of `externalPriorityProfiles`.
-- `parallelMode` is the general orchestrator rule for whether independent helper lanes should be parallelized by judgment at all; external fan-out is one overlay on top of that rule.
-- Independent external adapters may run in parallel when their scopes are disjoint, `parallelMode` permits ordinary parallel fan-out, and provider runtimes support it. If native internal slot limits would otherwise block additional independent eligible lanes, prefer available external adapters over silent serialization or dropped lanes.
+- Treat legacy parallel settings as compatibility input, not as a switch for independent ready work.
+- Independent external adapters may run in parallel when their scopes are disjoint, authorization is present, and provider runtimes support it. If native internal slot limits would otherwise block additional independent eligible lanes, prefer available external adapters over silent serialization or dropped lanes.
 - Parallel external routing is not capped at one instance per helper or provider. If multiple admitted artifacts or disjoint slices honestly need the same provider, the lead may launch repeated same-provider external helpers concurrently.
 - Treat same-lane multi-opinion collection and general external fan-out as different mechanisms: `externalOpinionCounts` governs distinct opinions for one lane, while brigade-style fan-out covers multiple independent lanes or slices on top of the general `parallelMode` rule.
 - Once a provider or subagent run is launched, a later preference change to effort, model, or framing applies to the next dispatch. Do not stop and replace the in-flight run: spent reasoning is sunk and redispatch adds cost. Stop only when the run is orphaned, no longer needed, or its prompt is broken/wrong.
@@ -588,7 +588,7 @@ When NOT to save:
 ## Parallelism guidance
 
 - Parallelize read-heavy work such as research, triage, and test analysis when scopes are independent.
-- `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes eligible refill a standing instruction whenever scopes are independent and the merge cost is justified.
+- Run ready, independent, authorized work in parallel whenever capacity and safe isolation permit; serialize only genuinely dependent or held work. Do not fabricate tasks or spawn a helper for indivisible work.
 - Parallelize write-heavy work only after contracts and phase boundaries are frozen.
 - Do not run two writing roles in the same area without explicit ownership boundaries.
 
