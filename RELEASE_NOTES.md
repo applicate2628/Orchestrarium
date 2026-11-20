@@ -7,6 +7,11 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-20
 
+- Require an explicit explanation when selecting an otherwise-admitted alternative to the recommended model or reasoning effort. Record the reason without judging its wording or granting launch authority.
+
+- Make Responsibility-Driven Engineering explicit in the shared rules and existing architecture roles: identify who owns a guarantee and how it is enforced and verified, without introducing a new role or review phase.
+- List optional Ponytail complexity-review skills in a separate registry. The pinned, MIT-licensed skill texts ship as optional source material only; default installation, hooks, execution permissions, and acceptance gates do not change.
+
 - Preserve Windows automatic inheritance when staging an upgrade. When Windows creates an object with the same owner, group and access list but omits the inherited-state flag, the installer asks Windows to recalculate inheritance on the new staged object, then verifies the entire original policy before publication. The native handle prevents propagation to any children. Protected, null, or mismatching access lists are not rewritten by this recovery path.
 
 - Limit installer rollback snapshots to the planned Orchestrarium skill owners, selected members, and receipts. An unrelated plugin in the shared skills directory no longer blocks the update. Codex installs that skip hook registration leave the existing hook configuration and its ownership inventory outside the write transaction.

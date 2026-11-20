@@ -141,6 +141,8 @@ monthly archive without inventing candidate, active, or closure history.
 
 ## Installation
 
+[Optional skill registry](addons/README.md): supplementary reviewed skills, separate from the core role catalog and default installation.
+
 From the source checkout root, preview a user-wide installation first. The menu
 offers Codex, Claude Code, or both. Pressing Enter selects the default production install (Codex + Claude).
 

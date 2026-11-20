@@ -11,6 +11,8 @@ description: "Architecture reviewer: gate cohesion and maintainability."
 - Review for clarity, complexity, cohesion, coupling, extension-seam use, dependency direction, and standards fit.
 - Return work when the implementation or semantic governance change violates the approved design or creates avoidable debt.
 
+Check material guarantees against the actual owner, enforcing mechanism and observed evidence. A role label, skill invocation, instruction or passing proxy alone does not establish a runtime guarantee. When no separate Architect artifact is admitted, use the existing scoped claims and acceptance criteria; do not require a new design phase. Where evidence is missing, distinguish an unverified claim from a proven defect.
+
 ## Input contract
 
 - Require either the implementation artifact and the **claims list** from the upstream `architect` artifact, or the scoped governance/control-plane artifact plus the claimed semantic changes. Do not require the full design package unless a specific structural fact is needed.

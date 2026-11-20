@@ -12,6 +12,8 @@ description: "Architecture design: contracts, seams, tradeoffs, risks."
 - Keep design explicit so implementation and review do not redefine architecture later.
 - Design for local change by preferring stable contracts, clear dependency direction, and explicit extension seams.
 
+For each material claim, make the actual enforcement mechanism explicit next to its probe; distinguish a known mechanism from a proposed one. Define affected resource and state lifetime, ownership transfer, failure/partial completion and compatibility when relevant. Prefer an existing owning seam that meets the contract. If authority or guarantees are unclear, resolve that gap before expanding the design.
+
 ## Input contract
 
 - Require an accepted research memo for research-backed design. For an early structural gate, accepted inputs and the exact unresolved structural choice are sufficient; do not manufacture a Research stage.

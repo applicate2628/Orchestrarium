@@ -11,6 +11,8 @@ over-absolute reading produces false findings).
 
 ## The principle
 
+Apply Responsibility-Driven Engineering to a material change: identify the owner of each affected guarantee, make the contract falsifiable, and pair its enforcing mechanism with a probe. An architectural instruction or selected skill is not evidence of enforcement. Reuse the existing owning boundary and evidence surface; the level of detail follows the risk.
+
 Split a system into MODULES by responsibility LAYER, each a single-owner unit with a narrow
 interface, and compose them — NOT into big independent per-feature programs that each privately copy
 the shared layers (a "silo"). A feature / variant / scenario is a THIN ASSEMBLY over the shared
