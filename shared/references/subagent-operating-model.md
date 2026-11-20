@@ -10,6 +10,8 @@ Inline provider routing may consolidate repeated presentation against shared rul
 
 ## 1. Main rule for the lead
 
+For a material change without a separate architecture artifact, carry the guarantee, owning boundary and enforcement evidence in the existing scoped handoff. Keep the independently reviewed architecture-layering slices and their original scope; an optional skill is not an acceptance gate.
+
 > **Split subagents by the stages selected for the task and by triggered risk type.**
 > Any selected stage or triggered risk that can independently fail the result — architecture, algorithms, numerics, performance, security, quality, maintainability, repository hygiene, or toolchain integrity — should have its own owner, its own artifact, and its own gate.
 > A subagent should not receive "build the whole feature." It should receive a role, minimal context, limited tools, one artifact, and an explicit acceptance criterion.
