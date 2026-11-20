@@ -141,6 +141,10 @@ monthly archive without inventing candidate, active, or closure history.
 
 ## Installation
 
+For a linked Codex hook file shared across hosts, the retained bundle offers a
+[registration-only update](scripts/distribution/README.md#shared-codex-hook-file)
+that leaves the rest of each profile unchanged.
+
 [Optional skill registry](addons/README.md): supplementary reviewed skills, separate from the core role catalog and default installation.
 
 From the source checkout root, preview a user-wide installation first. The menu

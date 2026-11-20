@@ -749,6 +749,10 @@ def _parser(provider: str) -> argparse.ArgumentParser:
         "--shared-hook-runtime", action="store_true",
         help="Global Codex only: register linked hooks against the same retained bundle path on every host",
     )
+    parser.add_argument(
+        "--hooks-only", action="store_true",
+        help="With --global --shared-hook-runtime: update only the owned hook registrations and inventory",
+    )
     kimi_maintenance = parser.add_mutually_exclusive_group()
     kimi_maintenance.add_argument("--enroll-kimi", action="store_true")
     kimi_maintenance.add_argument("--replace-kimi-enrollment", action="store_true")
@@ -12346,6 +12350,8 @@ def _install_hooks(
     *, transaction: _InstallTransaction | None = None,
     mutable_owner: _CreateOnlyMutablePath | None = None,
     prior_installed_root: Path | None = None,
+    hooks_only_recheck=None,
+    preview: bool = False,
 ) -> None:
     installer = root / "scripts" / "install-hypothesis-hook.py"
     host = "windows" if os.name == "nt" else "posix"
@@ -12353,23 +12359,27 @@ def _install_hooks(
     portable_inventory = prior_installed_root is not None
     if portable_inventory and (provider != "codex" or mode != "global"):
         raise ValueError("E_SHARED_HOOK_RUNTIME: global Codex only")
+    hooks_only = hooks_only_recheck is not None
+    if (preview or hooks_only) and (not portable_inventory or (preview and not hooks_only)):
+        raise ValueError("E_SHARED_HOOK_RUNTIME: explicit shared hook operation required")
     installed_checker_root = prior_installed_root or installed_root
     owned = transaction is not None and transaction.enabled
-    if portable_inventory and not owned:
+    if portable_inventory and not (owned or preview):
         raise ValueError("E_SHARED_HOOK_RUNTIME: retained hooks require a transaction")
     if owned and (mutable_owner is None or mutable_owner.transaction is not transaction):
         raise ValueError("E_MUTABLE_PATH_ESCAPE: hooks require their admitted writer")
     helper = (_load_module_from_path("orchestrarium_install_hypothesis_hook", installer)
-              if owned else None)
-    namespace_owner = _hook_health_module(root) if owned else None
+              if owned or preview else None)
+    namespace_owner = _hook_health_module(root) if owned or preview else None
     namespace = (namespace_owner._resolve_hooks_target(registration, allow_missing_ordinary=True)
-                 if owned else None)
+                 if owned or preview else None)
     def require_namespace():
-        if owned:
+        if owned or preview:
             current = namespace_owner._resolve_hooks_target(registration, allow_missing_ordinary=True)
             if current[:2] != namespace[:2]:
                 raise ValueError("E_HOOK_INVENTORY_TARGET_INVALID: registration namespace changed")
-            _owned_byte_context(registration, mutable_owner)
+            if owned:
+                _owned_byte_context(registration, mutable_owner)
     base = [
         str(installer),
         "--target",
@@ -12400,15 +12410,18 @@ def _install_hooks(
         proc = _run([*base, "--script-path", str(script), "--validate-only"], root)
         if proc.returncode:
             raise RuntimeError(f"hook target preflight failed for {script}")
-    _checkpoint(root, installer, registration, provider, mode, "sync")
+    if not preview:
+        _checkpoint(root, installer, registration, provider, mode, "sync")
     staged_data = None
     if portable_inventory:
         require_namespace()
         initial_text = _read_owned_text(registration, mutable_owner)
         staged_data = helper.load_existing(_HookConfigInput(registration, initial_text))
         initial_shape = helper.encode_hook_config(staged_data)
-    retired_specs = [(marker, event, []) for marker, event in RETIRED_HOOK_SPECS]
-    if provider == "codex":
+    # A scoped operation proves only the inventory's complete current set.
+    # It does not enroll or retire legacy commands outside that proof.
+    retired_specs = [] if hooks_only else [(marker, event, []) for marker, event in RETIRED_HOOK_SPECS]
+    if provider == "codex" and not hooks_only:
         marker, directory, event, matcher = next(
             spec for spec in _HOOK_METADATA if spec[0] == "check-mcp-momentum"
         )
@@ -12421,12 +12434,14 @@ def _install_hooks(
     managed_targets = {marker: {str(script)} for marker, script, _event, _matcher in selected_specs}
     legacy_witnesses = {}
     legacy_root = registration.parent if provider == "codex" else None
-    legacy_targets = _verified_legacy_hook_targets(
+    legacy_targets = {} if hooks_only else _verified_legacy_hook_targets(
         provider, installed_checker_root, set(managed_targets), legacy_provider_root=legacy_root,
         witnesses=legacy_witnesses,
     )
 
     def recheck_legacy(marker):
+        if hooks_only:
+            return
         expected = {path: legacy_witnesses[path] for path in legacy_targets.get(marker, ())}
         _recheck_legacy_hook_targets(provider, installed_checker_root, marker, expected, legacy_root)
     for marker, paths in legacy_targets.items():
@@ -12450,7 +12465,7 @@ def _install_hooks(
             | {marker for marker, _event, _arguments in retired_specs},
             managed_targets=managed_targets,
         )
-        if health_module is not None and registration.is_file()
+        if health_module is not None and not preview and registration.is_file()
         else {}
     )
     for marker, event, identity_arguments in retired_specs:
@@ -12485,7 +12500,7 @@ def _install_hooks(
             raise RuntimeError(f"obsolete hook removal failed for {marker}")
     codex_command = (
         health_module.resolve_codex_command(os.environ.get("CODEX_BIN"))
-        if health_module is not None
+        if health_module is not None and not preview
         else None
     )
     if inventory_path is None:
@@ -12498,7 +12513,7 @@ def _install_hooks(
         recheck_legacy(marker)
         if portable_inventory:
             health_module._recheck_selected_hook_targets(predecessor_witnesses, marker)
-        if owned:
+        if owned or preview:
             try:
                 require_namespace()
                 hook_target = helper.resolve_hook_target(str(script), host, provider)
@@ -12526,11 +12541,19 @@ def _install_hooks(
         proc = _run(arguments, root)
         if proc.returncode:
             raise RuntimeError(f"hook registration failed for {marker}")
+    planned_inventory = None
     if staged_data is not None:
         require_namespace()
         health_module._recheck_selected_hook_targets(predecessor_witnesses)
         if _read_owned_text(registration, mutable_owner) != initial_text:
             raise ValueError("E_SHARED_HOOK_RUNTIME: registration changed during planning")
+        if hooks_only:
+            authority = hooks_only_recheck()
+            planned_inventory = health_module._render_codex_inventory(
+                staged_data, authority=authority, specs=selected_specs, host_os=host, portable=True,
+            )
+            if preview:
+                return
         if helper.encode_hook_config(staged_data) != initial_shape:
             _publish_hook_data(helper, registration, staged_data, mutable_owner, remove=False)
     _checkpoint(root, installer, registration, provider, mode, "register")
@@ -12556,6 +12579,8 @@ def _install_hooks(
                 plan = health_module.plan_codex_inventory(
                     target=registration, specs=selected_specs,
                     inventory_path=inventory_path, host_os=host, portable=portable_inventory)
+                if planned_inventory is not None and plan.content != planned_inventory:
+                    raise ValueError("inventory no longer matches the qualified staged registration")
                 health_module._recheck_inventory_authority(plan.authority, for_write=True)
                 storage, node, inventory_owner = _owned_byte_context(plan.authority.inventory, mutable_owner)
                 if storage != plan.authority.inventory:
@@ -12620,9 +12645,10 @@ def _install_hooks(
     _checkpoint(root, installer, registration, provider, mode, "verify")
     _checkpoint(root, installer, registration, provider, mode, "reclaim")
     if provider == "codex":
+        installed_checker = (root / "scripts" if hooks_only else installed_checker_root / "scripts")
         installed_health = _run_hook_health_bounded(
             [
-                str(installed_checker_root / "scripts" / "check-hook-health.py"),
+                str(installed_checker / "check-hook-health.py"),
                 "--target",
                 str(registration),
                 "--platform",
@@ -12631,6 +12657,7 @@ def _install_hooks(
                 host,
                 "--installed-root",
                 str(installed_root),
+                *(["--repo-root", str(root)] if hooks_only else []),
                 "--inventory",
                 str(inventory_path),
                 "--codex-trust-mode",
@@ -13252,6 +13279,97 @@ def _finish_install_result(provider, target, dry_run, applied, primary, cleanup_
     return 0
 
 
+def _apply_shared_hooks_only(root: Path, target: Path, *, dry_run: bool) -> None:
+    health = _hook_health_module(root)
+    host = "windows" if os.name == "nt" else "posix"
+    registration = target / "hooks.json"
+    retained = _retained_codex_hook_root(root, registration)
+    inventory = health._codex_inventory_sidecar(registration)
+    authority = health._inventory_authority(registration, inventory, for_write=False)
+    before = {
+        path: _InstallTransaction._capture_node(path)
+        for path in (authority.resolved_target, authority.inventory)
+    }
+
+    skills = target.parent / ".agents" / "skills"
+    receipt = None
+    link = None
+    if _find_portable_codex_inventory(root, registration) is not None:
+        predecessor = retained
+    else:
+        logical = skills.parent
+        link = _linked_runtime_subroots_module(root).LinkedRuntimeSubrootAuthority.bind(
+            logical, scope="global", trusted_global_roots=(logical,),
+        )
+        if link is not None:
+            skills = link.resolved_root / "skills"
+        predecessor = skills / "lead"
+        receipt = _read_lead_receipt(skills / _LEAD_RECEIPT_NAME)
+        if receipt is None:
+            raise ValueError("E_SHARED_HOOK_RUNTIME: missing canonical predecessor receipt")
+
+    specs = list(_hook_specs("codex", predecessor))
+    targets, witnesses = health._selected_hook_targets(specs)
+    if set(witnesses) != set(targets):
+        raise ValueError("E_SHARED_HOOK_RUNTIME: predecessor hook files are missing")
+    expected, identities = health._load_codex_inventory(
+        inventory, target=registration, host_os=host, authority=authority,
+    )
+    data = health._load(authority.resolved_target)
+    rows = list(health._iter_owned_hooks(data, expected, "codex", host, targets))
+    observed = {
+        health.canonical_identity(event, argv, host, matcher=matcher,
+                                  source_path=authority.resolved_target)
+        for event, _stem, argv, matcher in rows
+    }
+    expected_shapes = {stem: (health._event_identity(event), matcher)
+                       for stem, _script, event, matcher in specs}
+    observed_shapes = {stem: (health._event_identity(event), matcher)
+                       for event, stem, _argv, matcher in rows}
+    # Exact stock direct command only; a sidecar cannot grant authority to
+    # remove operator-chosen arguments or interpreter flags.
+    if any(len(argv) != 2 or not Path(argv[0]).is_absolute()
+           for _event, _stem, argv, _matcher in rows):
+        raise _InstallFailure("E_SHARED_HOOK_RUNTIME", "inventory",
+                              ValueError("non-stock predecessor invocation"))
+    # Require inventory, package and actual registration to agree without
+    # resolving/running the old executable; replacing that path is the repair.
+    if (observed != identities or len(rows) != len(expected) or expected != set(targets)
+            or observed_shapes != expected_shapes):
+        raise ValueError("E_SHARED_HOOK_RUNTIME: predecessor registrations do not match their inventory")
+    def recheck():
+        if link is not None:
+            link.assert_current()
+        if receipt is not None and (
+            _read_lead_receipt(skills / _LEAD_RECEIPT_NAME) != receipt
+            or _tree_sha256(predecessor, ignore_runtime_cache=True)
+            != _lead_receipt_identity_v2(receipt, predecessor)
+        ):
+            raise ValueError("E_SHARED_HOOK_RUNTIME: predecessor Lead receipt drift")
+        health._recheck_selected_hook_targets(witnesses)
+        health._recheck_inventory_authority(authority, for_write=False)
+        if any(not _InstallTransaction._point_matches(path, node, check_file_content=True)
+               for path, node in before.items()):
+            raise ValueError("E_SHARED_HOOK_RUNTIME: predecessor registration or inventory changed")
+        return authority
+
+    recheck()
+    kwargs = {"prior_installed_root": predecessor, "hooks_only_recheck": recheck}
+    if dry_run:
+        _install_hooks(root, "codex", registration, retained, "global", inventory,
+                       preview=True, **kwargs)
+        return
+
+    pointer = (registration,) if registration.is_symlink() else ()
+    paths = [*pointer, authority.resolved_target, authority.inventory]
+    transaction = _InstallTransaction(paths, enabled=True, link_object_paths=pointer)
+    with transaction:
+        owner = _CreateOnlyMutablePath(target.parent, transaction, dry_run=False)
+        _install_hooks(root, "codex", registration, retained, "global", inventory,
+                       transaction=transaction, mutable_owner=owner, **kwargs)
+        transaction.commit()
+
+
 def _installer_platform_admitted() -> bool:
     """Admit implemented platform backends; native operation checks remain mandatory."""
     return os.name in {"nt", "posix"}
@@ -13263,6 +13381,13 @@ def install(provider: str, argv: list[str] | None = None) -> int:
         not args.no_hypothesis_hook
         and not os.environ.get("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK")
     )
+    if args.hooks_only:
+        compatible = {"global_install", "shared_hook_runtime", "hooks_only", "dry_run"}
+        if not args.shared_hook_runtime or any(
+            value for key, value in vars(args).items() if key not in compatible
+        ):
+            print("FAIL: E_SHARED_HOOK_RUNTIME: hooks-only must be a separate shared operation", file=sys.stderr)
+            return 1
     if args.shared_hook_runtime and (
         provider != "codex" or not args.global_install or args.uninstall
         or not register_hooks
@@ -13338,6 +13463,16 @@ def install(provider: str, argv: list[str] | None = None) -> int:
         return 1
     script = Path(__file__)
     root = _repo_root(script)
+    if args.hooks_only:
+        try:
+            _mode, target, _project = _target(provider, args)
+            _apply_shared_hooks_only(root, target, dry_run=args.dry_run)
+        except (OSError, RuntimeError, ValueError) as exc:
+            print("FAIL: " + _installer_failure_text(exc), file=sys.stderr)
+            return 1
+        print("RESULT: DRY-RUN complete (no files modified)." if args.dry_run
+              else "RESULT: OK - Codex shared registrations updated")
+        return 0
     canonical_plan: _CanonicalSkillsPlan | None = None
     primary = cleanup_error = None
     applied = False

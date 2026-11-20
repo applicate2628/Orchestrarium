@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-20
 
+- Add an explicit registration-only update for a retained shared Codex hook bundle. It previews the same proposed registration and inventory before writing, can replace a proven older hook command whose interpreter disappeared, and leaves the rest of each Codex profile and native trust unchanged.
+
 - Remove the contradictory maintainer instruction to test in a live Claude global installation. Installation checks use isolated targets; deployment remains a separate operation.
 
 - Run independent ready work in parallel within authorized capacity and safe isolation. Legacy mode values no longer silence the advisory, and do not authorize extra work.

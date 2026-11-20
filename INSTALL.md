@@ -12,6 +12,10 @@ For a linked global Codex registration shared across hosts, the
 [shared hook installation](scripts/distribution/README.md#shared-codex-hook-file)
 stages one retained bundle at the same path on each host. The installer owns
 the registration changes; use the native `/hooks` interface for trust.
+To change only the shared registrations and their generated inventory, add
+`--hooks-only` to the retained bundle command. This mode requires an existing
+complete owned registration and does not install or update skills, roles,
+documents, settings, or trust.
 
 
 ## Supported filesystem backends
@@ -219,7 +223,7 @@ project/
     .agents-mode.yaml
     AGENTS.md
     CLAUDE.md
-    settings.json          ← hook entries plus conditional force-mode `agent: lead` default merged here
+    settings.json          ← hook entries merged here; existing main-agent selection is preserved
     agents/                ← leaf-role subagents + dual-safe Lead main-agent definition + delegate-style common-skill wrappers
     commands/
     skills/                ← inline /lead orchestration skill + common skills such as repo-cleanup/ reachable from main conv and subagents

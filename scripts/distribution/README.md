@@ -63,13 +63,23 @@ path grammar. No interpreter is found through `PATH`.
 
 Run the bundle launcher with `--retain-only ABSOLUTE_DIRECTORY` on every host
 first. This stages the checked release without changing any provider profile.
-From the retained bundle run `--permanent-runtime --global --shared-hook-runtime
---dry-run` to preview. On the host owning publication of the common file, run
-the same command without `--dry-run`. This selects Codex without the provider
-menu. The installer updates only its registrations and validates the resulting
-Python and script paths; both paths refer to the retained bundle. The Codex
-profile link and unrelated hooks remain in place. The portable sidecar carries
-the same expected commands across different local sync/profile paths.
+For a registration-only update, preview from the existing retained bundle with
+`--permanent-runtime --global --shared-hook-runtime --hooks-only --dry-run`.
+On the host owning publication of the common file, remove only `--dry-run` to
+apply. This requires the current shared file and its neighboring installer
+inventory to agree with the current retained release or with a receipt-verified
+ordinary installation. The older interpreter may be missing, but its complete
+owned registration and script paths must still be independently identifiable.
+Only those registrations and the generated portable inventory can change.
+The installer preserves the Codex profile link, unrelated hooks, skills,
+roles, documents, settings and trust. Legacy commands outside the qualified
+inventory are not part of this operation.
+
+Omit `--hooks-only` for the existing full Codex pack installation with shared
+hook registration. It selects Codex without the provider menu. The shared
+registrations point at the selected retained Python and script paths; the
+portable inventory carries the expected commands across different local
+sync and profile paths.
 
 Do not run the apply step before all consumers have the same verified retained
 release. Review changed definitions in Codex’s native `/hooks` interface on

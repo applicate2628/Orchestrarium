@@ -908,6 +908,63 @@ class CodexInventoryPlan:
     content: bytes
 
 
+def _render_codex_inventory(
+    data: dict[str, Any],
+    *,
+    authority: _InventoryAuthority,
+    specs: Iterable[tuple[str, Path, str, str | None]],
+    host_os: str,
+    portable: bool,
+) -> bytes:
+    """Render staged hook data; the caller retains all filesystem authority."""
+    if portable and not authority.link_chain:
+        raise ValueError("portable inventory requires a witnessed linked hooks target")
+    spec_rows = list(specs)
+    stems = {marker for marker, _script, _event, _matcher in spec_rows}
+    if len(stems) != len(spec_rows):
+        raise ValueError("duplicate Codex hook marker in installer specifications")
+    targets = {marker: {str(script)} for marker, script, _event, _matcher in spec_rows}
+    rows = list(_iter_owned_hooks(data, stems, "codex", host_os, targets))
+    by_stem: dict[str, list[tuple[str, str, list[str], str | None]]] = {
+        stem: [] for stem in stems
+    }
+    for row in rows:
+        by_stem[row[1]].append(row)
+    invalid = sorted(
+        stem for stem, matches in by_stem.items() if len(matches) != 1
+    )
+    if invalid:
+        raise ValueError(
+            "Codex inventory generation requires one registration per marker: "
+            + ", ".join(invalid)
+        )
+    hooks = []
+    for marker, _script, expected_event, expected_matcher in spec_rows:
+        event, _stem, argv, matcher = by_stem[marker][0]
+        if (
+            _event_identity(event) != _event_identity(expected_event)
+            or matcher != expected_matcher
+        ):
+            raise ValueError(
+                f"Codex inventory registration shape mismatch: {marker}"
+            )
+        identity = canonical_identity(
+            event, argv, host_os, matcher=matcher,
+            source_path=authority.resolved_target if portable else authority.target,
+        )
+        if portable:
+            binding = json.loads(identity)
+            binding["sourcePath"] = _PORTABLE_INVENTORY_SOURCE
+            identity = json.dumps(binding, separators=(",", ":"), sort_keys=True)
+        hooks.append({"stem": marker, "identity": identity})
+    payload = {"hooks": sorted(hooks, key=lambda item: item["stem"])}
+    if portable:
+        payload.update(schemaVersion=2, sourceBinding=_PORTABLE_INVENTORY_SOURCE)
+    else:
+        payload.update(schemaVersion=1, sourcePath=_source_identity(authority.target, host_os))
+    return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
 def plan_codex_inventory(
     *,
     target: Path,
@@ -921,52 +978,11 @@ def plan_codex_inventory(
         authority = _inventory_authority(target, inventory_path, for_write=True)
         if portable and not authority.link_chain:
             raise ValueError("portable inventory requires a witnessed linked hooks target")
-        spec_rows = list(specs)
-        stems = {marker for marker, _script, _event, _matcher in spec_rows}
-        if len(stems) != len(spec_rows):
-            raise ValueError("duplicate Codex hook marker in installer specifications")
         data = _load(authority.resolved_target if portable else authority.target)
-        targets = {marker: {str(script)} for marker, script, _event, _matcher in spec_rows}
-        rows = list(_iter_owned_hooks(data, stems, "codex", host_os, targets))
-        by_stem: dict[str, list[tuple[str, str, list[str], str | None]]] = {
-            stem: [] for stem in stems
-        }
-        for row in rows:
-            by_stem[row[1]].append(row)
-        invalid = sorted(
-            stem for stem, matches in by_stem.items() if len(matches) != 1
-        )
-        if invalid:
-            raise ValueError(
-                "Codex inventory generation requires one registration per marker: "
-                + ", ".join(invalid)
-            )
-        hooks = []
-        for marker, _script, expected_event, expected_matcher in spec_rows:
-            event, _stem, argv, matcher = by_stem[marker][0]
-            if (
-                _event_identity(event) != _event_identity(expected_event)
-                or matcher != expected_matcher
-            ):
-                raise ValueError(
-                    f"Codex inventory registration shape mismatch: {marker}"
-                )
-            identity = canonical_identity(
-                event, argv, host_os, matcher=matcher,
-                source_path=authority.resolved_target if portable else authority.target,
-            )
-            if portable:
-                binding = json.loads(identity)
-                binding["sourcePath"] = _PORTABLE_INVENTORY_SOURCE
-                identity = json.dumps(binding, separators=(",", ":"), sort_keys=True)
-            hooks.append({"stem": marker, "identity": identity})
-        payload = {"hooks": sorted(hooks, key=lambda item: item["stem"])}
+        content = _render_codex_inventory(data, authority=authority, specs=specs,
+                                          host_os=host_os, portable=portable)
         if portable:
-            payload.update(schemaVersion=2, sourceBinding=_PORTABLE_INVENTORY_SOURCE)
             _recheck_inventory_authority(authority, for_write=True)
-        else:
-            payload.update(schemaVersion=1, sourcePath=_source_identity(authority.target, host_os))
-        content = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
         return CodexInventoryPlan(authority, content)
     except _HookHealthFailure:
         raise
