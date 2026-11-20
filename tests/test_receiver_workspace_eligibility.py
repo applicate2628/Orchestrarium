@@ -63,5 +63,37 @@ class ReceiverWorkspaceEligibilityTest(unittest.TestCase):
             mkdir.assert_not_called()
 
 
+    @unittest.skipUnless(sys.platform == "win32", "Windows selects the optional receiver")
+    def test_ordinary_route_is_still_admitted_once_after_workspace_decline(self):
+        from test_git_push_gate_hook import CANONICAL_HOOK, _load_gate_module
+
+        transport = _load_transport()
+        gate = _load_gate_module(CANONICAL_HOOK, "receiver_workspace_fallback_test")
+        args = ("C:/synthetic", "origin", "a" * 40, "refs/heads/topic")
+        for admitted in (False, True):
+            with (
+                self.subTest(admitted=admitted),
+                mock.patch.dict(sys.modules, {"receiver_transport": transport}),
+                mock.patch.dict(transport.os.environ, {"LOCALAPPDATA": "C:/Users/Fixture Name/Local"}),
+                mock.patch.object(transport, "qualify") as optional,
+                mock.patch.object(gate, "_normalize_repository_workdir", return_value=args[0]),
+                mock.patch.object(gate, "_prove_repository_root", return_value=args[0]),
+                mock.patch.object(gate, "_resolve_executable", return_value="git.exe"),
+                mock.patch.object(gate, "_regular_identity", return_value=("synthetic",)),
+                mock.patch.object(gate, "_native_configuration_query"),
+                mock.patch.object(gate, "parse_native_argument_vector", return_value=object()),
+                mock.patch.object(gate, "_qualify_native_parsed_push", return_value=admitted) as admission,
+                mock.patch.object(gate.subprocess, "run", return_value=types.SimpleNamespace(returncode=0)) as launch,
+            ):
+                self.assertEqual(gate._target_local_push_main(list(args)), 0 if admitted else 2)
+                optional.assert_not_called()
+                admission.assert_called_once()
+                if admitted:
+                    launch.assert_called_once()
+                    self.assertIn("--verify", launch.call_args.args[0])
+                else:
+                    launch.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
