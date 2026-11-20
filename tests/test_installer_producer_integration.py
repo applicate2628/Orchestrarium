@@ -1564,30 +1564,6 @@ class ProducerIntegrationTests(unittest.TestCase):
             return I
         self.fail("unexpected helper execution surface: " + str(path))
 
-    def test_settings_atomic_change_and_nochange_share_original_snapshot(self):
-        target = self.target / "settings.json"
-        target.write_bytes(b'{"custom":"keep"}')
-        original = target.read_bytes()
-        transaction = self.transaction([target])
-        primary = RuntimeError("later")
-        with patch.object(PI, "_load_module_from_path", side_effect=self.helper_loader):
-            with self.assertRaises(RuntimeError) as caught:
-                with transaction:
-                    owner = self.owner(transaction)
-                    self.assertEqual("lead-default-written", PI._merge_claude_main_agent_settings(
-                        self.source, target, "force", False, mutable_owner=owner))
-                    self.assertEqual({"custom": "keep", "agent": "lead"}, json.loads(target.read_bytes()))
-                    after = target.read_bytes()
-                    identity = PI._CreateOnlyMutablePath._identity(target)
-                    self.assertEqual("lead-already-selected", PI._merge_claude_main_agent_settings(
-                        self.source, target, "force", False, mutable_owner=owner))
-                    self.assertEqual(identity, PI._CreateOnlyMutablePath._identity(target))
-                    self.assertEqual(after, target.read_bytes())
-                    raise primary
-        self.assertIs(primary, caught.exception)
-        self.assertEqual(original, target.read_bytes())
-        self.assert_clean()
-
     def hook_fixture(self, provider="codex", linked=False, directory_link=False):
         marker = "check-bugfix-discipline"
         script = self.source / (marker + ".py")
@@ -1602,7 +1578,7 @@ class ProducerIntegrationTests(unittest.TestCase):
                                              "windows" if os.name == "nt" else "posix", "codex", require_script=False)
         retired = H.build_codex_entry(retired_target, "windows" if os.name == "nt" else "posix",
                                      event, retired_matcher)
-        retired["hooks"].append(foreign)
+        retired["hooks"].insert(0, foreign)
         original = H.encode_hook_config({"custom": "保持", "hooks": {event: [retired]}})
         storage.write_bytes(original)
         selected = storage
@@ -1859,22 +1835,16 @@ class ProducerIntegrationTests(unittest.TestCase):
     def test_claude_empty_link_retirement_preserves_link_then_registers(self):
         self.receive_claude_empty_retirement(True)
 
-    def test_document_and_settings_dryrun_keep_no_effect_and_custom_policy(self):
+    def test_document_dryrun_preserves_user_document(self):
         pack = self.documentation_fixture()
         document = self.target / "AGENTS.md"
-        settings = self.target / "settings.json"
-        document.write_bytes(b"user doc\r\n")
-        settings.write_bytes(b'{"agent":"custom","other":0}')
-        before = {p: p.read_bytes() for p in (document, settings)}
-        transaction = self.transaction(list(before))
+        before = b"user doc\r\n"
+        document.write_bytes(before)
+        transaction = self.transaction([document])
         with transaction:
-            owner = self.owner(transaction)
-            PI._merge_codex_agents(self.source, pack, document, True, mutable_owner=owner)
-            self.assertEqual("preserved-nonlead-agent", PI._merge_claude_main_agent_settings(
-                self.source, settings, "force", False, mutable_owner=owner))
-            self.assertEqual("mode-unresolved", PI._merge_claude_main_agent_settings(
-                self.source, settings, "unresolved", True, mutable_owner=owner))
-            self.assertEqual(before, {p: p.read_bytes() for p in before})
+            PI._merge_codex_agents(
+                self.source, pack, document, True, mutable_owner=self.owner(transaction))
+            self.assertEqual(before, document.read_bytes())
             transaction.commit()
         self.assert_clean()
 

@@ -11583,25 +11583,6 @@ def _load_claude_settings(settings_path: Path, *,
     return data
 
 
-def _merge_claude_main_agent(
-    settings: dict[str, Any], delegation_mode: str | None
-) -> tuple[str, bool]:
-    """Apply the sole persistent Lead-default policy to a decoded settings object."""
-    if "agent" in settings and isinstance(settings["agent"], (dict, list)):
-        raise ValueError("Claude settings agent must be a scalar")
-    mode = delegation_mode.casefold() if isinstance(delegation_mode, str) else ""
-    if mode == "force":
-        if "agent" not in settings:
-            settings["agent"] = "lead"
-            return "lead-default-written", True
-        if settings["agent"] == "lead":
-            return "lead-already-selected", False
-        return "preserved-nonlead-agent", False
-    if mode in {"auto", "manual"}:
-        return "mode-preserved", False
-    return "mode-unresolved", False
-
-
 def _load_module_from_path(module_name: str, path: Path):
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
