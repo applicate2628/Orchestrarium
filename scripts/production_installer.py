@@ -1116,11 +1116,14 @@ class _WindowsBoundNode:
         if self.handle is not None or self.descriptor is not None:
             return self
         ctypes, _wintypes, kernel, *_rest = self._api()
-        if self.purpose not in {"observe", "parent", "attributes", "dispose"}:
+        if self.purpose not in {"observe", "parent", "attributes", "dispose", "scalar-writer"}:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing native creator custody")
         access = (0x12019F if self.purpose == "parent" else
                   0x81 | (0x10100 if self.purpose == "dispose" else 0)
                   | (0x100 if self.purpose == "attributes" else 0))
+        if self.purpose == "scalar-writer":
+            # Ordinary byte mutation and READ_CONTROL only: no security mutation rights.
+            access = 0x120083  # SYNCHRONIZE | READ_CONTROL | READ_ATTRIBUTES | READ/WRITE_DATA
         if self.read_security:
             access |= 0x20000  # READ_CONTROL; no WRITE_DAC/WRITE_OWNER or privilege.
         share = 7 if self.purpose in {"observe", "parent"} else 1
@@ -1343,6 +1346,20 @@ class _WindowsBoundNode:
         if not kernel.GetFileInformationByHandleEx(self.live_handle, 0, ctypes.byref(information), ctypes.sizeof(information)):
             raise ctypes.WinError(ctypes.get_last_error())
         return information
+
+    def ordinary_single_link(self) -> bool:
+        ctypes, wintypes, kernel, *_rest = self._api()
+
+        class StandardInfo(ctypes.Structure):
+            _fields_ = (("allocation", ctypes.c_longlong), ("end", ctypes.c_longlong),
+                        ("links", wintypes.DWORD), ("delete_pending", ctypes.c_ubyte),
+                        ("directory", ctypes.c_ubyte))
+
+        info = StandardInfo()
+        if not kernel.GetFileInformationByHandleEx(
+                self.live_handle, 1, ctypes.byref(info), ctypes.sizeof(info)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return info.links == 1 and not info.delete_pending and not info.directory
 
     def digest(self) -> str:
         ctypes, wintypes, kernel, *_rest = self._api()
@@ -3354,6 +3371,13 @@ class _InstallTransaction:
         return _InstallTransaction._capture_node(path, descriptor=descriptor, kind="file",
             data=hashlib.sha256(_InstallTransaction._descriptor_bytes(descriptor, path=path)).hexdigest())
 
+    @staticmethod
+    def _assert_scalar_security(bound: _WindowsBoundNode, expected: _WindowsSecurityImage) -> None:
+        if (not bound.ordinary_single_link() or
+                bound.basic().attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT or
+                bound.security_image() != expected):
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar security or link count")
+
     def _scalar_beforeimage(self, path: Path, before: _PhysicalNode) -> Path:
         for entry in self._entries:
             if entry["kind"] == "file" and self._original.get(entry["path"]) == {path: before}:
@@ -3365,7 +3389,8 @@ class _InstallTransaction:
         return backup
 
     def transform_scalar(self, logical: Path, legacy: Path | None, render, owner: "_CreateOnlyMutablePath",
-                         *, move_legacy: bool = True) -> None:
+                         *, move_legacy: bool = True,
+                         windows_origin: _PhysicalNode | None = None) -> None:
         """Bind, render and perform one ordinary scalar write in this transaction."""
         logical = Path(os.path.abspath(logical))
         legacy = Path(os.path.abspath(legacy)) if legacy is not None else None
@@ -3377,7 +3402,16 @@ class _InstallTransaction:
             raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED")
         selected = self._bind_scalar_storage(logical)
         storage, before, links, leaf = selected
+        expected_windows_security = windows_origin.security if windows_origin is not None else None
+        if windows_origin is not None and (
+            os.name != "nt" or not self.enabled or legacy is not None
+            or expected_windows_security is None or before != replace(windows_origin, security=None)
+            or storage != logical or leaf != storage
+            or any(node.kind != "directory" for _path, node in links)
+        ):
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: secure scalar requires an existing ordinary Windows target")
         descriptor = None
+        secured = None
         resources = ExitStack()
         primary = None
         appended = False
@@ -3451,6 +3485,13 @@ class _InstallTransaction:
             if not isinstance(planned, bytes):
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION: scalar renderer bytes")
             digest = hashlib.sha256(planned).hexdigest()
+            if expected_windows_security is not None:
+                secured = resources.enter_context(_WindowsBoundNode(storage, purpose="scalar-writer", security=True))
+                secured.python_metadata(writable=True)
+                descriptor = secured.descriptor
+                if self._scalar_descriptor_node(storage, descriptor, before) != before:
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: secure scalar origin")
+                self._assert_scalar_security(secured, expected_windows_security)
             if before is not None and before.data == digest:
                 return
             # Missing suffixes belong only to this already-bound scalar selection.
@@ -3478,6 +3519,8 @@ class _InstallTransaction:
                      "before_node": before, "current_node": before, "origin": before,
                      "links": links, "operation_backup": None, "consumed": False, "born": before is None,
                      "logical_views": (logical,) if leaf == storage else ()}
+            if expected_windows_security is not None:
+                entry["expected_windows_security"] = expected_windows_security
             if before is not None and self.enabled:
                 entry["operation_backup"] = self._scalar_beforeimage(storage, before)
             self._assert_scalar_binding(entry)
@@ -3492,7 +3535,7 @@ class _InstallTransaction:
                     appended = True
                     node = self._capture_node(storage, bound_node=created, kind="file", data=hashlib.sha256(b"").hexdigest())
                     descriptor = created.descriptor
-                else:
+                elif secured is None:
                     descriptor = os.open(storage, flags)
                     resources.callback(close_descriptor)
             else:
@@ -3526,8 +3569,12 @@ class _InstallTransaction:
             def record(path, current):
                 entry["current_node"] = current
                 self._advance(path, {path: current})
+            if secured is not None:
+                self._assert_scalar_security(secured, expected_windows_security)
             self._write_owned_file(storage, descriptor, (planned,), record, digest,
                                    initial_state=before if before is not None else None)
+            if secured is not None:
+                self._assert_scalar_security(secured, expected_windows_security)
             actual = self._scalar_descriptor_node(storage, descriptor, entry["origin"])
             if actual != entry["current_node"]:
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION: scalar descriptor result")
@@ -3607,6 +3654,26 @@ class _InstallTransaction:
                     payload = backup.read_bytes()
                     if hashlib.sha256(payload).hexdigest() != entry["before_node"].data:
                         raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar inverse input")
+                    security = entry.get("expected_windows_security")
+                    if security is not None:
+                        with _WindowsBoundNode(path, purpose="scalar-writer", security=True) as secured:
+                            secured.python_metadata(writable=True)
+                            descriptor = secured.descriptor
+                            current = self._scalar_descriptor_node(path, descriptor, entry["origin"])
+                            if current != entry["current_node"]:
+                                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: secure scalar inverse descriptor")
+                            self._assert_scalar_security(secured, security)
+                            def record(member, node):
+                                entry["current_node"] = node
+                                self._advance(member, {member: node})
+                            self._write_owned_file(path, descriptor, (payload,), record,
+                                                   entry["before_node"].data, initial_state=current)
+                            self._assert_scalar_security(secured, security)
+                            if self._scalar_descriptor_node(path, descriptor, entry["origin"]) != entry["before_node"]:
+                                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: secure scalar inverse")
+                        self._assert_scalar_binding(entry)
+                        entry["consumed"] = True
+                        continue
                     descriptor = os.open(path, os.O_RDWR | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0))
                     primary = None
                     try:
@@ -3827,8 +3894,15 @@ class _InstallTransaction:
         """Add destination security witnesses before any replacement preparation."""
         if os.name != "nt":
             return
+        secured = self._windows_tree_security(effect.location, effect.before)
+        effect.before = secured
+        effect.actual = dict(secured)
+        # Admission adds evidence, not a mutation of the earlier snapshot.
+        # Normal relocation records it when an actual namespace effect occurs.
+
+    def _windows_tree_security(self, root: Path, image: dict[Path, _PhysicalNode]) -> dict[Path, _PhysicalNode]:
         secured = {}
-        for path, expected in effect.before.items():
+        for path, expected in image.items():
             if expected.kind not in {"file", "directory"}:
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION: nonordinary security counterpart")
             with _WindowsBoundNode(path, security=True) as bound:
@@ -3838,12 +3912,9 @@ class _InstallTransaction:
                         or current.native_proof != expected.native_proof):
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: security source identity")
                 secured[path] = replace(expected, security=bound.security_image())
-        if not self._image_matches(effect.location, secured):
+        if not self._image_matches(root, secured):
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: security acquisition drift")
-        effect.before = secured
-        effect.actual = dict(secured)
-        # Admission adds evidence, not a mutation of the earlier snapshot.
-        # Normal relocation records it when an actual namespace effect occurs.
+        return secured
 
     def _assert_effect_endpoint(self, effect: _DeclaredPathEffect, path: Path) -> None:
         destination_owner = effect.retained_owner or effect.owner
@@ -6845,7 +6916,8 @@ class _CreateOnlyMutablePath:
                     retained_destination: Path | None = None,
                     preserve_on_commit: bool = False,
                     retained_owner: "_CreateOnlyMutablePath | None" = None,
-                    readonly_dependencies: tuple[_ReadOnlyPathDependency, ...] = ()) -> Path:
+                    readonly_dependencies: tuple[_ReadOnlyPathDependency, ...] = (),
+                    preserve_windows_security: bool = False) -> Path:
         """Retain an exact admitted regular/link/tree image without following links."""
         path = self.destination(relative, allow_leaf_reparse=True)
         root = expected.get(path)
@@ -6861,6 +6933,8 @@ class _CreateOnlyMutablePath:
             retained_destination=retained_destination, preserve_on_commit=preserve_on_commit,
             retained_owner=retained_owner)
         effect.readonly_dependencies = tuple(readonly_dependencies)
+        if preserve_windows_security:
+            self.transaction.capture_replacement_security(effect)
         if effect.before != expected:
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: armed retention source")
         self.transaction.assert_effect_current(effect)
@@ -7123,6 +7197,57 @@ class _CreateOnlyMutablePath:
         self.transaction._migration_settled(record)
         self.transaction._assert_scalar_binding({"links": record.selection_links}, check_storage=False)
 
+    def _update_windows_tree_contents(self, target: Path, source: Path, before_digest: str,
+                                      after_digest: str, *, ignore_runtime_cache: bool) -> bool:
+        """Preserve historical access policy by keeping the original file objects."""
+        transaction = self.transaction
+        old = dict(_stage_tree_manifest(target, ignore_runtime_cache=ignore_runtime_cache))
+        new = dict(_stage_tree_manifest(source, ignore_runtime_cache=ignore_runtime_cache))
+        if old.keys() != new.keys() or any((old[k] == "directory") != (new[k] == "directory") for k in old):
+            return False  # Topology changes retain the strict staged tree publisher.
+        if (_tree_manifest_sha256(tuple(old.items())) != before_digest
+                or _tree_manifest_sha256(tuple(new.items())) != after_digest):
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: tree selection drift")
+        snapshot = next((transaction._expected[parent] for parent in (target, *target.parents)
+                         if parent in transaction._expected), {})
+        original = {path: node for path, node in snapshot.items()
+                    if path == target or target in path.parents}
+        if target not in original:
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing tree snapshot")
+        secured = transaction._windows_tree_security(target, original)
+        plan = []
+        for member, digest in new.items():
+            path = target / member
+            if secured[path].data != (None if old[member] == "directory" else old[member]):
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: tree snapshot digest drift")
+            if digest != old[member]:
+                payload = (source / member).read_bytes()
+                if hashlib.sha256(payload).hexdigest() != digest:
+                    raise ValueError("E_MUTABLE_PATH_POSTCONDITION: tree payload drift")
+                with _WindowsBoundNode(path, security=True) as bound:
+                    if bound.proof != secured[path].native_proof:
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: tree member origin")
+                    if not bound.ordinary_single_link():
+                        return False  # Replacement, unlike an in-place write, cannot update an alias.
+                    transaction._assert_scalar_security(bound, secured[path].security)
+                plan.append((path, payload, digest))
+        for path, payload, digest in plan:
+            transaction.transform_scalar(path, None, lambda _: payload, self, windows_origin=secured[path])
+            secured[path] = replace(secured[path], data=digest)
+        if ignore_runtime_cache and plan:
+            # Invalidate only the ordinary bytecode the staged publisher would
+            # drop; retain originals transactionally and leave containers alone.
+            for path, node in tuple(secured.items()):
+                if node.kind == "file" and _is_ordinary_runtime_cache_file(path.relative_to(target), path.lstat()):
+                    self.retain_path(path.relative_to(self.anchor), {path: node},
+                                     preserve_windows_security=True)
+                    del secured[path]
+        if (not transaction._image_matches(target, secured)
+                or _tree_sha256(target, ignore_runtime_cache=ignore_runtime_cache) != after_digest
+                or _tree_sha256(source, ignore_runtime_cache=ignore_runtime_cache) != after_digest):
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: tree content update verification")
+        return True
+
     @_InstallTransaction.direct_writer
     def replace_exact_tree(
         self,
@@ -7143,6 +7268,10 @@ class _CreateOnlyMutablePath:
         current_digest = digest(source)
         if current_digest is None:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: invalid source tree")
+        if (os.name == "nt" and self.transaction.enabled
+                and self._update_windows_tree_contents(target, source, expected_digest, current_digest,
+                                                       ignore_runtime_cache=ignore_runtime_cache)):
+            return target
         effect = self.transaction.arm_replacement(target, None, self)
         self.transaction.capture_replacement_security(effect)
         effect.ignore_runtime_cache = ignore_runtime_cache

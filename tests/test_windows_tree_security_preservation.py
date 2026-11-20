@@ -222,6 +222,85 @@ class WindowsTreeSecurityPreservationTests(unittest.TestCase):
         self.assertEqual({path: (path.stat().st_ino, _security(path), path.read_bytes())
                           for path in paths}, before)
 
+    def _same_shape_with_historical_inheritance(self):
+        staging = self.root / "original-parent"
+        _create_protected(staging, directory=True,
+                          sddl="D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;OW)")
+        historical = staging / "historical.txt"
+        historical.write_bytes(b"historical\n")
+        # Deliberately refresh inheritance before the same-volume move. The
+        # file keeps its original inherited ACEs despite the new parent.
+        with installer._WindowsBoundNode(historical, security=True) as bound:
+            prior = bound.security_image()
+        kernel, *_ = _apis()
+        handle = kernel.CreateFileW(str(historical), 0x60000, 7, None, 3, 0x200000, None)
+        if handle == ctypes.c_void_p(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            setter = ctypes.WinDLL("advapi32").SetSecurityInfo
+            setter.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
+                               ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
+            setter.restype = wintypes.DWORD
+            error = setter(handle, 1, 4, None, None, ctypes.create_string_buffer(prior.policy[2]), None)
+            if error:
+                raise ctypes.WinError(error)
+        finally:
+            if not kernel.CloseHandle(handle):
+                raise ctypes.WinError(ctypes.get_last_error())
+        historical = historical.rename(self.target / historical.name)
+        self.assertIn("D:AI", _security(historical))
+        self.assertNotIn(";;;WD)", _security(historical))
+        self.assertIn(";;;WD)", _security(self.target))
+        (self.source / historical.name).write_bytes(b"updated\n")
+        (self.source / "new-root.txt").unlink()
+        (self.source / "shared/schemas/new.json").unlink()
+        return historical
+
+    def test_same_shape_upgrade_preserves_historical_inherited_file(self):
+        historical = self._same_shape_with_historical_inheritance()
+        before = (historical.stat().st_ino, _security(historical))
+        expected = installer._tree_sha256(self.target)
+        with installer._InstallTransaction([self.target], enabled=True) as transaction:
+            owner = installer._CreateOnlyMutablePath(self.root, transaction, dry_run=False)
+            owner.replace_exact_tree(self.target.relative_to(self.root), expected, self.source)
+            self.assertEqual(installer._tree_sha256(self.target), installer._tree_sha256(self.source))
+            self.assertEqual((historical.stat().st_ino, _security(historical)), before)
+            transaction.commit()
+
+    def test_same_shape_late_rollback_restores_original_files_and_cache(self):
+        historical = self._same_shape_with_historical_inheritance()
+        cache = self.target / "__pycache__" / "historical.cpython-315.pyc"
+        cache.parent.mkdir()
+        cache.write_bytes(b"disposable bytecode")
+        snapshot = lambda: {p: (p.read_bytes(), _security(p), p.stat().st_ino)
+                            for p in self.target.rglob("*") if p.is_file()}
+        before = snapshot()
+        before_digest = installer._tree_sha256(self.target, ignore_runtime_cache=True)
+        with self.assertRaisesRegex(RuntimeError, "late fixture failure"):
+            with installer._InstallTransaction([self.target], enabled=True) as transaction:
+                owner = installer._CreateOnlyMutablePath(self.root, transaction, dry_run=False)
+                owner.replace_exact_tree(self.target.relative_to(self.root), before_digest,
+                                         self.source, ignore_runtime_cache=True)
+                self.assertFalse(cache.exists())
+                self.assertEqual(historical.read_bytes(), b"updated\n")
+                raise RuntimeError("late fixture failure")
+        self.assertEqual(snapshot(), before)
+
+    def test_same_shape_with_alias_uses_staged_replacement(self):
+        (self.source / "new-root.txt").unlink()
+        (self.source / "shared/schemas/new.json").unlink()
+        victim = self.target / self.members[0]
+        alias = self.root / "other-owner.txt"
+        os.link(victim, alias)
+        before = (alias.read_bytes(), _security(alias), alias.stat().st_ino)
+        expected = installer._tree_sha256(self.target)
+        with installer._InstallTransaction([self.target], enabled=True) as transaction:
+            owner = installer._CreateOnlyMutablePath(self.root, transaction, dry_run=False)
+            owner.replace_exact_tree(self.target.relative_to(self.root), expected, self.source)
+            self.assertEqual(installer._tree_sha256(self.target), installer._tree_sha256(self.source))
+            transaction.commit()
+        self.assertEqual((alias.read_bytes(), _security(alias), alias.stat().st_ino), before)
+
     def test_denied_security_capture_preserves_original(self):
         actual = installer._WindowsBoundNode.security_image
         def denied(node):

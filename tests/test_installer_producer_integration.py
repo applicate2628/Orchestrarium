@@ -274,6 +274,9 @@ class ProducerIntegrationTests(unittest.TestCase):
                 source = capsule / "source"
                 source.mkdir()
                 (source / "body.py").write_bytes(b"new authored")
+                # Change topology so this exercises the staged publication
+                # and recovery owner even when Windows admits in-place updates.
+                (source / "new_member.txt").write_bytes(b"new managed member")
                 target = capsule / "lead"
                 target.mkdir()
                 (target / "body.py").write_bytes(b"old original")
