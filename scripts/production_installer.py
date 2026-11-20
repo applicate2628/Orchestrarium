@@ -3357,9 +3357,11 @@ class _InstallTransaction:
         self._copy_snapshot(path, backup, {path: before})
         return backup
 
-    def transform_scalar(self, logical: Path, legacy: Path, render, owner: "_CreateOnlyMutablePath") -> None:
+    def transform_scalar(self, logical: Path, legacy: Path | None, render, owner: "_CreateOnlyMutablePath",
+                         *, move_legacy: bool = True) -> None:
         """Bind, render and perform one ordinary scalar write in this transaction."""
-        logical, legacy = Path(os.path.abspath(logical)), Path(os.path.abspath(legacy))
+        logical = Path(os.path.abspath(logical))
+        legacy = Path(os.path.abspath(legacy)) if legacy is not None else None
         if os.path.normcase(os.path.commonpath((str(owner.anchor), str(logical)))) != os.path.normcase(str(owner.anchor)):
             raise ValueError("E_MUTABLE_PATH_ESCAPE: scalar selection")
         if owner.linked_authority is not None:
@@ -3394,10 +3396,15 @@ class _InstallTransaction:
                 parent_path = parent_path.parent
             parent_node = dict(links)[parent_path]
             parent_reference = self._bind_scalar_parent(parent_path, parent_node, resources)
-            use_legacy = before is None and legacy.is_file()
-            if use_legacy:
+            if before is None and legacy is not None and legacy.is_file():
                 if leaf != storage:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: legacy target pointer is occupied")
+                if not move_legacy:
+                    # Existing provider readers support this filename.
+                    self.transform_scalar(legacy, None, render, owner)
+                    if self._bind_scalar_storage(logical) != selected:
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: legacy selection drift")
+                    return
                 source_selected = self._bind_scalar_storage(legacy)
                 source_storage, source_node, source_links, source_leaf = source_selected
                 source_parent = self._bind_scalar_parent(source_leaf.parent, dict(source_links)[source_leaf.parent], resources)
@@ -3405,6 +3412,8 @@ class _InstallTransaction:
                     self._bind_scalar_parent(source_storage.parent, dict(source_links)[source_storage.parent], resources))
                 legacy_image = self._observe(source_leaf)
                 planned = render(legacy)
+                if not isinstance(planned, bytes):
+                    raise ValueError("E_MUTABLE_PATH_POSTCONDITION: scalar legacy renderer bytes")
                 if self._bind_scalar_storage(legacy) != source_selected or self._bind_scalar_storage(logical) != selected:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar legacy rendering drift")
                 expected_legacy = self._relocate(legacy_image, source_leaf, leaf)
@@ -3430,6 +3439,8 @@ class _InstallTransaction:
                 planned = render(logical)
                 if self._bind_scalar_storage(logical) != selected:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar rendering drift")
+                if planned is None and before is None:
+                    return
             if not isinstance(planned, bytes):
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION: scalar renderer bytes")
             digest = hashlib.sha256(planned).hexdigest()
@@ -7995,14 +8006,12 @@ _POST_MATERIALIZATION_WRITER_CALLS = {
     "_merge_codex_agents": ("provider-doc",),
     "_apply_selected_replacement": ("provider-doc",),
     "_merge_claude_docs": ("provider-doc",),
-    "_normalize_agents_mode": ("agents-mode",),
-    "_merge_claude_main_agent_settings": ("claude-main-settings",),
+    "migrate_global_preferences": ("agents-mode",),
     "_reclaim_retired": ("retired-reclaim",),
     "_finalize_canonical_lead_receipt": ("lead-receipt",),
 }
 _POST_MATERIALIZATION_NONWRITER_CALLS = frozenset(
     {
-        "_resolve_claude_delegation_mode",
         "_warn_codex_project_budget",
         "_discard_canonical_skills_plan",
         "_assert_global_claude_linked_subroot_authority",
@@ -8018,7 +8027,6 @@ _POST_MATERIALIZATION_ARTIFACT_CLASS = {
     "native-role": "native-role",
     "provider-doc": "provider-doc",
     "agents-mode": "agents-mode",
-    "claude-main-settings": "claude-main-settings",
     "retired-reclaim": "retired-reclaim",
     "lead-receipt": "lead-receipt",
 }
@@ -8105,7 +8113,7 @@ def _post_materialization_writer_destinations(
     agents_root: Path,
     canonical_skills_target: Path,
     docs_target: Path,
-    mode_target: Path,
+    mode_target: Path | None,
     registration: Path,
     shared_mode_target: Path | None,
     hooks_enabled: bool,
@@ -8179,10 +8187,10 @@ def _post_materialization_writer_destinations(
     else:
         add("provider-doc", docs_target)
         add("provider-doc", docs_target.parent / "AGENTS.md")
-        add("agents-mode", mode_target)
+        if mode_target is not None:
+            add("agents-mode", mode_target)
         if shared_mode_target is not None:
             add("agents-mode", shared_mode_target)
-        add("claude-main-settings", registration)
         for relative in sorted({**_CLAUDE_RETIRED_PS1, **_CLAUDE_RETIRED_SH}):
             add("retired-reclaim", target / relative)
 
@@ -8337,7 +8345,7 @@ def _installer_mutation_paths(
     source_tree: Path,
     target_tree: Path,
     canonical_skills_target: Path,
-    mode_target: Path,
+    mode_target: Path | None,
     registration: Path,
     shared_mode_target: Path | None,
     codex_hook_inventory: Path | None = None,
@@ -8422,9 +8430,11 @@ def _installer_mutation_paths(
         )
         if register_hooks:
             paths.append(codex_hook_inventory or registration.parent / CODEX_HOOK_INVENTORY)
-    if register_hooks or provider == "claude":
+    if register_hooks:
         paths.append(registration)
-    paths.extend((docs_target, mode_target, mode_target.with_suffix("")))
+    paths.append(docs_target)
+    if mode_target is not None:
+        paths.extend((mode_target, mode_target.with_suffix("")))
     if shared_mode_target is not None:
         paths.extend(
             (
@@ -8450,29 +8460,32 @@ def _installer_mutation_paths(
 
 def _normalize_agents_mode(
     root: Path, template: Path, target: Path, provider: str, dry_run: bool,
-    *, transaction: _InstallTransaction | None = None,
+    *, migration_only: bool = False, move_legacy: bool = True,
+    transaction: _InstallTransaction | None = None,
     mutable_owner: _CreateOnlyMutablePath | None = None,
 ) -> None:
     legacy = target.with_suffix("")
     if dry_run:
-        if legacy.is_file() and not target.exists():
+        if move_legacy and legacy.is_file() and not target.exists():
             print(f"  Migrating legacy .agents-mode to {target}...")
-        print(f"    [dry-run] would normalize {target}")
+        action = "check preference migration for" if migration_only else "normalize"
+        print(f"    [dry-run] would {action} {target}")
         return
     if transaction is None or mutable_owner is None or mutable_owner.transaction is not transaction:
         raise ValueError("E_MUTABLE_PATH_ESCAPE: normalization requires its existing writer context")
     helper = root / "scripts" / "normalize-agents-mode.py"
-    dependencies = (helper, template, template.parent / "agents-mode.schema.json",
+    dependencies = (helper,) if migration_only else (helper, template, template.parent / "agents-mode.schema.json",
                     template.parent.parent / "shared" / "agents-mode.schema.json")
     before = {path: transaction._observe(path) for path in dependencies}
     module = _load_module_from_path("orchestrarium_installer_normalize_agents_mode", helper)
     def render(input_path):
-        result = module.normalize_file(str(template), str(input_path), provider).encode("utf-8")
+        result = (module.migrate_overlay(input_path) if migration_only
+                  else module.normalize_file(str(template), str(input_path), provider).encode("utf-8"))
         if any((not transaction._image_matches(path, state)) for path, state in before.items()):
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: normalization input drift")
         return result
     with transaction.direct_operation():
-        transaction.transform_scalar(target, legacy, render, mutable_owner)
+        transaction.transform_scalar(target, legacy, render, mutable_owner, move_legacy=move_legacy)
 
 
 def _file_sha256(path: Path) -> str:
@@ -11594,56 +11607,6 @@ def _load_module_from_path(module_name: str, path: Path):
     return module
 
 
-def _resolve_claude_delegation_mode(
-    root: Path, project_root: Path, home: Path | None
-) -> str:
-    """Use the existing agents-mode resolver; a resolution failure is non-mutating."""
-    if home is None:
-        return "unresolved"
-    try:
-        resolver = _load_module_from_path(
-            "orchestrarium_resolve_agents_mode",
-            root / "scripts" / "resolve-agents-mode.py",
-        )
-        resolved = resolver.resolve("claude", project_root, home, root)
-        mode = resolved["values"].get("delegationMode")
-    except (KeyError, OSError, RuntimeError, ValueError):
-        return "unresolved"
-    return mode.casefold() if isinstance(mode, str) else "unresolved"
-
-
-def _merge_claude_main_agent_settings(
-    root: Path,
-    settings_path: Path,
-    delegation_mode: str,
-    dry_run: bool,
-    *, mutable_owner: _CreateOnlyMutablePath | None = None,
-) -> str:
-    settings = _load_claude_settings(settings_path, mutable_owner=mutable_owner)
-    outcome, changed = _merge_claude_main_agent(settings, delegation_mode)
-    if outcome == "preserved-nonlead-agent":
-        print("WARN: Claude main agent preserved; force lead binding not installed")
-    elif outcome == "mode-unresolved":
-        print("WARN: Claude main-agent binding skipped; delegationMode unresolved")
-    if not changed:
-        return outcome
-    if dry_run:
-        print(f"    [dry-run] would set Claude settings agent to lead ({settings_path})")
-        return outcome
-    hook_installer = _load_module_from_path(
-        "orchestrarium_install_hypothesis_hook",
-        root / "scripts" / "install-hypothesis-hook.py",
-    )
-    if mutable_owner is not None and mutable_owner.transaction.enabled:
-        storage, _node, selected_owner = _owned_byte_context(settings_path, mutable_owner)
-        selected_owner.replace_file_atomic(storage.relative_to(selected_owner.anchor),
-            hook_installer.encode_hook_config(settings), mode=None, fsync="best-effort",
-            temporary_prefix=".install-hypothesis-hook.")
-    else:
-        hook_installer.write_atomic(settings_path, settings)
-    return outcome
-
-
 def _installer_child_environment() -> dict[str, str]:
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
@@ -13449,8 +13412,6 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                         raise ValueError("E_SHARED_HOOK_RUNTIME: existing hooks do not match this retained bundle") from exc
             source_tree = source / "skills"
             target_tree = skills_target
-            mode_target = agents_root / ".agents-mode.yaml"
-            normalize_provider = "codex"
             codex_agents_authority = _linked_runtime_subroots_module(root).LinkedRuntimeSubrootAuthority.bind(
                 target / "agents",
                 scope=mode,
@@ -13482,8 +13443,9 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             registration = target / "settings.json"
             source_tree = source
             target_tree = claude_agents_root
-            mode_target = target / ".agents-mode.yaml"
-            normalize_provider = "shared"
+        # Preference layers are not installed defaults.
+        mode_target = target / ".agents-mode.yaml" if mode == "global" else None
+        normalize_provider = "codex" if provider == "codex" else "shared"
         home = _resolve_global_home() if mode == "global" else None
         shared_mode_target: Path | None = None
         if mode == "global":
@@ -13703,7 +13665,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
         # link's existing write-through snapshot and never snapshot an alias as
         # though its logically named ordinary file were independent storage.
         byte_targets = [docs_target]
-        if register_hooks or provider == "claude":
+        if register_hooks:
             byte_targets.append(registration)
         if provider == "claude":
             byte_targets.append(docs_target.parent / "AGENTS.md")
@@ -13852,6 +13814,18 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     document_grant, root, source, target, docs_target,
                     "global" if mode == "global" else "project", create_only)
                 if document_grant is not None else instruction_updates)
+            def migrate_global_preferences() -> None:
+                for path, profile, move_legacy in (
+                    (mode_target, normalize_provider, False),
+                    (shared_mode_target, "shared", True),
+                ):
+                    if path is not None:
+                        _normalize_agents_mode(
+                            root, root / "shared" / "agents-mode.defaults.yaml",
+                            path, profile, args.dry_run, migration_only=True,
+                            move_legacy=move_legacy, transaction=transaction, mutable_owner=create_only,
+                        )
+
             # Canonical roles resolve the neutral contract through .agents.
             # Publish that leaf before the canonical skills tree, while the
             # transaction still owns both canonical and provider destinations.
@@ -13859,23 +13833,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 root, canonical_agents_root, args.dry_run, mutable_owner=canonical_skills_owner
             )
             if provider == "codex":
-                _normalize_agents_mode(
-                    root,
-                    root / "shared" / "agents-mode.defaults.yaml",
-                    mode_target,
-                    normalize_provider,
-                    args.dry_run,
-                    transaction=transaction, mutable_owner=create_only,
-                )
-                if shared_mode_target is not None:
-                    _normalize_agents_mode(
-                        root,
-                        root / "shared" / "agents-mode.defaults.yaml",
-                        shared_mode_target,
-                        "shared",
-                        args.dry_run,
-                        transaction=transaction, mutable_owner=create_only,
-                    )
+                migrate_global_preferences()
                 assert canonical_plan is not None
                 _apply_canonical_skills_plan(
                     canonical_plan,
@@ -14014,36 +13972,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 _merge_claude_docs(root, source, docs_target, args.dry_run,
                                    mutable_owner=create_only, project_scope=mode != "global")
             if provider != "codex":
-                _normalize_agents_mode(
-                    root,
-                    root / "shared" / "agents-mode.defaults.yaml",
-                    mode_target,
-                    normalize_provider,
-                    args.dry_run,
-                    transaction=transaction, mutable_owner=create_only,
-                )
-                if shared_mode_target is not None:
-                    _normalize_agents_mode(
-                        root,
-                        root / "shared" / "agents-mode.defaults.yaml",
-                        shared_mode_target,
-                        "shared",
-                        args.dry_run,
-                        transaction=transaction, mutable_owner=create_only,
-                    )
-
-            if provider == "claude":
-                mode_project = project if project is not None else target.parent / ".orchestrarium-global-install"
-                effective_delegation_mode = _resolve_claude_delegation_mode(
-                    root, mode_project, home if home is not None else mode_project
-                )
-                _merge_claude_main_agent_settings(
-                    root,
-                    registration,
-                    effective_delegation_mode,
-                    args.dry_run,
-                    mutable_owner=create_only,
-                )
+                migrate_global_preferences()
 
             if hooks_enabled and provider != "codex":
                 _install_hooks(
@@ -14116,11 +14045,11 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                             f"{len(missing_runtime)} missing: "
                             + ", ".join(str(path) for path in missing_runtime[:16]),
                         )
-                if not mode_target.is_file() or not docs_target.is_file():
+                if not docs_target.is_file():
                     raise _InstallFailure(
                         "E_INSTALL_VERIFY_CONTROL_FILES_MISSING",
                         "verify",
-                        "documentation or agents-mode output missing",
+                        "documentation output missing",
                     )
                 if args.replace_kimi_enrollment:
                     assert home is not None

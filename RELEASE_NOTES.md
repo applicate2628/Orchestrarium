@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-20
 
+- Preserve inherited project and global settings during installation. Do not create missing overlays or alter explicit Claude main-agent selection. Handle existing legacy preference compatibility at the owning transaction.
+
 - Require an explicit explanation when selecting an otherwise-admitted alternative to the recommended model or reasoning effort. Record the reason without judging its wording or granting launch authority.
 
 - Make Responsibility-Driven Engineering explicit in the shared rules and existing architecture roles: identify who owns a guarantee and how it is enforced and verified, without introducing a new role or review phase.
