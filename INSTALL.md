@@ -8,6 +8,11 @@ the frozen baseline tag from follow-up work. Installing a pack does not install
 provider executables or authorize provider launches.
 
 Optional local distribution assembly is documented in [the distribution guide](scripts/distribution/README.md). It requires an independently qualified standalone CPython standard-library runtime and binds its bytes and selected target notices before assembly. It packages this existing installer without changing its ownership or provider policies. Earlier distribution observations remain historical evidence and do not qualify the new runtime profile.
+For a linked global Codex registration shared across hosts, the
+[shared hook installation](scripts/distribution/README.md#shared-codex-hook-file)
+stages one retained bundle at the same path on each host. The installer owns
+the registration changes; use the native `/hooks` interface for trust.
+
 
 ## Supported filesystem backends
 
@@ -306,10 +311,9 @@ python "$HOME/.agents/skills/lead/scripts/check-hook-health.py" --target "$HOME/
 
 #### Codex manual trust step
 
-After reinstall, start interactive `codex` — not `codex exec` — and choose **Trust all and continue** for every affected entry among the twelve current Codex entries.
-Do not press Esc and do not choose **`Continue without trusting`**, because all hooks and guards remain installed but inactive.
-`codex exec` silently skips untrusted hook entries instead of showing the trust prompt, so interactive `codex` must run first.
-The trust modal does not time out and the operator must review every affected entry before making the explicit choice. An unchanged registration identity requires no repeat trust step.
+Open `/hooks` in interactive Codex to review and trust any new or changed Orchestrarium entries.
+Untrusted entries are skipped. Declining those entries does not disable already-trusted hooks.
+Unchanged definitions do not require another review. Verify readiness using the host trust report.
 
 #### Hook implementation
 

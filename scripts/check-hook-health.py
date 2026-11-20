@@ -76,6 +76,7 @@ def _load_posix_process_group_module():
 
 CODEX_TRUST_MODES = frozenset({"report", "require"})
 INVENTORY_NAME = "codex-hook-inventory.json"
+_PORTABLE_INVENTORY_SOURCE = "witnessed-linked-hooks-target"
 FAILURE_ENVELOPE_MAX_BYTES = 4096
 FAILURE_CAUSE_MAX_BYTES = 2048
 HEALTH_FAILURE_IDS = frozenset(
@@ -479,7 +480,7 @@ def resolve_codex_command(value: str | None = None) -> list[str]:
     if not path.is_file():
         raise ValueError("FAIL CODEX_HOOK_LIST_UNAVAILABLE: codex executable is unavailable")
     if path.suffix.casefold() == ".py":
-        return [str(Path(sys.executable).resolve()), str(path)]
+        return [str(Path(sys.executable).resolve()), "-B", str(path)]
     if os.name == "nt" and path.suffix.casefold() in {".cmd", ".bat"}:
         comspec = Path(os.environ.get("COMSPEC", "C:/Windows/System32/cmd.exe")).resolve()
         if not comspec.is_file():
@@ -913,15 +914,18 @@ def plan_codex_inventory(
     specs: Iterable[tuple[str, Path, str, str | None]],
     inventory_path: Path,
     host_os: str,
+    portable: bool = False,
 ) -> CodexInventoryPlan:
     """Validate and render the existing inventory without destination effects."""
     try:
         authority = _inventory_authority(target, inventory_path, for_write=True)
+        if portable and not authority.link_chain:
+            raise ValueError("portable inventory requires a witnessed linked hooks target")
         spec_rows = list(specs)
         stems = {marker for marker, _script, _event, _matcher in spec_rows}
         if len(stems) != len(spec_rows):
             raise ValueError("duplicate Codex hook marker in installer specifications")
-        data = _load(authority.target)
+        data = _load(authority.resolved_target if portable else authority.target)
         targets = {marker: {str(script)} for marker, script, _event, _matcher in spec_rows}
         rows = list(_iter_owned_hooks(data, stems, "codex", host_os, targets))
         by_stem: dict[str, list[tuple[str, str, list[str], str | None]]] = {
@@ -947,23 +951,21 @@ def plan_codex_inventory(
                 raise ValueError(
                     f"Codex inventory registration shape mismatch: {marker}"
                 )
-            hooks.append(
-                {
-                    "stem": marker,
-                    "identity": canonical_identity(
-                        event,
-                        argv,
-                        host_os,
-                        matcher=matcher,
-                        source_path=authority.target,
-                    ),
-                }
+            identity = canonical_identity(
+                event, argv, host_os, matcher=matcher,
+                source_path=authority.resolved_target if portable else authority.target,
             )
-        payload = {
-            "schemaVersion": 1,
-            "sourcePath": _source_identity(authority.target, host_os),
-            "hooks": sorted(hooks, key=lambda item: item["stem"]),
-        }
+            if portable:
+                binding = json.loads(identity)
+                binding["sourcePath"] = _PORTABLE_INVENTORY_SOURCE
+                identity = json.dumps(binding, separators=(",", ":"), sort_keys=True)
+            hooks.append({"stem": marker, "identity": identity})
+        payload = {"hooks": sorted(hooks, key=lambda item: item["stem"])}
+        if portable:
+            payload.update(schemaVersion=2, sourceBinding=_PORTABLE_INVENTORY_SOURCE)
+            _recheck_inventory_authority(authority, for_write=True)
+        else:
+            payload.update(schemaVersion=1, sourcePath=_source_identity(authority.target, host_os))
         content = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
         return CodexInventoryPlan(authority, content)
     except _HookHealthFailure:
@@ -980,12 +982,14 @@ def write_codex_inventory(
     specs: Iterable[tuple[str, Path, str, str | None]],
     inventory_path: Path,
     host_os: str,
+    portable: bool = False,
 ) -> None:
     """Atomically persist the generated Codex-only expected registration set."""
     temporary: Path | None = None
     try:
         plan = plan_codex_inventory(
-            target=target, specs=specs, inventory_path=inventory_path, host_os=host_os
+            target=target, specs=specs, inventory_path=inventory_path, host_os=host_os,
+            portable=portable
         )
         authority = plan.authority
         descriptor, temporary_name = tempfile.mkstemp(
@@ -1021,12 +1025,22 @@ def _load_codex_inventory(
     *,
     target: Path,
     host_os: str,
+    authority: _InventoryAuthority | None = None,
 ) -> tuple[set[str], set[str]]:
     try:
-        authority = _inventory_authority(target, inventory_path, for_write=False)
+        if authority is None:
+            authority = _inventory_authority(target, inventory_path, for_write=False)
         data = _load(authority.inventory)
-        if data.get("schemaVersion") != 1:
+        version = data.get("schemaVersion")
+        if type(version) is not int or version not in (1, 2):
             raise ValueError("Codex hook inventory schema is unsupported")
+        portable = version == 2
+        if portable:
+            if not authority.link_chain:
+                raise ValueError("portable inventory requires a witnessed linked hooks target")
+            if (set(data) != {"schemaVersion", "sourceBinding", "hooks"}
+                    or data["sourceBinding"] != _PORTABLE_INVENTORY_SOURCE):
+                raise ValueError("invalid portable source binding")
         def spelling(path: Path | str) -> str:
             value = str(path).replace("\\", "/")
             return value.casefold() if host_os == "windows" else value
@@ -1043,6 +1057,10 @@ def _load_codex_inventory(
             witnessed.add(spelling(current))
 
         def bind_source(value: Any) -> str:
+            if portable:
+                if value != _PORTABLE_INVENTORY_SOURCE:
+                    raise ValueError("invalid portable source binding")
+                return _source_identity(authority.resolved_target, host_os)
             if (
                 not isinstance(value, str)
                 or not Path(value).is_absolute()
@@ -1052,7 +1070,7 @@ def _load_codex_inventory(
                     "Codex hook inventory sourcePath is not a witnessed spelling; "
                     "regenerate inventory from the selected config"
                 )
-            return _source_identity(authority.target, host_os)
+            return _source_identity(authority.resolved_target, host_os)
 
         def unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
             result = {}
@@ -1062,7 +1080,8 @@ def _load_codex_inventory(
                 result[key] = value
             return result
 
-        bind_source(data.get("sourcePath"))
+        if not portable:
+            bind_source(data.get("sourcePath"))
         hooks = data.get("hooks")
         if not isinstance(hooks, list) or not hooks:
             raise ValueError("Codex hook inventory is empty or malformed")
@@ -1442,15 +1461,18 @@ def verify_config(
     installed_root: Path | None = None,
     selected_stems: set[str] | None = None,
 ) -> list[str]:
-    data = _load(target)
     inventory_identities: set[str] | None = None
+    authority: _InventoryAuthority | None = None
     if inventory_path is not None:
         if platform != "codex":
             raise ValueError("generated hook inventory is Codex-only")
+        authority = _inventory_authority(target, inventory_path, for_write=False)
+        data = _load(authority.resolved_target)
         expected, inventory_identities = _load_codex_inventory(
-            inventory_path, target=target, host_os=host_os,
+            inventory_path, target=target, host_os=host_os, authority=authority,
         )
     else:
+        data = _load(target)
         expected = _manifest_stems(repo_root, platform)
     if installed_root is None:
         installed_root = _installed_root_for_target(target, platform)
@@ -1475,13 +1497,14 @@ def verify_config(
     )
     rows = list(_iter_owned_hooks(data, expected, platform, host_os, managed_targets))
     if inventory_identities is not None:
+        assert authority is not None
         actual_identities = {
             canonical_identity(
                 event,
                 argv,
                 host_os,
                 matcher=matcher,
-                source_path=target,
+                source_path=authority.resolved_target,
             )
             for event, _stem, argv, matcher in rows
         }
@@ -1509,7 +1532,8 @@ def verify_config(
                 if not target_path.is_file():
                     raise ValueError(f"registered target is missing for {stem}: {target_path}")
             if verify_fires:
-                hook_env: dict[str, str] | None = None
+                hook_env = os.environ.copy()
+                hook_env["PYTHONDONTWRITEBYTECODE"] = "1"
                 if stem == "check-mcp-momentum":
                     synthetic_home = scratch_root / "synthetic-mcp-home"
                     synthetic_home.mkdir(exist_ok=True)
@@ -1517,7 +1541,6 @@ def verify_config(
                         (synthetic_home / ".agents-mode.yaml").write_text(
                             "mcpMode: force\n", encoding="utf-8"
                         )
-                    hook_env = os.environ.copy()
                     hook_env["HOME"] = str(synthetic_home)
                     hook_env["USERPROFILE"] = str(synthetic_home)
                 completed = subprocess.run(
@@ -1580,6 +1603,8 @@ def verify_config(
     if duplicates:
         raise ValueError("duplicate registered hooks: " + ", ".join(duplicates))
     _recheck_selected_hook_targets(selected_witnesses)
+    if authority is not None:
+        _recheck_inventory_authority(authority, for_write=False)
     if codex_trust_mode is not None:
         if platform != "codex":
             raise ValueError("Codex trust reconciliation is only valid for platform=codex")

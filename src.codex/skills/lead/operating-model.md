@@ -268,10 +268,9 @@ Unlike Claude Code, Codex marks every newly-installed or changed hook entry as u
 
 #### Manual trust step required (Codex security model)
 
-After reinstall, start interactive `codex` — not `codex exec` — and choose **Trust all and continue** for every affected entry among the twelve current entries.
-Do not press Esc and do not choose **`Continue without trusting`**, because all hooks and guards remain installed but inactive.
-`codex exec` silently skips untrusted hook entries instead of showing the trust prompt, so interactive `codex` must run first.
-The trust modal does not time out and the operator must review every affected entry before making the explicit choice.
+Open `/hooks` in interactive Codex to review and trust any new or changed Orchestrarium entries.
+Untrusted entries are skipped. Declining those entries does not disable already-trusted hooks.
+Unchanged definitions do not require another review. Verify readiness using the host trust report.
 
 Afterward, verify the host sees every current entry as runnable: `python "$HOME/.agents/skills/lead/scripts/check-hook-health.py" --target "$HOME/.codex/hooks.json" --platform codex --codex-trust-mode require`.
 

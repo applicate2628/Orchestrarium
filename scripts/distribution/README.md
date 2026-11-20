@@ -52,6 +52,34 @@ to the existing installer. Applying an installation requires explicit
 --retain-to ABSOLUTE_DIRECTORY or --permanent-runtime; retain the selected
 interpreter while installed hooks reference it.
 
+## Shared Codex hook file
+
+Use this only when multiple global Codex profiles already link to a synchronized
+`hooks.json`. Keep the bundle local, in the same absolute directory on each host
+of the same platform. Select an ordinary, permanent directory managed by the
+local installation owner, not a synchronized folder or an arbitrary workspace.
+On Windows the selected directory must satisfy the installer’s direct-command
+path grammar. No interpreter is found through `PATH`.
+
+Run the bundle launcher with `--retain-only ABSOLUTE_DIRECTORY` on every host
+first. This stages the checked release without changing any provider profile.
+From the retained bundle run `--permanent-runtime --global --shared-hook-runtime
+--dry-run` to preview. On the host owning publication of the common file, run
+the same command without `--dry-run`. This selects Codex without the provider
+menu. The installer updates only its registrations and validates the resulting
+Python and script paths; both paths refer to the retained bundle. The Codex
+profile link and unrelated hooks remain in place. The portable sidecar carries
+the same expected commands across different local sync/profile paths.
+
+Do not run the apply step before all consumers have the same verified retained
+release. Review changed definitions in Codex’s native `/hooks` interface on
+each applicable host; the package does not transfer hook trust. To verify the
+retained route explicitly, pass its `app/src.codex/skills/lead` directory as the
+health checker’s `--installed-root`. Retain the release as long as any hook
+references it. This mode initially migrates the installer’s ordinary installed
+hooks; re-running the same release is supported. Changing to a different
+retained root requires requalifying the predecessor, not editing the shared file.
+
 Earlier distribution assets and qualification records are preserved only in the
 [original Git checkpoint](https://github.com/applicate2628/Orchestrarium/tree/082d46cd83324117abcb965842005d3c15ab99ed/scripts/distribution).
 They are not current build inputs and must not be applied to new runtimes.

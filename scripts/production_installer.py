@@ -691,7 +691,9 @@ _CLAUDE_RETIRED_SH = {
 
 
 def _parser(provider: str) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=f"Install the production {provider} pack.")
+    parser = argparse.ArgumentParser(
+        description=f"Install the production {provider} pack.", allow_abbrev=False,
+    )
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--global", "-Global", dest="global_install", action="store_true")
     modes.add_argument("--target", "-Target")
@@ -743,6 +745,10 @@ def _parser(provider: str) -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", "-DryRun", action="store_true")
     parser.add_argument("--allow-unsafe-target", "-AllowUnsafeTarget", action="store_true")
     parser.add_argument("--no-hypothesis-hook", "-NoHypothesisHook", action="store_true")
+    parser.add_argument(
+        "--shared-hook-runtime", action="store_true",
+        help="Global Codex only: register linked hooks against the same retained bundle path on every host",
+    )
     kimi_maintenance = parser.add_mutually_exclusive_group()
     kimi_maintenance.add_argument("--enroll-kimi", action="store_true")
     kimi_maintenance.add_argument("--replace-kimi-enrollment", action="store_true")
@@ -906,6 +912,17 @@ class _WindowsSecurityImage:
                   control & 0x150F)
         return cls(descriptor, policy)
 
+    @property
+    def replayable_auto_inheritance(self) -> bool:
+        # Only a present, non-null and unprotected DACL can be replayed.
+        dacl, control = self.policy[2:]
+        return dacl is not None and control & 0x1404 == 0x0404
+
+    def needs_inheritance_replay(self, created: "_WindowsSecurityImage") -> bool:
+        return (self.replayable_auto_inheritance
+                and self.policy[:3] == created.policy[:3]
+                and self.policy[3] ^ created.policy[3] == 0x0400)
+
 
 @dataclass(frozen=True)
 class _PhysicalNode:
@@ -925,6 +942,7 @@ class _WindowsBoundNode:
     _creation_bindings = None
     _security_bindings = None
     _descriptor_bindings = None
+    _dacl_bindings = None
     _target_bindings = None
     _privilege_bindings = None
 
@@ -1173,7 +1191,13 @@ class _WindowsBoundNode:
                 attributes = ObjectAttributes(ctypes.sizeof(ObjectAttributes), parent.live_handle,
                                                ctypes.pointer(unicode), 0x40, security if security.value else None, None)
                 status_block, handle = IoStatus(), wintypes.HANDLE()
-                status = function(ctypes.byref(handle), 0x13019F, ctypes.byref(attributes),
+                access = 0x13019F
+                if security_image is not None and security_image.replayable_auto_inheritance:
+                    # SetSecurityInfo does not propagate to children when the
+                    # held creator handle was opened with MAXIMUM_ALLOWED.
+                    # This is OS-authorized access on the new object only.
+                    access |= 0x02000000 | 0x40000
+                status = function(ctypes.byref(handle), access, ctypes.byref(attributes),
                                   ctypes.byref(status_block), None, 0x80, 7, 2,
                                   0x21 if directory else 0x60, None, 0)
                 if status < 0:
@@ -1272,6 +1296,23 @@ class _WindowsBoundNode:
         if not get(self.live_handle, 7, buffer, len(buffer), ctypes.byref(needed)):
             raise ctypes.WinError(ctypes.get_last_error())
         return _WindowsSecurityImage.from_descriptor(bytes(buffer.raw[:needed.value]))
+
+    def replay_created_dacl_inheritance(self, expected: _WindowsSecurityImage) -> None:
+        """Reapply the same ACL so NTFS recalculates inheritance on a held new object."""
+        if self.purpose != "creator" or self.born_path != self.path or self.proof != self.creator_proof:
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing DACL creator binding")
+        ctypes, wintypes, _kernel, *_rest = self._api()
+        if self._dacl_bindings is None:
+            api = ctypes.WinDLL("advapi32")
+            setter = api.SetSecurityInfo
+            setter.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
+                               ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
+            setter.restype = wintypes.DWORD
+            type(self)._dacl_bindings = setter
+        dacl = ctypes.create_string_buffer(expected.policy[2])
+        error = self._dacl_bindings(self.live_handle, 1, 4, None, None, dacl, None)
+        if error:
+            raise ctypes.WinError(error)
 
     @property
     def proof(self) -> _NativeNodeProof:
@@ -1837,6 +1878,9 @@ def _installer_failure_text(error: BaseException) -> str:
             if value is None:
                 return kind, identity, cause_context, native_errno, native_winerror
             cause_type = type(value)
+            if cause_type is _AtomicTransportProjectionStateError:
+                return ("validation-error", "E_TRANSPORT_PROJECTION_PARITY",
+                        "transport-projection", native_errno, native_winerror)
             if cause_type is _InstallFailure:
                 kind = "installer-failure"
                 try:
@@ -1883,6 +1927,8 @@ def _installer_failure_text(error: BaseException) -> str:
             cause = "identity-check-failed" if identity in {"E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY",
                 "E_ROLLBACK_CREATED_IDENTITY_CHANGED", "E_RUNTIME_SUBROOT_ROLLBACK_UNSAFE"} else "operation-failed"
             original = f"{identity} | context={context} | cause={cause}"
+        elif type(error) is _AtomicTransportProjectionStateError:
+            original = "E_TRANSPORT_PROJECTION_PARITY | context=transport-projection | cause=atomic-projection-state"
         else:
             cause = "filesystem-operation-failed" if isinstance(error, OSError) else (
                 "validation-failed" if isinstance(error, ValueError) else "operation-failed")
@@ -1972,6 +2018,13 @@ def _installer_failure_text(error: BaseException) -> str:
         return " | ".join((original, *additions))
     except BaseException:
         return original + " | diagnostic=unavailable"
+
+
+class _AtomicTransportProjectionStateError(ValueError):
+    """An existing Claude transport is not an admitted atomic projection."""
+
+    def __init__(self) -> None:
+        super().__init__("E_TRANSPORT_PROJECTION_PARITY: atomic projection state")
 
 
 @dataclass(frozen=True)
@@ -4233,6 +4286,12 @@ class _InstallTransaction:
                 if capture_security or security_image is not None:
                     node = replace(node, security=created.security_image())
                     record(path, node)
+                    if security_image is not None and security_image.needs_inheritance_replay(node.security):
+                        try:
+                            created.replay_created_dacl_inheritance(security_image)
+                        finally:
+                            node = replace(node, security=created.security_image())
+                            record(path, node)
                     if security_image is not None and node.security != security_image:
                         raise ValueError("E_MUTABLE_PATH_POSTCONDITION: directory security creation")
                 return node
@@ -4374,6 +4433,12 @@ class _InstallTransaction:
                     if capture_security or security_image is not None:
                         node = replace(node, security=created.security_image())
                         record(target, node)
+                        if security_image is not None and security_image.needs_inheritance_replay(node.security):
+                            try:
+                                created.replay_created_dacl_inheritance(security_image)
+                            finally:
+                                node = replace(node, security=created.security_image())
+                                record(target, node)
                         if security_image is not None and node.security != security_image:
                             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: file security creation")
                     fill(incoming, created.descriptor, node.security)
@@ -7667,7 +7732,7 @@ def _stage_claude_transport_projection(
         replace_legacy_singleton = True
         replacement_digest = _file_sha256(projection_root / "provider_prompt.py")
     else:
-        raise ValueError("E_TRANSPORT_PROJECTION_PARITY: atomic projection state")
+        raise _AtomicTransportProjectionStateError()
     return _ClaudeTransportProjectionStage(
         files,
         manifest_payload,
@@ -8234,6 +8299,34 @@ def _sync_file_destinations(source: Path, target: Path, *,
     return destinations
 
 
+def _canonical_skill_snapshot_paths(
+    target: Path, plan: _CanonicalSkillsPlan,
+) -> tuple[Path, ...]:
+    """Snapshot selected Orchestrarium owners, not their shared container."""
+    paths = {target / "lead"}  # Final manifest is always received from the transaction.
+    selected_members = {skill.name for skill in plan.skills if skill.managed_before is not None}
+    for skill in plan.skills:
+        root = target / skill.name
+        if skill.managed_before is None:
+            paths.add(root)
+            continue
+        before = dict(skill.managed_before)
+        assert skill.selection is not None
+        for relative, value in skill.selection:
+            prior = before.get(relative)
+            if prior != value and not (value is None and prior == "directory"):
+                paths.add(root / relative)
+    if plan.lead_receipt is not None:
+        paths.add(target / _LEAD_RECEIPT_NAME)
+    if plan.nonlead_expected is not None:
+        paths.add(target / _NONLEAD_RECEIPT_NAME)
+        if plan.member_selection is None:
+            # Whole-tree receipt verification consumes its exact captured image.
+            paths.update(target / name for name, digest in plan.nonlead_expected
+                         if isinstance(digest, tuple) and name not in selected_members)
+    return tuple(sorted(paths))
+
+
 def _installer_mutation_paths(
     *,
     provider: str,
@@ -8248,6 +8341,8 @@ def _installer_mutation_paths(
     registration: Path,
     shared_mode_target: Path | None,
     codex_hook_inventory: Path | None = None,
+    canonical_skill_snapshots: tuple[Path, ...] = (),
+    register_hooks: bool = True,
     claude_commands_target: Path | None = None,
     claude_skills_target: Path | None = None,
     claude_projection_snapshot_paths: tuple[Path, ...] = (),
@@ -8262,8 +8357,7 @@ def _installer_mutation_paths(
     retained_transport_witnesses = {
         Path(os.path.abspath(path)) for path in claude_transport_migration_paths
     }
-    # Accepted-prior e7 canonical skill trees are transaction-restored if upgraded.
-    paths.append(canonical_skills_target)
+    paths.extend(canonical_skill_snapshots)
     if provider == "codex":
         # Slice-A skills and native-role/config records use the create/migration
         # ledger, never snapshot restoration, so accepted-prior inode recovery
@@ -8324,21 +8418,13 @@ def _installer_mutation_paths(
     if provider == "codex":
         paths.extend(
             tuple(helper_target / helper for helper in CODEX_RUNTIME_HELPERS)
-            + (
-                codex_hook_inventory
-                if codex_hook_inventory is not None
-                else registration.parent / CODEX_HOOK_INVENTORY,
-                target / CODEX_LEGACY_LUNA_ROLE,
-            )
+            + (target / CODEX_LEGACY_LUNA_ROLE,)
         )
-    paths.extend(
-        (
-            docs_target,
-            mode_target,
-            mode_target.with_suffix(""),
-            registration,
-        )
-    )
+        if register_hooks:
+            paths.append(codex_hook_inventory or registration.parent / CODEX_HOOK_INVENTORY)
+    if register_hooks or provider == "claude":
+        paths.append(registration)
+    paths.extend((docs_target, mode_target, mode_target.with_suffix("")))
     if shared_mode_target is not None:
         paths.extend(
             (
@@ -12217,8 +12303,10 @@ def _publish_hook_data(helper, registration: Path, data: dict[str, Any],
 
 def _transform_hook_registration(helper, registration: Path, owner: _CreateOnlyMutablePath,
                                  marker: str, event: str, platform: str, host: str, *,
-                                 entry=None, expected_entry=None, managed_targets=None) -> None:
-    data = helper.load_existing(_HookConfigInput(registration, _read_owned_text(registration, owner)))
+                                 entry=None, expected_entry=None, managed_targets=None,
+                                 staged_data: dict[str, Any] | None = None) -> None:
+    data = (staged_data if staged_data is not None else
+            helper.load_existing(_HookConfigInput(registration, _read_owned_text(registration, owner))))
     removal = entry is None
     if removal:
         changed = helper.remove(data, event, marker, expected_entry=expected_entry,
@@ -12234,8 +12322,69 @@ def _transform_hook_registration(helper, registration: Path, owner: _CreateOnlyM
     if not changed:
         print(f"  {marker} hook already present in {registration} (no-op)")
         return
-    _publish_hook_data(helper, registration, data, owner, remove=removal)
-    print(f"  {marker} hook {'removed' if removal else 'installed/updated'} in {registration}")
+    if staged_data is None:
+        _publish_hook_data(helper, registration, data, owner, remove=removal)
+        print(f"  {marker} hook {'removed' if removal else 'installed/updated'} in {registration}")
+    else:
+        print(f"  Planned {marker} hook {'removal' if removal else 'update'}")
+
+
+def _find_portable_codex_inventory(root: Path, registration: Path) -> Path | None:
+    """Recognize the installer's shared mode without adopting paths from JSON."""
+    if not registration.is_file():
+        return None
+    health = _hook_health_module(root)
+    resolved, links, _target = health._resolve_hooks_target(
+        registration, allow_missing_ordinary=False
+    )
+    if not links:
+        return None
+    inventory = resolved.parent / health.INVENTORY_NAME
+    try:
+        inventory.lstat()
+    except FileNotFoundError:
+        return None
+    try:
+        authority = health._inventory_authority(registration, inventory, for_write=False)
+        data = health._load(authority.inventory)
+        health._recheck_inventory_authority(authority, for_write=False)
+        version = data.get("schemaVersion")
+        if version == 1:
+            return None
+        if version == 2 and data.get("sourceBinding") == health._PORTABLE_INVENTORY_SOURCE:
+            return inventory
+    except (OSError, ValueError) as exc:
+        raise ValueError("E_SHARED_HOOK_RUNTIME: unreadable linked hook inventory") from exc
+    raise ValueError("E_SHARED_HOOK_RUNTIME: unrecognized linked hook inventory")
+
+
+def _retained_codex_hook_root(root: Path, registration: Path) -> Path:
+    """Select one retained release, not any interpreter found on PATH."""
+    health = _hook_health_module(root)
+    _resolved, links, _target = health._resolve_hooks_target(
+        registration, allow_missing_ordinary=False
+    )
+    if not links:
+        raise ValueError("E_SHARED_HOOK_RUNTIME: a linked hooks.json is required")
+    package = root.parent
+    launcher_file = package / "launch.py"
+    if (not launcher_file.is_file() or not (package / "bundle.json").is_file()
+            or _contains_reparse(package) or _contains_reparse(launcher_file)):
+        raise ValueError("E_SHARED_HOOK_RUNTIME: select the retained local bundle")
+    launcher = _load_module_from_path(
+        "orchestrarium_retained_hook_launcher", launcher_file
+    )
+    python, entry = launcher.resolve_launch(package, Path(sys.executable))
+    if entry != root / "install.py":
+        raise ValueError("E_SHARED_HOOK_RUNTIME: install from the retained bundle launcher")
+    lead = root / "src.codex" / "skills" / "lead"
+    host = "windows" if os.name == "nt" else "posix"
+    helper = _load_module_from_path(
+        "orchestrarium_install_hypothesis_hook", root / "scripts" / "install-hypothesis-hook.py"
+    )
+    for _marker, script, _event, _matcher in _hook_specs("codex", lead):
+        helper.resolve_hook_target(str(script), host, "codex", python_executable=str(python))
+    return lead
 
 
 def _install_hooks(
@@ -12247,11 +12396,18 @@ def _install_hooks(
     inventory_path: Path | None = None,
     *, transaction: _InstallTransaction | None = None,
     mutable_owner: _CreateOnlyMutablePath | None = None,
+    prior_installed_root: Path | None = None,
 ) -> None:
     installer = root / "scripts" / "install-hypothesis-hook.py"
     host = "windows" if os.name == "nt" else "posix"
     selected_specs = list(_hook_specs(provider, installed_root))
+    portable_inventory = prior_installed_root is not None
+    if portable_inventory and (provider != "codex" or mode != "global"):
+        raise ValueError("E_SHARED_HOOK_RUNTIME: global Codex only")
+    installed_checker_root = prior_installed_root or installed_root
     owned = transaction is not None and transaction.enabled
+    if portable_inventory and not owned:
+        raise ValueError("E_SHARED_HOOK_RUNTIME: retained hooks require a transaction")
     if owned and (mutable_owner is None or mutable_owner.transaction is not transaction):
         raise ValueError("E_MUTABLE_PATH_ESCAPE: hooks require their admitted writer")
     helper = (_load_module_from_path("orchestrarium_install_hypothesis_hook", installer)
@@ -12296,6 +12452,12 @@ def _install_hooks(
         if proc.returncode:
             raise RuntimeError(f"hook target preflight failed for {script}")
     _checkpoint(root, installer, registration, provider, mode, "sync")
+    staged_data = None
+    if portable_inventory:
+        require_namespace()
+        initial_text = _read_owned_text(registration, mutable_owner)
+        staged_data = helper.load_existing(_HookConfigInput(registration, initial_text))
+        initial_shape = helper.encode_hook_config(staged_data)
     retired_specs = [(marker, event, []) for marker, event in RETIRED_HOOK_SPECS]
     if provider == "codex":
         marker, directory, event, matcher = next(
@@ -12304,22 +12466,31 @@ def _install_hooks(
         retired_specs.append((
             marker,
             event,
-            ["--script-path", str(installed_root / directory / f"{marker}.py"), "--tool-matcher", matcher],
+            ["--script-path", str(installed_checker_root / directory / f"{marker}.py"), "--tool-matcher", matcher],
         ))
     health_module = _hook_health_module(root) if provider == "codex" else None
     managed_targets = {marker: {str(script)} for marker, script, _event, _matcher in selected_specs}
     legacy_witnesses = {}
     legacy_root = registration.parent if provider == "codex" else None
     legacy_targets = _verified_legacy_hook_targets(
-        provider, installed_root, set(managed_targets), legacy_provider_root=legacy_root,
+        provider, installed_checker_root, set(managed_targets), legacy_provider_root=legacy_root,
         witnesses=legacy_witnesses,
     )
 
     def recheck_legacy(marker):
         expected = {path: legacy_witnesses[path] for path in legacy_targets.get(marker, ())}
-        _recheck_legacy_hook_targets(provider, installed_root, marker, expected, legacy_root)
+        _recheck_legacy_hook_targets(provider, installed_checker_root, marker, expected, legacy_root)
     for marker, paths in legacy_targets.items():
         managed_targets[marker].update(paths)
+    predecessor_witnesses = {}
+    if portable_inventory:
+        prior_targets, predecessor_witnesses = health_module._selected_hook_targets(
+            _hook_specs("codex", prior_installed_root)
+        )
+        for marker, targets in prior_targets.items():
+            if marker in managed_targets:
+                managed_targets[marker].update(targets)
+
     before_definitions = (
         health_module.owned_definition_snapshots(
             target=registration,
@@ -12343,7 +12514,7 @@ def _install_hooks(
                                                              require_script=False)
                     expected_entry = helper.build_codex_entry(hook_target, host, event, identity_arguments[3])
                 _transform_hook_registration(helper, registration, mutable_owner, marker, event,
-                    provider, host, expected_entry=expected_entry)
+                    provider, host, expected_entry=expected_entry, staged_data=staged_data)
             except (OSError, ValueError, SystemExit) as exc:
                 raise RuntimeError(f"obsolete hook removal failed for {marker}") from exc
             continue
@@ -12374,6 +12545,8 @@ def _install_hooks(
         )
     for marker, script, event, matcher in selected_specs:
         recheck_legacy(marker)
+        if portable_inventory:
+            health_module._recheck_selected_hook_targets(predecessor_witnesses, marker)
         if owned:
             try:
                 require_namespace()
@@ -12382,8 +12555,11 @@ def _install_hooks(
                                                  _CODEX_HOOK_STATUS_MESSAGES[marker])
                          if provider == "codex" else helper.build_claude_entry(hook_target, event, matcher))
                 _transform_hook_registration(helper, registration, mutable_owner, marker, event,
-                                             provider, host, entry=entry, managed_targets=managed_targets)
+                                             provider, host, entry=entry, managed_targets=managed_targets,
+                                             staged_data=staged_data)
                 recheck_legacy(marker)
+                if portable_inventory:
+                    health_module._recheck_selected_hook_targets(predecessor_witnesses, marker)
             except (OSError, ValueError, SystemExit) as exc:
                 raise RuntimeError(f"hook registration failed for {marker}") from exc
             continue
@@ -12397,6 +12573,13 @@ def _install_hooks(
         proc = _run(arguments, root)
         if proc.returncode:
             raise RuntimeError(f"hook registration failed for {marker}")
+    if staged_data is not None:
+        require_namespace()
+        health_module._recheck_selected_hook_targets(predecessor_witnesses)
+        if _read_owned_text(registration, mutable_owner) != initial_text:
+            raise ValueError("E_SHARED_HOOK_RUNTIME: registration changed during planning")
+        if helper.encode_hook_config(staged_data) != initial_shape:
+            _publish_hook_data(helper, registration, staged_data, mutable_owner, remove=False)
     _checkpoint(root, installer, registration, provider, mode, "register")
     require_namespace()
     touched_identities = (
@@ -12419,13 +12602,15 @@ def _install_hooks(
                 require_namespace()
                 plan = health_module.plan_codex_inventory(
                     target=registration, specs=selected_specs,
-                    inventory_path=inventory_path, host_os=host)
+                    inventory_path=inventory_path, host_os=host, portable=portable_inventory)
                 health_module._recheck_inventory_authority(plan.authority, for_write=True)
-                storage, _node, inventory_owner = _owned_byte_context(plan.authority.inventory, mutable_owner)
+                storage, node, inventory_owner = _owned_byte_context(plan.authority.inventory, mutable_owner)
                 if storage != plan.authority.inventory:
                     raise ValueError("inventory storage must be ordinary")
-                inventory_owner.replace_file_atomic(storage.relative_to(inventory_owner.anchor), plan.content,
-                    mode=None, fsync="required", temporary_prefix=f".{storage.name}.")
+                if (not portable_inventory or node is None
+                        or node.data != hashlib.sha256(plan.content).hexdigest()):
+                    inventory_owner.replace_file_atomic(storage.relative_to(inventory_owner.anchor), plan.content,
+                        mode=None, fsync="required", temporary_prefix=f".{storage.name}.")
                 written = health_module._inventory_authority(
                     plan.authority.target, plan.authority.inventory, for_write=False)
                 health_module._require_same_hook_target_authority(plan.authority, written)
@@ -12484,7 +12669,7 @@ def _install_hooks(
     if provider == "codex":
         installed_health = _run_hook_health_bounded(
             [
-                str(installed_root / "scripts" / "check-hook-health.py"),
+                str(installed_checker_root / "scripts" / "check-hook-health.py"),
                 "--target",
                 str(registration),
                 "--platform",
@@ -13121,6 +13306,12 @@ def _installer_platform_admitted() -> bool:
 
 def install(provider: str, argv: list[str] | None = None) -> int:
     args = _parser(provider).parse_args(argv)
+    if args.shared_hook_runtime and (
+        provider != "codex" or not args.global_install or args.uninstall
+        or args.no_hypothesis_hook or os.environ.get("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK")
+    ):
+        print("FAIL: E_SHARED_HOOK_RUNTIME: retained linked hooks require global Codex registration", file=sys.stderr)
+        return 1
     # Even dry-run builds and disposes staging before entering the transaction.
     # Refuse unsupported hosts before target resolution and all plan creation.
     if not _installer_platform_admitted():
@@ -13235,6 +13426,27 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             docs_target = target / "AGENTS.md" if mode == "global" else project / "AGENTS.md"
             installed_hook_root = skills_target / "lead"
             registration = target / "hooks.json"
+            prior_installed_hook_root = installed_hook_root if args.shared_hook_runtime else None
+            shared_inventory = (
+                _find_portable_codex_inventory(root, registration) if mode == "global" else None
+            )
+            if shared_inventory is not None and not args.shared_hook_runtime:
+                if not args.no_hypothesis_hook and not os.environ.get("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK"):
+                    raise ValueError(
+                        "E_SHARED_HOOK_RUNTIME: reuse the retained shared-hook installation"
+                    )
+            if args.shared_hook_runtime:
+                installed_hook_root = _retained_codex_hook_root(root, registration)
+                if shared_inventory is not None:
+                    try:
+                        _hook_health_module(root).verify_config(
+                            target=registration, platform="codex",
+                            host_os="windows" if os.name == "nt" else "posix",
+                            repo_root=root, installed_root=installed_hook_root,
+                            inventory_path=shared_inventory, verify_fires=False,
+                        )
+                    except (OSError, ValueError) as exc:
+                        raise ValueError("E_SHARED_HOOK_RUNTIME: existing hooks do not match this retained bundle") from exc
             source_tree = source / "skills"
             target_tree = skills_target
             mode_target = agents_root / ".agents-mode.yaml"
@@ -13291,11 +13503,11 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             # not something a pack sync is allowed to repair after mutation.
             _load_claude_settings(registration)
 
-        hooks_enabled = (
+        register_hooks = (
             not args.no_hypothesis_hook
-            and not args.dry_run
             and not os.environ.get("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK")
         )
+        hooks_enabled = register_hooks and not args.dry_run
         canonical_lead = canonical_skills_target / "lead"
         codex_post_tree_runtime: tuple[tuple[Path, Path], ...] = ()
         codex_role_manifest: dict[str, Any] | None = None
@@ -13456,6 +13668,8 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             registration=registration,
             shared_mode_target=shared_mode_target,
             codex_hook_inventory=codex_hook_inventory,
+            canonical_skill_snapshots=_canonical_skill_snapshot_paths(canonical_skills_target, canonical_plan),
+            register_hooks=register_hooks,
             claude_commands_target=claude_commands_target,
             claude_skills_target=claude_skills_projection_target,
             claude_projection_snapshot_paths=tuple(
@@ -13488,7 +13702,9 @@ def install(provider: str, argv: list[str] | None = None) -> int:
         # Byte producers write ordinary resolved storage; keep a selected leaf
         # link's existing write-through snapshot and never snapshot an alias as
         # though its logically named ordinary file were independent storage.
-        byte_targets = [registration, docs_target]
+        byte_targets = [docs_target]
+        if register_hooks or provider == "claude":
+            byte_targets.append(registration)
         if provider == "claude":
             byte_targets.append(docs_target.parent / "AGENTS.md")
         byte_pointer_objects = tuple(logical for logical in byte_targets if logical.is_symlink())
@@ -13764,6 +13980,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                         mode,
                         codex_hook_inventory,
                         transaction=transaction, mutable_owner=create_only,
+                        prior_installed_root=prior_installed_hook_root,
                     )
                 _reconcile_codex_native_config(
                     target / "config.toml",

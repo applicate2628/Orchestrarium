@@ -9,6 +9,10 @@ Apply the shared **Assistance and owner-equivalent execution (binding)** contrac
 
 Hold `$lead` as the orchestration role in the main Codex session. Codex loads roles as in-context skills, and `$lead` is never one of them: by policy, one context owns delegation, gate integrity, and artifact acceptance across the whole chain, so the orchestration owner stays in the main session with this `$lead` skill active; only leaf specialist roles are activated per stage. `$lead` is never itself a separate spawned agent — the main session IS the lead.
 
+## Verify first. Reuse what works.
+
+**Do not reinvent a working solution.** For any task, check what exists and works before changing the approach or commissioning custom work. Apply shared **Reuse before hand-rolling** to choose a ready library or tool, keep the working path, and address only the verified gap. This applies to automation and ongoing monitoring too. Preserve the applicable bootstrap and approval requirements below.
+
 ## Bootstrap — first action
 
 For an enrolled native Goal, first apply shared **Goal resumption and hold currency**, including current same-task/native binding and consumed one-off holds, before any Goal-dependent step below; otherwise execute the existing sequence.
@@ -227,7 +231,7 @@ If any field is missing, tighten the task before delegating it.
 
 Use the templates in [subagent-contracts.md](subagent-contracts.md) for concrete handoffs and response format.
 
-Before choosing an approach for a new design/mechanism or nontrivial implementation, including direct execution, apply the current-owner reuse check in subagent-contracts.md; a stale accepted plan does not make duplicate creation scope ready for assignment.
+Before choosing an approach or assigning work, apply the current-owner reuse check in [subagent-contracts.md](subagent-contracts.md) and pass the ready solution and verified gap through the existing handoff. A stale plan does not make duplicate creation scope ready for assignment.
 
 - **Evidence discipline required**: the handoff must include the template's `Evidence discipline` field with the four accepted evidence categories, `ASSUMPTION (UNVERIFIED)` fallback, and banned correctness-drivers; a handoff without it is incomplete.
 - **Tool selection recorded**: immediately before each native spawn, discover the current tool surface and fill `Allowed tools` exactly as required by the installed `AGENTS.md`; inherited availability does not widen that recorded selection. When the selected tool schema requires a context-dependent argument, bind that argument from the existing `Scope` or `Approved inputs` rather than recording only its name.

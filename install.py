@@ -24,6 +24,8 @@ def _run_production(name: str, forwarded: list[str]) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     forwarded = list(sys.argv[1:] if argv is None else argv)
+    if "--shared-hook-runtime" in forwarded:
+        return _run_production("codex", forwarded)
     print("What to install?")
     print("Production installs:")
     print("  1) Codex pack")

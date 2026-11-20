@@ -5,7 +5,25 @@ A dated entry is not a release tag, publication notice, or confirmation of a
 local installation. For the frozen pre-SDK baseline and draft follow-up, see
 [Which version?](README.md#which-version).
 
+## 2026-11-20
+
+- Preserve Windows automatic inheritance when staging an upgrade. When Windows creates an object with the same owner, group and access list but omits the inherited-state flag, the installer asks Windows to recalculate inheritance on the new staged object, then verifies the entire original policy before publication. The native handle prevents propagation to any children. Protected, null, or mismatching access lists are not rewritten by this recovery path.
+
+- Limit installer rollback snapshots to the planned Orchestrarium skill owners, selected members, and receipts. An unrelated plugin in the shared skills directory no longer blocks the update. Codex installs that skip hook registration leave the existing hook configuration and its ownership inventory outside the write transaction.
+
+- Apply verification and reuse explicitly to every profession. Researchers and designers check ready alternatives against the real requirements; implementers adopt the fitting solution or show the gap; existing reviewers challenge unsupported replacements. No extra review phase or copied rule per role.
+
+- Put verification and reuse first in shared rules and the Lead skill. Before changing a working setup or creating code, tools, automation, or monitoring, check the actual behavior and look for a ready solution. Keep the working parts, use existing monitoring where useful, and assign only the uncovered work. No extra review stage or automatic dependency installation is added.
+
+- Stage a permanent pre-SDK bundle before changing a linked global Codex hook file. The shared hook installation binds managed commands to that bundle’s Python and scripts in one registration write, preserves unrelated hooks, and reports the host’s own trust state. On fleets with a shared file, prepare the same local directory on every host before the owning installation publishes the change.
+
+- Include the verified receiver publication implementation in the pre-SDK package. Owned Git subprocesses ignore an interactive pager, retain exact transfer coverage checks, and report the known resource-limit category without exposing scanned values. Existing receipt, hook ownership, and refusal checks stay in force.
+
+- Prevent the installer’s hook checks from writing Python bytecode into the installed package, including direct hook smoke checks and Python-based Codex hook-list probes. The registered commands and host trust policy are unchanged.
+
 ## 2026-11-19
+
+- Report a stable transport parity diagnostic when an existing Claude projection matches no accepted whole-package state. The pre-SDK installer still stops before replacing that projection; the diagnostic does not authorize migration or expose peer files.
 
 - Keep Second Opinion toggles separate from installer normalization in both dispatch contracts. A new project override changes only the consultant setting and leaves inherited provider and delegation policy intact.
 
