@@ -195,6 +195,33 @@ class WindowsTreeSecurityPreservationTests(unittest.TestCase):
                           for p in (self.target, *self.target.rglob("*"))}, self.original_ids)
         self.assertEqual({p: _security(self.target / p) for p in expected}, expected)
 
+    def test_bound_scalar_rollback_retains_creator_owner_inherited_security(self):
+        parent = self.root / "inherited"
+        _create_protected(parent, directory=True,
+                          sddl="D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;OW)(A;OICIIO;FR;;;CO)")
+        paths = tuple(parent / name for name in ("primary.txt", "companion.txt"))
+        for path in paths:
+            path.write_bytes(f"old {path.name}\n".encode())
+        before = {path: (path.stat().st_ino, _security(path), path.read_bytes())
+                  for path in paths}
+        for _, security, _ in before.values():
+            self.assertIn(";FR;;;", security)
+            self.assertNotIn(";;;CO)", security)  # CREATOR OWNER mapped to the child owner.
+
+        stop = RuntimeError("late synthetic refusal")
+        with self.assertRaises(RuntimeError) as caught:
+            with installer._InstallTransaction(list(paths), enabled=True) as transaction:
+                owner = installer._CreateOnlyMutablePath(parent, transaction, dry_run=False)
+                for path in paths:
+                    with transaction.direct_operation():
+                        transaction.transform_scalar(path, None, lambda _: b"updated\n", owner)
+                    self.assertEqual((path.stat().st_ino, _security(path)), before[path][:2])
+                    self.assertEqual(path.read_bytes(), b"updated\n")
+                raise stop
+        self.assertIs(caught.exception, stop)
+        self.assertEqual({path: (path.stat().st_ino, _security(path), path.read_bytes())
+                          for path in paths}, before)
+
     def test_denied_security_capture_preserves_original(self):
         actual = installer._WindowsBoundNode.security_image
         def denied(node):
