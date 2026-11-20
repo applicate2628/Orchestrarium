@@ -661,26 +661,42 @@ def test_transaction_restores_write_through_symlink_chain_referent(
     assert external.read_bytes() == (before if owned_write else after)
 
 
+@pytest.mark.parametrize("owned_write", (True, False), ids=("owned", "unowned"))
 def test_transaction_restores_dangling_write_through_symlink_referent(
-    tmp_path: Path,
+    tmp_path: Path, owned_write: bool,
 ) -> None:
     external = tmp_path / "external" / "missing.json"
     external.parent.mkdir()
     logical = tmp_path / "provider" / "hooks.json"
     _make_file_symlink(logical, external)
-    logical_target = os.readlink(logical)
+    pointer = logical.lstat()
+    link_target = os.readlink(logical)
+    created_bytes = b'{"created": true}\n'
+    failure = RuntimeError("forced rollback")
 
-    with pytest.raises(RuntimeError, match="forced rollback"):
-        with production_installer._InstallTransaction(
-            [logical],
-            enabled=True,
-        ):
-            external.write_bytes(b'{"created": true}\n')
-            raise RuntimeError("forced rollback")
+    with pytest.raises(RuntimeError, match="forced rollback") as caught:
+        with production_installer._InstallTransaction([logical], enabled=True) as transaction:
+            if owned_write:
+                owner = production_installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+                with transaction.direct_operation():
+                    transaction.transform_scalar(logical, None, lambda _path: created_bytes, owner)
+            else:
+                external.write_bytes(created_bytes)
+            assert logical.read_bytes() == created_bytes
+            raise failure
 
     assert logical.is_symlink()
-    assert os.readlink(logical) == logical_target
-    assert not external.exists()
+    assert os.readlink(logical) == link_target
+    assert (logical.lstat().st_dev, logical.lstat().st_ino) == (pointer.st_dev, pointer.st_ino)
+    if owned_write:
+        assert caught.value is failure
+        assert not external.exists()
+    else:
+        assert isinstance(caught.value, production_installer._InstallFailure)
+        assert caught.value.stable_id == "E_ROLLBACK_SETTLEMENT_FAILED"
+        assert caught.value.cause is failure
+        assert any(path.samefile(external) for path in caught.value.unresolved_paths)
+        assert external.read_bytes() == created_bytes
 
 
 def test_transaction_commit_keeps_write_through_symlink_referent_change(
