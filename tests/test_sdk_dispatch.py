@@ -233,6 +233,43 @@ def test_recovery_is_scanned_diagnostic_not_prompt_or_protocol_custody(tmp_path,
     assert "needles" not in payload.decode()
 
 
+@pytest.mark.parametrize("unsafe", (False, True))
+def test_interrupted_terminal_is_scanned_without_receiving_or_replay(tmp_path, monkeypatch, unsafe):
+    from process_supervision.sdk_worker import SdkWorkerInterrupted
+    from test_sdk_receiving import synthetic_observation
+    operation = prepare(tmp_path, monkeypatch)
+    usage = {"unsafe": "fixture-secret"} if unsafe else {}
+    observed = synthetic_observation(monkeypatch, operation.request, usage=usage)
+    context = owner.ProviderOutputContext((b"fixture-secret",) if unsafe else ())
+    partial = runtime.RuntimeRun(operation.request, operation.selection, context, None)
+    terminal = SdkWorkerInterrupted(operation.request, observed.result, None, None)
+    interruption = runtime.InterruptedRuntime(partial, terminal)
+    def interrupt(*args, **kwargs):
+        raise interruption
+    monkeypatch.setattr(runtime, "run_admitted_codex", interrupt)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        operation.execute(object())
+    assert caught.value is interruption
+    assert operation.runtime_run is None
+    assert operation.has_interrupted_evidence()
+    with pytest.raises(dispatch.DispatchError, match="RECEIVING_UNAVAILABLE"):
+        operation.receive()
+    with pytest.raises(dispatch.DispatchError, match="OPERATION_CONSUMED"):
+        operation.execute(object())
+    payload = operation.recovery_bytes()
+    record = json.loads(payload)
+    assert record["workerObservation"] == "interrupted-after-terminal"
+    assert record["authorizing"] is record["restorableObservation"] is record["replayAuthorized"] is False
+    assert record["receiving"] == "not-established"
+    assert not {"process", "stdout", "stderr"} & record.keys()
+    assert b"fixture-secret" not in payload
+    if unsafe:
+        assert record["unsafeOutputOmitted"] is True
+        assert "decodedResult" not in record
+    else:
+        assert record["decodedResult"]["result"]["review"]["verdict"] == "PASS"
+
+
 def test_recovery_unsafe_output_omits_payload_but_keeps_process_diagnostics(tmp_path, monkeypatch):
     from test_sdk_receiving import synthetic_observation
     operation = prepare(tmp_path, monkeypatch)

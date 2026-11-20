@@ -8115,33 +8115,50 @@ def _launch_sdk_review(operation, reserved_run: ReservedExternalRunV1, *, cancel
             raise ValueError("E_CODEX_SDK_CAPTURE_BINDING_REQUIRED")
         runner = ProcessRunnerV1()
         close_error = None
+        interrupted = None
         try:
             try:
                 operation.execute(runner)
                 lifecycle.arm_evidence_retention()
-            except KeyboardInterrupt:
+            except KeyboardInterrupt as error:
                 if cancellation is not None:
                     cancellation.set()
-                raise
+                has_evidence = getattr(operation, "has_interrupted_evidence", None)
+                if not callable(has_evidence) or not has_evidence():
+                    raise
+                interrupted = error
+                lifecycle.arm_evidence_retention()
         finally:
             try:
                 closed = runner.close()
             except BaseException as error:
                 close_error = error
                 closed = None
+        close_incomplete = (closed is None or closed.outcome != "closed" or closed.failure_id is not None
+                            or closed.unsettled_run_token_sha256)
+        if interrupted is not None and close_incomplete:
+            print("FAIL: E_SDK_REVIEW_RUNNER_CLOSE_INCOMPLETE", file=sys.stderr)
         try:
             recovery = lifecycle.persist_recovery_evidence(
                 operation.recovery_bytes(), max_bytes=operation.recovery_max_bytes,
             )
         except BaseException as persistence_error:
+            if interrupted is not None:
+                print("FAIL: E_SDK_REVIEW_DIAGNOSTIC_PERSISTENCE_INCOMPLETE", file=sys.stderr)
+                if close_error is not None:
+                    interrupted.add_note("SDK runner close also failed")
+                raise interrupted from persistence_error
             if close_error is not None and not isinstance(close_error, Exception):
                 close_error.add_note("SDK diagnostic persistence incomplete")
                 raise close_error from persistence_error
             raise
+        if interrupted is not None:
+            if close_error is not None:
+                raise interrupted from close_error
+            raise interrupted
         if close_error is not None and not isinstance(close_error, Exception):
             raise close_error
-        if (closed is None or closed.outcome != "closed" or closed.failure_id is not None
-                or closed.unsettled_run_token_sha256):
+        if close_incomplete:
             return fail("E_SDK_REVIEW_RUNNER_CLOSE_INCOMPLETE")
         result = operation.receive()
         lifecycle.release_evidence_retention()

@@ -209,6 +209,34 @@ def test_captured_terminal_survives_later_failure_and_cannot_rebind(monkeypatch)
     assert request().prompt not in repr(observed)
 
 
+@pytest.mark.parametrize("valid", (True, False))
+def test_interrupt_after_terminal_before_eof_keeps_only_validated_data(monkeypatch, valid):
+    operation = request()
+    terminal = result() if valid else result(request(model="wrong-model"))
+    original = KeyboardInterrupt()
+    channel = Channel([worker.encode_frame({"kind": "result", "result": terminal.to_dict()}), original])
+    with runner.ProcessRunnerV1() as owner:
+        def run(process_request, *, dialogue):
+            try:
+                dialogue.handler(channel)
+            except runner.ProcessSupervisionError:
+                raise original
+            raise AssertionError("expected simulated interruption")
+        monkeypatch.setattr(owner, "run", run)
+        with pytest.raises(KeyboardInterrupt) as caught:
+            owner_module.run_sdk_worker(
+                owner, operation, environment=(), deadline_monotonic=time.monotonic() + 10,
+                job_memory_limit_bytes=256 * 1024 * 1024,
+            )
+    if valid:
+        assert type(caught.value) is owner_module.SdkWorkerInterrupted
+        assert caught.value.result == terminal and caught.value.request == operation
+        assert caught.value.__cause__ is original
+        assert not hasattr(caught.value, "process")
+    else:
+        assert caught.value is original
+
+
 def test_cancel_acknowledgement_is_retained_but_not_success(monkeypatch):
     receipt = CancelReceipt(request().run_id, True, True)
     terminal = result(status="interrupted")

@@ -616,6 +616,15 @@ class RuntimeRun:
     launch_error: str | None = None
 
 
+class InterruptedRuntime(KeyboardInterrupt):
+    """An interrupted run's input commitments for diagnostic custody only."""
+
+    def __init__(self, run, terminal):
+        super().__init__()
+        self.run = run
+        self.terminal = terminal
+
+
 _CONTINUATION_CONTEXT_FIELDS = ("work_item_id", "provider", "role", "model", "effort", "cwd",
     "account_binding", "coordinator_binding", "scope", "write_workspace", "tool_profile")
 
@@ -905,7 +914,7 @@ def run_admitted_review(
     this function does not pretend a home-path hash proves its complete contents.
     """
     from process_supervision.process_runner import EnvironmentRowV1, ProcessRunnerV1
-    from process_supervision.sdk_worker import run_sdk_worker
+    from process_supervision.sdk_worker import SdkWorkerInterrupted, run_sdk_worker
 
     if type(capture_limit_bytes) is not int or not 0 < capture_limit_bytes <= MAX_STDIN_BYTES:
         raise RuntimeBindingError("invalid_worker_capture_budget")
@@ -993,12 +1002,15 @@ def run_admitted_review(
             else:
                 raise RuntimeBindingError("unexpected_authority_context")
 
-    observation = run_sdk_worker(
-        owner, effective, environment=tuple(EnvironmentRowV1(k, v) for k, v in environment.items()),
-        deadline_monotonic=deadline_monotonic, job_memory_limit_bytes=admitted.job_memory_limit_bytes,
-        cancellation_probe=cancellation_probe, runtime_selection=admitted.to_dict(), authority=authorize_effect,
-        capture_limit_bytes=capture_limit_bytes,
-    )
+    try:
+        observation = run_sdk_worker(
+            owner, effective, environment=tuple(EnvironmentRowV1(k, v) for k, v in environment.items()),
+            deadline_monotonic=deadline_monotonic, job_memory_limit_bytes=admitted.job_memory_limit_bytes,
+            cancellation_probe=cancellation_probe, runtime_selection=admitted.to_dict(), authority=authorize_effect,
+            capture_limit_bytes=capture_limit_bytes,
+        )
+    except SdkWorkerInterrupted as interrupted:
+        raise InterruptedRuntime(RuntimeRun(effective, admitted, output_context, None), interrupted) from interrupted
     return RuntimeRun(effective, admitted, output_context, observation)
 
 

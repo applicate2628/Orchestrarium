@@ -185,6 +185,7 @@ class CodexReviewDispatch:
         self._cancelled = cancellation_probe
         self.started_at, self.deadline = started_at, deadline
         self.runtime_run = None
+        self._interrupted_runtime = None
         self.terminal = None
         self._lock = threading.RLock()
         self._consumed = False
@@ -373,6 +374,9 @@ class CodexReviewDispatch:
             )
             self.runtime_run = run  # Retain BEFORE materialization/readback can fail.
             return run
+        except runtime.InterruptedRuntime as interrupted:
+            self._interrupted_runtime = interrupted
+            raise
         finally:
             with self._lock:
                 self._finished = True
@@ -381,6 +385,9 @@ class CodexReviewDispatch:
     def recovery_max_bytes(self) -> int:
         return self._capture_limit + 6 * self._result_limit + 65_536
 
+    def has_interrupted_evidence(self) -> bool:
+        return self._interrupted_runtime is not None
+
     def recovery_bytes(self) -> bytes:
         """Bounded diagnostic custody, NEVER a restorable observation or permit.
 
@@ -388,12 +395,13 @@ class CodexReviewDispatch:
         their exact digest/length/truncation, never their bytes. Only scanned result
         data survives. The original creator-owned observation remains in memory.
         """
-        run = self.runtime_run
+        interrupted = self._interrupted_runtime
+        run = self.runtime_run if interrupted is None else interrupted.run
         if (type(run) is not runtime.RuntimeRun or run.request != self.request
             or runtime.request_sha256(run.request, run.selection) != self._commitment):
             raise DispatchError("E_CODEX_SDK_RECOVERY_UNAVAILABLE")
         from process_supervision.process_runner import safe_serialize_result
-        from process_supervision.sdk_worker import SdkWorkerObservation
+        from process_supervision.sdk_worker import SdkWorkerInterrupted, SdkWorkerObservation
         record = {
             "schemaVersion": 1, "kind": "sdk-diagnostic-custody",
             "externalDispatchId": self.request.external_dispatch_id,
@@ -404,7 +412,14 @@ class CodexReviewDispatch:
             "payloadOmitted": "protocol-may-contain-prompt-or-secrets",
         }
         observation = run.observation
-        if observation is None:
+        if interrupted is not None:
+            observation = interrupted.terminal
+            if (type(observation) is not SdkWorkerInterrupted
+                    or observation.request != self.request
+                    or observation.result.request != self.request):
+                raise DispatchError("E_CODEX_SDK_RECOVERY_UNAVAILABLE")
+            record["workerObservation"] = "interrupted-after-terminal"
+        elif observation is None:
             record["workerObservation"] = "unavailable"
         else:
             if type(observation) is not SdkWorkerObservation or not observation.is_bound_to(self.request):
@@ -419,6 +434,7 @@ class CodexReviewDispatch:
                     "truncated": getattr(observation.process, name).truncated,
                     "payloadOmitted": "protocol-may-contain-prompt-or-secrets",
                 }
+        if observation is not None:
             candidate = {
                 "protocolError": observation.protocol_error,
                 "cancel": observation.cancel.to_dict() if observation.cancel is not None else None,

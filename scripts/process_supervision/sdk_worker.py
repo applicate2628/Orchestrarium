@@ -28,6 +28,17 @@ from sdk_execution.worker import AUTHORITY_EFFECTS, authority_context, decode_fr
 _OBSERVATION_SEAL = object()
 
 
+class SdkWorkerInterrupted(KeyboardInterrupt):
+    """Validated terminal data without a settled process or receiving seal."""
+
+    def __init__(self, request, result, cancel, protocol_error):
+        super().__init__()
+        self.request = request
+        self.result = result
+        self.cancel = cancel
+        self.protocol_error = protocol_error
+
+
 @dataclass(frozen=True)
 class SdkWorkerObservation:
     """Keep protocol evidence even when the process owner cannot settle cleanly."""
@@ -172,8 +183,10 @@ def run_sdk_worker(
     cancel_payload = encode_frame({"kind": "cancel", "run_id": request.run_id})
     binding = request_binding(request)
 
+    validated_terminal = None
+
     def receive(channel: ProcessDialogueChannelV1, *, cancelling: bool = False) -> str:
-        nonlocal result, cancel, unavailable, observation_bytes
+        nonlocal result, cancel, unavailable, validated_terminal, observation_bytes
         nonlocal authority_sequence, authority_denied, written_bytes
         try:
             frame = decode_frame(channel.read_line())
@@ -214,6 +227,7 @@ def run_sdk_worker(
                 result = observed
                 if observed.observations != tuple(observations):
                     raise ValueError("worker terminal observations differ from captured stream")
+                validated_terminal = observed
             elif kind == "observation" and set(frame) == {"kind", "run_id", "observation"}:
                 observation = Observation.from_dict(frame["observation"])
                 size = len(observation.payload_json.encode("utf-8"))
@@ -287,10 +301,18 @@ def run_sdk_worker(
                 )
             raise original
 
-    process = owner.run(
-        process_request,
-        dialogue=ProcessDialogueV1(SdkWorkerWindowsProfileV1.profile_id, dialogue),
-    )
+    try:
+        process = owner.run(
+            process_request,
+            dialogue=ProcessDialogueV1(SdkWorkerWindowsProfileV1.profile_id, dialogue),
+        )
+    except KeyboardInterrupt as interrupted:
+        # The process owner still settles. No process result or receiving seal
+        # can be supplied when it could not return a settled observation.
+        terminal = validated_terminal
+        if terminal is None:
+            raise
+        raise SdkWorkerInterrupted(request, terminal, cancel, protocol_error) from interrupted
     values = (
         request, process, result, cancel, unavailable, protocol_error,
         job_memory_limit_bytes, selection_json, tuple(observations),
