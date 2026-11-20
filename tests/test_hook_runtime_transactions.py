@@ -611,32 +611,54 @@ def test_global_transaction_inventory_excludes_unrelated_provider_home(
     assert copied_directories == []
 
 
+@pytest.mark.parametrize("owned_write", (True, False), ids=("owned", "unowned"))
 def test_transaction_restores_write_through_symlink_chain_referent(
-    tmp_path: Path,
+    tmp_path: Path, owned_write: bool,
 ) -> None:
     external = tmp_path / "external" / "settings.json"
     external.parent.mkdir()
-    external.write_bytes(b'{"before": true}\n')
+    before = b'{"before": true}\n'
+    after = b'{"after": true}\n'
+    external.write_bytes(before)
     intermediate = tmp_path / "links" / "intermediate.json"
     logical = tmp_path / "provider" / "settings.json"
     _make_file_symlink(intermediate, external)
     _make_file_symlink(logical, intermediate)
-    logical_target = os.readlink(logical)
-    intermediate_target = os.readlink(intermediate)
 
-    with pytest.raises(RuntimeError, match="forced rollback"):
-        with production_installer._InstallTransaction(
-            [logical],
-            enabled=True,
-        ):
-            external.write_bytes(b'{"after": true}\n')
-            raise RuntimeError("forced rollback")
+    def identity(path):
+        info = path.lstat()
+        return info.st_dev, info.st_ino
 
-    assert logical.is_symlink()
-    assert intermediate.is_symlink()
-    assert os.readlink(logical) == logical_target
-    assert os.readlink(intermediate) == intermediate_target
-    assert external.read_bytes() == b'{"before": true}\n'
+    links = {path: (os.readlink(path), identity(path)) for path in (logical, intermediate)}
+    referent_identity = identity(external)
+    failure = RuntimeError("forced rollback")
+    with pytest.raises(RuntimeError, match="forced rollback") as caught:
+        with production_installer._InstallTransaction([logical], enabled=True) as transaction:
+            if owned_write:
+                owner = production_installer._CreateOnlyMutablePath(
+                    tmp_path, transaction, dry_run=False
+                )
+                with transaction.direct_operation():
+                    transaction.transform_scalar(logical, None, lambda _path: after, owner)
+            else:
+                external.write_bytes(after)
+            assert logical.read_bytes() == external.read_bytes() == after
+            raise failure
+
+    if owned_write:
+        assert caught.value is failure
+    else:
+        assert isinstance(caught.value, production_installer._InstallFailure)
+        assert caught.value.stable_id == "E_ROLLBACK_SETTLEMENT_FAILED"
+        assert caught.value.cause is failure
+        assert any(path.samefile(external) for path in caught.value.unresolved_paths)
+    for path, (target, before_identity) in links.items():
+        assert path.is_symlink()
+        assert os.readlink(path) == target
+        assert identity(path) == before_identity
+    assert identity(external) == referent_identity
+    # A write without this scalar owner must not be mistaken for its change.
+    assert external.read_bytes() == (before if owned_write else after)
 
 
 def test_transaction_restores_dangling_write_through_symlink_referent(
@@ -837,7 +859,7 @@ def test_registration_symlink_referent_restored_after_reclaim_failure(
 
         assert result.returncode != 0, output
         if case.provider == "codex":
-            assert "hook transaction checkpoint failed at reclaim" in output, output
+            assert "TEST-ABORT: intentional test interruption after RECLAIM at " in output, output
         else:
             assert "abort" in output.casefold(), output
             assert "reclaim" in output.casefold(), output
