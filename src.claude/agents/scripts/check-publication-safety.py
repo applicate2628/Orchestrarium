@@ -456,6 +456,7 @@ class RangeSelection:
     object_format: GitObjectFormat = _SHA1_OBJECT_FORMAT
     destination_oid: str | None = None
     expected_parents: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    destination_endpoint_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -3731,6 +3732,7 @@ async def _range_selection(
         object_format=object_format,
         destination_oid=destination_oid,
         expected_parents=parent_graph,
+        destination_endpoint_sha256=hashlib.sha256(_native_json_bytes(push_destination)).hexdigest(),
     )
 
 
@@ -5497,6 +5499,8 @@ def _parser() -> argparse.ArgumentParser:
     group.add_argument("--range", nargs=2, metavar=("REMOTE", "DST"))
     group.add_argument("--native-push", action="store_true")
     parser.add_argument("--range-source", metavar="REVISION")
+    parser.add_argument("--history-diagnostics", action="store_true",
+                        help="show safe commit-message locations for a manual --range scan")
     parser.add_argument("legacy_path", nargs="?")
     return parser
 
@@ -5738,12 +5742,84 @@ def _emit_outcome(outcome: ScanOutcome) -> int:
     return exit_code
 
 
+def _emit_history_diagnostics(repo_root, remote, destination, source_revision, find_machine_paths) -> int:
+    """Report only redacted locations from an identity- and coverage-checked range."""
+    deadline = time.monotonic() + _SCAN_DEADLINE_SECONDS
+    policy = _load_review_policy_module()
+    observed, _ = _capture_review_repository(policy, repo_root, deadline)
+
+    def unqualified() -> int:
+        return _emit_outcome(ScanOutcome(
+            "refusal", "range", refusal=_refusal("PS-MSG-COVERAGE", "history-diagnostics"),
+        ))
+
+    if observed["status"] != "captured":
+        return unqualified()
+    outcome = _scan_range(
+        remote, destination, find_machine_paths, source_revision=source_revision,
+        scan_timeout=_remaining_seconds(deadline),
+    )
+    if outcome.kind == "refusal":
+        return _emit_outcome(outcome)
+    selection, history = outcome.selection, outcome.history
+    again, _ = _capture_review_repository(policy, repo_root, deadline)
+    if (again != observed or outcome.kind not in ("clean", "findings")
+            or selection is None or selection.destination_endpoint_sha256 is None
+            or history is None or outcome.coverage is None):
+        return unqualified()
+
+    commits = set(history.commit_ids)
+    rows = []
+    for finding in outcome.findings:
+        if finding.subject_kind != "commit-message":
+            continue
+        if finding.locator not in commits:
+            return unqualified()
+        rows.append({
+            "commitOid": finding.locator,
+            "field": "message",
+            "line": finding.line,
+            "class": finding.detector_class,
+        })
+
+    scope = {
+        "repositorySha256": policy.repository_digest(observed["repository"]),
+        "sourceOid": selection.tip,
+        "destinationOid": selection.destination_oid,
+        "destinationEndpointSha256": selection.destination_endpoint_sha256,
+        "commitSetSha256": history.commit_set,
+    }
+    # The invocation supplies the names. Bind them without echoing configured
+    # names, endpoints, filesystem paths or arbitrary message text to stdout.
+    scope["selectionSha256"] = hashlib.sha256(
+        b"history-diagnostics-selection-v1\0" + policy.C({
+            **scope,
+            "remote": selection.remote,
+            "destination": selection.destination,
+            "source": selection.source,
+        })
+    ).hexdigest()
+    print(json.dumps({
+        "schemaVersion": 1,
+        "status": outcome.kind,
+        "publicationAuthority": False,
+        "scope": scope,
+        "reportComplete": len(outcome.findings) < _MAX_FINDINGS,
+        "reportLimit": _MAX_FINDINGS,
+        "commitMessages": rows,
+        "otherFindingsShown": len(outcome.findings) - len(rows),
+    }, ensure_ascii=True, sort_keys=True))
+    return int(outcome.kind == "findings")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.legacy_path and (args.path or args.range or args.native_push):
         _parser().error("unexpected extra path argument")
     if args.range_source is not None and not args.range:
         _parser().error("--range-source requires --range")
+    if args.history_diagnostics and (not args.range or "__injected_native_push__" in globals()):
+        _parser().error("--history-diagnostics requires a standalone --range invocation")
     script = Path(__file__).resolve()
     try:
         repo_root = _repo_root()
@@ -5769,6 +5845,10 @@ def main(argv: list[str] | None = None) -> int:
                                                             recheck_native, exchanges))
         if args.range:
             remote, dst = args.range
+            if args.history_diagnostics:
+                return _emit_history_diagnostics(
+                    repo_root, remote, dst, args.range_source, find_machine_paths,
+                )
             review_deadline = time.monotonic() + _SCAN_DEADLINE_SECONDS
             review_evaluation, exchanges = _prepare_review_evaluation(repo_root, review_deadline)
             outcome = _scan_range(

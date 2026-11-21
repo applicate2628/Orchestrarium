@@ -27,6 +27,33 @@ Unit coverage includes exact argv dispatch, malformed arguments, native qualific
 - DIRECT_ARGV: parser-owned direct argument-vector provenance.
 - V3/V4: existing range and native-object scan receipt versions.
 
+## Local commit-message diagnostics
+
+Use the same repository, remote, destination and source as the standalone
+range scan you are investigating:
+
+```text
+python PATH_TO_SCANNER --range origin main --range-source WORKING_REF --history-diagnostics
+```
+
+Use a local terminal; keep the JSON within the review scope. It lists the
+full commit object ID, message field, line and detector class without
+printing the message, the matching text, local filesystem paths or the
+configured remote URL. The scope binds the checked repository, source commit,
+destination endpoint digest and ref, and observed destination commit (null
+for a new ref). The report is local, but the existing read-only range
+discovery contacts the configured receiver. It describes the range checked
+at selection time, not a later remote state. A native pre-push callback
+checks the actual ref updates and receiver evidence it was given. A standalone
+report does not reproduce that callback or authorize a retry.
+`reportComplete: false` means the report reached its display limit, not that
+the listed rows are the complete set. Other finding types remain redacted.
+
+A finding still exits with status 1; an unqualified scan exits with status 2
+without a locations report. No history, hook, policy or remote ref is changed.
+This JSON is for diagnosis, not a clean-scan receipt, approval, or transfer
+authorization. Ordinary scan output and publication checks are unchanged.
+
 ## Large full-history checks
 
 New native branches may require a conservative full-history scan. Blob payloads are reacquired and hash-verified per path instead of retained for the entire history. Every selected object is still checked, with existing per-object, count, tree, coverage and cleanup constraints.

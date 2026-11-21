@@ -40,8 +40,12 @@ class TestRefusalDiagnostics(unittest.TestCase):
                         exc = g._ScannerRefusalDenied("PGG-SCAN-REFUSAL",
                             f"publication-safety: refusing id={identifier} {fields}{ending}")
                         self.assertEqual(exc.failure_id, "PGG-SCAN-REFUSAL")
+                        guidance = (
+                            " The bounded reader timed out; check Git object availability before retrying."
+                            if identifier == "PS-MSG-READ-TIMEOUT" else ""
+                        )
                         self.assertEqual(g._format_scanner_refusal(exc),
-                            f" Scanner diagnostic: id={identifier}.")
+                            f" Scanner diagnostic: id={identifier}.{guidance}")
 
     def test_redaction_and_unknown_ids(self):
         g = self.gate
