@@ -19,6 +19,33 @@ IMPLEMENTATION_TO_THEORY_BODY_SHA256 = (
     "2a62f5489701d38a7252a9f3964a8b31f7fd064893075b95da34d17a5855bb78"
 )
 
+ACCEPTED_CANONICAL_WITH_FROZEN_MIGRATION_WITNESS = {
+    'analyzing-video-bugs': {
+        'src.claude': 'cf78ec0176f1726891045a2c2626363377994f34f081f9a9ad0ffbdb60740e91',
+        'src.codex': '7305d3e067fd2ad5f22ef65148d67a6a005a3ab311eba6b4253077bf768dd842',
+    },
+    'repo-cleanup': {
+        'src.claude': '942d2eed5941b4468b28fcb8c89d3ac03416d963c598613c0e8e3cb5553b2616',
+        'src.codex': '80d1a331232eb39aafbc1f328831212b1bb4633a0a7efe8aedaec99c04ad4234',
+    },
+    'vak-dissertation-review': {
+        'src.claude': 'e259d114a1ea2372d9152a07445aeba82c51493b9caf7b39f3b6b96678e9b261',
+        'src.codex': '0ba50252acb53b2f3b2f7df573864b3f99a10b3969d04ce8107699293e2e7597',
+    },
+    'vcpkg-builder': {
+        'src.claude': '72208f4bec6ebf30eb49e99da12cc4e3cef6ef2572bb1583232a5fb1ebe791dc',
+        'src.codex': '25d93aa341555945c9503cf40dcae47bcd62e0f3868567b13616096748bbfa6c',
+    },
+    'vcpkg-ports-updater': {
+        'src.claude': '17aedafce43a1de5c0917e2a14cba131fcd5dcccca67902ad42852108d90816f',
+        'src.codex': 'bd1ca0e83dafd29a4cb2b2486ee2e9058764f396702f7bd45b72dfe719711734',
+    },
+    'windows-gui-manual-testing': {
+        'src.claude': '7dd186bbeee1fab2eb44e2d4f1c4772ffea87d918605efdcc00a5a8fb3c272b8',
+        'src.codex': '3e5a0dd384fba8f6e6e840d579cdfb64fff1a5ebd136048a2635803d9912a30e',
+    },
+}
+
 
 def _runtime():
     return importlib.import_module("scripts.skill_pack_validator_runtime")
@@ -62,14 +89,11 @@ def _live_common_skill_hashes(root: Path = ROOT) -> dict[str, dict[str, str]]:
             assert path.is_file(), f"live common-skill {name} missing from {pack}"
             _assert_frontmatter(path, f"{pack}/{name}")
             hashes[pack] = digest(path.read_bytes())
-        # Current production installs use the Codex canonical tree. This admitted
-        # revision intentionally differs from the frozen Claude migration witness;
-        # pin both inputs rather than rewriting that witness to restore parity.
-        if name == "repo-cleanup":
-            assert hashes == {
-                "src.codex": "80d1a331232eb39aafbc1f328831212b1bb4633a0a7efe8aedaec99c04ad4234",
-                "src.claude": "942d2eed5941b4468b28fcb8c89d3ac03416d963c598613c0e8e3cb5553b2616",
-            }, f"repo-cleanup canonical or historical body drifted: {hashes}"
+        # These source-owned updates retain exact historical migration witnesses.
+        # Do not overwrite those witnesses or accept an unpinned body difference.
+        accepted = ACCEPTED_CANONICAL_WITH_FROZEN_MIGRATION_WITNESS.get(name)
+        if accepted is not None:
+            assert hashes == accepted, f"{name} canonical or historical body drifted: {hashes}"
             result[name] = hashes
             continue
         assert len(set(hashes.values())) == 1, (

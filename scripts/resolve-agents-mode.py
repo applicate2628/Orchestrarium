@@ -1740,6 +1740,7 @@ def resolve_ordinary_native_dispatch(
     requested_effort: Any = None,
     caller_rationale: Any,
     approved_execution_scope: Any,
+    preference_deviation_reason: Any = None,
     user_approved_max: bool = False,
     user_approved_launch: bool = False,
     astra_task_authorization: dict | None = None,
@@ -1831,6 +1832,19 @@ def resolve_ordinary_native_dispatch(
     if reason is not None:
         return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
             "E_ORDINARY_NATIVE_SELECTION_INVALID", diagnostic={"stage": "model-launch-policy", "reason": reason})
+    preferred = (description.get("defaultModel"), description.get("defaultEffort"))
+    deviation = None
+    if all(isinstance(value, str) and value for value in preferred) and (resolved_model, resolved_effort) != preferred:
+        if not isinstance(preference_deviation_reason, str) or not preference_deviation_reason.strip():
+            return _ordinary_native_denied(
+                description["taskClass"], description["role"],
+                "E_ORDINARY_NATIVE_PREFERENCE_DEVIATION_REASON_REQUIRED",
+                diagnostic={"stage": "preference-deviation", "reason": "separate-choice-reason-required",
+                            "preferredModel": preferred[0], "preferredEffort": preferred[1],
+                            "requestedModel": resolved_model, "requestedEffort": resolved_effort},
+            )
+        deviation = {"preferredModel": preferred[0], "preferredEffort": preferred[1],
+                     "reason": preference_deviation_reason.strip()}
     return {
         "schemaVersion": 1,
         "status": "resolved",
@@ -1846,6 +1860,7 @@ def resolve_ordinary_native_dispatch(
         "hostCapability": host_capability,
         "profession": copy.deepcopy(description["profession"]),
         "callerRationale": caller_rationale,
+        **({"preferenceDeviation": deviation} if deviation is not None else {}),
         "approvedExecutionScope": copy.deepcopy(approved_execution_scope),
         "astraTaskAuthorization": copy.deepcopy(astra_task_authorization),
         "invocation": invocation,
@@ -2453,6 +2468,8 @@ def main() -> int:
     parser.add_argument("--requested-model")
     parser.add_argument("--requested-effort")
     parser.add_argument("--caller-rationale")
+    parser.add_argument("--preference-deviation-reason",
+                        help="Explain why the requested model or effort differs from the effective preferred pair")
     parser.add_argument("--approved-scope-json")
     parser.add_argument("--user-approved-max", action="store_true")
     parser.add_argument("--user-approved-launch", action="store_true")
@@ -2552,6 +2569,7 @@ def main() -> int:
                 requested_effort=args.requested_effort,
                 caller_rationale=args.caller_rationale,
                 approved_execution_scope=approved_scope,
+                preference_deviation_reason=args.preference_deviation_reason,
                 user_approved_max=args.user_approved_max,
                 user_approved_launch=args.user_approved_launch,
                 astra_task_authorization=args.astra_task_authorization_json,

@@ -14,7 +14,7 @@ class EvidenceRecordTests(unittest.TestCase):
         self.builder = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.builder)
         self.path = self.root / "record.json"
-        self.data = {"schemaVersion": 1, "target": "windows-x64", "runtime": {"python.exe": ["file", "a" * 64, False]}, "notices": {"LICENSE": ["file", "b" * 64, False]}}
+        self.data = {"schemaVersion": 2, "target": "windows-x64", "runtimeProfile": self.builder.RUNTIME_PROFILE, "runtime": {"python.exe": ["file", "a" * 64, False]}, "notices": {"LICENSE": ["file", "b" * 64, False]}}
 
     def test_record_bytes_preserved(self):
         raw = json.dumps(self.data, indent=2).encode() + b"\n"
@@ -22,7 +22,7 @@ class EvidenceRecordTests(unittest.TestCase):
         self.assertEqual(self.builder._read_runtime_evidence(self.path, "windows-x64"), (raw, self.data))
 
     def test_invalid_record_refused(self):
-        for key, value in (("schemaVersion", True), ("target", "linux-x64"), ("runtime", {}), ("notices", []), ("extra", True)):
+        for key, value in (("schemaVersion", True), ("runtimeProfile", "unqualified"), ("target", "linux-x64"), ("runtime", {}), ("notices", []), ("extra", True)):
             with self.subTest(key=key):
                 bad = dict(self.data)
                 bad[key] = value

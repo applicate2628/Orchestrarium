@@ -47,6 +47,7 @@ description: "Review or QA run on external CLI provider; read-only."
 
 - Return one external review report containing findings, risk surfaces, the gate decision, and a provenance header. Every finding carries a file:line anchor, reproduction command or falsifying probe, and one of the shared evidence categories or `ASSUMPTION (UNVERIFIED)`; an approval names every surface actually examined.
 - The returned verdict is input evidence for the orchestrating session, not stage closure: the orchestrator spot-checks load-bearing findings or the no-findings claim before pinning the gate.
+- Bind findings and no-findings claims to the frozen revision reviewed. For each material protected claim or accepted criterion in the assigned slice, mark it checked, not checked, or unverified and cite the evidence or limitation; do not treat silence as coverage.
 - For the provenance header, use the canonical execution record in `../lead/external-dispatch.md` verbatim instead of defining local fields.
 
 ## Gate

@@ -1,6 +1,6 @@
 """Assemble a local Orche bundle; no downloads, installation, signing or activation.
 
-Runtime input must already have verified provenance and its required dependencies.
+Runtime input must be an independently qualified, standalone CPython runtime.
 Inputs must remain quiescent and the destination-parent hierarchy exclusively
 controlled throughout assembly/retention/launch. This local builder is not a
 sandbox against a hostile concurrent writer and does not authenticate a release.
@@ -27,11 +27,8 @@ APP_INPUTS = ('install.py', 'scripts', 'src.codex', 'src.claude', 'shared',
               'pyproject.toml')
 IGNORE = shutil.ignore_patterns('__pycache__', '*.pyc', '.DS_Store')
 PYTHON_PACKAGE_DIRS = frozenset({'site-packages', 'dist-packages'})
-CLI_ENTRY_NAMES = frozenset({'codex', 'codex.exe', 'codex.cmd', 'codex-script.py'})
-# The pinned Linux SDK runtime does not use the optional Berkeley DB backend.
-RUNTIME_OMISSIONS = {
-    'linux-x64': frozenset({'lib/python3.15/lib-dynload/_dbm.cpython-315-x86_64-linux-gnu.so'}),
-}
+RUNTIME_PROFILE = 'cpython-stdlib-only'
+ACTIVE_DISTRIBUTION_FILES = frozenset({'build.py', 'launch.py', 'README.md', 'notices'})
 
 SH = '''#!/bin/sh
 set -eu
@@ -40,11 +37,11 @@ case "$0" in
   *) directory=. ;;
 esac
 root=$(CDPATH= cd -P "$directory" && pwd)
-exec "$root/python/bin/python3" -I "$root/launch.py" "$@"
+exec "$root/python/bin/python3" -I -B "$root/launch.py" "$@"
 '''
 PS = '''# Orche: local launcher, not a downloader or a second installer.
 $ErrorActionPreference = 'Stop'
-& (Join-Path $PSScriptRoot 'python/python.exe') -I (Join-Path $PSScriptRoot 'launch.py') @args
+& (Join-Path $PSScriptRoot 'python/python.exe') -I -B (Join-Path $PSScriptRoot 'launch.py') @args
 exit $LASTEXITCODE
 '''
 
@@ -63,37 +60,27 @@ def _ordinary_directory_path(path: Path, *, missing_ok: bool = False) -> None:
             raise ValueError('Bundle roots and destination parents must be ordinary directories')
 
 
-def _is_embedded_cli_package(name: str) -> bool:
-    name = name.casefold()
-    return name == 'codex_cli_bin' or (
-        name.startswith('openai_codex_cli_bin-') and name.endswith('.dist-info')
-    )
-
-
-def _validate_tree(path: Path, boundary: Path, *, runtime: bool = False) -> None:
+def _validate_tree(path: Path, boundary: Path, *, runtime: bool = False, ignore=None) -> None:
     metadata = path.lstat()
     if getattr(metadata, 'st_file_attributes', 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
         raise ValueError('Reparse points are not bundle inputs')
+    if runtime:
+        name = path.name.casefold()
+        if ((name in PYTHON_PACKAGE_DIRS
+                and (not stat.S_ISDIR(metadata.st_mode) or any(path.iterdir())))
+                or name.endswith(('.dist-info', '.egg-info', '.pth'))
+                or name == 'pyvenv.cfg'):
+            raise ValueError('The pre-SDK runtime profile does not admit third-party package content')
     if stat.S_ISLNK(metadata.st_mode):
         target = path.resolve(strict=True)
         if not target.is_relative_to(boundary):
             raise ValueError('Input link escapes its payload root')
-        if runtime:
-            name = path.name.casefold()
-            parent = path.parent.name.casefold()
-            linked_cli = parent in PYTHON_PACKAGE_DIRS and _is_embedded_cli_package(name)
-            linked_entry = parent in {'bin', 'scripts'} and name in CLI_ENTRY_NAMES
-            linked_site = name in PYTHON_PACKAGE_DIRS and target.is_dir() and any(
-                _is_embedded_cli_package(child.name) for child in target.iterdir()
-            )
-            linked_entries = name in {'bin', 'scripts'} and target.is_dir() and any(
-                child.name.casefold() in CLI_ENTRY_NAMES for child in target.iterdir()
-            )
-            if linked_cli or linked_entry or linked_site or linked_entries:
-                raise ValueError('Linked embedded Codex CLI input is not supported; prepare an unlinked runtime')
     elif stat.S_ISDIR(metadata.st_mode):
-        for child in path.iterdir():
-            _validate_tree(child, boundary, runtime=runtime)
+        children = list(path.iterdir())
+        ignored = set(ignore(str(path), [child.name for child in children])) if ignore else set()
+        for child in children:
+            if child.name not in ignored:
+                _validate_tree(child, boundary, runtime=runtime, ignore=ignore)
     elif not stat.S_ISREG(metadata.st_mode):
         raise ValueError('Special files are not bundle inputs')
 
@@ -141,11 +128,11 @@ def _read_runtime_evidence(path: Path, target: str) -> tuple[bytes, dict]:
             result[key] = value
         return result
     data = json.loads(raw, object_pairs_hook=unique)
-    if (type(data) is not dict or set(data) != {'schemaVersion', 'target', 'runtime', 'notices'}
-        or type(data['schemaVersion']) is not int or data['schemaVersion'] != 1
-        or data['target'] != target or type(data['runtime']) is not dict
+    if (type(data) is not dict or set(data) != {'schemaVersion', 'target', 'runtimeProfile', 'runtime', 'notices'}
+        or type(data['schemaVersion']) is not int or data['schemaVersion'] != 2
+        or data['runtimeProfile'] != RUNTIME_PROFILE or data['target'] != target or type(data['runtime']) is not dict
         or not data['runtime'] or type(data['notices']) is not dict or not data['notices']):
-        raise ValueError('Unsupported runtime evidence record')
+        raise ValueError('An independently qualified CPython standard-library runtime evidence record is required')
     for section in ('runtime', 'notices'):
         for member in data[section].values():
             if type(member) is list and (
@@ -159,46 +146,40 @@ def _read_runtime_evidence(path: Path, target: str) -> tuple[bytes, dict]:
             raise ValueError('Unsupported runtime evidence member')
     return raw, data
 
-def _verify_runtime_evidence(runtime, notices, data, *, runtime_ignore=None):
-    if _payload_inventory(runtime, runtime_ignore) != data['runtime']:
-        raise ValueError('Runtime payload does not match its qualified evidence')
-    if _payload_inventory(notices, _notice_ignore(notices)) != data['notices']:
-        raise ValueError('Runtime notices do not match their qualified evidence')
-
-
-def _historical_notice_names(relative, names):
-    if relative == 'openai-codex':
-        return {name for name in names if name in {'native', 'rust-dependencies'}}
-    return set()
-
-
-def _notice_ignore(root: Path):
+def _notice_selection(root: Path, target: str):
+    """Package only the selected standalone CPython notice tree."""
     def ignore(directory, names):
+        relative = Path(directory).relative_to(root).as_posix()
         ignored = set(IGNORE(directory, names))
-        ignored.update(_historical_notice_names(Path(directory).relative_to(root).as_posix(), names))
+        if relative == '.':
+            ignored.update(set(names) - {'python-build-standalone'})
+        elif relative == 'python-build-standalone':
+            ignored.update(set(names) - {target + '-cp315'})
         return ignored
     return ignore
 
 
+def _verify_runtime_evidence(runtime, notices, data, *, runtime_ignore=None, notice_ignore=None):
+    if _payload_inventory(runtime, runtime_ignore) != data['runtime']:
+        raise ValueError('Runtime payload does not match its qualified evidence')
+    if _payload_inventory(notices, notice_ignore) != data['notices']:
+        raise ValueError('Runtime notices do not match their qualified evidence')
 
-def _runtime_ignore(runtime: Path, target: str):
-    def ignore_runtime(directory, names):
+
+def _application_selection(source: Path, target: str):
+    dist = source / 'scripts/distribution'
+    notices = dist / 'notices'
+    select_notice = _notice_selection(notices, target)
+
+    def ignore(directory, names):
+        parent = Path(directory)
         ignored = set(IGNORE(directory, names))
-        relative = Path(directory).relative_to(runtime)
-        omissions = RUNTIME_OMISSIONS.get(target, ())
-        for name in names:
-            candidate = (relative / name).as_posix()
-            if (candidate.casefold() if target.startswith('windows-') else candidate) in omissions:
-                ignored.add(name)
-        # The adapter supplies an explicitly selected external Codex executable.
-        # Do not distribute the SDK wheel's separate bundled CLI or its metadata.
-        if relative.name.casefold() in PYTHON_PACKAGE_DIRS:
-            ignored.update(name for name in names if _is_embedded_cli_package(name))
-        if relative.as_posix().casefold() in {'.', 'bin', 'scripts'}:
-            ignored.update(name for name in names if name.casefold() in CLI_ENTRY_NAMES)
+        if parent == dist:
+            ignored.update(set(names) - ACTIVE_DISTRIBUTION_FILES)
+        elif parent.is_relative_to(notices):
+            ignored.update(select_notice(directory, names))
         return ignored
-
-    return ignore_runtime
+    return ignore
 
 
 def build(source: Path, runtime: Path, output: Path, *, target: str, release: str, runtime_evidence: Path | None = None) -> Path:
@@ -217,32 +198,29 @@ def build(source: Path, runtime: Path, output: Path, *, target: str, release: st
     interpreter = runtime / TARGETS[target]
     if not interpreter.is_file():
         raise ValueError('Selected runtime lacks its target interpreter')
-    def ignore_app(directory, names):
-        ignored = set(IGNORE(directory, names))
-        relative = Path(directory).relative_to(source).as_posix()
-        prefix = 'scripts/distribution/notices/'
-        if relative.startswith(prefix):
-            ignored.update(_historical_notice_names(relative.removeprefix(prefix), names))
-        return ignored
-
+    ignore_app = _application_selection(source, target)
     _validate_tree(runtime, runtime, runtime=True)
     for name in APP_INPUTS:
         item = source / name
         if not item.exists():
             raise ValueError('Application input is missing: ' + name)
-        _validate_tree(item, source)
+        _validate_tree(item, source, ignore=ignore_app)
     if runtime_evidence is None:
         raise ValueError('An independently qualified runtime evidence record is required')
     evidence_bytes, evidence = _read_runtime_evidence(runtime_evidence, target)
-    ignore_runtime = _runtime_ignore(runtime, target)
     notices = source / 'scripts/distribution/notices'
-    _verify_runtime_evidence(runtime, notices, evidence, runtime_ignore=ignore_runtime)
+    selected_notices = notices / 'python-build-standalone' / (target + '-cp315')
+    _ordinary_directory_path(selected_notices)
+    if not any(member[0] == 'file' for member in evidence['notices'].values()):
+        raise ValueError('Selected CPython runtime notices are empty')
+    _verify_runtime_evidence(runtime, notices, evidence, runtime_ignore=IGNORE,
+                             notice_ignore=_notice_selection(notices, target))
     # Exclusive creation: never replace another output. An interrupted build is
     # retained for diagnosis and is not launchable until the manifest is written.
     output.mkdir(parents=True, exist_ok=False)
 
     shutil.copytree(runtime, output / 'python', symlinks=True,
-                    ignore=ignore_runtime, copy_function=_copy_leaf)
+                    ignore=IGNORE, copy_function=_copy_leaf)
     app = output / 'app'; app.mkdir()
     for name in APP_INPUTS:
         item = source / name
@@ -259,7 +237,8 @@ def build(source: Path, runtime: Path, output: Path, *, target: str, release: st
     _verify_runtime_evidence(output / 'python', app / 'scripts/distribution/notices', evidence)
     with (output / 'runtime-evidence.json').open('xb') as stream:
         stream.write(evidence_bytes)
-    manifest = {'schemaVersion': 2, 'product': 'Orche', 'release': release,
+    manifest = {'schemaVersion': 3, 'product': 'Orche', 'release': release,
+                'runtimeProfile': RUNTIME_PROFILE,
                 'target': target, 'python': 'python/' + TARGETS[target], 'entry': 'app/install.py',
                 'runtimeEvidence': 'runtime-evidence.json',
                 'runtimeEvidenceSha256': hashlib.sha256(evidence_bytes).hexdigest()}

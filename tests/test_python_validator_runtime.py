@@ -89,8 +89,8 @@ PACK_ROUTING_READ_ACTION_CASES = (
     (
         "codex", VALIDATORS[0], "src.codex/skills/consultant/SKILL.md",
         "consultant preserves precedence and authorized-write boundary",
-        ("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override", "Persist canonical formatting only within an authorized install/configuration write"),
-        (("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "All keys take one shared global value"), ("Persist canonical formatting only within an authorized install/configuration write", "Persist canonical formatting on every routing read")),
+        ("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override", "Persist canonical formatting only for a separately authorized normalization"),
+        (("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "All keys take one shared global value"), ("Persist canonical formatting only for a separately authorized normalization", "Persist canonical formatting on every routing read")),
     ),
     (
         "claude", VALIDATORS[1], "src.claude/agents/consultant.md",
@@ -101,8 +101,8 @@ PACK_ROUTING_READ_ACTION_CASES = (
     (
         "claude", VALIDATORS[1], "src.claude/agents/consultant.md",
         "consultant preserves precedence and authorized-write boundary",
-        ("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override", "Persist canonical formatting only within an authorized install/configuration write"),
-        (("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "All keys take one shared global value"), ("Persist canonical formatting only within an authorized install/configuration write", "Persist canonical formatting on every routing read")),
+        ("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override", "Persist canonical formatting only for a separately authorized normalization"),
+        (("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "All keys take one shared global value"), ("Persist canonical formatting only for a separately authorized normalization", "Persist canonical formatting on every routing read")),
     ),
     (
         "codex", VALIDATORS[0], "src.codex/skills/lead/subagent-contracts.md",
@@ -1544,8 +1544,8 @@ def test_initializer_read_contract_accepts_in_memory_and_rejects_boundary_loss(
         action for action in runtime._applicable_actions(adapter.ACTIONS, layout)
         if action[0] == "check_contains"
         and action[1].endswith(("/init-project/SKILL.md", "/agents-init-project.md"))
-        and ("before reading values" in action[-1]
-             or "read-time agents-mode normalization" in action[-1])
+        and ("reads effective preferences without write" in action[-1]
+             or "preserves read versus write boundary" in action[-1])
     )
     assert len(actions) == 2
     text = (ROOT / actions[0][1].removeprefix("@ROOT/")).read_text(encoding="utf-8")
@@ -1569,11 +1569,10 @@ def test_initializer_read_contract_accepts_in_memory_and_rejects_boundary_loss(
     assert accepted.errors == 0
     assert accepted.passed == 2
     losses = (
-        ("Normalize effective values in memory", "Rewrite the configuration file"),
-        ("do not rewrite borrowed/global configuration on read", "rewrite borrowed/global configuration on read"),
+        ("effective read order to inspect only", "effective read order to rewrite"),
+        ("without creating or rewriting any file", "after rewriting the configuration file"),
+        ("inspection grants no write", "inspection grants a write"),
         ("explicitly selected authorized project configuration", "project configuration"),
-        (f"local `.{ 'agents' if provider == 'codex' else 'claude' }/.agents-mode.yaml`",
-         "borrowed provider overlay"),
     )
     for clause, replacement in losses:
         assert clause in text
@@ -1640,23 +1639,27 @@ def test_current_provider_currency_pins_accept_source_and_reject_protected_drift
 
 
 @pytest.mark.parametrize("provider,validator", zip(("codex", "claude"), VALIDATORS))
-def test_initializer_presets_remain_guarded_by_existing_actions(
+def test_initializer_sparse_writes_remain_guarded_by_existing_actions(
     tmp_path: Path, provider: str, validator: Path,
 ) -> None:
-    adapter = _load(validator, f"initializer_preset_contract_{provider}")
+    adapter = _load(validator, f"initializer_sparse_contract_{provider}")
     runtime = adapter._ENGINE
     layout = runtime.detect_layout(validator, provider, ROOT)
     actions = tuple(
         action for action in runtime._applicable_actions(adapter.ACTIONS, layout)
         if action[0] == "check_contains"
-        and ("init-project exposes power-mode preset" in action[-1]
-             or "init-project correctness-first/power-mode presets raise" in action[-1])
+        and "init-project sparse preference writes" in action[-1]
     )
     assert len(actions) == 3
     text = (ROOT / actions[0][1].removeprefix("@ROOT/")).read_text(encoding="utf-8")
-    candidate = tmp_path / "presets.md"
+    candidate = tmp_path / "selected-preferences.md"
     selected = tuple((action[0], str(candidate), *action[2:]) for action in actions)
-    for content, errors in ((text, 0), (text.replace("review.security: 2", "review.security: 1"), 1)):
+    for content, errors in (
+        (text, 0),
+        (text.replace("If neither mode key changes, leave", "Always rewrite"), 1),
+        (text.replace("Preserve all unrelated bytes", "Normalize the full file"), 1),
+        (text.replace("Init itself does not launch external providers", "Init launches external providers"), 1),
+    ):
         candidate.write_text(content, encoding="utf-8")
         result = runtime.validate_pack(
             script=validator, provider=provider, actions=selected,

@@ -111,7 +111,13 @@ class AgentsModeContractTest(unittest.TestCase):
                     order = [clause.index(layer) for layer in layers]
                     self.assertEqual(order, sorted(order))
             with self.subTest(provider=provider, owner="first write"):
-                self.assertIn("externalCodexProfile: gpt-6.2-sol-xhigh", init)
+                self.assertIn("only the explicitly selected local mode keys", init)
+                self.assertIn("Preserve all unrelated bytes", init)
+                self.assertIn("if absent, do not create it", init)
+                self.assertIn("Init itself does not launch external providers", init)
+                self.assertIn("require actual use of selected relevant, available skills, plugins and MCP tools", init)
+                self.assertNotIn("externalCodexProfile:", init)
+                self.assertNotIn("## Preset expansion table", init)
                 default_row = next(line for line in first_write.splitlines() if line.startswith(f"| {label} |"))
                 self.assertIn("`runtime-default` | `gpt-6.2-sol-xhigh`", default_row)
             with self.subTest(provider=provider, owner="read-only policy"):
@@ -121,8 +127,8 @@ class AgentsModeContractTest(unittest.TestCase):
         self.assertIn("Use `scripts/resolve-agents-mode.py --provider <provider> --json`", maintenance)
         self.assertIn("normalize the effective values in memory", maintenance)
         self.assertIn("must not create or modify an overlay", maintenance)
-        self.assertIn("reinstall must rewrite it to the current canonical form", maintenance)
-        self.assertIn("Only the authorized writer", maintenance)
+        self.assertIn("Installation does not create preference files or copy defaults into them", maintenance)
+        self.assertIn("Full normalization is a separate, explicit maintenance action", maintenance)
         for obsolete in ("Normalize whichever file supplied", "This maintenance rewrite happens on read",
                          "Read-time normalization preserves"):
             self.assertNotIn(obsolete, maintenance)
@@ -149,8 +155,8 @@ class AgentsModeContractTest(unittest.TestCase):
             codex_init = tmp_root / "src.codex" / "skills" / "init-project" / "SKILL.md"
             text = codex_init.read_text(encoding="utf-8")
             text = text.replace(
-                "   externalClaudeProfile: {value}  # allowed: sonnet-high | opus-xhigh | opus-max | fable-xhigh; default: opus-xhigh",
-                "   externalFastProfile: {value}  # invalid drift from Codex-only scalar",
+                "   consultantMode: {value}  # selectable here: external | disabled",
+                "   externalProvider: {value}  # invalid third init control",
                 1,
             )
             codex_init.write_text(text, encoding="utf-8")
@@ -173,3 +179,22 @@ class AgentsModeContractTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_enum_scan_ignores_repo_relative_scratch_only(tmp_path):
+    from _module_loading_support import load_module
+
+    root = Path(__file__).resolve().parents[1]
+    validator = load_module(
+        root / "scripts/validate-agents-mode-contract.py", "agents_mode_enum_scope"
+    )
+    checkout = tmp_path / ".scratch" / "checkout"
+    included = checkout / "shared/references/active.md"
+    excluded = checkout / "shared/references/.scratch/temporary.md"
+    for path in (included, excluded):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+
+    scanned = validator._iter_enum_scan_files(checkout)
+    assert included in scanned
+    assert excluded not in scanned

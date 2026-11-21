@@ -17,19 +17,19 @@ to launch models or spend quota.
 - **Install or update:** [installation guide](INSTALL.md).
 - **Understand the workflow:** [documentation index](docs/README.md).
 - **Work on the project:** [maintainer starting point](docs/new-session-guide.md).
-- **See released changes:** [release notes](RELEASE_NOTES.md).
+- **See tracked changes:** [release notes](RELEASE_NOTES.md).
 
-## Current release and SDK development
+## Which version?
 
-| | Current `main` | SDK development in [PR #19](https://github.com/applicate2628/Orchestrarium/pull/19) |
-| --- | --- | --- |
-| Availability | The production source described by this README and its installation guide. | A separate, unmerged development branch; not the current globally installed release. |
-| Clients and layout | Codex and Claude Code packs share governance. Their source remains in `src.codex/` and `src.claude/`. | Work toward a common core with client adapters, including Antigravity integration. Its changed paths do not apply to `main`. |
-| Delegation | Existing role selection and execution routes, with their documented permissions and platform limits. | Optional SDK (Software Development Kit) execution and child-session coordination are being developed and checked. They are not enabled by this README. |
-| Evidence | Use the current installation guide and source contracts for the operation being performed. | Offline checks do not establish live provider or platform acceptance. Read the PR's current evidence and remaining limits before testing. |
+This guide describes the **pre-SDK source installer** for Codex and Claude Code.
+For the frozen reference, use the
+[`baseline-pre-sdk-2026-11-19` tag](https://github.com/applicate2628/Orchestrarium/tree/baseline-pre-sdk-2026-11-19).
+[Draft PR #52](https://github.com/applicate2628/Orchestrarium/pull/52) tracks
+follow-up verification and fixes; its contents are not part of the tag. Neither
+the tag nor the draft establishes what is installed on a particular computer.
 
-The SDK branch is not a reason to reinstall or migrate a working setup early.
-This page does not announce SDK release readiness or enable quota-consuming runs.
+The [Software Development Kit (SDK) work in draft PR #19](https://github.com/applicate2628/Orchestrarium/pull/19)
+is separate. Its adapters and installation paths do not apply to this guide.
 
 ### Roles, models and cost
 
@@ -57,12 +57,18 @@ included in a clone. Cleanup is a separate explicitly requested operation.
 
 Optional distribution assembly is documented in [the distribution guide](scripts/distribution/README.md).
 It binds the supplied runtime to its notice inventory; it does not change
-provider permissions. [Runtime evidence](scripts/distribution/runtime-evidence.md)
-records the bounded packaging checks, not general SDK acceptance.
+provider permissions. [Historical runtime evidence](https://github.com/applicate2628/Orchestrarium/blob/082d46cd83324117abcb965842005d3c15ab99ed/scripts/distribution/runtime-evidence.md)
+records only the exact earlier inputs and checks.
 
-## WARNING: Claude external authentication
+## Claude Code: interactive use and automated workers
 
-The Python-owned `invoke-claude-prompt.py` transport (also exposed through the thin POSIX launcher `invoke-claude-prompt.sh`) runs automated, headless `claude -p`. Orchestrarium currently admits only `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` for automated Claude runs; subscription sign-in (OAuth), the subscription override, Amazon Bedrock, and Google Vertex AI fail closed. Claude authentication is irrelevant when the Codex route is selected, so absent Claude credentials do not block Codex. Orchestrarium 1.x refuses `apiKeyHelper` before prompt capture or provider lookup because a helper-generated credential cannot be bound to the transport's exact output scan. For the secret-backed path, use `invoke-claude-api.py` or its thin `invoke-claude-api.sh` launcher with the credentials documented in `SECRET.md`. See [Anthropic's Claude Code legal and compliance guidance](https://code.claude.com/docs/en/legal-and-compliance).
+Installing the Claude Code pack does not start Claude or authorize paid use.
+An interactive Claude Code session and an automated worker are different routes.
+Use only an authorized commercial authentication mode for automated Claude work;
+a Claude subscription alone is not permission. Prefer the documented API route
+for programmatic workers. See the
+[Claude execution contract](src.claude/agents/contracts/external-dispatch.md)
+and [Anthropic's compliance guidance](https://code.claude.com/docs/en/legal-and-compliance).
 
 ## Repository layout
 
@@ -94,7 +100,7 @@ Dynamic user-interface roles in both live packs consume one neutral installed le
 
 The maintainer-only [cross-pack reconciliation manifest](shared/references/cross-pack-reconciliation.md) maps shared semantic blocks between provider contracts. It is intentionally excluded from standalone provider branches and packages.
 
-Installed Codex now follows the same compact-entrypoint pattern that Claude already uses: the installed `AGENTS.md` is intentionally the compact universal minimum, while installed runtime guidance lives in the Codex skill bodies under `skills/<role>/SKILL.md`. Shared and provider-specific reference trees remain source-maintainer canon rather than installed target-project docs. Claude keeps a short `CLAUDE.md` entrypoint and leaf-role files under `.claude/agents/`; the deliberate exception is the five curated role-skills — `lead`, `product-manager`, `analyst`, `architect`, `planner` — whose canonical contracts live at `.claude/skills/<role>/SKILL.md`. In `delegationMode: force`, an absent user `settings.json.agent` receives the `lead` default; this main-agent activation uses `agents/lead.md` frontmatter `initialPrompt: /lead`, while a stale dispatched `subagent_type: lead` still fails closed. The other four keep thin delegate wrappers under `.claude/agents/` that load the same-named skill.
+Installed Codex now follows the same compact-entrypoint pattern that Claude already uses: the installed `AGENTS.md` is intentionally the compact universal minimum, while installed runtime guidance lives in the Codex skill bodies under `skills/<role>/SKILL.md`. Shared and provider-specific reference trees remain source-maintainer canon rather than installed target-project docs. Claude keeps a short `CLAUDE.md` entrypoint and leaf-role files under `.claude/agents/`; the deliberate exception is the five curated role-skills — `lead`, `product-manager`, `analyst`, `architect`, `planner` — whose canonical contracts live at `.claude/skills/<role>/SKILL.md`. Claude main-agent selection is explicit and the installer does not modify `settings.json.agent`; this main-agent activation uses `agents/lead.md` frontmatter `initialPrompt: /lead`, while a stale dispatched `subagent_type: lead` still fails closed. The other four keep thin delegate wrappers under `.claude/agents/` that load the same-named skill.
 
 Maintainer note: this repository is the installer/source monorepo, not automatically a repo-local Codex install target. When working inside `Orchestrarium/`, it is valid to rely on the global Codex skill/contract install under `$HOME/.agents/` together with Codex configuration and runtime metadata under `$HOME/.codex/`. A missing local `.agents/` tree in this monorepo does not by itself mean the Codex runtime is misconfigured; create `.agents/` here only by running the installers intentionally.
 
@@ -126,7 +132,7 @@ receipt, and refreshes the derived README as one rollback-safe operation.
 An already-`fixed` current flat bug can instead be archived while its parent
 stays active through the lifecycle owner's explicit-apply `archive-fixed-bug`
 command, with incoming physical-link repair and a bound receipt; see
-[the operator contract](docs/work-item-execution-tracking.md#archive-an-already-fixed-flat-bug-while-its-parent-stays-active).
+[the operator contract](docs/work-item-execution-tracking.md#archive-an-already-fixed-flat-bug-under-an-active-or-archived-parent).
 Two owner-managed legacy transitions handle the old directory-shaped backlog:
 `convert-legacy-candidate` creates one visible flat candidate while preserving
 every accepted source text and digest as an appendix, and
@@ -135,29 +141,28 @@ monthly archive without inventing candidate, active, or closure history.
 
 ## Installation
 
-The pre-SDK installer uses its existing Windows and POSIX transaction backends under the ordinary serialized-writer contract. Capability, ownership and recovery checks remain active; see [Installation](INSTALL.md) for platform-specific limits.
+For a linked Codex hook file shared across hosts, the retained bundle offers a
+[registration-only update](scripts/distribution/README.md#shared-codex-hook-file)
+that leaves the rest of each profile unchanged.
 
-Use the root router installers for the common path:
+[Optional skill registry](addons/README.md): supplementary reviewed skills, separate from the core role catalog and default installation.
+
+From the source checkout root, preview a user-wide installation first. The menu
+offers Codex, Claude Code, or both. Pressing Enter selects the default production install (Codex + Claude).
 
 ```bash
-bash install.sh --global
+bash install.sh --global --dry-run
 ```
 
 ```powershell
-python .\install.py --global
+python .\install.py --global --dry-run
 ```
 
-Each router asks what to install:
-
-```text
-What to install?
-Production installs:
-  1) Codex pack
-  2) Claude Code
-  3) Codex + Claude (default production install)
-```
-
-Pressing Enter selects the default production install, `Codex + Claude`. The router then forwards the same arguments to the selected provider-specific installer in `scripts/`. Use `scripts/install-codex.*` or `scripts/install-claude.*` directly when you want deterministic automation on one line.
+If the preview matches the intended scope, omit `--dry-run` to apply. The two
+packs run in order when both are selected; this is not a single cross-pack
+transaction. Use the [installation guide](INSTALL.md#quick-install) for
+project-local install, supported platforms, custom-file preservation and
+ownership limits.
 
 Windows Kimi execution uses the canonical thin wrapper, not executable enrollment. For each run the wrapper resolves the fixed per-user executable; `ProcessRunnerV1` binds the executable it opens, accepts an absent optional caller binding, and supports a junction or file symlink whose final ordinary executable has a different name. Normal launch does not consult an enrollment receipt, version/hash allowlist, live manifest, high-water record, or offline admission state. The enrollment-named maintenance entrypoints are optional non-writing version/help diagnostics; a supplied offline-policy value is obsolete and fails explicitly. The wrapper alone owns the fixed `kimi-code/k3` file prompt, optional validated capability file, ordinary failure reporting, and resource cleanup. Without that file, tools, Model Context Protocol servers, and subagents remain empty and permission is `reject`; selected capabilities remain caller-scoped and independently verified. The configured model identifier is not independent server-side model attestation, and this contract does not promise compatibility with an arbitrary future breaking Kimi command-line interface change. No vendor binary is downloaded or replaced.
 
@@ -165,7 +170,7 @@ Important: operator preferences live in per-provider `agents-mode` files; both p
 
 - Codex reads `.agents/.agents-mode.yaml`.
 - Claude Code reads `.claude/.agents-mode.yaml`.
-- Legacy extensionless `.agents-mode` files remain compatibility input only. Decision-driving reads should resolve in this order: provider-local `.agents-mode.yaml`, local legacy `.agents-mode`, matching pack-local global `~/.<provider>/.agents-mode.yaml`, matching pack-local global legacy `.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml`, then built-in defaults. `scripts/resolve-agents-mode.py --provider <provider> --json` is the executable reference for this per-key read order. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope without recreating any legacy path or synthesizing a project-local override on read alone.
+- Legacy extensionless `.agents-mode` files remain compatibility input only. Decision-driving reads should resolve in this order: provider-local `.agents-mode.yaml`, local legacy `.agents-mode`, matching pack-local global `~/.<provider>/.agents-mode.yaml`, matching pack-local global legacy `.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml`, then built-in defaults. `scripts/resolve-agents-mode.py --provider <provider> --json` is the executable reference for this per-key read order. Resolution never writes files. On an explicit installer or supported configuration write, normalize the effective file to the canonical `.yaml` path in the same scope without recreating a legacy path or introducing an implicit project-local override.
 - Reinstall is expected to do the same maintenance work for installed overlays: if the shipped schema or defaults changed, the installer must rewrite an existing `.agents-mode.yaml` to the current canonical form instead of preserving stale pack-owned structure verbatim.
 - `consultantMode` controls `$consultant`.
 - `delegationMode: manual` keeps explicit-permission behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist. Because the host does not parse `.agents-mode.yaml` natively, the production Claude/Codex installers register an `agents-mode-reminder` `SessionStart` hook that surfaces the active `auto`/`force` posture into the main conversation at session start and after compaction (silent on `manual`), so an init-project run is not required for the posture to take effect.
@@ -185,9 +190,9 @@ Important: operator preferences live in per-provider `agents-mode` files; both p
 - Codex may additionally use `externalClaudeProfile` to select or override the Claude CLI execution profile: `sonnet-high`, `opus-xhigh` (shipped default), `opus-max` (max-depth escalation for especially hard tasks at caller discretion), or `fable-xhigh` (current Claude flagship-family best-effort tier; the `fable` flagship alias as of 2026-07). New Codex installs seed `opus-xhigh` by default unless a preset or explicit override chooses otherwise.
 - Codex installs the 18 manifest roles as create-only TOMLs under `.codex/agents/` and registers them under `[agents.<name>]` in `.codex/config.toml` with the exact `agents/<relativePath>` file. New or missing mappings receive the source description; compatible existing descriptions are preserved. Recognized stock migrations require positive provenance. Compatible user runtime settings, descriptions and formatting are preserved; incompatible profession instructions, identities or mappings fail without mutation. Missing mappings are appended deterministically while unrelated config bytes, comments, keys, and `agents.max_concurrent_threads_per_session` remain unchanged; an exact mapping is a no-op, a compatible same-target custom description is preserved, and incompatible mappings fail without mutation. An absent config receives `multi_agent_v2 = true` plus all mappings. The sole other 1.x migration exception removes the frozen exact `agents.luna_mechanical` block and its exact hash-pinned `agents/luna-mechanical.toml`; missing legacy files are accepted, while differing legacy mapping/file state is preserved and fails closed. The source manifest remains validation rather than an installed ownership receipt, and all other adoption/update/reclaim work remains reserved for 2.0.
 - Provider-specific workdir keys stay separate and default to `neutral`: `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`.
-- For first-time Codex project setup, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and review or update the installed default `.agents/.agents-mode.yaml`. If local Codex overlay files are missing but `~/.codex/.agents-mode.yaml` exists, ordinary reads should use that global overlay honestly until you choose to create a project-local override.
+- For first-time Codex project setup, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and set project preferences explicitly when needed at `.agents/.agents-mode.yaml`. If local Codex overlay files are missing but `~/.codex/.agents-mode.yaml` exists, ordinary reads should use that global overlay honestly until you choose to create a project-local override.
 - When the current working directory is this installer monorepo itself, a missing local `.agents/.agents-mode.yaml` should fall back to the global Codex install by default. Create a repo-local install only when you explicitly want project-local runtime state; the installer source tree and the installed runtime are different surfaces.
-- For first-time Claude Code project setup, run `/agents-init-project` to write `## Project policies` in `.claude/CLAUDE.md` and review or update the installed default `.claude/.agents-mode.yaml`. If local Claude overlay files are missing but `~/.claude/.agents-mode.yaml` exists, ordinary reads should use that global overlay honestly until you choose to create a project-local override.
+- For first-time Claude Code project setup, run `/agents-init-project` to write `## Project policies` in `.claude/CLAUDE.md` and set project preferences explicitly when needed at `.claude/.agents-mode.yaml`. If local Claude overlay files are missing but `~/.claude/.agents-mode.yaml` exists, ordinary reads should use that global overlay honestly until you choose to create a project-local override.
 - Explicit user role requests still override the toggle state in either direction.
 - Full value-by-value operator semantics live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md), including task continuity, continue-by-default execution expectations for initialized projects, and the current init-time preset family: `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, `power-mode`, and `max-speed`. Init helpers can either write the chosen preset as-is or open an optional fine-tune pass before saving `.agents-mode.yaml`.
 - Machine-readable `agents-mode` contract sources live in [`shared/agents-mode.schema.json`](shared/agents-mode.schema.json) and [`shared/agents-mode.presets.json`](shared/agents-mode.presets.json). [`scripts/validate-agents-mode-contract.py`](scripts/validate-agents-mode-contract.py) checks those sources against the shared YAML exemplar, the operator reference, and provider init surfaces.
@@ -257,7 +262,7 @@ Currently shipped:
 ## References and maintenance
 
 - `shared/references/` contains the shared cross-provider design core that current and future provider packs can reuse.
-- `shared/agents-mode.defaults.yaml` is the single editable YAML exemplar for provider default overlays in the monorepo. Keep it aligned with the machine-readable contract files, `shared/agents-mode.schema.json` and `shared/agents-mode.presets.json`; the pack validators call the shared contract check so docs, init helpers, defaults, and provider-order policy do not drift silently, and the normalizer reads the schema for provider/lane policy instead of carrying a second hardcoded provider universe. Main installers seed provider-local or global `agents-mode` files directly from that shared exemplar, with any provider-only additions applied at install time. Standalone pack repositories keep one shipped pack-root default for self-contained install seeding.
+- `shared/agents-mode.defaults.yaml` is the single editable YAML exemplar for provider default overlays in the monorepo. Keep it aligned with the machine-readable contract files, `shared/agents-mode.schema.json` and `shared/agents-mode.presets.json`; the pack validators call the shared contract check so docs, init helpers, defaults, and provider-order policy do not drift silently, and the normalizer reads the schema for provider/lane policy instead of carrying a second hardcoded provider universe. The resolver uses this exemplar for built-in defaults; installation does not materialize those defaults in user preference files. Standalone pack repositories keep one shipped pack-root default for self-contained install seeding.
 - `docs/README.md` is the common branch-level docs entrypoint for operator semantics and runtime-layout references.
 - [`docs/provider-runtime-layouts.md`](docs/provider-runtime-layouts.md) records the installed production runtime layout for Codex and Claude Code, with `global` and `local` scopes split explicitly so install/runtime paths are not confused with repo source trees.
 - `references-codex/` contains Codex-specific addenda plus compatibility pointers for older reference paths.
@@ -296,7 +301,7 @@ For a historical Claude instruction set, --replace-claude-receipted-instructions
 
 Codex can separately replace a reviewed current document interval with --replace-codex-document SHA256:START:END, using exact full-document bytes and Python character offsets. The strict selected renderer preserves surrounding text and ignores literal END examples inside closed code, while the ordinary no-selection renderer stays unchanged. The shared transaction receives selected content and its receipt together; this is selected acquisition, not historical ownership. See the [Codex selection contract](docs/provider-receipt-planning.md#explicit-selected-current-codex-document-replacement). Physical replacement/recovery qualification remains open.
 
-The runtime helper surface is installed with production Codex and Claude packs as well: Codex gets the scripts under `$HOME/.agents/skills/lead/scripts/` or `<repo>/.agents/skills/lead/scripts/`, while Claude Code gets them under `~/.claude/agents/scripts/` or `<repo>/.claude/agents/scripts/`. That payload includes the pure Version 3 (V3) solution-attempt reducer at `solution_attempt/reducer.py` and the bounded process owner at `process_supervision/process_runner.py`. Process Runner Version 1 (`ProcessRunnerV1`) remains Windows-only: it owns provider-prompt operations and detached Slice A validation, while skill-pack validator child checks use it on Windows. On POSIX, the validator runtime, publication scanner, and installer hook-health runner own their private process groups through `process_supervision/posix_process_group.py`; generic `ProcessRunnerV1` remains unavailable there. Each external provider-prompt launch requires an absolute caller-owned `--terminal-receipt` path, reserved before provider/capture/ledger side effects. On POSIX, every path ancestor must be owned by root or the current user, and the final parent must be current-user-owned without group/other write access. A group/other-writable ancestor is accepted only for a root-owned sticky shared directory such as `/tmp` whose next held component is a current-user-owned nonwritable boundary. The wrapper holds every opened component identity, revalidates owner, mode, path, and leaf before and after durable commit/readback, and removes only the exact descriptor-identified leaf if reservation setup fails. A raced replacement or unverifiable descriptor identity is preserved and fails with `E_EXTERNAL_TERMINAL_RECEIPT_CLEANUP_UNVERIFIED`. After settlement and secure cleanup, the wrapper safety-scans one serialized V2 envelope, durably commits and reads it back, writes and flushes the identical line to stdout, then appends the optional ledger event; the caller owns receipt retention and deletion. On Windows, the migrated Python and Git child paths retain bounded output capture and descendant-process-tree settlement through runner-owned, executable-specific probes performed for the same run; adapters cannot self-attest. Native Codex and Claude launches fail early with a typed unavailable result on Windows. Generic `ProcessRunnerV1` requests on POSIX fail at request validation with `PSV1-POSIX-ORACLE-UNAVAILABLE` before executable acquisition or subprocess creation. The returned result is non-success, does not claim an empty descendant tree, closes runner-owned resources, and starts no child. Kimi is explicit-only through fixed `kimi-code/k3` for policy-admitted read-only exploration/research/planning/review or mapped `external-worker` engineering. Its optional validated capability file may select admitted read tools/Model Context Protocol servers or scoped worker tools; omission preserves empty tools/servers/subagents and permission `reject`. Every result is independently verified, nonauthorizing, and outside `auto`. Grok remains unavailable in 1.x. The generic Windows command-line interface remains fail-closed unavailable, and a Rust implementation remains deferred to 2.0. The source-only durable operation store at `scripts/agent_run_persistence/operation_store.py` and route activation registry at `scripts/process_supervision/route_activation_registry.py` are not installed. See [docs/work-item-execution-tracking.md](docs/work-item-execution-tracking.md) for the sole operator runbook, including invalid-closure recovery. To group several work-items under one goal or milestone, see [docs/epics.md](docs/epics.md) (the epic -> work-item -> phase hierarchy). For durable cross-item architecture decisions see [docs/decisions.md](docs/decisions.md) (the ADR registry), and for standing cross-work-item dependencies see [docs/dependencies.md](docs/dependencies.md) (`Depends-on` edges + blocked/ready derivation). For the in-repo delivery-lessons registry see [docs/lessons.md](docs/lessons.md) (capture lessons learned so they survive a work-item's archival), and for the DoR/DoD vocabulary map onto existing admission and close gates see [docs/definition-of-ready-done.md](docs/definition-of-ready-done.md).
+The runtime helper surface is installed with production Codex and Claude packs as well: Codex gets the scripts under `$HOME/.agents/skills/lead/scripts/` or `<repo>/.agents/skills/lead/scripts/`, while Claude Code gets them under `~/.claude/agents/scripts/` or `<repo>/.claude/agents/scripts/`. That payload includes the pure Version 3 (V3) solution-attempt reducer at `solution_attempt/reducer.py` and the bounded process owner at `process_supervision/process_runner.py`. Process Runner Version 1 (`ProcessRunnerV1`) remains Windows-only: it owns provider-prompt operations and detached Slice A validation, while skill-pack validator child checks use it on Windows. On POSIX, the validator runtime, publication scanner, and installer hook-health runner own their private process groups through `process_supervision/posix_process_group.py`; generic `ProcessRunnerV1` remains unavailable there. Each external provider-prompt launch requires an absolute caller-owned `--terminal-receipt` path, reserved before provider/capture/ledger side effects. On POSIX, every path ancestor must be owned by root or the current user, and the final parent must be current-user-owned without group/other write access. A group/other-writable ancestor is accepted only for a root-owned sticky shared directory such as `/tmp` whose next held component is a current-user-owned nonwritable boundary. The wrapper holds every opened component identity, revalidates owner, mode, path, and leaf before and after durable commit/readback, and removes only the exact descriptor-identified leaf if reservation setup fails. A raced replacement or unverifiable descriptor identity is preserved and fails with `E_EXTERNAL_TERMINAL_RECEIPT_CLEANUP_UNVERIFIED`. After settlement and secure cleanup, the wrapper safety-scans one serialized V2 envelope, durably commits and reads it back, writes and flushes the identical line to stdout, then appends the optional ledger event; the caller owns receipt retention and deletion. On Windows, the migrated Python and Git child paths retain bounded output capture and descendant-process-tree settlement through runner-owned, executable-specific probes performed for the same run; adapters cannot self-attest. For direct single-executable Windows launches, the process owner qualifies the executable and argument-parser contract before reading the prompt. The Codex wrapper supplies its built-in parser contract; the ordinary Claude wrapper supplies none and refuses this route with `PSV1-ARGV-CODEC-UNSUPPORTED`. This contract is not proof of a live provider launch. Generic `ProcessRunnerV1` requests on POSIX fail at request validation with `PSV1-POSIX-ORACLE-UNAVAILABLE` before executable acquisition or subprocess creation. The returned result is non-success, does not claim an empty descendant tree, closes runner-owned resources, and starts no child. Kimi is explicit-only through fixed `kimi-code/k3` for policy-admitted read-only exploration/research/planning/review or mapped `external-worker` engineering. Its optional validated capability file may select admitted read tools/Model Context Protocol servers or scoped worker tools; omission preserves empty tools/servers/subagents and permission `reject`. Every result is independently verified, nonauthorizing, and outside `auto`. Grok remains unavailable in 1.x. The generic Windows command-line interface remains fail-closed unavailable, and a Rust implementation remains deferred to 2.0. The source-only durable operation store at `scripts/agent_run_persistence/operation_store.py` and route activation registry at `scripts/process_supervision/route_activation_registry.py` are not installed. See [docs/work-item-execution-tracking.md](docs/work-item-execution-tracking.md) for the sole operator runbook, including invalid-closure recovery. To group several work-items under one goal or milestone, see [docs/epics.md](docs/epics.md) (the epic -> work-item -> phase hierarchy). For durable cross-item architecture decisions see [docs/decisions.md](docs/decisions.md) (the ADR registry), and for standing cross-work-item dependencies see [docs/dependencies.md](docs/dependencies.md) (`Depends-on` edges + blocked/ready derivation). For the in-repo delivery-lessons registry see [docs/lessons.md](docs/lessons.md) (capture lessons learned so they survive a work-item's archival), and for the DoR/DoD vocabulary map onto existing admission and close gates see [docs/definition-of-ready-done.md](docs/definition-of-ready-done.md).
 
 For release-relevant tracked changes, update `RELEASE_NOTES.md` in the same change before publication and explain the practical effect of the change, not just its title. Keep release notes in reverse-chronological `## YYYY-MM-DD` sections instead of one long-lived `## Unreleased` bucket, and run the repo-local gate before publication:
 
@@ -308,11 +313,13 @@ bash scripts/check-publication-gate.sh
 python .\scripts\check-publication-gate.py
 ```
 
+## External launch permissions
+
+Managed adapters supply actual assigned-role provenance and consume `--user-approved-launch` locally before `--`; that flag is only the caller projection of genuine exact-launch approval. Optional `--astra-task-authorization-json` instead carries a matching genuine Astra 6.2 High/Extra high task authorization; caller-checked scope, revocation and limits still bind before covered repeats, and Max never uses it. `provider_prompt.launch` and the native selector share the pure `model_routing/launch_policy.py` rule. A complete selected logical package includes that nested module, including relocated transports; a FILE link on R/P does not move its companion namespace to the referent directory. Missing/broken mandatory support fails truthfully before effects. Prefer completing the qualified package; declared same-owner Assistance with all canonical rule, scope, genuine permission where needed, resources and readback guarantees may be selected by Root without a new ordinary permission loop. There is no catch-and-allow, raw-flag authority or automatic retry. Roleless direct-user compatibility does not permit managed callers to omit their assigned profession.
+
 ## License
 
 This repository is licensed under the Mozilla Public License 2.0. See [LICENSE](LICENSE).
-
-Managed adapters supply actual assigned-role provenance and consume `--user-approved-launch` locally before `--`; that flag is only the caller projection of genuine exact-launch approval. Optional `--astra-task-authorization-json` instead carries a matching genuine Astra 6.2 High/Extra high task authorization; caller-checked scope, revocation and limits still bind before covered repeats, and Max never uses it. `provider_prompt.launch` and the native selector share the pure `model_routing/launch_policy.py` rule. A complete selected logical package includes that nested module, including relocated transports; a FILE link on R/P does not move its companion namespace to the referent directory. Missing/broken mandatory support fails truthfully before effects. Prefer completing the qualified package; declared same-owner Assistance with all canonical rule, scope, genuine permission where needed, resources and readback guarantees may be selected by Root without a new ordinary permission loop. There is no catch-and-allow, raw-flag authority or automatic retry. Roleless direct-user compatibility does not permit managed callers to omit their assigned profession.
 
 ## Codex native instruction ownership
 

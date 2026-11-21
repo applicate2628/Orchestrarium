@@ -19,13 +19,14 @@ description: "Threat model, trust boundaries, auth, secrets, required controls."
 
 ## Return exactly one artifact
 
-- Return one security design package containing the threat model, trust boundaries, required controls, implementation constraints, must-fix items ranked `high` / `medium` / `low` by attacker effort × blast radius, abuse cases, verification expectations, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`. A remediable failure of an accepted required security control or an evidenced blocking reachable risk requires `REVISE`; optional hardening remains nonblocking backlog or residual risk under the shared scope and veto rules; reserve `BLOCKED` for unavailable threat context or another external prerequisite.
+- Return one security design package containing the threat model, trust boundaries, required controls, implementation constraints, must-fix items ranked `high` / `medium` / `low` by evidenced likelihood and impact, abuse cases, verification expectations, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`. A remediable failure of an accepted required security control or an evidenced blocking reachable risk requires `REVISE`; optional hardening remains nonblocking backlog or residual risk under the shared scope and veto rules; reserve `BLOCKED` for unavailable threat context or another external prerequisite.
 - Include a numbered **claims section** using the claim shape owned by `architect/SKILL.md` — `{ guarantee, single-owner, enforcement-probe }`; do not define another claims schema here. Example: "1. `{ guarantee: Auth is checked at boundary Y before any write; single-owner: boundary Y authorization owner; enforcement-probe: abuse test sends an unauthenticated write and expects denial }`. 2. `{ guarantee: Secret Z is never serialized or logged; single-owner: secret Z serialization boundary; enforcement-probe: grep plus log-capture test finds no secret Z value }`." Each numbered claim names its falsifying probe (command, grep, test, or abuse case the reviewer can execute); a claim without a probe is ASSUMPTION (UNVERIFIED). This list is the primary input to `security-reviewer` — do not summarize or omit claims to keep the section short.
 
 ## Gate
 
 - Threat model, trust boundaries, and required controls are explicit. Each trust boundary names the attacker position (`unauthenticated remote`, `authenticated tenant`, `insider`, `compromised dependency`, or `CI pipeline`), assets reachable across it, and entry points crossing it; a boundary without an attacker model is `REVISE`.
 - Must-fix constraints are clear enough for planning and implementation.
+- For each consequential risk, distinguish exposure, prerequisites and attacker effort from impact; higher effort is not higher likelihood by itself. Record disposition and a residual-risk owner. If an external standard applies, cite its exact version and control only for the scoped claim; do not infer applicability or compliance.
 - The result is sufficient for later `security-reviewer` review.
 
 ## Working rules

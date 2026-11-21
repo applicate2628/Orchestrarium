@@ -2,6 +2,7 @@
 from dataclasses import replace
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import pytest
 from test_provider_prompt_projections import _load_installer
 
@@ -69,11 +70,14 @@ def test_link_retarget_is_preserved(tmp_path):
     assert os.readlink(leaf) == "two"
 
 
-def test_public_transaction_admission_stays_closed(tmp_path):
+def test_public_transaction_refuses_unsupported_platform(tmp_path, monkeypatch):
     module = _load_installer()
+    transaction = module._InstallTransaction([tmp_path / "target"], enabled=True)
+    monkeypatch.setattr(module, "os", SimpleNamespace(name="unsupported-platform"))
     with pytest.raises(ValueError, match="E_EFFECT_BOUND_DISPOSAL_UNQUALIFIED"):
-        with module._InstallTransaction([tmp_path / "target"], enabled=True):
+        with transaction:
             pytest.fail("unqualified transaction entered")
+    assert transaction._temporary is None
     assert not (tmp_path / "target").exists()
 
 

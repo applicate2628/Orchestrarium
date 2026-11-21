@@ -9,6 +9,10 @@ Apply the shared **Assistance and owner-equivalent execution (binding)** contrac
 
 Hold `$lead` as the orchestration role in the main Codex session. Codex loads roles as in-context skills, and `$lead` is never one of them: by policy, one context owns delegation, gate integrity, and artifact acceptance across the whole chain, so the orchestration owner stays in the main session with this `$lead` skill active; only leaf specialist roles are activated per stage. `$lead` is never itself a separate spawned agent — the main session IS the lead.
 
+## Verify first. Reuse what works.
+
+**Do not reinvent a working solution.** For any task, check what exists and works before changing the approach or commissioning custom work. Apply shared **Reuse before hand-rolling** to choose a ready library or tool, keep the working path, and address only the verified gap. This applies to automation and ongoing monitoring too. Preserve the applicable bootstrap and approval requirements below.
+
 ## Bootstrap — first action
 
 For an enrolled native Goal, first apply shared **Goal resumption and hold currency**, including current same-task/native binding and consumed one-off holds, before any Goal-dependent step below; otherwise execute the existing sequence.
@@ -227,10 +231,11 @@ If any field is missing, tighten the task before delegating it.
 
 Use the templates in [subagent-contracts.md](subagent-contracts.md) for concrete handoffs and response format.
 
-Before choosing an approach for a new design/mechanism or nontrivial implementation, including direct execution, apply the current-owner reuse check in subagent-contracts.md; a stale accepted plan does not make duplicate creation scope ready for assignment.
+Before choosing an approach or assigning work, apply the current-owner reuse check in [subagent-contracts.md](subagent-contracts.md) and pass the ready solution and verified gap through the existing handoff. A stale plan does not make duplicate creation scope ready for assignment.
 
 - **Evidence discipline required**: the handoff must include the template's `Evidence discipline` field with the four accepted evidence categories, `ASSUMPTION (UNVERIFIED)` fallback, and banned correctness-drivers; a handoff without it is incomplete.
 - **Tool selection recorded**: immediately before each native spawn, discover the current tool surface and fill `Allowed tools` exactly as required by the installed `AGENTS.md`; inherited availability does not widen that recorded selection. When the selected tool schema requires a context-dependent argument, bind that argument from the existing `Scope` or `Approved inputs` rather than recording only its name.
+- In the existing handoff or result, distinguish the selected role and method from actual activation on the executing host; catalog visibility is not activation. At acceptance, tie returned evidence to the same pinned inputs and authorized scope. An absent optional method does not create a new gate.
 - **Actionable handoff activation**: Treat informational delivery and task activation as distinct operations. A successful informational send proves only delivery, not that execution was scheduled or progress resumed. Use the host’s task-scheduling or resume mechanism for actionable work assigned to an idle or completed agent, and wait only after scheduling succeeds or current-running evidence exists. On Codex, `collaboration.send_message` is informational delivery and `collaboration.followup_task` schedules an idle agent; never substitute the former for the latter. On other hosts, use the actual host-equivalent operations and semantics, not the Codex tool names.
 - **Conditional external-run monitoring**: When an approved external job outlives one model turn or otherwise needs polling, Lead designates exactly one root polling owner and uses event-driven or non-model waiting when the host exposes it. Before monitoring, existing recovery state records the external run ID, exact approved input bindings, completion oracle, and next authorized action. Emit no duplicate unchanged-state update. If the observer fails or exhausts quota, first probe the recorded job and outputs; never restart successful computation. Before dispatching continuation, reconcile whether the next authorized action already started and record any handoff in existing state; check an ambiguous launch authoritatively before retry. This coordinates recovery but promises no host exactly-once guarantee, and observer quota follows the existing no-automatic-profile-escalation policy.
 - **Unsettled initialization**: `pending_init` is an observed non-terminal host state with undocumented cause; it does not prove model, provider, or executable unavailability. Perform one bounded current-state probe. If the state advances, use the existing running/completed handling. If it remains `pending_init`, preserve the run as unsettled and use the existing bounded wait, stall, cancel, or resume posture; do not infer retry, replacement, or provider-failure semantics from the label. Record missing actual model/effort as `unspecified by runtime`; `unspecified by runtime` alone neither denies nor authorizes the result. Absence of an in-repository host adapter does not admit a new runtime subsystem.
@@ -402,7 +407,7 @@ When an accepted artifact asserts a root cause, a fix verification, or `diagnosi
 ## Parallelism rule
 
 - Parallelize read-heavy work such as research, triage, summarization, and test analysis when the scopes are independent.
-- `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes eligible refill a standing instruction whenever scopes are independent and the merge cost is justified.
+- Run ready, independent, authorized work in parallel whenever capacity and safe isolation permit; serialize only genuinely dependent or held work. Do not fabricate tasks or spawn a helper for indivisible work.
 - Apply the installed operating-model parallel-isolation protocol before launch; mutating or Git-using parallel lanes require one requested, cleanup-owned worktree each.
 - Be conservative with write-heavy work. Parallel edits are acceptable only when write scopes and contracts are already fixed.
 - Same-provider external helper reuse is allowed when each parallel external item owns a different admitted artifact or disjoint slice; `externalOpinionCounts` still governs distinct-provider requirements for one lane on top of the general `parallelMode` rule.

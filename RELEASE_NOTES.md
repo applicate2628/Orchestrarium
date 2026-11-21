@@ -1,8 +1,84 @@
 # Release Notes
 
-This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
+This log records user-facing changes in the Orchestrarium source tree by date.
+A dated entry is not a release tag, publication notice, or confirmation of a
+local installation. For the frozen pre-SDK baseline and draft follow-up, see
+[Which version?](README.md#which-version).
+
+## 2026-11-21
+
+- Run shared hook upgrade tests without an installed Codex executable. The rollback test now verifies that the simulated post-write health check actually ran before it checks restoration.
+
+- Preserve operator-supplied handler fields, including timeouts, when a shared hook upgrade changes its tool matcher. Joint relocations and mixed relocation/retirement groups now preserve those fields and neighboring registration positions. Permanent removal retains its existing ownership checks.
+
+## 2026-11-20
+
+- Fix uninstall of untouched documents created by a fresh install. After exact removal, the installer expects the document to be absent at its validated location instead of treating its own removal as drift. Edited or unrelated files remain protected, and a late failure still rolls back the removal.
+
+- Extend the shared Responsibility-Driven Engineering rule to prevent defect classes at their owner and verify both supported transitions and safe refusal. No new workflow gate or skill is required. The existing architecture roles now pair an accepted transition with a rejected case and verify protected state. Windows parity checks recognize the supported directory junction while still verifying the exact shared target. Retirement regression tests now distinguish harmless empty-group retention from forbidden movement of another hook.
+
+- Support an explicit, verified predecessor for shared hook upgrades between retained releases. Preview and apply use the same ownership checks; unrelated hooks and native trust remain unchanged. The prior package evidence, hook catalog and hook files must be direct members of the selected release. The installer compares the two releases' own catalogs so retired hooks do not remain active and unrelated native slots are preserved. The same group can retire or move multiple owned handlers together, including when only the matcher changes, without shifting a retained handler.
+
+- Route owned pushes through the native Git publication callback on all platforms. The experimental Windows receiver route is not used because its receipt alone does not satisfy the mandatory publication proofs. The native verification tests now include the complete captured source roles, so both ordinary bootstrap checks run instead of failing during fixture setup.
+
+- For an owned push to one ordinary HTTPS destination with no explicit redirect policy, default that destination to no redirects for this invocation only. The native hook still requires the exact receiver before using verified prior history. Explicit settings and unqualified transports are unchanged; no Git configuration file is edited.
+
+- On Windows, updates that change only the contents of an owned skill tree keep the original files and their inherited access policy. The installer verifies both trees and rolls back interrupted updates; topology changes and writes that would change the Windows Archive attribute use the checked staged publisher instead.
+
+- Add an explicit registration-only update for a retained shared Codex hook bundle. It previews the same proposed registration and inventory before writing, can replace a proven older hook command whose interpreter disappeared, and leaves the rest of each Codex profile and native trust unchanged.
+
+- Remove the contradictory maintainer instruction to test in a live Claude global installation. Installation checks use isolated targets; deployment remains a separate operation.
+
+- Run independent ready work in parallel within authorized capacity and safe isolation. Legacy mode values no longer silence the advisory, and do not authorize extra work.
+
+- Preserve inherited project and global settings during installation. Do not create missing overlays or alter explicit Claude main-agent selection. Handle existing legacy preference compatibility at the owning transaction.
+
+- Require an explicit explanation when selecting an otherwise-admitted alternative to the recommended model or reasoning effort. Record the reason without judging its wording or granting launch authority.
+
+- Make Responsibility-Driven Engineering explicit in the shared rules and existing architecture roles: identify who owns a guarantee and how it is enforced and verified, without introducing a new role or review phase.
+- List optional Ponytail complexity-review skills in a separate registry. The pinned, MIT-licensed skill texts ship as optional source material only; default installation, hooks, execution permissions, and acceptance gates do not change.
+
+- Preserve Windows automatic inheritance when staging an upgrade. When Windows creates an object with the same owner, group and access list but omits the inherited-state flag, the installer asks Windows to recalculate inheritance on the new staged object, then verifies the entire original policy before publication. The native handle prevents propagation to any children. Protected, null, or mismatching access lists are not rewritten by this recovery path.
+
+- Limit installer rollback snapshots to the planned Orchestrarium skill owners, selected members, and receipts. An unrelated plugin in the shared skills directory no longer blocks the update. Codex installs that skip hook registration leave the existing hook configuration and its ownership inventory outside the write transaction.
+
+- Apply verification and reuse explicitly to every profession. Researchers and designers check ready alternatives against the real requirements; implementers adopt the fitting solution or show the gap; existing reviewers challenge unsupported replacements. No extra review phase or copied rule per role.
+
+- Put verification and reuse first in shared rules and the Lead skill. Before changing a working setup or creating code, tools, automation, or monitoring, check the actual behavior and look for a ready solution. Keep the working parts, use existing monitoring where useful, and assign only the uncovered work. No extra review stage or automatic dependency installation is added.
+
+- Stage a permanent pre-SDK bundle before changing a linked global Codex hook file. The shared hook installation binds managed commands to that bundle’s Python and scripts in one registration write, preserves unrelated hooks, and reports the host’s own trust state. On fleets with a shared file, prepare the same local directory on every host before the owning installation publishes the change.
+
+- Include the verified receiver publication implementation in the pre-SDK package. Owned Git subprocesses ignore an interactive pager, retain exact transfer coverage checks, and report the known resource-limit category without exposing scanned values. Existing receipt, hook ownership, and refusal checks stay in force.
+
+- Prevent the installer’s hook checks from writing Python bytecode into the installed package, including direct hook smoke checks and Python-based Codex hook-list probes. The registered commands and host trust policy are unchanged.
 
 ## 2026-11-19
+
+- Report a stable transport parity diagnostic when an existing Claude projection matches no accepted whole-package state. The pre-SDK installer still stops before replacing that projection; the diagnostic does not authorize migration or expose peer files.
+
+- Keep Second Opinion toggles separate from installer normalization in both dispatch contracts. A new project override changes only the consultant setting and leaves inherited provider and delegation policy intact.
+
+- Route a demonstrated class of defects to its existing owner, whoever reported the example, and verify neighboring valid cases and required refusals. Preserve independent contracts and retire superseded branches and tests without authorizing wider work. Narrow the specialist rules that unintentionally required extra build stages, comparative data, output tooling, or a particular platform. Preserve native decoded-frame timing when verifying transient display defects and distinguish visual, assistive-technology and numerical evidence.
+
+- Align specialist instructions and native Claude wrappers with the existing QA-owned defect-admission contract. Roles report qualified adjacent findings in-band by default and use the configured registry only when explicitly authorized. The default directory is not a provider-specific requirement.
+
+- Raise the evidence bar in the specialist catalog without changing provider or model selection. Science separates code and solution verification from physical validation; delivery distinguishes settled effects and measured performance from replies and proxy signals; interface roles distinguish synthetic tests from actual device observations. Design, review and planning retain release authority and test scope while making their decision evidence more specific. The generic Review Loop now points Claude to its selected-root command where the native helper is installed.
+
+- Update pack verification to check the documented installation layout and the reviewed current common skill bodies. These checks verify packaging and contract alignment, not that a provider ran a role or that a model's answer improved.
+
+- Agents-mode validation now checks the same runtime documents even when the entire checkout lives in a temporary workspace; repository-local scratch files remain excluded.
+
+- The maintenance guide now directs changes to common skills through their single canonical source. Maintain provider-specific wrappers separately and verify the resulting installed projections; no runtime behavior changed.
+
+- The bundled installer now disables Python bytecode caching in both launch stages. Help, dry runs, and loading the runtime-retention builder no longer leave Python cache files in the source bundle.
+
+- Clarified how to identify a frozen pre-SDK baseline, preview an install without changing the target, and locate the canonical installed skill and hook files. These documentation changes do not switch the SDK track or change installer behavior.
+
+- The scratch recovery hook now compares original file bytes with Git, without clean filters or line-ending conversion. It quotes paths with special characters and enables Git's Windows long-path support, so preserved work is not mistaken for a committed copy merely because conversion makes the contents look alike.
+
+- Recognize the Windows process token's exact eligible default owner when binding its working directory, without moving the directory or changing permissions. Unrelated or deny-only identities and filesystem drift are still rejected.
+
+- Optional bundle assembly now requires a separately qualified standalone CPython standard-library runtime. It rejects third-party package content before output and packages only selected CPython notices. Superseded packaging assets and evidence remain available in the original Git checkpoint, not the current source tree. Final verification rejects unexpected notice content anywhere in the assembled bundle before creating its launch manifest. The existing source installer and provider policies are unchanged.
 
 - The agents-mode reference now distinguishes read-only routing and status checks from authorized configuration writes. Reading legacy overlays leaves their bytes unchanged; explicit configuration changes and reinstall retain their existing normalization rules.
 

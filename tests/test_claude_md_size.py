@@ -44,8 +44,8 @@ EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
         "0398b801e77a3bcdd96d22818272e57d61446ffeeac526fc15612a42f519a5d1",
     ),
     "installer-removal-json-path": (
-        5_254,
-        "1810bf29901fcf68b0efabc55aacafbd9b5f49aed5da325afb8b79cd7bce27fa",
+        5_278,
+        "79ca6e2c768e36609f01be3f2178f5b0672311b6d440b351e68d7f0749732ec3",
     ),
 }
 

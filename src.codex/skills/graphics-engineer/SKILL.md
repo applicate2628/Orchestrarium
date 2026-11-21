@@ -28,14 +28,14 @@ description: "Rendering, shaders, materials, GPU pipelines, scene/camera resourc
 - Render-path behavior, resource lifecycle, scene updates, and camera or material assumptions remain aligned with the accepted plan.
 - Planned graphics, correctness, and performance checks were run or explicitly reported as blocked.
 - Any visual-output change must capture a rendered frame or graphics-processing-unit frame capture, directly inspect it, and record the artifact path in the implementation notes before return.
-- New or changed graphics-processing-unit work runs once under the target API's debug or validation tooling with zero new errors or warnings, or reports that check blocked.
+- New or changed graphics-processing-unit work uses the target API's validation tooling with zero new errors or warnings, or reports that check blocked. For resource lifetime, ordering or reuse changes, explicitly enable applicable synchronization validation and exercise the affected transitions, including deferred presentation or resize when applicable. A clean static frame is not lifetime evidence.
 - Apply the `Receiving-side echo` owned by `subagent-contracts.md`; an implementation package missing that echo fails this gate.
 
 ## Working rules
 
 - Prefer explicit render-path changes over broad engine churn.
 - A graphics-resource change enumerates resize, minimized or zero-extent, and device-lost/device-removed paths, classifying each resource as recreated, released, or explicitly exempted.
-- A performance-neutral-or-better claim carries captured frame-time or GPU-time before/after numbers on a named scene.
+- A performance-neutral-or-better claim compares relevant CPU/GPU and tail frame time after warmup on the same named scene, settings, build configuration, driver and sampling method. Report validation overhead separately instead of mixing debug-on and debug-off timings.
 - Every new shader or pipeline boundary states its working color space and conversion point plus normalized-device-coordinate depth range, Y direction, and matrix-majority conventions.
 - For the accepted design's P8 fold, shared scene state consumed by multiple passes or threads preserves the design-named single writer-owner and settled event or frame fence. A second unsynchronized mutation path is `REVISE` to the architect.
 - Escalate architecture or frame-budget conflicts instead of patching around them locally.
@@ -46,7 +46,7 @@ description: "Rendering, shaders, materials, GPU pipelines, scene/camera resourc
 
 When implementation reveals bugs, risks, or improvement opportunities outside the approved change surface:
 
-1. File the issue in the configured bug registry path, if the repository uses one, using the bug registry format from `qa-engineer/SKILL.md`, with `context: adjacent-finding` and `status: open`.
+1. Route concrete defects through the bug-admission contract owned by `qa-engineer`; use `context: adjacent-finding` and `status: open` only for a defect admitted under that contract.
 2. Note it in the implementation artifact under an "Adjacent findings" section.
 3. Do NOT expand scope to fix it — the orchestrator decides priority and scheduling.
 4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` instead of working around it.

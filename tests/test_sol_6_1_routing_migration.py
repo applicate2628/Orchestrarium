@@ -159,7 +159,8 @@ class MigrationTests(unittest.TestCase):
         scope = {'authority':'parent-dispatcher-only','allowedTools':[], 'changeSurface':['accepted bounded contract']}
         for role,task in [('explorer','exploration'),('planner','planning'),('worker','engineering'),('scientific-software-engineer','engineering')]:
             description = resolver.describe_ordinary_native_role_options(role,task,host,repo_root=ROOT)
-            selected = resolver.resolve_ordinary_native_dispatch(description,requested_model='gpt-6.2-sol',requested_effort='medium',caller_rationale='Accepted bounded contract with directly testable oracle.',approved_execution_scope=scope)
+            selected = resolver.resolve_ordinary_native_dispatch(description,requested_model='gpt-6.2-sol',requested_effort='medium',caller_rationale='Accepted bounded contract with directly testable oracle.',approved_execution_scope=scope,
+                preference_deviation_reason='The bounded, deterministic oracle makes Medium sufficient.')
             assert selected['status'] == 'resolved', selected
             assert selected['resolvedProfile'] == 'frontier-medium'
             assert selected['fallback'] == 'none'

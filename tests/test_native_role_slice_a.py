@@ -1061,7 +1061,6 @@ POST_MATERIALIZATION_WRITER_IDS = {
     "native-role",
     "provider-doc",
     "agents-mode",
-    "claude-main-settings",
     "retired-reclaim",
 }
 POST_MATERIALIZATION_ARTIFACT_CLASSES = {
@@ -1073,7 +1072,6 @@ POST_MATERIALIZATION_ARTIFACT_CLASSES = {
     "native-role",
     "provider-doc",
     "agents-mode",
-    "claude-main-settings",
     "retired-reclaim",
 }
 
@@ -3492,7 +3490,6 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
         "native-role": "native-role",
         "provider-doc": "provider-doc",
         "agents-mode": "agents-mode",
-        "claude-main-settings": "claude-main-settings",
         "retired-reclaim": "retired-reclaim",
     }
     published = False
@@ -3543,14 +3540,14 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
 
     original_runtime = installer._install_runtime_files
 
-    def runtime(root, helper_target, dry_run, *, destinations=None):
+    def runtime(root, helper_target, dry_run, *, destinations=None, **kwargs):
         selected = (
             installer._runtime_file_destinations(root, helper_target)
             if destinations is None
             else destinations
         )
         original_runtime(
-            root, helper_target, dry_run, destinations=destinations
+            root, helper_target, dry_run, destinations=destinations, **kwargs
         )
         for _source, destination in selected:
             if published or helper_target.parent.parent.name == ".claude":
@@ -3566,8 +3563,8 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
 
     original_ui = installer._install_ui_continuity_contract
 
-    def ui(root, pack_root, dry_run):
-        original_ui(root, pack_root, dry_run)
+    def ui(root, pack_root, dry_run, **kwargs):
+        original_ui(root, pack_root, dry_run, **kwargs)
         emit("ui-continuity", pack_root / installer.UI_CONTINUITY_CONTRACT_TARGET)
 
     monkeypatch.setattr(installer, "_install_ui_continuity_contract", ui)
@@ -3581,6 +3578,7 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
         installed_hook_root,
         mode,
         inventory_path=None,
+        **kwargs,
     ):
         original_hooks(
             root,
@@ -3589,6 +3587,7 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
             installed_hook_root,
             mode,
             inventory_path,
+            **kwargs,
         )
         emit("hook-registration", registration)
         if provider == "codex":
@@ -3629,8 +3628,8 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
 
     original_codex_docs = installer._merge_codex_agents
 
-    def codex_docs(root, source, target, dry_run):
-        original_codex_docs(root, source, target, dry_run)
+    def codex_docs(root, source, target, dry_run, **kwargs):
+        original_codex_docs(root, source, target, dry_run, **kwargs)
         emit("provider-doc", target)
 
     monkeypatch.setattr(installer, "_merge_codex_agents", codex_docs)
@@ -3646,19 +3645,11 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
 
     original_mode = installer._normalize_agents_mode
 
-    def agents_mode(root, template, target, provider, dry_run):
-        original_mode(root, template, target, provider, dry_run)
+    def agents_mode(root, template, target, provider, dry_run, **kwargs):
+        original_mode(root, template, target, provider, dry_run, **kwargs)
         emit("agents-mode", target)
 
     monkeypatch.setattr(installer, "_normalize_agents_mode", agents_mode)
-
-    original_settings = installer._merge_claude_main_agent_settings
-
-    def settings(root, target, delegation_mode, dry_run):
-        original_settings(root, target, delegation_mode, dry_run)
-        emit("claude-main-settings", target)
-
-    monkeypatch.setattr(installer, "_merge_claude_main_agent_settings", settings)
 
     original_reclaim = installer._reclaim_retired
 
@@ -3678,6 +3669,7 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
 
     monkeypatch.setattr(installer, "_finalize_canonical_lead_receipt", receipt)
 
+    monkeypatch.setenv("CODEX_BIN", codex_hook_host_env({}, ROOT)["CODEX_BIN"])
     for provider in ("codex", "claude"):
         published = False
         run_observed.append([])

@@ -317,13 +317,13 @@ def test_eligible_work_start_remains_available_after_boundary_events(
         None,
     ),
 )
-def test_manual_unknown_or_missing_modes_are_silent(
+def test_legacy_or_missing_modes_do_not_suppress_the_advisory(
     tmp_path: Path, config: str | None
 ) -> None:
     result = _run(tmp_path, config, envelope=_envelope())
 
     assert result.returncode == 0
-    assert result.stdout == ""
+    assert json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
     assert result.stderr == ""
 
 
