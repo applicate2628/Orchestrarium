@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-21
 
+- Rebase the native Rust plan onto the accepted pre-SDK source and record the isolated reminder-hook pilot, its read-only Codex registration evidence, and the remaining trust, invocation and lifecycle checks. Planning only: Python remains the production owner; no installer or hook behavior changes.
+
 - Run shared hook upgrade tests without an installed Codex executable. The rollback test now verifies that the simulated post-write health check actually ran before it checks restoration.
 
 - Preserve operator-supplied handler fields, including timeouts, when a shared hook upgrade changes its tool matcher. Joint relocations and mixed relocation/retirement groups now preserve those fields and neighboring registration positions. Permanent removal retains its existing ownership checks.
@@ -93,6 +95,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-18
 
+- The Rust migration plan now explicitly retains GUI-independent functional operations and replaceable clients through the shared architecture contract, with headless and client-replacement acceptance scoped to each migration slice. No Rust implementation or activation is claimed.
+
 - The shared development workflow now requires GUI-independent functional operations and a replaceable presentation client through the existing common contract. Architecture guidance adds headless and client-replacement acceptance while preserving required approvals, presentation-only behavior and explicitly justified user-requested exceptions.
 
 - The repository front page now introduces Orchestrarium in plain language and separates the current production packs from the unmerged SDK work in PR #19. The current mascot is the approved Little Orche, displayed as a compact logo; the future Orche rebrand is not applied. Existing installation identifiers and runtime behavior are unchanged; the page no longer repeats an outdated model-ranking summary.
@@ -106,6 +110,12 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 - Codex model routing now admits only the latest confirmed version in each family: Luna 6, Terra 6.1, Sol 6.2 and Astra 6.2. Older model profiles are removed from active choices rather than retained as launchable compatibility or quota-fallback routes. Existing user configuration is preserved and retired choices are reported explicitly; historical evidence and migration fixtures remain intact. This prevents new tasks from silently returning to obsolete model generations.
 
 ## 2026-11-17
+
+- Inventory the full tracked Python/hook migration surface across native and SDK snapshots, retain each canonical owner and useful oracle, and map prior incidents to differential regression and scoped cutover/recovery. Record upstream library candidates and license boundaries without claiming a completed native port.
+
+- Expand the Rust workflow design across existing domain owners, scoped recovery, resource settlement and skill maintenance. Record installer process-loss evidence gaps, batch diagnostics and partial-setup recovery separately from already implemented behavior; no new scheduler, cleanup daemon or global stop is introduced.
+
+- Extend the native Rust proposal with staged SDK-to-Rust instruction reduction: move only covered deterministic obligations into their existing owners, retain semantic guidance and unsupported-host instructions, and retire procedural duplicates after verification. Planning only; no runtime activation or live rule removal.
 
 - Task-first routing now favors Sol 6.2 for ordinary implementation, Luna Extra high for bounded mechanics and Terra 6.1 High for fitting bounded/repository/visual work. Astra High/Extra high can use genuine task-scoped approval for scientific formulation, complex audit, architecture and security, including covered repeats; Max and separate launch/spending permissions remain protected. Substantive results now require a proportionate nonauthor check, not only critical results, without adding duplicate review loops.
 
@@ -207,6 +217,10 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 - Keep lifecycle fault-injection test doubles compatible with keyword arguments from their production owners. Forwarding wrappers preserve the complete call, while the controlled failure double accepts owner options without changing its injected failure; drift and rollback assertions remain unchanged.
 - Keep lifecycle tests discoverable through both test runners: pytest no longer reruns the unittest adapter, and unittest includes functions defined at the end of the module. Test assertions and production behavior are unchanged.
 - Restore fresh-install rollback through the existing identity-checked disposal owner instead of requiring a native move merely to retain newly created data. Existing-object replacement and runtime-observation custody retain their original safeguards. This removes a fresh-file recovery failure under an unsupported native move capability; directory atomic-publication refusal and POSIX disposal holds remain unchanged, so this is not complete DrvFS installation support.
+
+## 2026-11-12
+
+- Refine the independent native Rust plan into bounded work and receiving steps. Preserve the current Python owner and SDK acceptance boundary, explicitly test final process exit after output failures, and keep payload generation with the canonical policy source. This is planning only: no native build, installation, runtime activation or measured improvement is claimed.
 
 ## 2026-11-10
 
@@ -366,6 +380,10 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 - Ordinary model selection now exposes exact GPT-6.1 Terra profiles without changing fixed role or user defaults. Low and below-family-minimum choices refuse; every Astra or Max attempt requires individual user agreement, including omitted/configured routes. Existing profile identities, mechanical/critical gates and explicit host controls remain preserved.
 
 ## 2026-10-26
+
+- Refine the native delivery plan to one Rust CLI operation owner, a thin PowerShell download/verification bootstrap and npm as a compatible optional channel. Keep the current Python installer until qualified native cutover; delivery scripts must not duplicate managed-file, trust or recovery behavior. The first Rust implementation slice remains a joint decision after SDK acceptance.
+
+- Isolate the native Rust operations plan from npm distribution so it can be reviewed and delivered independently. Preserve the first shared reminder-hook slice, existing ownership, parity and cutover criteria; this plan does not activate a native runtime or change production policy.
 
 - Publication hooks recover one proved literal PowerShell Git invocation when a supported host label incorrectly selects Bash parsing. Mixed quoting retains the original command and all publication checks; compound refusals now show only safe parser facts and compiled revision labels for diagnosis.
 
