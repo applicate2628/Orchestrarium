@@ -2805,6 +2805,96 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
                 self.assertIn(report["scope"]["commitSetSha256"], valid_digests)
                 self.assertEqual(report["commitMessages"], [])
 
+    def test_history_metadata_volume_does_not_stop_individually_valid_commits(self):
+        module = _load_canonical_scanner("_scanner_metadata_volume")
+        ids = tuple(f"{index:040x}" for index in range(1, 34))
+        tree = hashlib.sha1(b"tree 0\0").hexdigest()
+        parents = tuple((oid, ids[i + 1:i + 2]) for i, oid in enumerate(ids))
+        selection = module.RangeSelection(
+            "origin", "main", "main", ids[0], ids, (*ids, tree),
+            expected_parents=parents,
+        )
+        message = b"synthetic fixture data\n" * 24_000
+        self.assertGreater(len(message) * len(ids), 16 * 1024 * 1024)
+        self.assertLess(len(message) + 100, 1024 * 1024)
+
+        class Reader:
+            async def read(self, oid, _object_type, *, scan_deadline):
+                if oid == tree:
+                    return module.ObjectReadSuccess(oid, oid, "tree", b"")
+                prefix = b"tree " + tree.encode() + b"\n"
+                for parent in dict(parents)[oid]:
+                    prefix += b"parent " + parent.encode() + b"\n"
+                return module.ObjectReadSuccess(oid, oid, "commit", prefix + b"\n" + message)
+
+        seen = []
+
+        def check_text(text, oid, _find_machine_paths, **kwargs):
+            self.assertEqual(kwargs["subject_kind"], "commit-message")
+            seen.append((oid, len(text)))
+            return ()
+
+        async def exercise():
+            recorder = module.CoverageRecorder(ids)
+            with mock.patch.object(module, "_content_hits", side_effect=check_text):
+                result = await module._acquire_history(
+                    selection, Reader(), None, recorder,
+                    asyncio.get_running_loop().time() + 30,
+                )
+            self.assertNotIsInstance(result, module.Refusal)
+            history, coverage, findings = result
+            self.assertEqual(seen, [(oid, len(message)) for oid in ids])
+            self.assertEqual(history.commit_set, self._expected_digest(list(ids)))
+            self.assertEqual(coverage.scanned_message_oids, ids)
+            self.assertEqual(findings, ())
+
+        asyncio.run(exercise())
+
+    def test_history_line_bound_is_checked_once_per_verified_blob(self):
+        module = _load_canonical_scanner("_scanner_line_bound_owner")
+        commit, tree = "1" * 40, "2" * 40
+        paths = (b"a.txt", b"b.txt")
+        for payload, clean in ((b"clean\nlines\n", True), (b"unbroken\n", False)):
+            with self.subTest(clean=clean):
+                blob = hashlib.sha1(f"blob {len(payload)}\0".encode() + payload).hexdigest()
+                raw_tree = b"".join(b"100644 " + path + b"\0" + bytes.fromhex(blob)
+                                    for path in paths)
+                records = {
+                    commit: ("commit", b"tree " + tree.encode() + b"\n\nsynthetic"),
+                    tree: ("tree", raw_tree), blob: ("blob", payload),
+                }
+                selection = module.RangeSelection(
+                    "origin", "main", "main", commit, (commit,), (commit, tree, blob)
+                )
+
+                class Reader:
+                    async def read(self, oid, _object_type, *, scan_deadline):
+                        kind, raw = records[oid]
+                        return module.ObjectReadSuccess(oid, oid, kind, raw)
+
+                async def exercise():
+                    with (mock.patch.object(module, "_line_limit_refusal",
+                                            wraps=module._line_limit_refusal) as bounds,
+                          mock.patch.object(module, "_MAX_LINE_BYTES", 7),
+                          mock.patch.object(module, "_content_hits", return_value=()) as detector):
+                        result = await module._acquire_history(
+                            selection, Reader(), None, module.CoverageRecorder((commit,)),
+                            asyncio.get_running_loop().time() + 10,
+                        )
+                    bounds.assert_called_once_with(payload)
+                    if not clean:
+                        self.assertEqual((result.failure_id, result.reason),
+                                         ("PS-MSG-LIMIT", "line-bytes"))
+                        return
+                    history, _coverage, findings = result
+                    self.assertEqual({call.args[1] for call in detector.call_args_list
+                                      if call.kwargs["subject_kind"] == "history-blob"},
+                                     {path.decode() for path in paths})
+                    self.assertEqual(len(history.subjects), len(paths))
+                    self.assertEqual(findings, ())
+
+                asyncio.run(exercise())
+
     def test_range_first_push_empty_remote_scans_clean_initial_commit(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = self._init_range_repo(Path(td), publish_seed=False)
@@ -3457,6 +3547,105 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
 
         self.assertIsInstance(outcome, module.Refusal)
         self.assertEqual(outcome.failure_id, "PS-MSG-LIMIT")
+
+    def test_verified_prior_roots_use_bounded_revision_stdin(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_revision_stdin")
+        for fmt in (module._SHA1_OBJECT_FORMAT, module._SHA256_OBJECT_FORMAT):
+            tip = "a" * fmt.hex_length
+            long_roots = tuple(f"{n:0{fmt.hex_length}x}" for n in range(1, 901))
+            self.assertLess(len(long_roots), module._MAX_REMOTE_REFS)
+            self.assertGreater(sum(len(oid) + 1 for oid in long_roots), 32767)
+            for native in (False, True):
+                for exclusions in ((), (long_roots[0],), long_roots):
+                    with self.subTest(format=fmt.name, native=native, roots=len(exclusions)):
+                        async def run_case():
+                            calls = []
+                            expected = (tip + "\n" + "".join("^" + oid + "\n" for oid in exclusions)).encode("ascii")
+
+                            async def reader(argv, **kwargs):
+                                self.assertTrue("--stdin" in argv, "revisions must not be expanded in Git argv")
+                                self.assertEqual(kwargs["input_bytes"], expected)
+                                self.assertLess(len(subprocess.list2cmdline(argv)), 32767)
+                                self.assertIs(kwargs["object_format"], fmt)
+                                calls.append(argv)
+                                if "--parents" in argv:
+                                    return ((tip, ()),)
+                                return (tip,)
+
+                            destination = "refs/heads/new"
+                            primary = module.RangeRequest("origin", destination, tip)
+                            request = module.NativePushRequest(
+                                fmt, {}, "synthetic-endpoint", "", "", "", "", "",
+                                (module.NativePushUpdate(b"refs/heads/source", tip,
+                                                         destination.encode(), "0" * fmt.hex_length),),
+                            )
+                            with (
+                                mock.patch.object(module, "_detect_git_object_format", return_value=fmt),
+                                mock.patch.object(module, "_graft_overlay_present", return_value=False),
+                                mock.patch.object(module, "_resolve_commit", return_value=tip),
+                                mock.patch.object(module, "_run_range_git", return_value=
+                                                  subprocess.CompletedProcess([], 0, "origin\n", "")),
+                                mock.patch.object(module, "_unique_push_destination", new=mock.AsyncMock(
+                                                  return_value="synthetic-endpoint")),
+                                mock.patch.object(module, "_remote_destination_oid", new=mock.AsyncMock(
+                                                  return_value=exclusions[0] if len(exclusions) == 1 else None)),
+                                mock.patch.object(module, "_remote_ref_tip_oids", new=mock.AsyncMock(return_value=())),
+                                mock.patch.object(module, "_local_remote_commit_tip_oids", new=mock.AsyncMock(
+                                                  return_value=exclusions)),
+                                mock.patch.object(module, "_native_prior_receiver_roots", new=mock.AsyncMock(
+                                                  return_value=exclusions)),
+                                mock.patch.object(module, "_read_parent_graph_bounded", new=reader),
+                                mock.patch.object(module, "_read_git_oid_lines_bounded", new=reader),
+                            ):
+                                if native:
+                                    result = await module._native_commit_range_selection(
+                                        primary, request, module.time.monotonic() + 30)
+                                else:
+                                    result = await module._range_selection(primary)
+
+                            self.assertEqual(len(calls), 2)
+                            self.assertEqual(result.expected_parents, ((tip, ()),))
+                            self.assertEqual(result.expected_oids, (tip,))
+                            self.assertEqual(result.object_oids, (tip,))
+
+                        asyncio.run(run_case())
+
+    def test_revision_stdin_matches_git_argv_on_synthetic_graph(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_revision_stdin_real")
+        for fmt in (module._SHA1_OBJECT_FORMAT, module._SHA256_OBJECT_FORMAT):
+            with self.subTest(format=fmt.name), tempfile.TemporaryDirectory() as td:
+                repo = self._init_range_repo(Path(td), publish_seed=False, object_format=fmt.name)
+                prior = self._commit(repo, "ancestor.txt", "prior", "prior")
+                self._commit(repo, "first.txt", "first", "first")
+                tip = self._commit(repo, "tip.txt", "tip", "tip")
+                for exclusions in ((), (prior,)):
+                    exclusion_args = ("--not", *exclusions) if exclusions else ()
+                    flags = ("--parents", "--topo-order")
+                    baseline_graph = self._git_run(
+                        repo, "--no-replace-objects", "rev-list", *flags, tip, *exclusion_args
+                    ).stdout.splitlines()
+                    object_flags = ("--objects", "--no-object-names")
+                    baseline_objects = self._git_run(
+                        repo, "--no-replace-objects", "rev-list", *object_flags, tip, *exclusion_args
+                    ).stdout.splitlines()
+
+                    async def read_graph():
+                        deadline = asyncio.get_running_loop().time() + 20
+                        revisions = module._revision_stdin((tip,), exclusions)
+                        argv = (_git(), "-C", str(repo), "--no-replace-objects", "rev-list")
+                        graph = await module._read_parent_graph_bounded(
+                            (*argv, *flags, "--stdin"), deadline=deadline,
+                            object_format=fmt, input_bytes=revisions)
+                        objects = await module._read_git_oid_lines_bounded(
+                            (*argv, *object_flags, "--stdin"), deadline=deadline,
+                            object_format=fmt, input_bytes=revisions, count_cap=100,
+                            byte_cap=fmt.list_byte_cap(100))
+                        return graph, objects
+
+                    graph, objects = asyncio.run(read_graph())
+                    self.assertEqual(graph, tuple((oid, tuple(parents)) for oid, *parents in
+                                                 (row.split() for row in baseline_graph)))
+                    self.assertEqual(objects, tuple(baseline_objects))
 
     def test_range_missing_destination_accepts_exact_ref_cap_with_tag_peels(self) -> None:
         module = _load_canonical_scanner("_scanner_v3_remote_ref_inventory_exact_cap")
@@ -4504,6 +4693,74 @@ class TestPublicationSafetyScannerR2Contract(unittest.TestCase):
 
     def _module(self, suffix: str):
         return _load_canonical_scanner("_scanner_r2_" + suffix)
+
+    def test_object_reader_uses_owner_deadline_without_inventing_shorter_limit(self) -> None:
+        module = self._module("object_deadline")
+        oid = "a" * 40
+        for operation in ("read", "classify"):
+            for case, owner, explicit, expected, writes in (
+                ("within-owner", 120.0, None, None, True),
+                ("expired-owner", 100.0, None, "PS-MSG-READ-TIMEOUT", False),
+                ("invalid-owner", float("inf"), None, "PS-MSG-READ-TIMEOUT", False),
+                ("short-owner", 104.0, None, "PS-MSG-READ-TIMEOUT", True),
+                ("short-explicit", 120.0, 4.0, "PS-MSG-READ-TIMEOUT", True),
+                ("standalone-default", None, None, "PS-MSG-READ-TIMEOUT", True),
+                ("standalone-explicit", None, 8.0, None, True),
+            ):
+                with self.subTest(operation=operation, case=case):
+                    async def exercise():
+                        loop = asyncio.get_running_loop()
+                        elapsed = 100.0
+                        read_deadlines = []
+                        stdin = mock.Mock(drain=mock.AsyncMock())
+                        stdout = mock.Mock(
+                            readline=mock.AsyncMock(return_value=(oid + " blob 1\n").encode("ascii")),
+                            readexactly=mock.AsyncMock(side_effect=(b"x", b"\n")),
+                        )
+                        reader = module._AsyncGitObjectReader(
+                            **({} if explicit is None else {"request_timeout": explicit})
+                        )
+                        reader._process = mock.Mock(stdin=stdin, stdout=stdout)
+                        reader._state = module.ReaderState.ACTIVE
+
+                        async def complete(awaitable, deadline):
+                            nonlocal elapsed
+                            read_deadlines.append(deadline)
+                            # More than the old five-second default before the first operation completes.
+                            elapsed = 106.0
+                            if elapsed >= deadline:
+                                awaitable.close()
+                                raise asyncio.TimeoutError
+                            return await awaitable
+
+                        with mock.patch.object(loop, "time", side_effect=lambda: elapsed), \
+                                mock.patch.object(reader, "_within", new=complete):
+                            if operation == "read":
+                                result = await reader.read(oid, "blob", scan_deadline=owner)
+                            else:
+                                result = await reader.classify(
+                                    oid, object_format=module._SHA1_OBJECT_FORMAT, scan_deadline=owner)
+
+                        self.assertEqual(stdin.write.called, writes)
+                        if expected is None:
+                            self.assertNotIsInstance(result, module.Refusal)
+                            if operation == "read":
+                                self.assertEqual(result.raw, b"x")
+                            else:
+                                self.assertEqual(result.object_type, "blob")
+                        else:
+                            self.assertEqual(result.failure_id, expected)
+                            self.assertTrue(reader._poisoned)
+                        if writes:
+                            limit = (owner if explicit is None and owner is not None
+                                     else min(owner, 100.0 + explicit) if owner is not None
+                                     else 100.0 + (5.0 if explicit is None else explicit))
+                            self.assertTrue(read_deadlines)
+                            self.assertEqual(set(read_deadlines), {limit})
+                        else:
+                            self.assertEqual(read_deadlines, [])
+
+                    asyncio.run(exercise())
 
     def test_r2_async_reader_and_coverage_contract_exist(self) -> None:
         module = self._module("owners")

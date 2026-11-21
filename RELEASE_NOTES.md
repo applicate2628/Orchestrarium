@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-21
 
+- Check large commit histories without a cumulative message-size cutoff. The scanner examines each bounded commit or tag and retains only structural metadata. Verify line bounds once per blob while preserving every path-specific check. Stream the same qualified Git revision inputs through the owned reader, avoiding the Windows command-line length limit on wide histories. Scoped Git object reads share the scan deadline rather than imposing a second default timeout. Findings, incomplete checks and publication authority stay distinct.
+
 - Add an opt-in local publication history report that identifies flagged commit messages by commit ID and line without exposing message text. The report binds the result to the checked range, marks truncated output, and does not change or authorize publication.
 
 - Run shared hook upgrade tests without an installed Codex executable. The rollback test now verifies that the simulated post-write health check actually ran before it checks restoration.

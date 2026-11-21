@@ -10,6 +10,7 @@ from enum import Enum
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import re
 import secrets
@@ -347,7 +348,6 @@ _MAX_SUBJECTS = 1_000_000
 _MAX_BLOB_PATHS = 50_000
 _MAX_PATH_BYTES = 4_096
 _MAX_MESSAGE_BYTES = 1_048_576
-_MAX_AGGREGATE_MESSAGE_BYTES = 16_777_216
 _MAX_COMMIT_TREE_BYTES = 1_048_576
 _MAX_TREE_CACHE_BYTES = 64 * 1_048_576
 _MAX_BLOB_BYTES = 64 * 1_048_576
@@ -709,7 +709,6 @@ ReapCertificate = ReaderReapCertificate
 @dataclass(frozen=True)
 class DecodedMessage:
     text: str
-    raw_size: int
 
 
 @dataclass(frozen=True)
@@ -3619,6 +3618,12 @@ def _range_request(
     return RangeRequest(remote, destination, effective_source)
 
 
+def _revision_stdin(roots: tuple[str, ...], exclusions: tuple[str, ...]) -> bytes:
+    """Frame already verified object IDs for the owned, bounded Git stdin feeder."""
+    positive = b"".join(oid.encode("ascii") + b"\n" for oid in roots)
+    return positive + b"".join(b"^" + oid.encode("ascii") + b"\n" for oid in exclusions)
+
+
 async def _range_selection(
     request: RangeRequest,
     deadline: float | None = None,
@@ -3693,27 +3698,28 @@ async def _range_selection(
         )
         if isinstance(local_commit_tips, Refusal):
             return local_commit_tips
-        exclusion = () if not local_commit_tips else ("--not", *local_commit_tips)
+        exclusions = local_commit_tips
     else:
-        exclusion = ("--not", destination_oid)
+        exclusions = (destination_oid,)
+    revisions = _revision_stdin((tip,), exclusions)
     parent_graph = await _read_parent_graph_bounded(
-        _range_git_argv("rev-list", "--parents", "--topo-order", tip, *exclusion),
+        _range_git_argv("rev-list", "--parents", "--topo-order", "--stdin"),
         deadline=asyncio.get_running_loop().time()
         + max(0.0, deadline - time.monotonic()),
         object_format=object_format,
+        input_bytes=revisions,
     )
     if isinstance(parent_graph, Refusal):
         return parent_graph
     commit_ids = tuple(oid for oid, _parents in parent_graph)
     object_ids = await _read_git_oid_lines_bounded(
-        _range_git_argv(
-            "rev-list", "--objects", "--no-object-names", tip, *exclusion
-        ),
+        _range_git_argv("rev-list", "--objects", "--no-object-names", "--stdin"),
         count_cap=_MAX_OBJECTS,
         byte_cap=object_format.list_byte_cap(_MAX_OBJECTS),
         deadline=asyncio.get_running_loop().time()
         + max(0.0, deadline - time.monotonic()),
         object_format=object_format,
+        input_bytes=revisions,
     )
     if isinstance(object_ids, Refusal):
         return object_ids
@@ -3811,8 +3817,7 @@ async def _native_push_selection(request: NativePushRequest, deadline: float) ->
     exclusions = await _native_prior_receiver_roots(request, deadline, inventory=inventory)
     if isinstance(exclusions, Refusal):
         return exclusions
-    revisions = b"".join((oid.encode("ascii") + b"\n") for oid in roots)
-    revisions += b"".join((b"^" + oid.encode("ascii") + b"\n") for oid in exclusions)
+    revisions = _revision_stdin(roots, exclusions)
     parent_graph = await _read_parent_graph_bounded(
         _range_git_argv("rev-list", "--parents", "--topo-order", "--stdin"),
         deadline=loop_deadline, object_format=request.object_format, input_bytes=revisions,
@@ -3854,7 +3859,6 @@ async def _native_commit_range_selection(
     prior_roots = await _native_prior_receiver_roots(request, deadline)
     if isinstance(prior_roots, Refusal):
         return prior_roots
-    exclusion = ("--not", *prior_roots) if prior_roots else ()
     for row in request.updates:
         if row.local_oid == zero:
             continue
@@ -3866,16 +3870,17 @@ async def _native_commit_range_selection(
         if selected_primary is None:
             selected_primary = (os.fsdecode(row.remote_ref), tip)
         loop_deadline = asyncio.get_running_loop().time() + _remaining_seconds(deadline)
+        revisions = _revision_stdin((tip,), prior_roots)
         graph = await _read_parent_graph_bounded(
-            _range_git_argv("rev-list", "--parents", "--topo-order", tip, *exclusion),
-            deadline=loop_deadline, object_format=object_format,
+            _range_git_argv("rev-list", "--parents", "--topo-order", "--stdin"),
+            deadline=loop_deadline, object_format=object_format, input_bytes=revisions,
         )
         if isinstance(graph, Refusal):
             return graph
         selected_objects = await _read_git_oid_lines_bounded(
-            _range_git_argv("rev-list", "--objects", "--no-object-names", tip, *exclusion),
+            _range_git_argv("rev-list", "--objects", "--no-object-names", "--stdin"),
             count_cap=_MAX_OBJECTS, byte_cap=object_format.list_byte_cap(_MAX_OBJECTS),
-            deadline=loop_deadline, object_format=object_format,
+            deadline=loop_deadline, object_format=object_format, input_bytes=revisions,
         )
         if isinstance(selected_objects, Refusal):
             return selected_objects
@@ -3982,7 +3987,7 @@ class _AsyncGitObjectReader:
         self,
         *,
         argv: tuple[str, ...] = _range_git_argv("cat-file", "--batch"),
-        request_timeout: float = _OBJECT_REQUEST_TIMEOUT_SECONDS,
+        request_timeout: float | None = None,
         settle_timeout: float = OBJECT_REAP_ATTEMPT_SECONDS,
     ) -> None:
         self._argv = argv
@@ -4038,6 +4043,24 @@ class _AsyncGitObjectReader:
         self._state = ReaderState.ACTIVE
         return None
 
+    def _request_deadline(self, scan_deadline: float | None) -> float:
+        now = asyncio.get_running_loop().time()
+        if scan_deadline is None:
+            budget = (
+                self._request_timeout
+                if self._request_timeout is not None else _OBJECT_REQUEST_TIMEOUT_SECONDS
+            )
+            deadline = now + budget
+        elif not math.isfinite(scan_deadline):
+            raise asyncio.TimeoutError
+        elif self._request_timeout is None:
+            deadline = scan_deadline
+        else:
+            deadline = min(scan_deadline, now + self._request_timeout)
+        if not math.isfinite(deadline) or deadline <= now:
+            raise asyncio.TimeoutError
+        return deadline
+
     async def _within(self, awaitable, deadline: float):
         remaining = deadline - asyncio.get_running_loop().time()
         if remaining <= 0:
@@ -4063,10 +4086,8 @@ class _AsyncGitObjectReader:
             or process.stdout is None
         ):
             return _refusal("PS-MSG-READ", "reader-state")
-        deadline = asyncio.get_running_loop().time() + self._request_timeout
-        if scan_deadline is not None:
-            deadline = min(deadline, scan_deadline)
         try:
+            deadline = self._request_deadline(scan_deadline)
             process.stdin.write(oid.encode("ascii") + b"\n")
             await self._within(process.stdin.drain(), deadline)
             header = await self._within(process.stdout.readline(), deadline)
@@ -4139,10 +4160,8 @@ class _AsyncGitObjectReader:
             or b"\r" in encoded_name
         ):
             return _refusal("PS-MSG-FRAME", "batch-check-request")
-        deadline = asyncio.get_running_loop().time() + self._request_timeout
-        if scan_deadline is not None:
-            deadline = min(deadline, scan_deadline)
         try:
+            deadline = self._request_deadline(scan_deadline)
             process.stdin.write(encoded_name + b"\n")
             await self._within(process.stdin.drain(), deadline)
             header = await self._within(process.stdout.readline(), deadline)
@@ -4348,7 +4367,7 @@ def _decode_commit_message(raw: bytes) -> DecodedMessage | Refusal:
     if declared not in (None, b"utf-8", b"utf8"):
         return _refusal("PS-MSG-DECODE", "encoding")
     try:
-        return DecodedMessage(message.decode("utf-8", "strict"), len(message))
+        return DecodedMessage(message.decode("utf-8", "strict"))
     except UnicodeDecodeError:
         return _refusal("PS-MSG-DECODE", "utf8")
 
@@ -4608,13 +4627,12 @@ async def _acquire_history(
     commit_set = set(selection.expected_oids)
     native = isinstance(selection, NativePushSelection)
     object_types: dict[str, str] = {}
-    commit_records: dict[str, CommitRecord] = {}
+    commit_topology: dict[str, tuple[str, tuple[str, ...]]] = {}
     tag_targets: dict[str, tuple[str, str]] = {}
     direct_tag_commit = None
     tree_cache: dict[str, bytes] = {}
     blob_records: dict[str, tuple[int, bytes, bool]] = {}
     findings: list[Finding] = []
-    aggregate_messages = 0
     # Total unique bytes are receipt evidence, not retained-cache allocation.
     # Payload memory is independent of this total; object/count/deadline guards
     # remain owned by the reader, traversal, and publication supervisor.
@@ -4663,9 +4681,6 @@ async def _acquire_history(
                 review_capture.metadata(record.message.text, "commit-message", find_machine_paths)
                 if native:
                     review_capture.metadata(header_text, "commit-header", find_machine_paths)
-            aggregate_messages += record.message.raw_size
-            if aggregate_messages > _MAX_AGGREGATE_MESSAGE_BYTES:
-                return _refusal("PS-MSG-LIMIT", "aggregate-message-bytes")
             _append_findings(findings, _content_hits(
                 record.message.text,
                 oid,
@@ -4674,14 +4689,15 @@ async def _acquire_history(
                 max_findings=max(0, _MAX_FINDINGS - len(findings)),
             ))
             coverage_recorder.record(CoverageEvent.SCANNED, oid)
-            commit_records[oid] = record
+            # Content is scanned synchronously; only topology survives this object.
+            commit_topology[oid] = (record.root_tree, record.parents)
+            del record
+            if native:
+                del header, header_text
         elif native and result.object_type == "tag":
             target = _decode_tag_target(result.raw, selection.object_format)
             if isinstance(target, Refusal):
                 return target
-            aggregate_messages += len(result.raw)
-            if aggregate_messages > _MAX_AGGREGATE_MESSAGE_BYTES:
-                return _refusal("PS-MSG-LIMIT", "aggregate-message-bytes")
             line_refusal = _line_limit_refusal(result.raw)
             if line_refusal is not None:
                 return line_refusal
@@ -4693,6 +4709,7 @@ async def _acquire_history(
             coverage_recorder.record(CoverageEvent.SCANNED, oid)
             if review_capture is not None:
                 review_capture.metadata(tag_text, "tag-object", find_machine_paths)
+            del tag_text
             tag_targets[oid] = target
             if selection.tag_receiver_inventory is not None:
                 tag_row = _native_new_same_name_tag(selection.request)
@@ -4712,6 +4729,11 @@ async def _acquire_history(
                 return _refusal("PS-MSG-COVERAGE", "object-content-identity")
             if len(blob_records) >= _MAX_BLOBS:
                 return _refusal("PS-MSG-LIMIT", "blob-count")
+            # The line bound is a property of the verified bytes, not their paths.
+            # Every path reuses only data whose identity is checked again.
+            line_refusal = _line_limit_refusal(result.raw)
+            if line_refusal is not None:
+                return line_refusal
             aggregate_blobs += len(result.raw)
             # Keep identity and disposition, not the complete payload history.
             blob_records[oid] = (
@@ -4724,14 +4746,14 @@ async def _acquire_history(
 
     if tuple(object_types) != selection.object_oids:
         return _refusal("PS-MSG-COVERAGE", "object-set")
-    if set(commit_records) != commit_set:
+    if set(commit_topology) != commit_set:
         return _refusal("PS-MSG-COVERAGE", "commit-set")
     if selection.expected_parents:
         expected_parents = dict(selection.expected_parents)
         if set(expected_parents) != commit_set:
             return _refusal("PS-MSG-COVERAGE", "parent-graph-set")
         if any(
-            commit_records[oid].parents != expected_parents[oid]
+            commit_topology[oid][1] != expected_parents[oid]
             for oid in selection.expected_oids
         ):
             return _refusal("PS-MSG-COVERAGE", "parent-graph")
@@ -4795,7 +4817,7 @@ async def _acquire_history(
     subject_modes: dict[tuple[str, bytes, str], str] = {}
     subject_set: set[tuple[str, bytes, str]] = set()
     native_metadata_paths: set[tuple[str, bytes]] = set()
-    tree_roots = [(oid, commit_records[oid].root_tree) for oid in selection.expected_oids]
+    tree_roots = [(oid, commit_topology[oid][0]) for oid in selection.expected_oids]
     direct_blobs = []
     if native:
         for root in selection.roots:
@@ -4946,9 +4968,6 @@ async def _acquire_history(
         decoded_path = path.decode("utf-8", "surrogateescape")
         if not native:
             _append_findings(findings, _filename_findings(decoded_path, "history-blob"))
-        line_refusal = _line_limit_refusal(raw)
-        if line_refusal is not None:
-            return line_refusal
         if review_capture is not None:
             review_capture.observe(raw, path, blob_oid,
                 subjects_by_path.get((path, blob_oid), ()), commit_set,
