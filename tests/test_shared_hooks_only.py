@@ -311,6 +311,94 @@ def test_shared_upgrade_retires_joint_owned_group_without_shifting_foreign(
         assert (s.common.read_bytes(), s.sidecar.read_bytes()) == published
 
 
+@pytest.mark.parametrize("shared_prior", [True], indirect=True)
+@pytest.mark.parametrize("owned_count, retirement", [
+    (1, None), (2, None), (1, "customized"), (2, "first"), (2, "last"),
+], ids=["single-matcher-change", "joint-matcher-change", "permanent-retirement",
+        "retire-before-move", "move-before-retire"])
+def test_shared_upgrade_preserves_customized_handlers_or_refuses_retirement(
+    shared_prior, monkeypatch, capsys, owned_count, retirement,
+):
+    s = shared_prior
+    args = ["--global", "--shared-hook-runtime", "--hooks-only"]
+    assert PI.install("codex", args) == 0
+    previous = PI._hook_specs("codex", s.retained)
+    selected = set(sorted(stem for stem, _, event, matcher in previous
+                          if (event, matcher) == ("PostToolUse", "OldTool"))[:owned_count])
+    assert len(selected) == owned_count
+    data = json.loads(s.common.read_bytes())
+    targets, _ = s.health._selected_hook_targets(previous)
+    rows = list(s.health._owned_records(data, selected, "codex", s.host, targets))
+    assert len(rows) == owned_count
+    retiring = ({rows[0 if retirement != "last" else -1][5].marker}
+                if retirement is not None else set())
+    extras = {}
+    for index, (_, _, _, _, handler, record) in enumerate(rows):
+        if retirement in {"first", "last"} and record.marker in retiring:
+            continue
+        extras[record.marker] = {"timeout": 91 + index,
+                                 "customMetadata": {"owner": record.marker, "labels": ["keep", index]}}
+        handler.update(extras[record.marker])
+    first = rows[0]
+    foreign = {"type": "command", "command": "unrelated-operator-hook", "timeout": 7}
+    groups = data["hooks"]["PostToolUse"]
+    groups[first[1]]["groupMetadata"] = {"operator": "keep"}
+    groups[first[1]]["hooks"] = [foreign, *(row[4] for row in rows)]
+    for row in rows[1:]:
+        groups[row[1]]["hooks"] = []
+    s.common.write_bytes(HELPER.encode_hook_config(data))
+    before = {p: (p.read_bytes(), p.stat().st_ino) for p in s.before}
+    alias = (s.alias.lstat().st_ino, os.readlink(s.alias))
+    _, identities = s.health._load_codex_inventory(s.sidecar, target=s.alias, host_os=s.host)
+    old_python = Path(json.loads(next(iter(identities)))["command"].split("\0")[0])
+    replacement = s.tmp_path / "next-release" / "lead"
+    desired = [(stem, replacement / script.relative_to(s.retained), event,
+                "NewTool" if stem in selected else matcher)
+               for stem, script, event, matcher in previous
+               if stem not in retiring]
+    for _, script, _, _ in desired:
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text("pass\n", encoding="utf-8")
+    original_specs = PI._hook_specs
+    monkeypatch.setattr(PI, "_hook_specs", lambda provider, lead:
+                        desired if lead == replacement else original_specs(provider, lead))
+    monkeypatch.setattr(PI, "_retained_codex_hook_root", lambda *_args: replacement)
+    monkeypatch.setattr(PI, "_previous_retained_hook_root",
+                        lambda *_args: (s.retained, old_python, previous))
+    chosen = [*args, "--previous-retained-release", str(s.retained.parent)]
+
+    expected = int(retirement == "customized")
+    assert PI.install("codex", [*chosen, "--dry-run"]) == expected
+    assert all((p.read_bytes(), p.stat().st_ino) == value for p, value in before.items())
+    assert PI.install("codex", chosen) == expected
+    assert (s.alias.lstat().st_ino, os.readlink(s.alias)) == alias
+    assert all((p.read_bytes(), p.stat().st_ino) == before[p]
+               for p in (s.settings, s.owner_receipt))
+    if retirement == "customized":
+        assert all((p.read_bytes(), p.stat().st_ino) == value for p, value in before.items())
+        assert "cause=validation-failed" in capsys.readouterr().err
+        assert len(s.calls) == 2
+        return
+
+    result = json.loads(s.common.read_bytes())
+    assert result["hooks"][s.event][0] == s.foreign
+    assert result["hooks"]["PostToolUse"][first[1]] == {
+        "matcher": "OldTool", "groupMetadata": {"operator": "keep"}, "hooks": [foreign],
+    }
+    assert not list(s.health._owned_records(result, selected, "codex", s.host, targets))
+    desired_targets, _ = s.health._selected_hook_targets(desired)
+    registered = list(s.health._owned_records(result, selected, "codex", s.host, desired_targets))
+    assert len(registered) == owned_count - len(retiring)
+    assert {row[5].marker for row in registered} == selected - retiring
+    for event, _, _, group, handler, record in registered:
+        assert event == "PostToolUse" and group["matcher"] == "NewTool"
+        assert {key: handler[key] for key in extras[record.marker]} == extras[record.marker]
+        assert handler["statusMessage"] == PI._CODEX_HOOK_STATUS_MESSAGES[record.marker]
+    published = {p: (p.read_bytes(), p.stat().st_ino) for p in (s.common, s.sidecar)}
+    assert PI.install("codex", chosen) == 0
+    assert all((p.read_bytes(), p.stat().st_ino) == value for p, value in published.items())
+
+
 def test_retained_catalog_reads_its_own_literals_without_executing(tmp_path):
     catalog = tmp_path / "universal_hooks_manifest.py"
     catalog.write_text(

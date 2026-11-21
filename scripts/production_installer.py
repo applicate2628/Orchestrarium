@@ -12486,7 +12486,7 @@ def _install_hooks(
     prior_installed_root: Path | None = None,
     hooks_only_recheck=None,
     prior_specs=None,
-    scoped_retirements=(),
+    scoped_transitions=(),
     preview: bool = False,
 ) -> None:
     installer = root / "scripts" / "install-hypothesis-hook.py"
@@ -12604,7 +12604,37 @@ def _install_hooks(
         if health_module is not None and not preview and registration.is_file()
         else {}
     )
-    for marker, event, expected_entry in scoped_retirements:
+    def install_selected(spec):
+        marker, script, event, matcher = spec
+        recheck_legacy(marker)
+        if portable_inventory:
+            health_module._recheck_selected_hook_targets(predecessor_witnesses, marker)
+        try:
+            require_namespace()
+            hook_target = helper.resolve_hook_target(str(script), host, provider)
+            entry = (helper.build_codex_entry(hook_target, host, event, matcher,
+                                             _CODEX_HOOK_STATUS_MESSAGES[marker])
+                     if provider == "codex" else helper.build_claude_entry(hook_target, event, matcher))
+            _transform_hook_registration(helper, registration, mutable_owner, marker, event,
+                                         provider, host, entry=entry, managed_targets=managed_targets,
+                                         staged_data=staged_data)
+            recheck_legacy(marker)
+            if portable_inventory:
+                health_module._recheck_selected_hook_targets(predecessor_witnesses, marker)
+        except helper.CodexHookSlotShift as exc:
+            raise _InstallFailure(exc.stable_id, "migration", exc) from exc
+        except (OSError, ValueError, SystemExit) as exc:
+            raise RuntimeError(f"hook registration failed for {marker}") from exc
+
+    selected_by_marker = {spec[0]: spec for spec in selected_specs}
+    relocated = set()
+    for marker, event, expected_entry in scoped_transitions:
+        successor = selected_by_marker.get(marker)
+        if successor is not None and successor[2] == event:
+            # The update owner carries handler metadata to the new matcher.
+            install_selected(successor)
+            relocated.add(marker)
+            continue
         require_namespace()
         try:
             if not helper.remove(staged_data, event, marker, expected_entry=expected_entry,
@@ -12654,27 +12684,14 @@ def _install_hooks(
             else registration.parent / CODEX_HOOK_INVENTORY
         )
     for marker, script, event, matcher in selected_specs:
+        if marker in relocated:
+            continue
+        if owned or preview:
+            install_selected((marker, script, event, matcher))
+            continue
         recheck_legacy(marker)
         if portable_inventory:
             health_module._recheck_selected_hook_targets(predecessor_witnesses, marker)
-        if owned or preview:
-            try:
-                require_namespace()
-                hook_target = helper.resolve_hook_target(str(script), host, provider)
-                entry = (helper.build_codex_entry(hook_target, host, event, matcher,
-                                                 _CODEX_HOOK_STATUS_MESSAGES[marker])
-                         if provider == "codex" else helper.build_claude_entry(hook_target, event, matcher))
-                _transform_hook_registration(helper, registration, mutable_owner, marker, event,
-                                             provider, host, entry=entry, managed_targets=managed_targets,
-                                             staged_data=staged_data)
-                recheck_legacy(marker)
-                if portable_inventory:
-                    health_module._recheck_selected_hook_targets(predecessor_witnesses, marker)
-            except helper.CodexHookSlotShift as exc:
-                raise _InstallFailure(exc.stable_id, "migration", exc) from exc
-            except (OSError, ValueError, SystemExit) as exc:
-                raise RuntimeError(f"hook registration failed for {marker}") from exc
-            continue
         arguments = [*base, "--script-marker", marker, "--script-path", str(script)]
         if event != "PreToolUse":
             arguments.extend(["--hook-event", event])
@@ -13557,16 +13574,16 @@ def _apply_shared_hooks_only(root: Path, target: Path, *, dry_run: bool,
         stem: (event, helper._with_event_matcher({}, event, matcher).get("matcher"))
         for stem, _script, event, matcher in _hook_specs("codex", retained)
     }
-    retirements = [
+    transitions = [
         (record.marker, event, {"matcher": group.get("matcher"), "hooks": [handler]})
         for event, _, _, group, handler, record in health._owned_records(data, expected, "codex", host, targets)
         if desired_groups.get(record.marker) != (event, group.get("matcher"))
     ]
-    # _owned_records walks each group from first slot to last. Retire from
-    # the end so a jointly retired handler is never mistaken for a survivor.
-    retirements.reverse()
+    # Move and retire from each group's end so another selected transition
+    # is never mistaken for a survivor. Unchanged handlers keep their slots.
+    transitions.reverse()
     kwargs = {"prior_installed_root": predecessor, "hooks_only_recheck": recheck,
-              "prior_specs": specs, "scoped_retirements": retirements}
+              "prior_specs": specs, "scoped_transitions": transitions}
     if dry_run:
         _install_hooks(root, "codex", registration, retained, "global", inventory,
                        preview=True, **kwargs)

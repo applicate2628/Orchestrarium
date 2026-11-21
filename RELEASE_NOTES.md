@@ -5,6 +5,10 @@ A dated entry is not a release tag, publication notice, or confirmation of a
 local installation. For the frozen pre-SDK baseline and draft follow-up, see
 [Which version?](README.md#which-version).
 
+## 2026-11-21
+
+- Preserve operator-supplied handler fields, including timeouts, when a shared hook upgrade changes its tool matcher. Joint relocations and mixed relocation/retirement groups now preserve those fields and neighboring registration positions. Permanent removal retains its existing ownership checks.
+
 ## 2026-11-20
 
 - Fix uninstall of untouched documents created by a fresh install. After exact removal, the installer expects the document to be absent at its validated location instead of treating its own removal as drift. Edited or unrelated files remain protected, and a late failure still rolls back the removal.
