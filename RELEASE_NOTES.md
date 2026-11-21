@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-21
 
+- Require material changes and reviews to verify owners, contracts, and active enforcement along the affected execution path, without adding a new workflow gate.
+
 - Expose exact machine-path match positions from the existing classifier so review preparation can represent the same findings as the publication scanner. Detection and required review decisions are unchanged.
 
 - Group repeated unresolved history-file findings before applying the ordinary scanner display limit. Distinct locations stay visible instead of being displaced by the same line in multiple commits. Review still evaluates each commit, and the publication decision is unchanged.
