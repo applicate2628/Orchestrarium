@@ -9,7 +9,12 @@ from pathlib import Path
 import sys
 import tracemalloc
 import unittest
+
+import pytest
 from unittest import mock
+
+pytestmark = pytest.mark.usefixtures("isolated_standalone_review_modules")
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
@@ -104,7 +109,7 @@ class RetainedPayloadTests(unittest.TestCase):
         evaluation.read = SimpleNamespace(usable_records=(object(),))
         evaluation.repository_observation = {"status": "captured", "repository": {}, "diagnostic": "none"}
         evaluation.unresolved = 0
-        evaluation._analysis = {}
+        evaluation._analysis = None
         evaluation._machine_path_analysis = None
         evaluation._clean_line_analysis = scanner._CleanLineAnalysis()
         finder = mock.Mock(side_effect=lambda line: "marked" in line)
@@ -233,7 +238,7 @@ class RetainedPayloadTests(unittest.TestCase):
                     self.assertEqual(context["git_mode"], "100644")
                 expected_subjects = tuple(sorted((commit_id, path, value)
                                                  for path, value in pairs))
-                self.assertEqual(history.subjects, expected_subjects)
+                self.assertEqual(len(history.subjects), len(expected_subjects))
                 self.assertEqual(history.subject_set,
                                  scanner._subject_set_digest(expected_subjects))
                 self.assertEqual(history.text_blobs, 3)
@@ -275,6 +280,72 @@ class RetainedPayloadTests(unittest.TestCase):
                     else:
                         self.assertIsInstance(result, scanner.Refusal)
                         self.assertEqual(result.failure_id, "PS-MSG-READ-TIMEOUT")
+
+    def test_total_history_subjects_are_not_a_retained_row_budget(self):
+        selection, objects, _ = fixture(repeated=True)
+        with mock.patch.object(scanner, "_MAX_SUBJECTS", 2, create=True):
+            result = acquire(selection, Reader(objects))
+        self.assertNotIsInstance(result, scanner.Refusal)
+        history, coverage, findings = result
+        root = selection.roots[0]
+        expected = tuple(sorted(
+            (root, item.name, item.oid)
+            for item in scanner._parse_tree(objects[root][1], selection.object_format)
+        ))
+        self.assertEqual(len(history.subjects), len(expected))
+        self.assertEqual(history.subject_set, scanner._subject_set_digest(expected))
+        self.assertEqual(coverage.scanned_count, len(selection.object_oids))
+        self.assertFalse(findings)
+
+    def test_multiple_commit_owners_preserve_binary_path_order_and_identity(self):
+        selection, objects, _ = fixture()
+        blob = selection.object_oids[-1]
+        paths = (b'a', b'x-\x7f', b'x-\xff')
+        # Embed normalized Git tree rows directly; Windows need not create
+        # filenames whose raw Git path bytes cannot be represented locally.
+        raw_tree = b''.join(b'100644 '+name+b'\0'+bytes.fromhex(blob) for name in paths)
+        tree = oid('tree', raw_tree)
+        objects = {blob: objects[blob], tree: ('tree', raw_tree)}
+        commits = []
+        for i in range(17):
+            raw = (f'tree {tree}\nauthor Fixture <fixture@example.test> 1 +0000\n'
+                   f'committer Fixture <fixture@example.test> 1 +0000\n\nChange {i}\n').encode()
+            commit = oid('commit', raw)
+            objects[commit] = ('commit', raw)
+            commits.append(commit)
+        chosen = scanner.NativePushSelection(
+            None, tuple(commits), (*commits, tree, blob), scanner._SHA1_OBJECT_FORMAT,
+            tuple(commits),
+        )
+        history, coverage, findings = acquire(chosen, Reader(objects))
+        subjects = tuple(sorted((owner, path, blob) for owner in commits for path in paths))
+        self.assertEqual(len(history.subjects), len(subjects))
+        self.assertEqual(history.subject_set, scanner._subject_set_digest(subjects))
+        self.assertEqual(history.path_set, scanner._path_set_digest((blob, path) for path in paths))
+        self.assertEqual(coverage.scanned_count, len(chosen.object_oids))
+        self.assertFalse(findings)
+
+    def test_tree_cache_capacity_controls_retention_not_coverage(self):
+        selection, objects, _ = fixture(repeated=True)
+        expected, _, _ = acquire(selection, Reader(objects))
+        reader = Reader(objects)
+        with mock.patch.object(scanner, "_TREE_CACHE_BYTES", 1):
+            result = acquire(selection, reader)
+        self.assertNotIsInstance(result, scanner.Refusal)
+        history, coverage, findings = result
+        self.assertEqual(history.subject_set, expected.subject_set)
+        self.assertEqual(history.path_set, expected.path_set)
+        self.assertEqual(coverage.scanned_count, len(selection.object_oids))
+        self.assertEqual(reader.calls[selection.roots[0]], 2)
+        self.assertFalse(findings)
+
+    def test_storage_error_cannot_produce_coverage(self):
+        selection, objects, _ = fixture()
+        with mock.patch.object(scanner._HistoryIndex, "seal",
+                               side_effect=scanner.sqlite3.OperationalError("fixture")):
+            result = acquire(selection, Reader(objects))
+        self.assertIsInstance(result, scanner.Refusal)
+        self.assertEqual(result.reason, "coverage-storage")
 
     def test_blob_count_boundary_remains_enforced(self):
         selection, objects, _ = fixture()

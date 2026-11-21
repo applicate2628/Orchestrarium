@@ -80,8 +80,17 @@ publication, and display truncation of findings is not permission to continue.
 | Remote advertisement | `destination-ref`, `remote-ref-count` | Bound individual names and accumulated ref records before using the advertisement as evidence. |
 | Individual acquired objects | `commit-bytes`, `tree-bytes`, `tag-bytes`, `blob-bytes` | Reject an oversized object before reading its declared body into memory. |
 | Text processing | `message`, `line-bytes` | Bound individual decoding and line processing. Commit and tag text is processed one object at a time under the scan deadline; only commit topology and tag targets are retained. A verified blob's line bound is checked once, while each path still receives its own detector and review context. |
-| Tree traversal and cache | `tree-frontier`, `tree-visits`, `tree-visited`, `tree-cache-count`, `tree-cache-bytes` | Bound pending paths, recurring traversal work, distinct tree identities and retained cache memory. A repeated tree at a different path still contributes path evidence. |
-| Paths and scan subjects | `path-bytes`, `subject-count`, `blob-count`, `blob-path-count` | Bound expanded paths, coverage records, distinct blobs and path-specific blob work; one blob may appear at multiple paths. |
+| Tree traversal | tree-frontier | Bound simultaneously pending paths. Cache capacity evicts entries, not evidence; a repeated tree at a different path keeps its own path evidence. |
+| Paths and scanned blobs | path-bytes, blob-count | Bound an individual expanded path and the current unique blob inventory. Exact coverage rows and distinct path/blob pairs do not have a cardinality ceiling. |
+
+Historical coverage and path ownership are indexed in scan-owned temporary SQLite
+storage rather than retained in Python collections. The index streams exact
+ordered rows to the existing receipt digest and closes before a receipt is
+emitted. Temporary storage errors mean incomplete coverage, not a finding.
+Tree payload retention is a bounded eviction cache, not admission policy. A
+cache miss reloads and verifies the Git object's identity. The single scan
+deadline still bounds elapsed work and its generic refusal does not identify
+which phase used the time.
 
 These are distinct resource concerns, not proof that every current numeric
 default is appropriate for supported repositories. Before changing a default,

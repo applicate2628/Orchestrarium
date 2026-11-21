@@ -55,6 +55,8 @@ import tempfile
 import threading
 import time
 import unittest
+
+import pytest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -68,6 +70,9 @@ PUSH_GATE = REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-git
 SCANNERS = (CODEX_SCANNER, CLAUDE_SCANNER)
 
 BACKSLASH = chr(92)  # keep the literal backslash out of source path literals
+
+
+pytestmark = pytest.mark.usefixtures("isolated_standalone_review_modules")
 
 
 def _join(*parts: str) -> str:
@@ -2436,7 +2441,7 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
                 self.assertIsInstance(result, module.Refusal)
                 self.assertEqual(result.failure_id, failure_id, result)
 
-    def test_tree_traversal_refuses_frontier_visit_and_cache_caps(self) -> None:
+    def test_tree_traversal_frontier_is_bounded_without_a_cache_admission_cap(self) -> None:
         deadline_module = _load_canonical_scanner("_scanner_v3_tree_deadline")
 
         async def expired_guard():
@@ -2444,9 +2449,6 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             return deadline_module._tree_traversal_guard(
                 deadline=loop.time() - 1.0,
                 frontier=0,
-                visits=0,
-                visited=0,
-                cache_entries=0,
             )
 
         deadline_refusal = asyncio.run(expired_guard())
@@ -2458,19 +2460,17 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             previous = Path.cwd()
             try:
                 os.chdir(repo)
-                for name in (
-                    "_MAX_TREE_FRONTIER",
-                    "_MAX_TREE_VISITS",
-                    "_MAX_TREE_CACHE_ENTRIES",
-                ):
+                for name, expected in (("_MAX_TREE_FRONTIER", "refusal"),
+                                       ("_MAX_TREE_CACHE_ENTRIES", "clean")):
                     module = _load_canonical_scanner("_scanner_v3_tree_" + name.lower())
                     setattr(module, name, 0)
                     with self.subTest(cap=name):
                         outcome = module._scan_range(
                             "origin", "claude", lambda _line: []
                         )
-                        self.assertEqual(outcome.kind, "refusal")
-                        self.assertEqual(outcome.refusal.failure_id, "PS-MSG-LIMIT")
+                        self.assertEqual(outcome.kind, expected)
+                        if expected == "refusal":
+                            self.assertEqual(outcome.refusal.reason, "tree-frontier")
             finally:
                 os.chdir(previous)
 
@@ -6172,3 +6172,37 @@ class TestThisTestFileIsGateSafe(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_binary_run_memo_preserves_each_finding_and_machine_path_check(monkeypatch):
+    from types import SimpleNamespace
+
+    scanner = _load_canonical_scanner("_scanner_binary_run_memo")
+    lexical_inputs = []
+    path_inputs = []
+
+    def observations(line, number, offset, kind, *, binary):
+        lexical_inputs.append(line)
+        assert binary and kind == "history-blob"
+        if line.startswith("FLAG"):
+            item = SimpleNamespace(diagnostic_class="synthetic")
+            yield item
+            yield item
+
+    def paths(line):
+        path_inputs.append(line)
+        return line == "FLAG"
+
+    monkeypatch.setattr(scanner, "_line_observations", observations)
+    monkeypatch.setattr(scanner, "_observation_key", lambda item: item.diagnostic_class)
+    large = "FLAG" + "X" * 4096
+    raw = b"\0quiet\0FLAG\0quiet\n\0FLAG\0" + large.encode("ascii")
+    findings = scanner._binary_content_hits(raw, "fixture.bin", paths)
+    assert [(f.line, f.detector_class) for f in findings] == [
+        (1, "synthetic"), (1, "machine-path"),
+        (2, "synthetic"), (2, "machine-path"), (2, "synthetic"),
+    ]
+    assert path_inputs == ["quiet", "FLAG", "quiet", "FLAG", large]
+    assert lexical_inputs == ["quiet", "FLAG", large]
+    scanner._binary_content_hits(raw, "fixture.bin", paths)
+    assert lexical_inputs == ["quiet", "FLAG", large] * 2

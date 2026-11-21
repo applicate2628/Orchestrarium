@@ -81,8 +81,8 @@ The remaining bounds have distinct owners and purposes:
 | --- | --- | --- |
 | Current blob | 64 MiB, object reader | Bound one acquired payload and decoder input; oversized object refuses before payload acquisition. Copies and decoded forms still consume additional memory. |
 | Enumeration | 10,000 commits, 100,000 objects, 50,000 blobs, selection/acquisition | Bound inventories and their bookkeeping; no partial inventory is accepted. |
-| Traversal/context | 1,000,000 subjects/visits, 50,000 blob/path pairs, 4,096 path bytes, traversal | Bound path expansion, review contexts and rereads; exceeding a bound refuses instead of omitting contexts. |
-| Cached metadata | 1 MiB commit/tree object, 64 MiB tree cache, 16 MiB parent graph, reader/traversal | Bound retained structural data and parsing. These are engineering defaults, not Git protocol maxima. |
+| Traversal/context | 4,096 path bytes and pending frontier, traversal | Bound one expanded path and the live work queue. Exact subject and blob/path rows stream from the temporary index; total rows and visits are not admission limits. |
+| Cached metadata | 1 MiB commit/tree object, 64 MiB eviction cache, 16 MiB parent graph | Bound current metadata. The tree cache drops entries and verifies rereads rather than refusing. |
 | Messages/lines | 1 MiB message, 8 MiB line, scanner | Process each bounded object under the shared deadline and retain only structural metadata; no silent content truncation. |
 | Work deadline | 240 s scanner deadline; 300 s gate-owned child deadline | Scanner refuses late acquisition results. The gate independently supervises the scanner process and requires settled child execution before consuming evidence. |
 | Output | 32 displayed findings, diagnostic owner | Bound diagnostic output, not inspection scope or residual-finding evaluation. |

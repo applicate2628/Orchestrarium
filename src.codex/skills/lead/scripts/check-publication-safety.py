@@ -5,8 +5,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
-from collections import Counter
+from collections import Counter, OrderedDict
 from enum import Enum
+from functools import lru_cache
 import hashlib
 import importlib.util
 import json
@@ -15,6 +16,8 @@ import os
 import re
 import secrets
 import shutil
+import sqlite3
+from contextlib import closing
 import subprocess
 import sys
 import threading
@@ -344,12 +347,10 @@ _SCANNER_REGEX_CATALOG_LINE = re.compile(
 _MAX_COMMITS = 10_000
 _MAX_OBJECTS = 100_000
 _MAX_BLOBS = 50_000
-_MAX_SUBJECTS = 1_000_000
-_MAX_BLOB_PATHS = 50_000
 _MAX_PATH_BYTES = 4_096
 _MAX_MESSAGE_BYTES = 1_048_576
 _MAX_COMMIT_TREE_BYTES = 1_048_576
-_MAX_TREE_CACHE_BYTES = 64 * 1_048_576
+_TREE_CACHE_BYTES = 64 * 1_048_576
 _MAX_BLOB_BYTES = 64 * 1_048_576
 _MAX_REVIEW_CAPTURE_BYTES = 64 * 1_048_576
 # Blob payloads are not retained across acquisition: the per-object reader
@@ -369,7 +370,6 @@ def _publication_scan_budget_seconds() -> float:
 
 
 _SCAN_DEADLINE_SECONDS = _publication_scan_budget_seconds()
-_MAX_TREE_VISITS = _MAX_SUBJECTS
 _MAX_TREE_FRONTIER = _MAX_OBJECTS
 _MAX_TREE_CACHE_ENTRIES = _MAX_OBJECTS
 # Budget base refnames and optional tag peels within the parent-graph byte cap.
@@ -748,6 +748,15 @@ class RangeReceiptV3:
 
 
 @dataclass(frozen=True)
+class _SealedRows:
+    count: int
+    digest: str
+
+    def __len__(self) -> int:
+        return self.count
+
+
+@dataclass(frozen=True)
 class HistoryProof:
     commit_ids: tuple[str, ...]
     object_ids: tuple[str, ...]
@@ -755,8 +764,8 @@ class HistoryProof:
     blob_bytes: int
     text_blobs: int
     binary_blobs: int
-    subjects: tuple[tuple[str, bytes, str], ...]
-    paths: tuple[tuple[str, bytes], ...]
+    subjects: _SealedRows | tuple[tuple[str, bytes, str], ...]
+    paths: _SealedRows | tuple[tuple[str, bytes], ...]
     commit_set: str
     object_set: str
     blob_set: str
@@ -1806,7 +1815,8 @@ def _machine_path_review_rows(raw: bytes, path: str, subject_kind: str, finder, 
     owner = _machine_path_review_definition(finder, policy_module)
     if owner is None:
         return None
-    text, boundaries = _original_byte_boundaries(raw)
+    text = raw.decode("utf-8", "strict")
+    boundaries = None
     rows = []
     for number, offset, line in _selected_text_lines(text, path, subject_kind):
         if machine_path_lines is not None and number not in machine_path_lines:
@@ -1821,6 +1831,8 @@ def _machine_path_review_rows(raw: bytes, path: str, subject_kind: str, finder, 
         # Classifier stays the coverage owner. A disagreement cannot grant credit.
         if set(finder(line)) != {line[a:b] for a,b in spans}:
             raise RuntimeError("review-path-witness")
+        if spans and boundaries is None:
+            _, boundaries = _original_byte_boundaries(raw)
         for start, end in spans:
             region = _byte_region(raw, boundaries[offset+start], boundaries[offset+end])
             candidate = {"normalFormId": "nf-machine-path-match-v1", **region,
@@ -2187,7 +2199,7 @@ class ReviewEvaluation:
         self.repository_observation = repository_observation
         self.execution = execution
         self.unresolved = 0
-        self._analysis: dict[tuple, dict] = {}
+        self._analysis: tuple[tuple, dict] | None = None
         self._machine_path_analysis = None
         self._clean_line_analysis = _CleanLineAnalysis()
         self._applications: list[tuple[dict, dict, dict, dict]] = []
@@ -2257,14 +2269,18 @@ class ReviewEvaluation:
             return findings
         content_key = (raw_path, blob_oid, git_mode, subject_kind, hashlib.sha256(raw).digest())
         key = (*content_key, machine_path_lines, id(find_machine_paths))
-        analysis = self._analysis.get(key)
-        if analysis is None:
+        cached = self._analysis
+        if cached is None or cached[0] != key:
             analysis = analyze_review_candidates(
                 raw, raw_path, subject_kind=subject_kind, policy_module=self.policy,
                 clean_lines=self._clean_line_analysis, find_machine_paths=find_machine_paths,
                 machine_path_lines=machine_path_lines,
             )
-            self._analysis[key] = analysis
+            # Path-ordered traversal visits related owners together. This is
+            # derived lexical work, never permission or application evidence.
+            self._analysis = (key, analysis)
+        else:
+            analysis = cached[1]
         if not analysis["complete"] or analysis["refusal"] is not None:
             raise RuntimeError("review-evaluation")
         repository = self.repository
@@ -2524,23 +2540,30 @@ def _binary_content_hits(
     *,
     max_findings: int | None = None,
 ) -> list[Finding]:
+    def lexical_classes(line: str) -> tuple[str, ...]:
+        classes: list[str] = []
+        seen: set[tuple] = set()
+        for observation in _line_observations(line, 0, 0, "history-blob", binary=True):
+            key = _observation_key(observation)
+            if key not in seen:
+                seen.add(key)
+                classes.append(observation.diagnostic_class)
+        return tuple(classes)
+
+    # Memoize exact short runs within one payload. Misses and evictions run
+    # the same detectors; occurrence coordinates are attached below.
+    short_run_classes = lru_cache(maxsize=4096)(lexical_classes)
     findings: list[Finding] = []
     locator = _safe_locator(path, "history-blob")
     for line_number, raw_line in enumerate(raw.splitlines(), 1):
         for raw_run in _BINARY_ASCII_RUN.findall(raw_line):
             line = raw_run.decode("ascii")
-            seen: set[tuple] = set()
-            for observation in _line_observations(
-                line, line_number, 0, "history-blob", binary=True
-            ):
-                key = _observation_key(observation)
-                if key in seen:
-                    continue
-                seen.add(key)
+            classes = (short_run_classes if len(raw_run) <= 64 else lexical_classes)(line)
+            for diagnostic_class in classes:
                 if max_findings is None or len(findings) < max_findings:
                     findings.append(Finding(
                         "PS-FINDING-CONTENT", "history-blob", locator,
-                        line_number, observation.diagnostic_class,
+                        line_number, diagnostic_class,
                     ))
             if find_machine_paths(line) and (
                 max_findings is None or len(findings) < max_findings
@@ -4596,29 +4619,111 @@ def _tree_traversal_guard(
     *,
     deadline: float,
     frontier: int,
-    visits: int,
-    visited: int,
-    cache_entries: int,
 ) -> Refusal | None:
     if asyncio.get_running_loop().time() >= deadline:
         return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
     if frontier > _MAX_TREE_FRONTIER:
         return _refusal("PS-MSG-LIMIT", "tree-frontier")
-    if visits > _MAX_TREE_VISITS:
-        return _refusal("PS-MSG-LIMIT", "tree-visits")
-    if visited > _MAX_TREE_CACHE_ENTRIES:
-        return _refusal("PS-MSG-LIMIT", "tree-visited")
-    if cache_entries > _MAX_TREE_CACHE_ENTRIES:
-        return _refusal("PS-MSG-LIMIT", "tree-cache-count")
     return None
 
 
-async def _acquire_history(
+class _HistoryIndex:
+    """Scan-owned temporary state; exact path bytes, never blob bodies."""
+
+    def __init__(self, db: sqlite3.Connection):
+        self.db = db
+        self.subject_count = 0
+        db.executescript("""
+            PRAGMA temp_store=FILE;
+            CREATE TABLE subject (owner TEXT, path BLOB, blob TEXT, mode TEXT NOT NULL,
+                PRIMARY KEY(owner, path, blob)) WITHOUT ROWID;
+            CREATE INDEX subject_path ON subject(path, blob, owner);
+            CREATE TABLE metadata_path (tree TEXT, path BLOB,
+                PRIMARY KEY(tree, path)) WITHOUT ROWID;
+        """)
+
+    def add(self, key, mode):
+        inserted = self.db.execute(
+            "INSERT INTO subject VALUES (?, ?, ?, ?) ON CONFLICT(owner,path,blob) DO NOTHING",
+            (*key, mode),
+        ).rowcount == 1
+        self.subject_count += inserted
+        return inserted
+
+    def add_metadata(self, tree, path):
+        return self.db.execute(
+            "INSERT INTO metadata_path VALUES (?, ?) ON CONFLICT(tree,path) DO NOTHING",
+            (tree, path),
+        ).rowcount == 1
+
+    def owners(self, path, blob):
+        return self.db.execute(
+            "SELECT owner, mode FROM subject WHERE path=? AND blob=? ORDER BY owner",
+            (path, blob),
+        )
+
+    def path_pairs(self):
+        return self.db.execute(
+            "SELECT DISTINCT path, blob FROM subject ORDER BY path, blob"
+        )
+
+    def blob_ids(self):
+        return (row[0] for row in self.db.execute("SELECT DISTINCT blob FROM subject"))
+
+    def _seal(self, query, digest):
+        count = 0
+
+        def rows():
+            nonlocal count
+            for row in self.db.execute(query):
+                count += 1
+                yield row
+
+        return _SealedRows(digest=digest(rows()), count=count)
+
+    def seal(self):
+        return (
+            self._seal("SELECT owner, path, blob FROM subject ORDER BY owner, path, blob",
+                       _subject_set_digest),
+            self._seal("SELECT DISTINCT blob, path FROM subject ORDER BY blob, path",
+                       _path_set_digest),
+        )
+
+
+async def _acquire_history(selection, reader, find_machine_paths, coverage_recorder,
+                           scan_deadline, **options):
+    # Close anonymous scratch before the outcome can confer any scan coverage.
+    try:
+        with closing(sqlite3.connect("")) as db:
+            index = _HistoryIndex(db)
+            clock = asyncio.get_running_loop().time
+            db.set_progress_handler(lambda: int(clock() >= scan_deadline), 2048)
+            result = await _acquire_indexed_history(
+                selection, reader, find_machine_paths, coverage_recorder, scan_deadline,
+                index, **options,
+            )
+            # Native receipts formerly rehashed retained rows. Re-read and
+            # verify them while their owner is live, then close the scratch.
+            if isinstance(selection, NativePushSelection) and isinstance(result, tuple):
+                history, _, findings = result
+                if not findings and index.seal() != (history.subjects, history.paths):
+                    return _refusal("PS-MSG-COVERAGE", "history-index")
+            if isinstance(result, tuple) and clock() >= scan_deadline:
+                return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+            return result
+    except sqlite3.Error:
+        if asyncio.get_running_loop().time() >= scan_deadline:
+            return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+        return _refusal("PS-MSG-READ", "coverage-storage")
+
+
+async def _acquire_indexed_history(
     selection: RangeSelection | NativePushSelection,
     reader: _AsyncGitObjectReader,
     find_machine_paths,
     coverage_recorder: CoverageRecorder,
     scan_deadline: float,
+    index: _HistoryIndex,
     *,
     review_evaluation: "ReviewEvaluation | None" = None,
     excluded_tag_targets: dict[str, str] | None = None,
@@ -4630,14 +4735,27 @@ async def _acquire_history(
     commit_topology: dict[str, tuple[str, tuple[str, ...]]] = {}
     tag_targets: dict[str, tuple[str, str]] = {}
     direct_tag_commit = None
-    tree_cache: dict[str, bytes] = {}
+    tree_cache: OrderedDict[str, bytes] = OrderedDict()
     blob_records: dict[str, tuple[int, bytes, bool]] = {}
     findings: list[Finding] = []
     # Total unique bytes are receipt evidence, not retained-cache allocation.
     # Payload memory is independent of this total; object/count/deadline guards
     # remain owned by the reader, traversal, and publication supervisor.
     aggregate_blobs = 0
-    aggregate_trees = 0
+    retained_tree_bytes = 0
+
+    def retain_tree(oid: str, raw: bytes) -> None:
+        nonlocal retained_tree_bytes
+        if len(raw) > _TREE_CACHE_BYTES or _MAX_TREE_CACHE_ENTRIES <= 0:
+            return
+        while tree_cache and (
+            retained_tree_bytes + len(raw) > _TREE_CACHE_BYTES
+            or len(tree_cache) >= _MAX_TREE_CACHE_ENTRIES
+        ):
+            _, evicted = tree_cache.popitem(last=False)
+            retained_tree_bytes -= len(evicted)
+        tree_cache[oid] = raw
+        retained_tree_bytes += len(raw)
 
     for oid in selection.object_oids:
         if asyncio.get_running_loop().time() >= scan_deadline:
@@ -4719,10 +4837,7 @@ async def _acquire_history(
                         == [tag_row.remote_ref.removeprefix(b"refs/tags/")]):
                     direct_tag_commit = target[0]
         elif result.object_type == "tree":
-            aggregate_trees += len(result.raw)
-            if aggregate_trees > _MAX_TREE_CACHE_BYTES:
-                return _refusal("PS-MSG-LIMIT", "tree-cache-bytes")
-            tree_cache[oid] = result.raw
+            retain_tree(oid, result.raw)
         elif result.object_type == "blob":
             if not native and hashlib.new(selection.object_format.name,
                                           f"blob {len(result.raw)}\0".encode("ascii") + result.raw).hexdigest() != oid:
@@ -4772,38 +4887,18 @@ async def _acquire_history(
             return _refusal("PS-MSG-FRAME", "tag-target")
 
     async def load_tree(oid: str) -> bytes | Refusal:
-        nonlocal aggregate_trees
-        guard = _tree_traversal_guard(
-            deadline=scan_deadline,
-            frontier=0,
-            visits=0,
-            visited=0,
-            cache_entries=len(tree_cache),
-        )
-        if guard is not None:
-            return guard
         cached = tree_cache.get(oid)
         if cached is not None:
+            tree_cache.move_to_end(oid)
             return cached
-        guard = _tree_traversal_guard(
-            deadline=scan_deadline,
-            frontier=0,
-            visits=0,
-            visited=0,
-            cache_entries=len(tree_cache) + 1,
-        )
-        if guard is not None:
-            return guard
         result = await reader.read(oid, "tree", scan_deadline=scan_deadline)
         if isinstance(result, Refusal):
             return result
-        if native and hashlib.new(selection.object_format.name,
-                                  f"tree {len(result.raw)}\0".encode("ascii") + result.raw).hexdigest() != oid:
+        if (result.returned_oid != oid or result.object_type != "tree"
+                or hashlib.new(selection.object_format.name,
+                               f"tree {len(result.raw)}\0".encode("ascii") + result.raw).hexdigest() != oid):
             return _refusal("PS-MSG-COVERAGE", "object-content-identity")
-        aggregate_trees += len(result.raw)
-        if aggregate_trees > _MAX_TREE_CACHE_BYTES:
-            return _refusal("PS-MSG-LIMIT", "tree-cache-bytes")
-        tree_cache[oid] = result.raw
+        retain_tree(oid, result.raw)
         return result.raw
 
     unpublished_trees = {
@@ -4811,12 +4906,6 @@ async def _acquire_history(
     }
     unpublished_blobs = set(blob_records)
     reached_unpublished_trees: set[str] = set()
-    visited_tree_ids: set[str] = set()
-    tree_visits = 0
-    subjects: list[tuple[str, bytes, str]] = []
-    subject_modes: dict[tuple[str, bytes, str], str] = {}
-    subject_set: set[tuple[str, bytes, str]] = set()
-    native_metadata_paths: set[tuple[str, bytes]] = set()
     tree_roots = [(oid, commit_topology[oid][0]) for oid in selection.expected_oids]
     direct_blobs = []
     if native:
@@ -4836,27 +4925,18 @@ async def _acquire_history(
         guard = _tree_traversal_guard(
             deadline=scan_deadline,
             frontier=0,
-            visits=tree_visits,
-            visited=len(visited_tree_ids),
-            cache_entries=len(tree_cache),
         )
         if guard is not None:
             return guard
         stack: list[tuple[str, bytes, tuple[str, ...]]] = [(root_tree, b"", ())]
         while stack:
-            next_tree_oid = stack[-1][0]
             guard = _tree_traversal_guard(
                 deadline=scan_deadline,
                 frontier=len(stack),
-                visits=tree_visits + 1,
-                visited=len(visited_tree_ids) + (next_tree_oid not in visited_tree_ids),
-                cache_entries=len(tree_cache),
             )
             if guard is not None:
                 return guard
             tree_oid, prefix, ancestors = stack.pop()
-            tree_visits += 1
-            visited_tree_ids.add(tree_oid)
             if tree_oid in ancestors:
                 return _refusal("PS-MSG-FRAME", "tree-cycle")
             raw_tree = await load_tree(tree_oid)
@@ -4871,17 +4951,13 @@ async def _acquire_history(
                 guard = _tree_traversal_guard(
                     deadline=scan_deadline,
                     frontier=len(stack),
-                    visits=tree_visits,
-                    visited=len(visited_tree_ids),
-                    cache_entries=len(tree_cache),
                 )
                 if guard is not None:
                     return guard
                 path = prefix + (b"/" if prefix else b"") + entry.name
                 if len(path) > _MAX_PATH_BYTES:
                     return _refusal("PS-MSG-LIMIT", "path-bytes")
-                if native and tree_oid in unpublished_trees and (tree_oid, path) not in native_metadata_paths:
-                    native_metadata_paths.add((tree_oid, path))
+                if native and tree_oid in unpublished_trees and index.add_metadata(tree_oid, path):
                     decoded_path = path.decode("utf-8", "surrogateescape")
                     filename_findings = _filename_findings(decoded_path, "tree-path")
                     _append_findings(findings, filename_findings)
@@ -4897,44 +4973,24 @@ async def _acquire_history(
                     guard = _tree_traversal_guard(
                         deadline=scan_deadline,
                         frontier=len(stack) + 1,
-                        visits=tree_visits,
-                        visited=len(visited_tree_ids),
-                        cache_entries=len(tree_cache),
                     )
                     if guard is not None:
                         return guard
                     stack.append((entry.oid, path, ancestors + (tree_oid,)))
                 elif entry.kind == "blob" and entry.oid in unpublished_blobs:
                     subject = (commit_oid, path, entry.oid)
-                    if subject in subject_set:
+                    if not index.add(subject, entry.mode):
                         return _refusal("PS-MSG-COVERAGE", "duplicate-subject")
-                    subject_set.add(subject)
-                    subjects.append(subject)
-                    subject_modes[subject] = entry.mode
-                    if len(subjects) > _MAX_SUBJECTS:
-                        return _refusal("PS-MSG-LIMIT", "subject-count")
 
     for subject in direct_blobs:
-        if subject not in subject_set:
-            subject_set.add(subject)
-            subjects.append(subject)
-            subject_modes[subject] = ""
+        index.add(subject, "")
     if reached_unpublished_trees != unpublished_trees:
         return _refusal("PS-MSG-COVERAGE", "tree-subjects")
-    if {blob for _commit, _path, blob in subjects} != unpublished_blobs:
+    if set(index.blob_ids()) != unpublished_blobs:
         return _refusal("PS-MSG-COVERAGE", "blob-subjects")
-    blob_paths = {(path, blob) for _commit, path, blob in subjects}
-    if len(blob_paths) > _MAX_BLOB_PATHS:
-        return _refusal("PS-MSG-LIMIT", "blob-path-count")
 
     binary_blobs = {oid for oid, (_, _, binary) in blob_records.items() if binary}
     text_blobs = set(blob_records) - binary_blobs
-    subjects_by_path: dict[tuple[bytes, str], list[tuple[str, str]]] = {}
-    if review_evaluation is not None or review_capture is not None:
-        for commit_oid, raw_path, blob_oid in sorted(subjects):
-            subjects_by_path.setdefault((raw_path, blob_oid), []).append(
-                (commit_oid, subject_modes[(commit_oid, raw_path, blob_oid)])
-            )
     # Preserve path-first finding/review order. A single payload cache bounds
     # retained memory independently of the cumulative admitted blob volume.
     # Rereads are at most the number of distinct blob/path pairs and share the
@@ -4942,7 +4998,9 @@ async def _acquire_history(
     cached_blob_oid = None
     raw = b""
     result = None
-    for path, blob_oid in sorted(blob_paths):
+    scanned_paths = 0
+    for path, blob_oid in index.path_pairs():
+        scanned_paths += 1
         if asyncio.get_running_loop().time() >= scan_deadline:
             return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
         if blob_oid != cached_blob_oid:
@@ -4970,7 +5028,7 @@ async def _acquire_history(
             _append_findings(findings, _filename_findings(decoded_path, "history-blob"))
         if review_capture is not None:
             review_capture.observe(raw, path, blob_oid,
-                subjects_by_path.get((path, blob_oid), ()), commit_set,
+                index.owners(path, blob_oid), commit_set,
                 selection.object_format.name, binary=blob_oid in binary_blobs)
         if blob_oid in binary_blobs:
             content_findings = _binary_content_hits(
@@ -4982,7 +5040,7 @@ async def _acquire_history(
         elif review_evaluation is not None:
             content_findings = []
             shown_locations = set()
-            for commit_oid, git_mode in subjects_by_path[(path, blob_oid)]:
+            for commit_oid, git_mode in index.owners(path, blob_oid):
                 if asyncio.get_running_loop().time() >= scan_deadline:
                     return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
                 if commit_oid not in commit_set:
@@ -5023,8 +5081,9 @@ async def _acquire_history(
         if isinstance(coverage, Refusal):
             return coverage
 
-    canonical_subjects = tuple(sorted(subjects))
-    canonical_paths = tuple(sorted((blob, path) for path, blob in blob_paths))
+    canonical_subjects, canonical_paths = index.seal()
+    if len(canonical_subjects) != index.subject_count or len(canonical_paths) != scanned_paths:
+        return _refusal("PS-MSG-COVERAGE", "history-index")
     canonical_objects = tuple(sorted(selection.object_oids))
     canonical_blobs = tuple(sorted(blob_records))
     proof = HistoryProof(
@@ -5039,8 +5098,8 @@ async def _acquire_history(
         _commit_set_digest(selection.expected_oids),
         _oid_set_digest(b"object-set", canonical_objects),
         _oid_set_digest(b"blob-set", canonical_blobs),
-        _subject_set_digest(canonical_subjects),
-        _path_set_digest(canonical_paths),
+        canonical_subjects.digest,
+        canonical_paths.digest,
         tuple(sorted(tag_targets)),
         direct_tag_commit,
     )
@@ -5401,8 +5460,14 @@ def _serialize_native_receipt_common(outcome: ScanOutcome) -> str:
         or history.object_set != _oid_set_digest(b"object-set", history.object_ids)
         or history.commit_set != _commit_set_digest(history.commit_ids)
         or history.blob_set != _oid_set_digest(b"blob-set", history.blob_ids)
-        or history.subject_set != _subject_set_digest(history.subjects)
-        or history.path_set != _path_set_digest(history.paths)
+        or history.subject_set != (
+            history.subjects.digest if isinstance(history.subjects, _SealedRows)
+            else _subject_set_digest(history.subjects)
+        )
+        or history.path_set != (
+            history.paths.digest if isinstance(history.paths, _SealedRows)
+            else _path_set_digest(history.paths)
+        )
         or history.text_blobs + history.binary_blobs != len(history.blob_ids)
         or history.blob_bytes < 0
         or (history.object_ids and (outcome.reap_certificate is None or not outcome.reap_certificate.complete))

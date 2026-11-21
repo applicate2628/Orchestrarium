@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-21
 
+- Keep exact historical path and commit coverage in a temporary index instead of rejecting a scan when the number of coverage rows grows. Tree cache capacity now causes eviction and verified rereads, not publication refusal; the proof, finding policy and publication gate are unchanged. Clean reviewed text no longer allocates exact byte-coordinate maps for nonexistent path matches. Shared engineering guidance distinguishes workload size, cache capacity, completeness, and eligibility.
+
 - Require material changes and reviews to verify owners, contracts, and active enforcement along the affected execution path, without adding a new workflow gate.
 
 - Expose exact machine-path match positions from the existing classifier so review preparation can represent the same findings as the publication scanner. Detection and required review decisions are unchanged.

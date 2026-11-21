@@ -108,8 +108,10 @@ class _ScannerRefusalDenied(PrRouteDenied):
            )},
         ("PS-MSG-COVERAGE", "empty-selection", "coverage"):
             " The verified range contained no new selected coverage; check the source and receiver binding.",
+        ("PS-MSG-READ", "coverage-storage", "reader"):
+            " Local scan scratch storage is unavailable; coverage is incomplete.",
         ("PS-MSG-READ-TIMEOUT", "deadline", "reader"):
-            " The bounded reader timed out; check Git object availability before retrying.",
+            " The history check did not complete within its time budget; the stage is not known.",
     }
 
     def __init__(self, failure_id: str, scanner_output: str):
