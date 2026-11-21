@@ -42,6 +42,7 @@ import contextlib
 import ctypes
 import dataclasses
 import importlib.util
+import json
 import hashlib
 import inspect
 import io
@@ -1813,6 +1814,108 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             )
             return self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
 
+    @staticmethod
+    def _synthetic_history_message() -> str:
+        return _join("Audit fixture C:", BACKSLASH, "Users", BACKSLASH,
+                     "synthetic", BACKSLASH, ".config", BACKSLASH, "example.txt")
+
+    def test_local_history_diagnostics_bind_distinct_commit_messages(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            git = _git()
+
+            def oid(revision):
+                return subprocess.check_output(
+                    [git, "-C", str(repo), "rev-parse", revision], text=True,
+                ).strip()
+
+            message = self._synthetic_history_message()
+            commits = set()
+            for number in range(2):
+                self._commit_file(repo, "file" + str(number), "clean", message=message)
+                commits.add(oid("HEAD"))
+
+            argv = [
+                sys.executable, str(CANONICAL_SCANNER), "--range", "origin",
+                "main", "--range-source", "claude",
+            ]
+            ordinary = subprocess.run(argv, cwd=repo, capture_output=True, text=True)
+            self.assertEqual(ordinary.returncode, 1, ordinary.stderr)
+            self.assertIn("PS-FINDING-COMMIT-MESSAGE", ordinary.stderr)
+            self.assertTrue(all(commit not in ordinary.stderr for commit in commits))
+            diag = subprocess.run(
+                [*argv, "--history-diagnostics"], cwd=repo, capture_output=True, text=True,
+            )
+            self.assertEqual(diag.returncode, 1, diag.stderr)
+            report = json.loads(diag.stdout)
+            self.assertEqual(report["status"], "findings")
+            self.assertFalse(report["publicationAuthority"])
+            self.assertTrue(report["reportComplete"])
+            self.assertEqual(report["scope"]["sourceOid"], oid("HEAD"))
+            self.assertEqual(report["scope"]["destinationOid"], oid("main"))
+            self.assertRegex(report["scope"]["repositorySha256"], r"^[0-9a-f]{64}$")
+            rows = report["commitMessages"]
+            self.assertEqual({row["commitOid"] for row in rows}, commits)
+            self.assertEqual({(row["field"], row["line"], row["class"]) for row in rows},
+                             {("message", 1, "machine-path")})
+            self.assertNotIn("synthetic", diag.stdout + diag.stderr)
+            self.assertRegex(report["scope"]["destinationEndpointSha256"], r"^[0-9a-f]{64}$")
+
+            other = repo.parent / "other.git"
+            subprocess.run([git, "clone", "-q", "--bare", str(repo.parent / "origin.git"),
+                            str(other)], check=True, capture_output=True)
+            subprocess.run([git, "-C", str(repo), "remote", "set-url", "--push", "origin",
+                            str(other)], check=True, capture_output=True)
+            moved = subprocess.run(
+                [*argv, "--history-diagnostics"], cwd=repo, capture_output=True, text=True,
+            )
+            self.assertEqual(moved.returncode, 1, moved.stderr)
+            new_scope = json.loads(moved.stdout)["scope"]
+            self.assertEqual(new_scope["destinationOid"], report["scope"]["destinationOid"])
+            self.assertNotEqual(new_scope["destinationEndpointSha256"],
+                                report["scope"]["destinationEndpointSha256"])
+            self.assertNotEqual(new_scope["selectionSha256"], report["scope"]["selectionSha256"])
+            self.assertNotIn("other.git", moved.stdout)
+
+    def test_local_history_diagnostics_marks_a_full_report_cap_as_partial(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            line = self._synthetic_history_message()
+            self._commit_file(repo, "clean.txt", "clean", message="\n".join([line] * 40))
+            diag = subprocess.run(
+                [sys.executable, str(CANONICAL_SCANNER), "--range", "origin", "main",
+                 "--range-source", "claude", "--history-diagnostics"],
+                cwd=repo, capture_output=True, text=True,
+            )
+            self.assertEqual(diag.returncode, 1, diag.stderr)
+            report = json.loads(diag.stdout)
+            self.assertFalse(report["reportComplete"])
+            self.assertEqual(len(report["commitMessages"]), report["reportLimit"])
+            self.assertLess(len(report["commitMessages"]), 40)
+            self.assertNotIn("synthetic", diag.stdout + diag.stderr)
+
+    def test_local_history_diagnostics_is_not_a_receipt_for_clean_or_nonmessage_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            self._commit_file(repo, "clean.txt", "clean")
+            argv = [
+                sys.executable, str(CANONICAL_SCANNER), "--range", "origin", "main",
+                "--range-source", "claude", "--history-diagnostics",
+            ]
+            clean = subprocess.run(argv, cwd=repo, capture_output=True, text=True)
+            self.assertEqual(clean.returncode, 0, clean.stderr)
+            report = json.loads(clean.stdout)
+            self.assertFalse(report["publicationAuthority"])
+            self.assertNotIn("receipt", clean.stdout.lower())
+
+            self._commit_file(repo, "blocked.txt", self._synthetic_history_message())
+            block = subprocess.run(argv, cwd=repo, capture_output=True, text=True)
+            self.assertEqual(block.returncode, 1, block.stderr)
+            report = json.loads(block.stdout)
+            self.assertEqual(report["status"], "findings")
+            self.assertEqual(report["commitMessages"], [])
+            self.assertGreater(report["otherFindingsShown"], 0)
+
     def test_range_mode_clean_scan_reports_remote_dst_tip_receipt(self) -> None:
         # The exact receipt shape check-git-push-gate.py's SCAN_CLEAN_RANGE_
         # REGEX matches: mode word "range", a non-empty examined count, and
@@ -2651,6 +2754,56 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
                 proc = self._run_range(repo)
                 self.assertEqual(proc.returncode, 1, f"case={case} out={proc.stdout!r} err={proc.stderr!r}")
                 self.assertNotIn("A1B2C3D4E5F6G7H8IJK", proc.stdout + proc.stderr)
+
+    def test_history_diagnostics_matches_constructed_graph(self) -> None:
+        # Build the expected disclosure set from the fixture topology, not the
+        # same revision-walk command being tested.
+        for depth, destination in ((1, "main"), (3, "main"), (3, "new-branch")):
+            with self.subTest(depth=depth, destination=destination), tempfile.TemporaryDirectory() as td:
+                repo = self._init_range_repo(Path(td))
+                self._git_run(repo, "branch", "unrelated")
+                self._git_run(repo, "switch", "-q", "unrelated")
+                self._commit(repo, "outside.txt", "unrelated local state", "unrelated")
+                self._git_run(repo, "switch", "-q", "main")
+                self._git_run(repo, "branch", "side")
+                expected = [
+                    self._commit(repo, f"main-{n}.txt", str(n), f"main {n}")
+                    for n in range(depth)
+                ]
+                self._git_run(repo, "switch", "-q", "side")
+                expected.extend(
+                    self._commit(repo, f"side-{n}.txt", str(n), f"side {n}")
+                    for n in range(depth)
+                )
+                self._git_run(repo, "switch", "-q", "main")
+                self._git_run(repo, "merge", "-q", "--no-ff", "side", "-m", "merged")
+                source = self._git_run(repo, "rev-parse", "HEAD").stdout.strip()
+                expected.append(source)
+                proc = subprocess.run(
+                    [sys.executable, str(CANONICAL_SCANNER), "--range", "origin",
+                     destination, "--range-source", "main", "--history-diagnostics"],
+                    cwd=repo, capture_output=True, text=True, encoding="utf-8",
+                )
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                report = json.loads(proc.stdout)
+                self.assertEqual(report["status"], "clean")
+                self.assertFalse(report["publicationAuthority"])
+                self.assertTrue(report["reportComplete"])
+                self.assertEqual(report["scope"]["sourceOid"], source)
+                # V3 binds traversal order. Accept either parent order and any
+                # interleaving that respects both parent chains.
+                from itertools import combinations
+
+                valid_digests = set()
+                for slots in combinations(range(2 * depth), depth):
+                    left = iter(reversed(expected[:depth]))
+                    right = iter(reversed(expected[depth:-1]))
+                    order = [source] + [
+                        next(left if i in slots else right) for i in range(2 * depth)
+                    ]
+                    valid_digests.add(self._expected_digest(order))
+                self.assertIn(report["scope"]["commitSetSha256"], valid_digests)
+                self.assertEqual(report["commitMessages"], [])
 
     def test_range_first_push_empty_remote_scans_clean_initial_commit(self) -> None:
         with tempfile.TemporaryDirectory() as td:
