@@ -1819,6 +1819,25 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
         return _join("Audit fixture C:", BACKSLASH, "Users", BACKSLASH,
                      "synthetic", BACKSLASH, ".config", BACKSLASH, "example.txt")
 
+    def test_machine_path_review_uses_the_canonical_match_locations(self):
+        scan = _load_canonical_scanner("_scanner_machine_path_review_owner")
+        fixture = self._synthetic_history_message()
+        raw = f"{fixture}\n{fixture}\n".encode("utf-8")
+        finder = scan._manual_path_finder(CANONICAL_SCANNER)
+        prefix_hits = finder(fixture)
+        self.assertTrue(prefix_hits)
+        self.assertEqual({fixture[a:b] for a, b in finder._review_occurrences(fixture)},
+                         set(prefix_hits))
+        rows = scan.analyze_review_candidates(
+            raw, b"example.txt", subject_kind="history-blob",
+            policy_module=scan._load_review_policy_module(), find_machine_paths=finder,
+        )
+        self.assertTrue(rows["complete"])
+        self.assertTrue(rows["pathsRepresented"])
+        self.assertEqual({row["line"] for row in rows["candidates"]
+                          if row["detectorClass"] == "machine-path"}, {1, 2})
+        self.assertEqual(rows["unresolved"], ())
+
     def test_reviewed_history_grouping_before_cap(self):
         scan = _load_canonical_scanner("_scanner_reviewed_grouping")
         with tempfile.TemporaryDirectory() as td:

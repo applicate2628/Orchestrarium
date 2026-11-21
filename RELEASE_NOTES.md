@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-21
 
+- Expose exact machine-path match positions from the existing classifier so review preparation can represent the same findings as the publication scanner. Detection and required review decisions are unchanged.
+
 - Group repeated unresolved history-file findings before applying the ordinary scanner display limit. Distinct locations stay visible instead of being displaced by the same line in multiple commits. Review still evaluates each commit, and the publication decision is unchanged.
 
 - Label the diagnostic history scan as unreviewed and show aggregate redacted finding classes. Its path-and-blob counts are not the per-commit counts used for scoped review evaluation; publication checks and authority are unchanged.
