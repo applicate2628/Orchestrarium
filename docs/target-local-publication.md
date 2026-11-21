@@ -47,7 +47,11 @@ at selection time, not a later remote state. A native pre-push callback
 checks the actual ref updates and receiver evidence it was given. A standalone
 report does not reproduce that callback or authorize a retry.
 `reportComplete: false` means the report reached its display limit, not that
-the listed rows are the complete set. Other finding types remain redacted.
+the listed rows are the complete set. Other finding types remain redacted;
+only aggregate detector-class counts are shown. Diagnostic output is
+unreviewed and counts history-file findings per path and blob. Ordinary
+publication evaluation can assess reviewed text per commit, so its
+reported count need not match this report. Neither count authorizes a push.
 
 A finding still exits with status 1; an unqualified scan exits with status 2
 without a locations report. No history, hook, policy or remote ref is changed.

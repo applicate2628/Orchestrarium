@@ -5826,7 +5826,13 @@ def _emit_history_diagnostics(repo_root, remote, destination, source_revision, f
         "reportComplete": len(outcome.findings) < _MAX_FINDINGS,
         "reportLimit": _MAX_FINDINGS,
         "commitMessages": rows,
+        "reviewPolicy": "not-applied",
+        "historyFileFindingUnit": "path-and-blob",
         "otherFindingsShown": len(outcome.findings) - len(rows),
+        "otherFindingClassesShown": dict(sorted(Counter(
+            finding.detector_class for finding in outcome.findings
+            if finding.subject_kind != "commit-message"
+        ).items())),
     }, ensure_ascii=True, sort_keys=True))
     return int(outcome.kind == "findings")
 

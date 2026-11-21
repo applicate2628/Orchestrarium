@@ -1915,6 +1915,11 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             self.assertEqual(report["status"], "findings")
             self.assertEqual(report["commitMessages"], [])
             self.assertGreater(report["otherFindingsShown"], 0)
+            self.assertEqual(report["reviewPolicy"], "not-applied")
+            self.assertEqual(report["historyFileFindingUnit"], "path-and-blob")
+            self.assertEqual(sum(report["otherFindingClassesShown"].values()),
+                             report["otherFindingsShown"])
+            self.assertIn("machine-path", report["otherFindingClassesShown"])
 
     def test_range_mode_clean_scan_reports_remote_dst_tip_receipt(self) -> None:
         # The exact receipt shape check-git-push-gate.py's SCAN_CLEAN_RANGE_
