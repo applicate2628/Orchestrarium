@@ -23,6 +23,45 @@ SPEC.loader.exec_module(PI)
 WINDOWS_FILE_ATTRIBUTE_PINNED = 0x00080000  # Win32 FILE_ATTRIBUTE_PINNED test value.
 
 
+_NATIVE_SET_COPY_TIMES = PI._WindowsBoundNode.set_copy_times
+_POSIX_UTIME = os.utime
+
+
+def _set_copy_times(target, atime_ns, mtime_ns):
+    """Apply the test effect to the held native handle or descriptor."""
+    if os.name == "nt":
+        return _NATIVE_SET_COPY_TIMES(target, atime_ns, mtime_ns)
+    _POSIX_UTIME(target, ns=(atime_ns, mtime_ns))
+
+
+def _patch_copy_times(effect):
+    """Inject at the real platform setter, preserving unrelated path-based utime."""
+    if os.name == "nt":
+        return patch.object(PI._WindowsBoundNode, "set_copy_times", effect)
+
+    def set_times(target, *args, **kwargs):
+        if type(target) is int and not args and tuple(kwargs) == ("ns",):
+            return effect(target, *kwargs["ns"])
+        return _POSIX_UTIME(target, *args, **kwargs)
+
+    supports_fd = os.supports_fd
+    if _POSIX_UTIME in supports_fd:
+        supports_fd = supports_fd | {set_times}
+    return patch.multiple(os, utime=set_times, supports_fd=supports_fd)
+
+
+def _copy_time_failure(error):
+    def fail(*_args):
+        raise error
+    return _patch_copy_times(fail)
+
+
+def _time_observations(current, assignment, *readbacks):
+    # POSIX reads the descriptor inside the setter before the shared driver
+    # reads it again. Windows' legacy no-result fixture has no assignment read.
+    return [current, *(() if os.name == "nt" else (assignment,)), *readbacks]
+
+
 def _write_windows_directory_attributes(path: Path, attributes: int) -> None:
     ctypes_api, _wintypes, kernel, *_rest = PI._WindowsBoundNode._api()
     with PI._WindowsBoundNode(path, purpose="attributes") as bound:
@@ -1063,7 +1102,7 @@ class CopyMetadataTests(unittest.TestCase):
         participant = tx._copy_metadata[self.target]
         records = []
         def action():
-            with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=[current, actual]):
+            with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=_time_observations(current, current, actual)):
                 tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]),
                                         lambda *args: records.append(args), participant)
         result, stderr, escaped = self.through_install(action)
@@ -1091,7 +1130,7 @@ class CopyMetadataTests(unittest.TestCase):
         desired = replace(current, mtime_ns=100)
         primary = OSError(errno.EIO, "created-readback")
         def action():
-            with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=[current, primary]):
+            with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=_time_observations(current, current, primary)):
                 tx._apply_copy_metadata(created, node, desired, stat.S_IMODE(node.python_identity[2]),
                                         lambda *_args: self.fail("unexpected record"), participant)
         result, stderr, escaped = self.through_install(action)
@@ -1112,12 +1151,11 @@ class CopyMetadataTests(unittest.TestCase):
         tx = self.transaction([directory])
         primary = RuntimeError("nested-primary")
         inverse_error = OSError(errno.EIO, "PRIVATE_nested_inverse")
-        setter = PI._WindowsBoundNode.set_copy_times
         def inverse(bound, atime, mtime):
-            setter(bound, atime, mtime)
+            _set_copy_times(bound, atime, mtime)
             raise inverse_error
         def action():
-            inverse_patch = patch.object(PI._WindowsBoundNode, "set_copy_times", inverse)
+            inverse_patch = _patch_copy_times(inverse)
             try:
                 with tx:
                     self.owner(tx).copy_file(Path("tree/target"), self.source)
@@ -1316,25 +1354,43 @@ class CopyMetadataTests(unittest.TestCase):
 
     @contextmanager
     def no_timestamp_effect(self):
-        with patch.object(PI._WindowsBoundNode, "set_copy_times", lambda *_args: None):
+        with _patch_copy_times(lambda *_args: None):
             yield
 
     def test_mixed_full_image_rejection_keeps_unknown_and_recovery(self):
-        setter = PI._WindowsBoundNode.set_copy_times
         reader = PI._InstallTransaction._read_copy_metadata
         source_inode = self.source.stat().st_ino
+        target_inode = self.target.stat().st_ino
+        late_write = None
+
         def source_observation(metadata, descriptor, bound):
+            nonlocal late_write
             image = reader(metadata, descriptor, bound)
+            if late_write is not None and metadata.st_ino == target_inode:
+                atime, mtime = late_write
+                late_write = None
+                _set_copy_times(descriptor, atime, mtime)
             return replace(image, atime_ns=1_650_000_000_123_456_700) if metadata.st_ino == source_inode else image
-        def mixed_effect(bound, atime, mtime):
-            # Preserve actual old atime and apply only projected mtime.
-            old = os.fstat(bound.descriptor)
+
+        def mixed_effect(target, atime, mtime):
+            nonlocal late_write
+            fd = target.descriptor if os.name == "nt" else target
+            old = os.fstat(fd)
+            if old.st_ino != target_inode:
+                return _set_copy_times(target, atime, mtime)
             self.assertNotEqual(old.st_atime_ns, atime)
             self.assertNotEqual(old.st_mtime_ns, mtime)
-            setter(bound, old.st_atime_ns, mtime)
+            if os.name == "nt":
+                # The legacy adapter drops assignment proof.
+                _set_copy_times(target, old.st_atime_ns, mtime)
+            else:
+                # Leave the descriptor unchanged until the POSIX same-operation
+                # observation is acquired. The next read then sees the partial
+                # timestamp drift, not an assignment supported by that proof.
+                late_write = (old.st_atime_ns, mtime)
         transaction = self.transaction()
         with patch.object(PI._InstallTransaction, "_read_copy_metadata", staticmethod(source_observation)), \
-                patch.object(PI._WindowsBoundNode, "set_copy_times", mixed_effect):
+                _patch_copy_times(mixed_effect):
             with self.assertRaises(PI._InstallFailure) as caught:
                 with transaction:
                     self.owner(transaction).copy_file(Path("target"), self.source)
@@ -1354,7 +1410,7 @@ class CopyMetadataTests(unittest.TestCase):
         current = PI._CopyMetadataImage(100, 200, None, None)
         desired = PI._CopyMetadataImage(300, 400, None, None)
         tx, node, participant, records, record = self.diagnostic_case(current)
-        with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=[current, current]):
+        with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=_time_observations(current, current, current)):
             with self.assertRaises(ValueError) as caught:
                 tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]),
                                         record, participant, restored=True)
@@ -1382,7 +1438,7 @@ class CopyMetadataTests(unittest.TestCase):
         primary = OSError(errno.EIO, "metadata-acquisition")
         primary.__cause__ = RuntimeError("kept-cause")
         chain = (primary.args, primary.__cause__, primary.__context__, primary.__suppress_context__)
-        with patch.object(PI._WindowsBoundNode, "set_copy_times", side_effect=operation), \
+        with _copy_time_failure(operation), \
                 patch.object(tx, "_read_copy_metadata", side_effect=[current, primary]):
             with self.assertRaises(OSError) as caught:
                 tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
@@ -1418,7 +1474,7 @@ class CopyMetadataTests(unittest.TestCase):
                     def record(path, value):
                         records.append((path, value, participant.unknown))
                         raise later
-                with patch.object(PI._WindowsBoundNode, "set_copy_times", side_effect=operation), \
+                with _copy_time_failure(operation), \
                         patch.object(tx, "_read_copy_metadata", side_effect=[current, desired]), \
                         patch.object(tx, "_capture_node", side_effect=later if stage == "identity" else None,
                                      return_value=node):
@@ -1458,7 +1514,7 @@ class CopyMetadataTests(unittest.TestCase):
         later.__context__ = ValueError("kept-later-context")
         chain = (later.args, later.__cause__, later.__context__, later.__suppress_context__)
         def action():
-            with patch.object(PI._WindowsBoundNode, "set_copy_times", side_effect=operation), \
+            with _copy_time_failure(operation), \
                     patch.object(tx, "_read_copy_metadata", side_effect=[current, later]):
                 tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
         result, stderr, escaped = self.through_install(action)
@@ -1674,7 +1730,7 @@ class CopyMetadataTests(unittest.TestCase):
         tx, node, participant, records, record = self.diagnostic_case(current)
         primary = OSError(errno.EIO, "identity-acquisition")
         chain = (primary.args, primary.__cause__, primary.__context__)
-        with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=[current, desired]), \
+        with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=_time_observations(current, desired, desired)), \
                 patch.object(tx, "_capture_node", side_effect=primary):
             with self.assertRaises(OSError) as caught:
                 tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
@@ -1699,11 +1755,10 @@ class CopyMetadataTests(unittest.TestCase):
         participant = PI._CopyMetadataParticipant(node, current, current)
         primary = OSError("completed-observed-operation")
         events = []
-        setter = PI._WindowsBoundNode.set_copy_times
         def fault(bound, atime, mtime):
             self.assertTrue(participant.unknown)
             events.append("operation")
-            setter(bound, atime, mtime)
+            _set_copy_times(bound, atime, mtime)
             raise primary
         def record(_path, _node):
             self.assertTrue(participant.unknown)
@@ -1718,7 +1773,7 @@ class CopyMetadataTests(unittest.TestCase):
             return trace
         try:
             sys.settrace(trace)
-            with patch.object(PI._WindowsBoundNode, "set_copy_times", fault):
+            with _patch_copy_times(fault):
                 with self.assertRaises(OSError) as caught:
                     tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
         finally:
@@ -1736,7 +1791,6 @@ class CopyMetadataTests(unittest.TestCase):
         os.utime(second, ns=(1_610_000_000_000_000_000,) * 2)
         tx = PI._InstallTransaction([self.target, second], enabled=True, copy_paths=(self.target, second))
         primary = RuntimeError("later-checkpoint")
-        setter = PI._WindowsBoundNode.set_copy_times
         failure_objects = [OSError(errno.EIO, "PRIVATE-inverse-token-one"), OSError(errno.EACCES, "PRIVATE-inverse-token-two")]
         winerror_descriptor = OSError.__dict__.get("winerror")
         if winerror_descriptor is not None:
@@ -1751,13 +1805,13 @@ class CopyMetadataTests(unittest.TestCase):
         count = 0
         def inverse(bound, atime, mtime):
             nonlocal count
-            setter(bound, atime, mtime)
+            _set_copy_times(bound, atime, mtime)
             error = failure_objects[count]
             count += 1
             raise error
         # Keep inverse patch active during context exit, not just the raise.
         def action():
-            inverse_patch = patch.object(PI._WindowsBoundNode, "set_copy_times", inverse)
+            inverse_patch = _patch_copy_times(inverse)
             with patch.object(PI._InstallTransaction, "_settlement_failure", staticmethod(observe)):
                 try:
                     with tx:
@@ -2089,7 +2143,7 @@ class CopyMetadataTests(unittest.TestCase):
         primary = ValueError("record-callback")
         def record(*_args):
             raise primary
-        with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=[current, desired]):
+        with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=_time_observations(current, desired, desired)):
             with self.assertRaises(ValueError) as caught:
                 tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
         self.assertIs(caught.exception, primary)
@@ -2136,7 +2190,7 @@ class CopyMetadataTests(unittest.TestCase):
         original = (primary.args, primary.__cause__, primary.__context__)
         desired = replace(current, mtime_ns=300)  # Require an operation, not the exact-image no-op.
         def action():
-            with patch.object(PI._WindowsBoundNode, "set_copy_times", side_effect=primary), \
+            with _copy_time_failure(primary), \
                     patch.object(tx, "_read_copy_metadata", side_effect=[current, current]):
                 tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
         result, stderr, escaped = self.through_install(action)
@@ -2283,7 +2337,7 @@ class CopyMetadataTests(unittest.TestCase):
                 participant.before = desired if restored else current
                 before = participant.before
                 with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata",
-                        side_effect=[current, desired, later, final]) as metadata:
+                        side_effect=_time_observations(current, desired, desired, later, final)) as metadata:
                     result = tx._apply_copy_metadata(self.target, node, desired,
                         stat.S_IMODE(node.python_identity[2]), record, participant, restored=restored)
                 self.assertIs(result, final)
@@ -2291,7 +2345,7 @@ class CopyMetadataTests(unittest.TestCase):
                 self.assertIs(participant.current, final)
                 self.assertIs(participant.restored, final if restored else None)
                 self.assertFalse(participant.unknown)
-                self.assertEqual(metadata.call_count, 4)
+                self.assertEqual(metadata.call_count, 4 if os.name == "nt" else 5)
                 self.assertEqual(len(records), 2)
                 self.assertTrue(all(entry[2] for entry in records))
                 self.assertEqual((desired.atime_ns, desired.mtime_ns), (300, 400))
@@ -2301,7 +2355,7 @@ class CopyMetadataTests(unittest.TestCase):
         desired = replace(current, atime_ns=300, mtime_ns=400)
         wrong = replace(desired, mtime_ns=current.mtime_ns)
         tx, node, participant, records, record = self.diagnostic_case(current)
-        with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=[current, wrong]):
+        with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=_time_observations(current, current, wrong)):
             with self.assertRaises(ValueError) as caught:
                 tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
         self.assertEqual(PI._copy_setter_detail(caught.exception).metadata_vs_projected, ("mtime_ns",))
@@ -2390,7 +2444,7 @@ class CopyMetadataTests(unittest.TestCase):
                 primary = OSError(errno.EPERM, "final-acquisition")
                 final = primary if acquisition else replace(desired, mtime_ns=600)
                 with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata",
-                        side_effect=[current, desired, desired, final]):
+                        side_effect=_time_observations(current, desired, desired, desired, final)):
                     with self.assertRaises(OSError if acquisition else ValueError) as caught:
                         tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
                 if acquisition:

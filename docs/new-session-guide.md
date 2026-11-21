@@ -63,7 +63,7 @@ Inside this monorepo, a missing project-local `.agents/` tree is not a misconfig
 | Symptom | Correct first move |
 |---|---|
 | Codex skill label, trigger, or default prompt is wrong | Edit `src.codex/skills/<skill>/SKILL.md` and/or `agents/openai.yaml`; then sync `$HOME/.agents/skills/<skill>/` only if immediate behavior is needed. |
-| Common skill behavior is wrong across providers | Update the common skill source in each affected provider tree; update shared docs/indexes when the public contract changes. Do not mechanically copy without validating provider semantics. |
+| Common skill behavior is wrong across providers | Edit the canonical body once in `src.codex/skills/<skill>/SKILL.md`. Change a provider wrapper or addendum only for provider-specific behavior, and verify each affected installed projection. Update shared docs/indexes when the public contract changes. |
 | Claude behavior relies on `Agent` or slash-command mechanics | Keep that change in `src.claude/`; do not rewrite it for Codex unless there is a Codex-native owner. |
 | Codex behavior lacks a direct Agent tool | Check available Codex subagent or MCP tooling in the current runtime; if unavailable, record the gap honestly instead of pretending the Claude mechanism exists. |
 | Installed runtime has stale behavior | Verify the live installed file, patch source first, then reinstall or explicitly sync the installed file as a temporary live-runtime update. |
@@ -75,6 +75,10 @@ Inside this monorepo, a missing project-local `.agents/` tree is not a misconfig
 ## Validation
 
 Run the smallest useful check first, then the affected pack checks.
+
+- When a failure recurs, use the existing bug-hunting and review-loop owners to find which invariant or verification step let the class recur. Add the smallest regression check at that boundary instead of another workflow.
+- For independent verification, give the reviewer the frozen input and acceptance criteria before sharing the author's conclusion. Reconcile findings and conclusions against that same input afterward.
+- Release installation and rollback evidence names the exact source commit, platform, installed target and result of each scenario. A changed candidate, a dry run or a neighboring platform does not inherit that acceptance.
 
 | Change surface | Checks |
 |---|---|

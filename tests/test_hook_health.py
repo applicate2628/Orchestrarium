@@ -1057,6 +1057,35 @@ def test_generated_inventory_is_read_only_and_detects_registration_drift(
         )
 
 
+def test_portable_inventory_can_validate_staged_config_before_publication(tmp_path: Path) -> None:
+    target = tmp_path / "hooks.json"
+    rows, _ = _host_trust_fixture(target)
+    staged = json.loads(target.read_bytes())
+    target.write_text('{"hooks": {}}\n', encoding="utf-8")
+    original = target.read_bytes()
+    alias = tmp_path / "linked-hooks.json"
+    _make_file_symlink(alias, target)
+    inventory = tmp_path / CHECKER.INVENTORY_NAME
+    authority = CHECKER._inventory_authority(alias, inventory, for_write=True)
+    specs = [(stem, Path(argv[-1]), event, matcher) for event, stem, argv, matcher in rows]
+
+    planned = CHECKER._render_codex_inventory(
+        staged, authority=authority, specs=specs, host_os="posix", portable=True
+    )
+    with pytest.raises(ValueError, match="requires one registration per marker"):
+        CHECKER._render_codex_inventory(
+            {"hooks": {}}, authority=authority, specs=specs, host_os="posix", portable=True
+        )
+    assert json.loads(planned)["schemaVersion"] == 2
+    assert alias.is_symlink() and target.read_bytes() == original and not inventory.exists()
+
+    target.write_text(json.dumps(staged), encoding="utf-8")
+    assert CHECKER.plan_codex_inventory(
+        target=alias, specs=specs, inventory_path=inventory, host_os="posix", portable=True
+    ).content == planned
+    assert not inventory.exists()
+
+
 @pytest.mark.parametrize("header,nested", [(True, False), (False, True), (True, True)])
 def test_inventory_accepts_bound_source_aliases(
     tmp_path: Path, header: bool, nested: bool

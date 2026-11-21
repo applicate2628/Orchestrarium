@@ -46,8 +46,9 @@ policy; update its owner documents only with the admitted production cutover.
 The installer migration is a bounded operation slice, not a prerequisite for all
 other native hooks or optional SDK coordination. Neither selecting this architecture
 nor implementing a bootstrap authorizes building, publishing, trusting or activating
-native binaries. The first implementation slice will be chosen with the user after
-SDK acceptance; the existing reminder proposal below is a candidate, not a launch.
+native binaries. The reminder below has an isolated pilot, not a production
+launch. Accept its evidence against the selected receiving base before choosing
+any production implementation or activation.
 
 ## Existing behavior and target architecture
 
@@ -419,6 +420,30 @@ time; a hand-copied text block is not another policy source. The migrated runtim
 has no Python dependency. Keep the Python policy module while other live consumers
 need it; only later move authored policy to one neutral single-source resource.
 
+### Isolated pilot evidence (2026-11-21)
+
+The receiving baseline for this plan is pre-SDK main
+`b9d11278f435fa1c20de61d83449b405a95469d2`. The isolated pilot's
+`native/mcp-usage-reminder/` is retained at
+`ea30a80c61f0ae348adeb18ab7beff74b7e3820b`, outside this plan PR. It does
+not add a production executable, selector or trust change to the receiving tree.
+
+| Evidence | Observed scope and limit |
+| --- | --- |
+| Standalone Windows and Linux checks | The Rust reminder built and matched the Python oracle in isolated fixtures; this is not provider dispatch or supported-platform rollout evidence. |
+| Retained descriptor and preview (`51896d8c9345988b7daa1468fdbeba4c44124ca7`) | Explicit isolated preview used the existing installer and health owner, with native apply still refused in the public route. |
+| Real Codex command-line client 0.170.0 (`1f27c477e1c31110d41daa0b5058466646d340f2`) | Read-only hook listing in fresh isolated profiles identified the native candidate and Python control. Both were enabled but untrusted; report returned `PENDING_MANUAL_TRUST` and require refused. No hook invocation, model turn or trust write was qualified. |
+| Windows isolated native predecessor lifecycle (`66d54906860f98386fbdb32a3cac11902f7c6829`, `ea30a80c61f0ae348adeb18ab7beff74b7e3820b`) | Selected native-to-native update/retirement and late-refusal rollback through the existing owner, not a live Python-to-Rust migration or crash/restart proof. |
+
+Next, recheck the bounded pilot against the accepted receiving source and
+preserve its exact code and evidence independently of this plan. Before any
+production selector, qualify actual manual-trust verification and hook dispatch
+without a provider inference call; check build-to-installed identity, repeat
+install, interruption/restart, retirement and rollback for each claimed
+consumer and platform. Codex listing alone does not qualify Codex dispatch,
+and no Claude dispatch is claimed. Python remains the only production default
+and owner. No policy changes, silent fallback or live cutover are admitted here.
+
 ### Acceptance and cutover
 
 1. Capture the consumer inventory and baseline for Codex and Claude, every supported
@@ -510,10 +535,10 @@ production cutover, new dependency installation, reviewer/model launch or merge.
 
 ## Independent subsequent slices
 
-If the reminder is selected first, a possible later order is another simple
-shared hook, then justified pure reducers/validators, then state-owner/installer
-operations. Choose the actual first slice together with the user; the order here
-is not implementation authorization. Process supervision,
+After the reminder pilot, a possible order is another simple shared hook, then
+justified pure reducers/validators, then state-owner/installer operations. Admit
+each production slice separately; the order here is not implementation
+authorization. Process supervision,
 publication and repository transfer are separate high-risk migrations with their
 own authority, creator-custody and complete-graph/settlement requirements.
 Unavailable generic routes stay unavailable. A simple hook does not wait for

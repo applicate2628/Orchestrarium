@@ -331,10 +331,11 @@ def test_turn_anchor_emits_direct_root_no_self_residue_invariant() -> None:
     assert "pre-existing user state" in context
 
 
-def test_turn_anchor_uses_the_universal_policy_owner() -> None:
+def test_turn_anchor_uses_the_universal_policy_owner(monkeypatch) -> None:
     policy_path = (
         ROOT / "scripts" / "universal-hooks" / "scripts" / "mcp_continuity_policy.py"
     )
+    monkeypatch.syspath_prepend(str(policy_path.parent))
     spec = importlib.util.spec_from_file_location("repo_cleanup_anchor_policy", policy_path)
     assert spec is not None and spec.loader is not None
     policy = importlib.util.module_from_spec(spec)

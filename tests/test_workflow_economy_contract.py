@@ -124,7 +124,7 @@ def workflow_duties(text: str) -> dict[str, bool]:
         "full-review-trigger": "full only new defect class/material upstream revision",
         "optional-advice-default": "Consultant/external-brigade default off",
         "advisory-readiness": "Lead may choose read-only Kimi ambiguity/options at readiness/decision",
-        "unavailable-provider": "Grok unavailable1.x: no launch/probe",
+        "unavailable-provider": "Grok unavailable 1.x: no launch/probe",
         "quick-fix-ceremony": "Quick-fix: no pre-review ceremony",
         "artifact-root-entry": "Each result one artifact/root entry",
         "progress-only-refusal": "no duplicates/progress-only artifact/REVISE while safe implementation/validation remains",
@@ -418,7 +418,9 @@ class TestWorkflowEconomyContract(unittest.TestCase):
             "task-specific domain owner and policy/host-admitted task class",
             "astra-high",
             "astra-xhigh",
-            "If the decision remains genuinely demanding and no materially different sufficient Sol approach with a falsifier is evidenced, MUST request an explicit Astra profile for the next launch.",
+            "If the decision remains genuinely demanding and no materially different sufficient Sol approach with a falsifier is evidenced, select an explicit admitted Astra profile for the next launch under current task authorization",
+            "request consent only when that launch is not already covered",
+            "A host denial is a blocker under existing no-fallback rules",
             "original acceptance oracle",
             "quota",
         ):
@@ -438,15 +440,16 @@ class TestWorkflowEconomyContract(unittest.TestCase):
         for relative in LEAD_SKILL_PROJECTIONS:
             self.assertIn(selected_item_rule, self._read(relative), relative)
 
-        routing_rule = (
-            "Resolve the template and evidence triggers first. Each listed role is a candidate; include it "
-            "only when its artifact is required by accepted uncertainty, contract, or risk. Preserve mandatory "
-            "security, performance, geometry, scientific, human, and publication gates."
-        )
         for relative in LEAD_ROUTING_PROJECTIONS:
-            text = self._read(relative)
-            self.assertIn("## Routing examples", text, relative)
-            self.assertIn(routing_rule, text, relative)
+            routing = selected_section(self._read(relative), "Routing examples").replace("contract, or risk", "contract or risk")
+            for marker in (
+                "Resolve the template and evidence triggers first",
+                "independence owner",
+                "specialist is a candidate",
+                "only when its artifact is required by accepted uncertainty, contract or risk",
+                "Preserve mandatory security, performance, geometry, scientific, human, and publication gates",
+            ):
+                self._assert_contract_marker(relative, routing, marker)
 
         applicability_rule = (
             "Apply a law only when accepted evidence triggers its concern. An existing boundary law governs "
@@ -740,9 +743,10 @@ class TestWorkflowEconomyContract(unittest.TestCase):
 
     def test_provider_review_entrypoints_keep_objective_selection_and_triggered_risk_gates(self) -> None:
         codex = "src.codex/AGENTS.codex.md"
-        rows = [line for line in self._read(codex).splitlines() if line.startswith("| `review` |")]
+        routing = selected_section(self._read(codex), "Template routing")
+        rows = [line for line in routing.splitlines() if "light `review`" in line]
         self.assertEqual(len(rows), 1)
-        for marker in ("objective-named reviewer", "evidence-triggered helpers", "when present"):
+        for marker in ("objective-named reviewer", "only evidence-triggered helpers", "order present helpers as research → QA → review"):
             self._assert_contract_marker(codex, rows[0], marker)
 
         claude = self._read("src.claude/CLAUDE.md")

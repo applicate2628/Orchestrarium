@@ -557,6 +557,19 @@ UI_CONTINUITY_CONTRACT_TARGET = Path("contracts") / "ui-transition-continuity.md
 CODEX_HOOK_INVENTORY = "codex-hook-inventory.json"
 CODEX_ROLE_MANIFEST = "orchestrarium-role-manifest.json"
 _STOCK_NATIVE_ROLE_CONTRACT_PRIOR_PAIRS = (
+    # Exact factory contract before removing Low catalogue entries.
+    ((Path("shared") / "role-routing-policy.v1.json", "172b335f9d0ea70021bff88b048d1472709132897989365f4b4ee3e47e5682d1"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "c8164fe1df43369c22e9d2c800ef2e2cb0e775c6a31dc65fc25c06cf77e812dc")),
+    # Exact factory contract before latest-family-only routing.
+    ((Path("shared") / "role-routing-policy.v1.json", "9672319f42039f6e8864de31e00ea4423011f3be679c3180e2161a8611b28259"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "882b96207b5503bb231002301cc15df08107c66a9ccfd189a84b48e6e62d1b0a")),
+    # Exact previous factory contract for the 6.2 task-first ranking.
+    ((Path("shared") / "role-routing-policy.v1.json", "b3551957c35cc724e905522d0b9ce0044fc050fcbeb2fd9e0893835cca083168"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "fbb6a7dbdb41336a8a82d8adfebbd79b762e5472f98267c30500d0e99c3fd03a")),
+    # Exact pre-6.2 factory contract. Keep the Terra ranking pair last: its
+    # position is the existing control-only migration provenance boundary.
+    ((Path("shared") / "role-routing-policy.v1.json", "fafd37b08375e0d261a57edd06613ab15dcaac9075fc031bf2702b173e6f8cf7"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "2ca416fa4fc2aa93c7fe74dc6db62273d72367a901e0ee260fce55377acb6d77")),
     (
         (Path("shared") / "role-routing-policy.v1.json",
          "b6b76525d5e9d054cf8c1a9d89ea038c42ce8b488a1a835873d6d38f6e5b8bd3"),
@@ -678,7 +691,9 @@ _CLAUDE_RETIRED_SH = {
 
 
 def _parser(provider: str) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=f"Install the production {provider} pack.")
+    parser = argparse.ArgumentParser(
+        description=f"Install the production {provider} pack.", allow_abbrev=False,
+    )
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--global", "-Global", dest="global_install", action="store_true")
     modes.add_argument("--target", "-Target")
@@ -730,6 +745,16 @@ def _parser(provider: str) -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", "-DryRun", action="store_true")
     parser.add_argument("--allow-unsafe-target", "-AllowUnsafeTarget", action="store_true")
     parser.add_argument("--no-hypothesis-hook", "-NoHypothesisHook", action="store_true")
+    parser.add_argument(
+        "--shared-hook-runtime", action="store_true",
+        help="Global Codex only: register linked hooks against the same retained bundle path on every host",
+    )
+    parser.add_argument(
+        "--hooks-only", action="store_true",
+        help="With --global --shared-hook-runtime: update only the owned hook registrations and inventory",
+    )
+    parser.add_argument("--previous-retained-release", type=Path,
+                        help="With --hooks-only: select the already trusted previous retained bundle")
     kimi_maintenance = parser.add_mutually_exclusive_group()
     kimi_maintenance.add_argument("--enroll-kimi", action="store_true")
     kimi_maintenance.add_argument("--replace-kimi-enrollment", action="store_true")
@@ -862,6 +887,50 @@ class _NativeNodeProof:
 
 
 @dataclass(frozen=True)
+class _WindowsSecurityImage:
+    """Owner/group/DACL policy; the native self-relative buffer is a recipe only."""
+
+    descriptor: bytes = field(compare=False, repr=False)
+    policy: tuple[Any, ...] = field(repr=False)
+
+    @classmethod
+    def from_descriptor(cls, descriptor: bytes) -> "_WindowsSecurityImage":
+        import struct
+        if len(descriptor) < 20:
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: truncated security descriptor")
+        revision, _reserved, control, owner, group, _sacl, dacl = struct.unpack_from(
+            "<BBHLLLL", descriptor)
+        if revision != 1 or not control & 0x8000:
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: nonrelative security descriptor")
+        def member(offset, *, acl=False):
+            if not offset:
+                return None
+            if offset < 20 or offset + 8 > len(descriptor):
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: security member bounds")
+            size = (struct.unpack_from("<H", descriptor, offset + 2)[0] if acl
+                    else 8 + 4 * descriptor[offset + 1])
+            if size < 8 or offset + size > len(descriptor):
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: security member length")
+            return descriptor[offset:offset + size]
+        # Presence distinguishes absent and NULL DACLs. Ordered ACE bytes and
+        # protected/automatic-inheritance flags are policy, unlike buffer offsets.
+        policy = (member(owner), member(group), member(dacl, acl=True),
+                  control & 0x150F)
+        return cls(descriptor, policy)
+
+    @property
+    def replayable_auto_inheritance(self) -> bool:
+        # Only a present, non-null and unprotected DACL can be replayed.
+        dacl, control = self.policy[2:]
+        return dacl is not None and control & 0x1404 == 0x0404
+
+    def needs_inheritance_replay(self, created: "_WindowsSecurityImage") -> bool:
+        return (self.replayable_auto_inheritance
+                and self.policy[:3] == created.policy[:3]
+                and self.policy[3] ^ created.policy[3] == 0x0400)
+
+
+@dataclass(frozen=True)
 class _PhysicalNode:
     kind: str
     python_identity: tuple[int, int, int, int]
@@ -869,6 +938,7 @@ class _PhysicalNode:
     native_proof: _NativeNodeProof | None = None
     reparse_data: bytes | None = None
     evidence_role: str = field(default="sealed", compare=False)
+    security: _WindowsSecurityImage | None = field(default=None, repr=False)
 
 
 class _WindowsBoundNode:
@@ -877,6 +947,8 @@ class _WindowsBoundNode:
     _bindings = None
     _creation_bindings = None
     _security_bindings = None
+    _descriptor_bindings = None
+    _dacl_bindings = None
     _target_bindings = None
     _privilege_bindings = None
 
@@ -1030,10 +1102,12 @@ class _WindowsBoundNode:
         import msvcrt
         return cls.proof_from_handle(msvcrt.get_osfhandle(descriptor))
 
-    def __init__(self, path: Path, *, purpose: str = "observe", follow: bool = False):
+    def __init__(self, path: Path, *, purpose: str = "observe", follow: bool = False,
+                 security: bool = False):
         self.path = path
         self.purpose = purpose
         self.follow = follow
+        self.read_security = security
         self.handle = None
         self.descriptor = None
         self.creator_proof = None
@@ -1044,11 +1118,16 @@ class _WindowsBoundNode:
         if self.handle is not None or self.descriptor is not None:
             return self
         ctypes, _wintypes, kernel, *_rest = self._api()
-        if self.purpose not in {"observe", "parent", "attributes", "dispose"}:
+        if self.purpose not in {"observe", "parent", "attributes", "dispose", "scalar-writer"}:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing native creator custody")
         access = (0x12019F if self.purpose == "parent" else
                   0x81 | (0x10100 if self.purpose == "dispose" else 0)
                   | (0x100 if self.purpose == "attributes" else 0))
+        if self.purpose == "scalar-writer":
+            # Ordinary byte mutation and READ_CONTROL only: no security mutation rights.
+            access = 0x120083  # SYNCHRONIZE | READ_CONTROL | READ_ATTRIBUTES | READ/WRITE_DATA
+        if self.read_security:
+            access |= 0x20000  # READ_CONTROL; no WRITE_DAC/WRITE_OWNER or privilege.
         share = 7 if self.purpose in {"observe", "parent"} else 1
         flags = 0x2000000 | (0 if self.follow else 0x200000)
         handle = kernel.CreateFileW(str(self.path), access, share, None, 3, flags, None)
@@ -1060,7 +1139,8 @@ class _WindowsBoundNode:
     @classmethod
     @contextmanager
     def create(cls, path: Path, *, directory: bool, mode: int = 0o777,
-               parent_reference: "_WindowsBoundNode | None" = None):
+               parent_reference: "_WindowsBoundNode | None" = None,
+               security_image: _WindowsSecurityImage | None = None):
         ctypes, wintypes, kernel, *_rest = cls._api()
         if cls._creation_bindings is None:
             class UnicodeString(ctypes.Structure):
@@ -1092,8 +1172,12 @@ class _WindowsBoundNode:
         born = None
         abandoned = False
         release = None
+        security_storage = None
         try:
-            if directory and mode == 0o700:
+            if security_image is not None:
+                security_storage = ctypes.create_string_buffer(security_image.descriptor)
+                security = ctypes.cast(security_storage, wintypes.LPVOID)
+            elif directory and mode == 0o700:
                 if cls._security_bindings is None:
                     advapi = ctypes.WinDLL("advapi32", use_last_error=True)
                     convert = advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW
@@ -1116,7 +1200,13 @@ class _WindowsBoundNode:
                 attributes = ObjectAttributes(ctypes.sizeof(ObjectAttributes), parent.live_handle,
                                                ctypes.pointer(unicode), 0x40, security if security.value else None, None)
                 status_block, handle = IoStatus(), wintypes.HANDLE()
-                status = function(ctypes.byref(handle), 0x13019F, ctypes.byref(attributes),
+                access = 0x13019F
+                if security_image is not None and security_image.replayable_auto_inheritance:
+                    # SetSecurityInfo does not propagate to children when the
+                    # held creator handle was opened with MAXIMUM_ALLOWED.
+                    # This is OS-authorized access on the new object only.
+                    access |= 0x02000000 | 0x40000
+                status = function(ctypes.byref(handle), access, ctypes.byref(attributes),
                                   ctypes.byref(status_block), None, 0x80, 7, 2,
                                   0x21 if directory else 0x60, None, 0)
                 if status < 0:
@@ -1177,7 +1267,7 @@ class _WindowsBoundNode:
             primary = error
             raise
         finally:
-            if security.value:
+            if release is not None and security.value:
                 if release(security):
                     cleanup = ctypes.WinError(ctypes.get_last_error())
                     previous = primary if isinstance(primary, _InstallFailure) else None
@@ -1194,6 +1284,44 @@ class _WindowsBoundNode:
                                           retained_errors=tuple(error for error in (previous, cleanup)
                                               if _copy_setter_operation_errors(error))) from primary
                 security.value = None
+
+    def security_image(self) -> _WindowsSecurityImage:
+        """Read only owner/group/DACL from this held object, never a pathname."""
+        ctypes, wintypes, _kernel, *_rest = self._api()
+        if self._descriptor_bindings is None:
+            advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+            get = advapi.GetKernelObjectSecurity
+            get.argtypes = (wintypes.HANDLE, wintypes.DWORD, ctypes.c_void_p,
+                            wintypes.DWORD, ctypes.POINTER(wintypes.DWORD))
+            get.restype = wintypes.BOOL
+            type(self)._descriptor_bindings = get
+        get = self._descriptor_bindings
+        needed = wintypes.DWORD()
+        if get(self.live_handle, 7, None, 0, ctypes.byref(needed)):
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing security buffer")
+        if ctypes.get_last_error() != 122 or not needed.value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        buffer = ctypes.create_string_buffer(needed.value)
+        if not get(self.live_handle, 7, buffer, len(buffer), ctypes.byref(needed)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return _WindowsSecurityImage.from_descriptor(bytes(buffer.raw[:needed.value]))
+
+    def replay_created_dacl_inheritance(self, expected: _WindowsSecurityImage) -> None:
+        """Reapply the same ACL so NTFS recalculates inheritance on a held new object."""
+        if self.purpose != "creator" or self.born_path != self.path or self.proof != self.creator_proof:
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing DACL creator binding")
+        ctypes, wintypes, _kernel, *_rest = self._api()
+        if self._dacl_bindings is None:
+            api = ctypes.WinDLL("advapi32")
+            setter = api.SetSecurityInfo
+            setter.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
+                               ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
+            setter.restype = wintypes.DWORD
+            type(self)._dacl_bindings = setter
+        dacl = ctypes.create_string_buffer(expected.policy[2])
+        error = self._dacl_bindings(self.live_handle, 1, 4, None, None, dacl, None)
+        if error:
+            raise ctypes.WinError(error)
 
     @property
     def proof(self) -> _NativeNodeProof:
@@ -1220,6 +1348,20 @@ class _WindowsBoundNode:
         if not kernel.GetFileInformationByHandleEx(self.live_handle, 0, ctypes.byref(information), ctypes.sizeof(information)):
             raise ctypes.WinError(ctypes.get_last_error())
         return information
+
+    def ordinary_single_link(self) -> bool:
+        ctypes, wintypes, kernel, *_rest = self._api()
+
+        class StandardInfo(ctypes.Structure):
+            _fields_ = (("allocation", ctypes.c_longlong), ("end", ctypes.c_longlong),
+                        ("links", wintypes.DWORD), ("delete_pending", ctypes.c_ubyte),
+                        ("directory", ctypes.c_ubyte))
+
+        info = StandardInfo()
+        if not kernel.GetFileInformationByHandleEx(
+                self.live_handle, 1, ctypes.byref(info), ctypes.sizeof(info)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return info.links == 1 and not info.delete_pending and not info.directory
 
     def digest(self) -> str:
         ctypes, wintypes, kernel, *_rest = self._api()
@@ -1722,7 +1864,7 @@ def _installer_failure_text(error: BaseException) -> str:
                     "native-acquisition", "native-security-release", "native-close", "creator-capture", "borrowed-content",
                     "copy-close", "scalar-parent-close", "descriptor-read-reset", "scalar-close", "scalar-acquisition",
                     "file-copy", "file-acquisition", "file-close", "construction", "disposal-close", "snapshot-acquisition",
-                    "residual-creator", "retention-acquisition", "migration-stage", "capability", "prepared", "projection-set"}
+                    "residual-creator", "retention-acquisition", "migration-stage", "capability", "prepared", "projection-set", "security-creation"}
         def safe_context(value):
             return value if type(value) is str and value in contexts else "unavailable"
         filesystem_types = (
@@ -1759,6 +1901,9 @@ def _installer_failure_text(error: BaseException) -> str:
             if value is None:
                 return kind, identity, cause_context, native_errno, native_winerror
             cause_type = type(value)
+            if cause_type is _AtomicTransportProjectionStateError:
+                return ("validation-error", "E_TRANSPORT_PROJECTION_PARITY",
+                        "transport-projection", native_errno, native_winerror)
             if cause_type is _InstallFailure:
                 kind = "installer-failure"
                 try:
@@ -1805,6 +1950,8 @@ def _installer_failure_text(error: BaseException) -> str:
             cause = "identity-check-failed" if identity in {"E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY",
                 "E_ROLLBACK_CREATED_IDENTITY_CHANGED", "E_RUNTIME_SUBROOT_ROLLBACK_UNSAFE"} else "operation-failed"
             original = f"{identity} | context={context} | cause={cause}"
+        elif type(error) is _AtomicTransportProjectionStateError:
+            original = "E_TRANSPORT_PROJECTION_PARITY | context=transport-projection | cause=atomic-projection-state"
         else:
             cause = "filesystem-operation-failed" if isinstance(error, OSError) else (
                 "validation-failed" if isinstance(error, ValueError) else "operation-failed")
@@ -1896,6 +2043,13 @@ def _installer_failure_text(error: BaseException) -> str:
         return original + " | diagnostic=unavailable"
 
 
+class _AtomicTransportProjectionStateError(ValueError):
+    """An existing Claude transport is not an admitted atomic projection."""
+
+    def __init__(self) -> None:
+        super().__init__("E_TRANSPORT_PROJECTION_PARITY: atomic projection state")
+
+
 @dataclass(frozen=True)
 class _RollbackFailureMember:
     phase: str
@@ -1983,6 +2137,9 @@ class _InstallFailure(RuntimeError):
 SLICE_A_FAILURE_IDS = frozenset(
     {
         "E_ATOMIC_DIRECTORY_PUBLISH_UNSUPPORTED",
+        "E_CODEX_HOOK_SLOT_SHIFT",
+        "E_WINDOWS_SECURITY_CREATION_MISMATCH",
+        "E_SHARED_HOOK_RUNTIME",
         "E_CODEX_DOCUMENT_LEGACY_OWNERSHIP_REQUIRED",
         "E_NATIVE_PROJECTION_SET_FAILED",
         "E_CREATE_ONLY_COLLISION",
@@ -2091,6 +2248,13 @@ class _DeclaredPathEffect:
     @property
     def location(self) -> Path:
         return self.path if self.current_path is None else self.current_path
+
+    @property
+    def preflight_state(self) -> tuple[tuple[Path, _PhysicalNode], ...]:
+        # Recognize the earlier content/identity acquisition, not fresh authority.
+        # Its caller must still assert the effect's stronger current witnesses.
+        return tuple(sorted((path, replace(node, security=None))
+                            for path, node in self.before.items()))
 
 
 def _require_transaction_disposal_backend() -> None:
@@ -2381,9 +2545,11 @@ class _InstallTransaction:
                         )
                         and current.native_proof == expected.native_proof)
             if os.name == "nt":
-                with _WindowsBoundNode(path) as bound:
+                with _WindowsBoundNode(path, security=expected.security is not None) as bound:
                     current = _InstallTransaction._capture_node(path, bound_node=bound, metadata_only=True)
                     if not metadata_matches(current):
+                        return False
+                    if expected.security is not None and bound.security_image() != expected.security:
                         return False
                     if expected.kind in {"link", "reparse"}:
                         return _InstallTransaction._capture_node(path, bound_node=bound, data=expected.data) == expected
@@ -3207,6 +3373,13 @@ class _InstallTransaction:
         return _InstallTransaction._capture_node(path, descriptor=descriptor, kind="file",
             data=hashlib.sha256(_InstallTransaction._descriptor_bytes(descriptor, path=path)).hexdigest())
 
+    @staticmethod
+    def _assert_scalar_security(bound: _WindowsBoundNode, expected: _WindowsSecurityImage) -> None:
+        if (not bound.ordinary_single_link() or
+                bound.basic().attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT or
+                bound.security_image() != expected):
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar security or link count")
+
     def _scalar_beforeimage(self, path: Path, before: _PhysicalNode) -> Path:
         for entry in self._entries:
             if entry["kind"] == "file" and self._original.get(entry["path"]) == {path: before}:
@@ -3217,9 +3390,12 @@ class _InstallTransaction:
         self._copy_snapshot(path, backup, {path: before})
         return backup
 
-    def transform_scalar(self, logical: Path, legacy: Path, render, owner: "_CreateOnlyMutablePath") -> None:
+    def transform_scalar(self, logical: Path, legacy: Path | None, render, owner: "_CreateOnlyMutablePath",
+                         *, move_legacy: bool = True,
+                         windows_origin: _PhysicalNode | None = None) -> None:
         """Bind, render and perform one ordinary scalar write in this transaction."""
-        logical, legacy = Path(os.path.abspath(logical)), Path(os.path.abspath(legacy))
+        logical = Path(os.path.abspath(logical))
+        legacy = Path(os.path.abspath(legacy)) if legacy is not None else None
         if os.path.normcase(os.path.commonpath((str(owner.anchor), str(logical)))) != os.path.normcase(str(owner.anchor)):
             raise ValueError("E_MUTABLE_PATH_ESCAPE: scalar selection")
         if owner.linked_authority is not None:
@@ -3228,7 +3404,16 @@ class _InstallTransaction:
             raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED")
         selected = self._bind_scalar_storage(logical)
         storage, before, links, leaf = selected
+        expected_windows_security = windows_origin.security if windows_origin is not None else None
+        if windows_origin is not None and (
+            os.name != "nt" or not self.enabled or legacy is not None
+            or expected_windows_security is None or before != replace(windows_origin, security=None)
+            or storage != logical or leaf != storage
+            or any(node.kind != "directory" for _path, node in links)
+        ):
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: secure scalar requires an existing ordinary Windows target")
         descriptor = None
+        secured = None
         resources = ExitStack()
         primary = None
         appended = False
@@ -3254,10 +3439,15 @@ class _InstallTransaction:
                 parent_path = parent_path.parent
             parent_node = dict(links)[parent_path]
             parent_reference = self._bind_scalar_parent(parent_path, parent_node, resources)
-            use_legacy = before is None and legacy.is_file()
-            if use_legacy:
+            if before is None and legacy is not None and legacy.is_file():
                 if leaf != storage:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: legacy target pointer is occupied")
+                if not move_legacy:
+                    # Existing provider readers support this filename.
+                    self.transform_scalar(legacy, None, render, owner)
+                    if self._bind_scalar_storage(logical) != selected:
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: legacy selection drift")
+                    return
                 source_selected = self._bind_scalar_storage(legacy)
                 source_storage, source_node, source_links, source_leaf = source_selected
                 source_parent = self._bind_scalar_parent(source_leaf.parent, dict(source_links)[source_leaf.parent], resources)
@@ -3265,6 +3455,8 @@ class _InstallTransaction:
                     self._bind_scalar_parent(source_storage.parent, dict(source_links)[source_storage.parent], resources))
                 legacy_image = self._observe(source_leaf)
                 planned = render(legacy)
+                if not isinstance(planned, bytes):
+                    raise ValueError("E_MUTABLE_PATH_POSTCONDITION: scalar legacy renderer bytes")
                 if self._bind_scalar_storage(legacy) != source_selected or self._bind_scalar_storage(logical) != selected:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar legacy rendering drift")
                 expected_legacy = self._relocate(legacy_image, source_leaf, leaf)
@@ -3290,9 +3482,18 @@ class _InstallTransaction:
                 planned = render(logical)
                 if self._bind_scalar_storage(logical) != selected:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar rendering drift")
+                if planned is None and before is None:
+                    return
             if not isinstance(planned, bytes):
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION: scalar renderer bytes")
             digest = hashlib.sha256(planned).hexdigest()
+            if expected_windows_security is not None:
+                secured = resources.enter_context(_WindowsBoundNode(storage, purpose="scalar-writer", security=True))
+                secured.python_metadata(writable=True)
+                descriptor = secured.descriptor
+                if self._scalar_descriptor_node(storage, descriptor, before) != before:
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: secure scalar origin")
+                self._assert_scalar_security(secured, expected_windows_security)
             if before is not None and before.data == digest:
                 return
             # Missing suffixes belong only to this already-bound scalar selection.
@@ -3320,6 +3521,8 @@ class _InstallTransaction:
                      "before_node": before, "current_node": before, "origin": before,
                      "links": links, "operation_backup": None, "consumed": False, "born": before is None,
                      "logical_views": (logical,) if leaf == storage else ()}
+            if expected_windows_security is not None:
+                entry["expected_windows_security"] = expected_windows_security
             if before is not None and self.enabled:
                 entry["operation_backup"] = self._scalar_beforeimage(storage, before)
             self._assert_scalar_binding(entry)
@@ -3334,7 +3537,7 @@ class _InstallTransaction:
                     appended = True
                     node = self._capture_node(storage, bound_node=created, kind="file", data=hashlib.sha256(b"").hexdigest())
                     descriptor = created.descriptor
-                else:
+                elif secured is None:
                     descriptor = os.open(storage, flags)
                     resources.callback(close_descriptor)
             else:
@@ -3368,8 +3571,12 @@ class _InstallTransaction:
             def record(path, current):
                 entry["current_node"] = current
                 self._advance(path, {path: current})
+            if secured is not None:
+                self._assert_scalar_security(secured, expected_windows_security)
             self._write_owned_file(storage, descriptor, (planned,), record, digest,
                                    initial_state=before if before is not None else None)
+            if secured is not None:
+                self._assert_scalar_security(secured, expected_windows_security)
             actual = self._scalar_descriptor_node(storage, descriptor, entry["origin"])
             if actual != entry["current_node"]:
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION: scalar descriptor result")
@@ -3449,6 +3656,26 @@ class _InstallTransaction:
                     payload = backup.read_bytes()
                     if hashlib.sha256(payload).hexdigest() != entry["before_node"].data:
                         raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar inverse input")
+                    security = entry.get("expected_windows_security")
+                    if security is not None:
+                        with _WindowsBoundNode(path, purpose="scalar-writer", security=True) as secured:
+                            secured.python_metadata(writable=True)
+                            descriptor = secured.descriptor
+                            current = self._scalar_descriptor_node(path, descriptor, entry["origin"])
+                            if current != entry["current_node"]:
+                                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: secure scalar inverse descriptor")
+                            self._assert_scalar_security(secured, security)
+                            def record(member, node):
+                                entry["current_node"] = node
+                                self._advance(member, {member: node})
+                            self._write_owned_file(path, descriptor, (payload,), record,
+                                                   entry["before_node"].data, initial_state=current)
+                            self._assert_scalar_security(secured, security)
+                            if self._scalar_descriptor_node(path, descriptor, entry["origin"]) != entry["before_node"]:
+                                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: secure scalar inverse")
+                        self._assert_scalar_binding(entry)
+                        entry["consumed"] = True
+                        continue
                     descriptor = os.open(path, os.O_RDWR | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0))
                     primary = None
                     try:
@@ -3665,6 +3892,32 @@ class _InstallTransaction:
         self._effects.append(effect)  # Armed before the first destructive operation.
         return effect
 
+    def capture_replacement_security(self, effect: _DeclaredPathEffect) -> None:
+        """Add destination security witnesses before any replacement preparation."""
+        if os.name != "nt":
+            return
+        secured = self._windows_tree_security(effect.location, effect.before)
+        effect.before = secured
+        effect.actual = dict(secured)
+        # Admission adds evidence, not a mutation of the earlier snapshot.
+        # Normal relocation records it when an actual namespace effect occurs.
+
+    def _windows_tree_security(self, root: Path, image: dict[Path, _PhysicalNode]) -> dict[Path, _PhysicalNode]:
+        secured = {}
+        for path, expected in image.items():
+            if expected.kind not in {"file", "directory"}:
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: nonordinary security counterpart")
+            with _WindowsBoundNode(path, security=True) as bound:
+                current = self._capture_node(path, bound_node=bound, metadata_only=True)
+                if (current.kind != expected.kind
+                        or not self._binding_identity_matches(expected.python_identity, current.python_identity)
+                        or current.native_proof != expected.native_proof):
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: security source identity")
+                secured[path] = replace(expected, security=bound.security_image())
+        if not self._image_matches(root, secured):
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: security acquisition drift")
+        return secured
+
     def _assert_effect_endpoint(self, effect: _DeclaredPathEffect, path: Path) -> None:
         destination_owner = effect.retained_owner or effect.owner
         owner = (destination_owner if any(root is not None and (path == root or root in path.parents)
@@ -3750,7 +4003,8 @@ class _InstallTransaction:
                     not self._binding_identity_matches(
                         previous.python_identity, node.python_identity
                     )
-                    or replace(node, python_identity=previous.python_identity) != previous
+                    or replace(node, python_identity=previous.python_identity,
+                               security=previous.security) != previous
                 ):
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: sealed observation drift")
                 current[member] = previous
@@ -4109,13 +4363,29 @@ class _InstallTransaction:
 
     def _create_owned_directory(self, path: Path, record, *, parent_descriptor: int | None = None,
                                 parent_reference: _WindowsBoundNode | None = None,
-                                mode: int = 0o777, born=None) -> _PhysicalNode:
+                                mode: int = 0o777, born=None,
+                                security_image: _WindowsSecurityImage | None = None,
+                                capture_security: bool = False) -> _PhysicalNode:
         if os.name == "nt":
-            with _WindowsBoundNode.create(path, directory=True, mode=mode, parent_reference=parent_reference) as created:
+            options = {"security_image": security_image} if security_image is not None else {}
+            with _WindowsBoundNode.create(path, directory=True, mode=mode,
+                                          parent_reference=parent_reference, **options) as created:
                 if born is not None:
                     born(path)
                 node = self._capture_node(path, bound_node=created, kind="directory")
                 record(path, node)
+                if capture_security or security_image is not None:
+                    node = replace(node, security=created.security_image())
+                    record(path, node)
+                    if security_image is not None and security_image.needs_inheritance_replay(node.security):
+                        try:
+                            created.replay_created_dacl_inheritance(security_image)
+                        finally:
+                            node = replace(node, security=created.security_image())
+                            record(path, node)
+                    if security_image is not None and node.security != security_image:
+                        raise _InstallFailure("E_WINDOWS_SECURITY_CREATION_MISMATCH", "security-creation",
+                                              ValueError("directory security creation"))
                 return node
         if parent_descriptor is None:
             os.mkdir(path, mode)
@@ -4210,13 +4480,18 @@ class _InstallTransaction:
 
     def _copy_owned_file(self, source: Path, target: Path, expected: _PhysicalNode,
                          record, *, source_parent: int | None = None,
-                         target_parent: int | None = None) -> None:
+                         target_parent: int | None = None,
+                         security_image: _WindowsSecurityImage | None = None,
+                         capture_security: bool = False) -> None:
         """The shared exclusive file producer records actual creator and partial bytes."""
         descriptors = []
         primary = None
-        def fill(incoming, outgoing):
+        def fill(incoming, outgoing, created_security=None):
+            def receive(path, node):
+                record(path, replace(node, security=created_security)
+                       if created_security is not None else node)
             node = self._write_owned_file(target, outgoing,
-                iter(lambda: os.read(incoming, 1024 * 1024), b""), record, expected.data,
+                iter(lambda: os.read(incoming, 1024 * 1024), b""), receive, expected.data,
                 mode=None if target in self._copy_metadata else stat.S_IMODE(expected.python_identity[2]))
             if target in self._copy_metadata:
                 participant = self._copy_metadata[target]
@@ -4242,11 +4517,24 @@ class _InstallTransaction:
             if os.name == "nt":
                 if _WindowsBoundNode.proof_from_descriptor(incoming) != expected.native_proof:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: source native identity")
-                with _WindowsBoundNode.create(target, directory=False) as created:
+                options = {"security_image": security_image} if security_image is not None else {}
+                with _WindowsBoundNode.create(target, directory=False, **options) as created:
                     node = self._capture_node(target, bound_node=created, kind="file",
                                               data=hashlib.sha256(b"").hexdigest())
                     record(target, node)
-                    fill(incoming, created.descriptor)
+                    if capture_security or security_image is not None:
+                        node = replace(node, security=created.security_image())
+                        record(target, node)
+                        if security_image is not None and security_image.needs_inheritance_replay(node.security):
+                            try:
+                                created.replay_created_dacl_inheritance(security_image)
+                            finally:
+                                node = replace(node, security=created.security_image())
+                                record(target, node)
+                        if security_image is not None and node.security != security_image:
+                            raise _InstallFailure("E_WINDOWS_SECURITY_CREATION_MISMATCH", "security-creation",
+                                                  ValueError("file security creation"))
+                    fill(incoming, created.descriptor, node.security)
             else:
                 outgoing = (os.open(target.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                                     0o600, dir_fd=target_parent) if target_parent is not None else
@@ -4348,7 +4636,7 @@ class _InstallTransaction:
         self, source: Path, target: Path, before: dict[Path, _PhysicalNode],
         effect: _DeclaredPathEffect | None,
         *, stage: bool = False, source_witness: dict[Path, _PhysicalNode] | None = None,
-        sink=None,
+        sink=None, security: dict[Path, _WindowsSecurityImage] | None = None,
     ) -> dict[Path, _PhysicalNode]:
         """Reconstruct ordinary trees through held parents and exclusive nodes."""
         required = {os.open, os.mkdir, os.stat}
@@ -4425,7 +4713,10 @@ class _InstallTransaction:
                 if not self._binding_identity_matches(value.python_identity, identity(metadata)):
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: construction source")
                 if value.kind == "directory":
-                    created_node = self._create_owned_directory(new, record, parent_descriptor=destination_descriptor)
+                    created_node = self._create_owned_directory(
+                        new, record, parent_descriptor=destination_descriptor,
+                        security_image=(security or {}).get(old, value.security),
+                        capture_security=security is not None)
                     source_child = opened_directory(source_descriptor, old.name, old, value)
                     destination_child = opened_directory(destination_descriptor, old.name, new, created_node)
                     construct(old, source_child, new, destination_child)
@@ -4439,7 +4730,9 @@ class _InstallTransaction:
                         descriptors.remove(source_child)
                 elif value.kind == "file":
                     self._copy_owned_file(old, new, value, record,
-                                          source_parent=source_descriptor, target_parent=destination_descriptor)
+                                          source_parent=source_descriptor, target_parent=destination_descriptor,
+                                          security_image=(security or {}).get(old, value.security),
+                                          capture_security=security is not None)
                 else:
                     self._copy_owned_link(old, new, value, record)
         original = None
@@ -4454,7 +4747,10 @@ class _InstallTransaction:
             source_descriptor = opened_directory(source_parent, source.name, source, before[source])
             if effect is not None:
                 effect.owner.destination(target.relative_to(effect.owner.anchor))
-            created_node = self._create_owned_directory(target, record, parent_descriptor=destination_parent)
+            created_node = self._create_owned_directory(
+                target, record, parent_descriptor=destination_parent,
+                security_image=(security or {}).get(source, before[source].security),
+                capture_security=security is not None)
             destination_descriptor = opened_directory(destination_parent, target.name, target, created_node)
             construct(source, source_descriptor, target, destination_descriptor)
             changed = self._chmod_owned(target, actual[target].python_identity, stat.S_IMODE(before[source].python_identity[2]),
@@ -4551,7 +4847,8 @@ class _InstallTransaction:
 
         The caller owns ancestor selection and journal advancement within the
         supported ordinary serialized-writer lifecycle.
-        No permission changes or recursive adoption occur in this primitive.
+        Only an owned private snapshot parent may be made writable for a
+        single disposal. No live-tree permissions or foreign state are adopted.
         """
         if (not isinstance(expected, _PhysicalNode)
                 or expected.evidence_role != "sealed"
@@ -4580,7 +4877,25 @@ class _InstallTransaction:
                         parent_identity, _CreateOnlyMutablePath._identity(path.parent))):
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: POSIX disposal binding")
             operation = os.rmdir if expected.kind == "directory" else os.unlink
-            operation(path.name, dir_fd=descriptor)
+            backup_parent = self._backup_root_state.get(path.parent)
+            if backup_parent is None or parent.st_uid != os.geteuid() or parent.st_mode & stat.S_IWUSR:
+                operation(path.name, dir_fd=descriptor)
+            else:
+                if (backup_parent.kind != "directory" or backup_parent.evidence_role != "sealed"
+                        or backup_parent.python_identity != bound_parent):
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: snapshot disposal parent")
+                mode = stat.S_IMODE(parent.st_mode)
+                writable = mode | stat.S_IWUSR
+                try:
+                    self._chmod_owned(path.parent, bound_parent, writable, descriptor=descriptor)
+                    operation(path.name, dir_fd=descriptor)
+                finally:
+                    # Restore the original mode on the same held object, even if
+                    # unlink or the writable transition raised.
+                    if stat.S_IMODE(os.fstat(descriptor).st_mode) != mode:
+                        os.fchmod(descriptor, mode)
+                    if stat.S_IMODE(os.fstat(descriptor).st_mode) != mode:
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: snapshot disposal mode")
             try:
                 os.stat(path.name, dir_fd=descriptor, follow_symlinks=False)
             except FileNotFoundError:
@@ -4614,7 +4929,8 @@ class _InstallTransaction:
         if os.name == "nt":
             if expected.native_proof is None:
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: missing native creator proof")
-            with _WindowsBoundNode(path, purpose="dispose") as bound:
+            with _WindowsBoundNode(path, purpose="dispose",
+                                   security=expected.security is not None) as bound:
                 if bound.proof != expected.native_proof:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal identity")
                 attributes = bound.basic().attributes
@@ -4632,6 +4948,8 @@ class _InstallTransaction:
                 if attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
                     if expected.reparse_data is None or bound.reparse_data() != expected.reparse_data:
                         raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal reparse metadata")
+                if expected.security is not None and bound.security_image() != expected.security:
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal security")
                 bound.mark_disposal()
             # Marking is not disappearance; a new occupant is never adopted.
             try:
@@ -6600,7 +6918,8 @@ class _CreateOnlyMutablePath:
                     retained_destination: Path | None = None,
                     preserve_on_commit: bool = False,
                     retained_owner: "_CreateOnlyMutablePath | None" = None,
-                    readonly_dependencies: tuple[_ReadOnlyPathDependency, ...] = ()) -> Path:
+                    readonly_dependencies: tuple[_ReadOnlyPathDependency, ...] = (),
+                    preserve_windows_security: bool = False) -> Path:
         """Retain an exact admitted regular/link/tree image without following links."""
         path = self.destination(relative, allow_leaf_reparse=True)
         root = expected.get(path)
@@ -6616,6 +6935,8 @@ class _CreateOnlyMutablePath:
             retained_destination=retained_destination, preserve_on_commit=preserve_on_commit,
             retained_owner=retained_owner)
         effect.readonly_dependencies = tuple(readonly_dependencies)
+        if preserve_windows_security:
+            self.transaction.capture_replacement_security(effect)
         if effect.before != expected:
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: armed retention source")
         self.transaction.assert_effect_current(effect)
@@ -6878,6 +7199,60 @@ class _CreateOnlyMutablePath:
         self.transaction._migration_settled(record)
         self.transaction._assert_scalar_binding({"links": record.selection_links}, check_storage=False)
 
+    def _update_windows_tree_contents(self, target: Path, source: Path, before_digest: str,
+                                      after_digest: str, *, ignore_runtime_cache: bool) -> bool:
+        """Preserve historical access policy by keeping the original file objects."""
+        transaction = self.transaction
+        old = dict(_stage_tree_manifest(target, ignore_runtime_cache=ignore_runtime_cache))
+        new = dict(_stage_tree_manifest(source, ignore_runtime_cache=ignore_runtime_cache))
+        if old.keys() != new.keys() or any((old[k] == "directory") != (new[k] == "directory") for k in old):
+            return False  # Topology changes retain the strict staged tree publisher.
+        if (_tree_manifest_sha256(tuple(old.items())) != before_digest
+                or _tree_manifest_sha256(tuple(new.items())) != after_digest):
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: tree selection drift")
+        snapshot = next((transaction._expected[parent] for parent in (target, *target.parents)
+                         if parent in transaction._expected), {})
+        original = {path: node for path, node in snapshot.items()
+                    if path == target or target in path.parents}
+        if target not in original:
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing tree snapshot")
+        secured = transaction._windows_tree_security(target, original)
+        plan = []
+        for member, digest in new.items():
+            path = target / member
+            if secured[path].data != (None if old[member] == "directory" else old[member]):
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: tree snapshot digest drift")
+            if digest != old[member]:
+                payload = (source / member).read_bytes()
+                if hashlib.sha256(payload).hexdigest() != digest:
+                    raise ValueError("E_MUTABLE_PATH_POSTCONDITION: tree payload drift")
+                with _WindowsBoundNode(path, security=True) as bound:
+                    if bound.proof != secured[path].native_proof:
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: tree member origin")
+                    if not bound.ordinary_single_link():
+                        return False  # Replacement, unlike an in-place write, cannot update an alias.
+                    # An ordinary write can set Archive and invalidate the bound image.
+                    if not bound.basic().attributes & stat.FILE_ATTRIBUTE_ARCHIVE:
+                        return False
+                    transaction._assert_scalar_security(bound, secured[path].security)
+                plan.append((path, payload, digest))
+        for path, payload, digest in plan:
+            transaction.transform_scalar(path, None, lambda _: payload, self, windows_origin=secured[path])
+            secured[path] = replace(secured[path], data=digest)
+        if ignore_runtime_cache and plan:
+            # Invalidate only the ordinary bytecode the staged publisher would
+            # drop; retain originals transactionally and leave containers alone.
+            for path, node in tuple(secured.items()):
+                if node.kind == "file" and _is_ordinary_runtime_cache_file(path.relative_to(target), path.lstat()):
+                    self.retain_path(path.relative_to(self.anchor), {path: node},
+                                     preserve_windows_security=True)
+                    del secured[path]
+        if (not transaction._image_matches(target, secured)
+                or _tree_sha256(target, ignore_runtime_cache=ignore_runtime_cache) != after_digest
+                or _tree_sha256(source, ignore_runtime_cache=ignore_runtime_cache) != after_digest):
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: tree content update verification")
+        return True
+
     @_InstallTransaction.direct_writer
     def replace_exact_tree(
         self,
@@ -6898,7 +7273,12 @@ class _CreateOnlyMutablePath:
         current_digest = digest(source)
         if current_digest is None:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: invalid source tree")
+        if (os.name == "nt" and self.transaction.enabled
+                and self._update_windows_tree_contents(target, source, expected_digest, current_digest,
+                                                       ignore_runtime_cache=ignore_runtime_cache)):
+            return target
         effect = self.transaction.arm_replacement(target, None, self)
+        self.transaction.capture_replacement_security(effect)
         effect.ignore_runtime_cache = ignore_runtime_cache
         def record_stage(path, node):
             effect.prepared_path = path
@@ -7506,7 +7886,7 @@ def _stage_claude_transport_projection(
         replace_legacy_singleton = True
         replacement_digest = _file_sha256(projection_root / "provider_prompt.py")
     else:
-        raise ValueError("E_TRANSPORT_PROJECTION_PARITY: atomic projection state")
+        raise _AtomicTransportProjectionStateError()
     return _ClaudeTransportProjectionStage(
         files,
         manifest_payload,
@@ -7769,14 +8149,12 @@ _POST_MATERIALIZATION_WRITER_CALLS = {
     "_merge_codex_agents": ("provider-doc",),
     "_apply_selected_replacement": ("provider-doc",),
     "_merge_claude_docs": ("provider-doc",),
-    "_normalize_agents_mode": ("agents-mode",),
-    "_merge_claude_main_agent_settings": ("claude-main-settings",),
+    "migrate_global_preferences": ("agents-mode",),
     "_reclaim_retired": ("retired-reclaim",),
     "_finalize_canonical_lead_receipt": ("lead-receipt",),
 }
 _POST_MATERIALIZATION_NONWRITER_CALLS = frozenset(
     {
-        "_resolve_claude_delegation_mode",
         "_warn_codex_project_budget",
         "_discard_canonical_skills_plan",
         "_assert_global_claude_linked_subroot_authority",
@@ -7792,7 +8170,6 @@ _POST_MATERIALIZATION_ARTIFACT_CLASS = {
     "native-role": "native-role",
     "provider-doc": "provider-doc",
     "agents-mode": "agents-mode",
-    "claude-main-settings": "claude-main-settings",
     "retired-reclaim": "retired-reclaim",
     "lead-receipt": "lead-receipt",
 }
@@ -7879,7 +8256,7 @@ def _post_materialization_writer_destinations(
     agents_root: Path,
     canonical_skills_target: Path,
     docs_target: Path,
-    mode_target: Path,
+    mode_target: Path | None,
     registration: Path,
     shared_mode_target: Path | None,
     hooks_enabled: bool,
@@ -7953,10 +8330,10 @@ def _post_materialization_writer_destinations(
     else:
         add("provider-doc", docs_target)
         add("provider-doc", docs_target.parent / "AGENTS.md")
-        add("agents-mode", mode_target)
+        if mode_target is not None:
+            add("agents-mode", mode_target)
         if shared_mode_target is not None:
             add("agents-mode", shared_mode_target)
-        add("claude-main-settings", registration)
         for relative in sorted({**_CLAUDE_RETIRED_PS1, **_CLAUDE_RETIRED_SH}):
             add("retired-reclaim", target / relative)
 
@@ -8073,6 +8450,34 @@ def _sync_file_destinations(source: Path, target: Path, *,
     return destinations
 
 
+def _canonical_skill_snapshot_paths(
+    target: Path, plan: _CanonicalSkillsPlan,
+) -> tuple[Path, ...]:
+    """Snapshot selected Orchestrarium owners, not their shared container."""
+    paths = {target / "lead"}  # Final manifest is always received from the transaction.
+    selected_members = {skill.name for skill in plan.skills if skill.managed_before is not None}
+    for skill in plan.skills:
+        root = target / skill.name
+        if skill.managed_before is None:
+            paths.add(root)
+            continue
+        before = dict(skill.managed_before)
+        assert skill.selection is not None
+        for relative, value in skill.selection:
+            prior = before.get(relative)
+            if prior != value and not (value is None and prior == "directory"):
+                paths.add(root / relative)
+    if plan.lead_receipt is not None:
+        paths.add(target / _LEAD_RECEIPT_NAME)
+    if plan.nonlead_expected is not None:
+        paths.add(target / _NONLEAD_RECEIPT_NAME)
+        if plan.member_selection is None:
+            # Whole-tree receipt verification consumes its exact captured image.
+            paths.update(target / name for name, digest in plan.nonlead_expected
+                         if isinstance(digest, tuple) and name not in selected_members)
+    return tuple(sorted(paths))
+
+
 def _installer_mutation_paths(
     *,
     provider: str,
@@ -8083,10 +8488,12 @@ def _installer_mutation_paths(
     source_tree: Path,
     target_tree: Path,
     canonical_skills_target: Path,
-    mode_target: Path,
+    mode_target: Path | None,
     registration: Path,
     shared_mode_target: Path | None,
     codex_hook_inventory: Path | None = None,
+    canonical_skill_snapshots: tuple[Path, ...] = (),
+    register_hooks: bool = True,
     claude_commands_target: Path | None = None,
     claude_skills_target: Path | None = None,
     claude_projection_snapshot_paths: tuple[Path, ...] = (),
@@ -8101,8 +8508,7 @@ def _installer_mutation_paths(
     retained_transport_witnesses = {
         Path(os.path.abspath(path)) for path in claude_transport_migration_paths
     }
-    # Accepted-prior e7 canonical skill trees are transaction-restored if upgraded.
-    paths.append(canonical_skills_target)
+    paths.extend(canonical_skill_snapshots)
     if provider == "codex":
         # Slice-A skills and native-role/config records use the create/migration
         # ledger, never snapshot restoration, so accepted-prior inode recovery
@@ -8163,21 +8569,15 @@ def _installer_mutation_paths(
     if provider == "codex":
         paths.extend(
             tuple(helper_target / helper for helper in CODEX_RUNTIME_HELPERS)
-            + (
-                codex_hook_inventory
-                if codex_hook_inventory is not None
-                else registration.parent / CODEX_HOOK_INVENTORY,
-                target / CODEX_LEGACY_LUNA_ROLE,
-            )
+            + (target / CODEX_LEGACY_LUNA_ROLE,)
         )
-    paths.extend(
-        (
-            docs_target,
-            mode_target,
-            mode_target.with_suffix(""),
-            registration,
-        )
-    )
+        if register_hooks:
+            paths.append(codex_hook_inventory or registration.parent / CODEX_HOOK_INVENTORY)
+    if register_hooks:
+        paths.append(registration)
+    paths.append(docs_target)
+    if mode_target is not None:
+        paths.extend((mode_target, mode_target.with_suffix("")))
     if shared_mode_target is not None:
         paths.extend(
             (
@@ -8203,29 +8603,32 @@ def _installer_mutation_paths(
 
 def _normalize_agents_mode(
     root: Path, template: Path, target: Path, provider: str, dry_run: bool,
-    *, transaction: _InstallTransaction | None = None,
+    *, migration_only: bool = False, move_legacy: bool = True,
+    transaction: _InstallTransaction | None = None,
     mutable_owner: _CreateOnlyMutablePath | None = None,
 ) -> None:
     legacy = target.with_suffix("")
     if dry_run:
-        if legacy.is_file() and not target.exists():
+        if move_legacy and legacy.is_file() and not target.exists():
             print(f"  Migrating legacy .agents-mode to {target}...")
-        print(f"    [dry-run] would normalize {target}")
+        action = "check preference migration for" if migration_only else "normalize"
+        print(f"    [dry-run] would {action} {target}")
         return
     if transaction is None or mutable_owner is None or mutable_owner.transaction is not transaction:
         raise ValueError("E_MUTABLE_PATH_ESCAPE: normalization requires its existing writer context")
     helper = root / "scripts" / "normalize-agents-mode.py"
-    dependencies = (helper, template, template.parent / "agents-mode.schema.json",
+    dependencies = (helper,) if migration_only else (helper, template, template.parent / "agents-mode.schema.json",
                     template.parent.parent / "shared" / "agents-mode.schema.json")
     before = {path: transaction._observe(path) for path in dependencies}
     module = _load_module_from_path("orchestrarium_installer_normalize_agents_mode", helper)
     def render(input_path):
-        result = module.normalize_file(str(template), str(input_path), provider).encode("utf-8")
+        result = (module.migrate_overlay(input_path) if migration_only
+                  else module.normalize_file(str(template), str(input_path), provider).encode("utf-8"))
         if any((not transaction._image_matches(path, state)) for path, state in before.items()):
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: normalization input drift")
         return result
     with transaction.direct_operation():
-        transaction.transform_scalar(target, legacy, render, mutable_owner)
+        transaction.transform_scalar(target, legacy, render, mutable_owner, move_legacy=move_legacy)
 
 
 def _file_sha256(path: Path) -> str:
@@ -8276,7 +8679,6 @@ def _copy_tree(
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing owned preparation")
         transaction = owner.transaction
         destination = effect.prepared_path
-        transaction._dispose_image(destination, effect.prepared_state)
         witness = transaction._observe(source)
         desired = dict(witness)
         if ignore_runtime_cache:
@@ -8287,8 +8689,21 @@ def _copy_tree(
                 if (path.name == "__pycache__" and desired[path].kind == "directory"
                         and not any(member != path and path in member.parents for member in desired)):
                     del desired[path]
+        security = None
+        if os.name == "nt" and effect.before:
+            security = {}
+            for path, node in desired.items():
+                previous = effect.before.get(effect.path / path.relative_to(source))
+                if previous is not None:
+                    if previous.kind != node.kind or previous.security is None:
+                        raise ValueError("E_MUTABLE_PATH_POSTCONDITION: invalid security counterpart")
+                    security[path] = previous.security
+            transaction.assert_effect_current(effect)
+        # Replacement members have their intended final security from birth.
+        # The empty 0700 reservation is not a privacy claim for the final tree.
+        transaction._dispose_image(destination, effect.prepared_state)
         transaction._construct_exclusive_tree(source, destination, desired, effect,
-                                               stage=True, source_witness=witness)
+                                               stage=True, source_witness=witness, security=security)
         return
     if not ignore_runtime_cache:
         shutil.copytree(source, destination, symlinks=True)
@@ -8510,10 +8925,12 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "3e964408acb6fe3ea1ba8a43158927e83b6d23bb121dd34b6b843863caf4a9fd",
     }),
     "backend-engineer": frozenset({
+        "a6e1e0239ef1c6e25b97f932790d56a134612f704824811d99cbe87e661594ca",  # Exact factory role before 6.2 task-first ranking.
         "f3b85eac0023a12de0d529a47766762f5a2ffaeac092c42e9b1b11be6a246c27",
         "38d99e26339cb0942eb66d4062e0de33f085c5b39f445cc358ac217b03010589",
     }),
     "explorer": frozenset({
+        "d57e825cc7155a81d75fe5ed205b2e402bd4a637c785d7f097223e6418700f74",  # Exact factory role before 6.2 task-first ranking.
         "03375f98ee2f442d1b236afce90919547f738348dd77cb9ca67c704e21772172",
         "a98b89ec3c513f8242459adda45808612645ed5f5cb07b9da8839fe66b670e89",
     }),
@@ -8522,10 +8939,12 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "0f26fae798309c1b69f3fe5077196e3e5895211bc661f7575aa683fd01e2225b",
     }),
     "knowledge-archivist": frozenset({
+        "8d148b86cdad5ef415cda74362bb607b700dca3069947bcfb45d5c802233f873",  # Exact factory role before 6.2 task-first ranking.
         "82ff6b4e4cbc433175ae36b23216f001cbec427e341d01b2b01709b25d744e02",
         "8f69d0f67010b77b71c81b77ad74119300ad245061c4363cbcfd2f1d0fab510c",
     }),
     "scientific-software-engineer": frozenset({
+        "d220652c7a880bcdcdd68a57a2f9cfe267014617a668655fe3a27e418709ed16",  # Exact pre-6.2 factory role (adefe904).
         "b4ee95a146843dd06a4470b380d7d263fb5c149edf9b2204c0944090e0d4ba3b",
     }),
     "planner": frozenset({
@@ -8533,18 +8952,24 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "dcde16fa86661eee94b21618fb6320026185ddb425541b15239b4c7d232c4faa",
     }),
     "algorithm-scientist": frozenset({
+        "a20cde75a7e9d1bef8dbb451658fa5341e5ee0e43ee1f89db453ccd2ec2576dd",  # Exact factory role before 6.2 task-first ranking.
+        "81b79398d9b55495cf32925007635b9f688920c75c32b50e4b092d4ef9bd1893",  # Exact pre-6.2 factory role (adefe904).
         "cd2bbbaf5f4173f07bfe18cea39d90dd0cc341630b77b5dac0d82d9f92b57d7e",
         "1bc7c60b30f1bb360a502ee955e41513a80d3e3f9e222e5a673817a7e421c8bd",
     }),
     "architect": frozenset({
+        "278f9311b982844cd0fdd542cf6f3c6fd0ec790bdd5cdf4d09bede1195828ec4",  # Exact pre-6.2 factory role (adefe904).
         "71f3d9e27019de2e133d8947a33cdb69ab38261824fab36bcb18c7f7f3ff0792",
         "bcdd83abcb3e5d99e0dd0963d622b475ea11d450bb16f1af1bc93855891ff4fb",
     }),
     "architecture-reviewer": frozenset({
+        "8ae8704a3f823b74bd5fbc8590fa43c979dbee66e341f1107bedf873b69a2d03",  # Exact pre-6.2 factory role (adefe904).
         "5e404f6643d8992dd7cd4a40e8a5d3ae4f7f388381907aa230b6b0fa15ac458a",
         "239a91ef35b54cc640372132b51662bcbe0da88dded68ff53d339621689df8c3",
     }),
     "computational-scientist": frozenset({
+        "aa94f35c668d62394bd12a27609ead6dd9e042b2e13a82a4b38d693967e98aac",  # Exact factory role before 6.2 task-first ranking.
+        "7731852f496a050f187b11c265943e5b6bc553820acd7d9359769852eb598aea",  # Exact pre-6.2 factory role (adefe904).
         "4169e5ac3442e542b0249879595b6974b78e0924b377613b5b427a6488171901",
         "7ddcfb3afe6d9032d03d3da6468662a961819ceacf5252caccccfc69744cc9d3",
     }),
@@ -8554,6 +8979,7 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "fd846b4791aea45f743661615d913d2f3cc96ee0b86fdb8abe53871b97e3c07c",
     }),
     "worker": frozenset({
+        "cc520f7c717fa1c9c529c07439967b0d8795b130b12073350504fe5ae7acad2c",  # Exact factory role before 6.2 task-first ranking.
         "392be7e7e35a5e76f27c0073c2be0545a1be6aa856753209cb4f8ba95976ce5e",
         "952271e679f9215f039e52377a35100fbc9b2fdb343db17f266c38be8a200815",
         "2d950ebfa4e9cc7293ee32cbc71ad3910fa6938a80a339bbbc3434ecc6c4d860",
@@ -8561,6 +8987,7 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "1b311bd1a413c660382c57df74bdccc016f9b8a919e039efe21f703f0b09e475",
     }),
     "platform-engineer": frozenset({
+        "0bc8c33d45761495089826145a466ab5ced84a7c52e957e22a378ed17cc5da4b",  # Exact factory role before 6.2 task-first ranking.
         "d54979aced93372dd0d20b18f413a472ec5b2f481848609e38045f8ed6a191f0",
         "3e4c199ba984cbfba080249ad28c645ffbf78a08daf8519e0aa058e7f92aaa40",
         "2f62aaf20edd4b30838db3e728d6a907e8f6826620d2eede78c02a1cd0b7a214",
@@ -8568,22 +8995,26 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "e5d44b7fafc7ec8ab3c69b4086bdda5e5430974334f90fc407b5bb78ace8a4cf",
     }),
     "security-engineer": frozenset({
+        "9cce8eb32f8386dba2cbe88ddefd54ff1ee8695956682f0a93ee8194ebcc6513",  # Exact pre-6.2 factory role (adefe904).
         "6e53fa663da8eed31ab4012354ee9bebf24f16ecb9cdaa517a7f196dcfd1969e",
         "aeb2800e4e498ad7d3a63951608e780eb730ef2bd744ff679fee5c697f5d837a",
         "54117decdfcf9bff576e23d31a1dc6aa2d2f4fd0d498820f9c1244b6742f78f9",
         "ceb53c8db3d77f75beea76a9cc27120d7623a60661cca3dac92b01a35ce06a0c",
     }),
     "security-reviewer": frozenset({
+        "3d5b521ee8c6a230e1327cf4cf815b6c9c98f844de0aa985b4e3a7b4cfe3eb6c",  # Exact pre-6.2 factory role (adefe904).
         "f22614caec4561e5cb0833e6264081b42c46570936fe1d2b62e8534c17ee214d",
         "0f9b75713128885b8db86b32a9ecb3e756b0022add169a89fc10d615745445f1",
     }),
     "mechanical-scout": frozenset({
+        "8ed620f22a35d59df3ef2cf64cad73ef8140452253dde49fc32f527000d2bb2e",  # Exact factory role before 6.2 task-first ranking.
         "4521ff3194ed13831214f94ad228c7aa0eba97b6d40bec56e990b3490fdcc672",
         "1d2d6c4fb6463710f8e6cd1bda1738f8230cd7483b9f342f7f0e500e5ac5bb67",
         "7d9c28aeb4471ea63fe733dde320fec3bfa60dcb11cb85404ff2aed2fc6658b5",
         "d384fa021005f10b4b3faf48818a4963ab314689b986a6fbed25b5ad13e66df1",
     }),
     "mechanical-worker": frozenset({
+        "155462c4f5eb5c035254ae50f61469de954c12439ef6289e6bdf74f04cf0999f",  # Exact factory role before 6.2 task-first ranking.
         "8c126a95d35301bd493e3e2f89e4061781aaf28ca4444a3d4a67b1868c4c7568",
         "ccf7633f55389ce826cd848692277b764a559ee0b7bc81402d5657b908165869",
         "6ab77b24305af7c7b8bf8b8661b2abe1a4fa628974eee9da096419deebea39b8",
@@ -10012,7 +10443,7 @@ def _assert_canonical_skills_plan_current(
         own_effect = next((effect for effect in transaction._effects
                            if effect.path == installed and predecessor is not None
                            and skill.name == "lead"
-                           and tuple(sorted(effect.before.items())) == predecessor.canonical_state), None) if transaction is not None else None
+                           and effect.preflight_state == predecessor.canonical_state), None) if transaction is not None else None
         if own_effect is not None:
             transaction.assert_effect_current(own_effect)
             lead_effect = own_effect
@@ -10063,7 +10494,7 @@ def _assert_canonical_skills_plan_current(
         if predecessor is not None:
             effect = next((item for item in transaction._effects
                            if item.path == target / "lead"
-                           and tuple(sorted(item.before.items())) == predecessor.canonical_state), None) if transaction is not None else None
+                           and item.preflight_state == predecessor.canonical_state), None) if transaction is not None else None
             if effect is not None:
                 transaction.assert_effect_current(effect)
             if predecessor.canonical_target != target or (effect is None and not
@@ -11290,25 +11721,6 @@ def _load_claude_settings(settings_path: Path, *,
     return data
 
 
-def _merge_claude_main_agent(
-    settings: dict[str, Any], delegation_mode: str | None
-) -> tuple[str, bool]:
-    """Apply the sole persistent Lead-default policy to a decoded settings object."""
-    if "agent" in settings and isinstance(settings["agent"], (dict, list)):
-        raise ValueError("Claude settings agent must be a scalar")
-    mode = delegation_mode.casefold() if isinstance(delegation_mode, str) else ""
-    if mode == "force":
-        if "agent" not in settings:
-            settings["agent"] = "lead"
-            return "lead-default-written", True
-        if settings["agent"] == "lead":
-            return "lead-already-selected", False
-        return "preserved-nonlead-agent", False
-    if mode in {"auto", "manual"}:
-        return "mode-preserved", False
-    return "mode-unresolved", False
-
-
 def _load_module_from_path(module_name: str, path: Path):
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
@@ -11317,56 +11729,6 @@ def _load_module_from_path(module_name: str, path: Path):
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
-
-
-def _resolve_claude_delegation_mode(
-    root: Path, project_root: Path, home: Path | None
-) -> str:
-    """Use the existing agents-mode resolver; a resolution failure is non-mutating."""
-    if home is None:
-        return "unresolved"
-    try:
-        resolver = _load_module_from_path(
-            "orchestrarium_resolve_agents_mode",
-            root / "scripts" / "resolve-agents-mode.py",
-        )
-        resolved = resolver.resolve("claude", project_root, home, root)
-        mode = resolved["values"].get("delegationMode")
-    except (KeyError, OSError, RuntimeError, ValueError):
-        return "unresolved"
-    return mode.casefold() if isinstance(mode, str) else "unresolved"
-
-
-def _merge_claude_main_agent_settings(
-    root: Path,
-    settings_path: Path,
-    delegation_mode: str,
-    dry_run: bool,
-    *, mutable_owner: _CreateOnlyMutablePath | None = None,
-) -> str:
-    settings = _load_claude_settings(settings_path, mutable_owner=mutable_owner)
-    outcome, changed = _merge_claude_main_agent(settings, delegation_mode)
-    if outcome == "preserved-nonlead-agent":
-        print("WARN: Claude main agent preserved; force lead binding not installed")
-    elif outcome == "mode-unresolved":
-        print("WARN: Claude main-agent binding skipped; delegationMode unresolved")
-    if not changed:
-        return outcome
-    if dry_run:
-        print(f"    [dry-run] would set Claude settings agent to lead ({settings_path})")
-        return outcome
-    hook_installer = _load_module_from_path(
-        "orchestrarium_install_hypothesis_hook",
-        root / "scripts" / "install-hypothesis-hook.py",
-    )
-    if mutable_owner is not None and mutable_owner.transaction.enabled:
-        storage, _node, selected_owner = _owned_byte_context(settings_path, mutable_owner)
-        selected_owner.replace_file_atomic(storage.relative_to(selected_owner.anchor),
-            hook_installer.encode_hook_config(settings), mode=None, fsync="best-effort",
-            temporary_prefix=".install-hypothesis-hook.")
-    else:
-        hook_installer.write_atomic(settings_path, settings)
-    return outcome
 
 
 def _installer_child_environment() -> dict[str, str]:
@@ -12028,8 +12390,10 @@ def _publish_hook_data(helper, registration: Path, data: dict[str, Any],
 
 def _transform_hook_registration(helper, registration: Path, owner: _CreateOnlyMutablePath,
                                  marker: str, event: str, platform: str, host: str, *,
-                                 entry=None, expected_entry=None, managed_targets=None) -> None:
-    data = helper.load_existing(_HookConfigInput(registration, _read_owned_text(registration, owner)))
+                                 entry=None, expected_entry=None, managed_targets=None,
+                                 staged_data: dict[str, Any] | None = None) -> None:
+    data = (staged_data if staged_data is not None else
+            helper.load_existing(_HookConfigInput(registration, _read_owned_text(registration, owner))))
     removal = entry is None
     if removal:
         changed = helper.remove(data, event, marker, expected_entry=expected_entry,
@@ -12045,8 +12409,69 @@ def _transform_hook_registration(helper, registration: Path, owner: _CreateOnlyM
     if not changed:
         print(f"  {marker} hook already present in {registration} (no-op)")
         return
-    _publish_hook_data(helper, registration, data, owner, remove=removal)
-    print(f"  {marker} hook {'removed' if removal else 'installed/updated'} in {registration}")
+    if staged_data is None:
+        _publish_hook_data(helper, registration, data, owner, remove=removal)
+        print(f"  {marker} hook {'removed' if removal else 'installed/updated'} in {registration}")
+    else:
+        print(f"  Planned {marker} hook {'removal' if removal else 'update'}")
+
+
+def _find_portable_codex_inventory(root: Path, registration: Path) -> Path | None:
+    """Recognize the installer's shared mode without adopting paths from JSON."""
+    if not registration.is_file():
+        return None
+    health = _hook_health_module(root)
+    resolved, links, _target = health._resolve_hooks_target(
+        registration, allow_missing_ordinary=False
+    )
+    if not links:
+        return None
+    inventory = resolved.parent / health.INVENTORY_NAME
+    try:
+        inventory.lstat()
+    except FileNotFoundError:
+        return None
+    try:
+        authority = health._inventory_authority(registration, inventory, for_write=False)
+        data = health._load(authority.inventory)
+        health._recheck_inventory_authority(authority, for_write=False)
+        version = data.get("schemaVersion")
+        if version == 1:
+            return None
+        if version == 2 and data.get("sourceBinding") == health._PORTABLE_INVENTORY_SOURCE:
+            return inventory
+    except (OSError, ValueError) as exc:
+        raise ValueError("E_SHARED_HOOK_RUNTIME: unreadable linked hook inventory") from exc
+    raise ValueError("E_SHARED_HOOK_RUNTIME: unrecognized linked hook inventory")
+
+
+def _retained_codex_hook_root(root: Path, registration: Path) -> Path:
+    """Select one retained release, not any interpreter found on PATH."""
+    health = _hook_health_module(root)
+    _resolved, links, _target = health._resolve_hooks_target(
+        registration, allow_missing_ordinary=False
+    )
+    if not links:
+        raise ValueError("E_SHARED_HOOK_RUNTIME: a linked hooks.json is required")
+    package = root.parent
+    launcher_file = package / "launch.py"
+    if (not launcher_file.is_file() or not (package / "bundle.json").is_file()
+            or _contains_reparse(package) or _contains_reparse(launcher_file)):
+        raise ValueError("E_SHARED_HOOK_RUNTIME: select the retained local bundle")
+    launcher = _load_module_from_path(
+        "orchestrarium_retained_hook_launcher", launcher_file
+    )
+    python, entry = launcher.resolve_launch(package, Path(sys.executable))
+    if entry != root / "install.py":
+        raise ValueError("E_SHARED_HOOK_RUNTIME: install from the retained bundle launcher")
+    lead = root / "src.codex" / "skills" / "lead"
+    host = "windows" if os.name == "nt" else "posix"
+    helper = _load_module_from_path(
+        "orchestrarium_install_hypothesis_hook", root / "scripts" / "install-hypothesis-hook.py"
+    )
+    for _marker, script, _event, _matcher in _hook_specs("codex", lead):
+        helper.resolve_hook_target(str(script), host, "codex", python_executable=str(python))
+    return lead
 
 
 def _install_hooks(
@@ -12058,24 +12483,39 @@ def _install_hooks(
     inventory_path: Path | None = None,
     *, transaction: _InstallTransaction | None = None,
     mutable_owner: _CreateOnlyMutablePath | None = None,
+    prior_installed_root: Path | None = None,
+    hooks_only_recheck=None,
+    prior_specs=None,
+    scoped_transitions=(),
+    preview: bool = False,
 ) -> None:
     installer = root / "scripts" / "install-hypothesis-hook.py"
     host = "windows" if os.name == "nt" else "posix"
     selected_specs = list(_hook_specs(provider, installed_root))
+    portable_inventory = prior_installed_root is not None
+    if portable_inventory and (provider != "codex" or mode != "global"):
+        raise ValueError("E_SHARED_HOOK_RUNTIME: global Codex only")
+    hooks_only = hooks_only_recheck is not None
+    if (preview or hooks_only) and (not portable_inventory or (preview and not hooks_only)):
+        raise ValueError("E_SHARED_HOOK_RUNTIME: explicit shared hook operation required")
+    installed_checker_root = prior_installed_root or installed_root
     owned = transaction is not None and transaction.enabled
+    if portable_inventory and not (owned or preview):
+        raise ValueError("E_SHARED_HOOK_RUNTIME: retained hooks require a transaction")
     if owned and (mutable_owner is None or mutable_owner.transaction is not transaction):
         raise ValueError("E_MUTABLE_PATH_ESCAPE: hooks require their admitted writer")
     helper = (_load_module_from_path("orchestrarium_install_hypothesis_hook", installer)
-              if owned else None)
-    namespace_owner = _hook_health_module(root) if owned else None
+              if owned or preview else None)
+    namespace_owner = _hook_health_module(root) if owned or preview else None
     namespace = (namespace_owner._resolve_hooks_target(registration, allow_missing_ordinary=True)
-                 if owned else None)
+                 if owned or preview else None)
     def require_namespace():
-        if owned:
+        if owned or preview:
             current = namespace_owner._resolve_hooks_target(registration, allow_missing_ordinary=True)
             if current[:2] != namespace[:2]:
                 raise ValueError("E_HOOK_INVENTORY_TARGET_INVALID: registration namespace changed")
-            _owned_byte_context(registration, mutable_owner)
+            if owned:
+                _owned_byte_context(registration, mutable_owner)
     base = [
         str(installer),
         "--target",
@@ -12106,31 +12546,51 @@ def _install_hooks(
         proc = _run([*base, "--script-path", str(script), "--validate-only"], root)
         if proc.returncode:
             raise RuntimeError(f"hook target preflight failed for {script}")
-    _checkpoint(root, installer, registration, provider, mode, "sync")
-    retired_specs = [(marker, event, []) for marker, event in RETIRED_HOOK_SPECS]
-    if provider == "codex":
+    if not preview:
+        _checkpoint(root, installer, registration, provider, mode, "sync")
+    staged_data = None
+    if portable_inventory:
+        require_namespace()
+        initial_text = _read_owned_text(registration, mutable_owner)
+        staged_data = helper.load_existing(_HookConfigInput(registration, initial_text))
+        initial_shape = helper.encode_hook_config(staged_data)
+    # A scoped operation proves only the inventory's complete current set.
+    # It does not enroll or retire legacy commands outside that proof.
+    retired_specs = [] if hooks_only else [(marker, event, []) for marker, event in RETIRED_HOOK_SPECS]
+    if provider == "codex" and not hooks_only:
         marker, directory, event, matcher = next(
             spec for spec in _HOOK_METADATA if spec[0] == "check-mcp-momentum"
         )
         retired_specs.append((
             marker,
             event,
-            ["--script-path", str(installed_root / directory / f"{marker}.py"), "--tool-matcher", matcher],
+            ["--script-path", str(installed_checker_root / directory / f"{marker}.py"), "--tool-matcher", matcher],
         ))
     health_module = _hook_health_module(root) if provider == "codex" else None
     managed_targets = {marker: {str(script)} for marker, script, _event, _matcher in selected_specs}
     legacy_witnesses = {}
     legacy_root = registration.parent if provider == "codex" else None
-    legacy_targets = _verified_legacy_hook_targets(
-        provider, installed_root, set(managed_targets), legacy_provider_root=legacy_root,
+    legacy_targets = {} if hooks_only else _verified_legacy_hook_targets(
+        provider, installed_checker_root, set(managed_targets), legacy_provider_root=legacy_root,
         witnesses=legacy_witnesses,
     )
 
     def recheck_legacy(marker):
+        if hooks_only:
+            return
         expected = {path: legacy_witnesses[path] for path in legacy_targets.get(marker, ())}
-        _recheck_legacy_hook_targets(provider, installed_root, marker, expected, legacy_root)
+        _recheck_legacy_hook_targets(provider, installed_checker_root, marker, expected, legacy_root)
     for marker, paths in legacy_targets.items():
         managed_targets[marker].update(paths)
+    predecessor_witnesses = {}
+    if portable_inventory:
+        prior_targets, predecessor_witnesses = health_module._selected_hook_targets(
+            prior_specs if prior_specs is not None else _hook_specs("codex", prior_installed_root)
+        )
+        for marker, targets in prior_targets.items():
+            if hooks_only or marker in managed_targets:
+                managed_targets.setdefault(marker, set()).update(targets)
+
     before_definitions = (
         health_module.owned_definition_snapshots(
             target=registration,
@@ -12141,9 +12601,47 @@ def _install_hooks(
             | {marker for marker, _event, _arguments in retired_specs},
             managed_targets=managed_targets,
         )
-        if health_module is not None and registration.is_file()
+        if health_module is not None and not preview and registration.is_file()
         else {}
     )
+    def install_selected(spec):
+        marker, script, event, matcher = spec
+        recheck_legacy(marker)
+        if portable_inventory:
+            health_module._recheck_selected_hook_targets(predecessor_witnesses, marker)
+        try:
+            require_namespace()
+            hook_target = helper.resolve_hook_target(str(script), host, provider)
+            entry = (helper.build_codex_entry(hook_target, host, event, matcher,
+                                             _CODEX_HOOK_STATUS_MESSAGES[marker])
+                     if provider == "codex" else helper.build_claude_entry(hook_target, event, matcher))
+            _transform_hook_registration(helper, registration, mutable_owner, marker, event,
+                                         provider, host, entry=entry, managed_targets=managed_targets,
+                                         staged_data=staged_data)
+            recheck_legacy(marker)
+            if portable_inventory:
+                health_module._recheck_selected_hook_targets(predecessor_witnesses, marker)
+        except helper.CodexHookSlotShift as exc:
+            raise _InstallFailure(exc.stable_id, "migration", exc) from exc
+        except (OSError, ValueError, SystemExit) as exc:
+            raise RuntimeError(f"hook registration failed for {marker}") from exc
+
+    selected_by_marker = {spec[0]: spec for spec in selected_specs}
+    relocated = set()
+    for marker, event, expected_entry in scoped_transitions:
+        successor = selected_by_marker.get(marker)
+        if successor is not None and successor[2] == event:
+            # The update owner carries handler metadata to the new matcher.
+            install_selected(successor)
+            relocated.add(marker)
+            continue
+        require_namespace()
+        try:
+            if not helper.remove(staged_data, event, marker, expected_entry=expected_entry,
+                                 platform=provider, host_os=host):
+                raise ValueError("E_SHARED_HOOK_RUNTIME: predecessor hook could not be retired exactly")
+        except helper.CodexHookSlotShift as exc:
+            raise _InstallFailure(exc.stable_id, "migration", exc) from exc
     for marker, event, identity_arguments in retired_specs:
         if owned:
             try:
@@ -12154,7 +12652,9 @@ def _install_hooks(
                                                              require_script=False)
                     expected_entry = helper.build_codex_entry(hook_target, host, event, identity_arguments[3])
                 _transform_hook_registration(helper, registration, mutable_owner, marker, event,
-                    provider, host, expected_entry=expected_entry)
+                    provider, host, expected_entry=expected_entry, staged_data=staged_data)
+            except helper.CodexHookSlotShift as exc:
+                raise _InstallFailure(exc.stable_id, "migration", exc) from exc
             except (OSError, ValueError, SystemExit) as exc:
                 raise RuntimeError(f"obsolete hook removal failed for {marker}") from exc
             continue
@@ -12174,7 +12674,7 @@ def _install_hooks(
             raise RuntimeError(f"obsolete hook removal failed for {marker}")
     codex_command = (
         health_module.resolve_codex_command(os.environ.get("CODEX_BIN"))
-        if health_module is not None
+        if health_module is not None and not preview
         else None
     )
     if inventory_path is None:
@@ -12184,20 +12684,14 @@ def _install_hooks(
             else registration.parent / CODEX_HOOK_INVENTORY
         )
     for marker, script, event, matcher in selected_specs:
-        recheck_legacy(marker)
-        if owned:
-            try:
-                require_namespace()
-                hook_target = helper.resolve_hook_target(str(script), host, provider)
-                entry = (helper.build_codex_entry(hook_target, host, event, matcher,
-                                                 _CODEX_HOOK_STATUS_MESSAGES[marker])
-                         if provider == "codex" else helper.build_claude_entry(hook_target, event, matcher))
-                _transform_hook_registration(helper, registration, mutable_owner, marker, event,
-                                             provider, host, entry=entry, managed_targets=managed_targets)
-                recheck_legacy(marker)
-            except (OSError, ValueError, SystemExit) as exc:
-                raise RuntimeError(f"hook registration failed for {marker}") from exc
+        if marker in relocated:
             continue
+        if owned or preview:
+            install_selected((marker, script, event, matcher))
+            continue
+        recheck_legacy(marker)
+        if portable_inventory:
+            health_module._recheck_selected_hook_targets(predecessor_witnesses, marker)
         arguments = [*base, "--script-marker", marker, "--script-path", str(script)]
         if event != "PreToolUse":
             arguments.extend(["--hook-event", event])
@@ -12208,6 +12702,21 @@ def _install_hooks(
         proc = _run(arguments, root)
         if proc.returncode:
             raise RuntimeError(f"hook registration failed for {marker}")
+    planned_inventory = None
+    if staged_data is not None:
+        require_namespace()
+        health_module._recheck_selected_hook_targets(predecessor_witnesses)
+        if _read_owned_text(registration, mutable_owner) != initial_text:
+            raise ValueError("E_SHARED_HOOK_RUNTIME: registration changed during planning")
+        if hooks_only:
+            authority = hooks_only_recheck()
+            planned_inventory = health_module._render_codex_inventory(
+                staged_data, authority=authority, specs=selected_specs, host_os=host, portable=True,
+            )
+            if preview:
+                return
+        if helper.encode_hook_config(staged_data) != initial_shape:
+            _publish_hook_data(helper, registration, staged_data, mutable_owner, remove=False)
     _checkpoint(root, installer, registration, provider, mode, "register")
     require_namespace()
     touched_identities = (
@@ -12230,13 +12739,17 @@ def _install_hooks(
                 require_namespace()
                 plan = health_module.plan_codex_inventory(
                     target=registration, specs=selected_specs,
-                    inventory_path=inventory_path, host_os=host)
+                    inventory_path=inventory_path, host_os=host, portable=portable_inventory)
+                if planned_inventory is not None and plan.content != planned_inventory:
+                    raise ValueError("inventory no longer matches the qualified staged registration")
                 health_module._recheck_inventory_authority(plan.authority, for_write=True)
-                storage, _node, inventory_owner = _owned_byte_context(plan.authority.inventory, mutable_owner)
+                storage, node, inventory_owner = _owned_byte_context(plan.authority.inventory, mutable_owner)
                 if storage != plan.authority.inventory:
                     raise ValueError("inventory storage must be ordinary")
-                inventory_owner.replace_file_atomic(storage.relative_to(inventory_owner.anchor), plan.content,
-                    mode=None, fsync="required", temporary_prefix=f".{storage.name}.")
+                if (not portable_inventory or node is None
+                        or node.data != hashlib.sha256(plan.content).hexdigest()):
+                    inventory_owner.replace_file_atomic(storage.relative_to(inventory_owner.anchor), plan.content,
+                        mode=None, fsync="required", temporary_prefix=f".{storage.name}.")
                 written = health_module._inventory_authority(
                     plan.authority.target, plan.authority.inventory, for_write=False)
                 health_module._require_same_hook_target_authority(plan.authority, written)
@@ -12293,9 +12806,10 @@ def _install_hooks(
     _checkpoint(root, installer, registration, provider, mode, "verify")
     _checkpoint(root, installer, registration, provider, mode, "reclaim")
     if provider == "codex":
+        installed_checker = (root / "scripts" if hooks_only else installed_checker_root / "scripts")
         installed_health = _run_hook_health_bounded(
             [
-                str(installed_root / "scripts" / "check-hook-health.py"),
+                str(installed_checker / "check-hook-health.py"),
                 "--target",
                 str(registration),
                 "--platform",
@@ -12304,6 +12818,7 @@ def _install_hooks(
                 host,
                 "--installed-root",
                 str(installed_root),
+                *(["--repo-root", str(root)] if hooks_only else []),
                 "--inventory",
                 str(inventory_path),
                 "--codex-trust-mode",
@@ -12925,6 +13440,165 @@ def _finish_install_result(provider, target, dry_run, applied, primary, cleanup_
     return 0
 
 
+def _previous_retained_hook_root(root: Path, package: Path) -> tuple[Path, Path, list]:
+    """Resolve the operator-selected predecessor without running its code."""
+    if not package.is_absolute() or _contains_reparse(package):
+        raise ValueError("previous release must be a direct absolute package path")
+    package = package.resolve(strict=True)
+    for member in ("bundle.json", "runtime-evidence.json", "app/install.py"):
+        if _contains_reparse(package / member):
+            raise ValueError("previous release has redirected package evidence")
+    launcher = _load_module_from_path(
+        "orchestrarium_retained_hook_launcher", root.parent / "launch.py"
+    )
+    data = launcher._manifest(package)
+    python_slot = "python/python.exe" if os.name == "nt" else "python/bin/python3"
+    if data["python"] != python_slot:
+        raise ValueError("previous release interpreter slot is not canonical")
+    installer = launcher._member(package, data["entry"])
+    lead = installer.parent / "src.codex" / "skills" / "lead"
+    if _contains_reparse(lead):
+        raise ValueError("previous release has redirected managed paths")
+    # A missing predecessor interpreter does not change the old command's identity.
+    catalog = installer.parent / "scripts" / "universal_hooks_manifest.py"
+    if _contains_reparse(catalog):
+        raise ValueError("previous release has a redirected hook catalog")
+    catalog = launcher._member(package, "app/scripts/universal_hooks_manifest.py")
+    return lead, package / python_slot, _HOOK_MANIFEST.retained_hook_specs(catalog, "codex", lead)
+
+def _apply_shared_hooks_only(root: Path, target: Path, *, dry_run: bool,
+                             previous_release: Path | None = None) -> None:
+    health = _hook_health_module(root)
+    host = "windows" if os.name == "nt" else "posix"
+    registration = target / "hooks.json"
+    retained = _retained_codex_hook_root(root, registration)
+    inventory = health._codex_inventory_sidecar(registration)
+    authority = health._inventory_authority(registration, inventory, for_write=False)
+    before = {
+        path: _InstallTransaction._capture_node(path)
+        for path in (authority.resolved_target, authority.inventory)
+    }
+
+    skills = target.parent / ".agents" / "skills"
+    receipt = None
+    link = None
+    expected, identities = health._load_codex_inventory(
+        inventory, target=registration, host_os=host, authority=authority,
+    )
+    previous_python = None
+    previous_specs = None
+    if _find_portable_codex_inventory(root, registration) is not None:
+        predecessor = retained
+        owned_scripts = {
+            health._command_identity([str(script)], host)
+            for _stem, script, _event, _matcher in _hook_specs("codex", retained)
+        }
+        registered_commands = [json.loads(identity)["command"].split("\0") for identity in identities]
+        registered_scripts = {argv[1] for argv in registered_commands if len(argv) == 2}
+        if registered_scripts != owned_scripts and previous_release is not None:
+            try:
+                predecessor, previous_python, previous_specs = _previous_retained_hook_root(root, previous_release)
+            except (OSError, ValueError) as exc:
+                raise _InstallFailure("E_SHARED_HOOK_RUNTIME", "previous-release", exc) from exc
+    else:
+        logical = skills.parent
+        link = _linked_runtime_subroots_module(root).LinkedRuntimeSubrootAuthority.bind(
+            logical, scope="global", trusted_global_roots=(logical,),
+        )
+        if link is not None:
+            skills = link.resolved_root / "skills"
+        predecessor = skills / "lead"
+        receipt = _read_lead_receipt(skills / _LEAD_RECEIPT_NAME)
+        if receipt is None:
+            raise ValueError("E_SHARED_HOOK_RUNTIME: missing canonical predecessor receipt")
+
+    specs = previous_specs if previous_specs is not None else _hook_specs("codex", predecessor)
+    if previous_python is not None and any(_contains_reparse(script) for _, script, _, _ in specs):
+        raise _InstallFailure("E_SHARED_HOOK_RUNTIME", "previous-release",
+                              ValueError("previous release has redirected hook files"))
+    targets, witnesses = health._selected_hook_targets(specs)
+    if set(witnesses) != set(targets):
+        raise ValueError("E_SHARED_HOOK_RUNTIME: predecessor hook files are missing")
+    if previous_python is not None and any(chain or resolved != script
+                                         for script, (resolved, chain, _node) in witnesses.values()):
+        raise _InstallFailure("E_SHARED_HOOK_RUNTIME", "previous-release",
+                              ValueError("previous release hook witness is not a direct package file"))
+    data = health._load(authority.resolved_target)
+    rows = list(health._iter_owned_hooks(data, expected, "codex", host, targets))
+    observed = {
+        health.canonical_identity(event, argv, host, matcher=matcher,
+                                  source_path=authority.resolved_target)
+        for event, _stem, argv, matcher in rows
+    }
+    expected_shapes = {stem: (health._event_identity(event), matcher)
+                       for stem, _script, event, matcher in specs}
+    observed_shapes = {stem: (health._event_identity(event), matcher)
+                       for event, stem, _argv, matcher in rows}
+    # Exact stock direct command only; a sidecar cannot grant authority to
+    # remove operator-chosen arguments or interpreter flags.
+    if any(len(argv) != 2 or not Path(argv[0]).is_absolute()
+           for _event, _stem, argv, _matcher in rows):
+        raise _InstallFailure("E_SHARED_HOOK_RUNTIME", "inventory",
+                              ValueError("non-stock predecessor invocation"))
+    # Require inventory, package and actual registration to agree without
+    # resolving/running the old executable; replacing that path is the repair.
+    if (observed != identities or len(rows) != len(expected) or expected != set(targets)
+            or observed_shapes != expected_shapes
+            or (previous_python is not None and any(
+                health._command_identity([argv[0]], host) != health._command_identity([str(previous_python)], host)
+                for _event, _stem, argv, _matcher in rows))):
+        raise ValueError("E_SHARED_HOOK_RUNTIME: predecessor registrations do not match their inventory")
+    def recheck():
+        if previous_python is not None and _previous_retained_hook_root(root, previous_release) != (predecessor, previous_python, specs):
+            raise ValueError("E_SHARED_HOOK_RUNTIME: previous package changed during planning")
+        if link is not None:
+            link.assert_current()
+        if receipt is not None and (
+            _read_lead_receipt(skills / _LEAD_RECEIPT_NAME) != receipt
+            or _tree_sha256(predecessor, ignore_runtime_cache=True)
+            != _lead_receipt_identity_v2(receipt, predecessor)
+        ):
+            raise ValueError("E_SHARED_HOOK_RUNTIME: predecessor Lead receipt drift")
+        health._recheck_selected_hook_targets(witnesses)
+        health._recheck_inventory_authority(authority, for_write=False)
+        if any(not _InstallTransaction._point_matches(path, node, check_file_content=True)
+               for path, node in before.items()):
+            raise ValueError("E_SHARED_HOOK_RUNTIME: predecessor registration or inventory changed")
+        return authority
+
+    recheck()
+    helper = _load_module_from_path(
+        "orchestrarium_install_hypothesis_hook", root / "scripts" / "install-hypothesis-hook.py"
+    )
+    desired_groups = {
+        stem: (event, helper._with_event_matcher({}, event, matcher).get("matcher"))
+        for stem, _script, event, matcher in _hook_specs("codex", retained)
+    }
+    transitions = [
+        (record.marker, event, {"matcher": group.get("matcher"), "hooks": [handler]})
+        for event, _, _, group, handler, record in health._owned_records(data, expected, "codex", host, targets)
+        if desired_groups.get(record.marker) != (event, group.get("matcher"))
+    ]
+    # Move and retire from each group's end so another selected transition
+    # is never mistaken for a survivor. Unchanged handlers keep their slots.
+    transitions.reverse()
+    kwargs = {"prior_installed_root": predecessor, "hooks_only_recheck": recheck,
+              "prior_specs": specs, "scoped_transitions": transitions}
+    if dry_run:
+        _install_hooks(root, "codex", registration, retained, "global", inventory,
+                       preview=True, **kwargs)
+        return
+
+    pointer = (registration,) if registration.is_symlink() else ()
+    paths = [*pointer, authority.resolved_target, authority.inventory]
+    transaction = _InstallTransaction(paths, enabled=True, link_object_paths=pointer)
+    with transaction:
+        owner = _CreateOnlyMutablePath(target.parent, transaction, dry_run=False)
+        _install_hooks(root, "codex", registration, retained, "global", inventory,
+                       transaction=transaction, mutable_owner=owner, **kwargs)
+        transaction.commit()
+
+
 def _installer_platform_admitted() -> bool:
     """Admit implemented platform backends; native operation checks remain mandatory."""
     return os.name in {"nt", "posix"}
@@ -12932,6 +13606,26 @@ def _installer_platform_admitted() -> bool:
 
 def install(provider: str, argv: list[str] | None = None) -> int:
     args = _parser(provider).parse_args(argv)
+    register_hooks = (
+        not args.no_hypothesis_hook
+        and not os.environ.get("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK")
+    )
+    if args.hooks_only:
+        compatible = {"global_install", "shared_hook_runtime", "hooks_only", "dry_run", "previous_retained_release"}
+        if not args.shared_hook_runtime or any(
+            value for key, value in vars(args).items() if key not in compatible
+        ):
+            print("FAIL: E_SHARED_HOOK_RUNTIME: hooks-only must be a separate shared operation", file=sys.stderr)
+            return 1
+    if args.previous_retained_release is not None and not args.hooks_only:
+        print("FAIL: E_SHARED_HOOK_RUNTIME: previous release requires hooks-only", file=sys.stderr)
+        return 1
+    if args.shared_hook_runtime and (
+        provider != "codex" or not args.global_install or args.uninstall
+        or not register_hooks
+    ):
+        print("FAIL: E_SHARED_HOOK_RUNTIME: retained linked hooks require global Codex registration", file=sys.stderr)
+        return 1
     # Even dry-run builds and disposes staging before entering the transaction.
     # Refuse unsupported hosts before target resolution and all plan creation.
     if not _installer_platform_admitted():
@@ -13001,6 +13695,17 @@ def install(provider: str, argv: list[str] | None = None) -> int:
         return 1
     script = Path(__file__)
     root = _repo_root(script)
+    if args.hooks_only:
+        try:
+            _mode, target, _project = _target(provider, args)
+            _apply_shared_hooks_only(root, target, dry_run=args.dry_run,
+                                     previous_release=args.previous_retained_release)
+        except (OSError, RuntimeError, ValueError) as exc:
+            print("FAIL: " + _installer_failure_text(exc), file=sys.stderr)
+            return 1
+        print("RESULT: DRY-RUN complete (no files modified)." if args.dry_run
+              else "RESULT: OK - Codex shared registrations updated")
+        return 0
     canonical_plan: _CanonicalSkillsPlan | None = None
     primary = cleanup_error = None
     applied = False
@@ -13046,10 +13751,31 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             docs_target = target / "AGENTS.md" if mode == "global" else project / "AGENTS.md"
             installed_hook_root = skills_target / "lead"
             registration = target / "hooks.json"
+            prior_installed_hook_root = installed_hook_root if args.shared_hook_runtime else None
+            shared_inventory = None
+            if mode == "global" and register_hooks:
+                try:
+                    shared_inventory = _find_portable_codex_inventory(root, registration)
+                except ValueError as exc:
+                    raise _InstallFailure("E_SHARED_HOOK_RUNTIME", "inventory", exc) from exc
+            if shared_inventory is not None and not args.shared_hook_runtime:
+                raise ValueError(
+                    "E_SHARED_HOOK_RUNTIME: reuse the retained shared-hook installation"
+                )
+            if args.shared_hook_runtime:
+                installed_hook_root = _retained_codex_hook_root(root, registration)
+                if shared_inventory is not None:
+                    try:
+                        _hook_health_module(root).verify_config(
+                            target=registration, platform="codex",
+                            host_os="windows" if os.name == "nt" else "posix",
+                            repo_root=root, installed_root=installed_hook_root,
+                            inventory_path=shared_inventory, verify_fires=False,
+                        )
+                    except (OSError, ValueError) as exc:
+                        raise ValueError("E_SHARED_HOOK_RUNTIME: existing hooks do not match this retained bundle") from exc
             source_tree = source / "skills"
             target_tree = skills_target
-            mode_target = agents_root / ".agents-mode.yaml"
-            normalize_provider = "codex"
             codex_agents_authority = _linked_runtime_subroots_module(root).LinkedRuntimeSubrootAuthority.bind(
                 target / "agents",
                 scope=mode,
@@ -13081,8 +13807,9 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             registration = target / "settings.json"
             source_tree = source
             target_tree = claude_agents_root
-            mode_target = target / ".agents-mode.yaml"
-            normalize_provider = "shared"
+        # Preference layers are not installed defaults.
+        mode_target = target / ".agents-mode.yaml" if mode == "global" else None
+        normalize_provider = "codex" if provider == "codex" else "shared"
         home = _resolve_global_home() if mode == "global" else None
         shared_mode_target: Path | None = None
         if mode == "global":
@@ -13102,11 +13829,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             # not something a pack sync is allowed to repair after mutation.
             _load_claude_settings(registration)
 
-        hooks_enabled = (
-            not args.no_hypothesis_hook
-            and not args.dry_run
-            and not os.environ.get("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK")
-        )
+        hooks_enabled = register_hooks and not args.dry_run
         canonical_lead = canonical_skills_target / "lead"
         codex_post_tree_runtime: tuple[tuple[Path, Path], ...] = ()
         codex_role_manifest: dict[str, Any] | None = None
@@ -13267,6 +13990,8 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             registration=registration,
             shared_mode_target=shared_mode_target,
             codex_hook_inventory=codex_hook_inventory,
+            canonical_skill_snapshots=_canonical_skill_snapshot_paths(canonical_skills_target, canonical_plan),
+            register_hooks=register_hooks,
             claude_commands_target=claude_commands_target,
             claude_skills_target=claude_skills_projection_target,
             claude_projection_snapshot_paths=tuple(
@@ -13299,7 +14024,9 @@ def install(provider: str, argv: list[str] | None = None) -> int:
         # Byte producers write ordinary resolved storage; keep a selected leaf
         # link's existing write-through snapshot and never snapshot an alias as
         # though its logically named ordinary file were independent storage.
-        byte_targets = [registration, docs_target]
+        byte_targets = [docs_target]
+        if register_hooks:
+            byte_targets.append(registration)
         if provider == "claude":
             byte_targets.append(docs_target.parent / "AGENTS.md")
         byte_pointer_objects = tuple(logical for logical in byte_targets if logical.is_symlink())
@@ -13447,6 +14174,18 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     document_grant, root, source, target, docs_target,
                     "global" if mode == "global" else "project", create_only)
                 if document_grant is not None else instruction_updates)
+            def migrate_global_preferences() -> None:
+                for path, profile, move_legacy in (
+                    (mode_target, normalize_provider, False),
+                    (shared_mode_target, "shared", True),
+                ):
+                    if path is not None:
+                        _normalize_agents_mode(
+                            root, root / "shared" / "agents-mode.defaults.yaml",
+                            path, profile, args.dry_run, migration_only=True,
+                            move_legacy=move_legacy, transaction=transaction, mutable_owner=create_only,
+                        )
+
             # Canonical roles resolve the neutral contract through .agents.
             # Publish that leaf before the canonical skills tree, while the
             # transaction still owns both canonical and provider destinations.
@@ -13454,23 +14193,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 root, canonical_agents_root, args.dry_run, mutable_owner=canonical_skills_owner
             )
             if provider == "codex":
-                _normalize_agents_mode(
-                    root,
-                    root / "shared" / "agents-mode.defaults.yaml",
-                    mode_target,
-                    normalize_provider,
-                    args.dry_run,
-                    transaction=transaction, mutable_owner=create_only,
-                )
-                if shared_mode_target is not None:
-                    _normalize_agents_mode(
-                        root,
-                        root / "shared" / "agents-mode.defaults.yaml",
-                        shared_mode_target,
-                        "shared",
-                        args.dry_run,
-                        transaction=transaction, mutable_owner=create_only,
-                    )
+                migrate_global_preferences()
                 assert canonical_plan is not None
                 _apply_canonical_skills_plan(
                     canonical_plan,
@@ -13575,6 +14298,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                         mode,
                         codex_hook_inventory,
                         transaction=transaction, mutable_owner=create_only,
+                        prior_installed_root=prior_installed_hook_root,
                     )
                 _reconcile_codex_native_config(
                     target / "config.toml",
@@ -13608,36 +14332,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 _merge_claude_docs(root, source, docs_target, args.dry_run,
                                    mutable_owner=create_only, project_scope=mode != "global")
             if provider != "codex":
-                _normalize_agents_mode(
-                    root,
-                    root / "shared" / "agents-mode.defaults.yaml",
-                    mode_target,
-                    normalize_provider,
-                    args.dry_run,
-                    transaction=transaction, mutable_owner=create_only,
-                )
-                if shared_mode_target is not None:
-                    _normalize_agents_mode(
-                        root,
-                        root / "shared" / "agents-mode.defaults.yaml",
-                        shared_mode_target,
-                        "shared",
-                        args.dry_run,
-                        transaction=transaction, mutable_owner=create_only,
-                    )
-
-            if provider == "claude":
-                mode_project = project if project is not None else target.parent / ".orchestrarium-global-install"
-                effective_delegation_mode = _resolve_claude_delegation_mode(
-                    root, mode_project, home if home is not None else mode_project
-                )
-                _merge_claude_main_agent_settings(
-                    root,
-                    registration,
-                    effective_delegation_mode,
-                    args.dry_run,
-                    mutable_owner=create_only,
-                )
+                migrate_global_preferences()
 
             if hooks_enabled and provider != "codex":
                 _install_hooks(
@@ -13710,11 +14405,11 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                             f"{len(missing_runtime)} missing: "
                             + ", ".join(str(path) for path in missing_runtime[:16]),
                         )
-                if not mode_target.is_file() or not docs_target.is_file():
+                if not docs_target.is_file():
                     raise _InstallFailure(
                         "E_INSTALL_VERIFY_CONTROL_FILES_MISSING",
                         "verify",
-                        "documentation or agents-mode output missing",
+                        "documentation output missing",
                     )
                 if args.replace_kimi_enrollment:
                     assert home is not None

@@ -14,10 +14,37 @@ LIVE_PACKS = ("src.claude", "src.codex")
 GENERALIZE_SKILL = "generalize-from-instance"
 GENERALIZE_BODY_SHA256 = "c55e0d9389abce424e778c41816127c76948d67d92233e9afb26ab4d92cfaf97"
 IMPLEMENTATION_TO_THEORY_SKILL = "implementation-to-theory"
-IMPLEMENTATION_TO_THEORY_SHA256 = "ca4a632ee9ca469dd65415f98ac0fd94dd250cdadb77fb34fe26657627a5db46"
+IMPLEMENTATION_TO_THEORY_SHA256 = "eeadb535e12e4102a43291cb7544f9d1396a6fcfa4c9bf5079e41334299b58ae"
 IMPLEMENTATION_TO_THEORY_BODY_SHA256 = (
     "2a62f5489701d38a7252a9f3964a8b31f7fd064893075b95da34d17a5855bb78"
 )
+
+ACCEPTED_CANONICAL_WITH_FROZEN_MIGRATION_WITNESS = {
+    'analyzing-video-bugs': {
+        'src.claude': 'cf78ec0176f1726891045a2c2626363377994f34f081f9a9ad0ffbdb60740e91',
+        'src.codex': '7305d3e067fd2ad5f22ef65148d67a6a005a3ab311eba6b4253077bf768dd842',
+    },
+    'repo-cleanup': {
+        'src.claude': '942d2eed5941b4468b28fcb8c89d3ac03416d963c598613c0e8e3cb5553b2616',
+        'src.codex': '80d1a331232eb39aafbc1f328831212b1bb4633a0a7efe8aedaec99c04ad4234',
+    },
+    'vak-dissertation-review': {
+        'src.claude': 'e259d114a1ea2372d9152a07445aeba82c51493b9caf7b39f3b6b96678e9b261',
+        'src.codex': '0ba50252acb53b2f3b2f7df573864b3f99a10b3969d04ce8107699293e2e7597',
+    },
+    'vcpkg-builder': {
+        'src.claude': '72208f4bec6ebf30eb49e99da12cc4e3cef6ef2572bb1583232a5fb1ebe791dc',
+        'src.codex': '25d93aa341555945c9503cf40dcae47bcd62e0f3868567b13616096748bbfa6c',
+    },
+    'vcpkg-ports-updater': {
+        'src.claude': '17aedafce43a1de5c0917e2a14cba131fcd5dcccca67902ad42852108d90816f',
+        'src.codex': 'bd1ca0e83dafd29a4cb2b2486ee2e9058764f396702f7bd45b72dfe719711734',
+    },
+    'windows-gui-manual-testing': {
+        'src.claude': '7dd186bbeee1fab2eb44e2d4f1c4772ffea87d918605efdcc00a5a8fb3c272b8',
+        'src.codex': '3e5a0dd384fba8f6e6e840d579cdfb64fff1a5ebd136048a2635803d9912a30e',
+    },
+}
 
 
 def _runtime():
@@ -62,14 +89,11 @@ def _live_common_skill_hashes(root: Path = ROOT) -> dict[str, dict[str, str]]:
             assert path.is_file(), f"live common-skill {name} missing from {pack}"
             _assert_frontmatter(path, f"{pack}/{name}")
             hashes[pack] = digest(path.read_bytes())
-        # Current production installs use the Codex canonical tree. This admitted
-        # revision intentionally differs from the frozen Claude migration witness;
-        # pin both inputs rather than rewriting that witness to restore parity.
-        if name == "repo-cleanup":
-            assert hashes == {
-                "src.codex": "80d1a331232eb39aafbc1f328831212b1bb4633a0a7efe8aedaec99c04ad4234",
-                "src.claude": "942d2eed5941b4468b28fcb8c89d3ac03416d963c598613c0e8e3cb5553b2616",
-            }, f"repo-cleanup canonical or historical body drifted: {hashes}"
+        # These source-owned updates retain exact historical migration witnesses.
+        # Do not overwrite those witnesses or accept an unpinned body difference.
+        accepted = ACCEPTED_CANONICAL_WITH_FROZEN_MIGRATION_WITNESS.get(name)
+        if accepted is not None:
+            assert hashes == accepted, f"{name} canonical or historical body drifted: {hashes}"
             result[name] = hashes
             continue
         assert len(set(hashes.values())) == 1, (
@@ -81,9 +105,22 @@ def _live_common_skill_hashes(root: Path = ROOT) -> dict[str, dict[str, str]]:
 
 def _assert_authoritative_status(root: Path = ROOT) -> None:
     readme = (root / "README.md").read_text(encoding="utf-8")
-    assert "`src.codex/` — the production Codex provider-pack source" in readme
-    assert "`src.claude/` — the production Claude Code provider-pack source" in readme
-    assert _runtime().installer_choices_are_supported_production_packs(root)
+    section = readme.partition("\n## Provider Packs\n")[2]
+    table = section.lstrip("\n").partition("\n\n")[0]
+    production = tuple(
+        (cells[0], cells[2])
+        for line in table.splitlines()
+        if line.startswith("|")
+        for cells in ([part.strip() for part in line.strip("|").split("|")],)
+        if len(cells) >= 3 and cells[1] == "Production"
+    )
+    assert production == (
+        ("Codex", "`src.codex/`"),
+        ("Claude Code", "`src.claude/`"),
+    ), "README production pack membership drifted"
+    assert _runtime().installer_choices_are_supported_production_packs(root), (
+        "installer production pack membership drifted"
+    )
 
 
 def _copy_contract_tree(tmp_path: Path) -> Path:
@@ -241,13 +278,25 @@ def test_authoritative_status_preserves_production_class() -> None:
 
 
 @pytest.mark.parametrize(
-    ("relative_path", "needle", "replacement"),
+    ("relative_path", "needle", "replacement", "failure"),
     (
-        ("README.md", "`src.codex/` — the production Codex provider-pack source", "`src.codex/` — example"),
+        (
+            "README.md",
+            "| Codex | Production | `src.codex/` |",
+            "| Codex | Example | `src.codex/` |",
+            "README production pack membership drifted",
+        ),
+        (
+            "README.md",
+            "| Claude Code | Production | `src.claude/` |",
+            "| Claude Code | Example | `src.claude/` |",
+            "README production pack membership drifted",
+        ),
         (
             "install.py",
             '"3": ("codex", "claude"),',
             '"3": ("codex",),',
+            "installer production pack membership drifted",
         ),
     ),
 )
@@ -256,13 +305,14 @@ def test_authoritative_status_mutation_does_not_redefine_production_membership(
     relative_path: str,
     needle: str,
     replacement: str,
+    failure: str,
 ) -> None:
     root = _copy_contract_tree(tmp_path)
     path = root / relative_path
     text = path.read_text(encoding="utf-8")
     assert needle in text
     path.write_text(text.replace(needle, replacement, 1), encoding="utf-8")
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match=failure):
         _assert_authoritative_status(root)
 
 

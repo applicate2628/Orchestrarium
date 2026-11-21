@@ -1,6 +1,6 @@
 # Repository Cleanup Common Skill — Frozen Design A
 
-Status: frozen for implementation and independent review
+Status: frozen historical design. The current implemented coordinator lives in [the canonical repo-cleanup skill](../../../src.codex/skills/repo-cleanup/SKILL.md). This note is not a pending implementation plan.
 Date: 2026-08-28
 Proposed ADR: `work-items/decisions/2026-08-28-repo-cleanup-front-door.md`
 

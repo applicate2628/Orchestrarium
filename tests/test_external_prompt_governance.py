@@ -9,7 +9,6 @@ import re
 import shutil
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -52,10 +51,10 @@ KIMI_TRANSPORT_OWNER_CONTRACTS = (
 )
 
 SHARED_KIMI_TRANSPORT_REQUIREMENTS = (
-    "fixed wrapper `kimi-code/k3`",
-    "independent verification; nonauthorizing",
     "use orchestrating runtime/approved wrapper, never an internal relay",
     "file-based prompt via stdin/file, never argv",
+    "no inferred fallback/retry/worker route",
+    "real terminal oracle/completion, no weaker shortcut without user approval",
 )
 KIMI_BEHAVIORAL_READ_ONLY_BOUNDARY = (
     "For `mutationClass: read-only`, read-only constrains the assigned work and expected "
@@ -313,15 +312,26 @@ class _PipedStdin:
 
 
 def _safe_provider_resolution(provider_prompt, calls: list[str]):
-    target = Path(provider_prompt.__file__).resolve()
+    target = Path(sys.executable).resolve()
     calls.append("binary-preflight")
     return provider_prompt.ResolvedProviderCommand(
-        (sys.executable, str(target)), target, "explicit-absolute-binding"
+        (str(target), "--version"), target, "explicit-absolute-binding"
     )
 
 
 def _terminal_receipt_args(tmp_path: Path, label: str) -> list[str]:
     return ["--terminal-receipt", str((tmp_path / f"{label}.receipt").resolve())]
+
+
+def _assert_prelaunch_failure_receipt(tmp_path: Path, label: str, stable_id: str) -> None:
+    (line,) = (tmp_path / f"{label}.receipt").read_text(encoding="utf-8").splitlines()
+    prefix, _, payload = line.partition("=")
+    assert prefix == "ORCHESTRARIUM_PROVIDER_RESULT_V2"
+    result = json.loads(payload)
+    assert result["token"] == f"UNVERIFIED:{stable_id}"
+    assert result["status"] == "blocked"
+    assert result["authorizing"] is False
+    assert result["cleanupStatus"] == "complete"
 
 
 @pytest.mark.parametrize(
@@ -338,9 +348,7 @@ def test_wrapper_rejects_bounded_strict_stdin_before_provider_or_capture(
 
     provider_prompt = _load_module()
     calls: list[str] = []
-    monkeypatch.setattr(
-        provider_prompt, "_requires_early_native_windows_refusal", lambda _provider: False
-    )
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(provider_prompt.sys, "stdin", _PipedStdin(payload))
     monkeypatch.setattr(
         provider_prompt,
@@ -351,15 +359,21 @@ def test_wrapper_rejects_bounded_strict_stdin_before_provider_or_capture(
         provider_prompt,
         "resolve_provider_auth_configuration",
         lambda _provider: calls.append("auth-configuration")
-        or SimpleNamespace(
+        or provider_prompt.ProviderAuthConfiguration(
+            mode="codex-auth-file",
             child_environment={},
             needles=(),
             output_scan_disposition="environment-exact",
         ),
     )
     monkeypatch.setattr(
-        provider_prompt.RunCaptureLifecycle,
-        "create",
+        provider_prompt,
+        "require_codex_hook_trust",
+        lambda *_args: pytest.fail(f"provider trust probe reached for {name}"),
+    )
+    monkeypatch.setattr(
+        provider_prompt.ReservedExternalRunV1,
+        "acquire_capture",
         lambda *_args: pytest.fail(f"capture allocation reached for {name}"),
     )
     monkeypatch.setattr(
@@ -372,6 +386,7 @@ def test_wrapper_rejects_bounded_strict_stdin_before_provider_or_capture(
         "codex", ["strict-stdin", *_terminal_receipt_args(tmp_path, name)]
     ) == 1
     assert calls == ["binary-preflight", "auth-configuration"]
+    _assert_prelaunch_failure_receipt(tmp_path, name, "E_EXTERNAL_PROMPT_INVALID")
 
 
 def test_wrapper_rejects_composed_overflow_before_provider_or_capture(
@@ -379,11 +394,9 @@ def test_wrapper_rejects_composed_overflow_before_provider_or_capture(
 ) -> None:
     """Catches a wrapper that validates task bytes but not capsule-plus-frame bytes."""
 
-    provider_prompt = _load_module(tmp_path)
+    provider_prompt = _load_module()
     calls: list[str] = []
-    monkeypatch.setattr(
-        provider_prompt, "_requires_early_native_windows_refusal", lambda _provider: False
-    )
+    monkeypatch.chdir(tmp_path)
     task = tmp_path / "task.md"
     overhead = (
         len(provider_prompt.EXTERNAL_GOVERNANCE_BEGIN)
@@ -400,15 +413,21 @@ def test_wrapper_rejects_composed_overflow_before_provider_or_capture(
         provider_prompt,
         "resolve_provider_auth_configuration",
         lambda _provider: calls.append("auth-configuration")
-        or SimpleNamespace(
+        or provider_prompt.ProviderAuthConfiguration(
+            mode="codex-auth-file",
             child_environment={},
             needles=(),
             output_scan_disposition="environment-exact",
         ),
     )
     monkeypatch.setattr(
-        provider_prompt.RunCaptureLifecycle,
-        "create",
+        provider_prompt,
+        "require_codex_hook_trust",
+        lambda *_args: pytest.fail("provider trust probe reached for composed overflow"),
+    )
+    monkeypatch.setattr(
+        provider_prompt.ReservedExternalRunV1,
+        "acquire_capture",
         lambda *_args: pytest.fail("capture allocation reached for composed overflow"),
     )
     monkeypatch.setattr(
@@ -429,6 +448,9 @@ def test_wrapper_rejects_composed_overflow_before_provider_or_capture(
         ],
     ) == 1
     assert calls == ["binary-preflight", "auth-configuration"]
+    _assert_prelaunch_failure_receipt(
+        tmp_path, "composed-overflow", "E_EXTERNAL_PROMPT_INVALID"
+    )
 
 
 def test_claude_auth_refusal_follows_provider_preflight_and_precedes_invalid_prompt(
@@ -439,6 +461,7 @@ def test_claude_auth_refusal_follows_provider_preflight_and_precedes_invalid_pro
 
     provider_prompt = _load_module()
     calls: list[str] = []
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(provider_prompt.sys, "stdin", _PipedStdin(b"\xff"))
     monkeypatch.setattr(
         provider_prompt,
@@ -461,8 +484,8 @@ def test_claude_auth_refusal_follows_provider_preflight_and_precedes_invalid_pro
         lambda *_args, **_kwargs: pytest.fail("prompt reached after auth refusal"),
     )
     monkeypatch.setattr(
-        provider_prompt.RunCaptureLifecycle,
-        "create",
+        provider_prompt.ReservedExternalRunV1,
+        "acquire_capture",
         lambda *_args, **_kwargs: pytest.fail("capture reached after auth refusal"),
     )
     monkeypatch.setattr(
@@ -479,6 +502,9 @@ def test_claude_auth_refusal_follows_provider_preflight_and_precedes_invalid_pro
         ],
     ) == 3
     assert calls == ["binary-preflight", "auth-refusal"]
+    _assert_prelaunch_failure_receipt(
+        tmp_path, "auth-before-invalid-prompt", "E_EXTERNAL_PROVIDER_AUTH_REFUSED"
+    )
 
 
 def test_external_contracts_require_wrappers_and_forbid_inline_or_sidecar_prompt_routes() -> None:
@@ -490,9 +516,18 @@ def test_external_contracts_require_wrappers_and_forbid_inline_or_sidecar_prompt
         ROOT / "src.codex" / "skills" / "consultant" / "SKILL.md",
         ROOT / "src.claude" / "agents" / "consultant.md",
     )
+    codex_owner, claude_owner = KIMI_TRANSPORT_OWNER_CONTRACTS
+    assert "unvalidated raw CLI, transport-neutral, inline, and caller-sidecar prompt chains are unsupported" in codex_owner.read_text(encoding="utf-8")
+    claude_text = claude_owner.read_text(encoding="utf-8")
+    assert "No transport-neutral raw provider chain is an approved substantive prompt path" in claude_text
+    assert "inline argv is permitted only for a fixed synthetic non-substantive smoke token" in claude_text
     for contract in contracts:
         text = contract.read_text(encoding="utf-8")
-        assert "prompt routes are unsupported" in text
+        if contract in KIMI_TRANSPORT_OWNER_CONTRACTS:
+            assert "a defective helper permits only declared owner-equivalent execution" in text
+            assert "file/stdin" in text
+        else:
+            assert "raw provider CLI prompt routes are unsupported" in text
         assert "invoke-" in text
         assert "transport-neutral inline chain" not in text
         assert "inline path bypasses" not in text
@@ -504,7 +539,7 @@ def test_external_contracts_require_wrappers_and_forbid_inline_or_sidecar_prompt
         assert "inline prompt argv is allowed" not in text
 
 
-def test_kimi_orchestration_is_wrapper_only_and_callers_do_not_compose_provider_argv() -> None:
+def test_kimi_orchestration_preserves_owner_guarantees_and_forbids_task_argv() -> None:
     """Catches shared or full-owner Kimi transport boundaries from drifting."""
 
     shared_text = (ROOT / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8")
@@ -512,15 +547,21 @@ def test_kimi_orchestration_is_wrapper_only_and_callers_do_not_compose_provider_
         assert statement in shared_text, f"shared governance omits Kimi boundary: {statement}"
 
     required = (
-        "`invoke-kimi-prompt` is the only approved Kimi launch surface",
-        "The wrapper alone owns every Kimi provider argument",
-        "Callers pass the unchanged task prompt file to the wrapper",
-        "must not invoke `kimi`, `kimi.exe`, `kimi --prompt`, or compose `--auto`",
+        "Explicit user or Lead override may choose Kimi",
+        "prefer the working `invoke-kimi-prompt` launch helper",
+        "which owns provider argument construction for actual wrapper execution",
+        "If it is defective, declared owner-equivalent launch under the shared assistance contract",
+        "exact fixed `kimi-code/k3` model, authentication/capability controls",
+        "unchanged file/stdin prompt and governance inputs",
+        "output/resource bounds, timeout/cancellation and real terminal oracle",
+        "Manual execution uses actual manual provenance, never a reserved wrapper frame",
+        "Direct `kimi`/`kimi.exe` invocation is permitted only when those guarantees are established",
+        "task prompts in argv (`kimi --prompt`) and independently invented `--auto` controls remain prohibited",
     )
     for contract in KIMI_TRANSPORT_OWNER_CONTRACTS:
         text = contract.read_text(encoding="utf-8")
         for statement in required:
-            assert statement in text, f"{contract} omits Kimi wrapper-only contract: {statement}"
+            assert statement in text, f"{contract} omits Kimi transport owner contract: {statement}"
 
 
 def test_kimi_read_only_is_behavioral_not_a_capability_sandbox() -> None:

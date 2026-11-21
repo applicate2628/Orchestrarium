@@ -91,6 +91,42 @@ class ResolveAgentsModeTest(unittest.TestCase):
 
             self.assertFalse((project / ".agents" / ".agents-mode.yaml.generated").exists())
 
+    def test_dispatch_owners_keep_second_opinion_toggle_sparse(self) -> None:
+        owners = {
+            "codex": ("src.codex/skills/lead/external-dispatch.md", ".codex", ".agents"),
+            "claude": ("src.claude/agents/contracts/external-dispatch.md", ".claude", ".claude"),
+        }
+        for provider, (owner, global_pack, local_pack) in owners.items():
+            with self.subTest(provider=provider), tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp)
+                project, home = base / "project", base / "home"
+                project.mkdir()
+                config = home / global_pack / ".agents-mode.yaml"
+                self._write(config, "consultantMode: internal\nexternalProvider: kimi\ndelegationMode: manual\n")
+                inherited = self._resolve(provider, project, home)
+                self.assertEqual(inherited["values"]["consultantMode"], "internal")
+                local = project / local_pack / ".agents-mode.yaml"
+                self.assertFalse(local.exists())
+                self._write(local, "consultantMode: external\n")
+                effective = self._resolve(provider, project, home)
+                self.assertEqual(effective["values"]["consultantMode"], "external")
+                for key in ("externalProvider", "delegationMode"):
+                    self.assertEqual(effective["values"][key], inherited["values"][key])
+                    self.assertEqual(effective["sources"][key], inherited["sources"][key])
+                    self.assertEqual(effective["sources"][key]["rank"], "global")
+                self._write(local, "consultantMode: internal\nfutureSetting: retained\n")
+                before = local.read_bytes()
+                readback = self._resolve(provider, project, home)
+                self.assertEqual(readback["values"]["consultantMode"], "internal")
+                for key in ("externalProvider", "delegationMode"):
+                    self.assertEqual(readback["sources"][key], inherited["sources"][key])
+                self.assertEqual(local.read_bytes(), before)
+                policy = (ROOT / owner).read_text(encoding="utf-8")
+                self.assertIn("A Second Opinion toggle writes only the local `consultantMode` key", policy)
+                self.assertIn("Authorized installer normalization is separate", policy)
+                self.assertNotIn("write the full default shape", policy)
+                self.assertNotIn("must not rewrite the file back to a consultant-only shape", policy)
+
     def test_project_local_wrapper_resolver_is_flagged_project_unconfirmed(self) -> None:
         """F9: a repo-supplied executable-bearing reserveResolver must not be silently trusted."""
         with tempfile.TemporaryDirectory() as tmp:

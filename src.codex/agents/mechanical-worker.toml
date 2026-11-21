@@ -1,7 +1,7 @@
 name = "mechanical-worker"
 description = "Native Luna mechanical worker for strictly bounded exact operations."
 model = "gpt-6-luna"
-model_reasoning_effort = "high"
+model_reasoning_effort = "xhigh"
 sandbox_mode = "workspace-write"
 developer_instructions = """
 Standalone $mechanical-worker operates under the universal AGENTS.md rules and accepts only one caller-authored exact patch operation from a caller-validated LunaExecutionContractV1 plan. The caller owns the target, exact root, tool, repository-relative path, patch bytes and SHA-256, pre-image SHA-256, post-image SHA-256, objective oracle, and high, xhigh, or max reasoning effort.

@@ -238,6 +238,41 @@ _BINARY_ASCII_RUN = re.compile(rb"[\x09\x20-\x7e]+")
 _IDENTIFIER_PREFIX = re.compile(
     r"[A-Za-z_][A-Za-z0-9_]*(?:(?:::|[-._:/\\])[A-Za-z_][A-Za-z0-9_]*)*(?:::|[-._:/\\])?$"
 )
+def _identifier_prefix_match(prefix: str) -> re.Match[str] | None:
+    """Find the anchored identifier suffix without retrying every start offset.
+
+    The suffix grammar is identifier (separator identifier)* separator?, with
+    ASCII identifier starts and one-character separators or a double colon.
+    Walk that grammar backwards once, then use the original regex at the one
+    proved start to preserve its Match object and offsets. Python's dollar
+    anchor also accepts the position immediately before one final newline.
+    """
+    end = len(prefix) - int(prefix.endswith("\n"))
+    separators = "-.:/\\"
+    if end and prefix[end - 1] in separators:
+        end -= 1
+        if prefix[end] == ":" and end and prefix[end - 1] == ":":
+            end -= 1
+    candidate = None
+    while end:
+        component_end = end
+        while end and (prefix[end - 1] == "_" or "a" <= prefix[end - 1] <= "z"
+                       or "A" <= prefix[end - 1] <= "Z" or "0" <= prefix[end - 1] <= "9"):
+            end -= 1
+        start = end
+        while start < component_end and "0" <= prefix[start] <= "9":
+            start += 1
+        if start == component_end:
+            break
+        candidate = start
+        if start != end or not end or prefix[end - 1] not in separators:
+            break
+        end -= 1
+        if prefix[end] == ":" and end and prefix[end - 1] == ":":
+            end -= 1
+    return _IDENTIFIER_PREFIX.match(prefix, candidate) if candidate is not None else None
+
+
 _VALUE = r"[A-Za-z0-9_./+=-]"
 _DIGIT_SHAPE = rf"(?:{_VALUE}{{5,}}[0-9]{_VALUE}*|{_VALUE}*[0-9]{_VALUE}{{5,}})"
 _QUOTED = rf"""["'`!@#$%^&*?|](?:{_VALUE}{{12,}}|{_DIGIT_SHAPE})["'`!@#$%^&*?|]"""
@@ -316,11 +351,24 @@ _MAX_AGGREGATE_MESSAGE_BYTES = 16_777_216
 _MAX_COMMIT_TREE_BYTES = 1_048_576
 _MAX_TREE_CACHE_BYTES = 64 * 1_048_576
 _MAX_BLOB_BYTES = 64 * 1_048_576
+_MAX_REVIEW_CAPTURE_BYTES = 64 * 1_048_576
+# Blob payloads are not retained across acquisition: the per-object reader
+# bound limits resident payload memory, while aggregate_bytes remains evidence.
 _MAX_LINE_BYTES = 8 * 1_048_576
 _MAX_PARENT_GRAPH_BYTES = 16 * 1_048_576
 _MAX_FINDINGS = 32
 _READ_CHUNK_BYTES = 64 * 1_024
-_SCAN_DEADLINE_SECONDS = 240.0
+def _publication_scan_budget_seconds() -> float:
+    """Explicit, bounded per-process budget; never changes scan coverage."""
+    value = os.environ.get("ORCHE_PUBLICATION_SCAN_SECONDS")
+    if value is None:
+        return 240.0
+    if not re.fullmatch(r"[1-9][0-9]{2,3}", value) or not 240 <= int(value) <= 3600:
+        raise ValueError("invalid publication scan budget (expected 240..3600 seconds)")
+    return float(value)
+
+
+_SCAN_DEADLINE_SECONDS = _publication_scan_budget_seconds()
 _MAX_TREE_VISITS = _MAX_SUBJECTS
 _MAX_TREE_FRONTIER = _MAX_OBJECTS
 _MAX_TREE_CACHE_ENTRIES = _MAX_OBJECTS
@@ -430,6 +478,7 @@ class NativePushRequest:
     repository_observation_sha256: str
     updates: tuple[NativePushUpdate, ...]
     receiver_inventory: bool = False
+    receiver_scope: object | None = None
 
 
 @dataclass(frozen=True)
@@ -440,6 +489,7 @@ class NativePushSelection:
     object_format: GitObjectFormat
     roots: tuple[str, ...]
     expected_parents: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    tag_receiver_inventory: tuple[RemoteRefTip, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -713,6 +763,7 @@ class HistoryProof:
     subject_set: str
     path_set: str
     tag_ids: tuple[str, ...] = ()
+    direct_tag_commit: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1373,6 +1424,8 @@ def _manual_path_finder(script: Path):
         raise RuntimeError("cannot compose path owner") from exc
     if not callable(finder):
         raise RuntimeError("cannot compose path owner")
+    finder._review_occurrences = namespace.get("find_machine_path_occurrences")
+    finder._review_source_sha256 = hashlib.sha256(source).hexdigest()
     return finder
 
 
@@ -1486,7 +1539,7 @@ def _assignment_coordinates(observation: _TextObservation) -> tuple[int, ...] | 
     identifier_end = separator_start
     while identifier_end > match.start() and line[identifier_end - 1].isspace():
         identifier_end -= 1
-    prefix = _IDENTIFIER_PREFIX.search(line[:match.start()])
+    prefix = _identifier_prefix_match(line[:match.start()])
     identifier_start = prefix.start() if prefix is not None else match.start()
     if identifier_end <= identifier_start:
         return None
@@ -1729,15 +1782,76 @@ def _load_review_policy_module():
     return module
 
 
-def detector_definitions(policy_module) -> dict[str, dict]:
+def _machine_path_review_definition(finder, policy_module) -> dict | None:
+    """Meaning comes from the captured classifier, never from a policy record."""
+    source_sha = getattr(finder, "_review_source_sha256", None)
+    if (not callable(getattr(finder, "_review_occurrences", None))
+        or type(source_sha) is not str or re.fullmatch(r"[0-9a-f]{64}", source_sha) is None):
+        return None
+    definition = {
+        "schemaVersion": 1, "ruleId": "machine-path-prefix-v1",
+        "normalFormId": "nf-machine-path-match-v1", "domain": "blob-text-v1",
+        "coordinate": "utf8-original-bytes-v1", "equivalence": "exact-occurrence-v1",
+        "classifierSourceSha256": source_sha,
+        "engine": "canonical-path-owner-occurrences-v1",
+    }
+    return {"definition": definition, "detector": {
+        "ruleId": definition["ruleId"],
+        "meaningSha256": policy_module.H("orchestrarium.publication-review.detector.v1", definition),
+    }}
+
+
+def _machine_path_review_rows(raw: bytes, path: str, subject_kind: str, finder, policy_module,
+                              machine_path_lines: frozenset[int] | None = None) -> tuple[dict, ...] | None:
+    owner = _machine_path_review_definition(finder, policy_module)
+    if owner is None:
+        return None
+    text, boundaries = _original_byte_boundaries(raw)
+    rows = []
+    for number, offset, line in _selected_text_lines(text, path, subject_kind):
+        if machine_path_lines is not None and number not in machine_path_lines:
+            continue
+        spans = finder._review_occurrences(line)
+        if type(spans) is not tuple or spans != tuple(sorted(set(spans))):
+            raise RuntimeError("review-path-witness")
+        for span in spans:
+            if (type(span) is not tuple or len(span) != 2 or any(type(x) is not int for x in span)
+                or not 0 <= span[0] < span[1] <= len(line)):
+                raise RuntimeError("review-path-witness")
+        # Classifier stays the coverage owner. A disagreement cannot grant credit.
+        if set(finder(line)) != {line[a:b] for a,b in spans}:
+            raise RuntimeError("review-path-witness")
+        for start, end in spans:
+            region = _byte_region(raw, boundaries[offset+start], boundaries[offset+end])
+            candidate = {"normalFormId": "nf-machine-path-match-v1", **region,
+                         "assignment": None,
+                         "contributors": [{"leafId": "machine-path-prefix-v1", "fullMatch": region}]}
+            candidate["occurrenceSha256"] = policy_module.H(
+                "orchestrarium.publication-review.occurrence.v1", {"detector": owner["detector"], **candidate})
+            rows.append({"detector": owner["detector"], "candidate": candidate,
+                         "line": number, "detectorClass": "machine-path"})
+    return tuple(rows)
+
+
+def detector_definitions(policy_module, *, find_machine_paths=None) -> dict[str, dict]:
     definitions, _leaves = _build_detector_catalog(policy_module.H)
-    return {definition["ruleId"]: {
+    result = {definition["ruleId"]: {
         "detector": {"ruleId": definition["ruleId"], "meaningSha256": policy_module.H("orchestrarium.publication-review.detector.v1", definition)},
         "definition": definition,
     } for definition in definitions}
+    finder = find_machine_paths if find_machine_paths is not None else _path_finder(Path(__file__))
+    path_owner = _machine_path_review_definition(finder, policy_module)
+    if path_owner is not None:
+        result[path_owner["detector"]["ruleId"]] = path_owner
+    return result
 
 
 def resolve_review_detector(diagnostic_class: str, *, policy_module) -> dict:
+    if diagnostic_class == "machine-path":
+        owner = detector_definitions(policy_module).get("machine-path-prefix-v1")
+        if owner is None:
+            raise ValueError("unknown-detector")
+        return owner["detector"]
     _definitions, leaves = _build_detector_catalog(policy_module.H)
     for index in range(len(_SIMPLE_RULES)):
         if diagnostic_class == f"simple-{index + 1}":
@@ -1749,7 +1863,8 @@ def resolve_review_detector(diagnostic_class: str, *, policy_module) -> dict:
 
 
 def analyze_review_candidates(raw: bytes, path: bytes, *, subject_kind: str, policy_module,
-                              clean_lines: _CleanLineAnalysis | None = None) -> dict:
+                              clean_lines: _CleanLineAnalysis | None = None,
+                              find_machine_paths=None, machine_path_lines=None) -> dict:
     if not isinstance(raw, bytes) or not isinstance(path, bytes) or not path or b"\0" in path:
         return {"complete": False, "candidates": (), "unresolved": (),
                 "refusal": _refusal("PS-INPUT-REFUSAL", "review-evaluation")}
@@ -1757,6 +1872,10 @@ def analyze_review_candidates(raw: bytes, path: bytes, *, subject_kind: str, pol
     try:
         rows = _analyze_review_candidates(raw, decoded_path, subject_kind=subject_kind,
             digest=policy_module.H, canonical=policy_module.C, clean_lines=clean_lines)
+        finder = find_machine_paths if find_machine_paths is not None else _path_finder(Path(__file__))
+        path_rows = _machine_path_review_rows(raw, decoded_path, subject_kind, finder, policy_module, machine_path_lines)
+        if path_rows is not None:
+            rows = (*rows, *path_rows)
     except UnicodeError:
         return {"complete": True, "candidates": (), "unresolved": tuple(_content_hits(
             raw.decode("utf-8", "replace"), decoded_path, lambda _line: (), subject_kind=subject_kind,
@@ -1769,7 +1888,220 @@ def analyze_review_candidates(raw: bytes, path: bytes, *, subject_kind: str, pol
         "PS-FINDING-COMMIT-MESSAGE" if subject_kind == "commit-message" else "PS-FINDING-CONTENT",
         subject_kind, _safe_locator(decoded_path, subject_kind), row["line"], row["detectorClass"],
     ) for row in rows if row["candidate"] is None)
-    return {"complete": True, "candidates": candidates, "unresolved": unresolved, "refusal": None}
+    return {"complete": True, "candidates": candidates, "unresolved": unresolved, "refusal": None, "pathsRepresented": path_rows is not None}
+
+
+def build_review_occurrences(raw: bytes, path: bytes, *, object_format: str,
+                             git_mode: str, policy_module,
+                             machine_path_lines=None) -> tuple[dict, ...]:
+    """Generate review input from captured blob bytes, never grant exceptions.
+
+    The owner supplies bytes from its captured Git object. Identity and byte
+    coordinates are generated here, not transcribed by the reviewer. Full-blob
+    context deliberately makes this an exact-content decision.
+    """
+    if object_format not in ("sha1", "sha256") or git_mode not in ("100644", "100755"):
+        raise ValueError("unsupported-review-subject")
+    analysis = analyze_review_candidates(raw, path, subject_kind="tracked-blob",
+                                         policy_module=policy_module,
+                                         machine_path_lines=machine_path_lines)
+    if not analysis["complete"] or analysis["refusal"] is not None or analysis["unresolved"]:
+        raise ValueError("incomplete-review-candidates")
+    header = b"blob " + str(len(raw)).encode("ascii") + b"\0"
+    blob_oid = hashlib.new(object_format, header + raw).hexdigest()
+    occurrences = []
+    for row in analysis["candidates"]:
+        candidate = row["candidate"]
+        body = {
+            "rawPathBase64": base64.b64encode(path).decode("ascii"),
+            "blobOid": blob_oid,
+            "blobSha256": hashlib.sha256(raw).hexdigest(),
+            "blobByteCount": len(raw),
+            "gitMode": git_mode,
+            "detector": row["detector"],
+            "candidate": candidate,
+            "reviewRegion": _byte_region(raw,
+                min(item["fullMatch"]["startByte"] for item in candidate["contributors"]),
+                max(item["fullMatch"]["endByteExclusive"] for item in candidate["contributors"])),
+            "contexts": [{"id": "complete-blob", "region": _byte_region(raw, 0, len(raw))}],
+        }
+        occurrence_id = policy_module.review_candidate_id(body)
+        occurrences.append(dict(body, id=occurrence_id))
+    return tuple(sorted(occurrences, key=lambda row: row["id"]))
+
+
+def _review_packet(occurrences, repository, modes, range_scope, policy_module):
+    occurrences = sorted(occurrences, key=lambda row: row["id"])
+    ids = [row["id"] for row in occurrences]
+    if not ids or len(ids) != len(set(ids)):
+        raise ValueError("empty-or-duplicate-review-candidates")
+    body = {"repository": repository, "modes": modes, "rangeScope": range_scope,
+            "occurrences": occurrences}
+    body = json.loads(policy_module.C(body))
+    return dict(body, packetId=policy_module.candidate_packet_id(body))
+
+
+def build_review_packet(subjects, *, repository: dict, modes: list[str],
+                        range_scope: dict | None, policy_module) -> dict:
+    """Build one review assignment from the scan owner's captured blob inputs.
+
+    Subjects are (raw bytes, raw Git path, Git mode) triples from the selected
+    scan, not reviewer-supplied replacement occurrences. Scope is supplied by
+    that same scan owner; packet identity binds it for the returned decisions.
+    """
+    occurrences = []
+    for raw, path, git_mode in subjects:
+        occurrences.extend(build_review_occurrences(raw, path,
+            object_format=repository["objectFormat"], git_mode=git_mode,
+            policy_module=policy_module))
+    return _review_packet(occurrences, repository, modes, range_scope, policy_module)
+
+
+def capture_staged_review() -> dict:
+    """Capture a private reviewer assignment from the current repository index.
+
+    Root must deliver this evidence privately to the real commissioned reviewer.
+    This read-only API neither approves findings nor prints potentially secret
+    content. It is staged-only, not a native-push/range capture or clean receipt.
+    """
+    root = _repo_root()
+    if Path.cwd().resolve() != root.resolve():
+        raise ValueError("staged-review-requires-repository-root")
+    policy = _load_review_policy_module()
+    deadline = time.monotonic() + _SCAN_DEADLINE_SECONDS
+    observed, _ = _capture_review_repository(policy, root, deadline)
+    if observed["status"] != "captured":
+        raise ValueError("staged-review-repository-unavailable")
+    bindings = {}
+    paths, blobs, lines = _tracked_files(review_bindings=bindings)
+    occurrences, unsupported, content = [], [], {}
+    for path in paths:
+        git_mode, blob_oid, raw_path = bindings[path]
+        raw = blobs[path]
+        locator = base64.b64encode(raw_path).decode("ascii")
+        if _filename_findings(path, "tracked-blob"):
+            unsupported.append({"rawPathBase64": locator, "reason": "filename-finding"})
+        if git_mode not in ("100644", "100755") or _is_binary(raw):
+            unsupported.append({"rawPathBase64": locator, "reason": "unsupported-review-subject"})
+            continue
+        try:
+            rows = build_review_occurrences(raw, raw_path,
+                object_format=observed["repository"]["objectFormat"], git_mode=git_mode,
+                policy_module=policy, machine_path_lines=lines[path])
+        except ValueError:
+            unsupported.append({"rawPathBase64": locator, "reason": "incomplete-review-candidates"})
+            continue
+        if any(row["blobOid"] != blob_oid for row in rows):
+            raise ValueError("staged-review-object-mismatch")
+        occurrences.extend(rows)
+        if rows:
+            content[blob_oid] = {"rawBase64": base64.b64encode(raw).decode("ascii"),
+                                "sha256": hashlib.sha256(raw).hexdigest()}
+    current = {}
+    current_paths, current_blobs, current_lines = _tracked_files(review_bindings=current)
+    again, _ = _capture_review_repository(policy, root, deadline)
+    if (current_paths != paths or current_blobs != blobs or current_lines != lines
+            or current != bindings or again != observed):
+        raise ValueError("staged-review-drift")
+    packet = (_review_packet(occurrences, observed["repository"],
+              ["staged-blob-text"], None, policy) if occurrences else None)
+    return {"status": "unsupported" if unsupported else "reviewable" if packet else "no-candidates",
+            "packet": packet, "content": content, "unsupported": unsupported}
+
+
+class _HistoryReviewCapture:
+    """Private bounded evidence sink, never an authorization or receipt owner."""
+    def __init__(self, policy):
+        self.policy = policy
+        self.occurrences = {}
+        self.content = {}
+        self.unsupported = set()
+        self.byte_count = 0
+        self.metadata_bytes = 0
+        self.limit_hit = False
+
+    def metadata(self, text, kind, finder):
+        if _content_hits(text, "review-metadata", finder, subject_kind=kind, max_findings=1):
+            self.unsupported.add(kind)
+
+    def observe(self, raw, path, blob_oid, owners, commits, object_format, *, binary):
+        if _filename_findings(path.decode("utf-8", "surrogateescape"), "history-blob"):
+            self.unsupported.add("filename-finding")
+        if binary:
+            self.unsupported.add("binary-subject")
+            return
+        modes = set()
+        for commit, mode in owners:
+            if commit not in commits or mode not in ("100644", "100755"):
+                self.unsupported.add("non-commit-or-nonordinary-subject")
+            else:
+                modes.add(mode)
+        for mode in sorted(modes):
+            try:
+                rows = build_review_occurrences(raw, path, object_format=object_format,
+                    git_mode=mode, policy_module=self.policy)
+            except ValueError:
+                self.unsupported.add("incomplete-review-candidates")
+                continue
+            if any(row["blobOid"] != blob_oid for row in rows):
+                raise ValueError("history-review-object-mismatch")
+            if rows and blob_oid not in self.content:
+                if self.byte_count + len(raw) > _MAX_REVIEW_CAPTURE_BYTES:
+                    self.limit_hit = True
+                    raise ValueError("history-review-capture-budget")
+                self.byte_count += len(raw)
+                self.content[blob_oid] = {"rawBase64": base64.b64encode(raw).decode("ascii"),
+                                         "sha256": hashlib.sha256(raw).hexdigest()}
+            for row in rows:
+                if row["id"] not in self.occurrences:
+                    self.metadata_bytes += len(self.policy.C(row))
+                    if self.metadata_bytes > _MAX_REVIEW_CAPTURE_BYTES:
+                        self.limit_hit = True
+                        raise ValueError("history-review-capture-budget")
+                    self.occurrences[row["id"]] = row
+
+
+def capture_history_review(remote=None, destination=None, *, source_revision=None,
+                           native_payload=None) -> dict:
+    """Capture through existing range/native traversal; no model or policy write.
+
+    Native input must come from the existing native selection owner. Returning
+    private content is not proof of receiving, approval, or transfer authority.
+    """
+    native = native_payload is not None
+    if ((native and (remote is not None or destination is not None or source_revision is not None))
+            or (not native and (not remote or not destination))):
+        raise ValueError("history-review-selection")
+    root = _repo_root()
+    if Path.cwd().resolve() != root.resolve():
+        raise ValueError("history-review-requires-repository-root")
+    policy = _load_review_policy_module()
+    deadline = time.monotonic() + _SCAN_DEADLINE_SECONDS
+    observed, _ = _capture_review_repository(policy, root, deadline)
+    if observed["status"] != "captured":
+        raise ValueError("history-review-repository-unavailable")
+    capture = _HistoryReviewCapture(policy)
+    finder = _path_finder(Path(__file__))
+    if native:
+        outcome = _scan_native_push(native_payload, finder, review_capture=capture,
+                                   scan_timeout=_remaining_seconds(deadline))
+    else:
+        outcome = _scan_range(remote, destination, finder, source_revision=source_revision,
+                             review_capture=capture, scan_timeout=_remaining_seconds(deadline))
+    again, _ = _capture_review_repository(policy, root, deadline)
+    if (outcome.kind not in ("clean", "findings") or outcome.history is None
+            or outcome.coverage is None or again != observed):
+        return {"status": "refused", "packet": None, "content": {},
+                "unsupported": ["history-review-capture-budget" if capture.limit_hit
+                                else "history-capture-unqualified"]}
+    commits = sorted(outcome.history.commit_ids)
+    if not commits and capture.occurrences:
+        raise ValueError("history-review-commit-scope")
+    packet = (_review_packet(list(capture.occurrences.values()), observed["repository"],
+              ["range-blob-text"], {"kind": "exact-commits", "commits": commits}, policy)
+              if capture.occurrences else None)
+    return {"status": "unsupported" if capture.unsupported else "reviewable" if packet else "no-candidates",
+            "packet": packet, "content": capture.content, "unsupported": sorted(capture.unsupported)}
 
 
 def project_review_candidate(raw: bytes, path: bytes, detector: dict, review_region: dict, *, policy_module) -> dict:
@@ -1923,11 +2255,15 @@ class ReviewEvaluation:
                 display_locator=display_locator, staged_index=staged_index)
             self.unresolved += len(findings)
             return findings
-        key = (raw_path, blob_oid, git_mode, subject_kind, hashlib.sha256(raw).digest())
+        content_key = (raw_path, blob_oid, git_mode, subject_kind, hashlib.sha256(raw).digest())
+        key = (*content_key, machine_path_lines, id(find_machine_paths))
         analysis = self._analysis.get(key)
         if analysis is None:
-            analysis = analyze_review_candidates(raw, raw_path, subject_kind=subject_kind, policy_module=self.policy,
-                                                 clean_lines=self._clean_line_analysis)
+            analysis = analyze_review_candidates(
+                raw, raw_path, subject_kind=subject_kind, policy_module=self.policy,
+                clean_lines=self._clean_line_analysis, find_machine_paths=find_machine_paths,
+                machine_path_lines=machine_path_lines,
+            )
             self._analysis[key] = analysis
         if not analysis["complete"] or analysis["refusal"] is not None:
             raise RuntimeError("review-evaluation")
@@ -1960,19 +2296,20 @@ class ReviewEvaluation:
                 raise RuntimeError("review-evaluation-duplicate")
             self._applied_keys.add(applied_key)
             self._applications.append((subject, row["candidate"], row["detector"], application))
-        # The classifier is pure for one captured scan. Retain only one
-        # payload/path's matching line numbers, never its bytes or a verdict.
-        # Commit authorization and occurrence accounting above remain per subject.
-        cached = self._machine_path_analysis
-        if cached is None or cached[0] != (key, path) or cached[1] is not find_machine_paths:
-            numbers = tuple(number for number, _offset, line in
-                            _selected_text_lines(raw.decode("utf-8", "replace"), path, subject_kind)
-                            if find_machine_paths(line))
-            cached = ((key, path), find_machine_paths, numbers)
-            self._machine_path_analysis = cached
-        for number in cached[2]:
-            if machine_path_lines is None or number in machine_path_lines:
-                findings.append(Finding("PS-FINDING-CONTENT", subject_kind, locator, number, "machine-path", display_locator, staged_index))
+        if not analysis.get("pathsRepresented", False):
+            # The classifier is pure for one captured scan. Retain only one
+            # payload/path's matching line numbers, never its bytes or a verdict.
+            # Commit authorization and occurrence accounting above remain per subject.
+            cached = self._machine_path_analysis
+            if cached is None or cached[0] != (content_key, path) or cached[1] is not find_machine_paths:
+                numbers = tuple(number for number, _offset, line in
+                                _selected_text_lines(raw.decode("utf-8", "replace"), path, subject_kind)
+                                if find_machine_paths(line))
+                cached = ((content_key, path), find_machine_paths, numbers)
+                self._machine_path_analysis = cached
+            for number in cached[2]:
+                if machine_path_lines is None or number in machine_path_lines:
+                    findings.append(Finding("PS-FINDING-CONTENT", subject_kind, locator, number, "machine-path", display_locator, staged_index))
         self.unresolved += len(findings)
         return findings
 
@@ -2110,7 +2447,7 @@ def _is_callable_rhs(line: str, match: re.Match[str]) -> bool:
 
 def _is_public_token_credential_identifier(line: str, match: re.Match[str]) -> bool:
     credential_identifier = match.groupdict().get("credential_token_identifier")
-    prefix = _IDENTIFIER_PREFIX.search(line[:match.start()])
+    prefix = _identifier_prefix_match(line[:match.start()])
     identifier_suffix = (
         credential_identifier
         if credential_identifier is not None
@@ -2173,7 +2510,7 @@ def _is_annotated_public_token_match(
 def _is_public_key_token_match(line: str, family: str, match: re.Match[str]) -> bool:
     if family != "token":
         return False
-    prefix = _IDENTIFIER_PREFIX.search(line[:match.start()])
+    prefix = _identifier_prefix_match(line[:match.start()])
     identifier = (prefix.group(0) if prefix is not None else "") + line[
         match.start():match.start() + len("Token")
     ]
@@ -3397,8 +3734,20 @@ async def _range_selection(
     )
 
 
+def _native_new_same_name_tag(request: NativePushRequest) -> NativePushUpdate | None:
+    if not request.receiver_inventory or len(request.updates) != 1:
+        return None
+    row = request.updates[0]
+    zero = "0" * request.object_format.hex_length
+    if (row.remote_oid == zero and row.local_oid != zero
+            and row.remote_ref.startswith(b"refs/tags/") and row.local_ref == row.remote_ref):
+        return row
+    return None
+
+
 async def _native_prior_receiver_roots(
     request: NativePushRequest, deadline: float,
+    *, inventory: tuple[RemoteRefTip, ...] | None = None,
 ) -> tuple[str, ...] | Refusal:
     """Use actual old roots, plus inventory only for a qualified same receiver.
 
@@ -3410,13 +3759,19 @@ async def _native_prior_receiver_roots(
     prior = tuple(RemoteRefTip(row.remote_ref, row.remote_oid)
                   for row in request.updates if row.remote_oid != zero)
     loop_deadline = asyncio.get_running_loop().time() + _remaining_seconds(deadline)
-    if request.receiver_inventory:
+    if request.receiver_scope is not None:
+        if request.receiver_inventory or inventory is not None:
+            return _refusal("PS-INPUT-REFUSAL", "receiver-scope")
+        # The held target-local owner alone supplies its qualified prior roots.
+        prior += tuple(RemoteRefTip(b"", oid) for oid in request.receiver_scope.excluded_roots)
+    if request.receiver_inventory and inventory is None:
         inventory = await _remote_ref_tip_oids(
             request.endpoint, deadline=loop_deadline, object_format=request.object_format,
             no_redirect=True,
         )
         if isinstance(inventory, Refusal):
             return inventory
+    if inventory is not None:
         prior += inventory
     return await _local_remote_commit_tip_oids(
         prior, deadline=loop_deadline, object_format=request.object_format,
@@ -3440,7 +3795,18 @@ async def _native_push_selection(request: NativePushRequest, deadline: float) ->
         return NativePushSelection(request, (), (), request.object_format, ())
     loop = asyncio.get_running_loop()
     loop_deadline = loop.time() + _remaining_seconds(deadline)
-    exclusions = await _native_prior_receiver_roots(request, deadline)
+    candidate = _native_new_same_name_tag(request)
+    inventory = None
+    if candidate is not None:
+        inventory = await _remote_ref_tip_oids(
+            request.endpoint, deadline=loop_deadline, object_format=request.object_format,
+            no_redirect=True,
+        )
+        if isinstance(inventory, Refusal):
+            return inventory
+        if any(tip.refname == candidate.remote_ref for tip in inventory):
+            return _refusal("PS-MSG-RANGE", "tag-destination-exists")
+    exclusions = await _native_prior_receiver_roots(request, deadline, inventory=inventory)
     if isinstance(exclusions, Refusal):
         return exclusions
     revisions = b"".join((oid.encode("ascii") + b"\n") for oid in roots)
@@ -3461,7 +3827,11 @@ async def _native_push_selection(request: NativePushRequest, deadline: float) ->
     commits = tuple(oid for oid, _parents in parent_graph)
     if not set(commits).issubset(objects):
         return _refusal("PS-MSG-COVERAGE", "commit-object-set")
-    return NativePushSelection(request, commits, objects, request.object_format, roots, parent_graph)
+    tag_inventory = (
+        inventory if inventory is not None and not commits and objects == roots else None
+    )
+    return NativePushSelection(request, commits, objects, request.object_format, roots, parent_graph,
+                               tag_inventory)
 
 
 async def _native_commit_range_selection(
@@ -4062,6 +4432,9 @@ def _parse_tree(
 
 
 def _line_limit_refusal(raw: bytes) -> Refusal | None:
+    # No individual line can be larger than the entire payload.
+    if len(raw) <= _MAX_LINE_BYTES:
+        return None
     start = 0
     while True:
         end = raw.find(b"\n", start)
@@ -4227,12 +4600,15 @@ async def _acquire_history(
     scan_deadline: float,
     *,
     review_evaluation: "ReviewEvaluation | None" = None,
+    excluded_tag_targets: dict[str, str] | None = None,
+    review_capture=None,
 ) -> tuple[HistoryProof, CoverageProof, tuple[Finding, ...]] | Refusal:
     commit_set = set(selection.expected_oids)
     native = isinstance(selection, NativePushSelection)
     object_types: dict[str, str] = {}
     commit_records: dict[str, CommitRecord] = {}
     tag_targets: dict[str, tuple[str, str]] = {}
+    direct_tag_commit = None
     tree_cache: dict[str, bytes] = {}
     blob_records: dict[str, tuple[int, bytes, bool]] = {}
     findings: list[Finding] = []
@@ -4276,10 +4652,15 @@ async def _acquire_history(
                 line_refusal = _line_limit_refusal(header)
                 if line_refusal is not None:
                     return line_refusal
+                header_text = header.decode("utf-8", "replace")
                 _append_findings(findings, _content_hits(
-                    header.decode("utf-8", "replace"), oid, find_machine_paths,
+                    header_text, oid, find_machine_paths,
                     subject_kind="commit-header", max_findings=max(0, _MAX_FINDINGS - len(findings)),
                 ))
+            if review_capture is not None:
+                review_capture.metadata(record.message.text, "commit-message", find_machine_paths)
+                if native:
+                    review_capture.metadata(header_text, "commit-header", find_machine_paths)
             aggregate_messages += record.message.raw_size
             if aggregate_messages > _MAX_AGGREGATE_MESSAGE_BYTES:
                 return _refusal("PS-MSG-LIMIT", "aggregate-message-bytes")
@@ -4302,18 +4683,31 @@ async def _acquire_history(
             line_refusal = _line_limit_refusal(result.raw)
             if line_refusal is not None:
                 return line_refusal
+            tag_text = result.raw.decode("utf-8", "replace")
             _append_findings(findings, _content_hits(
-                result.raw.decode("utf-8", "replace"), oid, find_machine_paths,
+                tag_text, oid, find_machine_paths,
                 subject_kind="tag-object", max_findings=max(0, _MAX_FINDINGS - len(findings)),
             ))
             coverage_recorder.record(CoverageEvent.SCANNED, oid)
+            if review_capture is not None:
+                review_capture.metadata(tag_text, "tag-object", find_machine_paths)
             tag_targets[oid] = target
+            if selection.tag_receiver_inventory is not None:
+                tag_row = _native_new_same_name_tag(selection.request)
+                header = result.raw.split(b"\n\n", 1)[0].split(b"\n")
+                if (tag_row is not None and oid == tag_row.local_oid and target[1] == "commit"
+                        and [line[4:] for line in header if line.startswith(b"tag ")]
+                        == [tag_row.remote_ref.removeprefix(b"refs/tags/")]):
+                    direct_tag_commit = target[0]
         elif result.object_type == "tree":
             aggregate_trees += len(result.raw)
             if aggregate_trees > _MAX_TREE_CACHE_BYTES:
                 return _refusal("PS-MSG-LIMIT", "tree-cache-bytes")
             tree_cache[oid] = result.raw
         elif result.object_type == "blob":
+            if not native and hashlib.new(selection.object_format.name,
+                                          f"blob {len(result.raw)}\0".encode("ascii") + result.raw).hexdigest() != oid:
+                return _refusal("PS-MSG-COVERAGE", "object-content-identity")
             if len(blob_records) >= _MAX_BLOBS:
                 return _refusal("PS-MSG-LIMIT", "blob-count")
             aggregate_blobs += len(result.raw)
@@ -4344,21 +4738,13 @@ async def _acquire_history(
         coverage = coverage_recorder.proof()
         if isinstance(coverage, Refusal):
             return coverage
-    target_types = dict(object_types)
     for target_oid, declared_type in tag_targets.values():
-        actual_type = target_types.get(target_oid)
+        actual_type = object_types.get(target_oid)
         if actual_type is None:
-            try:
-                result = _run_range_git(["cat-file", "-t", target_oid], text=True,
-                                        timeout=max(0.001, scan_deadline - asyncio.get_running_loop().time()))
-            except subprocess.TimeoutExpired:
-                return _refusal("PS-MSG-READ-TIMEOUT", "tag-target")
-            except OSError:
-                return _refusal("PS-MSG-READ", "tag-target")
-            if result.returncode or result.stdout.splitlines() != [declared_type]:
+            if excluded_tag_targets is None:
                 return _refusal("PS-MSG-FRAME", "tag-target")
-            target_types[target_oid] = declared_type
-        elif actual_type != declared_type:
+            actual_type = excluded_tag_targets.setdefault(target_oid, declared_type)
+        if actual_type != declared_type:
             return _refusal("PS-MSG-FRAME", "tag-target")
 
     async def load_tree(oid: str) -> bytes | Refusal:
@@ -4473,7 +4859,12 @@ async def _acquire_history(
                 if native and tree_oid in unpublished_trees and (tree_oid, path) not in native_metadata_paths:
                     native_metadata_paths.add((tree_oid, path))
                     decoded_path = path.decode("utf-8", "surrogateescape")
-                    _append_findings(findings, _filename_findings(decoded_path, "tree-path"))
+                    filename_findings = _filename_findings(decoded_path, "tree-path")
+                    _append_findings(findings, filename_findings)
+                    if review_capture is not None:
+                        review_capture.metadata(decoded_path, "tree-path", find_machine_paths)
+                        if filename_findings:
+                            review_capture.unsupported.add("filename-finding")
                     _append_findings(findings, _content_hits(
                         decoded_path, tree_oid, find_machine_paths, subject_kind="tree-path",
                         max_findings=max(0, _MAX_FINDINGS - len(findings)),
@@ -4515,7 +4906,7 @@ async def _acquire_history(
     binary_blobs = {oid for oid, (_, _, binary) in blob_records.items() if binary}
     text_blobs = set(blob_records) - binary_blobs
     subjects_by_path: dict[tuple[bytes, str], list[tuple[str, str]]] = {}
-    if review_evaluation is not None:
+    if review_evaluation is not None or review_capture is not None:
         for commit_oid, raw_path, blob_oid in sorted(subjects):
             subjects_by_path.setdefault((raw_path, blob_oid), []).append(
                 (commit_oid, subject_modes[(commit_oid, raw_path, blob_oid)])
@@ -4556,6 +4947,10 @@ async def _acquire_history(
         line_refusal = _line_limit_refusal(raw)
         if line_refusal is not None:
             return line_refusal
+        if review_capture is not None:
+            review_capture.observe(raw, path, blob_oid,
+                subjects_by_path.get((path, blob_oid), ()), commit_set,
+                selection.object_format.name, binary=blob_oid in binary_blobs)
         if blob_oid in binary_blobs:
             content_findings = _binary_content_hits(
                 raw,
@@ -4616,6 +5011,7 @@ async def _acquire_history(
         _subject_set_digest(canonical_subjects),
         _path_set_digest(canonical_paths),
         tuple(sorted(tag_targets)),
+        direct_tag_commit,
     )
     # Synchronous detectors and proof hashing may cross the shared deadline.
     if asyncio.get_running_loop().time() >= scan_deadline:
@@ -4635,6 +5031,7 @@ async def _scan_range_async(
     coverage_fault: CoverageFaultPort | None = None,
     scan_timeout: float = _SCAN_DEADLINE_SECONDS,
     review_evaluation: "ReviewEvaluation | None" = None,
+    review_capture=None,
 ) -> ScanOutcome:
     wall_deadline = time.monotonic() + scan_timeout
     request = _range_request(remote, destination, source_revision)
@@ -4648,8 +5045,46 @@ async def _scan_range_async(
     return await _scan_selected_history_async(
         selection, find_machine_paths, wall_deadline=wall_deadline, tip_resolver=tip_resolver,
         reader_factory=reader_factory, coverage_observer=coverage_observer, coverage_fault=coverage_fault,
-        review_evaluation=review_evaluation,
+        review_evaluation=review_evaluation, review_capture=review_capture,
     )
+
+
+async def _verify_excluded_tag_targets(
+    targets: dict[str, str], object_format: GitObjectFormat, wall_deadline: float,
+) -> Refusal | None:
+    # Previously disclosed objects need exact identity and type, not a second
+    # scan of their payload. The content reader has already been reaped.
+    remaining = wall_deadline - time.monotonic()
+    if remaining <= 0:
+        return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+    deadline = asyncio.get_running_loop().time() + remaining
+    reader = _AsyncGitObjectReader(argv=_range_git_argv("cat-file", "--batch-check"))
+    try:
+        pending = await reader.start()
+        if pending is None:
+            for oid, declared_type in targets.items():
+                resolved = await reader.classify(oid, object_format=object_format, scan_deadline=deadline)
+                if isinstance(resolved, Refusal):
+                    pending = resolved
+                    break
+                if resolved.returned_oid != oid or resolved.object_type != declared_type:
+                    pending = _refusal("PS-MSG-FRAME", "tag-target")
+                    break
+    except asyncio.CancelledError:
+        pending = _refusal("PS-MSG-READ", "cancelled")
+    except Exception:
+        pending = _refusal("PS-MSG-READ", "unexpected")
+    finalization = await _finalize_reader(reader)
+    if finalization is not None and finalization.failure_id == "PS-MSG-REAP" and reader.state is ReaderState.REAP_PENDING:
+        finalization = await _finalize_reader(reader)
+    if finalization is not None:
+        return finalization
+    certificate = reader.reap_certificate
+    if certificate is None or not certificate.complete:
+        return _refusal("PS-MSG-REAP", "certificate")
+    if pending is None and asyncio.get_running_loop().time() >= deadline:
+        return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+    return pending
 
 
 async def _scan_selected_history_async(
@@ -4662,6 +5097,7 @@ async def _scan_selected_history_async(
     coverage_observer: Callable[[CoverageEvent, str], None] | None = None,
     coverage_fault: CoverageFaultPort | None = None,
     review_evaluation: "ReviewEvaluation | None" = None,
+    review_capture=None,
 ) -> ScanOutcome:
     native = isinstance(selection, NativePushSelection)
     mode = "native-push" if native else "range"
@@ -4680,6 +5116,7 @@ async def _scan_selected_history_async(
         HistoryProof, CoverageProof, tuple[Finding, ...]
     ] | None = None
     reader: _AsyncGitObjectReader | None = None
+    excluded_tag_targets: dict[str, str] = {}
 
     if selection.object_oids:
         reader = reader_factory()
@@ -4699,6 +5136,10 @@ async def _scan_selected_history_async(
                         {"review_evaluation": review_evaluation}
                         if review_evaluation is not None else {}
                     )
+                    if native:
+                        review_arguments["excluded_tag_targets"] = excluded_tag_targets
+                    if review_capture is not None:
+                        review_arguments["review_capture"] = review_capture
                     acquisition = await _acquire_history(
                         selection,
                         reader,
@@ -4747,7 +5188,14 @@ async def _scan_selected_history_async(
         history, coverage, findings = acquired
         try:
             if native:
-                drift = None
+                if not excluded_tag_targets:
+                    drift = None
+                elif certificate is None or not certificate.complete:
+                    drift = _refusal("PS-MSG-REAP", "certificate")
+                else:
+                    drift = await _verify_excluded_tag_targets(
+                        excluded_tag_targets, selection.object_format, wall_deadline,
+                    )
             else:
                 resolver = tip_resolver or (
                     lambda timeout=None: _resolve_commit(selection.source, timeout, object_format=selection.object_format)
@@ -4794,6 +5242,7 @@ def _scan_range(
     source_revision: str | None = None,
     tip_resolver: Callable[[float | None], str] | None = None,
     review_evaluation: "ReviewEvaluation | None" = None,
+    review_capture=None,
     scan_timeout: float = _SCAN_DEADLINE_SECONDS,
 ) -> ScanOutcome:
     try:
@@ -4803,7 +5252,7 @@ def _scan_range(
             find_machine_paths,
             source_revision=source_revision,
             tip_resolver=tip_resolver,
-            review_evaluation=review_evaluation,
+            review_evaluation=review_evaluation, review_capture=review_capture,
             scan_timeout=scan_timeout,
         ))
     except KeyboardInterrupt:
@@ -4825,10 +5274,21 @@ async def _scan_native_push_async(
     coverage_fault: CoverageFaultPort | None = None,
     scan_timeout: float = _SCAN_DEADLINE_SECONDS,
     review_evaluation: "ReviewEvaluation | None" = None,
+    review_capture=None,
+    receiver_scope=None,
 ) -> ScanOutcome:
     request = _native_push_request(payload)
     if isinstance(request, Refusal):
         return ScanOutcome("refusal", "native-push", refusal=request)
+    if receiver_scope is not None:
+        from transfer_binding import ScopeBinding
+        if (type(receiver_scope) is not ScopeBinding
+            or request.receiver_inventory
+            or receiver_scope.endpoint_identity != request.endpoint_identity
+            or receiver_scope.object_format != request.object_format.name):
+            return ScanOutcome("refusal", "native-push", refusal=_refusal("PS-INPUT-REFUSAL", "receiver-scope"))
+        request = replace(request, receiver_scope=receiver_scope,
+                          selection_sha256=receiver_scope.selection_digest(payload))
     deadline = time.monotonic() + scan_timeout
     try:
         root = _repo_root()
@@ -4842,8 +5302,18 @@ async def _scan_native_push_async(
         outcome = await _scan_selected_history_async(
             selection, find_machine_paths, wall_deadline=deadline,
             reader_factory=reader_factory, coverage_observer=coverage_observer,
-            coverage_fault=coverage_fault, review_evaluation=review_evaluation,
+            coverage_fault=coverage_fault, review_evaluation=review_evaluation, review_capture=review_capture,
         )
+        if (outcome.kind == "clean" and outcome.history is not None
+                and outcome.history.direct_tag_commit is not None):
+            current_inventory = await _remote_ref_tip_oids(
+                request.endpoint, deadline=asyncio.get_running_loop().time() + _remaining_seconds(deadline),
+                object_format=request.object_format, no_redirect=True,
+            )
+            if isinstance(current_inventory, Refusal):
+                return ScanOutcome("refusal", "native-push", refusal=current_inventory)
+            if selection.tag_receiver_inventory != current_inventory:
+                return ScanOutcome("refusal", "native-push", refusal=_refusal("PS-MSG-RANGE", "tag-receiver-currentness"))
         after, _exchanges = _capture_review_repository(policy, root, deadline)
         if after != before:
             return replace(outcome, kind="refusal", refusal=_refusal("PS-INPUT-REFUSAL", "native-repository-currentness"))
@@ -4856,10 +5326,12 @@ async def _scan_native_push_async(
 
 def _scan_native_push(payload: object, find_machine_paths, *,
                       review_evaluation: "ReviewEvaluation | None" = None,
-                      scan_timeout: float = _SCAN_DEADLINE_SECONDS) -> ScanOutcome:
+                      scan_timeout: float = _SCAN_DEADLINE_SECONDS,
+                      review_capture=None, receiver_scope=None) -> ScanOutcome:
     try:
         return asyncio.run(_scan_native_push_async(payload, find_machine_paths,
-                           review_evaluation=review_evaluation, scan_timeout=scan_timeout))
+                           review_evaluation=review_evaluation, review_capture=review_capture, scan_timeout=scan_timeout,
+                           receiver_scope=receiver_scope))
     except KeyboardInterrupt:
         return ScanOutcome("refusal", "native-push", refusal=_refusal("PS-MSG-READ", "cancelled"))
     except Exception:
@@ -4867,6 +5339,21 @@ def _scan_native_push(payload: object, find_machine_paths, *,
 
 
 def _serialize_native_receipt_v4(outcome: ScanOutcome) -> str:
+    if outcome.native_selection is not None and outcome.native_selection.request.receiver_scope is not None:
+        raise ValueError("scoped selection requires V5")
+    return _serialize_native_receipt_common(outcome)
+
+
+def _serialize_receiver_scoped_receipt_v5(outcome: ScanOutcome) -> str:
+    if outcome.native_selection is None or outcome.native_selection.request.receiver_scope is None:
+        raise ValueError("missing receiver scope")
+    result = json.loads(_serialize_native_receipt_common(outcome))
+    result["version"] = 5
+    result["receiverScopeSha256"] = outcome.native_selection.request.receiver_scope.digest()
+    return _native_json_bytes(result).decode("ascii")
+
+
+def _serialize_native_receipt_common(outcome: ScanOutcome) -> str:
     selection, history, coverage = outcome.native_selection, outcome.history, outcome.coverage
     if outcome.kind != "clean" or selection is None or history is None or coverage is None:
         raise ValueError("native receipt")
@@ -4893,8 +5380,22 @@ def _serialize_native_receipt_v4(outcome: ScanOutcome) -> str:
         raise ValueError("native coverage")
     request = selection.request
     review = outcome.review
+    tag_only = {}
+    if history.direct_tag_commit is not None:
+        row = _native_new_same_name_tag(request)
+        inventory = selection.tag_receiver_inventory
+        if (row is None or not inventory or history.commit_ids or history.blob_ids
+                or history.object_ids != (row.local_oid,) or history.tag_ids != history.object_ids
+                or history.direct_tag_commit == row.local_oid
+                or not selection.object_format.matches(history.direct_tag_commit)):
+            raise ValueError("native tag-only coverage")
+        tag_only["tagOnly"] = {"commit": history.direct_tag_commit, "tag": row.local_oid,
+            "inventorySha256": hashlib.sha256(_native_json_bytes([
+                [base64.b64encode(tip.refname).decode("ascii"), tip.oid, tip.peeled_oid]
+                for tip in inventory
+            ])).hexdigest()}
     return _native_json_bytes({
-        "kind": "publication-safety-native", "version": 4,
+        "kind": "publication-safety-native", "version": 4, **tag_only,
         "status": "clean" if review is None else "qualified",
         "objectFormat": selection.object_format.name,
         "selectionSha256": request.selection_sha256,
@@ -5169,7 +5670,8 @@ def _format_outcome(outcome: ScanOutcome) -> tuple[str, str, int]:
         )
     if outcome.mode == "native-push":
         try:
-            return _serialize_native_receipt_v4(outcome), "", 0
+            scoped = outcome.native_selection is not None and outcome.native_selection.request.receiver_scope is not None
+            return (_serialize_receiver_scoped_receipt_v5(outcome) if scoped else _serialize_native_receipt_v4(outcome)), "", 0
         except (ValueError, TypeError, UnicodeError):
             return "", "publication-safety: refusing id=PS-INPUT-REFUSAL reason=native-receipt phase=input", 2
     if outcome.mode == "range":
@@ -5253,7 +5755,8 @@ def main(argv: list[str] | None = None) -> int:
             payload = globals().get("__injected_native_push__")
             outcome = _scan_native_push(payload, find_machine_paths,
                                        review_evaluation=evaluation if evaluation.read.usable_records else None,
-                                       scan_timeout=_remaining_seconds(deadline))
+                                       scan_timeout=_remaining_seconds(deadline),
+                                       receiver_scope=globals().get("__injected_receiver_scope__"))
 
             def recheck_native() -> bool:
                 request = _native_push_request(payload)
@@ -5301,7 +5804,8 @@ def main(argv: list[str] | None = None) -> int:
             review_deadline = time.monotonic() + _SCAN_DEADLINE_SECONDS
             need_repository = any(
                 not _is_binary(blobs[path]) and _content_hits(
-                    blobs[path].decode("utf-8", "replace"), path, lambda _line: (), max_findings=1,
+                    blobs[path].decode("utf-8", "replace"), path, find_machine_paths,
+                    machine_path_lines=machine_path_lines_by_path[path], max_findings=1,
                 ) for path in paths
             )
             review_evaluation, exchanges = _prepare_review_evaluation(

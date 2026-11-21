@@ -13,6 +13,7 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -421,6 +422,35 @@ def reject_removed_external_provider(existing: dict[str, ScalarMeta]) -> None:
             f"externalProvider '{provider}' was removed; choose auto, codex, claude, "
             "or the explicitly admitted kimi route"
         )
+
+
+def migrate_overlay(path: Path) -> bytes | None:
+    """Migrate explicit compatibility values without materializing defaults."""
+    try:
+        original = path.read_bytes()
+    except FileNotFoundError:
+        return None
+    lines = original.decode("utf-8").splitlines(keepends=True)
+    fields = {}
+    for index, line in enumerate(lines):
+        raw_key, colon, value = line.partition(":")
+        if colon and not line.startswith(" ") and not line.lstrip().startswith("#"):
+            fields[raw_key.strip()] = (index, ScalarMeta(*split_value_and_comment(value.lstrip())))
+    if "externalProvider" in fields:
+        reject_removed_external_provider({"externalProvider": fields["externalProvider"][1]})
+    if "reserveResolver" not in fields and "externalClaudeApiMode" in fields:
+        index, legacy = fields["externalClaudeApiMode"]
+        try:
+            disabled = decode_supported_yaml_scalar(legacy.value).lower() == "disabled"
+        except ValueError:
+            disabled = False
+        if disabled:
+            raw_key, colon, rest = lines[index].partition(":")
+            offset = rest.index(legacy.value)
+            lines[index] = (raw_key.replace("externalClaudeApiMode", "reserveResolver") + colon
+                            + rest[:offset] + "disabled" + rest[offset + len(legacy.value):])
+            return "".join(lines).encode("utf-8")
+    return original
 
 
 def render_profiles(

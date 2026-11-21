@@ -1,6 +1,6 @@
 ---
 name: vcpkg-ports-updater
-description: "Use when vcpkg overlay ports need upstream source/version synchronization, patch refresh, intentional-shadow reconciliation, or stale-overlay removal."
+description: "Refresh vcpkg overlay versions, patches, and intentional upstream shadows."
 ---
 
 # vcpkg Ports Updater

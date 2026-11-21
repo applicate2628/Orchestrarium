@@ -12,11 +12,11 @@ Reference for routing, interaction types, periodic controls, and role aliases. R
 
 ## Workflow economy projection
 
-Apply the binding shared **Workflow economy (binding)** rule. This Claude projection adds no default review, consultant, or external-brigade fan-out unless evidence, explicit user/configuration intent, or a documented risk trigger admits it. At a natural readiness or decision point, if a bounded independent read-only alternative view would materially reduce unresolved ambiguity or compare consequential options, Lead considers an advisory route and may explicitly select Kimi without waiting for a user reminder. Otherwise no Kimi call or skip record is required. Selection never enters `auto` or creates a gate or counter; current availability or quota claims require evidence, and the existing wrapper-only fixed `kimi-code/k3`, independently verified, nonauthorizing contract remains. Omission of the capability file preserves empty tools/servers/subagents and permission `reject`; validated selections may admit read tools/servers or scoped worker tools only under the policy-owned task mutation class and role mapping. Grok remains disabled and non-executing in 1.x. Preserve every template-required security, performance, or geometry role and the human publication/leak-check gate.
+Apply the binding shared **Workflow economy (binding)** rule. Every substantive result receives a proportionate nonauthor check; existing QA may satisfy it without an extra stage. This projection adds no duplicate review, consultant or external-brigade fan-out absent an evidenced need. At a natural readiness or decision point, if a bounded independent read-only alternative view would materially reduce unresolved ambiguity or compare consequential options, Lead considers an advisory route and may explicitly select Kimi without waiting for a user reminder. Otherwise no Kimi call or skip record is required. Selection never enters `auto` or creates a gate or counter; current availability or quota claims require evidence, and the existing wrapper-only fixed `kimi-code/k3`, independently verified, nonauthorizing contract remains. Omission of the capability file preserves empty tools/servers/subagents and permission `reject`; validated selections may admit read tools/servers or scoped worker tools only under the policy-owned task mutation class and role mapping. Grok remains disabled and non-executing in 1.x. Preserve every template-required security, performance, or geometry role and the human publication/leak-check gate.
 
 ## Routing examples
 
-Resolve the template and evidence triggers first. Each listed role is a candidate; include it only when its artifact is required by accepted uncertainty, contract, or risk. Preserve mandatory security, performance, geometry, scientific, human, and publication gates.
+Resolve the template and evidence triggers first. Apply the shared substantive-result independence owner; each additional specialist is a candidate only when its artifact is required by accepted uncertainty, contract or risk. Preserve mandatory security, performance, geometry, scientific, human, and publication gates.
 
 Team templates in `.claude/agents/team-templates/` define the team composition and execution chain for each task type.
 
@@ -214,7 +214,7 @@ Target-domain mapping: `security` → `$security-engineer` or `$security-reviewe
 
 When any role discovers a bug, risk, or improvement opportunity outside the approved change surface:
 
-1. **File it** in `work-items/bugs/` using the bug registry format (from `qa-engineer.md`), with `context: adjacent-finding` and `status: open`.
+1. Route concrete defects through the bug-admission contract owned by `qa-engineer`; use `context: adjacent-finding` and `status: open` only for a defect admitted under that contract.
 2. **Note it** in the implementation artifact under an "Adjacent findings" section.
 3. **Do NOT expand scope** to fix it. The orchestrator decides priority and scheduling.
 4. If the adjacent issue blocks the current phase (e.g., the phase depends on broken adjacent code), return `BLOCKED:prerequisite` instead of working around it.
@@ -291,8 +291,7 @@ An active work-item means the current task has `work-items/active/<slug>/`, not 
 | Security review | `work-items/active/<slug>/security-review.md` |
 | Test report | `work-items/active/<slug>/test-report.md` |
 | Advisory memo | `work-items/active/<slug>/advisory.md` |
-| Bug finding | `work-items/bugs/<date>-<slug>.md` |
-| Performance issue | `work-items/performance/<date>-<slug>.md` |
+| Bug finding (including measured performance defects) | The configured bug registry, default `work-items/bugs/<date>-<slug>.md` |
 | Epic (groups work-items) | active: `work-items/epics/<date>-<slug>.md`; closed: `work-items/epics/archive/<YYYY-MM>/<date>-<slug>.md` |
 | Decision (cross-item ADR) | `work-items/decisions/<date>-<slug>.md` |
 | Lesson (delivery retrospective) | `work-items/lessons/<date>-<slug>.md` |

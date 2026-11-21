@@ -38,7 +38,7 @@ Candidate launch arguments MUST NOT select or resume an existing provider sessio
 2. **Pinned-input gate.** Confirm one admitted objective, scope, and evidence/constraint package exist. A panel multiplies an unverified premise across every lane — verify it first.
 3. **Choose N and framings.** Default `N=2`. Pick a distinct, bounded framing per lane and pre-register them (lane id, framing, resolved role) before dispatch.
 4. **Dispatch the candidate lanes** through the external surface, each carrying the identical pinned input and its own framing, with file-based prompt delivery (write the prompt body to a temporary file; argv stays for launcher flags and file paths). Inspect the resolved provider argv and fail closed on every session-reuse route listed by `DP3-NATIVE-ROUTE-UNVERIFIED`. Run concurrently when the runtime supports it, else sequentially in fresh contexts. Each lane writes its candidate to `design-<lane>.md`, never `design.md`.
-5. **Collect.** Count each lane only after the approved thin wrapper owner returns its terminal result through the strict V2 parser, full external-nonauthorizing tuple, and untrusted/potentially-sensitive resultText contract. A died, timed-out, or empty lane is `UNVERIFIED` — re-run it with the same framing; never silently reduce quorum below `N=2`.
+5. **Collect.** Count each lane only after the approved thin wrapper owner returns its terminal result through the strict V2 parser, full external-nonauthorizing tuple, and untrusted/potentially-sensitive resultText contract. A died, timed-out, or empty lane is `UNVERIFIED`. No retry while the prior run is live or unsettled. A replacement needs confirmed terminal settlement under the shared dispatch owner and existing authorization for that attempt; retain the same framing and fresh-context isolation. If any prerequisite is missing, leave the lane unverified; never silently reduce quorum.
 6. **Synthesize.** The orchestrating session performs the synthesis directly (never a spawned "synthesizer" run acting as a stand-in lead, and never a candidate author). Produce the comparison/disposition matrix and write the sole canonical `design.md`, citing every candidate as evidence.
 7. **Return exactly one public result:** the synthesized design and its gate (`PASS | REVISE | BLOCKED:dependency | BLOCKED:prerequisite`). Never present one candidate as "the design." Candidate artifacts stay as work-item inputs and are never handed to the planner.
 
@@ -72,7 +72,7 @@ The synthesis owner is the orchestrating session, performing synthesis directly 
 
 ## Non-goals
 
-- Not an ordinary single-architect design chain (that is `$design`).
+- Not an ordinary single-architect design chain (route to `$architect`).
 - Not a review loop that verifies one already-existing artifact (that is `$review-loop`).
 - Not a single advisory opinion (that is `$second-opinion` / `$consultant`).
 - Not disjoint parallel helper lanes that each own a different artifact (that is `$external-brigade`).

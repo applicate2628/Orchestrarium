@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 
+UNSUPPORTED_PLATFORM = "unsupported-platform"
 SOURCE = Path(__file__).resolve().parents[1] / "scripts" / "production_installer.py"
 NAMES = {"_ensure_directory_path", "bind_or_create_anchor", "migrate_exact_file",
          "create_projection", "rollback_migrated"}
@@ -27,7 +28,7 @@ class MutablePathAdmissionHoldTests(unittest.TestCase):
         cls.extracted = ast.ClassDef(name="_CreateOnlyMutablePath", bases=[],
             keywords=[], body=list(cls.methods.values()), decorator_list=[])
 
-    def load(self, platform="posix"):
+    def load(self, platform):
         module = ast.Module(body=[ast.ImportFrom(module="__future__",
             names=[ast.alias(name="annotations")], level=0), self.helper, self.extracted],
             type_ignores=[])
@@ -35,7 +36,7 @@ class MutablePathAdmissionHoldTests(unittest.TestCase):
         exec(compile(ast.fix_missing_locations(module), str(SOURCE), "exec"), ns)
         return ns["_CreateOnlyMutablePath"]
 
-    def refuse(self, name, platform="posix"):
+    def refuse(self, name, platform=UNSUPPORTED_PLATFORM):
         owner = self.load(platform)
         value = Unobserved()
         with self.assertRaisesRegex(ValueError, "E_EFFECT_BOUND_DISPOSAL_UNQUALIFIED"):

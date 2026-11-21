@@ -26,7 +26,7 @@ description: "UX designer: define flows, states, and usability criteria."
 - For every screen or dialog, include a state matrix covering at minimum `empty`, `loading`, `partial`, `error`, `success`, `permission-denied`, and `interrupted-or-cancelled`; every transition names its trigger and the user input preserved across it.
 - Name the explicit accessibility standard and level (for example, WCAG 2.2 AA for web or the platform accessibility baseline for desktop). Per scoped surface, name the keyboard-only path, focus order, and assistive-technology announcement for every asynchronous state transition.
 - Number implementation acceptance guidance as observable assertions (`UXA1`, `UXA2`, ...), so the planner can lift them into phase AC-ids and `ux-reviewer` can map findings 1:1.
-- For every critical flow, name the observable completion signal — event, log, or state — that distinguishes completion from abandonment, or state that instrumentation is absent and verification is manual.
+- For every critical flow, name the observable completion signal — event, log, or state — that distinguishes completion from abandonment, or state that instrumentation is absent and verification is manual. Also name the user-visible completion cue, how it differs from pending/partial/retry states, and what cues lead from a realistic entry point to the action. Separate an inferred walkthrough from participant evidence; do not claim user validation without it.
 
 ## Gate
 

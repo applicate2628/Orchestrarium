@@ -2193,6 +2193,36 @@ def literal_direct_command(parsed: ShellParseResult) -> ExecutableCommand | None
     """
     if type(parsed) is not ShellParseResult:
         return None
+    if parsed.identity.input_kind == "DIRECT_ARGV":
+        if (parsed.identity.dialect != parsed.dialect
+            or parsed.identity.depth != 0 or parsed.identity.parent is not None
+            or parsed.identity.parent_source_span is not None
+            or parsed.identity.wrapper_id is not None
+            or parsed.identity.payload_composition is not None
+            or parsed.identity.contributing_spans
+            or parsed.raw_command or parsed.data_regions
+            or parsed.lexical.atoms or parsed.lexical.operations
+            or parsed.lexical.removed_spans or parsed.lexical.data_regions
+            or parsed.status != "SCG-PARSED" or parsed.candidates
+            or parsed.children or parsed.wrapper_projections or parsed.normalizations
+            or len(parsed.commands) != 1 or not parsed.effective_publications.exact_complete):
+            return None
+        command = parsed.commands[0]
+        if (command.environment_assignments or command.control_keywords
+            or command.dialect != parsed.dialect or command.ordinal != 0
+            or command.command_count != 1 or command.nesting_context != "top-level"
+            or command.boundary_before != "start" or command.boundary_after != "end"
+            or command.normalization_state != "literal"
+            or command.source_span != (0, len(command.tokens))
+            or not command.tokens or not command.tokens[0]
+            or command.executable != command.tokens[0]
+            or command.arguments != command.tokens[1:]
+            or command.confidence != "exact"
+            or tuple(token.value for token in command.token_records) != command.tokens
+            or any(token.states != ("ARGV",) or token.source_spans != ((index, index + 1),)
+                   for index, token in enumerate(command.token_records))):
+            return None
+        return command
     if (
         parsed.dialect not in {"posix", "powershell"}
         or parsed.identity.dialect != parsed.dialect
@@ -2399,7 +2429,15 @@ def classify_generic_push(parsed: ShellParseResult) -> GenericPushDecision:
     literal_command = literal_direct_command(parsed)
     literal_root = (
         literal_context is not None and literal_command is push.command
-        and (parsed.dialect == "powershell" or _is_exact_direct_literal(parsed.raw_command, parsed))
+        and (
+            parsed.dialect == "powershell"
+            or _is_exact_direct_literal(parsed.raw_command, parsed)
+            or (
+                parsed.dialect == "posix"
+                and literal_command.trailing_linebreak_only
+                and parsed.raw_command == shlex.join(literal_command.tokens) + "\n"
+            )
+        )
         and len(literal_command.tokens) == 6 and push.positionals == literal_command.tokens[4:]
         and not push.push_options and not push.push_option_occurrences
     )
@@ -2533,8 +2571,17 @@ def _project_scan_execution_graph(
         return True
     return False
 
-def resolve_command_dialect(tool_name: object) -> CommandDialectResolution:
+def resolve_command_dialect(tool_name: object, tool_input: object = None) -> CommandDialectResolution:
     operation = normalize_tool_operation(tool_name)
+    if operation == "rdc_start_process":
+        shell = tool_input.get("shell") if isinstance(tool_input, dict) else None
+        # Remote shell selection is observer input, never target-host proof.
+        word = _normalized_command_word(shell) if isinstance(shell, str) else ""
+        if word in {"powershell", "pwsh"}:
+            return CommandDialectResolution("powershell", True)
+        if word in {"bash", "sh", "dash", "zsh"}:
+            return CommandDialectResolution("posix", True)
+        return CommandDialectResolution("unsupported", False)
     if operation == "powershell":
         return CommandDialectResolution("powershell", True)
     if operation == "bash":
@@ -2707,7 +2754,8 @@ _GENERIC_STATUSES = frozenset((
     "PGG-GIT-GLOBAL-OPTION", "PGG-OPTION-ARITY", "PGG-PUSH-OPTION",
     "PGG-REMOTE-CARDINALITY", "PGG-REFSPEC-CARDINALITY", "PGG-DESTINATION-SHAPE",
 ))
-_PREFLIGHT_FAILURE_IDS = frozenset(("PGG-PARSE-UNCERTAIN", "PRG-WORKDIR-INVALID"))
+_PREFLIGHT_FAILURE_IDS = frozenset(("PGG-PARSE-UNCERTAIN", "PRG-WORKDIR-INVALID",
+                                     "PGG-REMOTE-EXECUTION-UNBOUND"))
 _PREFLIGHT_BRANCHES = {
     "PFP-ALLOW-SUBAGENT": ("ALLOW_FINAL", "NONE", frozenset(), None),
     "PFP-ALLOW-NO-COMMAND": ("ALLOW_FINAL", "NONE", frozenset(), None),
@@ -2861,24 +2909,32 @@ def _build_preflight(envelope: dict) -> PreflightResult:
         if envelope.get("agent_id"):
             return _result("ALLOW_FINAL", "PFP-ALLOW-SUBAGENT", "NONE")
         operation = normalize_tool_operation(envelope.get("tool_name"))
-        if operation not in {"bash", "powershell", "shell_command", "exec_command"}:
+        if operation not in {"bash", "powershell", "shell_command", "exec_command", "rdc_start_process"}:
             return _result("ALLOW_FINAL", "PFP-ALLOW-NO-COMMAND", "NONE")
         tool_input = envelope.get("tool_input")
         acquired = acquire_tool_input(envelope.get("tool_name"), tool_input)
         if not acquired.resolved or acquired.command is None:
             raise PrRouteDenied("PGG-PARSE-UNCERTAIN")
         command = acquired.command
-        resolution = resolve_command_dialect(envelope.get("tool_name"))
+        remote = operation == "rdc_start_process"
+        resolution = resolve_command_dialect(envelope.get("tool_name"), tool_input)
         parsed = parse_shell_command(command, resolution.dialect)
-        resolution, parsed = _recover_mislabeled_command_dialect(
-            command, resolution, parsed
-        )
+        if not remote:
+            resolution, parsed = _recover_mislabeled_command_dialect(
+                command, resolution, parsed
+            )
         pushes = find_git_push_records(parsed)
         minus_c_candidate = _has_malformed_minus_c_push_candidate(parsed)
+        if remote and (pushes or minus_c_candidate or parsed.effective_publications.records):
+            # No admitted transport binds this evaluator to the selected device.
+            # Refuse observed publication, including dry-run, before host-local
+            # workdir/identity checks could accidentally stand in for that proof.
+            raise PrRouteDenied("PGG-REMOTE-EXECUTION-UNBOUND")
         if (
             not pushes
             and not minus_c_candidate
             and parsed.effective_publications.exact_complete
+            and resolution.exact
         ):
             return _result(
                 "ALLOW_FINAL", "PFP-ALLOW-NON-PUSH", "NONE",
