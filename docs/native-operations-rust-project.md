@@ -2,10 +2,22 @@
 
 [Goal](#goal-quality-attributes-and-architecture) · [Delivery](#delivery-channels-and-native-installer-ownership) · [Ownership](#state-process-and-cutover-ownership) · [First slice](#candidate-first-vertical-slice-mcp-usage-reminder) · [Work plan](#bounded-work-plan-and-audit-receiving-2026-11-12) · [Verification](#acceptance-parity-and-deliberate-improvements) · [Admission](#receiving-and-implementation-admission) · [Terms](#terms-and-abbreviations)
 
-Status: independent design task, no native implementation or activation. Historical
+Status: independent design with an isolated publication matcher candidate; no native activation. Historical
 observation baseline main `317e1448a020aeaa58f65aaceb180e835741d6de`; source observations do not prove
 installed behavior. PowerShell/npm delivery and SDK coordination are independent consumers,
 not blanket prerequisites or mandatory phases of a Rust port.
+
+## Publication matcher candidate
+
+The isolated [publication matcher](../native/publication-match/) uses PCRE2
+just-in-time compilation and Rayon. The current scanner remains the sole
+owner of line framing, review identity, classification and Git decisions.
+The candidate accepts already-framed rows and returns ordered UTF-8 byte
+spans only. Its batch threshold selects scheduling; it does not limit coverage.
+An error is not an empty result. This test crate is not an installed CLI or
+a deployable replacement, and should be folded into the common native CLI
+rather than become a second production tool. Before activation, compare the
+complete gate and receiver effects, not just lexical matching.
 
 ## Goal, quality attributes and architecture
 
