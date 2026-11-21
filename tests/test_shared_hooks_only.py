@@ -76,6 +76,7 @@ def shared_prior(tmp_path, monkeypatch, request):
     monkeypatch.setattr(PI, "_resolve_global_home", lambda: home)
     monkeypatch.setattr(PI, "_run", lambda *_args, **_kwargs: SimpleNamespace(returncode=0))
     monkeypatch.setattr(health, "resolve_codex_command", lambda *_args: ["local-fixture"])
+    monkeypatch.setattr(PI, "_hook_health_module", lambda _root: health)
     def checker(args, _root, trusted):
         assert Path(args[0]) == trusted == ROOT / "scripts/check-hook-health.py"
         assert args[args.index("--codex-trust-mode") + 1] == "report"
@@ -104,11 +105,13 @@ def test_scoped_preview_and_apply_preserve_foreign_profile_and_link(shared_prior
 
 def test_failed_postpublish_health_restores_both_files(shared_prior, monkeypatch):
     s = shared_prior
+    observations = []
     def reject(*_args):
-        assert json.loads(s.sidecar.read_bytes())["schemaVersion"] == 2
+        observations.append(json.loads(s.sidecar.read_bytes())["schemaVersion"])
         return SimpleNamespace(returncode=1)
     monkeypatch.setattr(PI, "_run_hook_health_bounded", reject)
     assert PI.install("codex", ["--global", "--shared-hook-runtime", "--hooks-only"]) == 1
+    assert observations == [2]
     assert s.alias.is_symlink() and s.alias.resolve() == s.common
     assert all(p.read_bytes() == value for p, value in s.before.items())
 
@@ -210,7 +213,6 @@ def test_update_between_retained_releases_is_idempotent_and_never_adopts_wrong_o
         return targets, witnesses
 
     with monkeypatch.context() as fault:
-        fault.setattr(PI, "_hook_health_module", lambda _root: s.health)
         fault.setattr(s.health, "_selected_hook_targets", select_non_direct)
         assert PI.install("codex", chosen) == 1
     assert (s.common.read_bytes(), s.sidecar.read_bytes()) == registered

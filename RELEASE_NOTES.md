@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-21
 
+- Run shared hook upgrade tests without an installed Codex executable. The rollback test now verifies that the simulated post-write health check actually ran before it checks restoration.
+
 - Preserve operator-supplied handler fields, including timeouts, when a shared hook upgrade changes its tool matcher. Joint relocations and mixed relocation/retirement groups now preserve those fields and neighboring registration positions. Permanent removal retains its existing ownership checks.
 
 ## 2026-11-20
