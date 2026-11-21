@@ -50,13 +50,16 @@ report does not reproduce that callback or authorize a retry.
 the listed rows are the complete set. Other finding types remain redacted;
 only aggregate detector-class counts are shown. Diagnostic output is
 unreviewed and counts history-file findings per path and blob. Ordinary
-publication evaluation can assess reviewed text per commit, so its
-reported count need not match this report. Neither count authorizes a push.
+publication evaluation checks reviewed text per commit. Its display groups
+repeated unresolved locations within the same path and blob before applying
+the output limit, without changing the review decision. Neither report
+authorizes a push.
 
 A finding still exits with status 1; an unqualified scan exits with status 2
 without a locations report. No history, hook, policy or remote ref is changed.
 This JSON is for diagnosis, not a clean-scan receipt, approval, or transfer
-authorization. Ordinary scan output and publication checks are unchanged.
+authorization. The separate diagnostic mode does not change the ordinary
+publication check or its output.
 
 ## Large full-history checks
 
