@@ -4981,6 +4981,7 @@ async def _acquire_history(
             )
         elif review_evaluation is not None:
             content_findings = []
+            shown_locations = set()
             for commit_oid, git_mode in subjects_by_path[(path, blob_oid)]:
                 if asyncio.get_running_loop().time() >= scan_deadline:
                     return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
@@ -4990,11 +4991,20 @@ async def _acquire_history(
                         subject_kind="git-object-blob", max_findings=max(0, _MAX_FINDINGS - len(content_findings)),
                     ))
                     continue
-                _append_findings(content_findings, review_evaluation.scan_text_subject(
+                unresolved = review_evaluation.scan_text_subject(
                     raw, decoded_path, find_machine_paths, subject_kind="history-blob",
                     mode="range-blob-text", commit_oid=commit_oid, raw_path=path,
                     blob_oid=blob_oid, git_mode=git_mode,
-                ))
+                )
+                # Policy still evaluates every commit. Only the display sample
+                # groups unresolved rows for this exact path/blob pair.
+                for row in unresolved:
+                    if len(content_findings) >= _MAX_FINDINGS:
+                        break
+                    location = (row.failure_id, row.line, row.detector_class)
+                    if location not in shown_locations:
+                        shown_locations.add(location)
+                        content_findings.append(row)
         else:
             content_findings = _content_hits(
                 raw.decode("utf-8", "replace"),

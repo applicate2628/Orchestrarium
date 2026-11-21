@@ -1819,6 +1819,38 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
         return _join("Audit fixture C:", BACKSLASH, "Users", BACKSLASH,
                      "synthetic", BACKSLASH, ".config", BACKSLASH, "example.txt")
 
+    def test_reviewed_history_grouping_before_cap(self):
+        scan = _load_canonical_scanner("_scanner_reviewed_grouping")
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            self._commit_file(repo, "a.txt", "synthetic fixture")
+            for n in range(5):
+                self._commit_file(repo, "progress.txt", str(n))
+            self._commit_file(repo, "z.txt", "second synthetic fixture")
+            seen = []
+
+            def evaluate(_raw, path, _finder, **scope):
+                if path not in {"a.txt", "z.txt"}:
+                    return []
+                seen.append((path, scope["commit_oid"]))
+                return [scan.Finding("PS-FINDING-CONTENT", "history-blob", path, 1,
+                                     "value-password" if path == "a.txt" else "machine-path")]
+
+            previous = Path.cwd()
+            try:
+                os.chdir(repo)
+                with mock.patch.object(scan, "_MAX_FINDINGS", 2):
+                    result = scan._scan_range(
+                        "origin", "main", lambda _line: [], source_revision="claude",
+                        review_evaluation=SimpleNamespace(scan_text_subject=evaluate),
+                    )
+            finally:
+                os.chdir(previous)
+            self.assertEqual(result.kind, "findings")
+            self.assertEqual(len(set(seen)), 8)
+            self.assertEqual([(x.locator, x.detector_class) for x in result.findings],
+                             [("a.txt", "value-password"), ("z.txt", "machine-path")])
+
     def test_local_history_diagnostics_bind_distinct_commit_messages(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = self._init_range_repo(Path(td))
