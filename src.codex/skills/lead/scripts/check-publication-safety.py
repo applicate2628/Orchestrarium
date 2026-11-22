@@ -9,6 +9,7 @@ from collections import Counter, OrderedDict
 from enum import Enum
 from functools import lru_cache
 import hashlib
+from itertools import zip_longest
 import importlib.util
 import json
 import math
@@ -4683,8 +4684,12 @@ class _HistoryIndex:
     def __init__(self, db: sqlite3.Connection):
         self.db = db
         self.subject_count = 0
+        self.blob_count = 0
+        self.binary_blob_count = 0
         db.executescript("""
             PRAGMA temp_store=FILE;
+            CREATE TABLE blob (oid TEXT PRIMARY KEY, size INTEGER NOT NULL,
+                digest BLOB NOT NULL, binary INTEGER NOT NULL) WITHOUT ROWID;
             CREATE TABLE subject (owner TEXT, path BLOB, blob TEXT, mode TEXT NOT NULL,
                 PRIMARY KEY(owner, path, blob)) WITHOUT ROWID;
             CREATE TABLE metadata_path (tree TEXT, path BLOB,
@@ -4721,8 +4726,26 @@ class _HistoryIndex:
             "SELECT DISTINCT path, blob FROM subject ORDER BY path, blob"
         )
 
-    def blob_ids(self):
-        return (row[0] for row in self.db.execute("SELECT DISTINCT blob FROM subject"))
+    def add_blob(self, oid, size, digest, binary):
+        self.db.execute("INSERT INTO blob VALUES (?, ?, ?, ?)", (oid, size, digest, binary))
+        self.blob_count += 1
+        self.binary_blob_count += binary
+
+    def blob_record(self, oid):
+        row = self.db.execute("SELECT size, digest, binary FROM blob WHERE oid=?", (oid,)).fetchone()
+        if row is None:
+            return None
+        size, digest, binary = row
+        return size, digest, bool(binary)
+
+    def recorded_blob_ids(self):
+        return (oid for (oid,) in self.db.execute("SELECT oid FROM blob ORDER BY oid"))
+
+    def blob_coverage_complete(self):
+        path_blobs = (oid for (oid,) in self.db.execute(
+            "SELECT DISTINCT blob FROM subject ORDER BY blob"
+        ))
+        return all(a == b for a, b in zip_longest(self.recorded_blob_ids(), path_blobs))
 
     def _seal(self, query, digest):
         count = 0
@@ -4812,7 +4835,6 @@ async def _acquire_indexed_history(
     tag_targets: dict[str, tuple[str, str]] = {}
     direct_tag_commit = None
     tree_cache: OrderedDict[str, tuple[bytes | tuple[TreeEntry, ...], int]] = OrderedDict()
-    blob_records: dict[str, tuple[int, bytes, bool]] = {}
     findings: list[Finding] = []
     # Total unique bytes are receipt evidence, not retained-cache allocation.
     # Payload memory is independent of this total; object/count/deadline guards
@@ -4929,7 +4951,7 @@ async def _acquire_indexed_history(
             if not native and hashlib.new(selection.object_format.name,
                                           f"blob {len(result.raw)}\0".encode("ascii") + result.raw).hexdigest() != oid:
                 return _refusal("PS-MSG-COVERAGE", "object-content-identity")
-            if len(blob_records) >= _MAX_BLOBS:
+            if index.blob_count >= _MAX_BLOBS:
                 return _refusal("PS-MSG-LIMIT", "blob-count")
             # The line bound is a property of the verified bytes, not their paths.
             # Every path reuses only data whose identity is checked again.
@@ -4938,8 +4960,8 @@ async def _acquire_indexed_history(
                 return line_refusal
             aggregate_blobs += len(result.raw)
             # Keep identity and disposition, not the complete payload history.
-            blob_records[oid] = (
-                len(result.raw), hashlib.sha256(result.raw).digest(),
+            index.add_blob(
+                oid, len(result.raw), hashlib.sha256(result.raw).digest(),
                 _is_binary(result.raw),
             )
         else:
@@ -5000,7 +5022,6 @@ async def _acquire_indexed_history(
     unpublished_trees = {
         oid for oid, object_type in object_types.items() if object_type == "tree"
     }
-    unpublished_blobs = set(blob_records)
     reached_unpublished_trees: set[str] = set()
     tree_roots = [(oid, commit_topology[oid][0]) for oid in selection.expected_oids]
     direct_blobs = []
@@ -5070,7 +5091,7 @@ async def _acquire_indexed_history(
                     if guard is not None:
                         return guard
                     stack.append((entry.oid, path, ancestors + (tree_oid,)))
-                elif entry.kind == "blob" and entry.oid in unpublished_blobs:
+                elif entry.kind == "blob" and object_types.get(entry.oid) == "blob":
                     subject = (commit_oid, path, entry.oid)
                     if not index.add(subject, entry.mode):
                         return _refusal("PS-MSG-COVERAGE", "duplicate-subject")
@@ -5079,16 +5100,15 @@ async def _acquire_indexed_history(
         index.add(subject, "")
     if reached_unpublished_trees != unpublished_trees:
         return _refusal("PS-MSG-COVERAGE", "tree-subjects")
-    if set(index.blob_ids()) != unpublished_blobs:
+    if not index.blob_coverage_complete():
         return _refusal("PS-MSG-COVERAGE", "blob-subjects")
 
-    binary_blobs = {oid for oid, (_, _, binary) in blob_records.items() if binary}
-    text_blobs = set(blob_records) - binary_blobs
     # Preserve path-first finding/review order. A single payload cache bounds
     # retained memory independently of the cumulative admitted blob volume.
     # Rereads are at most the number of distinct blob/path pairs and share the
     # original deadline. No reread adds coverage events or receipt byte counts.
     cached_blob_oid = None
+    binary = False
     raw = b""
     result = None
     scanned_paths = 0
@@ -5103,7 +5123,10 @@ async def _acquire_indexed_history(
             result = await reader.read(blob_oid, "blob", scan_deadline=scan_deadline)
             if isinstance(result, Refusal):
                 return result
-            size, content_digest, _binary = blob_records[blob_oid]
+            blob_record = index.blob_record(blob_oid)
+            if blob_record is None:
+                return _refusal("PS-MSG-COVERAGE", "blob-subjects")
+            size, content_digest, binary = blob_record
             if (result.returned_oid != blob_oid or result.object_type != "blob"
                     or len(result.raw) != size
                     or hashlib.sha256(result.raw).digest() != content_digest):
@@ -5123,8 +5146,8 @@ async def _acquire_indexed_history(
         if review_capture is not None:
             review_capture.observe(raw, path, blob_oid,
                 index.owners(path, blob_oid), commit_set,
-                selection.object_format.name, binary=blob_oid in binary_blobs)
-        if blob_oid in binary_blobs:
+                selection.object_format.name, binary=binary)
+        if binary:
             room = max(0, _MAX_FINDINGS - len(findings))
             if matcher is None:
                 content_findings = _binary_content_hits(
@@ -5187,14 +5210,14 @@ async def _acquire_indexed_history(
     if len(canonical_subjects) != index.subject_count or len(canonical_paths) != scanned_paths:
         return _refusal("PS-MSG-COVERAGE", "history-index")
     canonical_objects = tuple(sorted(selection.object_oids))
-    canonical_blobs = tuple(sorted(blob_records))
+    canonical_blobs = tuple(index.recorded_blob_ids())
     proof = HistoryProof(
         selection.expected_oids,
         canonical_objects,
         canonical_blobs,
         aggregate_blobs,
-        len(text_blobs),
-        len(binary_blobs),
+        index.blob_count - index.binary_blob_count,
+        index.binary_blob_count,
         canonical_subjects,
         canonical_paths,
         _commit_set_digest(selection.expected_oids),

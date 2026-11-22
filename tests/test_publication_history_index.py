@@ -69,3 +69,23 @@ def test_coverage_seal_preserves_scan_order_and_v1_bytes():
         )
         assert all(rows == tuple((oid, 1) for oid in sorted(expected)) for rows in counters)
         assert all(rows is counters[0] for rows in counters)
+
+
+def test_blob_inventory_separates_identity_from_path_coverage():
+    scanner = runpy.run_path(str(SCANNER))
+    with closing(sqlite3.connect("")) as db:
+        index = scanner["_HistoryIndex"](db)
+        index.add_blob("b2", 24, b"binary-digest", True)
+        index.add_blob("b1", 18, b"text-digest", False)
+        assert index.blob_count == 2
+        assert index.blob_record("b1") == (18, b"text-digest", False)
+        assert index.blob_record("b2") == (24, b"binary-digest", True)
+        assert list(index.recorded_blob_ids()) == ["b1", "b2"]
+        assert not index.blob_coverage_complete()
+        index.add(("c1", b"second", "b2"), "100644")
+        assert not index.blob_coverage_complete()
+        index.add(("c1", b"first", "b1"), "100644")
+        index.add(("c2", b"other", "b1"), "100755")
+        assert index.blob_coverage_complete()
+        index.add(("c1", b"foreign", "b3"), "100644")
+        assert not index.blob_coverage_complete()
