@@ -47,3 +47,25 @@ def test_deferred_index_remains_subject_to_the_existing_sqlite_deadline():
             index.prepare_path_queries()
         db.set_progress_handler(None, 0)
         assert db.execute("SELECT name FROM sqlite_master WHERE name='subject_path'").fetchone() is None
+
+
+def test_coverage_seal_preserves_scan_order_and_v1_bytes():
+    import hashlib
+
+    scanner = runpy.run_path(str(SCANNER))
+    a, b = "a" * 40, "b" * 40
+    for expected, scanned in [((), ()), ((a,), (a,)), ((a, b), (b, a))]:
+        proof = scanner["_build_coverage_proof"](
+            iter(expected), iter(expected), iter(reversed(expected)), iter(scanned),
+            allow_empty=True,
+        )
+        assert proof.scanned_message_oids == scanned
+        assert proof.coverage_digest == hashlib.sha256(
+            b"publication-safety-coverage-v1\0" + b"\0".join(oid.encode("ascii") for oid in scanned)
+        ).hexdigest()
+        counters = (
+            proof.expected_counter, proof.requested_counter,
+            proof.acquired_counter, proof.scanned_counter,
+        )
+        assert all(rows == tuple((oid, 1) for oid in sorted(expected)) for rows in counters)
+        assert all(rows is counters[0] for rows in counters)

@@ -4606,17 +4606,18 @@ def _build_coverage_proof(
         or not (len(expected) == len(requested) == len(acquired) == len(scanned))
     ):
         return _refusal("PS-MSG-COVERAGE", "multiplicity")
-    coverage_digest = hashlib.sha256(
-        b"publication-safety-coverage-v1\0"
-        + b"\0".join(oid.encode("ascii") for oid in scanned)
-    ).hexdigest()
-    counter_rows = lambda value: tuple(sorted(value.items()))
+    digest = hashlib.sha256(b"publication-safety-coverage-v1\0")
+    for position, oid in enumerate(scanned):
+        if position:
+            digest.update(b"\0")
+        digest.update(oid.encode("ascii"))
+    # Equality above proves all four canonical multiplicity tables identical.
+    counter_rows = tuple(sorted(exact.items()))
     return CoverageProof(
         expected, requested, acquired, scanned,
-        counter_rows(expected_counter), counter_rows(requested_counter),
-        counter_rows(acquired_counter), counter_rows(scanned_counter),
+        counter_rows, counter_rows, counter_rows, counter_rows,
         len(expected), len(requested), len(acquired), len(scanned),
-        coverage_digest,
+        digest.hexdigest(),
     )
 
 
