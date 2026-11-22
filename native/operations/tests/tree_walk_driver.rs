@@ -1,8 +1,11 @@
 // A std-only test driver; this is not a scanner transport or release executable.
+#[path = "../src/publication/git_batch.rs"]
+mod git_batch;
 #[path = "../src/publication/tree_record.rs"]
 mod tree_record;
 #[path = "../src/publication/tree_walk.rs"]
 mod tree_walk;
+use git_batch::{FrameError, Limits, ObjectKind, read_frame};
 use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
@@ -83,7 +86,77 @@ fn run_records() {
     out.flush().unwrap();
 }
 
+fn kind_name(kind: ObjectKind) -> &'static str {
+    match kind {
+        ObjectKind::Commit => "commit",
+        ObjectKind::Tree => "tree",
+        ObjectKind::Blob => "blob",
+        ObjectKind::Tag => "tag",
+    }
+}
+
+fn run_frames() {
+    let stdout = io::stdout();
+    let mut out = io::BufWriter::new(stdout.lock());
+    for line in io::stdin().lock().lines() {
+        let line = line.unwrap();
+        let fields: Vec<_> = line.split_ascii_whitespace().collect();
+        let kind = match fields[1] {
+            "-" => None,
+            "blob" => Some(ObjectKind::Blob),
+            "tree" => Some(ObjectKind::Tree),
+            _ => panic!("invalid fixture type"),
+        };
+        let wire = if fields[5] == "-" {
+            Vec::new()
+        } else {
+            unhex(fields[5])
+        };
+        let mut input = io::BufReader::with_capacity(fields[2].parse().unwrap(), wire.as_slice());
+        let limits = Limits {
+            decimal_digits: fields[4].parse().unwrap(),
+            ..Limits::default()
+        };
+        for _ in 0..fields[3].parse::<usize>().unwrap() {
+            match read_frame(&mut input, fields[0].as_bytes(), kind, &limits) {
+                Ok(frame) => {
+                    let payload = if frame.payload.is_empty() {
+                        "-".into()
+                    } else {
+                        hex(&frame.payload)
+                    };
+                    writeln!(out, "F {} {}", kind_name(frame.kind), payload).unwrap();
+                }
+                Err(err) => {
+                    let (code, reason) = match err {
+                        FrameError::Missing => ("READ", "missing"),
+                        FrameError::Header => ("FRAME", "header"),
+                        FrameError::Identity => ("FRAME", "identity"),
+                        FrameError::Type => ("FRAME", "type"),
+                        FrameError::Length => ("FRAME", "length"),
+                        FrameError::HeaderDelimiter => ("FRAME", "header-delimiter"),
+                        FrameError::RecordDelimiter => ("FRAME", "record-delimiter"),
+                        FrameError::ShortRead => ("READ", "short-read"),
+                        FrameError::Pipe => ("READ", "pipe"),
+                        FrameError::TooLarge(kind) => {
+                            writeln!(out, "R PS-MSG-LIMIT {}-bytes", kind_name(kind)).unwrap();
+                            break;
+                        }
+                    };
+                    writeln!(out, "R PS-MSG-{code} {reason}").unwrap();
+                    break;
+                }
+            }
+        }
+    }
+    out.flush().unwrap();
+}
+
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--frames") {
+        run_frames();
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("--records") {
         run_records();
         return;

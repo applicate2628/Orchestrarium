@@ -50,3 +50,29 @@ The receiving Python parser supplies the byte-exact order and refusal oracle.
 The test also feeds borrowed records into the walker without copying their
 fields. Git acquisition, ownership and publication authority remain outside
 this component.
+
+## Git batch frame decoder
+
+The decoder consumes one response from a buffered byte stream. The acquisition
+owner supplies the checked request ID and optional expected type. Compare the
+header, decode the declared length, enforce the receiving transport's bounds,
+and require the exact payload and final LF before returning any bytes.
+Malformed or incomplete frames cannot yield a partial record. The owner
+must poison the session on failures; the decoder does not resynchronize it,
+spawn Git, schedule deadlines, or perform cryptographic identity verification.
+
+Defaults mirror the current receiving reader (64 KiB header, 1 MiB structured
+object, and 64 MiB blob). The receiving Python runtime also bounds decimal
+conversion; the compatible setting is configurable and supplied by the parity
+test. These are decoder compatibility parameters, not a new publication policy.
+
+The same test-only driver also accepts
+incrementally buffered batch frames.
+
+~~~text
+python -B native/operations/tests/git_batch_parity.py --driver <test-driver> --source <receiving-check-publication-safety.py>
+~~~
+
+The test executes the actual receiving byte-reader method against a local
+in-memory stream. It does not qualify a real subprocess, cancellation,
+deadline enforcement, content identity, or publication.
