@@ -3142,6 +3142,8 @@ async def _read_git_lines_bounded(
     env: dict[str, str] | None = None,
     input_bytes: bytes | None = None,
     on_line: Callable[[bytes], Refusal | None] | None = None,
+    frame_reason: str = 'selection-line',
+    byte_reason: str = 'selection-bytes',
 ) -> tuple[int, tuple[bytes, ...]] | Refusal:
     process_group_owner: PosixProcessGroupOwnerV1 | None = None
     direct_observation: _AsyncioDirectProcessObservation | None = None
@@ -3188,19 +3190,19 @@ async def _read_git_lines_bounded(
                 break
             total_bytes += len(chunk)
             if total_bytes > byte_cap:
-                refusal = _refusal("PS-MSG-LIMIT", "selection-bytes")
+                refusal = _refusal("PS-MSG-LIMIT", byte_reason)
                 break
             pending.extend(chunk)
             while refusal is None:
                 newline = pending.find(b"\n")
                 if newline < 0:
                     if len(pending) > line_cap:
-                        refusal = _refusal("PS-MSG-FRAME", "selection-line")
+                        refusal = _refusal("PS-MSG-FRAME", frame_reason)
                     break
                 raw = bytes(pending[:newline])
                 del pending[:newline + 1]
                 if len(raw) > line_cap:
-                    refusal = _refusal("PS-MSG-FRAME", "selection-line")
+                    refusal = _refusal("PS-MSG-FRAME", frame_reason)
                 else:
                     if on_line is None:
                         rows.append(raw)
@@ -3208,7 +3210,7 @@ async def _read_git_lines_bounded(
                         refusal = on_line(raw)
         if refusal is None and pending:
             if len(pending) > line_cap:
-                refusal = _refusal("PS-MSG-FRAME", "selection-line")
+                refusal = _refusal("PS-MSG-FRAME", frame_reason)
             else:
                 if on_line is None:
                     rows.append(bytes(pending))
@@ -3642,34 +3644,8 @@ async def _read_git_oid_lines_bounded(
     object_format: GitObjectFormat = _SHA1_OBJECT_FORMAT,
     input_bytes: bytes | None = None,
 ) -> tuple[str, ...] | Refusal:
-    process_group_owner: PosixProcessGroupOwnerV1 | None = None
-    direct_observation: _AsyncioDirectProcessObservation | None = None
-    try:
-        (
-            process,
-            process_group_owner,
-            direct_observation,
-        ) = await _create_owned_async_process(
-            argv,
-            stdin=asyncio.subprocess.DEVNULL if input_bytes is None else asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-    except (OSError, subprocess.SubprocessError, WindowsJobError):
-        return _refusal("PS-MSG-SPAWN", "selection")
-    if process.stdout is None or (input_bytes is not None and process.stdin is None):
-        if not await _settle_owned_async_process(
-            process, process_group_owner, direct_observation
-        ):
-            return _refusal("PS-MSG-REAP", "selection-child")
-        return _refusal("PS-MSG-READ", "selection-pipe")
-
     rows: list[str] = []
     seen: set[str] = set()
-    pending = bytearray()
-    total_bytes = 0
-    refusal: Refusal | None = None
-    input_task = None if input_bytes is None else asyncio.create_task(_feed_selection_input(process.stdin, input_bytes, deadline))
 
     def accept(raw: bytes) -> Refusal | None:
         if len(raw) != object_format.hex_length:
@@ -3686,74 +3662,21 @@ async def _read_git_oid_lines_bounded(
         rows.append(oid)
         return None
 
-    try:
-        while refusal is None:
-            remaining = deadline - asyncio.get_running_loop().time()
-            if remaining <= 0:
-                refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
-                break
-            try:
-                chunk = await asyncio.wait_for(
-                    process.stdout.read(_READ_CHUNK_BYTES), timeout=remaining
-                )
-            except asyncio.TimeoutError:
-                refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
-                break
-            if not chunk:
-                break
-            total_bytes += len(chunk)
-            if total_bytes > byte_cap:
-                refusal = _refusal("PS-MSG-LIMIT", "bytes")
-                break
-            pending.extend(chunk)
-            while refusal is None:
-                newline = pending.find(b"\n")
-                if newline < 0:
-                    if len(pending) > object_format.hex_length:
-                        refusal = _refusal("PS-MSG-FRAME", "oid")
-                    break
-                raw = bytes(pending[:newline])
-                del pending[:newline + 1]
-                refusal = accept(raw)
-        if refusal is None and pending:
-            refusal = accept(bytes(pending))
-    except asyncio.CancelledError:
-        refusal = _refusal("PS-MSG-READ", "cancelled")
-    except Exception:
-        refusal = _refusal("PS-MSG-READ", "selection")
-
-    input_refusal = await _finish_selection_input(input_task, deadline, cancel=refusal is not None)
-    if refusal is None:
-        refusal = input_refusal
-    if refusal is None:
-        remaining = deadline - asyncio.get_running_loop().time()
-        if remaining <= 0:
-            refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
-        else:
-            try:
-                await _wait_owned_async_direct(
-                    process, direct_observation, remaining
-                )
-            except asyncio.TimeoutError:
-                refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
-            except Exception:
-                refusal = _refusal("PS-MSG-READ", "selection-wait")
-
-    cleanup_deadline = asyncio.get_running_loop().time() + _PROCESS_TREE_CLEANUP_SECONDS
-    child_settled = await _settle_owned_async_process(
-        process,
-        process_group_owner,
-        direct_observation,
-        drain_readers=(process.stdout,),
+    result = await _read_git_lines_bounded(
+        argv,
+        byte_cap=byte_cap,
+        line_cap=object_format.hex_length,
+        deadline=deadline,
+        accepted_codes=frozenset({0}),
+        input_bytes=input_bytes,
+        on_line=accept,
+        frame_reason="oid",
+        byte_reason="bytes",
     )
-    input_settled = await _settle_selection_input(input_task, cleanup_deadline)
-    if not child_settled or not input_settled:
-        return _selection_reap_refusal(refusal, input_task is not None)
-    if refusal is not None:
-        return refusal
-    if process.returncode != 0:
-        return _refusal("PS-MSG-RANGE", "selection-child")
+    if isinstance(result, Refusal):
+        return result
     return tuple(rows)
+
 
 
 def _range_request(

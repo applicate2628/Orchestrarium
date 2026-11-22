@@ -113,6 +113,28 @@ class TestNativePublicationEffects(unittest.TestCase):
                 self.assertEqual(observation.call_count, captures)
 
 
+    def test_object_ids_stream_through_shared_git_reader(self):
+        mod = self.module
+        with self.in_root():
+            fmt = mod._detect_git_object_format(15)
+        oid = "a" * fmt.hex_length
+
+        async def shared_reader(_argv, *, on_line=None, **options):
+            self.assertIsNotNone(on_line)
+            self.assertEqual(options["line_cap"], fmt.hex_length)
+            self.assertIsNone(on_line(oid.upper().encode("ascii")))
+            return 0, ()
+
+        with mock.patch.object(mod, "_read_git_lines_bounded", side_effect=shared_reader):
+            async def exercise():
+                return await mod._read_git_oid_lines_bounded(
+                    (sys.executable, "-c", "raise SystemExit(1)"),
+                    object_format=fmt, count_cap=2, byte_cap=fmt.list_byte_cap(2),
+                    deadline=asyncio.get_running_loop().time() + 3,
+                )
+            self.assertEqual(asyncio.run(exercise()), (oid,))
+
+
     def test_parent_graph_validated_rows_arrive_without_collecting_raw_output(self):
         mod = self.module
         fmt = mod._detect_git_object_format(15)
