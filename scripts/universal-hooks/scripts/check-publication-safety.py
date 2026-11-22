@@ -2110,15 +2110,15 @@ class _HistoryReviewCapture:
         if _content_hits(text, "review-metadata", finder, subject_kind=kind, max_findings=1):
             self.unsupported.add(kind)
 
-    def observe(self, raw, path, blob_oid, owners, commits, object_format, *, binary):
+    def observe(self, raw, path, blob_oid, owners, object_format, *, binary):
         if _filename_findings(path.decode("utf-8", "surrogateescape"), "history-blob"):
             self.unsupported.add("filename-finding")
         if binary:
             self.unsupported.add("binary-subject")
             return
         modes = set()
-        for commit, mode in owners:
-            if commit not in commits or mode not in ("100644", "100755"):
+        for _owner, mode, is_commit in owners:
+            if not is_commit or mode not in ("100644", "100755"):
                 self.unsupported.add("non-commit-or-nonordinary-subject")
             else:
                 modes.add(mode)
@@ -4780,10 +4780,11 @@ class _HistoryIndex:
         self.db.execute("CREATE INDEX subject_path ON subject(path, blob, owner)")
 
     def owners(self, path, blob):
-        return self.db.execute(
-            "SELECT owner, mode FROM subject WHERE path=? AND blob=? ORDER BY owner",
-            (path, blob),
-        )
+        return ((oid, mode, bool(is_commit)) for oid, mode, is_commit in self.db.execute(
+            "SELECT s.owner, s.mode, c.oid IS NOT NULL FROM subject s "
+            "LEFT JOIN selected_commit c ON c.oid=s.owner "
+            "WHERE s.path=? AND s.blob=? ORDER BY s.owner", (path, blob),
+        ))
 
     def path_pairs(self):
         return self.db.execute(
@@ -4847,6 +4848,23 @@ class _HistoryIndex:
     def selected_objects(self, *, sorted_ids=False):
         order = "oid" if sorted_ids else "sequence"
         return (oid for (oid,) in self.db.execute(f"SELECT oid FROM selected_object ORDER BY {order}"))
+
+    def acquisition_targets(self, *, lexical: bool = False) -> Iterable[tuple[str, bool]]:
+        order = "o.oid" if lexical else "o.sequence"
+        after = "" if lexical else 0
+        # Close the read statement before handing off each bounded page.
+        # Acquisition updates other columns on these same selected rows.
+        while True:
+            page = self.db.execute(f"""
+                SELECT {order}, o.oid, c.oid IS NOT NULL FROM selected_object o
+                LEFT JOIN selected_commit c ON c.oid=o.oid
+                WHERE {order}>? ORDER BY {order} LIMIT 512
+            """, (after,)).fetchall()
+            if not page:
+                return
+            after = page[-1][0]
+            for _, oid, is_commit in page:
+                yield oid, bool(is_commit)
 
     def record_acquired(self, oid: str, kind: str, ordinal: int) -> bool:
         return self.db.execute(
@@ -5000,6 +5018,8 @@ async def _acquire_history(selection, reader, find_machine_paths, coverage_recor
                         return _refusal("PS-MSG-COVERAGE", "object-set")
                 if not index.seed_standalone_commits(selection):
                     return _refusal("PS-MSG-COVERAGE", "commit-set")
+            elif isinstance(selection, RangeSelection):
+                options["lexical_acquisition"] = True
             wire = globals().get("__injected_matcher_wire__")
             try:
                 executable = None if wire is None else wire["retained_matcher"](sys.executable)
@@ -5052,8 +5072,8 @@ async def _acquire_indexed_history(
     excluded_tag_targets: dict[str, str] | None = None,
     review_capture=None,
     matcher=None,
+    lexical_acquisition: bool = False,
 ) -> tuple[HistoryProof, CoverageProof | _ReceiptCoverage, tuple[Finding, ...]] | Refusal:
-    commit_set = set(selection.expected_oids)
     native = isinstance(selection, NativePushSelection)
     tag_targets: dict[str, tuple[str, str]] = {}
     direct_tag_commit = None
@@ -5089,10 +5109,13 @@ async def _acquire_indexed_history(
         retained_tree_bytes += cost
         return True
 
-    for ordinal, oid in enumerate(selection.object_oids):
+    targets = index.acquisition_targets(lexical=lexical_acquisition)
+    for ordinal, (oid, target) in enumerate(zip_longest(selection.object_oids, targets)):
         if asyncio.get_running_loop().time() >= scan_deadline:
             return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
-        expected_type = "commit" if oid in commit_set else None
+        if target is None or oid != target[0]:
+            return _refusal("PS-MSG-COVERAGE", "object-set")
+        expected_type = "commit" if target[1] else None
         if native or expected_type == "commit":
             coverage_recorder.record(CoverageEvent.REQUESTED, oid)
         result = await reader.read(
@@ -5111,7 +5134,7 @@ async def _acquire_indexed_history(
         if not index.record_acquired(oid, result.object_type, ordinal):
             return _refusal("PS-MSG-COVERAGE", "object-set")
         if result.object_type == "commit":
-            if oid not in commit_set:
+            if expected_type != "commit":
                 return _refusal("PS-MSG-COVERAGE", "unexpected-commit")
             if not native:
                 coverage_recorder.record(CoverageEvent.ACQUIRED, result.returned_oid)
@@ -5363,7 +5386,7 @@ async def _acquire_indexed_history(
             _append_findings(findings, _filename_findings(decoded_path, "history-blob"))
         if review_capture is not None:
             review_capture.observe(raw, path, blob_oid,
-                index.owners(path, blob_oid), commit_set,
+                index.owners(path, blob_oid),
                 selection.object_format.name, binary=binary)
         if binary:
             room = max(0, _MAX_FINDINGS - len(findings))
@@ -5378,10 +5401,10 @@ async def _acquire_indexed_history(
         elif review_evaluation is not None:
             content_findings = []
             shown_locations = set()
-            for commit_oid, git_mode in index.owners(path, blob_oid):
+            for commit_oid, git_mode, is_commit in index.owners(path, blob_oid):
                 if asyncio.get_running_loop().time() >= scan_deadline:
                     return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
-                if commit_oid not in commit_set:
+                if not is_commit:
                     _append_findings(content_findings, _content_hits(
                         raw.decode("utf-8", "replace"), decoded_path, find_machine_paths,
                         subject_kind="git-object-blob", max_findings=max(0, _MAX_FINDINGS - len(content_findings)),

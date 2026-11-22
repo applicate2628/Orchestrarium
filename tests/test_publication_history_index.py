@@ -26,7 +26,7 @@ def test_path_query_index_is_built_after_admission_without_changing_coverage():
         index.prepare_path_queries()
         assert db.execute(query).fetchall() == [("subject_path",)]
         assert list(index.path_pairs()) == sorted({r[1:] for r in inventory})
-        assert list(index.owners(b"a/real", "b1")) == [("c1", "100644"), ("c2", "100644")]
+        assert list(index.owners(b"a/real", "b1")) == [("c1", "100644", False), ("c2", "100644", False)]
         subjects, paths = index.seal()
         assert len(subjects) == len(inventory)
         assert len(paths) == len(set(r[1:] for r in inventory))
@@ -250,3 +250,38 @@ def test_standalone_commit_parent_seed_matches_graph_set_contract():
             assert index.record_commit_root("b", "root-b", ())
             assert index.commit_coverage_problem(check_parents=True) == problem
             assert tuple(index.commit_roots()) == (("b", "root-b"), ("a", "root-a"))
+
+
+def test_index_returns_typed_targets_and_path_owners_in_existing_orders():
+    scanner = runpy.run_path(str(SCANNER))
+    with closing(sqlite3.connect("")) as db:
+        index = scanner["_HistoryIndex"](db)
+        assert index.add_selected_object("z-commit")
+        assert index.add_selected_object("a-blob")
+        assert index.add_selected_commit("z-commit", ())
+        assert tuple(index.acquisition_targets()) == (("z-commit", True), ("a-blob", False))
+        assert tuple(index.acquisition_targets(lexical=True)) == (("a-blob", False), ("z-commit", True))
+        assert index.add(("z-commit", b"path", "a-blob"), "100644")
+        assert index.add(("tag-direct", b"path", "a-blob"), "")
+        index.prepare_path_queries()
+        assert tuple(index.owners(b"path", "a-blob")) == (
+            ("tag-direct", "", False), ("z-commit", "100644", True),
+        )
+
+
+def test_typed_target_pages_preserve_membership_while_acquisition_updates_rows():
+    scanner = runpy.run_path(str(SCANNER))
+    expected = tuple(f"{oid:040x}" for oid in range(1, 1027))
+    with closing(sqlite3.connect("")) as db:
+        index = scanner["_HistoryIndex"](db)
+        for oid in reversed(expected):
+            assert index.add_selected_object(oid)
+        for oid in expected[::2]:
+            assert index.add_selected_commit(oid, ())
+        observed = []
+        for ordinal, (oid, is_commit) in enumerate(index.acquisition_targets(lexical=True)):
+            assert is_commit == (ordinal % 2 == 0)
+            assert index.record_acquired(oid, "commit" if is_commit else "blob", ordinal)
+            observed.append(oid)
+        assert tuple(observed) == expected
+        assert tuple(index.acquired_oids()) == expected
