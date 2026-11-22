@@ -50,6 +50,9 @@ class TestPriorDisclosure(native.TestNativePublicationEffects):
                         serialize(mod.replace(new, coverage=invalid))
                     with self.assertRaisesRegex(ValueError, "native coverage"):
                         serialize(mod.replace(new, reap_certificate=None))
+                    wrong_order = mod.replace(new.coverage, selection_order="0" * 64)
+                    with self.assertRaisesRegex(ValueError, "native coverage"):
+                        serialize(mod.replace(new, coverage=wrong_order))
 
     def test_prior_receiver_history_is_not_new_disclosure(self):
         published, tip = self.publish_marker()

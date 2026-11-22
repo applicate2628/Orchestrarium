@@ -9,7 +9,7 @@ from collections import Counter, OrderedDict
 from enum import Enum
 from functools import lru_cache
 import hashlib
-from itertools import zip_longest
+from itertools import pairwise, zip_longest
 import importlib.util
 import json
 import math
@@ -572,9 +572,11 @@ class CoverageProof:
 
 @dataclass(frozen=True)
 class _ReceiptCoverage:
+    """In-process evidence from the live index, never accepted from a report."""
     expected_count: int
     object_set: str
     coverage_digest: str
+    selection_order: str
 
 
 def _coverage_digest(scanned: Iterable[str]) -> str:
@@ -4848,6 +4850,7 @@ class _HistoryIndex:
             _digest_frames(b"object-set", (oid.lower().encode("ascii")
                                           for oid in self.selected_objects(sorted_ids=True))),
             _coverage_digest(self.coverage_events(CoverageEvent.SCANNED)),
+            _ordered_native_object_digest(expected),
         )
 
     def add_blob(self, oid, size, digest, binary):
@@ -5735,29 +5738,62 @@ def _serialize_receiver_scoped_receipt_v5(outcome: ScanOutcome) -> str:
     return _native_json_bytes(result).decode("ascii")
 
 
+def _ordered_native_object_digest(object_ids: Iterable[str]) -> str:
+    return _digest_frames(b"native-selection-object-order", (oid.encode("ascii") for oid in object_ids))
+
+
+def _sorted_oid_subset(members: tuple[str, ...], universe: tuple[str, ...]) -> bool:
+    candidates = iter(universe)
+    previous = None
+    for member in members:
+        if previous is not None and member <= previous:
+            return False
+        for candidate in candidates:
+            if candidate == member:
+                break
+            if candidate > member:
+                return False
+        else:
+            return False
+        previous = member
+    return True
+
+
 def _serialize_native_receipt_common(outcome: ScanOutcome) -> str:
     selection, history, coverage = outcome.native_selection, outcome.history, outcome.coverage
     if outcome.kind != "clean" or selection is None or history is None or coverage is None:
         raise ValueError("native receipt")
     if isinstance(coverage, _ReceiptCoverage):
         exact_coverage = (
-            coverage.expected_count == len(history.object_ids)
+            coverage.expected_count == len(history.object_ids) == len(selection.object_oids)
             and coverage.object_set == history.object_set
+            and coverage.selection_order == _ordered_native_object_digest(selection.object_oids)
+            and all(a < b for a, b in pairwise(history.object_ids))
+            and _sorted_oid_subset(history.blob_ids, history.object_ids)
+            and _sorted_oid_subset(history.tag_ids, history.object_ids)
+            and history.object_set == _digest_frames(
+                b"object-set", (oid.lower().encode("ascii") for oid in history.object_ids),
+            )
+            and history.blob_set == _digest_frames(
+                b"blob-set", (oid.lower().encode("ascii") for oid in history.blob_ids),
+            )
         )
     else:
         actual = _build_coverage_proof(coverage.expected_oids, coverage.requested_oids,
                                        coverage.acquired_oids, coverage.scanned_message_oids, allow_empty=True)
-        exact_coverage = actual == coverage and set(coverage.expected_oids) == set(history.object_ids)
+        exact_coverage = (
+            actual == coverage and set(coverage.expected_oids) == set(history.object_ids)
+            and set(selection.object_oids) == set(history.object_ids)
+            and tuple(sorted(set(history.object_ids))) == history.object_ids
+            and set(history.blob_ids).issubset(history.object_ids)
+            and set(history.tag_ids).issubset(history.object_ids)
+            and history.object_set == _oid_set_digest(b"object-set", history.object_ids)
+            and history.blob_set == _oid_set_digest(b"blob-set", history.blob_ids)
+        )
     if (
         not exact_coverage
         or history.commit_ids != selection.expected_oids
-        or set(selection.object_oids) != set(history.object_ids)
-        or tuple(sorted(set(history.object_ids))) != history.object_ids
-        or not set(history.blob_ids).issubset(history.object_ids)
-        or not set(history.tag_ids).issubset(history.object_ids)
-        or history.object_set != _oid_set_digest(b"object-set", history.object_ids)
         or history.commit_set != _commit_set_digest(history.commit_ids)
-        or history.blob_set != _oid_set_digest(b"blob-set", history.blob_ids)
         or history.subject_set != (
             history.subjects.digest if isinstance(history.subjects, _SealedRows)
             else _subject_set_digest(history.subjects)
