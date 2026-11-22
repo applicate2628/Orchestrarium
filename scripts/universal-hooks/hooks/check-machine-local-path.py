@@ -110,6 +110,9 @@ def _is_placeholder_or_allowed(segment: str) -> bool:
 
 
 def _machine_path_spans(text: str):
+    # Every supported absolute path form has at least one separator.
+    if '/' not in text and '\\' not in text:
+        return
     for pattern in _PATTERNS:
         for match in pattern.finditer(text):
             if _is_placeholder_or_allowed(match.group(1)):
