@@ -1513,24 +1513,38 @@ def _line_observations(
     subject_kind: str,
     *,
     binary: bool = False,
+    raw_matches: Iterable[tuple[int, re.Match[str]]] | None = None,
 ) -> Iterator[_TextObservation]:
-    for index, (binary_rule, pattern) in enumerate(_SIMPLE_RULES):
-        if binary and not binary_rule:
+    if raw_matches is None:
+        raw_matches = _python_rule_matches(line, binary=binary)
+    simple_count = len(_SIMPLE_RULES)
+    for key, match in raw_matches:
+        if key < simple_count:
+            _, pattern = _SIMPLE_RULES[key]
+            yield _TextObservation(line, line_number, line_start, None, key, pattern, match)
             continue
-        for match in _matching_starts(pattern, line):
-            yield _TextObservation(line, line_number, line_start, None, index, pattern, match)
-    for index, (family, pattern) in enumerate(_VALUE_RULES):
-        for match in _matching_starts(pattern, line):
-            # Callable syntax is meaningful in blob text. Retain the legacy
-            # commit-message contract without granting it to new metadata.
-            if (_is_source_text_subject(subject_kind) or subject_kind == "commit-message") and _is_callable_rhs(line, match):
+        index = key - simple_count
+        family, pattern = _VALUE_RULES[index]
+        # Callable syntax is meaningful in blob text. Retain the legacy
+        # commit-message contract without granting it to new metadata.
+        if (_is_source_text_subject(subject_kind) or subject_kind == "commit-message") and _is_callable_rhs(line, match):
+            continue
+        if binary:
+            if _is_public_key_token_match(line, family, match):
                 continue
-            if binary:
-                if _is_public_key_token_match(line, family, match):
-                    continue
-            elif _is_annotated_public_token_match(line, family, match, subject_kind):
-                continue
-            yield _TextObservation(line, line_number, line_start, family, index, pattern, match)
+        elif _is_annotated_public_token_match(line, family, match, subject_kind):
+            continue
+        yield _TextObservation(line, line_number, line_start, family, index, pattern, match)
+
+
+def _python_rule_matches(line: str, *, binary: bool) -> Iterator[tuple[int, re.Match[str]]]:
+    for index, (binary_rule, pattern) in enumerate(_SIMPLE_RULES):
+        if not binary or binary_rule:
+            for match in _matching_starts(pattern, line):
+                yield index, match
+    for index, (_, pattern) in enumerate(_VALUE_RULES, len(_SIMPLE_RULES)):
+        for match in _matching_starts(pattern, line):
+            yield index, match
 
 
 def _assignment_coordinates(observation: _TextObservation) -> tuple[int, ...] | None:
