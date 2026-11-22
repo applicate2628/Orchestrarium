@@ -55,16 +55,19 @@ interpreter while installed hooks reference it.
 ### Optional Windows x64 publication matcher
 
 An independently built and qualified Windows x64 matcher can be selected with
-both --publication-matcher FILE and --publication-matcher-sha256 SHA256.
-The pack contains only the named executable at
-native/orche-publication-match.exe; the Rust toolchain and source tree are not
+--publication-matcher FILE and --publication-matcher-sha256 SHA256, together
+with --publication-matcher-notices FILE and --publication-matcher-notices-sha256
+SHA256. The pack contains the executable at native/orche-publication-match.exe
+and its qualified notice file at native/THIRD-PARTY-NOTICES.txt. The Rust
+toolchain and source tree are not
 packaged and no build runs during installation. This is an application
 component rather than a Python module or an SDK.
 
 The builder checks its image type and SHA-256 before and after copy. A bundle
-with no selection remains manifest version 3. Version 4 adds only
-publicationMatcher with the fixed relative path and expected SHA-256.
-Predecessor manifests remain readable without opening the old matcher;
+with no selection remains manifest version 3. Version 4 binds both the matcher
+and its notice file. The notice is verified before and after copy, independently
+of CPython runtime evidence. Predecessor manifests remain readable without
+opening the old matcher;
 active launch and retention reject a declared member that is absent, linked,
 or different. Retention passes the original identity to the same builder.
 

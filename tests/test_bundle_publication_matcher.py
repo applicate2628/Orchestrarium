@@ -42,16 +42,21 @@ def payload(tmp_path):
     content[86:88] = (2).to_bytes(2, "little")
     content[88:90] = (0x20B).to_bytes(2, "little")
     candidate.write_bytes(content)
+    notice = tmp_path / 'notices.txt'
+    notice.write_bytes(b'Synthetic notice bytes\n')
     options = dict(target=target, release="development", runtime_evidence=source_digest)
     return SimpleNamespace(builder=builder, launcher=launcher, runtime=runtime,
                            candidate=candidate, options=options,
-                           digest=hashlib.sha256(content).hexdigest())
+                           digest=hashlib.sha256(content).hexdigest(), notice=notice,
+                           notice_digest=hashlib.sha256(notice.read_bytes()).hexdigest())
 
 
 def build(payload, root, **override):
     options = dict(payload.options)
     options.update(publication_matcher=payload.candidate,
-                   publication_matcher_sha256=payload.digest)
+                   publication_matcher_sha256=payload.digest,
+                   publication_matcher_notices=payload.notice,
+                   publication_matcher_notices_sha256=payload.notice_digest)
     options.update(override)
     return payload.builder.build(SOURCE, payload.runtime, root, **options)
 
@@ -103,7 +108,7 @@ def test_declared_matcher_failure_precedes_active_launch_and_retention(payload, 
     assert not new.exists()
 
 
-@pytest.mark.parametrize("case", ["wrong-target", "wrong-digest", "missing-digest", "not-pe"])
+@pytest.mark.parametrize("case", ["wrong-target", "wrong-digest", "missing-digest", "missing-notice", "wrong-notice-digest", "not-pe"])
 def test_builder_refuses_unqualified_matcher_before_creating_output(payload, tmp_path, case):
     options = {}
     if case == "wrong-target":
@@ -112,6 +117,10 @@ def test_builder_refuses_unqualified_matcher_before_creating_output(payload, tmp
         options["publication_matcher_sha256"] = "0" * 64
     elif case == "missing-digest":
         options["publication_matcher_sha256"] = None
+    elif case == "missing-notice":
+        options["publication_matcher_notices"] = None
+    elif case == "wrong-notice-digest":
+        options["publication_matcher_notices_sha256"] = "0" * 64
     else:
         payload.candidate.write_bytes(b"not a native image")
         options["publication_matcher_sha256"] = hashlib.sha256(b"not a native image").hexdigest()
@@ -147,6 +156,8 @@ def test_publication_matcher_command_line_uses_same_qualified_builder(payload, t
         "--release", "development", "--output", str(output),
         "--publication-matcher", str(payload.candidate),
         "--publication-matcher-sha256", payload.digest,
+        "--publication-matcher-notices", str(payload.notice),
+        "--publication-matcher-notices-sha256", payload.notice_digest,
     ])
     payload.builder.main()
     assert (output / MATCHER).read_bytes() == payload.candidate.read_bytes()
@@ -160,3 +171,26 @@ def test_wrong_pe_architecture_cannot_be_admitted_by_its_actual_digest(payload, 
     with pytest.raises(ValueError, match="Windows x64"):
         build(payload, output, publication_matcher_sha256=hashlib.sha256(raw).hexdigest())
     assert not output.exists()
+
+
+@pytest.mark.parametrize("damage", [None, "changed", "missing"])
+def test_matcher_notices_follow_the_exact_artifact(payload, tmp_path, monkeypatch, damage):
+    monkeypatch.setattr(payload.launcher, "current_target", lambda: "windows-x64")
+    notice = tmp_path / "notice.txt"
+    notice.write_bytes(b"Synthetic complete notice text for the test matcher\n")
+    root = build(payload, tmp_path / "bundle", publication_matcher_notices=notice,
+                 publication_matcher_notices_sha256=hashlib.sha256(notice.read_bytes()).hexdigest())
+    member = root / "native/THIRD-PARTY-NOTICES.txt"
+    assert member.read_bytes() == notice.read_bytes()
+    retained = tmp_path / "retained"
+    if damage:
+        if damage == "changed":
+            member.write_bytes(b"Modified")
+        else:
+            member.unlink()
+        with pytest.raises((ValueError, FileNotFoundError), match="(?i)notices"):
+            payload.launcher.retain_bundle(root, retained)
+        assert not retained.exists()
+    else:
+        payload.launcher.retain_bundle(root, retained)
+        assert (retained / "native/THIRD-PARTY-NOTICES.txt").read_bytes() == notice.read_bytes()

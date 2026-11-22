@@ -195,17 +195,25 @@ def _launcher_module():
 
 def build(source: Path, runtime: Path, output: Path, *, target: str, release: str,
           runtime_evidence: Path | None = None, publication_matcher: Path | None = None,
-          publication_matcher_sha256: str | None = None) -> Path:
+          publication_matcher_sha256: str | None = None,
+          publication_matcher_notices: Path | None = None,
+          publication_matcher_notices_sha256: str | None = None) -> Path:
     if target not in TARGETS or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._+-]{0,127}', release):
         raise ValueError('Explicit supported target and safe release identity required')
     matcher_record = None
-    if publication_matcher is not None or publication_matcher_sha256 is not None:
-        if publication_matcher is None or publication_matcher_sha256 is None:
-            raise ValueError('Publication matcher path and qualified SHA-256 must be selected together')
+    native_options = (publication_matcher, publication_matcher_sha256,
+                      publication_matcher_notices, publication_matcher_notices_sha256)
+    if any(value is not None for value in native_options):
+        if (any(value is None for value in native_options)
+                or type(publication_matcher_notices_sha256) is not str
+                or re.fullmatch(r'[0-9a-f]{64}', publication_matcher_notices_sha256) is None):
+            raise ValueError('Publication matcher and notices require both paths and qualified SHA-256 values')
         launcher = _launcher_module()
         matcher_record = launcher._publication_matcher_record(target, publication_matcher_sha256)
         publication_matcher = launcher.verify_publication_matcher(
             publication_matcher.absolute(), publication_matcher_sha256)
+        publication_matcher_notices = launcher.verify_publication_matcher_notices(
+            publication_matcher_notices.absolute(), publication_matcher_notices_sha256)
     output = output.absolute()
     if output.exists() or output.is_symlink():
         raise FileExistsError(output)
@@ -255,6 +263,9 @@ def build(source: Path, runtime: Path, output: Path, *, target: str, release: st
         matcher_output.parent.mkdir()
         _copy_leaf(publication_matcher, matcher_output)
         launcher.verify_publication_matcher(matcher_output, matcher_record['sha256'])
+        notice_output = output / launcher.PUBLICATION_MATCHER_NOTICES
+        _copy_leaf(publication_matcher_notices, notice_output)
+        launcher.verify_publication_matcher_notices(notice_output, publication_matcher_notices_sha256)
     if target.startswith('windows-'):
         (output / 'orche.ps1').write_text(PS, encoding='utf-8')
     else:
@@ -271,6 +282,7 @@ def build(source: Path, runtime: Path, output: Path, *, target: str, release: st
     if matcher_record is not None:
         manifest['schemaVersion'] = 4
         manifest['publicationMatcher'] = matcher_record
+        manifest['publicationMatcherNoticesSha256'] = publication_matcher_notices_sha256
     with (output / 'bundle.json').open('x', encoding='utf-8') as stream:
         json.dump(manifest, stream, indent=2); stream.write('\n')
     return output
@@ -286,10 +298,14 @@ def main() -> None:
     parser.add_argument('--release', required=True, help='Use development for a local prototype; do not invent product versioning')
     parser.add_argument('--publication-matcher', type=Path)
     parser.add_argument('--publication-matcher-sha256')
+    parser.add_argument('--publication-matcher-notices', type=Path)
+    parser.add_argument('--publication-matcher-notices-sha256')
     args = parser.parse_args()
     build(args.source, args.runtime, args.output, target=args.target, release=args.release,
           runtime_evidence=args.runtime_evidence, publication_matcher=args.publication_matcher,
-          publication_matcher_sha256=args.publication_matcher_sha256)
+          publication_matcher_sha256=args.publication_matcher_sha256,
+          publication_matcher_notices=args.publication_matcher_notices,
+          publication_matcher_notices_sha256=args.publication_matcher_notices_sha256)
 
 
 if __name__ == '__main__':
