@@ -91,6 +91,13 @@ class ModelCatalogueTests(unittest.TestCase):
         points["medium"]["minutesPerTask"] = True
         self.assertIsNone(build(policy, "codex", options)[1])
         points["medium"]["minutesPerTask"] = 3.6
+        snapshot = policy["modelReference"]["benchmarkSnapshot"]
+        baseline = snapshot["costBaseline"]
+        snapshot["costBaseline"] = {"provider": "codex", "model": "gpt-6.2-astra", "effort": "max"}
+        self.assertIsNone(build(policy, "codex", options)[1])
+        snapshot["costBaseline"] = {**baseline, "extra": "not in the compact contract"}
+        self.assertIsNone(build(policy, "codex", options)[1])
+        snapshot["costBaseline"] = baseline
         points["high"]["costUsdPerTask"] = 0
         rows, basis = build(policy, "codex", options)
         self.assertIsNone(basis)

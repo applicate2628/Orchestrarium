@@ -8,7 +8,6 @@ import copy
 import hashlib
 import importlib.util
 import json
-import math
 import os
 import re
 import stat
@@ -1450,7 +1449,7 @@ def _advisory_model_catalog(policy, provider, options):
     baseline = _catalog_record(snapshot, "costBaseline")
     basis = None
     baseline_cost = None
-    if isinstance(baseline, dict) and all(isinstance(baseline.get(k), str) for k in ("provider", "model", "effort")):
+    if baseline == {"provider": "codex", "model": "gpt-6.2-sol", "effort": "high"}:
         baseline_cost = _catalog_record(snapshot, "models", baseline["provider"], baseline["model"],
                                         "efforts", baseline["effort"], "costUsdPerTask")
         provenance = {k: snapshot.get(k) for k in ("publisher", "methodology", "observedDate")}
