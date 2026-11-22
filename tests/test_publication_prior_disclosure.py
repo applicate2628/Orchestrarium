@@ -47,11 +47,17 @@ class TestPriorDisclosure(native.TestNativePublicationEffects):
             (b"(delete)", self.zero(), b"refs/heads/main", published),
         ])
         self.assertEqual(self.scan(payload).kind, "clean")
-        with self.in_root():
+        async def select():
             request = self.module._native_push_request(payload)
-            selected = asyncio.run(self.module._native_commit_range_selection(
-                self.module.RangeRequest("origin", "refs/heads/new", tip),
-                request, self.module.time.monotonic() + 30))
+            deadline = self.module.time.monotonic() + 30
+            with self.module._open_history_index(deadline) as index:
+                return await self.module._native_commit_range_selection(
+                    self.module.RangeRequest("origin", "refs/heads/new", tip),
+                    request, deadline, index,
+                )
+
+        with self.in_root():
+            selected = asyncio.run(select())
         self.assertNotIsInstance(selected, self.module.Refusal)
         self.assertNotIn(published, selected.expected_oids)
         self.assertIn(tip, selected.expected_oids)
@@ -109,9 +115,15 @@ class TestPriorDisclosure(native.TestNativePublicationEffects):
         tip = self.git("commit-tree", tree, "-p", self.commit, raw=b"mode metadata\n").strip().decode()
         payload = self.payload([(tip.encode(), tip, b"refs/heads/new", self.zero())])
         payload["receiverInventory"] = True
+
+        async def select():
+            request = self.module._native_push_request(payload)
+            deadline = self.module.time.monotonic() + 30
+            with self.module._open_history_index(deadline) as index:
+                return await self.module._native_push_selection(request, deadline, (tip,), index)
+
         with self.in_root():
-            selected = asyncio.run(self.module._native_push_selection(
-                self.module._native_push_request(payload), self.module.time.monotonic() + 30))
+            selected = asyncio.run(select())
         self.assertNotIsInstance(selected, self.module.Refusal)
         self.assertIn(tree, selected.object_oids)
         self.assertNotIn(blob.decode(), selected.object_oids)
