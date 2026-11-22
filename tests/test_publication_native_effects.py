@@ -18,6 +18,8 @@ import tempfile
 import unittest
 from unittest import mock
 
+import pytest
+
 
 SOURCE = Path(__file__).resolve().parents[1] / "scripts" / "universal-hooks" / "scripts" / "check-publication-safety.py"
 
@@ -31,6 +33,7 @@ def load_scanner():
     return module
 
 
+@pytest.mark.usefixtures("isolated_standalone_review_modules")
 class TestNativePublicationEffects(unittest.TestCase):
     object_format = "sha1"
 
