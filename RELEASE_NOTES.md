@@ -5,6 +5,10 @@ A dated entry is not a release tag, publication notice, or confirmation of a
 local installation. For the frozen pre-SDK baseline and draft follow-up, see
 [Which version?](README.md#which-version).
 
+## 2026-11-22
+
+- The Windows x64 pre-SDK bundle can carry the Rust publication matcher. The existing scanner uses it to accelerate binary-history and ordinary commit-text matching while keeping the same publication policy and finding decisions. The bundle builder and retainer verify the exact executable and its third-party notices. The matcher does not add provider SDK dependencies or require Rust on the target machine. See [bundle assembly](scripts/distribution/README.md) for package inputs.
+
 ## 2026-11-21
 
 - Keep exact historical path and commit coverage in a temporary index instead of rejecting a scan when the number of coverage rows grows. Tree cache capacity now causes eviction and verified rereads, not publication refusal; the proof, finding policy and publication gate are unchanged. Clean reviewed text no longer allocates exact byte-coordinate maps for nonexistent path matches. Shared engineering guidance distinguishes workload size, cache capacity, completeness, and eligibility.
