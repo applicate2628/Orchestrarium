@@ -574,7 +574,7 @@ class CoverageProof:
 class _ReceiptCoverage:
     """In-process evidence from the live index, never accepted from a report."""
     expected_count: int
-    object_set: str
+    selection_set: str
     coverage_digest: str
     selection_order: str
 
@@ -605,7 +605,7 @@ class CoverageRecorder:
         *,
         allow_empty: bool = False,
         history_index: "_HistoryIndex | None" = None,
-        receipt_coverage: bool = False,
+        receipt_coverage: str | None = None,
     ) -> None:
         self.expected_oids = tuple(expected_oids)
         self._receipt_coverage = receipt_coverage
@@ -627,7 +627,9 @@ class CoverageRecorder:
 
     def proof(self) -> CoverageProof | _ReceiptCoverage | Refusal:
         if self._receipt_coverage and self._history_index is not None:
-            return self._history_index.seal_receipt_coverage(self.expected_oids)
+            return self._history_index.seal_receipt_coverage(
+                self.expected_oids, commits=self._receipt_coverage == "commits",
+            )
 
         def events(stage: CoverageEvent) -> Iterable[str]:
             if self._history_index is None:
@@ -4831,26 +4833,33 @@ class _HistoryIndex:
             "SELECT oid FROM coverage_event WHERE stage=? ORDER BY sequence", (stage.value,),
         ))
 
-    def seal_receipt_coverage(self, expected: tuple[str, ...]) -> _ReceiptCoverage | Refusal:
+    def seal_receipt_coverage(
+        self, expected: tuple[str, ...], *, commits: bool = False,
+    ) -> _ReceiptCoverage | Refusal:
         def invalid():
             return _refusal("PS-MSG-COVERAGE", "multiplicity")
 
-        if not expected or any(a != b for a, b in zip_longest(expected, self.selected_objects())):
+        def selected(order):
+            table = "selected_commit" if commits else "selected_object"
+            return (oid for (oid,) in self.db.execute(f"SELECT oid FROM {table} ORDER BY {order}"))
+
+        if not expected or any(a != b for a, b in zip_longest(expected, selected("sequence"))):
             return invalid()
         for stage in CoverageEvent:
             observed = self.db.execute(
                 "SELECT oid, COUNT(*) FROM coverage_event WHERE stage=? GROUP BY oid ORDER BY oid",
                 (stage.value,),
             )
-            exact = ((oid, 1) for oid in self.selected_objects(sorted_ids=True))
+            exact = ((oid, 1) for oid in selected("oid"))
             if any(a != b for a, b in zip_longest(exact, observed)):
                 return invalid()
         return _ReceiptCoverage(
             len(expected),
-            _digest_frames(b"object-set", (oid.lower().encode("ascii")
-                                          for oid in self.selected_objects(sorted_ids=True))),
+            _commit_set_digest(expected) if commits else _digest_frames(
+                b"object-set", (oid.lower().encode("ascii") for oid in selected("oid")),
+            ),
             _coverage_digest(self.coverage_events(CoverageEvent.SCANNED)),
-            _ordered_native_object_digest(expected),
+            _ordered_receipt_selection_digest(expected),
         )
 
     def add_blob(self, oid, size, digest, binary):
@@ -5385,6 +5394,7 @@ async def _scan_range_async(
     scan_timeout: float = _SCAN_DEADLINE_SECONDS,
     review_evaluation: "ReviewEvaluation | None" = None,
     review_capture=None,
+    receipt_coverage: bool = False,
 ) -> ScanOutcome:
     wall_deadline = time.monotonic() + scan_timeout
     request = _range_request(remote, destination, source_revision)
@@ -5403,7 +5413,8 @@ async def _scan_range_async(
             return await _scan_selected_history_async(
                 selection, find_machine_paths, wall_deadline=wall_deadline, tip_resolver=tip_resolver,
                 reader_factory=reader_factory, coverage_observer=coverage_observer, coverage_fault=coverage_fault,
-                review_evaluation=review_evaluation, review_capture=review_capture, **options,
+                review_evaluation=review_evaluation, review_capture=review_capture,
+                receipt_coverage=receipt_coverage and index is not None, **options,
             )
     except sqlite3.Error:
         return ScanOutcome("refusal", "range", refusal=(
@@ -5476,7 +5487,7 @@ async def _scan_selected_history_async(
     coverage_recorder = CoverageRecorder(
         selection.object_oids if native else selection.expected_oids, coverage_observer, coverage_fault,
         history_index=history_index,
-        receipt_coverage=native and receipt_coverage,
+        receipt_coverage=("objects" if native else "commits") if receipt_coverage else None,
     )
     pending: ScanOutcome | None = None
     acquired: tuple[
@@ -5613,6 +5624,7 @@ def _scan_range(
     review_evaluation: "ReviewEvaluation | None" = None,
     review_capture=None,
     scan_timeout: float = _SCAN_DEADLINE_SECONDS,
+    receipt_coverage: bool = False,
 ) -> ScanOutcome:
     try:
         return asyncio.run(_scan_range_async(
@@ -5622,7 +5634,7 @@ def _scan_range(
             source_revision=source_revision,
             tip_resolver=tip_resolver,
             review_evaluation=review_evaluation, review_capture=review_capture,
-            scan_timeout=scan_timeout,
+            scan_timeout=scan_timeout, receipt_coverage=receipt_coverage,
         ))
     except KeyboardInterrupt:
         return ScanOutcome(
@@ -5738,8 +5750,8 @@ def _serialize_receiver_scoped_receipt_v5(outcome: ScanOutcome) -> str:
     return _native_json_bytes(result).decode("ascii")
 
 
-def _ordered_native_object_digest(object_ids: Iterable[str]) -> str:
-    return _digest_frames(b"native-selection-object-order", (oid.encode("ascii") for oid in object_ids))
+def _ordered_receipt_selection_digest(object_ids: Iterable[str]) -> str:
+    return _digest_frames(b"native-receipt-selection-order", (oid.encode("ascii") for oid in object_ids))
 
 
 def _sorted_oid_subset(members: tuple[str, ...], universe: tuple[str, ...]) -> bool:
@@ -5766,8 +5778,8 @@ def _serialize_native_receipt_common(outcome: ScanOutcome) -> str:
     if isinstance(coverage, _ReceiptCoverage):
         exact_coverage = (
             coverage.expected_count == len(history.object_ids) == len(selection.object_oids)
-            and coverage.object_set == history.object_set
-            and coverage.selection_order == _ordered_native_object_digest(selection.object_oids)
+            and coverage.selection_set == history.object_set
+            and coverage.selection_order == _ordered_receipt_selection_digest(selection.object_oids)
             and all(a < b for a, b in pairwise(history.object_ids))
             and _sorted_oid_subset(history.blob_ids, history.object_ids)
             and _sorted_oid_subset(history.tag_ids, history.object_ids)
@@ -6124,7 +6136,17 @@ def _format_outcome(outcome: ScanOutcome) -> tuple[str, str, int]:
                 "phase=input reason=unexpected",
                 2,
             )
-        if not coverage.scanned_message_oids:
+        if isinstance(coverage, _ReceiptCoverage):
+            exact = (
+                coverage.expected_count > 0
+                and coverage.expected_count == len(history.commit_ids) == len(selection.expected_oids)
+                and coverage.selection_order == _ordered_receipt_selection_digest(selection.expected_oids)
+                and history.commit_ids == selection.expected_oids
+                and coverage.selection_set == history.commit_set == _commit_set_digest(history.commit_ids)
+            )
+            if not exact:
+                return "", "publication-safety: refusing id=PS-MSG-COVERAGE reason=receipt-binding phase=coverage", 2
+        elif not coverage.scanned_message_oids:
             return (
                 "",
                 "publication-safety: refusing id=PS-MSG-COVERAGE "
@@ -6293,6 +6315,7 @@ def main(argv: list[str] | None = None) -> int:
                 source_revision=args.range_source,
                 review_evaluation=review_evaluation if review_evaluation.read.usable_records else None,
                 scan_timeout=_remaining_seconds(review_deadline),
+                receipt_coverage=globals().get("__injected_native_push__") is not None,
             )
 
             def recheck_range() -> bool:

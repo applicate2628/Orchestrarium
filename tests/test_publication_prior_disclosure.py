@@ -45,7 +45,7 @@ class TestPriorDisclosure(native.TestNativePublicationEffects):
                     self.assertEqual(new.kind, "clean", new.refusal)
                     self.assertIsInstance(new.coverage, mod._ReceiptCoverage)
                     self.assertEqual(serialize(old), serialize(new))
-                    invalid = mod.replace(new.coverage, object_set="0" * 64)
+                    invalid = mod.replace(new.coverage, selection_set="0" * 64)
                     with self.assertRaisesRegex(ValueError, "native coverage"):
                         serialize(mod.replace(new, coverage=invalid))
                     with self.assertRaisesRegex(ValueError, "native coverage"):
@@ -53,6 +53,29 @@ class TestPriorDisclosure(native.TestNativePublicationEffects):
                     wrong_order = mod.replace(new.coverage, selection_order="0" * 64)
                     with self.assertRaisesRegex(ValueError, "native coverage"):
                         serialize(mod.replace(new, coverage=wrong_order))
+
+    def test_indexed_and_legacy_guarded_range_receipts_are_byte_identical(self):
+        self.git("commit", "--allow-empty", "-qm", "public guarded-range follow-up")
+        tip = self.git("rev-parse", "HEAD").strip().decode()
+        payload = self.payload([(tip.encode(), tip, b"refs/heads/main", self.commit)])
+        mod = self.module
+        with self.in_root(), mock.patch.object(mod, "__injected_native_push__", payload, create=True):
+            old = mod._scan_range("origin", "refs/heads/main", lambda _line: (), source_revision=tip)
+            indexed = mod._scan_range(
+                "origin", "refs/heads/main", lambda _line: (), source_revision=tip, receipt_coverage=True,
+            )
+        self.assertEqual(old.kind, "clean", old.refusal)
+        self.assertEqual(indexed.kind, "clean", indexed.refusal)
+        self.assertIsInstance(indexed.coverage, mod._ReceiptCoverage)
+        self.assertEqual(mod._format_outcome(indexed), mod._format_outcome(old))
+        self.assertEqual(mod._format_outcome(indexed)[2], 0)
+        for mismatch in (
+            {"coverage": mod.replace(indexed.coverage, selection_order="0" * 64)},
+            {"coverage": mod.replace(indexed.coverage, expected_count=indexed.coverage.expected_count + 1)},
+            {"reap_certificate": None},
+        ):
+            with self.subTest(field=next(iter(mismatch))):
+                self.assertNotEqual(mod._format_outcome(mod.replace(indexed, **mismatch))[2], 0)
 
     def test_prior_receiver_history_is_not_new_disclosure(self):
         published, tip = self.publish_marker()

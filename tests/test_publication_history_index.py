@@ -173,7 +173,7 @@ def test_receipt_coverage_matches_legacy_digest_and_rejects_missing_extra_or_dup
                     legacy = scanner["_build_coverage_proof"]((a, b), (b, a), (b, a), (b, a))
                     assert proof.coverage_digest == legacy.coverage_digest
                     assert proof.expected_count == 2
-                    assert proof.object_set == scanner["_oid_set_digest"](b"object-set", (a, b))
+                    assert proof.selection_set == scanner["_oid_set_digest"](b"object-set", (a, b))
                     assert index.seal_receipt_coverage((b, a)).failure_id == "PS-MSG-COVERAGE"
                 else:
                     assert proof.failure_id == "PS-MSG-COVERAGE"
