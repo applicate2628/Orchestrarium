@@ -30,3 +30,23 @@ record graph events but do not run policy or classify findings. This does not
 qualify Git acquisition, a full scanner verdict, hardware throughput, or
 runtime cutover. Future integration still needs exact receiving-source parity
 and full gate measurements without bypassing the existing owner.
+
+## Publication tree record parser
+
+The existing Git acquisition owner must validate the complete object's type,
+framing, byte length and identity before constructing a verified payload view.
+The parser performs structural decoding only: it accepts either object-ID
+width and returns ordered borrowed mode, name and object-ID byte ranges.
+A malformed payload does not expose entries already decoded from that payload.
+Keep the verified payload alive while its entry views are in use.
+
+Run the additional differential test with the same compiled test driver:
+
+~~~text
+python -B native/operations/tests/tree_record_parity.py --driver <test-driver> --source <receiving-check-publication-safety.py>
+~~~
+
+The receiving Python parser supplies the byte-exact order and refusal oracle.
+The test also feeds borrowed records into the walker without copying their
+fields. Git acquisition, ownership and publication authority remain outside
+this component.

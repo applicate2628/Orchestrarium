@@ -1,4 +1,6 @@
 // A std-only test driver; this is not a scanner transport or release executable.
+#[path = "../src/publication/tree_record.rs"]
+mod tree_record;
 #[path = "../src/publication/tree_walk.rs"]
 mod tree_walk;
 use std::{
@@ -6,6 +8,7 @@ use std::{
     collections::{HashMap, HashSet},
     io::{self, BufRead, Write},
 };
+use tree_record::{ObjectWidth, TreeRecordError, VerifiedTreePayload};
 use tree_walk::{Entry, Event, Kind, WalkError, walk};
 
 fn unhex(input: &str) -> Vec<u8> {
@@ -26,7 +29,66 @@ fn hex(input: &[u8]) -> String {
     out
 }
 
+fn object_width(width: usize) -> ObjectWidth {
+    match width {
+        20 => ObjectWidth::Sha1,
+        32 => ObjectWidth::Sha256,
+        _ => panic!("unsupported fixture width"),
+    }
+}
+
+fn run_records() {
+    let stdout = io::stdout();
+    let mut out = io::BufWriter::new(stdout.lock());
+    for line in io::stdin().lock().lines() {
+        let line = line.unwrap();
+        let (width, body) = line.split_once(' ').unwrap();
+        let width = object_width(width.parse().unwrap());
+        let raw = if body == "-" { Vec::new() } else { unhex(body) };
+        match VerifiedTreePayload::from_verified_bytes(&raw, width).parse() {
+            Ok(entries) => {
+                for entry in entries {
+                    let payload = raw.as_ptr_range();
+                    for bytes in [entry.name, entry.oid, entry.mode] {
+                        let field = bytes.as_ptr_range();
+                        assert!(payload.start <= field.start && field.end <= payload.end);
+                    }
+                    let kind = match entry.kind {
+                        Kind::Blob => "blob",
+                        Kind::Tree => "tree",
+                        Kind::Gitlink => "gitlink",
+                    };
+                    writeln!(
+                        out,
+                        "E {} {} {} {}",
+                        kind,
+                        std::str::from_utf8(entry.mode).unwrap(),
+                        hex(entry.name),
+                        hex(entry.oid)
+                    )
+                    .unwrap();
+                }
+                writeln!(out, "R ok").unwrap();
+            }
+            Err(err) => {
+                let reason = match err {
+                    TreeRecordError::Tree => "tree",
+                    TreeRecordError::TreePath => "tree-path",
+                    TreeRecordError::TreeMode => "tree-mode",
+                };
+                writeln!(out, "R PS-MSG-FRAME {reason}").unwrap();
+            }
+        }
+    }
+    out.flush().unwrap();
+}
+
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--records") {
+        run_records();
+        return;
+    }
+
     let stdin = io::stdin();
     let lines: Vec<Vec<String>> = stdin
         .lock()
@@ -44,6 +106,7 @@ fn main() {
     let max_frontier: usize = header[2].parse().unwrap();
     let expire_step: usize = header[3].parse().unwrap();
     let mut owned = HashMap::new();
+    let mut raw_trees = HashMap::new();
     let mut unpublished_trees = HashSet::new();
     let mut unpublished_blobs = HashSet::new();
     for row in lines.iter().skip(1) {
@@ -57,6 +120,12 @@ fn main() {
                     unpublished_trees.insert(oid.clone());
                 }
                 assert!(owned.insert(oid, Vec::new()).is_none());
+            }
+            "P" => {
+                if row[2] == "new" {
+                    unpublished_trees.insert(oid.clone());
+                }
+                assert!(raw_trees.insert(oid, unhex(&row[3])).is_none());
             }
             "E" => {
                 let kind = match row[2].as_str() {
@@ -75,7 +144,7 @@ fn main() {
             _ => panic!("unknown fixture row"),
         }
     }
-    let arena: HashMap<_, Vec<_>> = owned
+    let mut arena: HashMap<_, Vec<_>> = owned
         .iter()
         .map(|(oid, entries)| {
             (
@@ -92,6 +161,12 @@ fn main() {
             )
         })
         .collect();
+    for (oid, raw) in &raw_trees {
+        let records = VerifiedTreePayload::from_verified_bytes(raw, object_width(root.len()))
+            .parse()
+            .unwrap();
+        assert!(arena.insert(oid.as_slice(), records).is_none());
+    }
     let trees = unpublished_trees.iter().map(Vec::as_slice).collect();
     let blobs = unpublished_blobs.iter().map(Vec::as_slice).collect();
     let stdout = io::stdout();
