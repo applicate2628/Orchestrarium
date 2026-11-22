@@ -3624,9 +3624,16 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
                                 self.assertLess(len(subprocess.list2cmdline(argv)), 32767)
                                 self.assertIs(kwargs["object_format"], fmt)
                                 calls.append(argv)
+                                store_row = kwargs.get("store_row")
                                 if "--parents" in argv:
-                                    return ((tip, ()),)
-                                return (tip,)
+                                    if store_row is None:
+                                        return ((tip, ()),)
+                                    self.assertTrue(store_row(tip, ()))
+                                else:
+                                    if store_row is None:
+                                        return (tip,)
+                                    self.assertTrue(store_row(tip))
+                                return ()
 
                             destination = "refs/heads/new"
                             primary = module.RangeRequest("origin", destination, tip)
@@ -3654,8 +3661,10 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
                                 mock.patch.object(module, "_read_git_oid_lines_bounded", new=reader),
                             ):
                                 if native:
-                                    result = await module._native_commit_range_selection(
-                                        primary, request, module.time.monotonic() + 30)
+                                    deadline = module.time.monotonic() + 30
+                                    with module._open_history_index(deadline) as index:
+                                        result = await module._native_commit_range_selection(
+                                            primary, request, deadline, index)
                                 else:
                                     result = await module._range_selection(primary)
 

@@ -18,7 +18,7 @@ import re
 import secrets
 import shutil
 import sqlite3
-from contextlib import asynccontextmanager, closing, nullcontext
+from contextlib import asynccontextmanager, closing, contextmanager, nullcontext
 import subprocess
 import sys
 import threading
@@ -3717,6 +3717,8 @@ def _revision_stdin(roots: tuple[str, ...], exclusions: tuple[str, ...]) -> byte
 async def _range_selection(
     request: RangeRequest,
     deadline: float | None = None,
+    *,
+    history_index: "_HistoryIndex | None" = None,
 ) -> RangeSelection | Refusal:
     deadline = deadline if deadline is not None else time.monotonic() + _SCAN_DEADLINE_SECONDS
     native_payload = globals().get("__injected_native_push__")
@@ -3724,7 +3726,10 @@ async def _range_selection(
         native = _native_push_request(native_payload)
         if isinstance(native, Refusal):
             return native
-        return await _native_commit_range_selection(request, native, deadline)
+        if history_index is not None:
+            return await _native_commit_range_selection(request, native, deadline, history_index)
+        with _open_history_index(deadline) as index:
+            return await _native_commit_range_selection(request, native, deadline, index)
     try:
         remotes = _run_range_git(
             ["remote"], text=True, timeout=_remaining_seconds(deadline)
@@ -3939,7 +3944,7 @@ async def _native_push_selection(
 
 
 async def _native_commit_range_selection(
-    primary: RangeRequest, request: NativePushRequest, deadline: float,
+    primary: RangeRequest, request: NativePushRequest, deadline: float, index: "_HistoryIndex",
 ) -> RangeSelection | Refusal:
     """Union newly disclosed actual update graphs for this receiver.
 
@@ -3950,13 +3955,11 @@ async def _native_commit_range_selection(
     if _detect_git_object_format(_remaining_seconds(deadline)) != object_format or _graft_overlay_present(_remaining_seconds(deadline)):
         return _refusal("PS-MSG-RANGE", "native-repository")
     zero = "0" * object_format.hex_length
-    parents: dict[str, tuple[str, ...]] = {}
-    objects: set[str] = set()
     selected_primary = None
     prior_roots = await _native_prior_receiver_roots(request, deadline)
     if isinstance(prior_roots, Refusal):
         return prior_roots
-    for row in request.updates:
+    for stream, row in enumerate(request.updates, start=1):
         if row.local_oid == zero:
             continue
         try:
@@ -3971,6 +3974,7 @@ async def _native_commit_range_selection(
         graph = await _read_parent_graph_bounded(
             _range_git_argv("rev-list", "--parents", "--topo-order", "--stdin"),
             deadline=loop_deadline, object_format=object_format, input_bytes=revisions,
+            store_row=lambda oid, parents: index.add_selected_commit(oid, parents, stream=stream),
         )
         if isinstance(graph, Refusal):
             return graph
@@ -3978,20 +3982,20 @@ async def _native_commit_range_selection(
             _range_git_argv("rev-list", "--objects", "--no-object-names", "--stdin"),
             count_cap=_MAX_OBJECTS, byte_cap=object_format.list_byte_cap(_MAX_OBJECTS),
             deadline=loop_deadline, object_format=object_format, input_bytes=revisions,
+            store_row=lambda oid: index.add_selected_object(oid, stream=stream),
         )
         if isinstance(selected_objects, Refusal):
             return selected_objects
-        parents.update(graph)
-        objects.update(selected_objects)
-        if len(parents) > _MAX_COMMITS or len(objects) > _MAX_OBJECTS:
+        if not index.selection_within_limits():
             return _refusal("PS-MSG-LIMIT", "count")
     if selected_primary != (primary.destination, primary.source):
         return _refusal("PS-MSG-RANGE", "native-primary")
-    if not set(parents).issubset(objects):
+    if not index.selected_commits_covered():
         return _refusal("PS-MSG-COVERAGE", "commit-object-set")
+    parents = tuple(index.selected_commits())
     return RangeSelection(primary.remote, primary.destination, primary.source,
-        primary.source, tuple(parents), tuple(sorted(objects)), object_format,
-        expected_parents=tuple(parents.items()))
+        primary.source, tuple(oid for oid, _ in parents), tuple(index.selected_objects(sorted_ids=True)),
+        object_format, expected_parents=parents)
 
 
 def _parse_batch_header(
@@ -4713,8 +4717,9 @@ class _HistoryIndex:
         db.executescript("""
             PRAGMA temp_store=FILE;
             CREATE TABLE selected_commit (sequence INTEGER PRIMARY KEY, oid TEXT UNIQUE,
-                parents TEXT NOT NULL);
-            CREATE TABLE selected_object (sequence INTEGER PRIMARY KEY, oid TEXT UNIQUE);
+                parents TEXT NOT NULL, stream INTEGER NOT NULL);
+            CREATE TABLE selected_object (sequence INTEGER PRIMARY KEY, oid TEXT UNIQUE,
+                stream INTEGER NOT NULL);
             CREATE TABLE blob (oid TEXT PRIMARY KEY, size INTEGER NOT NULL,
                 digest BLOB NOT NULL, binary INTEGER NOT NULL) WITHOUT ROWID;
             CREATE TABLE subject (owner TEXT, path BLOB, blob TEXT, mode TEXT NOT NULL,
@@ -4753,24 +4758,35 @@ class _HistoryIndex:
             "SELECT DISTINCT path, blob FROM subject ORDER BY path, blob"
         )
 
-    def add_selected_commit(self, oid, parents):
-        return self.db.execute(
-            "INSERT INTO selected_commit(oid, parents) VALUES (?, ?) ON CONFLICT(oid) DO NOTHING",
-            (oid, " ".join(parents)),
-        ).rowcount == 1
+    def add_selected_commit(self, oid, parents, *, stream=0):
+        # Another walk can replace Git's parent view, but not first-seen order.
+        return self.db.execute("""
+            INSERT INTO selected_commit(oid, parents, stream) VALUES (?, ?, ?)
+            ON CONFLICT(oid) DO UPDATE SET parents=excluded.parents, stream=excluded.stream
+            WHERE selected_commit.stream <> excluded.stream
+        """, (oid, " ".join(parents), stream)).rowcount == 1
 
-    def add_selected_object(self, oid):
-        return self.db.execute(
-            "INSERT INTO selected_object(oid) VALUES (?) ON CONFLICT(oid) DO NOTHING", (oid,),
-        ).rowcount == 1
+    def add_selected_object(self, oid, *, stream=0):
+        return self.db.execute("""
+            INSERT INTO selected_object(oid, stream) VALUES (?, ?)
+            ON CONFLICT(oid) DO UPDATE SET stream=excluded.stream
+            WHERE selected_object.stream <> excluded.stream
+        """, (oid, stream)).rowcount == 1
 
     def selected_commits(self):
         return ((oid, tuple(parents.split())) for oid, parents in self.db.execute(
             "SELECT oid, parents FROM selected_commit ORDER BY sequence"
         ))
 
-    def selected_objects(self):
-        return (oid for (oid,) in self.db.execute("SELECT oid FROM selected_object ORDER BY sequence"))
+    def selected_objects(self, *, sorted_ids=False):
+        order = "oid" if sorted_ids else "sequence"
+        return (oid for (oid,) in self.db.execute(f"SELECT oid FROM selected_object ORDER BY {order}"))
+
+    def selection_within_limits(self):
+        commits, objects = self.db.execute(
+            "SELECT (SELECT COUNT(*) FROM selected_commit), (SELECT COUNT(*) FROM selected_object)"
+        ).fetchone()
+        return commits <= _MAX_COMMITS and objects <= _MAX_OBJECTS
 
     def selected_commits_covered(self):
         return self.db.execute("""
@@ -4818,6 +4834,16 @@ class _HistoryIndex:
             self._seal("SELECT DISTINCT blob, path FROM subject ORDER BY blob, path",
                        _path_set_digest),
         )
+
+
+@contextmanager
+def _open_history_index(wall_deadline):
+    with closing(sqlite3.connect("")) as db:
+        index = _HistoryIndex(db)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _remaining_seconds(wall_deadline)
+        db.set_progress_handler(lambda: int(loop.time() >= deadline), 2048)
+        yield index
 
 
 async def _acquire_history(selection, reader, find_machine_paths, coverage_recorder,
@@ -5306,16 +5332,26 @@ async def _scan_range_async(
     request = _range_request(remote, destination, source_revision)
     if isinstance(request, Refusal):
         return ScanOutcome("refusal", "range", refusal=request)
-    selection = await _range_selection(request, wall_deadline)
-    if isinstance(selection, Refusal):
-        return ScanOutcome("refusal", "range", refusal=selection)
-    if not selection.expected_oids:
-        return ScanOutcome("refusal", "range", refusal=_refusal("PS-MSG-COVERAGE", "empty-selection"), selection=selection)
-    return await _scan_selected_history_async(
-        selection, find_machine_paths, wall_deadline=wall_deadline, tip_resolver=tip_resolver,
-        reader_factory=reader_factory, coverage_observer=coverage_observer, coverage_fault=coverage_fault,
-        review_evaluation=review_evaluation, review_capture=review_capture,
-    )
+    try:
+        storage = (_open_history_index(wall_deadline)
+                   if globals().get("__injected_native_push__") is not None else nullcontext())
+        with storage as index:
+            options = {"history_index": index} if index is not None else {}
+            selection = await _range_selection(request, wall_deadline, **options)
+            if isinstance(selection, Refusal):
+                return ScanOutcome("refusal", "range", refusal=selection)
+            if not selection.expected_oids:
+                return ScanOutcome("refusal", "range", refusal=_refusal("PS-MSG-COVERAGE", "empty-selection"), selection=selection)
+            return await _scan_selected_history_async(
+                selection, find_machine_paths, wall_deadline=wall_deadline, tip_resolver=tip_resolver,
+                reader_factory=reader_factory, coverage_observer=coverage_observer, coverage_fault=coverage_fault,
+                review_evaluation=review_evaluation, review_capture=review_capture, **options,
+            )
+    except sqlite3.Error:
+        return ScanOutcome("refusal", "range", refusal=(
+            _refusal("PS-MSG-READ-TIMEOUT", "deadline") if time.monotonic() >= wall_deadline
+            else _refusal("PS-MSG-READ", "coverage-storage")
+        ))
 
 
 async def _verify_excluded_tag_targets(
@@ -5570,14 +5606,8 @@ async def _scan_native_push_async(
             return ScanOutcome("refusal", "native-push", refusal=_refusal("PS-INPUT-REFUSAL", "native-repository"))
         zero = "0" * request.object_format.hex_length
         roots = tuple(dict.fromkeys(row.local_oid for row in request.updates if row.local_oid != zero))
-        connection = closing(sqlite3.connect("")) if roots else nullcontext()
-        with connection as db:
-            index = None
-            if db is not None:
-                index = _HistoryIndex(db)
-                loop = asyncio.get_running_loop()
-                storage_deadline = loop.time() + _remaining_seconds(deadline)
-                db.set_progress_handler(lambda: int(loop.time() >= storage_deadline), 2048)
+        storage = _open_history_index(deadline) if roots else nullcontext()
+        with storage as index:
             selection = await _native_push_selection(request, deadline, roots, index)
             if isinstance(selection, Refusal):
                 return ScanOutcome("refusal", "native-push", refusal=selection)

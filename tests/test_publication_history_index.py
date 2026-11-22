@@ -14,7 +14,7 @@ def test_path_query_index_is_built_after_admission_without_changing_coverage():
     with closing(sqlite3.connect("")) as db:
         index = scanner["_HistoryIndex"](db)
         inventory = [(owner, path, blob) for owner in ("c2", "c1")
-                     for path in (b"z/real", b"a/real")
+                     for path in (b"z/real", b"a/real", b"A/real", b"\xff/real")
                      for blob in ("b2", "b1")]
         for row in inventory:
             assert index.add(row, "100644")
@@ -22,6 +22,7 @@ def test_path_query_index_is_built_after_admission_without_changing_coverage():
         assert index.subject_count == len(inventory)
         query = "SELECT name FROM sqlite_master WHERE name='subject_path'"
         assert db.execute(query).fetchall() == []
+        assert db.execute("SELECT DISTINCT typeof(path) FROM subject").fetchall() == [("blob",)]
         index.prepare_path_queries()
         assert db.execute(query).fetchall() == [("subject_path",)]
         assert list(index.path_pairs()) == sorted({r[1:] for r in inventory})
@@ -106,3 +107,27 @@ def test_selection_inventory_preserves_order_and_rejects_duplicate_rows():
         assert index.selected_commits_covered()
         assert tuple(index.selected_commits()) == (("c2", ("c1", "c0")), ("c1", ()))
         assert tuple(index.selected_objects()) == ("c1", "blob", "c2")
+
+
+def test_multiple_git_streams_keep_first_commit_order_and_last_parent_view():
+    scanner = runpy.run_path(str(SCANNER))
+    with closing(sqlite3.connect("")) as db:
+        index = scanner["_HistoryIndex"](db)
+        assert index.add_selected_commit("top", ("old",), stream=1)
+        assert index.add_selected_commit("old", (), stream=1)
+        assert index.add_selected_object("top", stream=1)
+        assert index.add_selected_object("old", stream=1)
+        assert index.add_selected_object("blob-z", stream=1)
+        assert index.add_selected_commit("other", ("old",), stream=2)
+        assert index.add_selected_commit("top", ("new", "old"), stream=2)
+        assert not index.add_selected_commit("top", (), stream=2)
+        assert index.add_selected_object("top", stream=2)
+        assert not index.add_selected_object("top", stream=2)
+        assert index.add_selected_object("other", stream=2)
+        assert index.add_selected_object("blob-a", stream=2)
+        assert tuple(index.selected_commits()) == (
+            ("top", ("new", "old")), ("old", ()), ("other", ("old",)),
+        )
+        assert tuple(index.selected_objects()) == ("top", "old", "blob-z", "other", "blob-a")
+        assert tuple(index.selected_objects(sorted_ids=True)) == ("blob-a", "blob-z", "old", "other", "top")
+        assert index.selected_commits_covered()
