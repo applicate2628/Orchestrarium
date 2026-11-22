@@ -553,6 +553,50 @@ class TestNativePublicationEffects(unittest.TestCase):
         self.assertEqual(mod._format_outcome(refused)[2], 2)
 
 
+    def test_compact_native_selection_is_bound_without_retaining_object_ids(self):
+        mod = self.module
+        (self.root / "second.txt").write_text("synthetic public record\n", encoding="utf-8")
+        self.git("add", "second.txt")
+        self.git("commit", "-qm", "synthetic object order fixture")
+        tip = self.git("rev-parse", "HEAD").strip().decode()
+        payload = self.payload([(b"refs/heads/main", tip, b"refs/heads/main", self.commit)])
+        with self.in_root():
+            raw = self.scan(payload)
+            compact = mod._scan_native_push(payload, lambda _line: (), receipt_coverage=True)
+        self.assertEqual(raw.kind, "clean", raw.refusal)
+        self.assertEqual(compact.kind, "clean", compact.refusal)
+        legacy_ids = raw.native_selection.object_oids
+        binding = compact.native_selection.object_oids
+        self.assertIsInstance(legacy_ids, tuple)
+        self.assertNotIsInstance(binding, tuple)
+        self.assertEqual(binding.count, len(legacy_ids))
+        self.assertEqual(binding.order, mod._ordered_receipt_selection_digest(legacy_ids))
+        self.assertEqual(mod._format_outcome(compact), mod._format_outcome(raw))
+        for change in ({"count": binding.count + 1}, {"order": "f" * 64}):
+            changed = mod.replace(compact.native_selection, object_oids=mod.replace(binding, **change))
+            self.assertNotEqual(mod._format_outcome(mod.replace(compact, native_selection=changed))[2], 0)
+
+
+    def test_compact_native_selection_rejects_reordered_storage_with_exact_multiplicity(self):
+        mod = self.module
+        fmt = mod._SUPPORTED_OBJECT_FORMATS[self.object_format]
+        first, second = "a" * fmt.hex_length, "b" * fmt.hex_length
+        with contextlib.closing(mod.sqlite3.connect(":memory:")) as db:
+            index = mod._HistoryIndex(db)
+            for oid in (first, second):
+                self.assertTrue(index.add_selected_object(oid))
+            binding = index.bind_object_selection()
+            for event in mod.CoverageEvent:
+                for oid in (first, second):
+                    index.record_coverage(event, oid)
+            self.assertIsInstance(index.seal_receipt_coverage(binding), mod._ReceiptCoverage)
+            db.execute("DELETE FROM selected_object WHERE oid = ?", (first,))
+            self.assertTrue(index.add_selected_object(first))
+            self.assertEqual(tuple(index.selected_objects()), (second, first))
+            self.assertEqual(index.seal_receipt_coverage(binding),
+                             mod._refusal("PS-MSG-COVERAGE", "multiplicity"))
+
+
     def test_compact_native_blob_count_preserves_exact_receipt_and_late_findings(self):
         mod = self.module
         for index in range(3):

@@ -486,10 +486,20 @@ class NativePushRequest:
 
 
 @dataclass(frozen=True)
+class _IndexedObjectSelection:
+    """Binding to the native scan's ordered, exclusive index; not coverage proof."""
+    count: int
+    order: str
+
+    def __len__(self) -> int:
+        return self.count
+
+
+@dataclass(frozen=True)
 class NativePushSelection:
     request: NativePushRequest
     expected_oids: tuple[str, ...]
-    object_oids: tuple[str, ...]
+    object_oids: tuple[str, ...] | _IndexedObjectSelection
     object_format: GitObjectFormat
     roots: tuple[str, ...]
     expected_parents: tuple[tuple[str, tuple[str, ...]], ...] = ()
@@ -664,7 +674,7 @@ class CoverageRecorder:
 
     def __init__(
         self,
-        expected_oids: Iterable[str],
+        expected_oids: Iterable[str] | _IndexedObjectSelection,
         observer: Callable[[CoverageEvent, str], None] | None = None,
         fault_port: "CoverageFaultPort | None" = None,
         *,
@@ -672,7 +682,12 @@ class CoverageRecorder:
         history_index: "_HistoryIndex | None" = None,
         receipt_coverage: str | None = None,
     ) -> None:
-        self.expected_oids = tuple(expected_oids)
+        if isinstance(expected_oids, _IndexedObjectSelection):
+            if history_index is None or receipt_coverage != "objects":
+                raise ValueError("indexed object selection requires compact native coverage")
+            self.expected_oids = expected_oids
+        else:
+            self.expected_oids = tuple(expected_oids)
         self._receipt_coverage = receipt_coverage
         self._history_index = history_index
         self._events = {event: [] for event in CoverageEvent} if history_index is None else None
@@ -4087,11 +4102,13 @@ async def _native_push_selection(
     if not index.selected_commits_covered():
         return _refusal("PS-MSG-COVERAGE", "commit-object-set")
     parent_graph = () if compact_graph else tuple(index.selected_commits())
-    objects = tuple(index.selected_objects())
+    objects = index.bind_object_selection() if compact_graph else tuple(index.selected_objects())
     commits = tuple(index.selected_commit_ids()) if compact_graph else tuple(oid for oid, _parents in parent_graph)
-    tag_inventory = (
-        inventory if inventory is not None and not commits and objects == roots else None
-    )
+    tag_inventory = None
+    if inventory is not None and not commits and len(objects) == len(roots):
+        ordered_objects = index.selected_objects() if isinstance(objects, _IndexedObjectSelection) else objects
+        if all(oid == root for oid, root in zip_longest(ordered_objects, roots)):
+            tag_inventory = inventory
     return NativePushSelection(request, commits, objects, request.object_format, roots, parent_graph,
                                tag_inventory, indexed_parent_graph=compact_graph)
 
@@ -5024,6 +5041,12 @@ class _HistoryIndex:
         order = "oid" if sorted_ids else "sequence"
         return (oid for (oid,) in self.db.execute(f"SELECT oid FROM selected_object ORDER BY {order}"))
 
+    def bind_object_selection(self) -> _IndexedObjectSelection | tuple[()]:
+        count, = self.db.execute("SELECT COUNT(*) FROM selected_object").fetchone()
+        if not count:
+            return ()
+        return _IndexedObjectSelection(count, _ordered_receipt_selection_digest(self.selected_objects()))
+
     def acquisition_targets(self, *, lexical: bool = False) -> Iterable[tuple[str, bool]]:
         order = "o.oid" if lexical else "o.sequence"
         after = "" if lexical else 0
@@ -5096,7 +5119,7 @@ class _HistoryIndex:
         ))
 
     def seal_receipt_coverage(
-        self, expected: tuple[str, ...], *, commits: bool = False,
+        self, expected: tuple[str, ...] | _IndexedObjectSelection, *, commits: bool = False,
     ) -> _ReceiptCoverage | Refusal:
         def invalid():
             return _refusal("PS-MSG-COVERAGE", "multiplicity")
@@ -5105,8 +5128,14 @@ class _HistoryIndex:
             table = "selected_commit" if commits else "selected_object"
             return (oid for (oid,) in self.db.execute(f"SELECT oid FROM {table} ORDER BY {order}"))
 
-        if not expected or any(a != b for a, b in zip_longest(expected, selected("sequence"))):
-            return invalid()
+        if isinstance(expected, _IndexedObjectSelection):
+            if commits or self.bind_object_selection() != expected:
+                return invalid()
+            ordered_digest = expected.order
+        else:
+            if not expected or any(a != b for a, b in zip_longest(expected, selected("sequence"))):
+                return invalid()
+            ordered_digest = _ordered_receipt_selection_digest(expected)
         for stage in CoverageEvent:
             observed = self.db.execute(
                 "SELECT oid, COUNT(*) FROM coverage_event WHERE stage=? GROUP BY oid ORDER BY oid",
@@ -5121,7 +5150,7 @@ class _HistoryIndex:
                 b"object-set", (oid.lower().encode("ascii") for oid in selected("oid")),
             ),
             _coverage_digest(self.coverage_events(CoverageEvent.SCANNED)),
-            _ordered_receipt_selection_digest(expected),
+            ordered_digest,
         )
 
     def add_blob(self, oid, size, digest, binary):
@@ -5303,8 +5332,14 @@ async def _acquire_indexed_history(
         return True
 
     targets = index.acquisition_targets(lexical=lexical_acquisition)
+    indexed_objects = isinstance(selection.object_oids, _IndexedObjectSelection)
+    if indexed_objects and (lexical_acquisition or not native):
+        return _refusal("PS-MSG-COVERAGE", "object-set")
+    ordered_targets = ((target[0], target) for target in targets) if indexed_objects else (
+        zip_longest(selection.object_oids, targets)
+    )
     acquisition_progress = _VerifiedWorkPhase("acquired", enabled=native, budget=scan_deadline)
-    for ordinal, (oid, target) in enumerate(zip_longest(selection.object_oids, targets)):
+    for ordinal, (oid, target) in enumerate(ordered_targets):
         if _time_left(scan_deadline, asyncio.get_running_loop().time) <= 0:
             return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
         if target is None or oid != target[0]:
@@ -5414,7 +5449,8 @@ async def _acquire_indexed_history(
         acquisition_progress.step()
     acquisition_progress.finish()
 
-    if any(a != b for a, b in zip_longest(index.acquired_oids(), selection.object_oids)):
+    expected_objects = index.selected_objects() if indexed_objects else selection.object_oids
+    if any(a != b for a, b in zip_longest(index.acquired_oids(), expected_objects)):
         return _refusal("PS-MSG-COVERAGE", "object-set")
     commit_problem = index.commit_coverage_problem(
         check_parents=selection.indexed_parent_graph or bool(selection.expected_parents),
@@ -6097,6 +6133,10 @@ def _serialize_native_receipt_common(outcome: ScanOutcome) -> str:
     if outcome.kind != "clean" or selection is None or history is None or coverage is None:
         raise ValueError("native receipt")
     if isinstance(coverage, _ReceiptCoverage):
+        expected_order = (
+            selection.object_oids.order if isinstance(selection.object_oids, _IndexedObjectSelection)
+            else _ordered_receipt_selection_digest(selection.object_oids)
+        )
         exact_coverage = (
             isinstance(history.object_ids, _SealedOids)
             and isinstance(history.blob_ids, _SealedOids)
@@ -6105,13 +6145,14 @@ def _serialize_native_receipt_common(outcome: ScanOutcome) -> str:
             and coverage.selection_set == history.object_set == history.object_ids.digest
             and history.blob_set == history.blob_ids.digest
             and len(history.commit_ids) + len(history.blob_ids) + len(history.tag_ids) <= len(history.object_ids)
-            and coverage.selection_order == _ordered_receipt_selection_digest(selection.object_oids)
+            and coverage.selection_order == expected_order
         )
     else:
         actual = _build_coverage_proof(coverage.expected_oids, coverage.requested_oids,
                                        coverage.acquired_oids, coverage.scanned_message_oids, allow_empty=True)
         exact_coverage = (
-            actual == coverage and set(coverage.expected_oids) == set(history.object_ids)
+            not isinstance(selection.object_oids, _IndexedObjectSelection)
+            and actual == coverage and set(coverage.expected_oids) == set(history.object_ids)
             and set(selection.object_oids) == set(history.object_ids)
             and tuple(sorted(set(history.object_ids))) == history.object_ids
             and set(history.blob_ids).issubset(history.object_ids)
