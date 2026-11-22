@@ -2462,11 +2462,19 @@ def _content_hits(
     display_locator: str | None = None,
     staged_index: int | None = None,
 ) -> list[Finding]:
+    rows = ((*line, None) for line in _selected_text_lines(text, path, subject_kind))
+    return _text_findings(rows, path, find_machine_paths, subject_kind, max_findings,
+                          machine_path_lines, display_locator, staged_index)
+
+
+def _text_findings(rows, path, find_machine_paths, subject_kind, max_findings=None,
+                   machine_path_lines=None, display_locator=None, staged_index=None):
     findings: list[Finding] = []
     locator = _safe_locator(path, subject_kind)
-    for line_number, line_start, line in _selected_text_lines(text, path, subject_kind):
+    for line_number, line_start, line, raw_matches in rows:
         seen: set[tuple] = set()
-        for observation in _line_observations(line, line_number, line_start, subject_kind):
+        for observation in _line_observations(line, line_number, line_start, subject_kind,
+                                              raw_matches=raw_matches):
             key = _observation_key(observation)
             if key in seen:
                 continue
@@ -2627,9 +2635,9 @@ def _binary_content_hits(
 def _matcher_batches(rows):
     batch = []
     size = 0
-    for number, line in rows:
-        batch.append((number, line))
-        size += len(line)
+    for row in rows:
+        batch.append(row)
+        size += len(row[-1])
         if len(batch) >= 8192 or size >= 2 * 1024 * 1024:
             yield batch
             batch, size = [], 0
@@ -2648,6 +2656,22 @@ async def _binary_content_hits_with_matcher(
             ((number, line, _binary_lexical_classes(line, matches))
              for (number, line), matches in zip(batch, captures, strict=True)),
             path, find_machine_paths, room,
+        ))
+    return findings
+
+
+async def _text_content_hits_with_matcher(
+    raw, path, find_machine_paths, matcher, deadline, *, max_findings=None,
+):
+    kind = 'history-blob'
+    rows = _selected_text_lines(raw.decode('utf-8', 'replace'), path, kind)
+    findings = []
+    for batch in _matcher_batches(rows):
+        captures = await matcher.match(tuple((line, False) for _, _, line in batch), deadline)
+        room = None if max_findings is None else max(0, max_findings - len(findings))
+        findings.extend(_text_findings(
+            ((*row, matches) for row, matches in zip(batch, captures, strict=True)),
+            path, find_machine_paths, kind, room,
         ))
     return findings
 
@@ -5162,6 +5186,11 @@ async def _acquire_indexed_history(
                     if location not in shown_locations:
                         shown_locations.add(location)
                         content_findings.append(row)
+        elif matcher is not None:
+            content_findings = await _text_content_hits_with_matcher(
+                raw, decoded_path, find_machine_paths, matcher, scan_deadline,
+                max_findings=max(0, _MAX_FINDINGS - len(findings)),
+            )
         else:
             content_findings = _content_hits(
                 raw.decode("utf-8", "replace"),
