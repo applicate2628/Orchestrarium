@@ -560,6 +560,11 @@ _STOCK_NATIVE_ROLE_CONTRACT_PRIOR_PAIRS = (
     # Exact factory contract before removing Low catalogue entries.
     ((Path("shared") / "role-routing-policy.v1.json", "172b335f9d0ea70021bff88b048d1472709132897989365f4b4ee3e47e5682d1"),
      (Path("shared") / "orchestrarium-role-manifest.json", "c8164fe1df43369c22e9d2c800ef2e2cb0e775c6a31dc65fc25c06cf77e812dc")),
+    # Exact factory catalogue before benchmark snapshots were included.
+    ((Path("shared") / "role-routing-policy.v1.json", "b5ef5a34460abaad0af499304309be0649094ff596bcc7f5584f199046878dba"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "ab699ed377660521a08bf0e8555f468ca0efcf6458248009002a7f4fdc0314d1"),
+     (Path("scripts") / "resolve-agents-mode.py", "b255b28350e4fb4350425970a304e5a9a0a0723ee88b553174855e78558741ab"),
+     (Path("operating-model.md"), "7c57a353050c1e82b57eea7810efd9045abbfb99a72d2d10ac08b8a117a1714f")),
     # Exact pre-catalogue factory contract, including the resolver leaf.
     ((Path("shared") / "role-routing-policy.v1.json", "6d508666d4b1ce7511db799e017ed07c26df341ed6e07bb90c98e742420748d2"),
      (Path("shared") / "orchestrarium-role-manifest.json", "fefedb3f1d9fe2448414d8f6d454a43d62f3872b5eec48efe4e977c747011a2b"),

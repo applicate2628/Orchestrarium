@@ -47,6 +47,27 @@ class ModelCatalogueTests(unittest.TestCase):
         self.assertEqual(rows[0]["profiles"], [option["profile"] for option in description["options"]])
         self.assertIsNone(rows[0]["recommendedProfile"])
 
+    def test_benchmarks_follow_exact_eligible_profiles_without_changing_prices(self):
+        description = self.describe(role="worker", task="engineering")
+        rows = {row["model"]: row for row in description["modelCatalog"]}
+        sol = rows["gpt-6.2-sol"]
+        medium = sol["benchmarkByProfile"]["frontier-medium"]
+        self.assertEqual((medium["intelligenceIndex"], medium["costUsdPerTask"],
+                          medium["minutesPerTask"]), (53, 0.41, 3.6))
+        self.assertEqual(sol["relativePrice"]["uniform"], 1)
+        self.assertEqual(medium["observedDate"], "2026-11-22")
+        self.assertTrue(medium["sourceUrl"].startswith("https://artificialanalysis.ai/"))
+        luna = rows["gpt-6-luna"]
+        self.assertNotIn("luna-medium", luna["benchmarkByProfile"])
+        for row in rows.values():
+            self.assertLessEqual(set(row["benchmarkByProfile"]), set(row["profiles"]))
+        ref = runpy.run_path(str(RESOLVER))["_advisory_effort_snapshot"]
+        policy = json.loads((ROOT / "shared/role-routing-policy.v1.json").read_text(encoding="utf-8"))
+        self.assertIsNone(ref(policy, "other", "gpt-6.2-sol", "medium"))
+        self.assertIsNone(ref(policy, "codex", "gpt-6.2-sol", "unknown"))
+        policy["modelReference"]["benchmarkSnapshot"]["models"]["codex"]["gpt-6.2-sol"]["efforts"]["medium"]["minutesPerTask"] = True
+        self.assertIsNone(ref(policy, "codex", "gpt-6.2-sol", "medium"))
+
     def test_comparison_does_not_authorize_unapproved_astra_or_remove_reason(self):
         common = [
             sys.executable, "-B", str(RESOLVER), "--provider", "codex", "--repo-root", str(ROOT),

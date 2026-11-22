@@ -1501,6 +1501,34 @@ def _advisory_model_reference(policy: dict, provider: str, model: str) -> dict:
     }
 
 
+def _advisory_effort_snapshot(policy, provider, model, effort):
+    record = policy
+    for key in ("modelReference", "benchmarkSnapshot"):
+        record = record.get(key) if isinstance(record, dict) else None
+    if not isinstance(record, dict):
+        return None
+    model_record = record
+    for key in ("models", provider, model):
+        model_record = model_record.get(key) if isinstance(model_record, dict) else None
+    if not isinstance(model_record, dict):
+        return None
+    efforts = model_record.get("efforts")
+    metrics = efforts.get(effort) if isinstance(efforts, dict) else None
+    if not isinstance(metrics, dict):
+        return None
+    fields = ("intelligenceIndex", "costUsdPerTask", "minutesPerTask")
+    values = {key: metrics.get(key) for key in fields}
+    if not all(type(value) in (int, float) and 0 <= value < float("inf") for value in values.values()):
+        return None
+    source = model_record.get("sourceUrl")
+    provenance = {key: record.get(key) for key in ("publisher", "methodology", "observedDate")}
+    if not isinstance(source, str) or not source.startswith("https://") or not all(
+        isinstance(value, str) and value.strip() for value in provenance.values()
+    ):
+        return None
+    return {**provenance, "sourceUrl": source, **values}
+
+
 def _advisory_model_catalog(policy, provider, options, default_profile):
     by_model = {}
     for option in options:
@@ -1514,6 +1542,9 @@ def _advisory_model_catalog(policy, provider, options, default_profile):
         row = by_model[model]
         row["profiles"].append(option["profile"])
         row["tiersByProfile"][option["profile"]] = option["modelTier"]
+        measured = _advisory_effort_snapshot(policy, provider, model, option["effort"])
+        if measured is not None:
+            row.setdefault("benchmarkByProfile", {})[option["profile"]] = measured
         if option["profile"] == default_profile:
             row["recommendedProfile"] = default_profile
     return sorted(by_model.values(), key=lambda row: row["recommendedProfile"] is None)

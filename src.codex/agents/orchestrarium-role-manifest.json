@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "packRevision": "1.x-native-role-policy-v1",
-  "policySha256": "b5ef5a34460abaad0af499304309be0649094ff596bcc7f5584f199046878dba",
+  "policySha256": "7b1f5cda232547e3a6f09352908fc9f2781dbeadad55413d8dadb4e40038a929",
   "roles": {
     "algorithm-scientist": {
       "relativePath": "algorithm-scientist.toml",
