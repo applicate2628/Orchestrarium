@@ -131,3 +131,24 @@ def test_multiple_git_streams_keep_first_commit_order_and_last_parent_view():
         assert tuple(index.selected_objects()) == ("top", "old", "blob-z", "other", "blob-a")
         assert tuple(index.selected_objects(sorted_ids=True)) == ("blob-a", "blob-z", "old", "other", "top")
         assert index.selected_commits_covered()
+
+
+def test_indexed_coverage_preserves_events_and_duplicate_refusal():
+    scanner = runpy.run_path(str(SCANNER))
+    with closing(sqlite3.connect("")) as db:
+        index = scanner["_HistoryIndex"](db)
+        event = scanner["CoverageEvent"]
+        expected = ("a" * 40, "b" * 40)
+        expected_events = tuple((stage, oid) for oid in reversed(expected) for stage in event)
+        observed = []
+        record = scanner["CoverageRecorder"](
+            expected, lambda stage, oid: observed.append((stage, oid)), history_index=index,
+        )
+        for stage, oid in expected_events:
+            record.record(stage, oid)
+        assert tuple(observed) == expected_events
+        assert record.proof().scanned_message_oids == tuple(reversed(expected))
+        assert tuple(index.coverage_events(event.SCANNED)) == tuple(reversed(expected))
+        record.record(event.SCANNED, expected[0])
+        assert record.proof().failure_id == "PS-MSG-COVERAGE"
+        assert tuple(index.coverage_events(event.SCANNED)) == (*reversed(expected), expected[0])

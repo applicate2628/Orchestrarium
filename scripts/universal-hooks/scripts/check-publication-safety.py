@@ -586,11 +586,11 @@ class CoverageRecorder:
         fault_port: "CoverageFaultPort | None" = None,
         *,
         allow_empty: bool = False,
+        history_index: "_HistoryIndex | None" = None,
     ) -> None:
         self.expected_oids = tuple(expected_oids)
-        self._events: dict[CoverageEvent, list[str]] = {
-            event: [] for event in CoverageEvent
-        }
+        self._history_index = history_index
+        self._events = {event: [] for event in CoverageEvent} if history_index is None else None
         self._observer = observer
         self._fault_port = fault_port
         self._allow_empty = allow_empty
@@ -598,16 +598,22 @@ class CoverageRecorder:
     def record(self, event: CoverageEvent, oid: str) -> None:
         rows = ((event, oid),) if self._fault_port is None else self._fault_port.transform(event, oid)
         for observed_event, observed_oid in rows:
-            self._events[observed_event].append(observed_oid)
+            if self._history_index is None:
+                self._events[observed_event].append(observed_oid)
+            else:
+                self._history_index.record_coverage(observed_event, observed_oid)
             if self._observer is not None:
                 self._observer(observed_event, observed_oid)
 
     def proof(self) -> CoverageProof | Refusal:
+        def events(stage: CoverageEvent) -> Iterable[str]:
+            if self._history_index is None:
+                return self._events[stage]
+            return self._history_index.coverage_events(stage)
+
         return _build_coverage_proof(
-            self.expected_oids,
-            self._events[CoverageEvent.REQUESTED],
-            self._events[CoverageEvent.ACQUIRED],
-            self._events[CoverageEvent.SCANNED],
+            self.expected_oids, events(CoverageEvent.REQUESTED),
+            events(CoverageEvent.ACQUIRED), events(CoverageEvent.SCANNED),
             allow_empty=self._allow_empty,
         )
 
@@ -4720,6 +4726,9 @@ class _HistoryIndex:
                 parents TEXT NOT NULL, stream INTEGER NOT NULL);
             CREATE TABLE selected_object (sequence INTEGER PRIMARY KEY, oid TEXT UNIQUE,
                 stream INTEGER NOT NULL);
+            CREATE TABLE coverage_event (sequence INTEGER PRIMARY KEY, stage TEXT NOT NULL,
+                oid TEXT NOT NULL);
+            CREATE INDEX coverage_stage ON coverage_event(stage, sequence);
             CREATE TABLE blob (oid TEXT PRIMARY KEY, size INTEGER NOT NULL,
                 digest BLOB NOT NULL, binary INTEGER NOT NULL) WITHOUT ROWID;
             CREATE TABLE subject (owner TEXT, path BLOB, blob TEXT, mode TEXT NOT NULL,
@@ -4794,6 +4803,15 @@ class _HistoryIndex:
             WHERE NOT EXISTS (SELECT 1 FROM selected_object AS o WHERE o.oid=c.oid)
             LIMIT 1
         """).fetchone() is None
+
+    def record_coverage(self, stage: CoverageEvent, oid: str) -> None:
+        # Preserve every observation, including duplicates, for the proof owner.
+        self.db.execute("INSERT INTO coverage_event(stage, oid) VALUES (?, ?)", (stage.value, oid))
+
+    def coverage_events(self, stage: CoverageEvent) -> Iterable[str]:
+        return (oid for (oid,) in self.db.execute(
+            "SELECT oid FROM coverage_event WHERE stage=? ORDER BY sequence", (stage.value,),
+        ))
 
     def add_blob(self, oid, size, digest, binary):
         self.db.execute("INSERT INTO blob VALUES (?, ?, ?, ?)", (oid, size, digest, binary))
@@ -5415,7 +5433,8 @@ async def _scan_selected_history_async(
         coverage = _build_coverage_proof((), (), (), (), allow_empty=True)
         return ScanOutcome("clean", mode, coverage=coverage, history=empty, **selection_fields)
     coverage_recorder = CoverageRecorder(
-        selection.object_oids if native else selection.expected_oids, coverage_observer, coverage_fault
+        selection.object_oids if native else selection.expected_oids, coverage_observer, coverage_fault,
+        history_index=history_index,
     )
     pending: ScanOutcome | None = None
     acquired: tuple[
