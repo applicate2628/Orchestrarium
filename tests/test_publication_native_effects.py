@@ -161,6 +161,96 @@ class TestNativePublicationEffects(unittest.TestCase):
         self.assertEqual(graph, ((first, (second,)), (second, ())))
 
 
+    def test_graph_budget_preserves_indexed_scope_and_rejects_duplicate_rows(self):
+        mod = self.module
+        fmt = mod._SUPPORTED_OBJECT_FORMATS[self.object_format]
+        oids = [str(side) * fmt.hex_length for side in (1, 2, 3)]
+        seen = set()
+
+        def admit(oid, _parents):
+            if oid in seen:
+                return False
+            seen.add(oid)
+            return True
+
+        async def attempt(rows, store=None):
+            async def read(_argv, *, on_line, **_options):
+                for oid in rows:
+                    problem = on_line(oid.encode("ascii"))
+                    if problem is not None:
+                        return problem
+                return 0, ()
+            with mock.patch.object(mod, "_read_git_lines_bounded", side_effect=read), \
+                    mock.patch.object(mod, "_MAX_COMMITS", 2):
+                return await mod._read_parent_graph_bounded(
+                    ("unused",), deadline=asyncio.get_running_loop().time() + 5,
+                    object_format=fmt, store_row=store,
+                )
+
+        self.assertEqual(asyncio.run(attempt(oids)).reason, "count")
+        self.assertEqual(asyncio.run(attempt(oids, admit)), ())
+        self.assertEqual(seen, set(oids))
+        seen.clear()
+        self.assertEqual(asyncio.run(attempt(oids + [oids[2]], admit)).reason, "parent-graph")
+
+
+    def import_large_history(self):
+        stream = bytearray()
+        for number in range(1, 10_002):
+            stream.extend(
+                (f"commit refs/heads/local-first\nmark :{number}\n"
+                 f"committer Synthetic Author <author@example.invalid> {1_700_000_000 + number} +0000\n"
+                 "data 15\nsynthetic input\n").encode("ascii")
+            )
+            if number > 1:
+                stream.extend(f"from :{number - 1}\n".encode("ascii"))
+            stream.extend(b"\n")
+        self.git("fast-import", "--quiet", raw=stream)
+
+    def test_large_first_publication_of_valid_history_is_not_refused_for_count(self):
+        # Use real unique Git commits and an empty receiver. No production
+        # tuning, altered limits, synthetic findings, or published refs.
+        import_root = self.root / "first-publication.git"
+        self.git("init", "--bare", "-q", "--object-format=" + self.object_format, str(import_root))
+        self.remote = import_root
+        self.git("remote", "set-url", "origin", str(import_root))
+        self.import_large_history()
+        tip = self.git("rev-parse", "refs/heads/local-first").strip().decode("ascii")
+        count = self.git("rev-list", "--count", tip).strip()
+        self.assertEqual(count, b"10001")
+        payload = self.payload([
+            (b"refs/heads/local-first", tip, b"refs/heads/main", self.zero()),
+        ])
+        outcome = self.scan(payload)
+        self.assertEqual(outcome.kind, "clean", outcome.refusal)
+        self.assertEqual(len(outcome.history.commit_ids), 10_001)
+        mod = self.module
+        with self.in_root(), mock.patch.object(mod, "__injected_native_push__", payload, create=True):
+            ranged = mod._scan_range(
+                "origin", "refs/heads/main", lambda _line: (), source_revision=tip, receipt_coverage=True,
+            )
+        self.assertEqual(ranged.kind, "clean", ranged.refusal)
+        self.assertEqual(len(ranged.history.commit_ids), 10_001)
+        self.assertEqual(mod._format_outcome(ranged)[2], 0)
+        self.assertEqual(self.git("--git-dir", str(import_root), "for-each-ref"), b"")
+
+
+    def test_small_publication_does_not_rescan_large_receiver_history(self):
+        self.import_large_history()
+        base = self.git("rev-parse", "refs/heads/local-first").strip().decode("ascii")
+        self.git("push", "-q", "origin", base + ":refs/heads/large")
+        tree = self.git("rev-parse", base + "^{tree}").strip().decode("ascii")
+        tip = self.git("commit-tree", tree, "-p", base, "-m", "one new commit").strip().decode("ascii")
+        self.git("update-ref", "refs/heads/local-first", tip)
+        payload = self.payload([(b"refs/heads/local-first", tip, b"refs/heads/large", base)])
+        outcome = self.scan(payload)
+        self.assertEqual(outcome.kind, "clean", outcome.refusal)
+        self.assertEqual(outcome.history.commit_ids, (tip,))
+        self.assertEqual(outcome.history.object_ids, (tip,))
+        self.assertEqual(self.git("--git-dir", str(self.remote), "rev-parse", "refs/heads/large").strip(),
+                         base.encode("ascii"))
+
+
     def test_tag_annotation_is_scanned_even_when_target_commit_is_remote(self):
         annotation = "TOKEN=" + "aB9" * 16
         self.git("tag", "-a", "extra", "-m", annotation)

@@ -3654,7 +3654,9 @@ async def _read_parent_graph_bounded(
 
     def consume(row: bytes) -> Refusal | None:
         nonlocal count
-        if count >= _MAX_COMMITS:
+        # The indexed route has no extra commit-only ceiling. Its exact
+        # object inventory already bounds how many commits can be admitted.
+        if store_row is None and count >= _MAX_COMMITS:
             return _refusal("PS-MSG-LIMIT", "count")
         fields = row.split(b" ")
         if not fields or any(len(field) != object_format.hex_length for field in fields):
@@ -4037,7 +4039,7 @@ async def _native_commit_range_selection(
         )
         if isinstance(selected_objects, Refusal):
             return selected_objects
-        if not index.selection_within_limits():
+        if not index.object_selection_within_limit():
             return _refusal("PS-MSG-LIMIT", "count")
     if selected_primary != (primary.destination, primary.source):
         return _refusal("PS-MSG-RANGE", "native-primary")
@@ -4920,11 +4922,9 @@ class _HistoryIndex:
     def has_blob(self, oid: str) -> bool:
         return self.db.execute("SELECT 1 FROM blob WHERE oid=?", (oid,)).fetchone() is not None
 
-    def selection_within_limits(self):
-        commits, objects = self.db.execute(
-            "SELECT (SELECT COUNT(*) FROM selected_commit), (SELECT COUNT(*) FROM selected_object)"
-        ).fetchone()
-        return commits <= _MAX_COMMITS and objects <= _MAX_OBJECTS
+    def object_selection_within_limit(self):
+        objects, = self.db.execute("SELECT COUNT(*) FROM selected_object").fetchone()
+        return objects <= _MAX_OBJECTS
 
     def selected_commits_covered(self):
         return self.db.execute("""

@@ -526,7 +526,7 @@ def test_native_mode_captures_repository_even_without_exception_records():
         capture.assert_called_once()
 
 
-def _run_owned_git_job(argv, cwd):
+def _run_owned_git_job(argv, cwd, *, timeout=60):
     """Exercise the real transfer inside the existing creator-owned Job."""
     helper_path = CANONICAL_HOOK.parents[2] / "process_supervision" / "windows_job.py"
     specification = importlib.util.spec_from_file_location("_native_gate_test_job", helper_path)
@@ -560,7 +560,7 @@ def _run_owned_git_job(argv, cwd):
             worker = threading.Thread(target=drain, args=(stream, key))
             worker.start()
             workers.append(worker)
-        returncode = process.wait(time.monotonic() + 60)
+        returncode = process.wait(time.monotonic() + timeout)
         closure = process.settle(time.monotonic() + 5)
         for worker in workers:
             worker.join(timeout=5)
@@ -1112,3 +1112,49 @@ def test_owned_scan_progress_is_attempt_bound_and_leaves_real_stderr_unchanged()
     assert progress.feed(final) == b""
     assert progress.finish() == final
     assert progress.completed == 44
+
+
+
+@pytest.mark.skipif(os.name != "nt", reason="This target receiving verifies the Windows creator-owned Job")
+def test_actual_first_publication_crosses_old_commit_count(native_repository, monkeypatch):
+    owner = module()
+    home = native_repository / "synthetic-user"
+    home.mkdir()
+    monkeypatch.setenv("USERPROFILE", str(home))
+    executable = str(pathlib.Path(shutil.which("git")).resolve(strict=True))
+
+    def git(*arguments, **options):
+        return subprocess.run([executable, "-C", str(native_repository), *arguments],
+                              check=True, capture_output=True, timeout=30, **options).stdout
+
+    remote = native_repository / "first-receiver.git"
+    git("init", "-q", "--bare", str(remote))
+    git("remote", "add", "origin", str(remote))
+    git("config", "protocol.allow", "never")
+    git("config", "protocol.file.allow", "always")
+    stream = bytearray()
+    for number in range(1, 10_002):
+        stream.extend((f"commit refs/heads/large-first\nmark :{number}\n"
+                       f"committer Synthetic <author@example.invalid> {1_700_000_000 + number} +0000\n"
+                       "data 15\nsynthetic input\n").encode("ascii"))
+        if number > 1:
+            stream.extend(f"from :{number - 1}\n".encode("ascii"))
+        stream.extend(b"\n")
+    git("fast-import", "--quiet", input=stream)
+    tip = git("rev-parse", "refs/heads/large-first").strip()
+    argv = (executable, "-C", str(native_repository), *owner.native_git_config_arguments(),
+            "push", "--porcelain", "origin", "refs/heads/large-first:refs/heads/received")
+    envelope = {"tool_name": "Bash", "cwd": str(native_repository), "tool_input": {"command": shlex.join(argv)}}
+    runner = CANONICAL_HOOK.with_name("check-git-push-gate-runner.py")
+    preflight = subprocess.run([sys.executable, "-B", str(runner)], input=json.dumps(envelope).encode(),
+                               capture_output=True, cwd=native_repository, timeout=30)
+    assert (preflight.returncode, preflight.stdout, preflight.stderr) == (0, b"", b"")
+    code, stdout, stderr, closure = _run_owned_git_job(argv, native_repository, timeout=120)
+    assert closure.complete and code == 0, (stdout + stderr).decode("utf-8", "replace")
+    receipts = [json.loads(line) for line in stdout.splitlines() if line.startswith(b"{")]
+    assert len(receipts) == 1
+    assert receipts[0]["version"] == 4 and receipts[0]["status"] == "clean"
+    assert receipts[0]["commits"] == 10_001
+    assert git("--git-dir", str(remote), "for-each-ref", "--format=%(refname) %(objectname)") == (
+        b"refs/heads/received " + tip + b"\n"
+    )
