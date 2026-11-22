@@ -317,7 +317,9 @@ class RetainedPayloadTests(unittest.TestCase):
             None, tuple(commits), (*commits, tree, blob), scanner._SHA1_OBJECT_FORMAT,
             tuple(commits),
         )
-        history, coverage, findings = acquire(chosen, Reader(objects))
+        with mock.patch.object(scanner, "_parse_tree", wraps=scanner._parse_tree) as parse:
+            history, coverage, findings = acquire(chosen, Reader(objects))
+        self.assertEqual(parse.call_count, 1)
         subjects = tuple(sorted((owner, path, blob) for owner in commits for path in paths))
         self.assertEqual(len(history.subjects), len(subjects))
         self.assertEqual(history.subject_set, scanner._subject_set_digest(subjects))

@@ -4878,7 +4878,7 @@ async def _acquire_indexed_history(
     commit_topology: dict[str, tuple[str, tuple[str, ...]]] = {}
     tag_targets: dict[str, tuple[str, str]] = {}
     direct_tag_commit = None
-    tree_cache: OrderedDict[str, bytes] = OrderedDict()
+    tree_cache: OrderedDict[str, tuple[bytes | tuple[TreeEntry, ...], int]] = OrderedDict()
     blob_records: dict[str, tuple[int, bytes, bool]] = {}
     findings: list[Finding] = []
     # Total unique bytes are receipt evidence, not retained-cache allocation.
@@ -4887,18 +4887,29 @@ async def _acquire_indexed_history(
     aggregate_blobs = 0
     retained_tree_bytes = 0
 
-    def retain_tree(oid: str, raw: bytes) -> None:
+    def retain_tree(oid: str, payload: bytes | tuple[TreeEntry, ...]) -> bool:
         nonlocal retained_tree_bytes
-        if len(raw) > _TREE_CACHE_BYTES or _MAX_TREE_CACHE_ENTRIES <= 0:
-            return
+        cost = sys.getsizeof(payload)
+        if isinstance(payload, tuple):
+            # Charge parsed objects and their fields to the same cache budget.
+            for entry in payload:
+                cost += (sys.getsizeof(entry) + sys.getsizeof(entry.__dict__)
+                         + sys.getsizeof(entry.kind) + sys.getsizeof(entry.name)
+                         + sys.getsizeof(entry.oid) + sys.getsizeof(entry.mode))
+        if cost > _TREE_CACHE_BYTES or _MAX_TREE_CACHE_ENTRIES <= 0:
+            return False
+        previous = tree_cache.pop(oid, None)
+        if previous is not None:
+            retained_tree_bytes -= previous[1]
         while tree_cache and (
-            retained_tree_bytes + len(raw) > _TREE_CACHE_BYTES
+            retained_tree_bytes + cost > _TREE_CACHE_BYTES
             or len(tree_cache) >= _MAX_TREE_CACHE_ENTRIES
         ):
-            _, evicted = tree_cache.popitem(last=False)
-            retained_tree_bytes -= len(evicted)
-        tree_cache[oid] = raw
-        retained_tree_bytes += len(raw)
+            _, (_, evicted_cost) = tree_cache.popitem(last=False)
+            retained_tree_bytes -= evicted_cost
+        tree_cache[oid] = (payload, cost)
+        retained_tree_bytes += cost
+        return True
 
     for oid in selection.object_oids:
         if asyncio.get_running_loop().time() >= scan_deadline:
@@ -5029,20 +5040,29 @@ async def _acquire_indexed_history(
         if actual_type != declared_type:
             return _refusal("PS-MSG-FRAME", "tag-target")
 
-    async def load_tree(oid: str) -> bytes | Refusal:
+    async def load_tree(oid: str) -> tuple[TreeEntry, ...] | Refusal:
         cached = tree_cache.get(oid)
         if cached is not None:
             tree_cache.move_to_end(oid)
-            return cached
-        result = await reader.read(oid, "tree", scan_deadline=scan_deadline)
-        if isinstance(result, Refusal):
-            return result
-        if (result.returned_oid != oid or result.object_type != "tree"
-                or hashlib.new(selection.object_format.name,
-                               f"tree {len(result.raw)}\0".encode("ascii") + result.raw).hexdigest() != oid):
-            return _refusal("PS-MSG-COVERAGE", "object-content-identity")
-        retain_tree(oid, result.raw)
-        return result.raw
+            raw = cached[0]
+            if isinstance(raw, tuple):
+                return raw
+        else:
+            result = await reader.read(oid, "tree", scan_deadline=scan_deadline)
+            if isinstance(result, Refusal):
+                return result
+            if (result.returned_oid != oid or result.object_type != "tree"
+                    or hashlib.new(selection.object_format.name,
+                                   f"tree {len(result.raw)}\0".encode("ascii") + result.raw).hexdigest() != oid):
+                return _refusal("PS-MSG-COVERAGE", "object-content-identity")
+            raw = result.raw
+        # Parse at first traversal, not during acquisition, so errors are not
+        # moved ahead of the original checks. Reuse only successful results.
+        entries = _parse_tree(raw, selection.object_format)
+        if not isinstance(entries, Refusal) and not retain_tree(oid, entries) and cached is None:
+            # A parsed tree may not fit even when its verified raw bytes do.
+            retain_tree(oid, raw)
+        return entries
 
     unpublished_trees = {
         oid for oid, object_type in object_types.items() if object_type == "tree"
@@ -5082,14 +5102,11 @@ async def _acquire_indexed_history(
             tree_oid, prefix, ancestors = stack.pop()
             if tree_oid in ancestors:
                 return _refusal("PS-MSG-FRAME", "tree-cycle")
-            raw_tree = await load_tree(tree_oid)
-            if isinstance(raw_tree, Refusal):
-                return raw_tree
-            if tree_oid in unpublished_trees:
-                reached_unpublished_trees.add(tree_oid)
-            entries = _parse_tree(raw_tree, selection.object_format)
+            entries = await load_tree(tree_oid)
             if isinstance(entries, Refusal):
                 return entries
+            if tree_oid in unpublished_trees:
+                reached_unpublished_trees.add(tree_oid)
             for entry in reversed(entries):
                 guard = _tree_traversal_guard(
                     deadline=scan_deadline,
