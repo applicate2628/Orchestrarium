@@ -5148,6 +5148,7 @@ async def _acquire_indexed_history(
         return True
 
     targets = index.acquisition_targets(lexical=lexical_acquisition)
+    announce_acquisition = globals().get("__injected_verified_acquisition__") if native else None
     for ordinal, (oid, target) in enumerate(zip_longest(selection.object_oids, targets)):
         if asyncio.get_running_loop().time() >= scan_deadline:
             return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
@@ -5253,6 +5254,10 @@ async def _acquire_indexed_history(
         else:
             return _refusal("PS-MSG-FRAME", "object-type")
         result = None  # Release the previous blob before the next reader allocation.
+        if announce_acquisition is not None:
+            completed = ordinal + 1
+            if completed == 1 or completed % 128 == 0 or completed == len(selection.object_oids):
+                announce_acquisition(completed)
 
     if any(a != b for a, b in zip_longest(index.acquired_oids(), selection.object_oids)):
         return _refusal("PS-MSG-COVERAGE", "object-set")

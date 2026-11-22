@@ -948,11 +948,15 @@ def test_named_remote_keeps_private_endpoint_inside_captured_stdin(native_reposi
     wire = b"HEAD " + commit + b" refs/heads/main " + b"0" * 40 + b"\n"
     original = owner._run_snapshot_child
     received_payloads = []
+    progress_counts = []
     def child(pending, payload, *args):
         assert all(canary not in value for value in pending.exact_argv)
         assert json.loads(payload)["nativePush"]["endpoint"] == endpoint
         received_payloads.append(payload)
-        return original(pending, payload, *args)
+        launched, records = original(pending, payload, *args)
+        assert len(records) == 1
+        progress_counts.append(records[0].verified_acquired_objects)
+        return launched, records
     output, errors = io.StringIO(), io.StringIO()
     with mock.patch.object(owner, "_run_snapshot_child", side_effect=child), \
          mock.patch.object(sys, "stdin", SimpleNamespace(buffer=io.BytesIO(wire))), \
@@ -960,6 +964,7 @@ def test_named_remote_keeps_private_endpoint_inside_captured_stdin(native_reposi
         result = owner._native_pre_push_main(["origin", endpoint])
     assert result == 0, errors.getvalue()
     assert len(received_payloads) == 2
+    assert progress_counts[0] == 0 and progress_counts[1] > 0
     lines = output.getvalue().splitlines()
     v3 = owner.parse_publication_safety_observation(lines[0])
     v4 = owner.parse_publication_safety_observation(lines[1])
@@ -1076,3 +1081,34 @@ def test_native_callback_reuses_new_graph_tag_scan_without_skipping_closure_chec
         assert output.out == "" and "PGG-SCAN-IDENTITY-DRIFT" in output.err
     else:
         assert output.out == "V3\nV4\n" and output.err == ""
+
+
+def test_owned_scan_progress_is_attempt_bound_and_leaves_real_stderr_unchanged():
+    gate = module()
+    token = "a" * 32
+    progress = gate._ScanProgressFrames(token)
+
+    def frame(attempt, count):
+        return b"\x1eORCHE-SCAN-PROGRESS-V1 " + attempt.encode("ascii") + b" " + count + b"\n"
+
+    marker = frame(token, b"17")
+    assert progress.feed(b"ordinary message\n" + marker[:15]) == b"ordinary message\n"
+    assert progress.completed == 0
+    assert progress.feed(marker[15:]) == b""
+    assert progress.completed == 17
+    assert progress.feed(frame(token, b"17") + frame(token, b"2")) == b""
+    assert progress.completed == 17
+    foreign = frame("b" * 32, b"42")
+    malformed = frame(token, b"1" * 180)
+    assert progress.feed(foreign + malformed) == foreign + malformed
+    assert progress.completed == 17
+    assert progress.feed(frame(token, b"42")) == b""
+    assert progress.completed == 42
+    third = frame(token, b"44")
+    assert progress.feed(b"ordinary-without-LF" + third[:5]) == b"ordinary-without-LF"
+    assert progress.feed(third[5:]) == b""
+    assert progress.completed == 44
+    final = frame(token, b"99")[:-1]
+    assert progress.feed(final) == b""
+    assert progress.finish() == final
+    assert progress.completed == 44

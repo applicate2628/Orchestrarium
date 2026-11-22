@@ -648,6 +648,7 @@ class TrustedExecutionRecord:
     closure_after: CanonicalSourceClosure
     interpreter_identity_after: InterpreterIdentity
     provenance_verdict: str
+    verified_acquired_objects: int = 0
 
 
 # R2 public names remain aliases of the single lifecycle types.
@@ -1517,7 +1518,15 @@ if policy.H("orchestrarium.publication-review.snapshot.v1",snapshot)!=review["sn
     raise RuntimeError("snapshot id")
 if len(sys.argv)<3 or sys.argv[1]!="--gate-git-executable":
     raise RuntimeError("git executable contract")
-if native_mode and not (sys.argv[3:]==["--native-push"] or (len(sys.argv[3:])==5 and sys.argv[3]=="--range" and sys.argv[6]=="--range-source")):
+scan_argv=sys.argv[3:]
+progress_attempt=None
+if scan_argv[:1]==["--gate-progress-attempt"]:
+    if (not native_mode or len(scan_argv)!=3 or scan_argv[2]!="--native-push"
+        or re.fullmatch(r"[0-9a-f]{32}",scan_argv[1]) is None):
+        raise RuntimeError("scanner progress attempt")
+    progress_attempt=scan_argv[1]
+    scan_argv=scan_argv[2:]
+if native_mode and not (scan_argv==["--native-push"] or (len(scan_argv)==5 and scan_argv[0]=="--range" and scan_argv[3]=="--range-source")):
     raise RuntimeError("native scanner mode")
 git_executable=sys.argv[2]
 scanner_path="<closure>/check-publication-safety.py"
@@ -1528,7 +1537,18 @@ exec(compile(sources["matcher_wire"],wire["__file__"],"exec"),wire,wire)
 scanner["__injected_matcher_wire__"]=wire
 if native_mode: scanner["__injected_native_push__"]=native
 if scoped_mode: scanner["__injected_receiver_scope__"]=receiver_scope
-sys.argv=[scanner_path,*sys.argv[3:]]
+if progress_attempt is not None:
+    def verified_acquisition(completed):
+        if type(completed) is not int or not 0<completed<=9223372036854775807:
+            return
+        try:
+            line="\x1eORCHE-SCAN-PROGRESS-V1 "+progress_attempt+" "+str(completed)+"\n"
+            sys.stderr.buffer.write(line.encode("ascii"))
+            sys.stderr.buffer.flush()
+        except (OSError,ValueError):
+            pass
+    scanner["__injected_verified_acquisition__"]=verified_acquisition
+sys.argv=[scanner_path,*scan_argv]
 exec(compile(sources["scanner"],scanner_path,"exec"),scanner,scanner)
 '''
 
@@ -2785,6 +2805,51 @@ def _announce_scan_threshold(elapsed: float, report) -> None:
         pass
 
 
+class _ScanProgressFrames:
+    """Split private attempt-bound progress frames from ordinary stderr."""
+    _MAX_DIGITS = 19
+
+    def __init__(self, attempt: str) -> None:
+        self._prefix = b"\x1eORCHE-SCAN-PROGRESS-V1 " + attempt.encode("ascii") + b" "
+        self._tail = b""
+        self.completed = 0
+
+    def feed(self, chunk: bytes) -> bytes:
+        normal = bytearray()
+        pending, self._tail = self._tail + chunk, b""
+        while pending:
+            start = pending.find(self._prefix)
+            if start < 0:
+                # Only a suffix starting with the reserved separator could
+                # become a frame on the next read. Ordinary stderr is exact.
+                suffix = pending.rfind(self._prefix[:1])
+                if suffix >= 0 and self._prefix.startswith(pending[suffix:]):
+                    self._tail = pending[suffix:]
+                    pending = pending[:suffix]
+                normal.extend(pending)
+                break
+            normal.extend(pending[:start])
+            payload = pending[start + len(self._prefix):]
+            end = payload.find(b"\n", 0, self._MAX_DIGITS + 1)
+            if end >= 0 and re.fullmatch(rb"[1-9][0-9]{0,18}", payload[:end]):
+                completed = int(payload[:end])
+                if completed <= 9223372036854775807:
+                    self.completed = max(completed, self.completed)
+                    pending = payload[end + 1:]
+                    continue
+            if (end < 0 and len(payload) <= self._MAX_DIGITS
+                    and (not payload or re.fullmatch(rb"[1-9][0-9]*", payload))):
+                self._tail = pending[start:]
+                break
+            normal.append(pending[start])
+            pending = pending[start + 1:]
+        return bytes(normal)
+
+    def finish(self) -> bytes:
+        tail, self._tail = self._tail, b""
+        return tail
+
+
 def _run_snapshot_child(
     pending: PendingScanInvocation, payload: bytes, repository_workdir: str,
 ) -> tuple[LaunchedScanInvocation, tuple[TrustedExecutionRecord, ...]]:
@@ -2813,6 +2878,14 @@ def _run_snapshot_child(
 
     notice_scope = _scan_threshold_scope.get()
     threshold_notice = notice_scope if notice_scope is not None else _ScanThresholdNotice()
+    progress = (
+        _ScanProgressFrames(pending.attempt_id)
+        if isinstance(pending.binding, NativePushScanBinding)
+        and pending.exact_argv[-3:] == ("--gate-progress-attempt", pending.attempt_id, "--native-push")
+        and isinstance(pending.attempt_id, str)
+        and re.fullmatch(r"[0-9a-f]{32}", pending.attempt_id)
+        else None
+    )
 
     def retain_child_outcome(primary: BaseException) -> None:
         actual_streams = []
@@ -2859,17 +2932,22 @@ def _run_snapshot_child(
                 pass
 
     def drain(name: str, stream) -> None:
+        frames = progress if name == "stderr" else None
+        read = getattr(stream, "read1", stream.read) if frames is not None else stream.read
         try:
             while not overflow.is_set():
-                chunk = stream.read(8192)
-                if not chunk:
-                    return
+                chunk = read(8192)
+                eof = not chunk
+                if frames is not None:
+                    chunk = frames.finish() if eof else frames.feed(chunk)
                 with output_lock:
                     total = len(output["stdout"]) + len(output["stderr"])
                     if total + len(chunk) > SCAN_OUTPUT_BYTE_CAP:
                         overflow.set()
                         return
                     output[name].extend(chunk)
+                if eof:
+                    return
         except BaseException as exc:
             reader_failures.append(exc)
             overflow.set()
@@ -3039,6 +3117,7 @@ def _run_snapshot_child(
         process.returncode if process.returncode is not None else -1,
         bytes(output["stdout"]), bytes(output["stderr"]), settlement,
         pending.closure, pending.interpreter_identity, "pending",
+        progress.completed if progress is not None else 0,
     )
     return launched, (execution,)
 
@@ -3190,7 +3269,7 @@ def _run_authoritative_scan(
             raise PrRouteDenied(prefix + "-SCAN-PROVENANCE") from None
         invocation_id = secrets.token_hex(32)
         attempt_id = secrets.token_hex(16)
-        scan_arguments = ("--native-push",) if native_objects else (
+        scan_arguments = ("--gate-progress-attempt", attempt_id, "--native-push") if native_objects else (
             "--range", binding.remote, binding.destination, "--range-source", binding.source_oid,
         )
         argv = (
