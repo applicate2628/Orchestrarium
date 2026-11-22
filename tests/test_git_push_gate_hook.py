@@ -1351,6 +1351,30 @@ class TestPublicationSafetyTrustedScanR2(unittest.TestCase):
             self.assertIn("report not saved", warning.getvalue())
 
 
+    def test_native_callback_does_not_wait_for_pending_threshold_report(self) -> None:
+        module = self._module("native_pending_report")
+        pending = mock.Mock()
+        pending.done.return_value = False
+        pending.result.side_effect = AssertionError("pending writer must not be awaited")
+        warning = io.StringIO()
+
+        def run(_arguments):
+            module._scan_threshold_scope.get().observe(1.0)
+            return 2
+
+        with mock.patch.object(module, "SCAN_THRESHOLD_SECONDS", 0.05), \
+             mock.patch.object(module, "_start_scan_threshold_report", return_value=pending) as start, \
+             mock.patch.object(module, "_run_native_pre_push", side_effect=run), \
+             mock.patch.object(sys, "stderr", warning):
+            self.assertEqual(module._native_pre_push_main([]), 2)
+
+        start.assert_called_once()
+        pending.result.assert_not_called()
+        self.assertEqual(warning.getvalue().count("PGG-SCAN-THRESHOLD"), 1)
+        self.assertIn("report not confirmed", warning.getvalue())
+        self.assertNotIn("report not saved", warning.getvalue())
+
+
     def test_native_callback_shares_one_real_report_across_scanner_children(self) -> None:
         module = self._module("native_report")
         binding = module.PushScanBinding("generic", "origin", "refs/heads/main", "1" * 40, "1" * 40)

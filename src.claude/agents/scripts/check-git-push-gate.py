@@ -2790,13 +2790,17 @@ def _start_scan_threshold_report(elapsed: float):
 
 
 def _announce_scan_threshold(elapsed: float, report) -> None:
-    path = None
+    destination = "report not saved"
     try:
-        if report is not None and report.done():
-            path = report.result()
+        if report is not None:
+            if report.done():
+                path = report.result()
+                if path is not None:
+                    destination = f"report: {path}"
+            else:
+                destination = "report not confirmed"
     except Exception:
         pass
-    destination = f"report: {path}" if path is not None else "report not saved"
     try:
         print(
             f"PGG-SCAN-THRESHOLD: Scan exceeded the {SCAN_THRESHOLD_SECONDS:g}s "
