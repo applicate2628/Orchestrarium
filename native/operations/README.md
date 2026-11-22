@@ -90,6 +90,13 @@ frame with a malformed authenticated tree still fails structural decoding.
 python -B native/operations/tests/publication_composition_parity.py --driver <test-driver> --source <receiving-check-publication-safety.py>
 ~~~
 
+Pass --git-scratch with an existing disposable workspace directory to also
+compare unmodified git cat-file --batch output from file-only bare Git
+repositories in both SHA-1 and SHA-256 formats. This checks empty and nested
+trees and the refusal for a missing child with actual Git output. No remote,
+hook, or publication operation is involved. Use the receiving Python source
+being qualified, not an incidental checkout of an older scanner.
+
 Fixture preparation verifies both Git object-ID algorithms with Python; neither
 the Rust framing decoder nor this test adapter provides hash authority. This
 is a test-only arena, not a production cache, dispatcher, or acquisition

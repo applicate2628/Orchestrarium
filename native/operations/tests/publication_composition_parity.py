@@ -1,9 +1,12 @@
-"""Compose verified synthetic batch input with tree decoding and traversal."""
+"""Compare batch decoding and traversal using synthetic and native Git frames."""
 import argparse
 import asyncio
 import hashlib
-from pathlib import Path
+import os
 import subprocess
+import tempfile
+from itertools import chain
+from pathlib import Path
 from types import SimpleNamespace
 
 from git_batch_parity import receiving_reader, reference
@@ -62,10 +65,47 @@ def fixtures(algorithm):
         yield case, root, frames, leaf, ({root, child} & frames.keys()) | {root}
 
 
+def native_git_fixtures(algorithm, scratch):
+    """Obtain unmodified stdout frames from Git in a disposable repository."""
+    with tempfile.TemporaryDirectory(prefix="git-frames-", dir=scratch) as root:
+        env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+        env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull, GIT_ALLOW_PROTOCOL="file")
+
+        def git(*arguments, data=b""):
+            return subprocess.run(
+                ["git", *arguments], cwd=root, env=env, input=data, capture_output=True,
+                check=True, timeout=15,
+            ).stdout
+
+        def write(kind, raw):
+            oid = bytes.fromhex(git("hash-object", "-t", kind, "-w", "--stdin", data=raw).decode().strip())
+            assert oid == object_id(raw, kind.encode("ascii"), algorithm)
+            return oid
+
+        def batch(oid):
+            return git("cat-file", "--batch", data=oid.hex().encode("ascii") + b"\n")
+
+        git("init", "--quiet", "--bare", "--template=", f"--object-format={algorithm}")
+        leaf = write("blob", b"git fixture\n")
+        child = write("tree", entry(b"100644", b"nested.txt", leaf))
+        tree = write("tree", entry(b"40000", b"dir", child) + entry(b"100755", b"root.txt", leaf))
+        empty = write("tree", b"")
+        absent = object_id(b"unwritten tree", b"tree", algorithm)
+        missing_parent = write("tree", entry(b"40000", b"missing", absent))
+
+        absent_frame = batch(absent)
+        assert absent_frame == absent.hex().encode("ascii") + b" missing\n"
+        yield "native_valid", tree, {tree: batch(tree), child: batch(child)}, leaf, {tree, child}
+        yield "native_empty", empty, {empty: batch(empty)}, leaf, {empty}
+        yield "native_missing_child", missing_parent, {missing_parent: batch(missing_parent),
+                                                        absent: absent_frame}, leaf, {missing_parent, absent}
+
+
 def main():
     cli = argparse.ArgumentParser()
     cli.add_argument("--driver", type=Path, required=True)
     cli.add_argument("--source", type=Path, required=True)
+    cli.add_argument("--git-scratch", type=Path, help="Existing parent for disposable native Git fixtures")
     args = cli.parse_args()
     raw_source = args.source.read_bytes()
     source = raw_source.decode("utf-8")
@@ -73,7 +113,10 @@ def main():
     checked = lines = 0
     digest = hashlib.sha256()
     for algorithm, width in (("sha1", 20), ("sha256", 32)):
-        for case, root, frames, leaf, trees in fixtures(algorithm):
+        cases = fixtures(algorithm)
+        if args.git_scratch is not None:
+            cases = chain(cases, native_git_fixtures(algorithm, args.git_scratch))
+        for case, root, frames, leaf, trees in cases:
             graph = {}
             for oid, wire in frames.items():
                 result, = asyncio.run(reference(reader, wire, oid.hex().encode("ascii"), "tree", 1))
@@ -92,6 +135,16 @@ def main():
                 subjects = [r.split() for r in rows if r.startswith(b"S ")]
                 assert len(subjects) == 3 and {bytes.fromhex(r[2].decode()) for r in subjects} == {leaf}
                 assert sum(r.startswith(b"M ") for r in rows) == 5 and rows[-1] == b"R ok"
+            elif case == "native_valid":
+                rows = expected.splitlines()
+                assert sum(r.startswith(b"S ") for r in rows) == 2 and rows[-1] == b"R ok"
+            elif case == "native_empty":
+                rows = expected.splitlines()
+                assert not any(r.startswith(b"S ") for r in rows) and rows[-1] == b"R ok"
+            elif case == "native_missing_child":
+                rows = expected.splitlines()
+                assert not any(r.startswith(b"S ") for r in rows)
+                assert rows[-1].startswith(b"R ") and rows[-1] != b"R ok"
             for chunk in (1, 23, 65536):
                 rows = [f"{root.hex()} 4096 12 0", f"B {leaf.hex()}"]
                 rows.extend(f"F {oid.hex()} {'new' if oid in trees else 'known'} {chunk} {wire.hex() or '-'}"
