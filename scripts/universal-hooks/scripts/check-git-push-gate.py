@@ -130,7 +130,38 @@ class _ScannerRefusalDenied(PrRouteDenied):
                 match.group(2) or match.group(5), match.group(3) or match.group(4)), "")
 
 
+class _ScannerFindingDenied(PrRouteDenied):
+    # Only closed bucket names and integer sample counts may cross this boundary.
+    _ROW = re.compile(
+        r"PS-FINDING-(?:COMMIT-MESSAGE kind=(commit-message) field=message|"
+        r"CONTENT kind=([a-z][a-z0-9_-]*)) "
+        r"line=[1-9][0-9]* class=([a-z][a-z0-9_-]*)"
+    )
+    _FOOTER = "publication-safety scan found potential tracked-content leak markers"
+    _KINDS = frozenset({"commit-message", "commit-header", "history-blob", "path-blob", "tag-object", "tree-path"})
+
+    def __init__(self, failure_id: str, scanner_output: str) -> None:
+        super().__init__(failure_id)
+        self.sample: tuple[tuple[str, str, int], ...] = ()
+        rows = scanner_output.replace("\r\n", "\n").removesuffix("\n").split("\n")
+        if len(rows) < 2 or rows[-1] != self._FOOTER:
+            return
+        counts: dict[tuple[str, str], int] = {}
+        for row in rows[:-1]:
+            match = self._ROW.fullmatch(row)
+            if match is None:
+                return
+            kind = match[1] or match[2]
+            key = (kind if kind in self._KINDS else "other-object",
+                   "machine-path" if match[3] == "machine-path" else "other")
+            counts[key] = counts.get(key, 0) + 1
+        self.sample = tuple((*key, count) for key, count in sorted(counts.items()))
+
+
 def _format_scanner_refusal(exc: PrRouteDenied) -> str:
+    if type(exc) is _ScannerFindingDenied and exc.sample:
+        counts = "; ".join(f"{kind} {category}={count}" for kind, category, count in exc.sample)
+        return f" Scanner finding sample: {counts}."
     if type(exc) is _ScannerRefusalDenied and exc.scanner_id in _ScannerRefusalDenied._IDS:
         return f" Scanner diagnostic: id={exc.scanner_id}." + exc.detail
     return ""
@@ -542,7 +573,7 @@ class PendingScanInvocation:
                 else:
                     parsed = parse_publication_safety_observation(text)
                 if execution.exit_code == 1:
-                    raise PrRouteDenied(prefix + "-SCAN-FINDING")
+                    raise _ScannerFindingDenied(prefix + "-SCAN-FINDING", text)
                 if execution.exit_code == 2:
                     raise _ScannerRefusalDenied(prefix + "-SCAN-REFUSAL", text)
                 if execution.exit_code != 0:

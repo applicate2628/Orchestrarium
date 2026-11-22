@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-22
 
+- Show a redacted sample of publication findings by subject and category when a guarded push is denied. The summary does not reveal matched text, paths or locations and does not change the verdict.
+
 - The publication scanner verifies the captured review-policy origin once per scan instead of revalidating and hashing the same snapshot for every matching subject. It still checks each subject and revalidates used authority before publication.
 
 - The Lead now verifies the scope of a suspected blocker before pausing work. It checks the actual action and session, uses a read-only verification where possible, and continues independent work without bypassing confirmed restrictions.

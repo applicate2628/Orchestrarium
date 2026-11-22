@@ -318,6 +318,8 @@ def test_v3_precedes_native_transfer_and_rechecks_target(native_repository, monk
             assert code == 2
             expected = {"commit-secret": "PGG-SCAN-FINDING", "fake-v4": "PGG-RANGE-RECEIPT-VERSION", "scanner-failure": "PGG-SCAN-EXECUTION"}.get(scenario, "PGG-TARGET-CURRENTNESS")
             assert expected in errors.getvalue()
+            if scenario == "commit-secret":
+                assert "Scanner finding sample: history-blob other=1." in errors.getvalue()
             assert output.getvalue() == ""
             assert len(seen) == (0 if scenario in {"commit-secret", "scanner-failure"} else 1)
     refs = subprocess.check_output(["git", "--git-dir", str(remote), "for-each-ref", "--format=%(refname)"], timeout=20)
@@ -737,6 +739,7 @@ def test_actual_tag_only_push_retains_independent_v4_annotation_detection(native
     code, stdout, stderr, settlement = _run_owned_git_job(argv, native_repository)
     assert settlement.complete
     assert code != 0 and b"PGG-SCAN-FINDING" in stderr
+    assert b"Scanner finding sample: tag-object other=1." in stderr
     assert marker.encode() not in stdout + stderr
     assert subprocess.check_output(["git", "--git-dir", str(remote), "for-each-ref"], timeout=20) == b""
 
