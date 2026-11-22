@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-22
 
+- The Lead now verifies the scope of a suspected blocker before pausing work. It checks the actual action and session, uses a read-only verification where possible, and continues independent work without bypassing confirmed restrictions.
+
 - The Git publication hook records an advisory time-threshold warning at most once per callback and writes a best-effort, sanitized report under the user Orche reports directory. The warning never modifies scanner evidence, its verdict, or current protection budgets.
 
 - Publication diagnostics retain the original native scan refusal instead of replacing it with a secondary repository metadata error. Complete scans still require unchanged repository metadata before publication.
