@@ -194,6 +194,38 @@ class TestNativePublicationEffects(unittest.TestCase):
         self.assertEqual(asyncio.run(attempt(oids + [oids[2]], admit)).reason, "parent-graph")
 
 
+    def test_compact_graph_spools_total_bytes_but_still_checks_each_frame(self):
+        mod = self.module
+        fmt = mod._SUPPORTED_OBJECT_FORMATS[self.object_format]
+        oid = "1" * fmt.hex_length
+        output = (oid + "\n").encode("ascii")
+        argv = (sys.executable, "-B", "-c", "import sys; sys.stdout.buffer.write(" + repr(output) + ")")
+
+        async def read(indexed, frame_limit=1_048_576):
+            accepted = []
+            def store(commit, parents):
+                accepted.append((commit, parents))
+                return True
+            with mock.patch.object(mod, "_MAX_PARENT_GRAPH_BYTES", fmt.hex_length), mock.patch.object(
+                mod, "_MAX_COMMIT_TREE_BYTES", frame_limit,
+            ):
+                result = await mod._read_parent_graph_bounded(
+                    argv, deadline=asyncio.get_running_loop().time() + 10, object_format=fmt,
+                    store_row=store, indexed_only=indexed,
+                )
+                return result, accepted
+
+        legacy, seen = asyncio.run(read(False))
+        self.assertEqual(legacy.reason, "selection-bytes")
+        self.assertEqual(seen, [])
+        compact, seen = asyncio.run(read(True))
+        self.assertEqual(compact, ())
+        self.assertEqual(seen, [(oid, ())])
+        malformed, seen = asyncio.run(read(True, fmt.hex_length - 1))
+        self.assertEqual(malformed.failure_id, "PS-MSG-FRAME")
+        self.assertEqual(seen, [])
+
+
     def import_large_history(self):
         stream = bytearray()
         for number in range(1, 10_002):

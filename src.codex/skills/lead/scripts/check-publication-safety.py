@@ -458,6 +458,7 @@ class RangeSelection:
     destination_oid: str | None = None
     expected_parents: tuple[tuple[str, tuple[str, ...]], ...] = ()
     destination_endpoint_sha256: str | None = None
+    indexed_parent_graph: bool = False
 
 
 @dataclass(frozen=True)
@@ -492,6 +493,7 @@ class NativePushSelection:
     roots: tuple[str, ...]
     expected_parents: tuple[tuple[str, tuple[str, ...]], ...] = ()
     tag_receiver_inventory: tuple[RemoteRefTip, ...] | None = None
+    indexed_parent_graph: bool = False
 
 
 @dataclass(frozen=True)
@@ -3220,7 +3222,7 @@ def _selection_reap_refusal(prior: Refusal | None, has_input: bool) -> Refusal:
 async def _read_git_lines_bounded(
     argv: tuple[str, ...],
     *,
-    byte_cap: int,
+    byte_cap: int | None,
     line_cap: int,
     deadline: float,
     accepted_codes: frozenset[int],
@@ -3273,10 +3275,11 @@ async def _read_git_lines_bounded(
                 break
             if not chunk:
                 break
-            total_bytes += len(chunk)
-            if total_bytes > byte_cap:
-                refusal = _refusal("PS-MSG-LIMIT", byte_reason)
-                break
+            if byte_cap is not None:
+                total_bytes += len(chunk)
+                if total_bytes > byte_cap:
+                    refusal = _refusal("PS-MSG-LIMIT", byte_reason)
+                    break
             pending.extend(chunk)
             while refusal is None:
                 newline = pending.find(b"\n")
@@ -3680,6 +3683,7 @@ async def _read_parent_graph_bounded(
     object_format: GitObjectFormat,
     input_bytes: bytes | None = None,
     store_row: Callable[[str, tuple[str, ...]], bool] | None = None,
+    indexed_only: bool = False,
 ) -> tuple[tuple[str, tuple[str, ...]], ...] | Refusal:
     parsed: list[tuple[str, tuple[str, ...]]] = []
     seen: set[str] = set()
@@ -3714,7 +3718,9 @@ async def _read_parent_graph_bounded(
 
     result = await _read_git_lines_bounded(
         argv,
-        byte_cap=_MAX_PARENT_GRAPH_BYTES,
+        # Indexed-only captures do not retain a second graph in memory.
+        # A record's caller-supplied frame boundary is still enforced.
+        byte_cap=None if indexed_only and store_row is not None else _MAX_PARENT_GRAPH_BYTES,
         line_cap=_MAX_COMMIT_TREE_BYTES,
         deadline=deadline,
         accepted_codes=frozenset({0}),
@@ -3805,6 +3811,7 @@ async def _range_selection(
     deadline: float | None = None,
     *,
     history_index: "_HistoryIndex | None" = None,
+    compact_graph: bool = False,
 ) -> RangeSelection | Refusal:
     deadline = deadline if deadline is not None else time.monotonic() + _SCAN_DEADLINE_SECONDS
     native_payload = globals().get("__injected_native_push__")
@@ -3813,7 +3820,9 @@ async def _range_selection(
         if isinstance(native, Refusal):
             return native
         if history_index is not None:
-            return await _native_commit_range_selection(request, native, deadline, history_index)
+            return await _native_commit_range_selection(
+                request, native, deadline, history_index, compact_graph=compact_graph,
+            )
         with _open_history_index(deadline) as index:
             return await _native_commit_range_selection(request, native, deadline, index)
     try:
@@ -3971,6 +3980,7 @@ async def _native_prior_receiver_roots(
 async def _native_push_selection(
     request: NativePushRequest, deadline: float, roots: tuple[str, ...],
     index: "_HistoryIndex | None",
+    *, compact_graph: bool = False,
 ) -> NativePushSelection | Refusal:
     try:
         if _detect_git_object_format(_remaining_seconds(deadline)) != request.object_format:
@@ -4007,6 +4017,7 @@ async def _native_push_selection(
         _range_git_argv("rev-list", "--parents", "--topo-order", "--stdin"),
         deadline=loop_deadline, object_format=request.object_format, input_bytes=revisions,
         store_row=commit_progress.observed(index.add_selected_commit),
+        indexed_only=compact_graph,
     )
     if isinstance(parent_graph, Refusal):
         return parent_graph
@@ -4023,18 +4034,19 @@ async def _native_push_selection(
     object_progress.finish()
     if not index.selected_commits_covered():
         return _refusal("PS-MSG-COVERAGE", "commit-object-set")
-    parent_graph = tuple(index.selected_commits())
+    parent_graph = () if compact_graph else tuple(index.selected_commits())
     objects = tuple(index.selected_objects())
-    commits = tuple(oid for oid, _parents in parent_graph)
+    commits = tuple(index.selected_commit_ids()) if compact_graph else tuple(oid for oid, _parents in parent_graph)
     tag_inventory = (
         inventory if inventory is not None and not commits and objects == roots else None
     )
     return NativePushSelection(request, commits, objects, request.object_format, roots, parent_graph,
-                               tag_inventory)
+                               tag_inventory, indexed_parent_graph=compact_graph)
 
 
 async def _native_commit_range_selection(
     primary: RangeRequest, request: NativePushRequest, deadline: float, index: "_HistoryIndex",
+    *, compact_graph: bool = False,
 ) -> RangeSelection | Refusal:
     """Union newly disclosed actual update graphs for this receiver.
 
@@ -4065,6 +4077,7 @@ async def _native_commit_range_selection(
             _range_git_argv("rev-list", "--parents", "--topo-order", "--stdin"),
             deadline=loop_deadline, object_format=object_format, input_bytes=revisions,
             store_row=lambda oid, parents: index.add_selected_commit(oid, parents, stream=stream),
+            indexed_only=compact_graph,
         )
         if isinstance(graph, Refusal):
             return graph
@@ -4082,10 +4095,11 @@ async def _native_commit_range_selection(
         return _refusal("PS-MSG-RANGE", "native-primary")
     if not index.selected_commits_covered():
         return _refusal("PS-MSG-COVERAGE", "commit-object-set")
-    parents = tuple(index.selected_commits())
+    parents = () if compact_graph else tuple(index.selected_commits())
+    commits = tuple(index.selected_commit_ids()) if compact_graph else tuple(oid for oid, _ in parents)
     return RangeSelection(primary.remote, primary.destination, primary.source,
-        primary.source, tuple(oid for oid, _ in parents), tuple(index.selected_objects(sorted_ids=True)),
-        object_format, expected_parents=parents)
+        primary.source, commits, tuple(index.selected_objects(sorted_ids=True)),
+        object_format, expected_parents=parents, indexed_parent_graph=compact_graph)
 
 
 def _parse_batch_header(
@@ -4899,6 +4913,9 @@ class _HistoryIndex:
             WHERE selected_object.stream <> excluded.stream
         """, (oid, stream)).rowcount == 1
 
+    def selected_commit_ids(self):
+        return (oid for (oid,) in self.db.execute("SELECT oid FROM selected_commit ORDER BY sequence"))
+
     def selected_commits(self):
         return ((oid, tuple(parents.split())) for oid, parents in self.db.execute(
             "SELECT oid, parents FROM selected_commit ORDER BY sequence"
@@ -5087,6 +5104,8 @@ async def _acquire_history(selection, reader, find_machine_paths, coverage_recor
             clock = asyncio.get_running_loop().time
             db.set_progress_handler(lambda: int(clock() >= scan_deadline), 2048)
             if history_index is None:
+                if selection.indexed_parent_graph:
+                    return _refusal("PS-MSG-COVERAGE", "parent-graph-set")
                 # Standalone selection was formed before this local index opened.
                 for oid in selection.object_oids:
                     if not index.add_selected_object(oid):
@@ -5296,7 +5315,9 @@ async def _acquire_indexed_history(
 
     if any(a != b for a, b in zip_longest(index.acquired_oids(), selection.object_oids)):
         return _refusal("PS-MSG-COVERAGE", "object-set")
-    commit_problem = index.commit_coverage_problem(check_parents=bool(selection.expected_parents))
+    commit_problem = index.commit_coverage_problem(
+        check_parents=selection.indexed_parent_graph or bool(selection.expected_parents),
+    )
     if commit_problem is not None:
         return _refusal("PS-MSG-COVERAGE", commit_problem)
     coverage = None
@@ -5604,7 +5625,10 @@ async def _scan_range_async(
                    if globals().get("__injected_native_push__") is not None else nullcontext())
         with storage as index:
             options = {"history_index": index} if index is not None else {}
-            selection = await _range_selection(request, wall_deadline, **options)
+            selection = await _range_selection(
+                request, wall_deadline, **options,
+                **({"compact_graph": True} if receipt_coverage and index is not None else {}),
+            )
             if isinstance(selection, Refusal):
                 return ScanOutcome("refusal", "range", refusal=selection)
             if not selection.expected_oids:
@@ -5881,7 +5905,9 @@ async def _scan_native_push_async(
         roots = tuple(dict.fromkeys(row.local_oid for row in request.updates if row.local_oid != zero))
         storage = _open_history_index(deadline) if roots else nullcontext()
         with storage as index:
-            selection = await _native_push_selection(request, deadline, roots, index)
+            selection = await _native_push_selection(
+                request, deadline, roots, index, compact_graph=receipt_coverage,
+            )
             if isinstance(selection, Refusal):
                 return ScanOutcome("refusal", "native-push", refusal=selection)
             outcome = await _scan_selected_history_async(

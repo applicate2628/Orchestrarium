@@ -46,6 +46,9 @@ class TestPriorDisclosure(native.TestNativePublicationEffects):
                     self.assertEqual(old.kind, "clean", old.refusal)
                     self.assertEqual(new.kind, "clean", new.refusal)
                     self.assertIsInstance(new.coverage, mod._ReceiptCoverage)
+                    self.assertTrue(old.native_selection.expected_parents)
+                    self.assertTrue(new.native_selection.indexed_parent_graph)
+                    self.assertEqual(new.native_selection.expected_parents, ())
                     for field in ("object_ids", "blob_ids", "tag_ids"):
                         sealed = getattr(new.history, field)
                         self.assertIsInstance(sealed, mod._SealedOids)
@@ -76,6 +79,9 @@ class TestPriorDisclosure(native.TestNativePublicationEffects):
         self.assertEqual(old.kind, "clean", old.refusal)
         self.assertEqual(indexed.kind, "clean", indexed.refusal)
         self.assertIsInstance(indexed.coverage, mod._ReceiptCoverage)
+        self.assertTrue(old.selection.expected_parents)
+        self.assertTrue(indexed.selection.indexed_parent_graph)
+        self.assertEqual(indexed.selection.expected_parents, ())
         self.assertEqual(mod._format_outcome(indexed), mod._format_outcome(old))
         self.assertEqual(mod._format_outcome(indexed)[2], 0)
         for mismatch in (
