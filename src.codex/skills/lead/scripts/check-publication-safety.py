@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import base64
 from collections import Counter, OrderedDict
+from copy import deepcopy
 from enum import Enum
 from functools import lru_cache
 import hashlib
@@ -2360,7 +2361,8 @@ class ReviewEvaluation:
             raise RuntimeError("review-policy-snapshot")
         self.policy = policy_module
         self.read = decoded
-        self.repository_observation = repository_observation
+        self.repository_observation = deepcopy(repository_observation)
+        self._origin_outside_repository: bool | None = None
         self.execution = execution
         self.unresolved = 0
         self._analysis: tuple[tuple, dict] | None = None
@@ -2388,8 +2390,13 @@ class ReviewEvaluation:
         repository = self.repository
         if repository is None:
             return None
-        # Policy's pure origin boundary check is the only source of origin credit.
-        if not self.policy.origin_is_outside_repository(self.read.snapshot, repository):
+        # The capture is owned by this evaluation. Its origin proof is independent
+        # of the subject; matching and final live authority checks are not cached.
+        if self._origin_outside_repository is None:
+            self._origin_outside_repository = self.policy.origin_is_outside_repository(
+                self.read.snapshot, repository,
+            )
+        if not self._origin_outside_repository:
             return None
         choices = []
         for record in self.read.usable_records:

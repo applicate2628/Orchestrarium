@@ -104,6 +104,24 @@ def acquire(selection, reader, review=None):
 
 
 class RetainedPayloadTests(unittest.TestCase):
+    def test_origin_check_reused_only_inside_one_captured_evaluation(self):
+        from types import SimpleNamespace
+
+        for outside in (True, False):
+            with self.subTest(outside=outside):
+                decoded = SimpleNamespace(snapshot={"status": "captured"}, snapshot_id="fixture",
+                                          usable_records=())
+                captured = {"status": "captured", "repository": {"fixture": outside}, "diagnostic": "none"}
+                check = mock.Mock(side_effect=lambda _snapshot, repo: repo["fixture"])
+                policy = SimpleNamespace(decode_policy_snapshot=lambda _: decoded,
+                                         origin_is_outside_repository=check)
+                scan = scanner.ReviewEvaluation(policy_module=policy, policy_read=decoded,
+                                                repository_observation=captured, execution="gate-captured-v1")
+                captured["repository"]["fixture"] = not outside
+                for _ in range(3):
+                    self.assertIsNone(scan._authority(b"", {}, {}, {}))
+                check.assert_called_once_with(decoded.snapshot, {"fixture": outside})
+
     def test_machine_path_detection_reused_but_subject_findings_remain_independent(self):
         from types import SimpleNamespace
         evaluation = scanner.ReviewEvaluation.__new__(scanner.ReviewEvaluation)
