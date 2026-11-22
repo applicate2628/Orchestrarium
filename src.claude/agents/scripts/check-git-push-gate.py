@@ -25,6 +25,7 @@ import sys
 import threading
 import time
 import types
+from contextvars import ContextVar
 from dataclasses import (
     dataclass,
     field,
@@ -83,7 +84,8 @@ def _publication_scan_budget_seconds() -> float:
     return float(value)
 
 
-SCAN_TIMEOUT_SECONDS = _publication_scan_budget_seconds() + 60.0
+SCAN_THRESHOLD_SECONDS = _publication_scan_budget_seconds()
+SCAN_TIMEOUT_SECONDS = SCAN_THRESHOLD_SECONDS + 60.0
 SCAN_SETTLEMENT_ATTEMPT_SECONDS = 3.0
 SCAN_SETTLEMENT_MAX_ENTRIES = 2
 
@@ -2731,6 +2733,58 @@ class ChildSupervisor:
         return self._settlement
 
 
+@dataclass
+class _ScanThresholdNotice:
+    elapsed: float | None = None
+    report: object | None = None
+
+    def observe(self, elapsed: float) -> None:
+        if self.elapsed is not None or elapsed < SCAN_THRESHOLD_SECONDS:
+            return
+        self.elapsed = elapsed
+        try:
+            self.report = _start_scan_threshold_report(elapsed)
+        except Exception:
+            # Reporting is not part of scanner authority or process settlement.
+            pass
+
+    def announce(self) -> None:
+        if self.elapsed is not None:
+            _announce_scan_threshold(self.elapsed, self.report)
+
+
+_scan_threshold_scope: ContextVar[_ScanThresholdNotice | None] = ContextVar(
+    "publication_scan_threshold_scope", default=None,
+)
+
+
+def _start_scan_threshold_report(elapsed: float):
+    from hook_common import ThresholdWarning, start_threshold_warning_report
+
+    threshold = max(1, int(SCAN_THRESHOLD_SECONDS * 1000))
+    return start_threshold_warning_report((
+        ThresholdWarning("scan", "milliseconds", threshold, max(threshold, int(elapsed * 1000)), 0),
+    ))
+
+
+def _announce_scan_threshold(elapsed: float, report) -> None:
+    path = None
+    try:
+        if report is not None and report.done():
+            path = report.result()
+    except Exception:
+        pass
+    destination = f"report: {path}" if path is not None else "report not saved"
+    try:
+        print(
+            f"PGG-SCAN-THRESHOLD: Scan exceeded the {SCAN_THRESHOLD_SECONDS:g}s "
+            f"advisory threshold (observed {elapsed:.1f}s); {destination}.",
+            file=sys.stderr,
+        )
+    except (OSError, ValueError):
+        pass
+
+
 def _run_snapshot_child(
     pending: PendingScanInvocation, payload: bytes, repository_workdir: str,
 ) -> tuple[LaunchedScanInvocation, tuple[TrustedExecutionRecord, ...]]:
@@ -2756,6 +2810,9 @@ def _run_snapshot_child(
     primary_failure: BaseException | None = None
     primary_traceback = None
     settlement_failures: list[BaseException] = []
+
+    notice_scope = _scan_threshold_scope.get()
+    threshold_notice = notice_scope if notice_scope is not None else _ScanThresholdNotice()
 
     def retain_child_outcome(primary: BaseException) -> None:
         actual_streams = []
@@ -2854,13 +2911,16 @@ def _run_snapshot_child(
         for name, construct in workers:
             worker = construct()
             supervisor.start_worker(worker, name=name)
-        deadline = time.monotonic() + SCAN_TIMEOUT_SECONDS
+        started = time.monotonic()
+        deadline = started + SCAN_TIMEOUT_SECONDS
         while True:
             return_code = process.poll()
             if return_code is not None:
                 bounded = not overflow.is_set()
                 break
-            if overflow.is_set() or time.monotonic() >= deadline:
+            now = time.monotonic()
+            threshold_notice.observe(now - started)
+            if overflow.is_set() or now >= deadline:
                 break
             time.sleep(0.01)
     except BaseException as exc:
@@ -2938,6 +2998,9 @@ def _run_snapshot_child(
                 raise PrRouteDenied(prefix + "-SCAN-EXECUTION") from primary_failure
             raise primary_failure.with_traceback(primary_traceback)
         raise PrRouteDenied(prefix + "-SCAN-EXECUTION")
+
+    if notice_scope is None:
+        threshold_notice.announce()
 
     if primary_failure is None and reader_failures:
         primary_failure = reader_failures[0]
@@ -3806,6 +3869,16 @@ def _single_new_named_tag_row(wire: bytes) -> str | None:
 
 def _native_pre_push_main(arguments: list[str]) -> int:
     """Git owns invocation and transfer; any failure here stops this callback."""
+    notice = _ScanThresholdNotice()
+    token = _scan_threshold_scope.set(notice)
+    try:
+        return _run_native_pre_push(arguments)
+    finally:
+        _scan_threshold_scope.reset(token)
+        notice.announce()
+
+
+def _run_native_pre_push(arguments: list[str]) -> int:
     stage = "native-binding"
     try:
         if len(arguments) != 2:

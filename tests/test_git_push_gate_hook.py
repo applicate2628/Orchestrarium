@@ -1329,6 +1329,57 @@ class TestPublicationSafetyTrustedScanR2(unittest.TestCase):
             finally:
                 module.__file__ = original_file
 
+    def test_authoritative_child_warns_once_without_stopping_work(self) -> None:
+        module = self._module("child_warning")
+        binding = module.PushScanBinding("generic", "origin", "refs/heads/main", "1" * 40, "1" * 40)
+        with temporary_repository_workdir() as repository_workdir:
+            pending = self._pending(module, binding, (
+                sys.executable, "-c", "import time; time.sleep(0.3); print('finished')",
+            ))
+            warning = io.StringIO()
+            with mock.patch.object(module, "SCAN_THRESHOLD_SECONDS", 0.05, create=True), \
+                 mock.patch.object(module, "_start_scan_threshold_report", create=True) as start, \
+                 mock.patch.object(sys, "stderr", warning):
+                start.return_value.done.return_value = True
+                start.return_value.result.return_value = None
+                _invocation, rows = module._run_snapshot_child(pending, b"", repository_workdir)
+            self.assertTrue(rows[0].bounded_completion)
+            self.assertTrue(rows[0].settlement.complete)
+            self.assertIn(b"finished", rows[0].stdout)
+            start.assert_called_once()
+            self.assertEqual(warning.getvalue().count("PGG-SCAN-THRESHOLD"), 1)
+            self.assertIn("report not saved", warning.getvalue())
+
+
+    def test_native_callback_shares_one_real_report_across_scanner_children(self) -> None:
+        module = self._module("native_report")
+        binding = module.PushScanBinding("generic", "origin", "refs/heads/main", "1" * 40, "1" * 40)
+        warning = io.StringIO()
+        with temporary_repository_workdir() as repository_workdir:
+            home = Path(repository_workdir)
+
+            def two_children(_arguments):
+                for marker in ("range-complete", "native-complete"):
+                    pending = self._pending(module, binding, (
+                        sys.executable, "-c", f"import time; time.sleep(0.5); print({marker!r})",
+                    ))
+                    _, rows = module._run_snapshot_child(pending, b"", repository_workdir)
+                    self.assertTrue(rows[0].bounded_completion)
+                    self.assertTrue(rows[0].settlement.complete)
+                    self.assertEqual(rows[0].stdout.strip(), marker.encode("ascii"))
+                    self.assertEqual(rows[0].stderr, b"")
+                return 0
+
+            with mock.patch.object(module, "SCAN_THRESHOLD_SECONDS", 0.05), \
+                 mock.patch.object(module, "_run_native_pre_push", side_effect=two_children), \
+                 mock.patch.object(Path, "home", return_value=home), \
+                 mock.patch.object(sys, "stderr", warning):
+                self.assertEqual(module._native_pre_push_main([]), 0)
+            reports = list((home / ".orche" / "reports").glob("*.json"))
+            self.assertEqual(len(reports), 1)
+            self.assertEqual(warning.getvalue().count("PGG-SCAN-THRESHOLD"), 1)
+            self.assertIn(str(reports[0]), warning.getvalue())
+
     def test_authoritative_child_timeout_and_output_overflow_reap_workers(self) -> None:
         module = self._module("child_bounds")
         binding = module.PushScanBinding(

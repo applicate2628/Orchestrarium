@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-22
 
+- The Git publication hook records an advisory time-threshold warning at most once per callback and writes a best-effort, sanitized report under the user Orche reports directory. The warning never modifies scanner evidence, its verdict, or current protection budgets.
+
 - Publication diagnostics retain the original native scan refusal instead of replacing it with a secondary repository metadata error. Complete scans still require unchanged repository metadata before publication.
 
 - The Windows x64 pre-SDK bundle can carry the Rust publication matcher. The existing scanner uses it to accelerate binary-history and ordinary commit-text matching while keeping the same publication policy and finding decisions. The bundle builder and retainer verify the exact executable and its third-party notices. The matcher does not add provider SDK dependencies or require Rust on the target machine. See [bundle assembly](scripts/distribution/README.md) for package inputs.
