@@ -5563,6 +5563,9 @@ async def _scan_native_push_async(
             reader_factory=reader_factory, coverage_observer=coverage_observer,
             coverage_fault=coverage_fault, review_evaluation=review_evaluation, review_capture=review_capture,
         )
+        if outcome.kind == "refusal":
+            # This outcome cannot authorize publication. Preserve its first cause.
+            return outcome
         if (outcome.kind == "clean" and outcome.history is not None
                 and outcome.history.direct_tag_commit is not None):
             current_inventory = await _remote_ref_tip_oids(

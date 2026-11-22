@@ -92,6 +92,27 @@ class TestNativePublicationEffects(unittest.TestCase):
     def zero(self):
         return "0" * len(self.commit)
 
+    def test_native_post_scan_currentness_does_not_replace_prior_refusal(self):
+        mod = self.module
+        payload = self.payload([(b"refs/heads/main", self.commit, b"refs/heads/alias", self.zero())])
+        captured = payload["repositoryObservation"]
+        unavailable = {"status": "unavailable", "repository": None, "diagnostic": "metadata-unavailable"}
+        timeout = mod._refusal("PS-MSG-READ-TIMEOUT", "deadline")
+        for kind, after, expected, captures in (
+            ("refusal", unavailable, timeout, 1),
+            ("clean", unavailable, mod._refusal("PS-INPUT-REFUSAL", "native-repository-currentness"), 2),
+            ("clean", captured, None, 2),
+        ):
+            with self.subTest(kind=kind, status=after["status"]):
+                history = mod.ScanOutcome(kind, "native-push", refusal=timeout if kind == "refusal" else None)
+                with mock.patch.object(mod, "_capture_review_repository", side_effect=[(captured, ()), (after, ())]) as observation, \
+                        mock.patch.object(mod, "_scan_selected_history_async", return_value=history):
+                    actual = self.scan(payload)
+                self.assertEqual(actual.refusal, expected)
+                self.assertEqual(actual.kind, "refusal" if expected else "clean")
+                self.assertEqual(observation.call_count, captures)
+
+
     def test_tag_annotation_is_scanned_even_when_target_commit_is_remote(self):
         annotation = "TOKEN=" + "aB9" * 16
         self.git("tag", "-a", "extra", "-m", annotation)
