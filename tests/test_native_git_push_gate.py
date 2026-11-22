@@ -457,7 +457,7 @@ def synthetic_review_payload(owner):
     bodies = {
         "gate": b"gate", "hook_common": b"", "classifier": b"def find_machine_paths(value): return []\n",
         "posix_helper": b"", "windows_job": b"", "scanner": scanner_source,
-        "publication_review_policy": policy_source, "linked_runtime_subroots": b"", "receiver_scope": b"",
+        "publication_review_policy": policy_source, "linked_runtime_subroots": b"", "receiver_scope": b"", "matcher_wire": b"",
     }
     interpreter = owner._interpreter_identity()
     root = owner.PathComponentIdentity(".", "directory", (1,))

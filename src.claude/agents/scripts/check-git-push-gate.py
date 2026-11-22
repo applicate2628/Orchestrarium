@@ -266,7 +266,7 @@ class SourceLayout:
 
 SOURCE_ROLE_ORDER = (
     "gate", "hook_common", "classifier", "posix_helper", "windows_job",
-    "scanner", "publication_review_policy", "linked_runtime_subroots", "receiver_scope",
+    "scanner", "publication_review_policy", "linked_runtime_subroots", "receiver_scope", "matcher_wire",
 )
 
 
@@ -283,6 +283,7 @@ SOURCE_LAYOUTS = (
             ("publication_review_policy", "universal-hooks/scripts/publication_review_policy.py"),
             ("linked_runtime_subroots", "linked_runtime_subroots.py"),
             ("receiver_scope", "universal-hooks/scripts/transfer_binding.py"),
+            ("matcher_wire", "universal-hooks/scripts/publication_match_wire.py"),
         ),
     ),
     SourceLayout(
@@ -297,6 +298,7 @@ SOURCE_LAYOUTS = (
             ("publication_review_policy", "src.codex/skills/lead/scripts/publication_review_policy.py"),
             ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
             ("receiver_scope", "src.codex/skills/lead/scripts/transfer_binding.py"),
+            ("matcher_wire", "src.codex/skills/lead/scripts/publication_match_wire.py"),
         ),
     ),
     SourceLayout(
@@ -311,6 +313,7 @@ SOURCE_LAYOUTS = (
             ("publication_review_policy", "src.claude/agents/scripts/publication_review_policy.py"),
             ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
             ("receiver_scope", "src.claude/agents/scripts/transfer_binding.py"),
+            ("matcher_wire", "src.claude/agents/scripts/publication_match_wire.py"),
         ),
     ),
     SourceLayout(
@@ -325,6 +328,7 @@ SOURCE_LAYOUTS = (
             ("publication_review_policy", "scripts/publication_review_policy.py"),
             ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
             ("receiver_scope", "scripts/transfer_binding.py"),
+            ("matcher_wire", "scripts/publication_match_wire.py"),
         ),
     ),
 )
@@ -1405,7 +1409,7 @@ if type(bundle) is not dict or type(bundle.get("payloadVersion")) is not int or 
 native_mode=bundle["payloadVersion"] in (2,3)
 scoped_mode=bundle["payloadVersion"]==3
 exact_object(bundle,(("payloadVersion","sources","review","nativePush","receiverScope") if scoped_mode else ("payloadVersion","sources","review","nativePush")) if native_mode else ("payloadVersion","sources","review"),"payload shape")
-roles=("hook_common","classifier","posix_helper","windows_job","scanner","publication_review_policy","linked_runtime_subroots","receiver_scope")
+roles=("hook_common","classifier","posix_helper","windows_job","scanner","publication_review_policy","linked_runtime_subroots","receiver_scope","matcher_wire")
 encoded_sources=exact_object(bundle["sources"],roles,"source roles")
 sources={}
 for key,value in encoded_sources.items():
@@ -1517,6 +1521,9 @@ git_executable=sys.argv[2]
 scanner_path="<closure>/check-publication-safety.py"
 scanner={"__name__":"__main__","__file__":scanner_path,"__package__":None,"__cached__":None,"__injected_find_machine_paths__":finder,"__injected_git_executable__":git_executable,"__injected_posix_process_group_module__":posix_helper,"__injected_windows_job_module__":windows_job,"__injected_review_policy_snapshot__":snapshot,"__injected_review_repository_observation__":observation,"__injected_review_execution__":"gate-captured-v1"}
 scanner[policy.POLICY_INJECTION_KEY]=policy
+wire={"__name__":"_orchestrarium_matcher_wire_v1","__file__":"<closure>/publication_match_wire.py"}
+exec(compile(sources["matcher_wire"],wire["__file__"],"exec"),wire,wire)
+scanner["__injected_matcher_wire__"]=wire
 if native_mode: scanner["__injected_native_push__"]=native
 if scoped_mode: scanner["__injected_receiver_scope__"]=receiver_scope
 sys.argv=[scanner_path,*sys.argv[3:]]
@@ -2088,7 +2095,7 @@ def _closure_payload(
         node.role: base64.b64encode(node.source).decode("ascii")
         for node in closure.nodes if node.role != "gate"
     }
-    if len(sources) != 8 or tuple(sources) != SOURCE_ROLE_ORDER[1:]:
+    if tuple(sources) != SOURCE_ROLE_ORDER[1:]:
         raise ValueError("source-role-cardinality")
     encoder = canonical_bytes
     if not callable(encoder):
