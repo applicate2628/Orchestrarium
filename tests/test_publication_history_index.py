@@ -209,3 +209,44 @@ def test_acquired_kind_keeps_actual_order_and_exact_tree_reachability():
         assert not index.tree_coverage_complete()
         assert index.record_reached_tree("other-tree")
         assert index.tree_coverage_complete()
+
+
+def test_commit_roots_preserve_selection_order_and_graph_comparison():
+    scanner = runpy.run_path(str(SCANNER))
+    with closing(sqlite3.connect("")) as db:
+        index = scanner["_HistoryIndex"](db)
+        assert index.add_selected_commit("newer", ("second", "first"))
+        assert index.add_selected_commit("older", ())
+        assert index.record_commit_root("older", "root-a", ())
+        assert not index.record_commit_root("older", "root-b", ())
+        assert not index.record_commit_root("outside", "ignored", ())
+        assert index.commit_coverage_problem(check_parents=True) == "commit-set"
+        assert index.record_commit_root("newer", "root-b", ("first", "second"))
+        assert index.commit_coverage_problem(check_parents=True) == "parent-graph"
+        assert index.commit_coverage_problem(check_parents=False) is None
+        assert tuple(index.commit_roots()) == (("newer", "root-b"), ("older", "root-a"))
+    with closing(sqlite3.connect("")) as db:
+        index = scanner["_HistoryIndex"](db)
+        assert index.add_selected_commit("legacy", None)
+        assert index.record_commit_root("legacy", "root", ())
+        assert index.commit_coverage_problem(check_parents=True) == "parent-graph-set"
+        assert index.commit_coverage_problem(check_parents=False) is None
+
+
+def test_standalone_commit_parent_seed_matches_graph_set_contract():
+    from types import SimpleNamespace
+
+    scanner = runpy.run_path(str(SCANNER))
+    for expected, problem in (
+        ((("a", ("earlier",)), ("a", ()), ("b", ())), None),
+        ((("a", ()),), "parent-graph-set"),
+        ((("a", ()), ("b", ()), ("outside", ())), "parent-graph-set"),
+    ):
+        with closing(sqlite3.connect("")) as db:
+            index = scanner["_HistoryIndex"](db)
+            selection = SimpleNamespace(expected_oids=("b", "a"), expected_parents=expected)
+            assert index.seed_standalone_commits(selection)
+            assert index.record_commit_root("a", "root-a", ())
+            assert index.record_commit_root("b", "root-b", ())
+            assert index.commit_coverage_problem(check_parents=True) == problem
+            assert tuple(index.commit_roots()) == (("b", "root-b"), ("a", "root-a"))

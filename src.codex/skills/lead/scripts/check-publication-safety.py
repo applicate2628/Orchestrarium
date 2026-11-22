@@ -4740,10 +4740,12 @@ class _HistoryIndex:
         self.subject_count = 0
         self.blob_count = 0
         self.binary_blob_count = 0
+        self.unexpected_parent_key = False
         db.executescript("""
             PRAGMA temp_store=FILE;
             CREATE TABLE selected_commit (sequence INTEGER PRIMARY KEY, oid TEXT UNIQUE,
-                parents TEXT NOT NULL, stream INTEGER NOT NULL);
+                parents TEXT, stream INTEGER NOT NULL, root_tree TEXT,
+                parent_mismatch INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE selected_object (sequence INTEGER PRIMARY KEY, oid TEXT UNIQUE,
                 stream INTEGER NOT NULL, acquired_kind TEXT, acquired_sequence INTEGER,
                 reached INTEGER NOT NULL DEFAULT 0);
@@ -4794,7 +4796,41 @@ class _HistoryIndex:
             INSERT INTO selected_commit(oid, parents, stream) VALUES (?, ?, ?)
             ON CONFLICT(oid) DO UPDATE SET parents=excluded.parents, stream=excluded.stream
             WHERE selected_commit.stream <> excluded.stream
-        """, (oid, " ".join(parents), stream)).rowcount == 1
+        """, (oid, None if parents is None else " ".join(parents), stream)).rowcount == 1
+
+    def seed_standalone_commits(self, selection) -> bool:
+        for oid in selection.expected_oids:
+            if not self.add_selected_commit(oid, None):
+                return False
+        for oid, parents in selection.expected_parents:
+            updated = self.db.execute(
+                "UPDATE selected_commit SET parents=? WHERE oid=?", (" ".join(parents), oid),
+            ).rowcount
+            self.unexpected_parent_key |= updated != 1
+        return True
+
+    def record_commit_root(self, oid: str, root_tree: str, parents: tuple[str, ...]) -> bool:
+        return self.db.execute("""
+            UPDATE selected_commit SET root_tree=?,
+                parent_mismatch=CASE WHEN parents IS NOT NULL AND parents<>? THEN 1 ELSE 0 END
+            WHERE oid=? AND root_tree IS NULL
+        """, (root_tree, " ".join(parents), oid)).rowcount == 1
+
+    def commit_coverage_problem(self, *, check_parents: bool) -> str | None:
+        if self.db.execute("SELECT 1 FROM selected_commit WHERE root_tree IS NULL LIMIT 1").fetchone():
+            return "commit-set"
+        if not check_parents:
+            return None
+        if self.unexpected_parent_key or self.db.execute(
+            "SELECT 1 FROM selected_commit WHERE parents IS NULL LIMIT 1",
+        ).fetchone():
+            return "parent-graph-set"
+        if self.db.execute("SELECT 1 FROM selected_commit WHERE parent_mismatch=1 LIMIT 1").fetchone():
+            return "parent-graph"
+        return None
+
+    def commit_roots(self) -> Iterable[tuple[str, str]]:
+        return self.db.execute("SELECT oid, root_tree FROM selected_commit ORDER BY sequence")
 
     def add_selected_object(self, oid, *, stream=0):
         return self.db.execute("""
@@ -4962,6 +4998,8 @@ async def _acquire_history(selection, reader, find_machine_paths, coverage_recor
                 for oid in selection.object_oids:
                     if not index.add_selected_object(oid):
                         return _refusal("PS-MSG-COVERAGE", "object-set")
+                if not index.seed_standalone_commits(selection):
+                    return _refusal("PS-MSG-COVERAGE", "commit-set")
             wire = globals().get("__injected_matcher_wire__")
             try:
                 executable = None if wire is None else wire["retained_matcher"](sys.executable)
@@ -5017,7 +5055,6 @@ async def _acquire_indexed_history(
 ) -> tuple[HistoryProof, CoverageProof | _ReceiptCoverage, tuple[Finding, ...]] | Refusal:
     commit_set = set(selection.expected_oids)
     native = isinstance(selection, NativePushSelection)
-    commit_topology: dict[str, tuple[str, tuple[str, ...]]] = {}
     tag_targets: dict[str, tuple[str, str]] = {}
     direct_tag_commit = None
     tree_cache: OrderedDict[str, tuple[bytes | tuple[TreeEntry, ...], int]] = OrderedDict()
@@ -5104,7 +5141,8 @@ async def _acquire_indexed_history(
             ))
             coverage_recorder.record(CoverageEvent.SCANNED, oid)
             # Content is scanned synchronously; only topology survives this object.
-            commit_topology[oid] = (record.root_tree, record.parents)
+            if not index.record_commit_root(oid, record.root_tree, record.parents):
+                return _refusal("PS-MSG-COVERAGE", "commit-set")
             del record
             if native:
                 del header, header_text
@@ -5157,17 +5195,9 @@ async def _acquire_indexed_history(
 
     if any(a != b for a, b in zip_longest(index.acquired_oids(), selection.object_oids)):
         return _refusal("PS-MSG-COVERAGE", "object-set")
-    if set(commit_topology) != commit_set:
-        return _refusal("PS-MSG-COVERAGE", "commit-set")
-    if selection.expected_parents:
-        expected_parents = dict(selection.expected_parents)
-        if set(expected_parents) != commit_set:
-            return _refusal("PS-MSG-COVERAGE", "parent-graph-set")
-        if any(
-            commit_topology[oid][1] != expected_parents[oid]
-            for oid in selection.expected_oids
-        ):
-            return _refusal("PS-MSG-COVERAGE", "parent-graph")
+    commit_problem = index.commit_coverage_problem(check_parents=bool(selection.expected_parents))
+    if commit_problem is not None:
+        return _refusal("PS-MSG-COVERAGE", commit_problem)
     coverage = None
     if not native:
         coverage = coverage_recorder.proof()
@@ -5210,7 +5240,7 @@ async def _acquire_indexed_history(
     # membership and already-recorded tree visits, not object payloads.
     selected_tree_reached = lru_cache(maxsize=4096)(index.record_reached_tree)
     selected_blob = lru_cache(maxsize=4096)(index.has_blob)
-    commit_roots = ((oid, commit_topology[oid][0]) for oid in selection.expected_oids)
+    commit_roots = index.commit_roots()
     direct_trees = []
     direct_blobs = []
     if native:
