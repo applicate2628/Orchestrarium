@@ -505,6 +505,43 @@ class TestNativePublicationEffects(unittest.TestCase):
         broken = self.module.replace(outcome, history=self.module.replace(outcome.history, object_set="0" * 64))
         self.assertEqual(self.module._format_outcome(broken)[2], 2)
 
+    def test_compact_native_blob_count_preserves_exact_receipt_and_late_findings(self):
+        mod = self.module
+        for index in range(3):
+            name = f"part-{index}.txt"
+            (self.root / name).write_text(f"safe public fixture {index}\n", encoding="utf-8")
+            self.git("add", name)
+        self.git("commit", "-qm", "multiple synthetic public blobs")
+        tip = self.git("rev-parse", "HEAD").strip().decode()
+        rows = [(b"refs/heads/main", tip, b"refs/heads/main", self.commit)]
+        payload = self.payload(rows)
+        with self.in_root():
+            compact = lambda: mod._scan_native_push(payload, lambda _line: (), receipt_coverage=True)
+            reference = compact()
+            with mock.patch.object(mod, "_MAX_BLOBS", 1):
+                clean = compact()
+                legacy = self.scan(payload)
+        self.assertEqual(reference.kind, "clean", reference)
+        self.assertEqual(clean.kind, "clean", clean)
+        self.assertEqual(len(clean.history.blob_ids), 3)
+        self.assertEqual(mod._format_outcome(clean), mod._format_outcome(reference))
+        self.assertEqual((legacy.refusal.failure_id, legacy.refusal.reason), ("PS-MSG-LIMIT", "blob-count"))
+
+        (self.root / "z-last.txt").write_text("TOKEN=" + "aB9" * 16 + "\n", encoding="utf-8")
+        self.git("add", "z-last.txt")
+        self.git("commit", "-qm", "synthetic detector fixture")
+        head = self.git("rev-parse", "HEAD").strip().decode()
+        payload = self.payload([(b"refs/heads/main", head, b"refs/heads/main", self.commit)])
+        with self.in_root():
+            found = compact()
+            with mock.patch.object(mod, "_MAX_BLOBS", 1):
+                unsafe = compact()
+        self.assertEqual(unsafe.kind, "findings", unsafe)
+        self.assertTrue(any(f.failure_id == "PS-FINDING-CONTENT" for f in unsafe.findings), unsafe.findings)
+        self.assertEqual(mod._format_outcome(unsafe), mod._format_outcome(found))
+        self.assertEqual(mod._format_outcome(unsafe)[2], 1)
+
+
     def test_blob_review_is_preserved_and_cannot_approve_tag_annotation(self):
         from tests.test_publication_review_policy import _record
         raw = ("TOKEN=" + "aB9" * 16 + "\n").encode()

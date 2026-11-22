@@ -679,6 +679,10 @@ class CoverageRecorder:
         self._fault_port = fault_port
         self._allow_empty = allow_empty
 
+    @property
+    def compact_native_receipt(self) -> bool:
+        return self._history_index is not None and self._receipt_coverage == "objects"
+
     def record(self, event: CoverageEvent, oid: str) -> None:
         rows = ((event, oid),) if self._fault_port is None else self._fault_port.transform(event, oid)
         for observed_event, observed_oid in rows:
@@ -5343,7 +5347,9 @@ async def _acquire_indexed_history(
             if not native and hashlib.new(selection.object_format.name,
                                           f"blob {len(result.raw)}\0".encode("ascii") + result.raw).hexdigest() != oid:
                 return _refusal("PS-MSG-COVERAGE", "object-content-identity")
-            if index.blob_count >= _MAX_BLOBS:
+            # Only the raw receipt path retains the full list of blob IDs.
+            # The compact native receipt seals the exact SQLite-backed set.
+            if not coverage_recorder.compact_native_receipt and index.blob_count >= _MAX_BLOBS:
                 return _refusal("PS-MSG-LIMIT", "blob-count")
             # The line bound is a property of the verified bytes, not their paths.
             # Every path reuses only data whose identity is checked again.
