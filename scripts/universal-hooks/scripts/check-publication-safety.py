@@ -5460,7 +5460,8 @@ async def _acquire_indexed_history(
     ordered_targets = ((target[0], target) for target in targets) if indexed_objects else (
         zip_longest(selection.object_oids, targets)
     )
-    acquisition_progress = _VerifiedWorkPhase("acquired", enabled=native, budget=scan_deadline)
+    observe_work = native or isinstance(scan_deadline, _ScanInactivity)
+    acquisition_progress = _VerifiedWorkPhase("acquired", enabled=observe_work, budget=scan_deadline)
     for ordinal, (oid, target) in enumerate(ordered_targets):
         if _time_left(scan_deadline, asyncio.get_running_loop().time) <= 0:
             return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
@@ -5634,7 +5635,7 @@ async def _acquire_indexed_history(
                 direct_trees.append((root, selected))
             elif kind == "blob":
                 direct_blobs.append((root, b"", selected))
-    traversal_progress = _VerifiedWorkPhase("traversed", enabled=native, budget=scan_deadline)
+    traversal_progress = _VerifiedWorkPhase("traversed", enabled=observe_work, budget=scan_deadline)
     compact_frontier = coverage_recorder.compact_native_receipt
     stack = _PendingTrees(index.db) if compact_frontier else []
     for commit_oid, root_tree in chain(commit_roots, direct_trees):
@@ -5710,7 +5711,7 @@ async def _acquire_indexed_history(
     # retained memory independently of the cumulative admitted blob volume.
     # Rereads are at most the number of distinct blob/path pairs and share the
     # shared scan budget. No reread adds coverage events or receipt byte counts.
-    classified_progress = _VerifiedWorkPhase("classified", enabled=native, budget=scan_deadline)
+    classified_progress = _VerifiedWorkPhase("classified", enabled=observe_work, budget=scan_deadline)
     cached_blob_oid = None
     binary = False
     raw = b""
@@ -5884,8 +5885,9 @@ async def _scan_range_async(
     review_evaluation: "ReviewEvaluation | None" = None,
     review_capture=None,
     receipt_coverage: bool = False,
+    work_budget: _ScanInactivity | None = None,
 ) -> ScanOutcome:
-    wall_deadline = time.monotonic() + scan_timeout
+    wall_deadline = work_budget if work_budget is not None else time.monotonic() + scan_timeout
     request = _range_request(remote, destination, source_revision)
     if isinstance(request, Refusal):
         return ScanOutcome("refusal", "range", refusal=request)
@@ -5910,7 +5912,7 @@ async def _scan_range_async(
             )
     except sqlite3.Error:
         return ScanOutcome("refusal", "range", refusal=(
-            _refusal("PS-MSG-READ-TIMEOUT", "deadline") if time.monotonic() >= wall_deadline
+            _refusal("PS-MSG-READ-TIMEOUT", "deadline") if _time_left(wall_deadline) <= 0
             else _refusal("PS-MSG-READ", "coverage-storage")
         ))
 
@@ -6125,6 +6127,7 @@ def _scan_range(
     review_capture=None,
     scan_timeout: float = _SCAN_DEADLINE_SECONDS,
     receipt_coverage: bool = False,
+    work_budget: _ScanInactivity | None = None,
 ) -> ScanOutcome:
     try:
         return asyncio.run(_scan_range_async(
@@ -6135,6 +6138,7 @@ def _scan_range(
             tip_resolver=tip_resolver,
             review_evaluation=review_evaluation, review_capture=review_capture,
             scan_timeout=scan_timeout, receipt_coverage=receipt_coverage,
+            work_budget=work_budget,
         ))
     except KeyboardInterrupt:
         return ScanOutcome(
@@ -6802,10 +6806,10 @@ def main(argv: list[str] | None = None) -> int:
         repo_root = _repo_root()
         os.chdir(repo_root)
         find_machine_paths = _path_finder(script)
+        initial_deadline = time.monotonic() + _SCAN_DEADLINE_SECONDS
+        work_budget = (_ScanInactivity(initial_deadline, _SCAN_DEADLINE_SECONDS)
+                       if callable(globals().get("__injected_verified_completion__")) else None)
         if args.native_push:
-            initial_deadline = time.monotonic() + _SCAN_DEADLINE_SECONDS
-            work_budget = (_ScanInactivity(initial_deadline, _SCAN_DEADLINE_SECONDS)
-                           if callable(globals().get("__injected_verified_completion__")) else None)
             deadline = work_budget if work_budget is not None else initial_deadline
             evaluation, exchanges = _prepare_review_evaluation(repo_root, deadline)
             payload = globals().get("__injected_native_push__")
@@ -6832,7 +6836,7 @@ def main(argv: list[str] | None = None) -> int:
                 return _emit_history_diagnostics(
                     repo_root, remote, dst, args.range_source, find_machine_paths,
                 )
-            review_deadline = time.monotonic() + _SCAN_DEADLINE_SECONDS
+            review_deadline = work_budget if work_budget is not None else initial_deadline
             review_evaluation, exchanges = _prepare_review_evaluation(repo_root, review_deadline)
             outcome = _scan_range(
                 remote,
@@ -6842,6 +6846,7 @@ def main(argv: list[str] | None = None) -> int:
                 review_evaluation=review_evaluation if review_evaluation.read.usable_records else None,
                 scan_timeout=_remaining_seconds(review_deadline),
                 receipt_coverage=globals().get("__injected_native_push__") is not None,
+                work_budget=work_budget,
             )
 
             def recheck_range() -> bool:
@@ -6854,7 +6859,7 @@ def main(argv: list[str] | None = None) -> int:
 
             return _emit_outcome(_finalize_review_evaluation(
                 outcome, review_evaluation, repo_root, review_deadline, recheck_range, exchanges,
-            ))
+            ), work_budget=work_budget)
         elif args.path or args.legacy_path:
             mode = "path"
             paths, blobs = _path_files(args.path or args.legacy_path)

@@ -463,6 +463,7 @@ class PendingScanInvocation:
     consumption_id: str | None = field(init=False, default=None)
     _transition_lock: threading.Lock = field(init=False, repr=False, default_factory=threading.Lock)
     _identity_sealed: bool = field(init=False, repr=False, default=False)
+    _settled_progress_at: float | None = field(init=False, repr=False, default=None)
 
     def __setattr__(self, name, value):
         if getattr(self, "_identity_sealed", False) and name in {
@@ -488,6 +489,15 @@ class PendingScanInvocation:
     def __deepcopy__(self, memo):
         raise TypeError("pending invocation is non-copyable")
 
+    def _consumption_deadline(self) -> float:
+        deadline = float(self.authorization_deadline)
+        if self._settled_progress_at is not None:
+            # Active work is bounded by the owner's quiet window; bound the
+            # final local settlement/currentness phase from observed completion.
+            deadline = max(deadline, self._settled_progress_at
+                           + SCAN_SETTLEMENT_ATTEMPT_SECONDS * SCAN_SETTLEMENT_MAX_ENTRIES)
+        return deadline
+
     def correlate_and_consume_once(
         self,
         launched: "LaunchedScanInvocation",
@@ -507,7 +517,7 @@ class PendingScanInvocation:
                 raise PrRouteDenied(prefix + "-RECEIPT-USED")
             if (
                 self.state is not PendingState.SETTLED
-                or time.monotonic() > float(self.authorization_deadline)
+                or time.monotonic() > self._consumption_deadline()
                 or len(records) != 1
             ):
                 self.state = PendingState.FAILED
@@ -642,7 +652,7 @@ class PendingScanInvocation:
                         or review_finalization.get("resourcesSettled") is not True
                     ):
                         raise PrRouteDenied(prefix + "-SCAN-CORRELATION")
-                if time.monotonic() > float(self.authorization_deadline):
+                if time.monotonic() > self._consumption_deadline():
                     raise PrRouteDenied(prefix + "-SCAN-CORRELATION")
             except BaseException:
                 self.state = PendingState.FAILED
@@ -1552,13 +1562,15 @@ if len(sys.argv)<3 or sys.argv[1]!="--gate-git-executable":
     raise RuntimeError("git executable contract")
 scan_argv=sys.argv[3:]
 progress_attempt=None
+def native_scan_mode(args):
+    return args==["--native-push"] or (len(args)==5 and args[0]=="--range" and args[3]=="--range-source")
 if scan_argv[:1]==["--gate-progress-attempt"]:
-    if (not native_mode or len(scan_argv)!=3 or scan_argv[2]!="--native-push"
+    if (not native_mode or len(scan_argv)<3 or not native_scan_mode(scan_argv[2:])
         or re.fullmatch(r"[0-9a-f]{32}",scan_argv[1]) is None):
         raise RuntimeError("scanner progress attempt")
     progress_attempt=scan_argv[1]
     scan_argv=scan_argv[2:]
-if native_mode and not (scan_argv==["--native-push"] or (len(scan_argv)==5 and scan_argv[0]=="--range" and scan_argv[3]=="--range-source")):
+if native_mode and not native_scan_mode(scan_argv):
     raise RuntimeError("native scanner mode")
 git_executable=sys.argv[2]
 scanner_path="<closure>/check-publication-safety.py"
@@ -2953,6 +2965,7 @@ def _run_snapshot_child(
     notice_scope = _scan_threshold_scope.get()
     threshold_notice = notice_scope if notice_scope is not None else _ScanThresholdNotice()
     quiet_deadline = None
+    completed_with_progress_at = None
     interval = SCAN_TIMEOUT_SECONDS
 
     def advance_quiet_window() -> None:
@@ -2962,10 +2975,13 @@ def _run_snapshot_child(
         if quiet_deadline is not None and observed_at < quiet_deadline:
             quiet_deadline = observed_at + interval
 
+    args = pending.exact_argv[6:]
+    native_scan = (("--native-push",) if isinstance(pending.binding, NativePushScanBinding) else
+                   ("--range", pending.binding.remote, pending.binding.destination,
+                    "--range-source", pending.binding.source_oid))
     progress = (
         _ScanProgressFrames(pending.attempt_id, on_advance=advance_quiet_window)
-        if isinstance(pending.binding, NativePushScanBinding)
-        and pending.exact_argv[-3:] == ("--gate-progress-attempt", pending.attempt_id, "--native-push")
+        if args == ("--gate-progress-attempt", pending.attempt_id, *native_scan)
         and isinstance(pending.attempt_id, str)
         and re.fullmatch(r"[0-9a-f]{32}", pending.attempt_id)
         else None
@@ -3084,9 +3100,12 @@ def _run_snapshot_child(
             return_code = process.poll()
             if return_code is not None:
                 with output_lock:
+                    observed_exit_at = time.monotonic()
                     bounded = not overflow.is_set() and (
-                        progress is None or time.monotonic() < quiet_deadline
+                        progress is None or observed_exit_at < quiet_deadline
                     )
+                    if bounded and progress is not None and progress.phase_counts:
+                        completed_with_progress_at = observed_exit_at
                 break
             now = time.monotonic()
             threshold_notice.observe(now - started)
@@ -3149,6 +3168,8 @@ def _run_snapshot_child(
                             )
                             else PendingState.FAILED
                         )
+                        if pending.state is PendingState.SETTLED:
+                            pending._settled_progress_at = completed_with_progress_at
             except BaseException as exc:
                 settlement_failures.append(exc)
                 try:
@@ -3364,9 +3385,11 @@ def _run_authoritative_scan(
             raise PrRouteDenied(prefix + "-SCAN-PROVENANCE") from None
         invocation_id = secrets.token_hex(32)
         attempt_id = secrets.token_hex(16)
-        scan_arguments = ("--gate-progress-attempt", attempt_id, "--native-push") if native_objects else (
+        scan_arguments = ("--native-push",) if native_objects else (
             "--range", binding.remote, binding.destination, "--range-source", binding.source_oid,
         )
+        if native is not None:
+            scan_arguments = ("--gate-progress-attempt", attempt_id, *scan_arguments)
         argv = (
             interpreter_before.absolute_resolved_path, "-I", "-c", _SCAN_BOOTSTRAP,
             "--gate-git-executable", git_exe,

@@ -974,8 +974,8 @@ def test_named_remote_keeps_private_endpoint_inside_captured_stdin(native_reposi
         result = owner._native_pre_push_main(["origin", endpoint])
     assert result == 0, errors.getvalue()
     assert len(received_payloads) == 2
-    assert progress_counts[0] == 0 and progress_counts[1] > 0
-    assert phases[0] == ()
+    assert all(count > 0 for count in progress_counts)
+    assert tuple(name for name, _ in phases[0])[-3:] == ("acquired", "traversed", "classified")
     assert tuple(name for name, _ in phases[1]) == ("commits", "objects", "acquired", "traversed", "classified")
     assert phases[1][-1] == ("classified", 1)
     lines = output.getvalue().splitlines()
@@ -1227,7 +1227,7 @@ for unit in range(1, 8):
             "--gate-progress-attempt", token, "--native-push")
     pending = gate.PendingScanInvocation(
         "synthetic-native-watchdog", token, binding, None, gate._interpreter_identity(), argv,
-        object(), captured,
+        object(), captured, authorization_deadline=time.monotonic() + .85,
     )
     # This fixture tests owned execution, not receiving or publication authority.
     delayed_observation = (
@@ -1241,3 +1241,8 @@ for unit in range(1, 8):
     assert records[0].verified_acquired_objects == {"advancing": 7, "replayed": 1, "late": 0}[mode]
     assert records[0].stderr == b""
     assert pending.consumption_id is None
+    if mode == "advancing":
+        assert time.monotonic() > pending.authorization_deadline
+        assert pending._consumption_deadline() > time.monotonic()
+    else:
+        assert pending._consumption_deadline() == pending.authorization_deadline
