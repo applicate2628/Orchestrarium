@@ -6,7 +6,9 @@ import collections
 import hashlib
 import importlib.util
 from pathlib import Path
+import subprocess
 import sys
+import time
 import tracemalloc
 import unittest
 
@@ -396,6 +398,119 @@ class RetainedPayloadTests(unittest.TestCase):
         self.assertEqual(result[0].binary_blobs, count)
         self.assertEqual(result[1].scanned_count, count + 1)
         self.assertEqual(reader.reads, count * 2 + 1)
+
+
+def test_interrupted_history_retries_from_fresh_reader_and_proof(tmp_path, monkeypatch):
+    """An interrupted scan contributes no evidence to a complete, current retry."""
+    monkeypatch.chdir(tmp_path)
+
+    def git(*args, data=None):
+        return subprocess.run(
+            ("git", *args), input=data, capture_output=True, check=True, timeout=15,
+        ).stdout.strip()
+
+    git("init", "--quiet", "--template=", "--object-format=sha1")
+    chosen, objects, blobs = fixture(count=2)
+    tree = chosen.roots[0]
+    commit_raw = (
+        f"tree {tree}\nauthor Fixture <fixture@example.test> 1 +0000\n"
+        "committer Fixture <fixture@example.test> 1 +0000\n\nFixture commit\n"
+    ).encode("ascii")
+    commit = oid("commit", commit_raw)
+    objects[commit] = ("commit", commit_raw)
+    for object_id, (kind, raw) in objects.items():
+        assert git("hash-object", "-w", "-t", kind, "--stdin", data=raw) == object_id.encode()
+
+    git("update-ref", "HEAD", commit)
+    selection = scanner.RangeSelection(
+        "origin", "refs/heads/main", "HEAD", commit, (commit,), (commit, tree, *blobs),
+    )
+    binary_scan = scanner._binary_content_hits
+    scanned_paths = []
+
+    def record_binary_scan(raw, path, find_paths, **options):
+        findings = binary_scan(raw, path, find_paths, **options)
+        scanned_paths.append(path)
+        return findings
+
+    monkeypatch.setattr(scanner, "_binary_content_hits", record_binary_scan)
+
+    async def exercise():
+        blocked = asyncio.Event()
+        proceed = asyncio.Event()
+
+        class ReaderWithBarrier(scanner._AsyncGitObjectReader):
+            def __init__(self, *, interrupt=False):
+                super().__init__()
+                self.interrupt = interrupt
+                self.requests = []
+
+            async def read(self, value, expected_type=None, *, scan_deadline):
+                self.requests.append(value)
+                if self.interrupt and value == blobs[1] and self.requests.count(value) == 2:
+                    blocked.set()
+                    await proceed.wait()
+                return await super().read(value, expected_type, scan_deadline=scan_deadline)
+
+        async def scan(reader):
+            return await scanner._scan_selected_history_async(
+                selection, lambda _line: [], wall_deadline=time.monotonic() + 30,
+                reader_factory=lambda: reader,
+            )
+
+        first = ReaderWithBarrier(interrupt=True)
+        task = asyncio.create_task(scan(first))
+        try:
+            await asyncio.wait_for(blocked.wait(), 10)
+            assert scanned_paths == ["file0"]
+            task.cancel()
+            interrupted = await task
+        finally:
+            if not task.done():
+                task.cancel()
+            proceed.set()
+            await asyncio.gather(task, return_exceptions=True)
+        assert interrupted.kind == "refusal"
+        assert interrupted.refusal.reason == "cancelled"
+        assert interrupted.history is interrupted.coverage is None
+        assert interrupted.reap_certificate.complete
+        assert first.state is scanner.ReaderState.REAPED
+        assert first.process.returncode is not None
+        stdout, stderr, status = scanner._format_outcome(interrupted)
+        assert (stdout, status) == ("", 2)
+        assert "receipt" not in stderr
+
+        scanned_paths.clear()
+        retry_reader = ReaderWithBarrier()
+        retry = await scan(retry_reader)
+        assert retry.kind == "clean"
+        assert retry.reap_certificate.complete
+        assert retry.reap_certificate.session_id != interrupted.reap_certificate.session_id
+        assert scanned_paths == ["file0", "file1"]
+        assert retry_reader.requests == [commit, tree, *blobs, *blobs]
+        assert retry.coverage.scanned_message_oids == (commit,)
+        clean_receipt = scanner._format_outcome(retry)
+        assert clean_receipt[2] == 0 and "receipt=v3" in clean_receipt[0]
+
+        oracle_reader = ReaderWithBarrier()
+        oracle = await scan(oracle_reader)
+        assert oracle.kind == "clean"
+        assert retry.history == oracle.history
+        assert retry.coverage == oracle.coverage
+        assert clean_receipt == scanner._format_outcome(oracle)
+
+        new_tip = git("hash-object", "-w", "-t", "commit", "--stdin",
+                      data=commit_raw.replace(b"Fixture commit", b"New fixture commit")).decode()
+        git("update-ref", "HEAD", new_tip, commit)
+        drift_reader = ReaderWithBarrier()
+        drift = await scan(drift_reader)
+        assert drift.kind == "refusal"
+        assert drift.refusal.failure_id == "PS-MSG-TIP-CHANGED"
+        assert drift.history is drift.coverage is None
+        assert drift_reader.requests == retry_reader.requests
+        assert scanner._format_outcome(drift)[0] == ""
+
+    asyncio.run(exercise())
 
 
 if __name__ == "__main__":
