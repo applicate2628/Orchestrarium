@@ -3141,6 +3141,7 @@ async def _read_git_lines_bounded(
     accepted_codes: frozenset[int],
     env: dict[str, str] | None = None,
     input_bytes: bytes | None = None,
+    on_line: Callable[[bytes], Refusal | None] | None = None,
 ) -> tuple[int, tuple[bytes, ...]] | Refusal:
     process_group_owner: PosixProcessGroupOwnerV1 | None = None
     direct_observation: _AsyncioDirectProcessObservation | None = None
@@ -3201,12 +3202,18 @@ async def _read_git_lines_bounded(
                 if len(raw) > line_cap:
                     refusal = _refusal("PS-MSG-FRAME", "selection-line")
                 else:
-                    rows.append(raw)
+                    if on_line is None:
+                        rows.append(raw)
+                    else:
+                        refusal = on_line(raw)
         if refusal is None and pending:
             if len(pending) > line_cap:
                 refusal = _refusal("PS-MSG-FRAME", "selection-line")
             else:
-                rows.append(bytes(pending))
+                if on_line is None:
+                    rows.append(bytes(pending))
+                else:
+                    refusal = on_line(bytes(pending))
     except asyncio.CancelledError:
         refusal = _refusal("PS-MSG-READ", "cancelled")
     except Exception:
@@ -3586,22 +3593,11 @@ async def _read_parent_graph_bounded(
     object_format: GitObjectFormat,
     input_bytes: bytes | None = None,
 ) -> tuple[tuple[str, tuple[str, ...]], ...] | Refusal:
-    result = await _read_git_lines_bounded(
-        argv,
-        byte_cap=_MAX_PARENT_GRAPH_BYTES,
-        line_cap=_MAX_COMMIT_TREE_BYTES,
-        deadline=deadline,
-        accepted_codes=frozenset({0}),
-        **({"input_bytes": input_bytes} if input_bytes is not None else {}),
-    )
-    if isinstance(result, Refusal):
-        return result
-    _returncode, rows = result
-    if len(rows) > _MAX_COMMITS:
-        return _refusal("PS-MSG-LIMIT", "count")
     parsed: list[tuple[str, tuple[str, ...]]] = []
     seen: set[str] = set()
-    for row in rows:
+    def consume(row: bytes) -> Refusal | None:
+        if len(parsed) >= _MAX_COMMITS:
+            return _refusal("PS-MSG-LIMIT", "count")
         fields = row.split(b" ")
         if not fields or any(len(field) != object_format.hex_length for field in fields):
             return _refusal("PS-MSG-FRAME", "parent-graph")
@@ -3616,6 +3612,19 @@ async def _read_parent_graph_bounded(
             return _refusal("PS-MSG-FRAME", "parent-graph")
         seen.add(oid)
         parsed.append((oid, parents))
+        return None
+
+    result = await _read_git_lines_bounded(
+        argv,
+        byte_cap=_MAX_PARENT_GRAPH_BYTES,
+        line_cap=_MAX_COMMIT_TREE_BYTES,
+        deadline=deadline,
+        accepted_codes=frozenset({0}),
+        on_line=consume,
+        **({"input_bytes": input_bytes} if input_bytes is not None else {}),
+    )
+    if isinstance(result, Refusal):
+        return result
     return tuple(parsed)
 
 

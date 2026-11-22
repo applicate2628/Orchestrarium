@@ -113,6 +113,29 @@ class TestNativePublicationEffects(unittest.TestCase):
                 self.assertEqual(observation.call_count, captures)
 
 
+    def test_parent_graph_validated_rows_arrive_without_collecting_raw_output(self):
+        mod = self.module
+        fmt = mod._detect_git_object_format(15)
+        first, second = "1" * fmt.hex_length, "2" * fmt.hex_length
+        streamed = []
+
+        async def read_with_sink(_argv, *, on_line=None, **_options):
+            self.assertIsNotNone(on_line)
+            for raw in (f"{first} {second}".encode("ascii"), second.encode("ascii")):
+                streamed.append(raw)
+                self.assertIsNone(on_line(raw))
+            return 0, ()
+
+        with mock.patch.object(mod, "_read_git_lines_bounded", side_effect=read_with_sink):
+            async def exercise():
+                return await mod._read_parent_graph_bounded(
+                    ("unused",), object_format=fmt, deadline=asyncio.get_running_loop().time() + 20,
+                )
+            graph = asyncio.run(exercise())
+        self.assertEqual(len(streamed), 2)
+        self.assertEqual(graph, ((first, (second,)), (second, ())))
+
+
     def test_tag_annotation_is_scanned_even_when_target_commit_is_remote(self):
         annotation = "TOKEN=" + "aB9" * 16
         self.git("tag", "-a", "extra", "-m", annotation)
