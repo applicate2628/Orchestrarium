@@ -48,3 +48,31 @@ def test_binary_rows_do_not_admit_text_only_rules():
 def test_length_is_not_success_if_the_frame_is_unterminated():
     with pytest.raises(ValueError, match="invalid matcher frame"):
         decode(b"[[]]", (("", False),), rules)
+
+def test_frames_cross_pipe_chunks_without_losing_the_following_frame():
+    import asyncio
+
+    async def verify():
+        reader = asyncio.StreamReader(limit=64 * 1024)
+        reader.feed_data(b"[" + b" " * (150 * 1024) + b"]\n[]\n")
+        reader.feed_eof()
+        stream = WIRE["FrameReader"](reader)
+        deadline = asyncio.get_running_loop().time() + 2
+        assert await stream.read(deadline) == b"[" + b" " * (150 * 1024) + b"]\n"
+        assert await stream.read(deadline) == b"[]\n"
+
+    asyncio.run(verify())
+
+
+def test_eof_before_delimiter_is_not_a_frame():
+    import asyncio
+
+    async def verify():
+        reader = asyncio.StreamReader()
+        reader.feed_data(b"[[]]")
+        reader.feed_eof()
+        stream = WIRE["FrameReader"](reader)
+        with pytest.raises(ValueError, match="incomplete matcher frame"):
+            await stream.read(asyncio.get_running_loop().time() + 2)
+
+    asyncio.run(verify())

@@ -73,3 +73,26 @@ def _decode_row(row, text, binary, rules):
         previous_key = key
         observations.append((rule_id, match))
     return tuple(observations)
+
+class FrameReader:
+    """Read newline frames across the bounded owner pipe's transport chunks."""
+
+    def __init__(self, stream):
+        self._stream = stream
+        self._next = b""
+
+    async def read(self, deadline):
+        import asyncio
+
+        frame = bytearray()
+        # No new admission quota: the existing scanner owns the deadline.
+        async with asyncio.timeout_at(deadline):
+            while True:
+                chunk = self._next or await self._stream.read(64 * 1024)
+                if not chunk:
+                    raise ValueError("incomplete matcher frame")
+                line, delimiter, self._next = chunk.partition(b"\n")
+                frame.extend(line)
+                if delimiter:
+                    frame.extend(delimiter)
+                    return bytes(frame)
