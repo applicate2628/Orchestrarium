@@ -14,10 +14,15 @@ just-in-time compilation and Rayon. The current scanner remains the sole
 owner of line framing, review identity, classification and Git decisions.
 The candidate accepts already-framed rows and returns ordered UTF-8 byte
 spans only. Its batch threshold selects scheduling; it does not limit coverage.
-An error is not an empty result. This test crate is not an installed CLI or
-a deployable replacement, and should be folded into the common native CLI
-rather than become a second production tool. Before activation, compare the
-complete gate and receiver effects, not just lexical matching.
+An error is not an empty result. The publication matcher is the narrowly scoped
+pre-SDK delivery exception: the qualified Windows x64 worker ships in the
+normal pre-SDK bundle with no SDK dependency. It is an internal scanner
+component, not a second installed CLI. Other native operations remain under
+the broader migration and receiving plan.
+
+Before activating the worker, verify the exact retained artifact, complete
+gate and receiver effects, and full VFEM timing at the ordinary gate budget.
+Lexical equivalence or packaging alone does not constitute activation.
 
 ## Goal, quality attributes and architecture
 
