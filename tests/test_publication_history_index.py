@@ -184,3 +184,28 @@ def test_receipt_coverage_matches_legacy_digest_and_rejects_missing_extra_or_dup
         for stage in event:
             index.record_coverage(stage, a)
         assert index.seal_receipt_coverage((a, a)).failure_id == "PS-MSG-COVERAGE"
+
+
+def test_acquired_kind_keeps_actual_order_and_exact_tree_reachability():
+    scanner = runpy.run_path(str(SCANNER))
+    with closing(sqlite3.connect("")) as db:
+        index = scanner["_HistoryIndex"](db)
+        for oid in ("tree", "blob", "commit", "other-tree"):
+            assert index.add_selected_object(oid)
+        assert not index.record_acquired("unselected", "tree", 0)
+        assert index.record_acquired("commit", "commit", 0)
+        assert not index.record_acquired("commit", "tree", 1)
+        assert index.record_acquired("blob", "blob", 1)
+        assert index.record_acquired("tree", "tree", 2)
+        assert index.record_acquired("other-tree", "tree", 3)
+        assert tuple(index.acquired_oids()) == ("commit", "blob", "tree", "other-tree")
+        assert tuple(index.acquired_oids(deferred=True)) == ("blob", "tree", "other-tree")
+        assert index.acquired_kind("tree") == "tree"
+        assert index.acquired_kind("unselected") is None
+        assert not index.record_reached_tree("commit")
+        assert not index.record_reached_tree("unselected")
+        assert index.record_reached_tree("tree")
+        assert index.record_reached_tree("tree")
+        assert not index.tree_coverage_complete()
+        assert index.record_reached_tree("other-tree")
+        assert index.tree_coverage_complete()

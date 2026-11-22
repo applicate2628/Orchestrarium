@@ -9,7 +9,7 @@ from collections import Counter, OrderedDict
 from enum import Enum
 from functools import lru_cache
 import hashlib
-from itertools import pairwise, zip_longest
+from itertools import chain, pairwise, zip_longest
 import importlib.util
 import json
 import math
@@ -4745,7 +4745,8 @@ class _HistoryIndex:
             CREATE TABLE selected_commit (sequence INTEGER PRIMARY KEY, oid TEXT UNIQUE,
                 parents TEXT NOT NULL, stream INTEGER NOT NULL);
             CREATE TABLE selected_object (sequence INTEGER PRIMARY KEY, oid TEXT UNIQUE,
-                stream INTEGER NOT NULL);
+                stream INTEGER NOT NULL, acquired_kind TEXT, acquired_sequence INTEGER,
+                reached INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE coverage_event (sequence INTEGER PRIMARY KEY, stage TEXT NOT NULL,
                 oid TEXT NOT NULL);
             CREATE INDEX coverage_stage ON coverage_event(stage, sequence);
@@ -4810,6 +4811,40 @@ class _HistoryIndex:
     def selected_objects(self, *, sorted_ids=False):
         order = "oid" if sorted_ids else "sequence"
         return (oid for (oid,) in self.db.execute(f"SELECT oid FROM selected_object ORDER BY {order}"))
+
+    def record_acquired(self, oid: str, kind: str, ordinal: int) -> bool:
+        return self.db.execute(
+            "UPDATE selected_object SET acquired_kind=?, acquired_sequence=? "
+            "WHERE oid=? AND acquired_kind IS NULL", (kind, ordinal, oid),
+        ).rowcount == 1
+
+    def acquired_oids(self, *, deferred: bool = False) -> Iterable[str]:
+        kind = "acquired_kind IN ('tree', 'blob')" if deferred else "acquired_kind IS NOT NULL"
+        return (oid for (oid,) in self.db.execute(
+            f"SELECT oid FROM selected_object WHERE {kind} ORDER BY acquired_sequence",
+        ))
+
+    def acquired_kind(self, oid: str) -> str | None:
+        row = self.db.execute("SELECT acquired_kind FROM selected_object WHERE oid=?", (oid,)).fetchone()
+        return None if row is None else row[0]
+
+    def record_reached_tree(self, oid: str) -> bool:
+        row = self.db.execute(
+            "SELECT reached FROM selected_object WHERE oid=? AND acquired_kind='tree'", (oid,),
+        ).fetchone()
+        if row is None:
+            return False
+        if not row[0]:
+            self.db.execute("UPDATE selected_object SET reached=1 WHERE oid=?", (oid,))
+        return True
+
+    def tree_coverage_complete(self) -> bool:
+        return self.db.execute(
+            "SELECT 1 FROM selected_object WHERE acquired_kind='tree' AND reached=0 LIMIT 1",
+        ).fetchone() is None
+
+    def has_blob(self, oid: str) -> bool:
+        return self.db.execute("SELECT 1 FROM blob WHERE oid=?", (oid,)).fetchone() is not None
 
     def selection_within_limits(self):
         commits, objects = self.db.execute(
@@ -4922,6 +4957,11 @@ async def _acquire_history(selection, reader, find_machine_paths, coverage_recor
             index = _HistoryIndex(db) if history_index is None else history_index
             clock = asyncio.get_running_loop().time
             db.set_progress_handler(lambda: int(clock() >= scan_deadline), 2048)
+            if history_index is None:
+                # Standalone selection was formed before this local index opened.
+                for oid in selection.object_oids:
+                    if not index.add_selected_object(oid):
+                        return _refusal("PS-MSG-COVERAGE", "object-set")
             wire = globals().get("__injected_matcher_wire__")
             try:
                 executable = None if wire is None else wire["retained_matcher"](sys.executable)
@@ -4977,7 +5017,6 @@ async def _acquire_indexed_history(
 ) -> tuple[HistoryProof, CoverageProof | _ReceiptCoverage, tuple[Finding, ...]] | Refusal:
     commit_set = set(selection.expected_oids)
     native = isinstance(selection, NativePushSelection)
-    object_types: dict[str, str] = {}
     commit_topology: dict[str, tuple[str, tuple[str, ...]]] = {}
     tag_targets: dict[str, tuple[str, str]] = {}
     direct_tag_commit = None
@@ -5013,7 +5052,7 @@ async def _acquire_indexed_history(
         retained_tree_bytes += cost
         return True
 
-    for oid in selection.object_oids:
+    for ordinal, oid in enumerate(selection.object_oids):
         if asyncio.get_running_loop().time() >= scan_deadline:
             return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
         expected_type = "commit" if oid in commit_set else None
@@ -5032,7 +5071,8 @@ async def _acquire_indexed_history(
             if actual_oid != oid:
                 return _refusal("PS-MSG-COVERAGE", "object-content-identity")
             coverage_recorder.record(CoverageEvent.ACQUIRED, oid)
-        object_types[oid] = result.object_type
+        if not index.record_acquired(oid, result.object_type, ordinal):
+            return _refusal("PS-MSG-COVERAGE", "object-set")
         if result.object_type == "commit":
             if oid not in commit_set:
                 return _refusal("PS-MSG-COVERAGE", "unexpected-commit")
@@ -5115,7 +5155,7 @@ async def _acquire_indexed_history(
             return _refusal("PS-MSG-FRAME", "object-type")
         result = None  # Release the previous blob before the next reader allocation.
 
-    if tuple(object_types) != selection.object_oids:
+    if any(a != b for a, b in zip_longest(index.acquired_oids(), selection.object_oids)):
         return _refusal("PS-MSG-COVERAGE", "object-set")
     if set(commit_topology) != commit_set:
         return _refusal("PS-MSG-COVERAGE", "commit-set")
@@ -5134,7 +5174,7 @@ async def _acquire_indexed_history(
         if isinstance(coverage, Refusal):
             return coverage
     for target_oid, declared_type in tag_targets.values():
-        actual_type = object_types.get(target_oid)
+        actual_type = index.acquired_kind(target_oid)
         if actual_type is None:
             if excluded_tag_targets is None:
                 return _refusal("PS-MSG-FRAME", "tag-target")
@@ -5166,26 +5206,28 @@ async def _acquire_indexed_history(
             retain_tree(oid, raw)
         return entries
 
-    unpublished_trees = {
-        oid for oid, object_type in object_types.items() if object_type == "tree"
-    }
-    reached_unpublished_trees: set[str] = set()
-    tree_roots = [(oid, commit_topology[oid][0]) for oid in selection.expected_oids]
+    # Acquisition is complete. These small caches store immutable scope
+    # membership and already-recorded tree visits, not object payloads.
+    selected_tree_reached = lru_cache(maxsize=4096)(index.record_reached_tree)
+    selected_blob = lru_cache(maxsize=4096)(index.has_blob)
+    commit_roots = ((oid, commit_topology[oid][0]) for oid in selection.expected_oids)
+    direct_trees = []
     direct_blobs = []
     if native:
         for root in selection.roots:
             selected = root
-            chain = set()
+            tag_chain = set()
             while selected in tag_targets:
-                if selected in chain:
+                if selected in tag_chain:
                     return _refusal("PS-MSG-FRAME", "tag-cycle")
-                chain.add(selected)
+                tag_chain.add(selected)
                 selected = tag_targets[selected][0]
-            if object_types.get(selected) == "tree":
-                tree_roots.append((root, selected))
-            elif object_types.get(selected) == "blob":
+            kind = index.acquired_kind(selected)
+            if kind == "tree":
+                direct_trees.append((root, selected))
+            elif kind == "blob":
                 direct_blobs.append((root, b"", selected))
-    for commit_oid, root_tree in tree_roots:
+    for commit_oid, root_tree in chain(commit_roots, direct_trees):
         guard = _tree_traversal_guard(
             deadline=scan_deadline,
             frontier=0,
@@ -5206,8 +5248,7 @@ async def _acquire_indexed_history(
             entries = await load_tree(tree_oid)
             if isinstance(entries, Refusal):
                 return entries
-            if tree_oid in unpublished_trees:
-                reached_unpublished_trees.add(tree_oid)
+            unpublished_tree = selected_tree_reached(tree_oid)
             for entry in reversed(entries):
                 guard = _tree_traversal_guard(
                     deadline=scan_deadline,
@@ -5218,7 +5259,7 @@ async def _acquire_indexed_history(
                 path = prefix + (b"/" if prefix else b"") + entry.name
                 if len(path) > _MAX_PATH_BYTES:
                     return _refusal("PS-MSG-LIMIT", "path-bytes")
-                if native and tree_oid in unpublished_trees and index.add_metadata(tree_oid, path):
+                if native and unpublished_tree and index.add_metadata(tree_oid, path):
                     decoded_path = path.decode("utf-8", "surrogateescape")
                     filename_findings = _filename_findings(decoded_path, "tree-path")
                     _append_findings(findings, filename_findings)
@@ -5238,14 +5279,14 @@ async def _acquire_indexed_history(
                     if guard is not None:
                         return guard
                     stack.append((entry.oid, path, ancestors + (tree_oid,)))
-                elif entry.kind == "blob" and object_types.get(entry.oid) == "blob":
+                elif entry.kind == "blob" and selected_blob(entry.oid):
                     subject = (commit_oid, path, entry.oid)
                     if not index.add(subject, entry.mode):
                         return _refusal("PS-MSG-COVERAGE", "duplicate-subject")
 
     for subject in direct_blobs:
         index.add(subject, "")
-    if reached_unpublished_trees != unpublished_trees:
+    if not index.tree_coverage_complete():
         return _refusal("PS-MSG-COVERAGE", "tree-subjects")
     if not index.blob_coverage_complete():
         return _refusal("PS-MSG-COVERAGE", "blob-subjects")
@@ -5346,9 +5387,8 @@ async def _acquire_indexed_history(
         _append_findings(findings, content_findings)
 
     if native:
-        for oid in selection.object_oids:
-            if object_types[oid] in {"tree", "blob"}:
-                coverage_recorder.record(CoverageEvent.SCANNED, oid)
+        for oid in index.acquired_oids(deferred=True):
+            coverage_recorder.record(CoverageEvent.SCANNED, oid)
         coverage = coverage_recorder.proof()
         if isinstance(coverage, Refusal):
             return coverage
