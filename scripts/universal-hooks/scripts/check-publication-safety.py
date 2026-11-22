@@ -596,23 +596,49 @@ class CoverageEvent(str, Enum):
     SCANNED = "scanned"
 
 
+class _ScanInactivity:
+    """Scanner-owned quiet deadline; expired work cannot revive it."""
+    def __init__(self, initial_deadline: float, interval: float, *, clock=None) -> None:
+        self._deadline = initial_deadline
+        self.interval = interval
+        self.clock = clock or time.monotonic
+
+    def remaining(self) -> float:
+        return self._deadline - self.clock()
+
+    def observe_unit(self) -> float | None:
+        now = self.clock()
+        if now >= self._deadline:
+            return None
+        self._deadline = now + self.interval
+        return now
+
+
 class _VerifiedWorkPhase:
     """Report accepted semantic units, never a heartbeat or a receipt."""
-    def __init__(self, name: str, *, enabled: bool = True) -> None:
+    def __init__(self, name: str, *, enabled: bool = True, budget=None) -> None:
         self._name = name
         self._emit = globals().get("__injected_verified_completion__") if enabled else None
+        self._budget = budget if isinstance(budget, _ScanInactivity) and enabled else None
         self._count = 0
         self._reported = 0
+        self._last_report_at = None
 
     def step(self) -> None:
-        if self._emit is None:
+        if self._emit is None and self._budget is None:
+            return
+        accepted_at = self._budget.observe_unit() if self._budget is not None else None
+        if self._budget is not None and accepted_at is None:
             return
         self._count += 1
-        if self._count == 1 or self._count % 128 == 0:
+        due = (self._budget is not None and accepted_at is not None
+               and self._last_report_at is not None
+               and accepted_at - self._last_report_at >= self._budget.interval / 4)
+        if self._count == 1 or self._count % 128 == 0 or due:
             self.finish()
 
     def observed(self, store):
-        if self._emit is None:
+        if self._emit is None and self._budget is None:
             return store
 
         def add(*args):
@@ -624,9 +650,12 @@ class _VerifiedWorkPhase:
         return add
 
     def finish(self) -> None:
-        if self._emit is not None and self._count > self._reported:
+        if (self._emit is not None and self._count > self._reported
+                and (self._budget is None or self._budget.remaining() > 0)):
             self._emit(self._name, self._count)
             self._reported = self._count
+            if self._budget is not None:
+                self._last_report_at = self._budget.clock()
 
 
 class CoverageRecorder:
@@ -1382,12 +1411,13 @@ async def _owned_matcher_exchange(verified_executable, wire_factory, rules, dead
         exchange = wire_factory(process.stdout, process.stdin, rules)
         yield exchange
         process.stdin.close()
-        async with asyncio.timeout_at(deadline):
+        finish_by = _deadline_snapshot(deadline, asyncio.get_running_loop().time)
+        async with asyncio.timeout_at(finish_by):
             await process.stdin.wait_closed()
-            if not await exchange.eof(deadline):
+            if not await exchange.eof(finish_by):
                 raise ValueError("unexpected matcher output after last batch")
             if await _wait_owned_async_direct(
-                process, observation, max(0.0, deadline - asyncio.get_running_loop().time()),
+                process, observation, max(0.0, finish_by - asyncio.get_running_loop().time()),
             ) != 0:
                 raise ValueError("matcher did not exit successfully")
     finally:
@@ -2737,7 +2767,7 @@ async def _binary_content_hits_with_matcher(
             if position == len(inputs):
                 inputs.append((line, True))
             positions.append(position)
-        captures = await matcher.match(inputs, deadline)
+        captures = await matcher.match(inputs, _deadline_snapshot(deadline, asyncio.get_running_loop().time))
         classes = [
             _binary_lexical_classes(line, matches)
             for (line, _), matches in zip(inputs, captures, strict=True)
@@ -2758,7 +2788,9 @@ async def _text_content_hits_with_matcher(
     rows = _selected_text_lines(raw.decode('utf-8', 'replace'), path, kind)
     findings = []
     for batch in _matcher_batches(rows):
-        captures = await matcher.match(tuple((line, False) for _, _, line in batch), deadline)
+        captures = await matcher.match(
+            tuple((line, False) for _, _, line in batch), _deadline_snapshot(deadline, asyncio.get_running_loop().time),
+        )
         room = None if max_findings is None else max(0, max_findings - len(findings))
         findings.extend(_text_findings(
             ((*row, matches) for row, matches in zip(batch, captures, strict=True)),
@@ -3085,8 +3117,23 @@ def _native_push_request(payload: object) -> NativePushRequest | Refusal:
         return _refusal("PS-INPUT-REFUSAL", "native-selection")
 
 
-def _remaining_seconds(deadline: float) -> float:
-    remaining = deadline - time.monotonic()
+def _time_left(deadline, clock=None) -> float:
+    return deadline.remaining() if isinstance(deadline, _ScanInactivity) else deadline - (clock or time.monotonic)()
+
+
+def _deadline_snapshot(deadline, clock=None) -> float:
+    return ((clock or time.monotonic)() + deadline.remaining()
+            if isinstance(deadline, _ScanInactivity) else deadline)
+
+
+def _loop_scan_deadline(deadline):
+    if isinstance(deadline, _ScanInactivity):
+        return deadline
+    return asyncio.get_running_loop().time() + _remaining_seconds(deadline)
+
+
+def _remaining_seconds(deadline) -> float:
+    remaining = _time_left(deadline)
     if remaining <= 0:
         raise subprocess.TimeoutExpired("publication-safety-range", 0)
     return remaining
@@ -3153,7 +3200,7 @@ async def _feed_selection_input(stream, data: bytes, deadline: float) -> None:
     try:
         for offset in range(0, len(data), _READ_CHUNK_BYTES):
             stream.write(data[offset:offset + _READ_CHUNK_BYTES])
-            remaining = deadline - asyncio.get_running_loop().time()
+            remaining = _time_left(deadline, asyncio.get_running_loop().time)
             if remaining <= 0:
                 raise asyncio.TimeoutError
             await asyncio.wait_for(stream.drain(), remaining)
@@ -3172,7 +3219,7 @@ async def _finish_selection_input(task, deadline: float, *, cancel: bool) -> Ref
         if cancel:
             task.cancel()
         else:
-            remaining = deadline - asyncio.get_running_loop().time()
+            remaining = _time_left(deadline, asyncio.get_running_loop().time)
             if remaining <= 0:
                 raise asyncio.TimeoutError
             await asyncio.wait_for(asyncio.shield(task), remaining)
@@ -3194,7 +3241,7 @@ async def _settle_selection_input(task, deadline: float) -> bool:
         return True
     try:
         if not task.done():
-            remaining = deadline - asyncio.get_running_loop().time()
+            remaining = _time_left(deadline, asyncio.get_running_loop().time)
             if remaining <= 0:
                 return False
             await asyncio.wait_for(asyncio.shield(task), remaining)
@@ -3262,7 +3309,7 @@ async def _read_git_lines_bounded(
     input_task = None if input_bytes is None else asyncio.create_task(_feed_selection_input(process.stdin, input_bytes, deadline))
     try:
         while refusal is None:
-            remaining = deadline - asyncio.get_running_loop().time()
+            remaining = _time_left(deadline, asyncio.get_running_loop().time)
             if remaining <= 0:
                 refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
                 break
@@ -3313,7 +3360,7 @@ async def _read_git_lines_bounded(
     if refusal is None:
         refusal = input_refusal
     if refusal is None:
-        remaining = deadline - asyncio.get_running_loop().time()
+        remaining = _time_left(deadline, asyncio.get_running_loop().time)
         if remaining <= 0:
             refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
         else:
@@ -3956,7 +4003,7 @@ async def _native_prior_receiver_roots(
     zero = "0" * request.object_format.hex_length
     prior = tuple(RemoteRefTip(row.remote_ref, row.remote_oid)
                   for row in request.updates if row.remote_oid != zero)
-    loop_deadline = asyncio.get_running_loop().time() + _remaining_seconds(deadline)
+    loop_deadline = _loop_scan_deadline(deadline)
     if request.receiver_scope is not None:
         if request.receiver_inventory or inventory is not None:
             return _refusal("PS-INPUT-REFUSAL", "receiver-scope")
@@ -3996,7 +4043,7 @@ async def _native_push_selection(
     if index is None:
         return _refusal("PS-MSG-READ", "coverage-storage")
     loop = asyncio.get_running_loop()
-    loop_deadline = loop.time() + _remaining_seconds(deadline)
+    loop_deadline = _loop_scan_deadline(deadline)
     candidate = _native_new_same_name_tag(request)
     inventory = None
     if candidate is not None:
@@ -4012,7 +4059,7 @@ async def _native_push_selection(
     if isinstance(exclusions, Refusal):
         return exclusions
     revisions = _revision_stdin(roots, exclusions)
-    commit_progress = _VerifiedWorkPhase("commits")
+    commit_progress = _VerifiedWorkPhase("commits", budget=deadline)
     parent_graph = await _read_parent_graph_bounded(
         _range_git_argv("rev-list", "--parents", "--topo-order", "--stdin"),
         deadline=loop_deadline, object_format=request.object_format, input_bytes=revisions,
@@ -4022,7 +4069,7 @@ async def _native_push_selection(
     if isinstance(parent_graph, Refusal):
         return parent_graph
     commit_progress.finish()
-    object_progress = _VerifiedWorkPhase("objects")
+    object_progress = _VerifiedWorkPhase("objects", budget=deadline)
     objects = await _read_git_oid_lines_bounded(
         _range_git_argv("rev-list", "--objects", "--no-object-names", "--stdin"),
         count_cap=_MAX_OBJECTS, byte_cap=request.object_format.list_byte_cap(_MAX_OBJECTS),
@@ -4248,8 +4295,10 @@ class _AsyncGitObjectReader:
         self._state = ReaderState.ACTIVE
         return None
 
-    def _request_deadline(self, scan_deadline: float | None) -> float:
+    def _request_deadline(self, scan_deadline: float | _ScanInactivity | None) -> float:
         now = asyncio.get_running_loop().time()
+        if isinstance(scan_deadline, _ScanInactivity):
+            scan_deadline = now + scan_deadline.remaining()
         if scan_deadline is None:
             budget = (
                 self._request_timeout
@@ -4267,7 +4316,7 @@ class _AsyncGitObjectReader:
         return deadline
 
     async def _within(self, awaitable, deadline: float):
-        remaining = deadline - asyncio.get_running_loop().time()
+        remaining = _time_left(deadline, asyncio.get_running_loop().time)
         if remaining <= 0:
             close = getattr(awaitable, "close", None)
             if callable(close):
@@ -4798,7 +4847,7 @@ def _tree_traversal_guard(
     deadline: float,
     frontier: int,
 ) -> Refusal | None:
-    if asyncio.get_running_loop().time() >= deadline:
+    if _time_left(deadline, asyncio.get_running_loop().time) <= 0:
         return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
     if frontier > _MAX_TREE_FRONTIER:
         return _refusal("PS-MSG-LIMIT", "tree-frontier")
@@ -5089,8 +5138,8 @@ def _open_history_index(wall_deadline):
     with closing(sqlite3.connect("")) as db:
         index = _HistoryIndex(db)
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + _remaining_seconds(wall_deadline)
-        db.set_progress_handler(lambda: int(loop.time() >= deadline), 2048)
+        deadline = _loop_scan_deadline(wall_deadline)
+        db.set_progress_handler(lambda: int(_time_left(deadline, loop.time) <= 0), 2048)
         yield index
 
 
@@ -5102,7 +5151,7 @@ async def _acquire_history(selection, reader, find_machine_paths, coverage_recor
         with connection as db:
             index = _HistoryIndex(db) if history_index is None else history_index
             clock = asyncio.get_running_loop().time
-            db.set_progress_handler(lambda: int(clock() >= scan_deadline), 2048)
+            db.set_progress_handler(lambda: int(_time_left(scan_deadline, clock) <= 0), 2048)
             if history_index is None:
                 if selection.indexed_parent_graph:
                     return _refusal("PS-MSG-COVERAGE", "parent-graph-set")
@@ -5130,7 +5179,7 @@ async def _acquire_history(selection, reader, find_machine_paths, coverage_recor
                     async with _owned_matcher_exchange(
                         executable, wire["MatcherExchange"], rules, scan_deadline,
                     ) as matcher:
-                        await matcher.match((), scan_deadline)
+                        await matcher.match((), _deadline_snapshot(scan_deadline, asyncio.get_running_loop().time))
                         result = await _acquire_indexed_history(
                             selection, reader, find_machine_paths, coverage_recorder,
                             scan_deadline, index, matcher=matcher, **options,
@@ -5145,11 +5194,11 @@ async def _acquire_history(selection, reader, find_machine_paths, coverage_recor
                 history, _, findings = result
                 if not findings and index.seal() != (history.subjects, history.paths):
                     return _refusal("PS-MSG-COVERAGE", "history-index")
-            if isinstance(result, tuple) and clock() >= scan_deadline:
+            if isinstance(result, tuple) and _time_left(scan_deadline, clock) <= 0:
                 return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
             return result
     except sqlite3.Error:
-        if asyncio.get_running_loop().time() >= scan_deadline:
+        if _time_left(scan_deadline, asyncio.get_running_loop().time) <= 0:
             return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
         return _refusal("PS-MSG-READ", "coverage-storage")
 
@@ -5204,9 +5253,9 @@ async def _acquire_indexed_history(
         return True
 
     targets = index.acquisition_targets(lexical=lexical_acquisition)
-    acquisition_progress = _VerifiedWorkPhase("acquired", enabled=native)
+    acquisition_progress = _VerifiedWorkPhase("acquired", enabled=native, budget=scan_deadline)
     for ordinal, (oid, target) in enumerate(zip_longest(selection.object_oids, targets)):
-        if asyncio.get_running_loop().time() >= scan_deadline:
+        if _time_left(scan_deadline, asyncio.get_running_loop().time) <= 0:
             return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
         if target is None or oid != target[0]:
             return _refusal("PS-MSG-COVERAGE", "object-set")
@@ -5379,7 +5428,7 @@ async def _acquire_indexed_history(
                 direct_trees.append((root, selected))
             elif kind == "blob":
                 direct_blobs.append((root, b"", selected))
-    traversal_progress = _VerifiedWorkPhase("traversed", enabled=native)
+    traversal_progress = _VerifiedWorkPhase("traversed", enabled=native, budget=scan_deadline)
     for commit_oid, root_tree in chain(commit_roots, direct_trees):
         guard = _tree_traversal_guard(
             deadline=scan_deadline,
@@ -5451,8 +5500,8 @@ async def _acquire_indexed_history(
     # Preserve path-first finding/review order. A single payload cache bounds
     # retained memory independently of the cumulative admitted blob volume.
     # Rereads are at most the number of distinct blob/path pairs and share the
-    # original deadline. No reread adds coverage events or receipt byte counts.
-    classified_progress = _VerifiedWorkPhase("classified", enabled=native)
+    # shared scan budget. No reread adds coverage events or receipt byte counts.
+    classified_progress = _VerifiedWorkPhase("classified", enabled=native, budget=scan_deadline)
     cached_blob_oid = None
     binary = False
     raw = b""
@@ -5463,7 +5512,7 @@ async def _acquire_indexed_history(
         scanned_paths += 1
         classify_room = len(findings) < _MAX_FINDINGS
         path_reviewed = False
-        if asyncio.get_running_loop().time() >= scan_deadline:
+        if _time_left(scan_deadline, asyncio.get_running_loop().time) <= 0:
             return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
         if blob_oid != cached_blob_oid:
             raw = b""  # Release before allocating the next payload.
@@ -5509,7 +5558,7 @@ async def _acquire_indexed_history(
             content_findings = []
             shown_locations = set()
             for commit_oid, git_mode, is_commit in index.owners(path, blob_oid):
-                if asyncio.get_running_loop().time() >= scan_deadline:
+                if _time_left(scan_deadline, asyncio.get_running_loop().time) <= 0:
                     return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
                 if not is_commit:
                     _append_findings(content_findings, _content_hits(
@@ -5596,7 +5645,7 @@ async def _acquire_indexed_history(
         direct_tag_commit,
     )
     # Synchronous detectors and proof hashing may cross the shared deadline.
-    if asyncio.get_running_loop().time() >= scan_deadline:
+    if _time_left(scan_deadline, asyncio.get_running_loop().time) <= 0:
         return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
     return proof, coverage, tuple(findings)
 
@@ -5651,7 +5700,7 @@ async def _verify_excluded_tag_targets(
 ) -> Refusal | None:
     # Previously disclosed objects need exact identity and type, not a second
     # scan of their payload. The content reader has already been reaped.
-    remaining = wall_deadline - time.monotonic()
+    remaining = _time_left(wall_deadline)
     if remaining <= 0:
         return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
     deadline = asyncio.get_running_loop().time() + remaining
@@ -5729,7 +5778,7 @@ async def _scan_selected_history_async(
                 )
             else:
                 loop = asyncio.get_running_loop()
-                remaining = wall_deadline - time.monotonic()
+                remaining = _time_left(wall_deadline)
                 if remaining <= 0:
                     acquisition = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
                 else:
@@ -5748,7 +5797,7 @@ async def _scan_selected_history_async(
                         reader,
                         find_machine_paths,
                         coverage_recorder,
-                        loop.time() + remaining,
+                        wall_deadline if isinstance(wall_deadline, _ScanInactivity) else loop.time() + remaining,
                         **review_arguments,
                     )
                 if isinstance(acquisition, Refusal):
@@ -5803,7 +5852,7 @@ async def _scan_selected_history_async(
                 resolver = tip_resolver or (
                     lambda timeout=None: _resolve_commit(selection.source, timeout, object_format=selection.object_format)
                 )
-                drift = _confirm_tip(selection.tip, resolver, max(0.001, wall_deadline - time.monotonic()))
+                drift = _confirm_tip(selection.tip, resolver, max(0.001, _time_left(wall_deadline)))
         except Exception:
             pending = ScanOutcome(
                 "refusal", mode,
@@ -5881,6 +5930,7 @@ async def _scan_native_push_async(
     review_capture=None,
     receiver_scope=None,
     receipt_coverage: bool = False,
+    work_budget: _ScanInactivity | None = None,
 ) -> ScanOutcome:
     request = _native_push_request(payload)
     if isinstance(request, Refusal):
@@ -5894,7 +5944,7 @@ async def _scan_native_push_async(
             return ScanOutcome("refusal", "native-push", refusal=_refusal("PS-INPUT-REFUSAL", "receiver-scope"))
         request = replace(request, receiver_scope=receiver_scope,
                           selection_sha256=receiver_scope.selection_digest(payload))
-    deadline = time.monotonic() + scan_timeout
+    deadline = work_budget if work_budget is not None else time.monotonic() + scan_timeout
     try:
         root = _repo_root()
         policy = _load_review_policy_module()
@@ -5933,12 +5983,12 @@ async def _scan_native_push_async(
         after, _exchanges = _capture_review_repository(policy, root, deadline)
         if after != before:
             return replace(outcome, kind="refusal", refusal=_refusal("PS-INPUT-REFUSAL", "native-repository-currentness"))
-        return outcome
+        return _inactivity_checked_outcome(outcome, work_budget)
     except subprocess.TimeoutExpired:
         return ScanOutcome("refusal", "native-push", refusal=_refusal("PS-MSG-READ-TIMEOUT", "deadline"))
     except sqlite3.Error:
         return ScanOutcome("refusal", "native-push", refusal=(
-            _refusal("PS-MSG-READ-TIMEOUT", "deadline") if time.monotonic() >= deadline
+            _refusal("PS-MSG-READ-TIMEOUT", "deadline") if _time_left(deadline) <= 0
             else _refusal("PS-MSG-READ", "coverage-storage")
         ))
     except (OSError, ValueError, RuntimeError):
@@ -5949,11 +5999,13 @@ def _scan_native_push(payload: object, find_machine_paths, *,
                       review_evaluation: "ReviewEvaluation | None" = None,
                       scan_timeout: float = _SCAN_DEADLINE_SECONDS,
                       review_capture=None, receiver_scope=None,
-                      receipt_coverage: bool = False) -> ScanOutcome:
+                      receipt_coverage: bool = False,
+                      work_budget: _ScanInactivity | None = None) -> ScanOutcome:
     try:
         return asyncio.run(_scan_native_push_async(payload, find_machine_paths,
                            review_evaluation=review_evaluation, review_capture=review_capture, scan_timeout=scan_timeout,
-                           receiver_scope=receiver_scope, receipt_coverage=receipt_coverage))
+                           receiver_scope=receiver_scope, receipt_coverage=receipt_coverage,
+                           work_budget=work_budget))
     except KeyboardInterrupt:
         return ScanOutcome("refusal", "native-push", refusal=_refusal("PS-MSG-READ", "cancelled"))
     except Exception:
@@ -6394,8 +6446,20 @@ def _format_outcome(outcome: ScanOutcome) -> tuple[str, str, int]:
     return f"publication-safety: clean ({outcome.mode}, examined {count} {noun})", "", 0
 
 
-def _emit_outcome(outcome: ScanOutcome) -> int:
+def _inactivity_checked_outcome(
+    outcome: ScanOutcome, budget: _ScanInactivity | None,
+) -> ScanOutcome:
+    if outcome.kind == "clean" and budget is not None and budget.remaining() <= 0:
+        return replace(outcome, kind="refusal", refusal=_refusal("PS-MSG-READ-TIMEOUT", "deadline"))
+    return outcome
+
+
+def _emit_outcome(outcome: ScanOutcome, *, work_budget: _ScanInactivity | None = None) -> int:
+    outcome = _inactivity_checked_outcome(outcome, work_budget)
     stdout, stderr, exit_code = _format_outcome(outcome)
+    current = _inactivity_checked_outcome(outcome, work_budget)
+    if current is not outcome:
+        stdout, stderr, exit_code = _format_outcome(current)
     if stdout:
         print(stdout)
     if stderr:
@@ -6493,14 +6557,18 @@ def main(argv: list[str] | None = None) -> int:
         os.chdir(repo_root)
         find_machine_paths = _path_finder(script)
         if args.native_push:
-            deadline = time.monotonic() + _SCAN_DEADLINE_SECONDS
+            initial_deadline = time.monotonic() + _SCAN_DEADLINE_SECONDS
+            work_budget = (_ScanInactivity(initial_deadline, _SCAN_DEADLINE_SECONDS)
+                           if callable(globals().get("__injected_verified_completion__")) else None)
+            deadline = work_budget if work_budget is not None else initial_deadline
             evaluation, exchanges = _prepare_review_evaluation(repo_root, deadline)
             payload = globals().get("__injected_native_push__")
             outcome = _scan_native_push(payload, find_machine_paths,
                                        review_evaluation=evaluation if evaluation.read.usable_records else None,
                                        scan_timeout=_remaining_seconds(deadline),
                                        receiver_scope=globals().get("__injected_receiver_scope__"),
-                                       receipt_coverage=True)
+                                       receipt_coverage=True,
+                                       work_budget=work_budget)
 
             def recheck_native() -> bool:
                 request = _native_push_request(payload)
@@ -6509,8 +6577,9 @@ def main(argv: list[str] | None = None) -> int:
                 observed, _exchange = _capture_review_repository(evaluation.policy, repo_root, deadline)
                 return observed == request.repository_observation
 
-            return _emit_outcome(_finalize_review_evaluation(outcome, evaluation, repo_root, deadline,
-                                                            recheck_native, exchanges))
+            outcome = _finalize_review_evaluation(outcome, evaluation, repo_root, deadline,
+                                                  recheck_native, exchanges)
+            return _emit_outcome(outcome, work_budget=work_budget)
         if args.range:
             remote, dst = args.range
             if args.history_diagnostics:

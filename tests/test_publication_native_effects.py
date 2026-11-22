@@ -226,6 +226,71 @@ class TestNativePublicationEffects(unittest.TestCase):
         self.assertEqual(seen, [])
 
 
+    def test_native_quiet_budget_tracks_only_fresh_decoded_work(self):
+        mod = self.module
+        tick = [10.0]
+        fake = mod._ScanInactivity(11.0, 1.0, clock=lambda: tick[0])
+        tick[0] = 10.6
+        fake.observe_unit()
+        self.assertAlmostEqual(fake.remaining(), 1.0)
+        tick[0] = 11.8
+        fake.observe_unit()
+        self.assertLess(fake.remaining(), 0)
+
+        program = ("import sys,time;[(sys.stdout.buffer.write(bytes((48+i,10))),"
+                   "sys.stdout.buffer.flush(),time.sleep(.13)) for i in range(8)]")
+        argv = (sys.executable, "-B", "-c", program)
+
+        async def scan(advancing):
+            budget = mod._ScanInactivity(mod.time.monotonic() + .55, .55)
+            observed = []
+            def admit(row):
+                self.assertEqual(row, str(len(observed)).encode("ascii"))
+                observed.append(row)
+                if advancing:
+                    budget.observe_unit()
+            outcome = await mod._read_git_lines_bounded(
+                argv, byte_cap=128, line_cap=8, deadline=budget,
+                accepted_codes=frozenset({0}), on_line=admit,
+            )
+            return outcome, observed
+        outcome, observed = asyncio.run(scan(True))
+        self.assertEqual(outcome, (0, ()))
+        self.assertEqual(len(observed), 8)
+        outcome, observed = asyncio.run(scan(False))
+        self.assertEqual(outcome.failure_id, "PS-MSG-READ-TIMEOUT")
+        self.assertLess(len(observed), 8)
+
+
+    def test_native_quiet_budget_does_not_emit_clean_after_formatting(self):
+        mod = self.module
+        tick = [10.0]
+        budget = mod._ScanInactivity(11.0, 1.0, clock=lambda: tick[0])
+        kind_log = []
+        refusal_log = []
+
+        def formatting(outcome):
+            kind_log.append(outcome.kind)
+            if outcome.kind == "clean":
+                tick[0] = 11.0
+                return "clean proof", "", 0
+            refusal_log.append(outcome.refusal.failure_id)
+            return "", "refused proof", 2
+
+        out, err = io.StringIO(), io.StringIO()
+        with (mock.patch.object(mod, "_format_outcome", side_effect=formatting),
+              contextlib.redirect_stdout(out), contextlib.redirect_stderr(err)):
+            result = mod._emit_outcome(mod.ScanOutcome("clean", "native-push"), work_budget=budget)
+        self.assertEqual(result, 2)
+        self.assertEqual(out.getvalue(), "")
+        self.assertEqual(err.getvalue(), "refused proof\n")
+        self.assertEqual(kind_log, ["clean", "refusal"])
+        self.assertEqual(refusal_log, ["PS-MSG-READ-TIMEOUT"])
+
+        earlier = mod.ScanOutcome("refusal", "native-push", refusal=mod._refusal("PS-MSG-READ", "reader"))
+        self.assertIs(mod._inactivity_checked_outcome(earlier, budget), earlier)
+
+
     def import_large_history(self):
         stream = bytearray()
         for number in range(1, 10_002):
