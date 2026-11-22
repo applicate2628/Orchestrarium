@@ -4961,6 +4961,49 @@ class _IndexedTagTargets:
         )
 
 
+class _IndexedExcludedTagTargets:
+    """First declaration per excluded target, retained until the second reader settles."""
+
+    def __init__(self, db: sqlite3.Connection) -> None:
+        self._db = db
+        self._size = 0
+
+    def __bool__(self) -> bool:
+        return bool(self._size)
+
+    def setdefault(self, oid: str, declared_type: str) -> str:
+        if not self._size:
+            self._db.execute(
+                "CREATE TEMP TABLE excluded_tag_target (sequence INTEGER PRIMARY KEY, "
+                "oid TEXT UNIQUE NOT NULL, declared_type TEXT NOT NULL)"
+            )
+        added = self._db.execute(
+            "INSERT INTO excluded_tag_target(oid, declared_type) VALUES (?, ?) "
+            "ON CONFLICT(oid) DO NOTHING", (oid, declared_type),
+        ).rowcount
+        if added:
+            self._size += 1
+            return declared_type
+        stored = self._db.execute(
+            "SELECT declared_type FROM excluded_tag_target WHERE oid=?", (oid,),
+        ).fetchone()
+        if stored is None:
+            raise sqlite3.DatabaseError("excluded tag target coverage")
+        return stored[0]
+
+    def items(self) -> Iterable[tuple[str, str]]:
+        if not self._size:
+            return
+        count = 0
+        for row in self._db.execute(
+            "SELECT oid, declared_type FROM excluded_tag_target ORDER BY sequence"
+        ):
+            count += 1
+            yield row
+        if count != self._size:
+            raise sqlite3.DatabaseError("excluded tag target coverage")
+
+
 class _HistoryIndex:
     """Scan-owned temporary state; exact path bytes, never blob bodies."""
 
@@ -5337,7 +5380,7 @@ async def _acquire_indexed_history(
     index: _HistoryIndex,
     *,
     review_evaluation: "ReviewEvaluation | None" = None,
-    excluded_tag_targets: dict[str, str] | None = None,
+    excluded_tag_targets: dict[str, str] | _IndexedExcludedTagTargets | None = None,
     review_capture=None,
     matcher=None,
     lexical_acquisition: bool = False,
@@ -5846,7 +5889,8 @@ async def _scan_range_async(
 
 
 async def _verify_excluded_tag_targets(
-    targets: dict[str, str], object_format: GitObjectFormat, wall_deadline: float,
+    targets: dict[str, str] | _IndexedExcludedTagTargets,
+    object_format: GitObjectFormat, wall_deadline: float,
 ) -> Refusal | None:
     # Previously disclosed objects need exact identity and type, not a second
     # scan of their payload. The content reader has already been reaped.
@@ -5868,6 +5912,10 @@ async def _verify_excluded_tag_targets(
                     break
     except asyncio.CancelledError:
         pending = _refusal("PS-MSG-READ", "cancelled")
+    except sqlite3.Error:
+        pending = _refusal("PS-MSG-READ-TIMEOUT", "deadline") if _time_left(wall_deadline) <= 0 else (
+            _refusal("PS-MSG-READ", "coverage-storage")
+        )
     except Exception:
         pending = _refusal("PS-MSG-READ", "unexpected")
     finalization = await _finalize_reader(reader)
@@ -5916,7 +5964,10 @@ async def _scan_selected_history_async(
         HistoryProof, CoverageProof | _ReceiptCoverage, tuple[Finding, ...]
     ] | None = None
     reader: _AsyncGitObjectReader | None = None
-    excluded_tag_targets: dict[str, str] = {}
+    excluded_tag_targets: dict[str, str] | _IndexedExcludedTagTargets = (
+        _IndexedExcludedTagTargets(history_index.db)
+        if history_index is not None and coverage_recorder.compact_native_receipt else {}
+    )
 
     if selection.object_oids:
         reader = reader_factory()

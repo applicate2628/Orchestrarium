@@ -284,3 +284,29 @@ class TestAnnotationOnlyProof(native.TestNativePublicationEffects):
         self.assertIn(tag, outcome.history.object_ids)
         self.assertNotIn(target, outcome.history.object_ids)
         self.assertIsNone(outcome.history.direct_tag_commit)
+
+        mod = self.module
+        checked = []
+        verify = mod._verify_excluded_tag_targets
+
+        async def observe(targets, *args):
+            self.assertNotIsInstance(targets, dict)
+            checked.extend(targets.items())
+            return await verify(targets, *args)
+
+        with (self.in_root(), mock.patch.object(mod, "_MAX_BLOB_BYTES", 64),
+              mock.patch.object(mod, "_verify_excluded_tag_targets", observe)):
+            compact = mod._scan_native_push(payload, lambda _line: (), receipt_coverage=True)
+        self.assertEqual(compact.kind, "clean", compact.refusal)
+        self.assertEqual(checked, [(target, "blob")])
+        self.assertEqual(mod._format_outcome(compact), mod._format_outcome(outcome))
+
+        async def drop_row(targets, *args):
+            targets._db.execute("DELETE FROM excluded_tag_target WHERE oid=?", (target,))
+            return await verify(targets, *args)
+
+        with (self.in_root(), mock.patch.object(mod, "_MAX_BLOB_BYTES", 64),
+              mock.patch.object(mod, "_verify_excluded_tag_targets", drop_row)):
+            missing = mod._scan_native_push(payload, lambda _line: (), receipt_coverage=True)
+        self.assertEqual(missing.refusal, mod._refusal("PS-MSG-READ", "coverage-storage"))
+        self.assertEqual(mod._format_outcome(missing)[2], 2)
