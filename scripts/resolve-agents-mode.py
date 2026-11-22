@@ -1434,120 +1434,56 @@ def _profession_skill_metadata(repo_root: Path, role: str, instructions: str) ->
     }
 
 
-def _advisory_model_reference(policy: dict, provider: str, model: str) -> dict:
-    """Presentation data only. Missing or invalid advisory prices are unknown."""
-    def read(*keys):
-        value = policy
-        for key in keys:
-            value = value.get(key) if isinstance(value, dict) else None
-        return value
-
-    def text(value):
-        return value if isinstance(value, str) and value.strip() else None
-
-    kinds = ("input", "cachedInput", "output")
-
-    def price(basis, *, reference=False):
-        if not isinstance(basis, str) or not basis:
-            return None
-        prefix = ("modelReference", "priceBases", basis)
-        base = read(*prefix, "baseline")
-        source = text(read(*prefix, "source"))
-        checked = text(read(*prefix, "verifiedOn"))
-        scope = text(read(*prefix, "scope"))
-        if (not isinstance(base, list) or len(base) != 2
-                or not all(isinstance(part, str) and part for part in base)
-                or source is None or checked is None or scope is None):
-            return None
-        current = read(*prefix, "rates", provider, model)
-        baseline = read(*prefix, "rates", *base)
-        if not all(isinstance(rates, list) and len(rates) == len(kinds) for rates in (current, baseline)):
-            return None
-
-        def rate(value):
-            return type(value) in (int, float) and 0 <= value < 10**12
-        metadata = {"billingBasis": basis, "baselineProvider": base[0],
-                    "baselineModel": base[1], "source": source, "verifiedOn": checked, "scope": scope}
-        if reference:
-            basket = read(*prefix, "basket")
-            if (not isinstance(basket, dict) or set(basket) != set(kinds)
-                    or not all(type(n) is int and 0 <= n <= 10**7 for n in basket.values())
-                    or not any(basket.values())):
-                return None
-            active = [(basket[key], value, denom) for key, value, denom in zip(kinds, current, baseline)
-                      if basket[key]]
-            if not all(rate(value) and rate(denom) for _, value, denom in active):
-                return None
-            comparable = sum(w * value for w, value, _ in active)
-            standard = sum(w * denom for w, _, denom in active)
-            units = comparable / standard if standard else math.inf
-            return {**metadata, "basket": dict(basket), "units": units} if math.isfinite(units) else None
-        if not all(rate(value) and rate(denom) and denom > 0
-                   for value, denom in zip(current, baseline)):
-            return None
-        ratios = [model_rate / base_rate for model_rate, base_rate in zip(current, baseline)]
-        if not all(map(math.isfinite, ratios)):
-            return None
-        return {**metadata, "perTokenType": dict(zip(kinds, ratios)),
-                "uniform": ratios[0] if all(value == ratios[0] for value in ratios) else None}
-
-    record = ("modelReference", "models", provider, model)
-    return {
-        "strength": text(read(*record, "strength")),
-        "capabilitySource": text(read("modelReference", "capabilitySources", provider)),
-        "tradeoff": text(read(*record, "tradeoff")),
-        "relativePrice": price(read(*record, "nativePriceBasis")),
-        "referencePrice": price(read(*record, "referencePriceBasis"), reference=True),
-    }
-
-
-def _advisory_effort_snapshot(policy, provider, model, effort):
-    record = policy
-    for key in ("modelReference", "benchmarkSnapshot"):
+def _catalog_record(record, *keys):
+    for key in keys:
         record = record.get(key) if isinstance(record, dict) else None
-    if not isinstance(record, dict):
-        return None
-    model_record = record
-    for key in ("models", provider, model):
-        model_record = model_record.get(key) if isinstance(model_record, dict) else None
-    if not isinstance(model_record, dict):
-        return None
-    efforts = model_record.get("efforts")
-    metrics = efforts.get(effort) if isinstance(efforts, dict) else None
-    if not isinstance(metrics, dict):
-        return None
-    fields = ("intelligenceIndex", "costUsdPerTask", "minutesPerTask")
-    values = {key: metrics.get(key) for key in fields}
-    if not all(type(value) in (int, float) and 0 <= value < float("inf") for value in values.values()):
-        return None
-    source = model_record.get("sourceUrl")
-    provenance = {key: record.get(key) for key in ("publisher", "methodology", "observedDate")}
-    if not isinstance(source, str) or not source.startswith("https://") or not all(
-        isinstance(value, str) and value.strip() for value in provenance.values()
-    ):
-        return None
-    return {**provenance, "sourceUrl": source, **values}
+    return record
 
 
-def _advisory_model_catalog(policy, provider, options, default_profile):
+def _catalog_number(value):
+    return type(value) in (int, float) and 0 <= value < 1e300
+
+
+def _advisory_model_catalog(policy, provider, options):
+    reference = _catalog_record(policy, "modelReference")
+    snapshot = _catalog_record(reference, "benchmarkSnapshot")
+    baseline = _catalog_record(snapshot, "costBaseline")
+    basis = None
+    baseline_cost = None
+    if isinstance(baseline, dict) and all(isinstance(baseline.get(k), str) for k in ("provider", "model", "effort")):
+        baseline_cost = _catalog_record(snapshot, "models", baseline["provider"], baseline["model"],
+                                        "efforts", baseline["effort"], "costUsdPerTask")
+        provenance = {k: snapshot.get(k) for k in ("publisher", "methodology", "observedDate")}
+        if (_catalog_number(baseline_cost) and baseline_cost > 0
+                and all(isinstance(v, str) and v.strip() for v in provenance.values())):
+            basis = {**provenance, "costUnit": "baseline-task", "baseline": baseline}
     by_model = {}
     for option in options:
-        model = option["model"]
+        model, profile, effort = option["model"], option["profile"], option["effort"]
         if model not in by_model:
-            by_model[model] = {
-                "provider": provider, "model": model, "tiersByProfile": {},
-                "hostCapability": option["hostCapability"], "profiles": [],
-                "recommendedProfile": None, **_advisory_model_reference(policy, provider, model),
-            }
+            row = by_model[model] = {"model": model}
+            for key in ("strength", "tradeoff"):
+                value = _catalog_record(reference, "models", provider, model, key)
+                if isinstance(value, str) and value.strip():
+                    row[key] = value
         row = by_model[model]
-        row["profiles"].append(option["profile"])
-        row["tiersByProfile"][option["profile"]] = option["modelTier"]
-        measured = _advisory_effort_snapshot(policy, provider, model, option["effort"])
-        if measured is not None:
-            row.setdefault("benchmarkByProfile", {})[option["profile"]] = measured
-        if option["profile"] == default_profile:
-            row["recommendedProfile"] = default_profile
-    return sorted(by_model.values(), key=lambda row: row["recommendedProfile"] is None)
+        if basis is None:
+            continue
+        source = _catalog_record(snapshot, "models", provider, model, "sourceUrl")
+        point = _catalog_record(snapshot, "models", provider, model, "efforts", effort)
+        if not isinstance(point, dict) or not isinstance(source, str) or not source.startswith("https://"):
+            continue
+        score, cost, minutes = (point.get(k) for k in ("intelligenceIndex", "costUsdPerTask", "minutesPerTask"))
+        if not all(_catalog_number(v) for v in (score, cost, minutes)):
+            continue
+        units = cost / baseline_cost
+        if not _catalog_number(units):
+            continue
+        row["benchmarkSourceUrl"] = source
+        row.setdefault("benchmarkByProfile", {})[profile] = {
+            "score": score, "costUnits": round(units, 4), "minutes": minutes,
+        }
+    return list(by_model.values()), basis if any("benchmarkByProfile" in row for row in by_model.values()) else None
 
 
 def _describe_ordinary_native_role_options_in_layout(
@@ -1803,7 +1739,14 @@ def _describe_ordinary_native_role_options_in_layout(
     if default_error is not None:
         values.update(defaultProfile=None, defaultModel=None, defaultEffort=None)
     values["carrierConfigurationError"] = carrier_error
-    values["modelCatalog"] = _advisory_model_catalog(policy, "codex", options, values["defaultProfile"])
+    values["modelCatalog"], basis = _advisory_model_catalog(policy, "codex", options)
+    if basis is not None:
+        values["modelCatalogBenchmark"] = basis
+    values["decisionGuidance"] = (
+        "The default is a fallback, not a priority. Choose the eligible profile that best meets "
+        "the task's quality requirements at the lowest expected total time and cost, including rework. "
+        "Briefly justify the choice, even if it matches the default."
+    )
     return _NativeRoleSelection(values, snapshots, linked_authority, carrier, launch_package)
 
 

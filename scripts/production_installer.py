@@ -560,6 +560,11 @@ _STOCK_NATIVE_ROLE_CONTRACT_PRIOR_PAIRS = (
     # Exact factory contract before removing Low catalogue entries.
     ((Path("shared") / "role-routing-policy.v1.json", "172b335f9d0ea70021bff88b048d1472709132897989365f4b4ee3e47e5682d1"),
      (Path("shared") / "orchestrarium-role-manifest.json", "c8164fe1df43369c22e9d2c800ef2e2cb0e775c6a31dc65fc25c06cf77e812dc")),
+    # Exact factory catalogue before normalizing benchmark costs.
+    ((Path("shared") / "role-routing-policy.v1.json", "7b1f5cda232547e3a6f09352908fc9f2781dbeadad55413d8dadb4e40038a929"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "a945c889cb456c2065786a3923b68651a24c627cf64cde5a7c9e921ae9bbd73e"),
+     (Path("scripts") / "resolve-agents-mode.py", "de23c471895c80c43d2fe17e7e2763aeec1ac10f0189b7d66daab2fc763c5e50"),
+     (Path("operating-model.md"), "9f7a310a2efe8d91d13f08094d58c294d9e33a9dde954f914b45e00eaedc773a")),
     # Exact factory catalogue before benchmark snapshots were included.
     ((Path("shared") / "role-routing-policy.v1.json", "b5ef5a34460abaad0af499304309be0649094ff596bcc7f5584f199046878dba"),
      (Path("shared") / "orchestrarium-role-manifest.json", "ab699ed377660521a08bf0e8555f468ca0efcf6458248009002a7f4fdc0314d1"),

@@ -20,53 +20,40 @@ class ModelCatalogueTests(unittest.TestCase):
         ], capture_output=True, check=True, encoding="utf-8")
         return json.loads(result.stdout)
 
-    def test_science_catalogue_shows_recommendation_and_relative_price_once_per_model(self):
+    def test_default_is_a_fallback_and_catalogue_does_not_reorder_it_first(self):
         description = self.describe()
+        self.assertEqual(description["defaultProfile"], "astra-high")
+        self.assertIn("fallback, not a priority", description["decisionGuidance"])
+        self.assertIn("justify", description["decisionGuidance"])
         rows = description["modelCatalog"]
-        self.assertEqual([row["model"] for row in rows], ["gpt-6.2-astra", "gpt-6.2-sol"])
-        recommended, baseline = rows
-        self.assertEqual(recommended["recommendedProfile"], "astra-high")
-        self.assertEqual(recommended["tiersByProfile"]["astra-high"], "apex")
-        self.assertEqual(baseline["tiersByProfile"], {"frontier-xhigh": "frontier", "apex-max": "apex"})
-        self.assertIsNone(baseline["recommendedProfile"])
-        self.assertIn("science", recommended["strength"].lower())
-        self.assertTrue(recommended["tradeoff"])
-        self.assertEqual(recommended["relativePrice"]["uniform"], 4)
-        self.assertEqual(baseline["relativePrice"]["uniform"], 1)
-        self.assertEqual(recommended["referencePrice"]["units"], 4)
-        self.assertEqual(recommended["referencePrice"]["basket"], {
-            "input": 10000, "cachedInput": 0, "output": 1000,
-        })
-        self.assertEqual(baseline["referencePrice"]["units"], 1)
-        self.assertEqual(recommended["relativePrice"]["billingBasis"], "codex-standard-credits")
+        self.assertEqual([row["model"] for row in rows],
+                         list(dict.fromkeys(row["model"] for row in description["options"])))
+        for row in rows:
+            self.assertFalse({"relativePrice", "referencePrice", "recommendedProfile", "profiles",
+                              "tiersByProfile"} & row.keys())
 
-    def test_catalogue_never_adds_host_filtered_model_or_changes_profiles(self):
+    def test_catalogue_never_adds_host_filtered_models(self):
         description = self.describe("--reported-model", "gpt-6.2-sol")
-        rows = description["modelCatalog"]
-        self.assertEqual([row["model"] for row in rows], ["gpt-6.2-sol"])
-        self.assertEqual(rows[0]["profiles"], [option["profile"] for option in description["options"]])
-        self.assertIsNone(rows[0]["recommendedProfile"])
+        self.assertEqual([row["model"] for row in description["modelCatalog"]], ["gpt-6.2-sol"])
 
-    def test_benchmarks_follow_exact_eligible_profiles_without_changing_prices(self):
+    def test_benchmark_uses_one_cost_unit_per_allowed_effort(self):
         description = self.describe(role="worker", task="engineering")
+        basis = description["modelCatalogBenchmark"]
+        self.assertEqual(basis["baseline"], {"provider": "codex", "model": "gpt-6.2-sol", "effort": "high"})
+        self.assertEqual(basis["observedDate"], "2026-11-22")
+        self.assertEqual(description["defaultProfile"], "frontier-high")
         rows = {row["model"]: row for row in description["modelCatalog"]}
         sol = rows["gpt-6.2-sol"]
-        medium = sol["benchmarkByProfile"]["frontier-medium"]
-        self.assertEqual((medium["intelligenceIndex"], medium["costUsdPerTask"],
-                          medium["minutesPerTask"]), (53, 0.41, 3.6))
-        self.assertEqual(sol["relativePrice"]["uniform"], 1)
-        self.assertEqual(medium["observedDate"], "2026-11-22")
-        self.assertTrue(medium["sourceUrl"].startswith("https://artificialanalysis.ai/"))
-        luna = rows["gpt-6-luna"]
-        self.assertNotIn("luna-medium", luna["benchmarkByProfile"])
+        self.assertEqual(sol["benchmarkByProfile"]["frontier-medium"],
+                         {"score": 53, "costUnits": 0.7321, "minutes": 3.6})
+        self.assertEqual(sol["benchmarkByProfile"]["frontier-high"]["costUnits"], 1)
+        self.assertEqual(rows["gpt-6.2-astra"]["benchmarkByProfile"]["astra-high"]["costUnits"], 3.6964)
+        self.assertNotIn("luna-medium", rows["gpt-6-luna"]["benchmarkByProfile"])
+        self.assertTrue(sol["benchmarkSourceUrl"].startswith("https://artificialanalysis.ai/"))
         for row in rows.values():
-            self.assertLessEqual(set(row["benchmarkByProfile"]), set(row["profiles"]))
-        ref = runpy.run_path(str(RESOLVER))["_advisory_effort_snapshot"]
-        policy = json.loads((ROOT / "shared/role-routing-policy.v1.json").read_text(encoding="utf-8"))
-        self.assertIsNone(ref(policy, "other", "gpt-6.2-sol", "medium"))
-        self.assertIsNone(ref(policy, "codex", "gpt-6.2-sol", "unknown"))
-        policy["modelReference"]["benchmarkSnapshot"]["models"]["codex"]["gpt-6.2-sol"]["efforts"]["medium"]["minutesPerTask"] = True
-        self.assertIsNone(ref(policy, "codex", "gpt-6.2-sol", "medium"))
+            eligible = {option["profile"] for option in description["options"] if option["model"] == row["model"]}
+            self.assertLessEqual(set(row["benchmarkByProfile"]), eligible)
+        self.assertNotIn("costUsdPerTask", json.dumps(description))
 
     def test_comparison_does_not_authorize_unapproved_astra_or_remove_reason(self):
         common = [
@@ -91,32 +78,23 @@ class ModelCatalogueTests(unittest.TestCase):
                 if stable_id is not None:
                     self.assertEqual(reply["stableId"], stable_id)
 
-    def test_reference_is_exact_provider_model_and_missing_price_is_not_zero(self):
+    def test_missing_or_invalid_benchmark_is_not_a_zero_or_inferred_profile(self):
         mod = runpy.run_path(str(RESOLVER))
         policy = json.loads((ROOT / "shared/role-routing-policy.v1.json").read_text(encoding="utf-8"))
-        reference = mod["_advisory_model_reference"]
-        luna = reference(policy, "codex", "gpt-6-luna")
-        price = luna["relativePrice"]
-        self.assertIsNone(price["uniform"])
-        self.assertEqual(price["perTokenType"], {"input": 0.05, "cachedInput": 0.1, "output": 0.05})
-        self.assertEqual(reference(policy, "other", "gpt-6-luna"), {
-            "strength": None, "capabilitySource": None, "tradeoff": None,
-            "relativePrice": None, "referencePrice": None,
-        })
-        policy["modelReference"]["priceBases"]["codex-standard-credits"]["rates"]["codex"]["gpt-6-luna"][0] = -1
-        self.assertIsNone(reference(policy, "codex", "gpt-6-luna")["relativePrice"])
-
-        model_reference = policy["modelReference"]
-        model_reference["models"]["other"] = {"exact-id": {"referencePriceBasis": "standard-api-reference"}}
-        model_reference["priceBases"]["standard-api-reference"]["rates"]["other"] = {
-            "exact-id": [4, None, 20],
-        }
-        prices = model_reference["priceBases"]
-        prices["codex-standard-credits"]["rates"]["codex"]["gpt-6.2-sol"][0] = 5e-324
-        self.assertIsNone(reference(policy, "codex", "gpt-6.2-astra")["relativePrice"])
-        exact = reference(policy, "other", "exact-id")
-        self.assertEqual(exact["referencePrice"]["units"], 2)
-        self.assertIsNone(exact["relativePrice"])
+        build = mod["_advisory_model_catalog"]
+        options = [{"model": "gpt-6.2-sol", "profile": "frontier-medium", "effort": "medium"}]
+        self.assertIsNone(build(policy, "other", options)[1])
+        options[0]["effort"] = "unknown"
+        self.assertIsNone(build(policy, "codex", options)[1])
+        options[0]["effort"] = "medium"
+        points = policy["modelReference"]["benchmarkSnapshot"]["models"]["codex"]["gpt-6.2-sol"]["efforts"]
+        points["medium"]["minutesPerTask"] = True
+        self.assertIsNone(build(policy, "codex", options)[1])
+        points["medium"]["minutesPerTask"] = 3.6
+        points["high"]["costUsdPerTask"] = 0
+        rows, basis = build(policy, "codex", options)
+        self.assertIsNone(basis)
+        self.assertNotIn("benchmarkByProfile", rows[0])
 
 
 if __name__ == "__main__":
