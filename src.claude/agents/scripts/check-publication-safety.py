@@ -4735,7 +4735,6 @@ class _HistoryIndex:
             PRAGMA temp_store=FILE;
             CREATE TABLE subject (owner TEXT, path BLOB, blob TEXT, mode TEXT NOT NULL,
                 PRIMARY KEY(owner, path, blob)) WITHOUT ROWID;
-            CREATE INDEX subject_path ON subject(path, blob, owner);
             CREATE TABLE metadata_path (tree TEXT, path BLOB,
                 PRIMARY KEY(tree, path)) WITHOUT ROWID;
         """)
@@ -4753,6 +4752,11 @@ class _HistoryIndex:
             "INSERT INTO metadata_path VALUES (?, ?) ON CONFLICT(tree,path) DO NOTHING",
             (tree, path),
         ).rowcount == 1
+
+    def prepare_path_queries(self):
+        # The bulk build avoids maintaining this lookup index during admission.
+        # The primary key continues to enforce subject uniqueness on every row.
+        self.db.execute("CREATE INDEX subject_path ON subject(path, blob, owner)")
 
     def owners(self, path, blob):
         return self.db.execute(
@@ -5119,6 +5123,7 @@ async def _acquire_indexed_history(
     raw = b""
     result = None
     scanned_paths = 0
+    index.prepare_path_queries()
     for path, blob_oid in index.path_pairs():
         scanned_paths += 1
         if asyncio.get_running_loop().time() >= scan_deadline:
