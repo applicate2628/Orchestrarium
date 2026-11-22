@@ -372,6 +372,7 @@ def _publication_scan_budget_seconds() -> float:
 
 _SCAN_DEADLINE_SECONDS = _publication_scan_budget_seconds()
 _MAX_TREE_FRONTIER = _MAX_OBJECTS
+_TREE_FRONTIER_PAGE = 32
 _MAX_TREE_CACHE_ENTRIES = _MAX_OBJECTS
 # Budget base refnames and optional tag peels within the parent-graph byte cap.
 _MAX_REMOTE_REFS = _MAX_PARENT_GRAPH_BYTES // (2 * _MAX_PATH_BYTES)
@@ -4858,6 +4859,51 @@ def _tree_traversal_guard(
     return None
 
 
+class _PendingTrees:
+    """Oldest pending tasks on disk, newest page in memory, one LIFO order."""
+
+    def __init__(self, db: sqlite3.Connection) -> None:
+        self._db = db
+        self._page: list[tuple[str, bytes, tuple[str, ...]]] = []
+        self._stored = 0
+        db.execute(
+            "CREATE TEMP TABLE tree_frontier (ordinal INTEGER PRIMARY KEY, "
+            "oid TEXT NOT NULL, path BLOB NOT NULL, ancestors TEXT NOT NULL)"
+        )
+
+    def __bool__(self) -> bool:
+        return bool(self._page or self._stored)
+
+    def append(self, task: tuple[str, bytes, tuple[str, ...]]) -> None:
+        if len(self._page) == _TREE_FRONTIER_PAGE:
+            self._db.executemany(
+                "INSERT INTO tree_frontier VALUES (?, ?, ?, ?)",
+                ((self._stored + offset, oid, path, ",".join(ancestors))
+                 for offset, (oid, path, ancestors) in enumerate(self._page)),
+            )
+            self._stored += len(self._page)
+            self._page.clear()
+        self._page.append(task)
+
+    def pop(self) -> tuple[str, bytes, tuple[str, ...]]:
+        if not self._page and self._stored:
+            start = max(0, self._stored - _TREE_FRONTIER_PAGE)
+            for expected, (ordinal, oid, path, ancestors) in enumerate(
+                self._db.execute(
+                    "SELECT ordinal, oid, path, ancestors FROM tree_frontier "
+                    "WHERE ordinal >= ? ORDER BY ordinal", (start,)
+                ), start
+            ):
+                if ordinal != expected or ordinal >= self._stored:
+                    raise sqlite3.DatabaseError("tree frontier order")
+                self._page.append((oid, path, tuple(ancestors.split(",")) if ancestors else ()))
+            if len(self._page) != self._stored - start:
+                raise sqlite3.DatabaseError("tree frontier coverage")
+            self._db.execute("DELETE FROM tree_frontier WHERE ordinal >= ?", (start,))
+            self._stored = start
+        return self._page.pop()
+
+
 class _HistoryIndex:
     """Scan-owned temporary state; exact path bytes, never blob bodies."""
 
@@ -5435,6 +5481,8 @@ async def _acquire_indexed_history(
             elif kind == "blob":
                 direct_blobs.append((root, b"", selected))
     traversal_progress = _VerifiedWorkPhase("traversed", enabled=native, budget=scan_deadline)
+    compact_frontier = coverage_recorder.compact_native_receipt
+    stack = _PendingTrees(index.db) if compact_frontier else []
     for commit_oid, root_tree in chain(commit_roots, direct_trees):
         guard = _tree_traversal_guard(
             deadline=scan_deadline,
@@ -5442,11 +5490,11 @@ async def _acquire_indexed_history(
         )
         if guard is not None:
             return guard
-        stack: list[tuple[str, bytes, tuple[str, ...]]] = [(root_tree, b"", ())]
+        stack.append((root_tree, b"", ()))
         while stack:
             guard = _tree_traversal_guard(
                 deadline=scan_deadline,
-                frontier=len(stack),
+                frontier=0 if compact_frontier else len(stack),
             )
             if guard is not None:
                 return guard
@@ -5457,10 +5505,11 @@ async def _acquire_indexed_history(
             if isinstance(entries, Refusal):
                 return entries
             unpublished_tree = selected_tree_reached(tree_oid)
+            child_ancestors = ancestors + (tree_oid,)
             for entry in reversed(entries):
                 guard = _tree_traversal_guard(
                     deadline=scan_deadline,
-                    frontier=len(stack),
+                    frontier=0 if compact_frontier else len(stack),
                 )
                 if guard is not None:
                     return guard
@@ -5482,11 +5531,11 @@ async def _acquire_indexed_history(
                 if entry.kind == "tree":
                     guard = _tree_traversal_guard(
                         deadline=scan_deadline,
-                        frontier=len(stack) + 1,
+                        frontier=0 if compact_frontier else len(stack) + 1,
                     )
                     if guard is not None:
                         return guard
-                    stack.append((entry.oid, path, ancestors + (tree_oid,)))
+                    stack.append((entry.oid, path, child_ancestors))
                 elif entry.kind == "blob" and selected_blob(entry.oid):
                     subject = (commit_oid, path, entry.oid)
                     if not index.add(subject, entry.mode):

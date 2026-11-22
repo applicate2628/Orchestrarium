@@ -505,6 +505,54 @@ class TestNativePublicationEffects(unittest.TestCase):
         broken = self.module.replace(outcome, history=self.module.replace(outcome.history, object_set="0" * 64))
         self.assertEqual(self.module._format_outcome(broken)[2], 2)
 
+    def test_compact_native_tree_frontier_preserves_exact_receipt(self):
+        mod = self.module
+        for outer in range(5):
+            for inner in range(3):
+                folder = self.root / f"group-{outer}" / f"part-{inner}"
+                folder.mkdir(parents=True)
+                (folder / "public.txt").write_text(f"synthetic record {outer}:{inner}\n", encoding="utf-8")
+        self.git("add", ".")
+        self.git("commit", "-qm", "synthetic wide nested tree")
+        tip = self.git("rev-parse", "HEAD").strip().decode()
+        payload = self.payload([(b"refs/heads/main", tip, b"refs/heads/main", self.commit)])
+        reference_order, compact_order = [], []
+
+        def observe(rows):
+            def detector(line):
+                rows.append(line)
+                return ()
+            return detector
+
+        with self.in_root():
+            reference = mod._scan_native_push(payload, observe(reference_order), receipt_coverage=True)
+            with (mock.patch.object(mod, "_MAX_TREE_FRONTIER", 2),
+                  mock.patch.object(mod, "_TREE_FRONTIER_PAGE", 2)):
+                compact = mod._scan_native_push(payload, observe(compact_order), receipt_coverage=True)
+                legacy = self.scan(payload)
+        self.assertEqual(reference.kind, "clean")
+        self.assertGreater(len(reference_order), 15)
+        self.assertEqual(compact_order, reference_order)
+        self.assertEqual(compact.kind, "clean", compact.refusal)
+        self.assertEqual(len(compact.history.blob_ids), 15)
+        self.assertEqual(mod._format_outcome(compact), mod._format_outcome(reference))
+        self.assertEqual(legacy.refusal, mod._refusal("PS-MSG-LIMIT", "tree-frontier"))
+
+        pop = mod._PendingTrees.pop
+
+        def lose_spilled_row(stack):
+            if not stack._page and stack._stored:
+                stack._db.execute("DELETE FROM tree_frontier WHERE ordinal = ?", (stack._stored - 1,))
+            return pop(stack)
+
+        with (self.in_root(), mock.patch.object(mod, "_TREE_FRONTIER_PAGE", 2),
+              mock.patch.object(mod._PendingTrees, "pop", lose_spilled_row)):
+            refused = mod._scan_native_push(payload, lambda _line: (), receipt_coverage=True)
+        self.assertEqual(refused.kind, "refusal")
+        self.assertEqual(refused.refusal, mod._refusal("PS-MSG-READ", "coverage-storage"))
+        self.assertEqual(mod._format_outcome(refused)[2], 2)
+
+
     def test_compact_native_blob_count_preserves_exact_receipt_and_late_findings(self):
         mod = self.module
         for index in range(3):
