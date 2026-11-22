@@ -4921,6 +4921,46 @@ class _PendingTrees:
         return self._page.pop()
 
 
+class _IndexedTagTargets:
+    """Verified tag edges in acquisition order, owned by the history index."""
+
+    def __init__(self, db: sqlite3.Connection) -> None:
+        self._db = db
+        self._populated = False
+
+    def __setitem__(self, oid: str, target: tuple[str, str]) -> None:
+        if not self._populated:
+            self._db.execute(
+                "CREATE TEMP TABLE selected_tag_target (sequence INTEGER PRIMARY KEY, "
+                "oid TEXT UNIQUE NOT NULL, target_oid TEXT NOT NULL, declared_type TEXT NOT NULL)"
+            )
+            self._populated = True
+        self._db.execute(
+            "INSERT INTO selected_tag_target(oid, target_oid, declared_type) VALUES (?, ?, ?)",
+            (oid, *target),
+        )
+
+    def __len__(self) -> int:
+        if not self._populated:
+            return 0
+        count, = self._db.execute("SELECT COUNT(*) FROM selected_tag_target").fetchone()
+        return count
+
+    def get(self, oid: str) -> tuple[str, str] | None:
+        if not self._populated:
+            return None
+        return self._db.execute(
+            "SELECT target_oid, declared_type FROM selected_tag_target WHERE oid=?", (oid,),
+        ).fetchone()
+
+    def values(self) -> Iterable[tuple[str, str]]:
+        if not self._populated:
+            return ()
+        return self._db.execute(
+            "SELECT target_oid, declared_type FROM selected_tag_target ORDER BY sequence"
+        )
+
+
 class _HistoryIndex:
     """Scan-owned temporary state; exact path bytes, never blob bodies."""
 
@@ -5303,7 +5343,9 @@ async def _acquire_indexed_history(
     lexical_acquisition: bool = False,
 ) -> tuple[HistoryProof, CoverageProof | _ReceiptCoverage, tuple[Finding, ...]] | Refusal:
     native = isinstance(selection, NativePushSelection)
-    tag_targets: dict[str, tuple[str, str]] = {}
+    tag_targets: dict[str, tuple[str, str]] | _IndexedTagTargets = (
+        _IndexedTagTargets(index.db) if coverage_recorder.compact_native_receipt else {}
+    )
     direct_tag_commit = None
     tree_cache: OrderedDict[str, tuple[bytes | tuple[TreeEntry, ...], int]] = OrderedDict()
     findings: list[Finding] = []
@@ -5512,11 +5554,11 @@ async def _acquire_indexed_history(
         for root in selection.roots:
             selected = root
             tag_chain = set()
-            while selected in tag_targets:
+            while (target := tag_targets.get(selected)) is not None:
                 if selected in tag_chain:
                     return _refusal("PS-MSG-FRAME", "tag-cycle")
                 tag_chain.add(selected)
-                selected = tag_targets[selected][0]
+                selected = target[0]
             kind = index.acquired_kind(selected)
             if kind == "tree":
                 direct_trees.append((root, selected))
@@ -5719,6 +5761,8 @@ async def _acquire_indexed_history(
             return _refusal("PS-MSG-COVERAGE", "history-index")
         object_digest, blob_digest = canonical_objects.digest, canonical_blobs.digest
     else:
+        if isinstance(tag_targets, _IndexedTagTargets):
+            return _refusal("PS-MSG-COVERAGE", "tag-set")
         canonical_objects = tuple(sorted(selection.object_oids))
         canonical_blobs = tuple(index.recorded_blob_ids())
         canonical_tags = tuple(sorted(tag_targets))

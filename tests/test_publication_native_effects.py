@@ -417,6 +417,33 @@ class TestNativePublicationEffects(unittest.TestCase):
         self.assertEqual(outcome.coverage.scanned_count, receipt["objects"])
         self.assertNotIn(str(self.remote), self.module._format_outcome(outcome)[0])
 
+        mod = self.module
+        stored = []
+        store = mod._IndexedTagTargets.__setitem__
+
+        def watch(indexed, oid, target):
+            store(indexed, oid, target)
+            stored.append((oid, target))
+
+        with (self.in_root(), mock.patch.object(mod._IndexedTagTargets, "__setitem__", watch)):
+            compact = mod._scan_native_push(payload, lambda _line: (), receipt_coverage=True)
+        self.assertEqual(compact.kind, "clean", compact.refusal)
+        self.assertEqual(mod._format_outcome(compact), mod._format_outcome(outcome))
+        self.assertEqual(len(stored), 2)
+        self.assertEqual(dict(stored), {outer: (inner, "tag"), inner: (self.commit, "commit")})
+
+        decode = mod._decode_tag_target
+
+        def inconsistent_type(content, fmt):
+            target = decode(content, fmt)
+            return (inner, "commit") if target == (inner, "tag") else target
+
+        with self.in_root(), mock.patch.object(mod, "_decode_tag_target", inconsistent_type):
+            for enabled in (False, True):
+                refused = mod._scan_native_push(payload, lambda _line: (), receipt_coverage=enabled)
+                self.assertEqual(refused.refusal, mod._refusal("PS-MSG-FRAME", "tag-target"))
+                self.assertEqual(mod._format_outcome(refused)[2], 2)
+
     def test_zero_object_coverage_reports_observed_rows_without_claiming_ref_effects(self):
         rows = [(b"(delete)", self.zero(), b"refs/heads/main", self.commit)]
         for name, updates in (("observed-deletion-row", rows), ("empty-observed-wire", []),
