@@ -1540,7 +1540,7 @@ if native_mode: scanner["__injected_native_push__"]=native
 if scoped_mode: scanner["__injected_receiver_scope__"]=receiver_scope
 if progress_attempt is not None:
     def verified_completion(phase,completed):
-        if (phase not in ("commits","objects","acquired","classified")
+        if (phase not in ("commits","objects","acquired","traversed","classified")
             or type(completed) is not int or not 0<completed<=9223372036854775807):
             return
         try:
@@ -2810,7 +2810,7 @@ def _announce_scan_threshold(elapsed: float, report) -> None:
 class _ScanProgressFrames:
     """Split private attempt-bound progress frames from ordinary stderr."""
     _MAX_DIGITS = 19
-    _PHASES = (b"commits", b"objects", b"acquired", b"classified")
+    _PHASES = (b"commits", b"objects", b"acquired", b"traversed", b"classified")
     _MAX_PAYLOAD = max(map(len, _PHASES)) + 1 + _MAX_DIGITS
 
     def __init__(self, attempt: str) -> None:

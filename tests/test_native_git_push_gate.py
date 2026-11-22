@@ -973,7 +973,7 @@ def test_named_remote_keeps_private_endpoint_inside_captured_stdin(native_reposi
     assert len(received_payloads) == 2
     assert progress_counts[0] == 0 and progress_counts[1] > 0
     assert phases[0] == ()
-    assert tuple(name for name, _ in phases[1]) == ("commits", "objects", "acquired", "classified")
+    assert tuple(name for name, _ in phases[1]) == ("commits", "objects", "acquired", "traversed", "classified")
     assert phases[1][-1] == ("classified", 1)
     lines = output.getvalue().splitlines()
     v3 = owner.parse_publication_safety_observation(lines[0])
@@ -1179,11 +1179,11 @@ def test_scan_progress_does_not_advance_on_an_obsolete_or_unknown_phase():
     def frame(phase, count):
         return b"\x1eORCHE-SCAN-PROGRESS-V1 " + attempt.encode("ascii") + b" " + phase + b" " + count + b"\n"
 
-    for phase, count in ((b"commits", b"9"), (b"objects", b"12"), (b"acquired", b"12"), (b"classified", b"3")):
+    for phase, count in ((b"commits", b"9"), (b"objects", b"12"), (b"acquired", b"12"), (b"traversed", b"8"), (b"classified", b"3")):
         assert progress.feed(frame(phase, count)) == b""
     assert progress.completed == 12
     accepted = progress.phase_counts
-    assert accepted == (("commits", 9), ("objects", 12), ("acquired", 12), ("classified", 3))
+    assert accepted == (("commits", 9), ("objects", 12), ("acquired", 12), ("traversed", 8), ("classified", 3))
     assert progress.feed(frame(b"commits", b"10") + frame(b"classified", b"2")) == b""
     assert progress.phase_counts == accepted
     unknown = frame(b"log", b"99")

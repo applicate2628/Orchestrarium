@@ -5358,6 +5358,7 @@ async def _acquire_indexed_history(
                 direct_trees.append((root, selected))
             elif kind == "blob":
                 direct_blobs.append((root, b"", selected))
+    traversal_progress = _VerifiedWorkPhase("traversed", enabled=native)
     for commit_oid, root_tree in chain(commit_roots, direct_trees):
         guard = _tree_traversal_guard(
             deadline=scan_deadline,
@@ -5414,6 +5415,10 @@ async def _acquire_indexed_history(
                     subject = (commit_oid, path, entry.oid)
                     if not index.add(subject, entry.mode):
                         return _refusal("PS-MSG-COVERAGE", "duplicate-subject")
+            # Each selected owner/path tree occurrence has finished its
+            # entries; cycles, invalid paths and failed reads return first.
+            traversal_progress.step()
+    traversal_progress.finish()
 
     for subject in direct_blobs:
         index.add(subject, "")
@@ -5436,6 +5441,7 @@ async def _acquire_indexed_history(
     for path, blob_oid in index.path_pairs():
         scanned_paths += 1
         classify_room = len(findings) < _MAX_FINDINGS
+        path_reviewed = False
         if asyncio.get_running_loop().time() >= scan_deadline:
             return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
         if blob_oid != cached_blob_oid:
@@ -5495,6 +5501,9 @@ async def _acquire_indexed_history(
                     mode="range-blob-text", commit_oid=commit_oid, raw_path=path,
                     blob_oid=blob_oid, git_mode=git_mode,
                 )
+                # This owner was evaluated even if the display sample is full.
+                classified_progress.step()
+                path_reviewed = True
                 # Policy still evaluates every commit. Only the display sample
                 # groups unresolved rows for this exact path/blob pair.
                 for row in unresolved:
@@ -5518,7 +5527,7 @@ async def _acquire_indexed_history(
                 max_findings=max(0, _MAX_FINDINGS - len(findings)),
             )
         _append_findings(findings, content_findings)
-        if classify_room:
+        if classify_room and not path_reviewed:
             classified_progress.step()
     classified_progress.finish()
 
