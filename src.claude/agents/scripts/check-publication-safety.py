@@ -17,7 +17,7 @@ import re
 import secrets
 import shutil
 import sqlite3
-from contextlib import closing
+from contextlib import asynccontextmanager, closing
 import subprocess
 import sys
 import threading
@@ -1293,6 +1293,34 @@ async def _create_owned_async_process(
             except PosixProcessGroupError:
                 pass
         raise
+
+
+@asynccontextmanager
+async def _owned_matcher_exchange(verified_executable, wire_factory, rules, deadline):
+    """Use the same process and pipe owner as Git selection and acquisition."""
+    process, owner, observation = await _create_owned_async_process(
+        (os.fspath(verified_executable),),
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    try:
+        if process.stdin is None or process.stdout is None:
+            raise ValueError("matcher pipes unavailable")
+        exchange = wire_factory(process.stdout, process.stdin, rules)
+        yield exchange
+        process.stdin.close()
+        async with asyncio.timeout_at(deadline):
+            await process.stdin.wait_closed()
+            if not await exchange.eof(deadline):
+                raise ValueError("unexpected matcher output after last batch")
+            if await _wait_owned_async_direct(
+                process, observation, max(0.0, deadline - asyncio.get_running_loop().time()),
+            ) != 0:
+                raise ValueError("matcher did not exit successfully")
+    finally:
+        if not await _settle_owned_async_process(process, owner, observation):
+            raise ValueError("matcher process did not settle")
 
 
 async def _drain_owned_async_reader(
