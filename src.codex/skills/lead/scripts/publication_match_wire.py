@@ -96,3 +96,50 @@ class FrameReader:
                 if delimiter:
                     frame.extend(delimiter)
                     return bytes(frame)
+
+    async def eof(self, deadline):
+        import asyncio
+
+        async with asyncio.timeout_at(deadline):
+            return not self._next and not await self._stream.read(1)
+
+
+def _pattern_source(pattern):
+    import re
+
+    flags = ((re.I, "i"), (re.M, "m"), (re.S, "s"), (re.X, "x"))
+    if pattern.flags & ~(re.U | sum(flag for flag, _ in flags)):
+        raise ValueError("unsupported matcher rule flags")
+    selected = "".join(letter for flag, letter in flags if pattern.flags & flag)
+    return (f"(?{selected})" if selected else "") + pattern.pattern
+
+
+class MatcherExchange:
+    """One sequential exchange over the scanner-owned child's pipes."""
+
+    def __init__(self, reader, writer, rules):
+        self._reader = FrameReader(reader)
+        self._writer = writer
+        self._rules = rules
+        self._started = False
+
+    async def _write(self, value, deadline):
+        import asyncio
+
+        async with asyncio.timeout_at(deadline):
+            data = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            self._writer.write(data + b"\n")
+            await self._writer.drain()
+
+    async def match(self, rows, deadline):
+        if not self._started:
+            await self._write([{"regex": _pattern_source(pattern), "binary": binary}
+                               for binary, pattern in self._rules], deadline)
+            if await self._reader.read(deadline) != PROTOCOL_HEADER:
+                raise ValueError("unexpected matcher protocol")
+            self._started = True
+        await self._write([{"text": text, "binary": binary} for text, binary in rows], deadline)
+        return decode_batch(await self._reader.read(deadline), rows, self._rules)
+
+    async def eof(self, deadline):
+        return await self._reader.eof(deadline)

@@ -76,3 +76,36 @@ def test_eof_before_delimiter_is_not_a_frame():
             await stream.read(asyncio.get_running_loop().time() + 2)
 
     asyncio.run(verify())
+
+@pytest.mark.parametrize("header", [b"orche-match-spans-v1\n", b"wrong-worker\n"])
+def test_owned_exchange_requires_the_declared_protocol(header):
+    import asyncio
+
+    class Writer:
+        def __init__(self):
+            self.sent = []
+
+        def write(self, data):
+            self.sent.append(json.loads(data))
+
+        async def drain(self):
+            pass
+
+    async def verify():
+        reader = asyncio.StreamReader()
+        reader.feed_data(header + frame([[[0, [[0, 2], [0, 2], None]]]]))
+        reader.feed_eof()
+        writer = Writer()
+        exchange = WIRE["MatcherExchange"](reader, writer, rules)
+        deadline = asyncio.get_running_loop().time() + 2
+        if header != WIRE["PROTOCOL_HEADER"]:
+            with pytest.raises(ValueError, match="unexpected matcher protocol"):
+                await exchange.match((("ab", False),), deadline)
+            assert len(writer.sent) == 1
+            return
+        rows = await exchange.match((("ab", False),), deadline)
+        assert rows[0][0][1].group(0) == "ab"
+        assert writer.sent[-1] == [{"text": "ab", "binary": False}]
+        assert await exchange.eof(deadline)
+
+    asyncio.run(verify())
