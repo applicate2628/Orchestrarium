@@ -570,6 +570,22 @@ class CoverageProof:
     coverage_digest: str
 
 
+@dataclass(frozen=True)
+class _ReceiptCoverage:
+    expected_count: int
+    object_set: str
+    coverage_digest: str
+
+
+def _coverage_digest(scanned: Iterable[str]) -> str:
+    digest = hashlib.sha256(b"publication-safety-coverage-v1\0")
+    for position, oid in enumerate(scanned):
+        if position:
+            digest.update(b"\0")
+        digest.update(oid.encode("ascii"))
+    return digest.hexdigest()
+
+
 class CoverageEvent(str, Enum):
     REQUESTED = "requested"
     ACQUIRED = "acquired"
@@ -587,8 +603,10 @@ class CoverageRecorder:
         *,
         allow_empty: bool = False,
         history_index: "_HistoryIndex | None" = None,
+        receipt_coverage: bool = False,
     ) -> None:
         self.expected_oids = tuple(expected_oids)
+        self._receipt_coverage = receipt_coverage
         self._history_index = history_index
         self._events = {event: [] for event in CoverageEvent} if history_index is None else None
         self._observer = observer
@@ -605,7 +623,10 @@ class CoverageRecorder:
             if self._observer is not None:
                 self._observer(observed_event, observed_oid)
 
-    def proof(self) -> CoverageProof | Refusal:
+    def proof(self) -> CoverageProof | _ReceiptCoverage | Refusal:
+        if self._receipt_coverage and self._history_index is not None:
+            return self._history_index.seal_receipt_coverage(self.expected_oids)
+
         def events(stage: CoverageEvent) -> Iterable[str]:
             if self._history_index is None:
                 return self._events[stage]
@@ -790,7 +811,7 @@ class ScanOutcome:
     findings: tuple[Finding, ...] = ()
     refusal: Refusal | None = None
     selection: RangeSelection | None = None
-    coverage: CoverageProof | None = None
+    coverage: CoverageProof | _ReceiptCoverage | None = None
     reap_certificate: ReaderReapCertificate | None = None
     history: HistoryProof | None = None
     review: "ReviewedEvidence | None" = None
@@ -4641,18 +4662,13 @@ def _build_coverage_proof(
         or not (len(expected) == len(requested) == len(acquired) == len(scanned))
     ):
         return _refusal("PS-MSG-COVERAGE", "multiplicity")
-    digest = hashlib.sha256(b"publication-safety-coverage-v1\0")
-    for position, oid in enumerate(scanned):
-        if position:
-            digest.update(b"\0")
-        digest.update(oid.encode("ascii"))
     # Equality above proves all four canonical multiplicity tables identical.
     counter_rows = tuple(sorted(exact.items()))
     return CoverageProof(
         expected, requested, acquired, scanned,
         counter_rows, counter_rows, counter_rows, counter_rows,
         len(expected), len(requested), len(acquired), len(scanned),
-        digest.hexdigest(),
+        _coverage_digest(scanned),
     )
 
 
@@ -4813,6 +4829,27 @@ class _HistoryIndex:
             "SELECT oid FROM coverage_event WHERE stage=? ORDER BY sequence", (stage.value,),
         ))
 
+    def seal_receipt_coverage(self, expected: tuple[str, ...]) -> _ReceiptCoverage | Refusal:
+        def invalid():
+            return _refusal("PS-MSG-COVERAGE", "multiplicity")
+
+        if not expected or any(a != b for a, b in zip_longest(expected, self.selected_objects())):
+            return invalid()
+        for stage in CoverageEvent:
+            observed = self.db.execute(
+                "SELECT oid, COUNT(*) FROM coverage_event WHERE stage=? GROUP BY oid ORDER BY oid",
+                (stage.value,),
+            )
+            exact = ((oid, 1) for oid in self.selected_objects(sorted_ids=True))
+            if any(a != b for a, b in zip_longest(exact, observed)):
+                return invalid()
+        return _ReceiptCoverage(
+            len(expected),
+            _digest_frames(b"object-set", (oid.lower().encode("ascii")
+                                          for oid in self.selected_objects(sorted_ids=True))),
+            _coverage_digest(self.coverage_events(CoverageEvent.SCANNED)),
+        )
+
     def add_blob(self, oid, size, digest, binary):
         self.db.execute("INSERT INTO blob VALUES (?, ?, ?, ?)", (oid, size, digest, binary))
         self.blob_count += 1
@@ -4925,7 +4962,7 @@ async def _acquire_indexed_history(
     excluded_tag_targets: dict[str, str] | None = None,
     review_capture=None,
     matcher=None,
-) -> tuple[HistoryProof, CoverageProof, tuple[Finding, ...]] | Refusal:
+) -> tuple[HistoryProof, CoverageProof | _ReceiptCoverage, tuple[Finding, ...]] | Refusal:
     commit_set = set(selection.expected_oids)
     native = isinstance(selection, NativePushSelection)
     object_types: dict[str, str] = {}
@@ -5422,6 +5459,7 @@ async def _scan_selected_history_async(
     review_evaluation: "ReviewEvaluation | None" = None,
     review_capture=None,
     history_index: _HistoryIndex | None = None,
+    receipt_coverage: bool = False,
 ) -> ScanOutcome:
     native = isinstance(selection, NativePushSelection)
     mode = "native-push" if native else "range"
@@ -5435,10 +5473,11 @@ async def _scan_selected_history_async(
     coverage_recorder = CoverageRecorder(
         selection.object_oids if native else selection.expected_oids, coverage_observer, coverage_fault,
         history_index=history_index,
+        receipt_coverage=native and receipt_coverage,
     )
     pending: ScanOutcome | None = None
     acquired: tuple[
-        HistoryProof, CoverageProof, tuple[Finding, ...]
+        HistoryProof, CoverageProof | _ReceiptCoverage, tuple[Finding, ...]
     ] | None = None
     reader: _AsyncGitObjectReader | None = None
     excluded_tag_targets: dict[str, str] = {}
@@ -5603,6 +5642,7 @@ async def _scan_native_push_async(
     review_evaluation: "ReviewEvaluation | None" = None,
     review_capture=None,
     receiver_scope=None,
+    receipt_coverage: bool = False,
 ) -> ScanOutcome:
     request = _native_push_request(payload)
     if isinstance(request, Refusal):
@@ -5635,6 +5675,7 @@ async def _scan_native_push_async(
                 reader_factory=reader_factory, coverage_observer=coverage_observer,
                 coverage_fault=coverage_fault, review_evaluation=review_evaluation,
                 review_capture=review_capture, history_index=index,
+                receipt_coverage=receipt_coverage,
             )
         if outcome.kind == "refusal":
             # This outcome cannot authorize publication. Preserve its first cause.
@@ -5667,11 +5708,12 @@ async def _scan_native_push_async(
 def _scan_native_push(payload: object, find_machine_paths, *,
                       review_evaluation: "ReviewEvaluation | None" = None,
                       scan_timeout: float = _SCAN_DEADLINE_SECONDS,
-                      review_capture=None, receiver_scope=None) -> ScanOutcome:
+                      review_capture=None, receiver_scope=None,
+                      receipt_coverage: bool = False) -> ScanOutcome:
     try:
         return asyncio.run(_scan_native_push_async(payload, find_machine_paths,
                            review_evaluation=review_evaluation, review_capture=review_capture, scan_timeout=scan_timeout,
-                           receiver_scope=receiver_scope))
+                           receiver_scope=receiver_scope, receipt_coverage=receipt_coverage))
     except KeyboardInterrupt:
         return ScanOutcome("refusal", "native-push", refusal=_refusal("PS-MSG-READ", "cancelled"))
     except Exception:
@@ -5697,12 +5739,18 @@ def _serialize_native_receipt_common(outcome: ScanOutcome) -> str:
     selection, history, coverage = outcome.native_selection, outcome.history, outcome.coverage
     if outcome.kind != "clean" or selection is None or history is None or coverage is None:
         raise ValueError("native receipt")
-    actual = _build_coverage_proof(coverage.expected_oids, coverage.requested_oids,
-                                   coverage.acquired_oids, coverage.scanned_message_oids, allow_empty=True)
+    if isinstance(coverage, _ReceiptCoverage):
+        exact_coverage = (
+            coverage.expected_count == len(history.object_ids)
+            and coverage.object_set == history.object_set
+        )
+    else:
+        actual = _build_coverage_proof(coverage.expected_oids, coverage.requested_oids,
+                                       coverage.acquired_oids, coverage.scanned_message_oids, allow_empty=True)
+        exact_coverage = actual == coverage and set(coverage.expected_oids) == set(history.object_ids)
     if (
-        isinstance(actual, Refusal) or actual != coverage
+        not exact_coverage
         or history.commit_ids != selection.expected_oids
-        or set(coverage.expected_oids) != set(history.object_ids)
         or set(selection.object_oids) != set(history.object_ids)
         or tuple(sorted(set(history.object_ids))) != history.object_ids
         or not set(history.blob_ids).issubset(history.object_ids)
@@ -6182,7 +6230,8 @@ def main(argv: list[str] | None = None) -> int:
             outcome = _scan_native_push(payload, find_machine_paths,
                                        review_evaluation=evaluation if evaluation.read.usable_records else None,
                                        scan_timeout=_remaining_seconds(deadline),
-                                       receiver_scope=globals().get("__injected_receiver_scope__"))
+                                       receiver_scope=globals().get("__injected_receiver_scope__"),
+                                       receipt_coverage=True)
 
             def recheck_native() -> bool:
                 request = _native_push_request(payload)

@@ -152,3 +152,35 @@ def test_indexed_coverage_preserves_events_and_duplicate_refusal():
         record.record(event.SCANNED, expected[0])
         assert record.proof().failure_id == "PS-MSG-COVERAGE"
         assert tuple(index.coverage_events(event.SCANNED)) == (*reversed(expected), expected[0])
+
+
+def test_receipt_coverage_matches_legacy_digest_and_rejects_missing_extra_or_duplicate():
+    scanner = runpy.run_path(str(SCANNER))
+    a, b, outside = ("a" * 40, "b" * 40, "c" * 40)
+    event = scanner["CoverageEvent"]
+    for damaged_stage in event:
+        for damaged in (None, (a,), (b, a, outside), (b, a, a), (b, outside)):
+            with closing(sqlite3.connect("")) as db:
+                index = scanner["_HistoryIndex"](db)
+                assert index.add_selected_object(a)
+                assert index.add_selected_object(b)
+                for stage in event:
+                    rows = damaged if stage is damaged_stage and damaged is not None else (b, a)
+                    for oid in rows:
+                        index.record_coverage(stage, oid)
+                proof = index.seal_receipt_coverage((a, b))
+                if damaged is None:
+                    legacy = scanner["_build_coverage_proof"]((a, b), (b, a), (b, a), (b, a))
+                    assert proof.coverage_digest == legacy.coverage_digest
+                    assert proof.expected_count == 2
+                    assert proof.object_set == scanner["_oid_set_digest"](b"object-set", (a, b))
+                    assert index.seal_receipt_coverage((b, a)).failure_id == "PS-MSG-COVERAGE"
+                else:
+                    assert proof.failure_id == "PS-MSG-COVERAGE"
+    with closing(sqlite3.connect("")) as db:
+        index = scanner["_HistoryIndex"](db)
+        assert index.seal_receipt_coverage(()).failure_id == "PS-MSG-COVERAGE"
+        assert index.add_selected_object(a)
+        for stage in event:
+            index.record_coverage(stage, a)
+        assert index.seal_receipt_coverage((a, a)).failure_id == "PS-MSG-COVERAGE"

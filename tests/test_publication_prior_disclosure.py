@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from unittest import mock
 
 import test_publication_native_effects as native
@@ -19,6 +20,36 @@ class TestPriorDisclosure(native.TestNativePublicationEffects):
         self.git("add", "-u")
         self.git("commit", "-qm", "remove synthetic fixture")
         return published, self.git("rev-parse", "HEAD").strip().decode()
+
+    def test_indexed_and_legacy_native_receipts_are_byte_identical(self):
+        self.git("commit", "--allow-empty", "-qm", "public follow-up")
+        tip = self.git("rev-parse", "HEAD").strip().decode()
+        payload = self.payload([(tip.encode(), tip, b"refs/heads/main", self.commit)])
+        mod = self.module
+        with self.in_root(), mock.patch.object(sys, "path", [str(native.SOURCE.parent), *sys.path]):
+            from transfer_binding import ScopeBinding
+            scope = ScopeBinding(
+                "synthetic-scope", payload["endpointIdentity"], self.object_format,
+                "f" * 64, (self.commit,), "synthetic-local-receiver",
+            )
+            for receiver, serialize in (
+                (None, mod._serialize_native_receipt_v4),
+                (scope, mod._serialize_receiver_scoped_receipt_v5),
+            ):
+                with self.subTest(scoped=receiver is not None):
+                    old = mod._scan_native_push(payload, lambda _line: (), receiver_scope=receiver)
+                    new = mod._scan_native_push(
+                        payload, lambda _line: (), receiver_scope=receiver, receipt_coverage=True,
+                    )
+                    self.assertEqual(old.kind, "clean", old.refusal)
+                    self.assertEqual(new.kind, "clean", new.refusal)
+                    self.assertIsInstance(new.coverage, mod._ReceiptCoverage)
+                    self.assertEqual(serialize(old), serialize(new))
+                    invalid = mod.replace(new.coverage, object_set="0" * 64)
+                    with self.assertRaisesRegex(ValueError, "native coverage"):
+                        serialize(mod.replace(new, coverage=invalid))
+                    with self.assertRaisesRegex(ValueError, "native coverage"):
+                        serialize(mod.replace(new, reap_certificate=None))
 
     def test_prior_receiver_history_is_not_new_disclosure(self):
         published, tip = self.publish_marker()
@@ -146,8 +177,13 @@ class TestAnnotationOnlyProof(native.TestNativePublicationEffects):
         self.assertEqual(outcome.history.object_ids, (oid,))
         self.assertEqual(outcome.history.direct_tag_commit, self.commit)
         import json
-        proof = json.loads(self.module._serialize_native_receipt_v4(outcome))["tagOnly"]
+        serialize = self.module._serialize_native_receipt_v4
+        proof = json.loads(serialize(outcome))["tagOnly"]
         self.assertEqual((proof["tag"], proof["commit"]), (oid, self.commit))
+        with self.in_root():
+            compact = self.module._scan_native_push(payload, lambda _line: (), receipt_coverage=True)
+        self.assertIsInstance(compact.coverage, self.module._ReceiptCoverage)
+        self.assertEqual(serialize(compact), serialize(outcome))
 
     def test_new_graph_and_unqualified_receiver_do_not_produce_tag_only_proof(self):
         _, _, payload = self.tag_payload(receiver_inventory=False)
