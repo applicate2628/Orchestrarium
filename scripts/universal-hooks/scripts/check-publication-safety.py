@@ -9,7 +9,7 @@ from collections import Counter, OrderedDict
 from enum import Enum
 from functools import lru_cache
 import hashlib
-from itertools import chain, pairwise, zip_longest
+from itertools import chain, zip_longest
 import importlib.util
 import json
 import math
@@ -789,10 +789,15 @@ class _SealedRows:
 
 
 @dataclass(frozen=True)
+class _SealedOids(_SealedRows):
+    singleton: str | None
+
+
+@dataclass(frozen=True)
 class HistoryProof:
     commit_ids: tuple[str, ...]
-    object_ids: tuple[str, ...]
-    blob_ids: tuple[str, ...]
+    object_ids: tuple[str, ...] | _SealedOids
+    blob_ids: tuple[str, ...] | _SealedOids
     blob_bytes: int
     text_blobs: int
     binary_blobs: int
@@ -803,7 +808,7 @@ class HistoryProof:
     blob_set: str
     subject_set: str
     path_set: str
-    tag_ids: tuple[str, ...] = ()
+    tag_ids: tuple[str, ...] | _SealedOids = ()
     direct_tag_commit: str | None = None
 
 
@@ -2957,6 +2962,21 @@ def _oid_set_digest(domain: bytes, object_ids: Iterable[str]) -> str:
     )
 
 
+def _seal_sorted_oids(domain: bytes, values: Iterable[str]) -> _SealedOids:
+    count = 0
+    singleton = None
+
+    def rows():
+        nonlocal count, singleton
+        for oid in values:
+            count += 1
+            singleton = oid if count == 1 else None
+            yield oid.lower().encode("ascii")
+
+    digest = _digest_frames(domain, rows())
+    return _SealedOids(count, digest, singleton)
+
+
 def _native_json_bytes(value: object) -> bytes:
     return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("ascii")
 
@@ -4963,6 +4983,24 @@ class _HistoryIndex:
         size, digest, binary = row
         return size, digest, bool(binary)
 
+    def seal_native_identities(self) -> tuple[_SealedOids, _SealedOids, _SealedOids] | Refusal:
+        if self.db.execute("""
+            SELECT 1 FROM blob b LEFT JOIN selected_object o ON o.oid=b.oid
+            WHERE o.acquired_kind IS NULL OR o.acquired_kind<>'blob' LIMIT 1
+        """).fetchone():
+            return _refusal("PS-MSG-COVERAGE", "blob-set")
+        blob_count, = self.db.execute(
+            "SELECT COUNT(*) FROM selected_object WHERE acquired_kind='blob'",
+        ).fetchone()
+        blobs = _seal_sorted_oids(b"blob-set", self.recorded_blob_ids())
+        if len(blobs) != blob_count or len(blobs) != self.blob_count:
+            return _refusal("PS-MSG-COVERAGE", "blob-set")
+        tags = _seal_sorted_oids(b"tag-set", (oid for (oid,) in self.db.execute(
+            "SELECT oid FROM selected_object WHERE acquired_kind='tag' ORDER BY oid",
+        )))
+        objects = _seal_sorted_oids(b"object-set", self.selected_objects(sorted_ids=True))
+        return objects, blobs, tags
+
     def recorded_blob_ids(self):
         return (oid for (oid,) in self.db.execute("SELECT oid FROM blob ORDER BY oid"))
 
@@ -5449,8 +5487,22 @@ async def _acquire_indexed_history(
     canonical_subjects, canonical_paths = index.seal()
     if len(canonical_subjects) != index.subject_count or len(canonical_paths) != scanned_paths:
         return _refusal("PS-MSG-COVERAGE", "history-index")
-    canonical_objects = tuple(sorted(selection.object_oids))
-    canonical_blobs = tuple(index.recorded_blob_ids())
+    if native and isinstance(coverage, _ReceiptCoverage):
+        identities = index.seal_native_identities()
+        if isinstance(identities, Refusal):
+            return identities
+        canonical_objects, canonical_blobs, canonical_tags = identities
+        if (len(canonical_objects) != coverage.expected_count
+                or canonical_objects.digest != coverage.selection_set
+                or len(canonical_tags) != len(tag_targets)):
+            return _refusal("PS-MSG-COVERAGE", "history-index")
+        object_digest, blob_digest = canonical_objects.digest, canonical_blobs.digest
+    else:
+        canonical_objects = tuple(sorted(selection.object_oids))
+        canonical_blobs = tuple(index.recorded_blob_ids())
+        canonical_tags = tuple(sorted(tag_targets))
+        object_digest = _oid_set_digest(b"object-set", canonical_objects)
+        blob_digest = _oid_set_digest(b"blob-set", canonical_blobs)
     proof = HistoryProof(
         selection.expected_oids,
         canonical_objects,
@@ -5461,11 +5513,11 @@ async def _acquire_indexed_history(
         canonical_subjects,
         canonical_paths,
         _commit_set_digest(selection.expected_oids),
-        _oid_set_digest(b"object-set", canonical_objects),
-        _oid_set_digest(b"blob-set", canonical_blobs),
+        object_digest,
+        blob_digest,
         canonical_subjects.digest,
         canonical_paths.digest,
-        tuple(sorted(tag_targets)),
+        canonical_tags,
         direct_tag_commit,
     )
     # Synchronous detectors and proof hashing may cross the shared deadline.
@@ -5847,21 +5899,10 @@ def _ordered_receipt_selection_digest(object_ids: Iterable[str]) -> str:
     return _digest_frames(b"native-receipt-selection-order", (oid.encode("ascii") for oid in object_ids))
 
 
-def _sorted_oid_subset(members: tuple[str, ...], universe: tuple[str, ...]) -> bool:
-    candidates = iter(universe)
-    previous = None
-    for member in members:
-        if previous is not None and member <= previous:
-            return False
-        for candidate in candidates:
-            if candidate == member:
-                break
-            if candidate > member:
-                return False
-        else:
-            return False
-        previous = member
-    return True
+def _exact_oid_singleton(rows: tuple[str, ...] | _SealedOids, oid: str, domain: bytes) -> bool:
+    if isinstance(rows, _SealedOids):
+        return len(rows) == 1 and rows.singleton == oid and rows.digest == _oid_set_digest(domain, (oid,))
+    return rows == (oid,)
 
 
 def _serialize_native_receipt_common(outcome: ScanOutcome) -> str:
@@ -5870,18 +5911,14 @@ def _serialize_native_receipt_common(outcome: ScanOutcome) -> str:
         raise ValueError("native receipt")
     if isinstance(coverage, _ReceiptCoverage):
         exact_coverage = (
-            coverage.expected_count == len(history.object_ids) == len(selection.object_oids)
-            and coverage.selection_set == history.object_set
+            isinstance(history.object_ids, _SealedOids)
+            and isinstance(history.blob_ids, _SealedOids)
+            and isinstance(history.tag_ids, _SealedOids)
+            and coverage.expected_count == len(history.object_ids) == len(selection.object_oids)
+            and coverage.selection_set == history.object_set == history.object_ids.digest
+            and history.blob_set == history.blob_ids.digest
+            and len(history.commit_ids) + len(history.blob_ids) + len(history.tag_ids) <= len(history.object_ids)
             and coverage.selection_order == _ordered_receipt_selection_digest(selection.object_oids)
-            and all(a < b for a, b in pairwise(history.object_ids))
-            and _sorted_oid_subset(history.blob_ids, history.object_ids)
-            and _sorted_oid_subset(history.tag_ids, history.object_ids)
-            and history.object_set == _digest_frames(
-                b"object-set", (oid.lower().encode("ascii") for oid in history.object_ids),
-            )
-            and history.blob_set == _digest_frames(
-                b"blob-set", (oid.lower().encode("ascii") for oid in history.blob_ids),
-            )
         )
     else:
         actual = _build_coverage_proof(coverage.expected_oids, coverage.requested_oids,
@@ -5920,7 +5957,8 @@ def _serialize_native_receipt_common(outcome: ScanOutcome) -> str:
         row = _native_new_same_name_tag(request)
         inventory = selection.tag_receiver_inventory
         if (row is None or not inventory or history.commit_ids or history.blob_ids
-                or history.object_ids != (row.local_oid,) or history.tag_ids != history.object_ids
+                or not _exact_oid_singleton(history.object_ids, row.local_oid, b"object-set")
+                or not _exact_oid_singleton(history.tag_ids, row.local_oid, b"tag-set")
                 or history.direct_tag_commit == row.local_oid
                 or not selection.object_format.matches(history.direct_tag_commit)):
             raise ValueError("native tag-only coverage")

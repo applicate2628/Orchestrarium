@@ -285,3 +285,24 @@ def test_typed_target_pages_preserve_membership_while_acquisition_updates_rows()
             observed.append(oid)
         assert tuple(observed) == expected
         assert tuple(index.acquired_oids()) == expected
+
+
+def test_native_identity_seal_rejects_missing_or_out_of_scope_blobs():
+    scanner = runpy.run_path(str(SCANNER))
+    for recorded in ("selected-blob", "selected-tag", "unselected", None):
+        with closing(sqlite3.connect("")) as db:
+            index = scanner["_HistoryIndex"](db)
+            assert index.add_selected_object("selected-tag")
+            assert index.add_selected_object("selected-blob")
+            assert index.record_acquired("selected-tag", "tag", 0)
+            assert index.record_acquired("selected-blob", "blob", 1)
+            if recorded is not None:
+                index.add_blob(recorded, 1, b"pinned-digest", False)
+            seal = index.seal_native_identities()
+            if recorded == "selected-blob":
+                objects, blobs, tags = seal
+                assert len(objects) == 2 and objects.singleton is None
+                assert blobs.singleton == "selected-blob"
+                assert tags.singleton == "selected-tag"
+            else:
+                assert seal.reason == "blob-set"

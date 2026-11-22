@@ -22,7 +22,9 @@ class TestPriorDisclosure(native.TestNativePublicationEffects):
         return published, self.git("rev-parse", "HEAD").strip().decode()
 
     def test_indexed_and_legacy_native_receipts_are_byte_identical(self):
-        self.git("commit", "--allow-empty", "-qm", "public follow-up")
+        (self.root / "second.txt").write_bytes(b"Public second fixture\n")
+        self.git("add", "second.txt")
+        self.git("commit", "-qm", "public follow-up")
         tip = self.git("rev-parse", "HEAD").strip().decode()
         payload = self.payload([(tip.encode(), tip, b"refs/heads/main", self.commit)])
         mod = self.module
@@ -44,6 +46,10 @@ class TestPriorDisclosure(native.TestNativePublicationEffects):
                     self.assertEqual(old.kind, "clean", old.refusal)
                     self.assertEqual(new.kind, "clean", new.refusal)
                     self.assertIsInstance(new.coverage, mod._ReceiptCoverage)
+                    for field in ("object_ids", "blob_ids", "tag_ids"):
+                        sealed = getattr(new.history, field)
+                        self.assertIsInstance(sealed, mod._SealedOids)
+                        self.assertEqual(len(sealed), len(getattr(old.history, field)))
                     self.assertEqual(serialize(old), serialize(new))
                     invalid = mod.replace(new.coverage, selection_set="0" * 64)
                     with self.assertRaisesRegex(ValueError, "native coverage"):
@@ -53,6 +59,9 @@ class TestPriorDisclosure(native.TestNativePublicationEffects):
                     wrong_order = mod.replace(new.coverage, selection_order="0" * 64)
                     with self.assertRaisesRegex(ValueError, "native coverage"):
                         serialize(mod.replace(new, coverage=wrong_order))
+                    impossible_tags = mod.replace(new.history.tag_ids, count=len(new.history.object_ids) + 1)
+                    with self.assertRaisesRegex(ValueError, "native coverage"):
+                        serialize(mod.replace(new, history=mod.replace(new.history, tag_ids=impossible_tags)))
 
     def test_indexed_and_legacy_guarded_range_receipts_are_byte_identical(self):
         self.git("commit", "--allow-empty", "-qm", "public guarded-range follow-up")
@@ -210,6 +219,10 @@ class TestAnnotationOnlyProof(native.TestNativePublicationEffects):
             compact = self.module._scan_native_push(payload, lambda _line: (), receipt_coverage=True)
         self.assertIsInstance(compact.coverage, self.module._ReceiptCoverage)
         self.assertEqual(serialize(compact), serialize(outcome))
+        wrong_tag = self.module.replace(compact.history.tag_ids, digest="0" * 64)
+        wrong_history = self.module.replace(compact.history, tag_ids=wrong_tag)
+        with self.assertRaisesRegex(ValueError, "native tag-only coverage"):
+            serialize(self.module.replace(compact, history=wrong_history))
 
     def test_new_graph_and_unqualified_receiver_do_not_produce_tag_only_proof(self):
         _, _, payload = self.tag_payload(receiver_inventory=False)
