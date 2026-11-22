@@ -4772,10 +4772,31 @@ async def _acquire_history(selection, reader, find_machine_paths, coverage_recor
             index = _HistoryIndex(db)
             clock = asyncio.get_running_loop().time
             db.set_progress_handler(lambda: int(clock() >= scan_deadline), 2048)
-            result = await _acquire_indexed_history(
-                selection, reader, find_machine_paths, coverage_recorder, scan_deadline,
-                index, **options,
-            )
+            wire = globals().get("__injected_matcher_wire__")
+            try:
+                executable = None if wire is None else wire["retained_matcher"](sys.executable)
+            except (OSError, ValueError):
+                return _refusal("PS-MSG-READ", "matcher-package")
+            if executable is None:
+                result = await _acquire_indexed_history(
+                    selection, reader, find_machine_paths, coverage_recorder, scan_deadline,
+                    index, **options,
+                )
+            else:
+                rules = tuple(_SIMPLE_RULES) + tuple((True, pattern) for _, pattern in _VALUE_RULES)
+                try:
+                    async with _owned_matcher_exchange(
+                        executable, wire["MatcherExchange"], rules, scan_deadline,
+                    ) as matcher:
+                        await matcher.match((), scan_deadline)
+                        result = await _acquire_indexed_history(
+                            selection, reader, find_machine_paths, coverage_recorder,
+                            scan_deadline, index, matcher=matcher, **options,
+                        )
+                except TimeoutError:
+                    return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+                except (OSError, ValueError, subprocess.SubprocessError, WindowsJobError):
+                    return _refusal("PS-MSG-READ", "matcher-worker")
             # Native receipts formerly rehashed retained rows. Re-read and
             # verify them while their owner is live, then close the scratch.
             if isinstance(selection, NativePushSelection) and isinstance(result, tuple):

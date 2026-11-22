@@ -143,3 +143,65 @@ class MatcherExchange:
 
     async def eof(self, deadline):
         return await self._reader.eof(deadline)
+
+def retained_matcher(interpreter):
+    """Resolve only the matcher declared beside the selected bundled Python."""
+    import hashlib
+    import os
+    from pathlib import Path
+    import re
+    import stat
+
+    if os.name != "nt":
+        return None
+    python = Path(interpreter)
+    if (not python.is_absolute() or python.name.lower() != "python.exe"
+            or python.parent.name.lower() != "python"):
+        return None
+    root = python.parent.parent
+    manifest = root / "bundle.json"
+    if not os.path.lexists(manifest) and not (root / "app/install.py").is_file():
+        return None
+
+    def ordinary(path, is_file):
+        meta = path.lstat()
+        if (getattr(meta, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+                or not (stat.S_ISREG if is_file else stat.S_ISDIR)(meta.st_mode)
+                or (is_file and meta.st_nlink != 1)):
+            raise ValueError("invalid retained matcher member")
+
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("invalid retained matcher manifest")
+            result[key] = value
+        return result
+
+    for directory in (root, *root.parents):
+        ordinary(directory, False)
+    ordinary(python.parent, False)
+    ordinary(python, True)
+    ordinary(manifest, True)
+    with manifest.open("rb") as stream:
+        data = json.load(stream, object_pairs_hook=unique)
+    if (not isinstance(data, dict) or data.get("product") != "Orche"
+            or data.get("python") != "python/python.exe" or data.get("entry") != "app/install.py"):
+        raise ValueError("invalid retained matcher manifest")
+    schema = data.get("schemaVersion")
+    if type(schema) is int and schema == 3 and "publicationMatcher" not in data:
+        return None
+    record = data.get("publicationMatcher")
+    relative = "native/orche-publication-match.exe"
+    if (type(schema) is not int or schema != 4 or data.get("target") != "windows-x64"
+            or not isinstance(record, dict) or set(record) != {"path", "sha256"}
+            or record["path"] != relative or type(record["sha256"]) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", record["sha256"]) is None):
+        raise ValueError("invalid retained matcher declaration")
+    worker = root / relative
+    ordinary(worker.parent, False)
+    ordinary(worker, True)
+    with worker.open("rb") as stream:
+        if hashlib.file_digest(stream, "sha256").hexdigest() != record["sha256"]:
+            raise ValueError("retained matcher digest mismatch")
+    return worker

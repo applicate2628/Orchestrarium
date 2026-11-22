@@ -1,5 +1,6 @@
 """Rust matcher frame validation at the scanner boundary."""
 import json
+import os
 from pathlib import Path
 import re
 import runpy
@@ -109,3 +110,32 @@ def test_owned_exchange_requires_the_declared_protocol(header):
         assert await exchange.eof(deadline)
 
     asyncio.run(verify())
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows x64 retained component")
+def test_retained_package_does_not_downgrade_a_declared_matcher(tmp_path):
+    import hashlib
+
+    python = tmp_path / "python/python.exe"
+    worker = tmp_path / "native/orche-publication-match.exe"
+    for member in (python, worker):
+        member.parent.mkdir()
+        member.write_bytes(b"fixture")
+    manifest = tmp_path / "bundle.json"
+    bind = WIRE["retained_matcher"]
+    data = {"schemaVersion": 3, "target": "windows-x64", "product": "Orche",
+            "python": "python/python.exe", "entry": "app/install.py"}
+    manifest.write_text(json.dumps(data), encoding="ascii")
+    assert bind(python) is None
+
+    data["schemaVersion"] = 4
+    data["publicationMatcher"] = {"path": "native/orche-publication-match.exe",
+                                  "sha256": hashlib.sha256(b"fixture").hexdigest()}
+    manifest.write_text(json.dumps(data), encoding="ascii")
+    assert bind(python) == worker
+
+    worker.write_bytes(b"mismatch")
+    with pytest.raises(ValueError, match="digest mismatch"):
+        bind(python)
+    worker.unlink()
+    with pytest.raises(OSError):
+        bind(python)
