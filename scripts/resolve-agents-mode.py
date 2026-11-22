@@ -8,6 +8,7 @@ import copy
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import re
 import stat
@@ -1433,6 +1434,91 @@ def _profession_skill_metadata(repo_root: Path, role: str, instructions: str) ->
     }
 
 
+def _advisory_model_reference(policy: dict, provider: str, model: str) -> dict:
+    """Presentation data only. Missing or invalid advisory prices are unknown."""
+    def read(*keys):
+        value = policy
+        for key in keys:
+            value = value.get(key) if isinstance(value, dict) else None
+        return value
+
+    def text(value):
+        return value if isinstance(value, str) and value.strip() else None
+
+    kinds = ("input", "cachedInput", "output")
+
+    def price(basis, *, reference=False):
+        if not isinstance(basis, str) or not basis:
+            return None
+        prefix = ("modelReference", "priceBases", basis)
+        base = read(*prefix, "baseline")
+        source = text(read(*prefix, "source"))
+        checked = text(read(*prefix, "verifiedOn"))
+        scope = text(read(*prefix, "scope"))
+        if (not isinstance(base, list) or len(base) != 2
+                or not all(isinstance(part, str) and part for part in base)
+                or source is None or checked is None or scope is None):
+            return None
+        current = read(*prefix, "rates", provider, model)
+        baseline = read(*prefix, "rates", *base)
+        if not all(isinstance(rates, list) and len(rates) == len(kinds) for rates in (current, baseline)):
+            return None
+
+        def rate(value):
+            return type(value) in (int, float) and 0 <= value < 10**12
+        metadata = {"billingBasis": basis, "baselineProvider": base[0],
+                    "baselineModel": base[1], "source": source, "verifiedOn": checked, "scope": scope}
+        if reference:
+            basket = read(*prefix, "basket")
+            if (not isinstance(basket, dict) or set(basket) != set(kinds)
+                    or not all(type(n) is int and 0 <= n <= 10**7 for n in basket.values())
+                    or not any(basket.values())):
+                return None
+            active = [(basket[key], value, denom) for key, value, denom in zip(kinds, current, baseline)
+                      if basket[key]]
+            if not all(rate(value) and rate(denom) for _, value, denom in active):
+                return None
+            comparable = sum(w * value for w, value, _ in active)
+            standard = sum(w * denom for w, _, denom in active)
+            units = comparable / standard if standard else math.inf
+            return {**metadata, "basket": dict(basket), "units": units} if math.isfinite(units) else None
+        if not all(rate(value) and rate(denom) and denom > 0
+                   for value, denom in zip(current, baseline)):
+            return None
+        ratios = [model_rate / base_rate for model_rate, base_rate in zip(current, baseline)]
+        if not all(map(math.isfinite, ratios)):
+            return None
+        return {**metadata, "perTokenType": dict(zip(kinds, ratios)),
+                "uniform": ratios[0] if all(value == ratios[0] for value in ratios) else None}
+
+    record = ("modelReference", "models", provider, model)
+    return {
+        "strength": text(read(*record, "strength")),
+        "capabilitySource": text(read("modelReference", "capabilitySources", provider)),
+        "tradeoff": text(read(*record, "tradeoff")),
+        "relativePrice": price(read(*record, "nativePriceBasis")),
+        "referencePrice": price(read(*record, "referencePriceBasis"), reference=True),
+    }
+
+
+def _advisory_model_catalog(policy, provider, options, default_profile):
+    by_model = {}
+    for option in options:
+        model = option["model"]
+        if model not in by_model:
+            by_model[model] = {
+                "provider": provider, "model": model, "tiersByProfile": {},
+                "hostCapability": option["hostCapability"], "profiles": [],
+                "recommendedProfile": None, **_advisory_model_reference(policy, provider, model),
+            }
+        row = by_model[model]
+        row["profiles"].append(option["profile"])
+        row["tiersByProfile"][option["profile"]] = option["modelTier"]
+        if option["profile"] == default_profile:
+            row["recommendedProfile"] = default_profile
+    return sorted(by_model.values(), key=lambda row: row["recommendedProfile"] is None)
+
+
 def _describe_ordinary_native_role_options_in_layout(
     role: Any,
     task_class: Any,
@@ -1686,6 +1772,7 @@ def _describe_ordinary_native_role_options_in_layout(
     if default_error is not None:
         values.update(defaultProfile=None, defaultModel=None, defaultEffort=None)
     values["carrierConfigurationError"] = carrier_error
+    values["modelCatalog"] = _advisory_model_catalog(policy, "codex", options, values["defaultProfile"])
     return _NativeRoleSelection(values, snapshots, linked_authority, carrier, launch_package)
 
 

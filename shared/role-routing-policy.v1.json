@@ -1,5 +1,111 @@
 {
   "schemaVersion": 1,
+  "modelReference": {
+    "capabilitySources": {
+      "codex": "https://developers.openai.com/api/docs/guides/model-selection"
+    },
+    "models": {
+      "codex": {
+        "gpt-6.2-astra": {
+          "strength": "Top capability in this policy for difficult science, engineering and critical review.",
+          "tradeoff": "Higher token rates; reserve for tasks where a reasoning error or missed finding is expensive.",
+          "nativePriceBasis": "codex-standard-credits",
+          "referencePriceBasis": "standard-api-reference"
+        },
+        "gpt-6.2-sol": {
+          "strength": "Strong general coding, multi-step work and most engineering reviews.",
+          "tradeoff": "For difficult scientific formulation or fragile evidence, prefer the stronger qualified candidate.",
+          "nativePriceBasis": "codex-standard-credits",
+          "referencePriceBasis": "standard-api-reference"
+        },
+        "gpt-6.1-terra": {
+          "strength": "Fast visual and computer-use work, repository comprehension and bounded fixes.",
+          "tradeoff": "Use an independent check for subtle scientific judgments and broad design changes.",
+          "nativePriceBasis": "codex-standard-credits",
+          "referencePriceBasis": "standard-api-reference"
+        },
+        "gpt-6-luna": {
+          "strength": "Efficient for high-volume, bounded work with clear acceptance checks.",
+          "tradeoff": "Not a substitute for critical review, ambiguous design or final acceptance.",
+          "nativePriceBasis": "codex-standard-credits",
+          "referencePriceBasis": "standard-api-reference"
+        }
+      }
+    },
+    "priceBases": {
+      "codex-standard-credits": {
+        "scope": "Standard purchased Codex credits per million tokens; not included plan usage or a per-run quote.",
+        "baseline": [
+          "codex",
+          "gpt-6.2-sol"
+        ],
+        "source": "https://learn.chatgpt.com/docs/pricing#token-rates",
+        "verifiedOn": "2026-11-22",
+        "rates": {
+          "codex": {
+            "gpt-6.2-astra": [
+              200,
+              10,
+              1000
+            ],
+            "gpt-6.2-sol": [
+              50,
+              2.5,
+              250
+            ],
+            "gpt-6.1-terra": [
+              25,
+              1.25,
+              125
+            ],
+            "gpt-6-luna": [
+              2.5,
+              0.25,
+              12.5
+            ]
+          }
+        }
+      },
+      "standard-api-reference": {
+        "scope": "Standard direct API, up to 272,000 input tokens, USD per million tokens; excludes tools, cache writes, plan allowances and speed surcharges.",
+        "baseline": [
+          "codex",
+          "gpt-6.2-sol"
+        ],
+        "source": "https://developers.openai.com/api/docs/pricing",
+        "verifiedOn": "2026-11-22",
+        "basket": {
+          "input": 10000,
+          "cachedInput": 0,
+          "output": 1000
+        },
+        "rates": {
+          "codex": {
+            "gpt-6.2-astra": [
+              8,
+              0.4,
+              40
+            ],
+            "gpt-6.2-sol": [
+              2,
+              0.1,
+              10
+            ],
+            "gpt-6.1-terra": [
+              1,
+              0.05,
+              5
+            ],
+            "gpt-6-luna": [
+              0.1,
+              0.01,
+              0.5
+            ]
+          }
+        }
+      }
+    }
+  },
   "modelTierOrder": [
     "mechanical",
     "balanced",
