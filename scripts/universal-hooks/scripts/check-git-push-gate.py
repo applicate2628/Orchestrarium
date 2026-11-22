@@ -2813,7 +2813,8 @@ class _ScanProgressFrames:
     _PHASES = (b"commits", b"objects", b"acquired", b"traversed", b"classified")
     _MAX_PAYLOAD = max(map(len, _PHASES)) + 1 + _MAX_DIGITS
 
-    def __init__(self, attempt: str) -> None:
+    def __init__(self, attempt: str, *, on_advance=None) -> None:
+        self._on_advance = on_advance
         self._prefix = b"\x1eORCHE-SCAN-PROGRESS-V1 " + attempt.encode("ascii") + b" "
         self._tail = b""
         self._counts: dict[bytes, int] = {}
@@ -2841,6 +2842,8 @@ class _ScanProgressFrames:
         if rank >= self._rank and completed > self._counts.get(phase, 0):
             self._rank = rank
             self._counts[phase] = completed
+            if self._on_advance is not None:
+                self._on_advance()
         return True
 
     def _partial(self, payload: bytes) -> bool:
@@ -2914,8 +2917,18 @@ def _run_snapshot_child(
 
     notice_scope = _scan_threshold_scope.get()
     threshold_notice = notice_scope if notice_scope is not None else _ScanThresholdNotice()
+    quiet_deadline = None
+    interval = SCAN_TIMEOUT_SECONDS
+
+    def advance_quiet_window() -> None:
+        # Called only under output_lock for new verified semantic work.
+        nonlocal quiet_deadline
+        observed_at = time.monotonic()
+        if quiet_deadline is not None and observed_at < quiet_deadline:
+            quiet_deadline = observed_at + interval
+
     progress = (
-        _ScanProgressFrames(pending.attempt_id)
+        _ScanProgressFrames(pending.attempt_id, on_advance=advance_quiet_window)
         if isinstance(pending.binding, NativePushScanBinding)
         and pending.exact_argv[-3:] == ("--gate-progress-attempt", pending.attempt_id, "--native-push")
         and isinstance(pending.attempt_id, str)
@@ -2974,9 +2987,9 @@ def _run_snapshot_child(
             while not overflow.is_set():
                 chunk = read(8192)
                 eof = not chunk
-                if frames is not None:
-                    chunk = frames.finish() if eof else frames.feed(chunk)
                 with output_lock:
+                    if frames is not None:
+                        chunk = frames.finish() if eof else frames.feed(chunk)
                     total = len(output["stdout"]) + len(output["stderr"])
                     if total + len(chunk) > SCAN_OUTPUT_BYTE_CAP:
                         overflow.set()
@@ -3022,19 +3035,29 @@ def _run_snapshot_child(
             ("stdout", lambda: threading.Thread(target=drain, args=("stdout", process.stdout))),
             ("stderr", lambda: threading.Thread(target=drain, args=("stderr", process.stderr))),
         )
+        started = time.monotonic()
+        quiet_deadline = started + interval
         for name, construct in workers:
             worker = construct()
             supervisor.start_worker(worker, name=name)
-        started = time.monotonic()
-        deadline = started + SCAN_TIMEOUT_SECONDS
         while True:
+            if progress is not None:
+                with output_lock:
+                    expired = time.monotonic() >= quiet_deadline
+                if expired:
+                    break
             return_code = process.poll()
             if return_code is not None:
-                bounded = not overflow.is_set()
+                with output_lock:
+                    bounded = not overflow.is_set() and (
+                        progress is None or time.monotonic() < quiet_deadline
+                    )
                 break
             now = time.monotonic()
             threshold_notice.observe(now - started)
-            if overflow.is_set() or now >= deadline:
+            with output_lock:
+                expired = (time.monotonic() if progress is not None else now) >= quiet_deadline
+            if overflow.is_set() or expired:
                 break
             time.sleep(0.01)
     except BaseException as exc:

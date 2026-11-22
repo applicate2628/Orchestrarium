@@ -1189,3 +1189,52 @@ def test_scan_progress_does_not_advance_on_an_obsolete_or_unknown_phase():
     unknown = frame(b"log", b"99")
     assert progress.feed(unknown) == unknown
     assert progress.phase_counts == accepted
+
+
+
+@pytest.mark.parametrize("mode", ["advancing", "replayed", "late"])
+def test_native_outer_watchdog_uses_only_advancing_owned_work(tmp_path, mode):
+    from contextlib import nullcontext
+
+    gate = module()
+    token = "c" * 32
+    payload = b""
+    captured = gate.CapturedReviewPayload(
+        gate.CapturedReviewModules(object(), object(), ()), {}, "e" * 64,
+        {"status": "not-requested", "repository": None, "diagnostic": "not-needed"},
+        None, True, payload, hashlib.sha256(payload).hexdigest(),
+    )
+    binding = gate.NativePushScanBinding(
+        "sha1", "sha256:" + "d" * 64, "e" * 64, "f" * 64, "1" * 64,
+    )
+    emitter = """
+import sys, time
+token = sys.argv[2]
+if sys.argv[1] == 'late':
+    time.sleep(.20)
+    raise SystemExit(0)
+for unit in range(1, 8):
+    counter = unit if sys.argv[1] == 'advancing' else 1
+    sys.stderr.buffer.write((chr(30) + 'ORCHE-SCAN-PROGRESS-V1 ' + token
+                             + ' acquired ' + str(counter) + chr(10)).encode('ascii'))
+    sys.stderr.buffer.flush()
+    time.sleep(.22)
+"""
+    argv = (sys.executable, "-B", "-c", emitter, mode, token,
+            "--gate-progress-attempt", token, "--native-push")
+    pending = gate.PendingScanInvocation(
+        "synthetic-native-watchdog", token, binding, None, gate._interpreter_identity(), argv,
+        object(), captured,
+    )
+    # This fixture tests owned execution, not receiving or publication authority.
+    delayed_observation = (
+        mock.patch.object(gate._ScanThresholdNotice, "observe", side_effect=lambda _: time.sleep(.45))
+        if mode == "late" else nullcontext()
+    )
+    with mock.patch.object(gate, "SCAN_TIMEOUT_SECONDS", .10 if mode == "late" else .85), delayed_observation:
+        _, records = gate._run_snapshot_child(pending, payload, str(tmp_path))
+    assert len(records) == 1 and records[0].settlement.complete
+    assert records[0].bounded_completion is (mode == "advancing")
+    assert records[0].verified_acquired_objects == {"advancing": 7, "replayed": 1, "late": 0}[mode]
+    assert records[0].stderr == b""
+    assert pending.consumption_id is None
