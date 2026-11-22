@@ -2575,48 +2575,80 @@ def _is_public_key_token_match(line: str, family: str, match: re.Match[str]) -> 
     return identifier == "publicKeyToken"
 
 
-def _binary_content_hits(
-    raw: bytes,
-    path: str,
-    find_machine_paths,
-    *,
-    max_findings: int | None = None,
-) -> list[Finding]:
-    def lexical_classes(line: str) -> tuple[str, ...]:
-        classes: list[str] = []
-        seen: set[tuple] = set()
-        for observation in _line_observations(line, 0, 0, "history-blob", binary=True):
-            key = _observation_key(observation)
-            if key not in seen:
-                seen.add(key)
-                classes.append(observation.diagnostic_class)
-        return tuple(classes)
+def _binary_runs(raw: bytes):
+    for number, raw_line in enumerate(raw.splitlines(), 1):
+        for run in _BINARY_ASCII_RUN.findall(raw_line):
+            yield number, run.decode("ascii")
 
-    # Memoize exact short runs within one payload. Misses and evictions run
-    # the same detectors; occurrence coordinates are attached below.
-    short_run_classes = lru_cache(maxsize=4096)(lexical_classes)
+
+def _binary_lexical_classes(line: str, raw_matches=None) -> tuple[str, ...]:
+    classes: list[str] = []
+    seen: set[tuple] = set()
+    for observation in _line_observations(
+        line, 0, 0, "history-blob", binary=True, raw_matches=raw_matches,
+    ):
+        key = _observation_key(observation)
+        if key not in seen:
+            seen.add(key)
+            classes.append(observation.diagnostic_class)
+    return tuple(classes)
+
+
+def _binary_findings(rows, path, find_machine_paths, max_findings):
     findings: list[Finding] = []
     locator = _safe_locator(path, "history-blob")
-    for line_number, raw_line in enumerate(raw.splitlines(), 1):
-        for raw_run in _BINARY_ASCII_RUN.findall(raw_line):
-            line = raw_run.decode("ascii")
-            classes = (short_run_classes if len(raw_run) <= 64 else lexical_classes)(line)
-            for diagnostic_class in classes:
-                if max_findings is None or len(findings) < max_findings:
-                    findings.append(Finding(
-                        "PS-FINDING-CONTENT", "history-blob", locator,
-                        line_number, diagnostic_class,
-                    ))
-            if find_machine_paths(line) and (
-                max_findings is None or len(findings) < max_findings
-            ):
+    for number, line, classes in rows:
+        for diagnostic_class in classes:
+            if max_findings is None or len(findings) < max_findings:
                 findings.append(Finding(
-                    "PS-FINDING-CONTENT",
-                    "history-blob",
-                    locator,
-                    line_number,
-                    "machine-path",
+                    "PS-FINDING-CONTENT", "history-blob", locator, number, diagnostic_class,
                 ))
+        if find_machine_paths(line) and (
+            max_findings is None or len(findings) < max_findings
+        ):
+            findings.append(Finding(
+                "PS-FINDING-CONTENT", "history-blob", locator, number, "machine-path",
+            ))
+    return findings
+
+
+def _binary_content_hits(
+    raw: bytes, path: str, find_machine_paths, *, max_findings: int | None = None,
+) -> list[Finding]:
+    # The cache changes work, not the occurrence inventory.
+    short_run_classes = lru_cache(maxsize=4096)(_binary_lexical_classes)
+    return _binary_findings(
+        ((number, line, (short_run_classes if len(line) <= 64 else _binary_lexical_classes)(line))
+         for number, line in _binary_runs(raw)),
+        path, find_machine_paths, max_findings,
+    )
+
+
+def _matcher_batches(rows):
+    batch = []
+    size = 0
+    for number, line in rows:
+        batch.append((number, line))
+        size += len(line)
+        if len(batch) >= 8192 or size >= 2 * 1024 * 1024:
+            yield batch
+            batch, size = [], 0
+    if batch:
+        yield batch
+
+
+async def _binary_content_hits_with_matcher(
+    raw, path, find_machine_paths, matcher, deadline, *, max_findings=None,
+):
+    findings = []
+    for batch in _matcher_batches(_binary_runs(raw)):
+        captures = await matcher.match(tuple((line, True) for _, line in batch), deadline)
+        room = None if max_findings is None else max(0, max_findings - len(findings))
+        findings.extend(_binary_findings(
+            ((number, line, _binary_lexical_classes(line, matches))
+             for (number, line), matches in zip(batch, captures, strict=True)),
+            path, find_machine_paths, room,
+        ))
     return findings
 
 
@@ -4770,6 +4802,7 @@ async def _acquire_indexed_history(
     review_evaluation: "ReviewEvaluation | None" = None,
     excluded_tag_targets: dict[str, str] | None = None,
     review_capture=None,
+    matcher=None,
 ) -> tuple[HistoryProof, CoverageProof, tuple[Finding, ...]] | Refusal:
     commit_set = set(selection.expected_oids)
     native = isinstance(selection, NativePushSelection)
@@ -5073,12 +5106,15 @@ async def _acquire_indexed_history(
                 index.owners(path, blob_oid), commit_set,
                 selection.object_format.name, binary=blob_oid in binary_blobs)
         if blob_oid in binary_blobs:
-            content_findings = _binary_content_hits(
-                raw,
-                decoded_path,
-                find_machine_paths,
-                max_findings=max(0, _MAX_FINDINGS - len(findings)),
-            )
+            room = max(0, _MAX_FINDINGS - len(findings))
+            if matcher is None:
+                content_findings = _binary_content_hits(
+                    raw, decoded_path, find_machine_paths, max_findings=room,
+                )
+            else:
+                content_findings = await _binary_content_hits_with_matcher(
+                    raw, decoded_path, find_machine_paths, matcher, scan_deadline, max_findings=room,
+                )
         elif review_evaluation is not None:
             content_findings = []
             shown_locations = set()

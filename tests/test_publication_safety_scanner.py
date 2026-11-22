@@ -6181,7 +6181,8 @@ def test_binary_run_memo_preserves_each_finding_and_machine_path_check(monkeypat
     lexical_inputs = []
     path_inputs = []
 
-    def observations(line, number, offset, kind, *, binary):
+    def observations(line, number, offset, kind, *, binary, raw_matches=None):
+        assert raw_matches is None
         lexical_inputs.append(line)
         assert binary and kind == "history-blob"
         if line.startswith("FLAG"):
@@ -6206,3 +6207,42 @@ def test_binary_run_memo_preserves_each_finding_and_machine_path_check(monkeypat
     assert lexical_inputs == ["quiet", "FLAG", large]
     scanner._binary_content_hits(raw, "fixture.bin", paths)
     assert lexical_inputs == ["quiet", "FLAG", large] * 2
+
+def test_binary_matcher_batches_preserve_complete_findings_and_reject_short_output():
+    scanner = _load_canonical_scanner("_scanner_binary_matcher")
+    raw = b"\0quiet\r\n" * 9000 + b"\0ordinary\n\0ordinary"
+    visits = []
+
+    class Matcher:
+        def __init__(self, short=False):
+            self.batches = []
+            self.short = short
+
+        async def match(self, rows, deadline):
+            self.batches.append(len(rows))
+            assert all(binary for _, binary in rows)
+            return tuple(tuple(scanner._python_rule_matches(line, binary=True))
+                         for line, _ in (rows[:-1] if self.short else rows))
+
+    def path(line):
+        visits.append(line)
+        return line == "ordinary"
+
+    expected = scanner._binary_content_hits(raw, "fixture.bin", path, max_findings=1)
+    assert len(expected) == 1 and len(visits) == 9002
+    visits.clear()
+
+    async def verify():
+        deadline = asyncio.get_running_loop().time() + 10
+        matcher = Matcher()
+        result = await scanner._binary_content_hits_with_matcher(
+            raw, "fixture.bin", path, matcher, deadline, max_findings=1,
+        )
+        assert result == expected and len(visits) == 9002
+        assert matcher.batches == [8192, 810]
+        with pytest.raises(ValueError):
+            await scanner._binary_content_hits_with_matcher(
+                raw, "fixture.bin", path, Matcher(short=True), deadline,
+            )
+
+    asyncio.run(verify())
