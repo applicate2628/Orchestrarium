@@ -498,7 +498,7 @@ class _IndexedObjectSelection:
 @dataclass(frozen=True)
 class NativePushSelection:
     request: NativePushRequest
-    expected_oids: tuple[str, ...]
+    expected_oids: tuple[str, ...] | _SealedRows
     object_oids: tuple[str, ...] | _IndexedObjectSelection
     object_format: GitObjectFormat
     roots: tuple[str, ...]
@@ -879,7 +879,7 @@ class _SealedOids(_SealedRows):
 
 @dataclass(frozen=True)
 class HistoryProof:
-    commit_ids: tuple[str, ...]
+    commit_ids: tuple[str, ...] | _SealedRows
     object_ids: tuple[str, ...] | _SealedOids
     blob_ids: tuple[str, ...] | _SealedOids
     blob_bytes: int
@@ -4103,7 +4103,7 @@ async def _native_push_selection(
         return _refusal("PS-MSG-COVERAGE", "commit-object-set")
     parent_graph = () if compact_graph else tuple(index.selected_commits())
     objects = index.bind_object_selection() if compact_graph else tuple(index.selected_objects())
-    commits = tuple(index.selected_commit_ids()) if compact_graph else tuple(oid for oid, _parents in parent_graph)
+    commits = index.bind_commit_selection() if compact_graph else tuple(oid for oid, _parents in parent_graph)
     tag_inventory = None
     if inventory is not None and not commits and len(objects) == len(roots):
         ordered_objects = index.selected_objects() if isinstance(objects, _IndexedObjectSelection) else objects
@@ -5037,6 +5037,12 @@ class _HistoryIndex:
             "SELECT oid, parents FROM selected_commit ORDER BY sequence"
         ))
 
+    def bind_commit_selection(self) -> _SealedRows | tuple[()]:
+        count, = self.db.execute("SELECT COUNT(*) FROM selected_commit").fetchone()
+        if not count:
+            return ()
+        return _SealedRows(count, _commit_set_digest(self.selected_commit_ids()))
+
     def selected_objects(self, *, sorted_ids=False):
         order = "oid" if sorted_ids else "sequence"
         return (oid for (oid,) in self.db.execute(f"SELECT oid FROM selected_object ORDER BY {order}"))
@@ -5718,8 +5724,17 @@ async def _acquire_indexed_history(
         canonical_tags = tuple(sorted(tag_targets))
         object_digest = _oid_set_digest(b"object-set", canonical_objects)
         blob_digest = _oid_set_digest(b"blob-set", canonical_blobs)
+    commit_ids = selection.expected_oids
+    if isinstance(commit_ids, _SealedRows):
+        if (not native or not isinstance(coverage, _ReceiptCoverage)
+                or not selection.indexed_parent_graph
+                or index.bind_commit_selection() != commit_ids):
+            return _refusal("PS-MSG-COVERAGE", "commit-set")
+        commit_digest = commit_ids.digest
+    else:
+        commit_digest = _commit_set_digest(commit_ids)
     proof = HistoryProof(
-        selection.expected_oids,
+        commit_ids,
         canonical_objects,
         canonical_blobs,
         aggregate_blobs,
@@ -5727,7 +5742,7 @@ async def _acquire_indexed_history(
         index.binary_blob_count,
         canonical_subjects,
         canonical_paths,
-        _commit_set_digest(selection.expected_oids),
+        commit_digest,
         object_digest,
         blob_digest,
         canonical_subjects.digest,
@@ -6160,10 +6175,23 @@ def _serialize_native_receipt_common(outcome: ScanOutcome) -> str:
             and history.object_set == _oid_set_digest(b"object-set", history.object_ids)
             and history.blob_set == _oid_set_digest(b"blob-set", history.blob_ids)
         )
+    expected_commits = selection.expected_oids
+    if isinstance(expected_commits, _SealedRows):
+        exact_commits = (
+            isinstance(coverage, _ReceiptCoverage)
+            and selection.indexed_parent_graph
+            and history.commit_ids == expected_commits
+            and history.commit_set == expected_commits.digest
+        )
+    else:
+        exact_commits = (
+            isinstance(history.commit_ids, tuple)
+            and history.commit_ids == expected_commits
+            and history.commit_set == _commit_set_digest(history.commit_ids)
+        )
     if (
         not exact_coverage
-        or history.commit_ids != selection.expected_oids
-        or history.commit_set != _commit_set_digest(history.commit_ids)
+        or not exact_commits
         or history.subject_set != (
             history.subjects.digest if isinstance(history.subjects, _SealedRows)
             else _subject_set_digest(history.subjects)

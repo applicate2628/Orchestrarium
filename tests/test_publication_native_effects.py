@@ -577,6 +577,38 @@ class TestNativePublicationEffects(unittest.TestCase):
             self.assertNotEqual(mod._format_outcome(mod.replace(compact, native_selection=changed))[2], 0)
 
 
+    def test_compact_native_selection_binds_commits_without_retaining_the_tuple(self):
+        mod = self.module
+        for offset in range(2):
+            filename = f"commit-{offset}.txt"
+            (self.root / filename).write_text(f"synthetic public record {offset}\n", encoding="utf-8")
+            self.git("add", filename)
+            self.git("commit", "-qm", f"synthetic commit order fixture {offset}")
+        tip = self.git("rev-parse", "HEAD").strip().decode()
+        payload = self.payload([(b"refs/heads/main", tip, b"refs/heads/main", self.commit)])
+        with self.in_root():
+            raw = self.scan(payload)
+            compact = mod._scan_native_push(payload, lambda _line: (), receipt_coverage=True)
+        self.assertEqual(raw.kind, "clean", raw.refusal)
+        self.assertEqual(compact.kind, "clean", compact.refusal)
+        legacy = raw.native_selection.expected_oids
+        binding = compact.native_selection.expected_oids
+        self.assertIsInstance(legacy, tuple)
+        self.assertNotIsInstance(binding, tuple)
+        self.assertEqual(binding.count, len(legacy))
+        self.assertEqual(binding.digest, mod._commit_set_digest(legacy))
+        self.assertEqual(raw.history.commit_ids, legacy)
+        self.assertEqual(compact.history.commit_ids, binding)
+        self.assertEqual(mod._format_outcome(compact), mod._format_outcome(raw))
+        no_parent_proof = mod.replace(compact.native_selection, indexed_parent_graph=False)
+        self.assertNotEqual(mod._format_outcome(mod.replace(compact, native_selection=no_parent_proof))[2], 0)
+        for change in ({"count": binding.count + 1}, {"digest": "f" * 64}):
+            altered = mod.replace(binding, **change)
+            for changed in (mod.replace(compact, native_selection=mod.replace(compact.native_selection, expected_oids=altered)),
+                            mod.replace(compact, history=mod.replace(compact.history, commit_ids=altered))):
+                self.assertNotEqual(mod._format_outcome(changed)[2], 0)
+
+
     def test_compact_native_selection_rejects_reordered_storage_with_exact_multiplicity(self):
         mod = self.module
         fmt = mod._SUPPORTED_OBJECT_FORMATS[self.object_format]
