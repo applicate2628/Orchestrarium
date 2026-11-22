@@ -5371,6 +5371,30 @@ async def _acquire_history(selection, reader, find_machine_paths, coverage_recor
         return _refusal("PS-MSG-READ", "coverage-storage")
 
 
+def _follow_native_tag_chain(
+    root: str, lookup: Callable[[str], tuple[str, str] | None],
+    deadline: float | _ScanInactivity,
+) -> str | Refusal:
+    # Brent's cycle detection: retain one checkpoint, not every tag visited.
+    clock = asyncio.get_running_loop().time
+    anchor = selected = root
+    span = 1
+    steps = 0
+    while _time_left(deadline, clock) > 0:
+        target = lookup(selected)
+        if target is None:
+            if _time_left(deadline, clock) > 0:
+                return selected
+            break
+        selected = target[0]
+        if selected == anchor:
+            return _refusal("PS-MSG-FRAME", "tag-cycle")
+        steps += 1
+        if steps == span:
+            anchor, span, steps = selected, span * 2, 0
+    return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+
+
 async def _acquire_indexed_history(
     selection: RangeSelection | NativePushSelection,
     reader: _AsyncGitObjectReader,
@@ -5595,13 +5619,9 @@ async def _acquire_indexed_history(
     direct_blobs = []
     if native:
         for root in selection.roots:
-            selected = root
-            tag_chain = set()
-            while (target := tag_targets.get(selected)) is not None:
-                if selected in tag_chain:
-                    return _refusal("PS-MSG-FRAME", "tag-cycle")
-                tag_chain.add(selected)
-                selected = target[0]
+            selected = _follow_native_tag_chain(root, tag_targets.get, scan_deadline)
+            if isinstance(selected, Refusal):
+                return selected
             kind = index.acquired_kind(selected)
             if kind == "tree":
                 direct_trees.append((root, selected))

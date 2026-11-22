@@ -395,6 +395,38 @@ class TestNativePublicationEffects(unittest.TestCase):
                 known_old = self.payload([(next_commit.encode(), next_commit, published_ref.encode(), commit)])
                 self.assertEqual(self.scan(known_old).kind, "clean")
 
+    def test_tag_chain_walk_detects_a_cycle_and_honors_quiet_expiry(self):
+        mod = self.module
+
+        async def verify():
+            clock = asyncio.get_running_loop().time
+            seen = 0
+            length = 4_097
+
+            def lookup(oid):
+                nonlocal seen
+                seen += 1
+                offset = int(oid)
+                return (str(offset + 1), "tag") if offset < length else None
+
+            self.assertEqual(mod._follow_native_tag_chain("0", lookup, clock() + 10), str(length))
+            self.assertEqual(seen, length + 1)
+
+            def cycle(oid):
+                return ("2", "tag") if oid == "5" else lookup(oid)
+
+            self.assertEqual(mod._follow_native_tag_chain("0", cycle, clock() + 10),
+                             mod._refusal("PS-MSG-FRAME", "tag-cycle"))
+            self.assertEqual(mod._follow_native_tag_chain("0", lambda _oid: ("0", "tag"), clock() + 10),
+                             mod._refusal("PS-MSG-FRAME", "tag-cycle"))
+            count = seen
+            self.assertEqual(mod._follow_native_tag_chain("0", lookup, clock() - 1),
+                             mod._refusal("PS-MSG-READ-TIMEOUT", "deadline"))
+            self.assertEqual(seen, count)
+
+        asyncio.run(verify())
+
+
     def test_tag_chain_and_direct_roots_have_real_object_coverage(self):
         self.git("tag", "-a", "inner", "-m", "public inner annotation")
         inner = self.git("rev-parse", "refs/tags/inner").strip().decode()
