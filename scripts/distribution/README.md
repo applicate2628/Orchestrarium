@@ -52,6 +52,27 @@ to the existing installer. Applying an installation requires explicit
 --retain-to ABSOLUTE_DIRECTORY or --permanent-runtime; retain the selected
 interpreter while installed hooks reference it.
 
+### Optional Windows x64 publication matcher
+
+An independently built and qualified Windows x64 matcher can be selected with
+both --publication-matcher FILE and --publication-matcher-sha256 SHA256.
+The pack contains only the named executable at
+native/orche-publication-match.exe; the Rust toolchain and source tree are not
+packaged and no build runs during installation. This is an application
+component rather than a Python module or an SDK.
+
+The builder checks its image type and SHA-256 before and after copy. A bundle
+with no selection remains manifest version 3. Version 4 adds only
+publicationMatcher with the fixed relative path and expected SHA-256.
+Predecessor manifests remain readable without opening the old matcher;
+active launch and retention reject a declared member that is absent, linked,
+or different. Retention passes the original identity to the same builder.
+
+A passing package check is not build provenance, publisher authentication,
+dependency license evidence, or actual activation. Release qualification must
+establish the executable and its applicable notices independently. The
+existing stock hook registration and Python runtime lifetime do not change.
+
 ## Shared Codex hook file
 
 Use this only when multiple global Codex profiles already link to a synchronized
