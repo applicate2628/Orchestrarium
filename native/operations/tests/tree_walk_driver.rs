@@ -40,6 +40,14 @@ fn object_width(width: usize) -> ObjectWidth {
     }
 }
 
+fn record_reason(err: TreeRecordError) -> &'static str {
+    match err {
+        TreeRecordError::Tree => "tree",
+        TreeRecordError::TreePath => "tree-path",
+        TreeRecordError::TreeMode => "tree-mode",
+    }
+}
+
 fn run_records() {
     let stdout = io::stdout();
     let mut out = io::BufWriter::new(stdout.lock());
@@ -74,11 +82,7 @@ fn run_records() {
                 writeln!(out, "R ok").unwrap();
             }
             Err(err) => {
-                let reason = match err {
-                    TreeRecordError::Tree => "tree",
-                    TreeRecordError::TreePath => "tree-path",
-                    TreeRecordError::TreeMode => "tree-mode",
-                };
+                let reason = record_reason(err);
                 writeln!(out, "R PS-MSG-FRAME {reason}").unwrap();
             }
         }
@@ -93,6 +97,24 @@ fn kind_name(kind: ObjectKind) -> &'static str {
         ObjectKind::Blob => "blob",
         ObjectKind::Tag => "tag",
     }
+}
+
+fn frame_error(err: FrameError) -> String {
+    let (code, reason) = match err {
+        FrameError::Missing => ("READ", "missing"),
+        FrameError::Header => ("FRAME", "header"),
+        FrameError::Identity => ("FRAME", "identity"),
+        FrameError::Type => ("FRAME", "type"),
+        FrameError::Length => ("FRAME", "length"),
+        FrameError::HeaderDelimiter => ("FRAME", "header-delimiter"),
+        FrameError::RecordDelimiter => ("FRAME", "record-delimiter"),
+        FrameError::ShortRead => ("READ", "short-read"),
+        FrameError::Pipe => ("READ", "pipe"),
+        FrameError::TooLarge(kind) => {
+            return format!("PS-MSG-LIMIT {}-bytes", kind_name(kind));
+        }
+    };
+    format!("PS-MSG-{code} {reason}")
 }
 
 fn run_frames() {
@@ -128,22 +150,7 @@ fn run_frames() {
                     writeln!(out, "F {} {}", kind_name(frame.kind), payload).unwrap();
                 }
                 Err(err) => {
-                    let (code, reason) = match err {
-                        FrameError::Missing => ("READ", "missing"),
-                        FrameError::Header => ("FRAME", "header"),
-                        FrameError::Identity => ("FRAME", "identity"),
-                        FrameError::Type => ("FRAME", "type"),
-                        FrameError::Length => ("FRAME", "length"),
-                        FrameError::HeaderDelimiter => ("FRAME", "header-delimiter"),
-                        FrameError::RecordDelimiter => ("FRAME", "record-delimiter"),
-                        FrameError::ShortRead => ("READ", "short-read"),
-                        FrameError::Pipe => ("READ", "pipe"),
-                        FrameError::TooLarge(kind) => {
-                            writeln!(out, "R PS-MSG-LIMIT {}-bytes", kind_name(kind)).unwrap();
-                            break;
-                        }
-                    };
-                    writeln!(out, "R PS-MSG-{code} {reason}").unwrap();
+                    writeln!(out, "R {}", frame_error(err)).unwrap();
                     break;
                 }
             }
@@ -180,6 +187,7 @@ fn main() {
     let expire_step: usize = header[3].parse().unwrap();
     let mut owned = HashMap::new();
     let mut raw_trees = HashMap::new();
+    let mut framed_trees = HashMap::new();
     let mut unpublished_trees = HashSet::new();
     let mut unpublished_blobs = HashSet::new();
     for row in lines.iter().skip(1) {
@@ -200,6 +208,27 @@ fn main() {
                 }
                 assert!(raw_trees.insert(oid, unhex(&row[3])).is_none());
             }
+            "F" => {
+                if row[2] == "new" {
+                    unpublished_trees.insert(oid.clone());
+                }
+                let chunks = row[3].parse().unwrap();
+                let wire = if row[4] == "-" {
+                    Vec::new()
+                } else {
+                    unhex(&row[4])
+                };
+                let mut input = io::BufReader::with_capacity(chunks, wire.as_slice());
+                let raw = read_frame(
+                    &mut input,
+                    row[1].as_bytes(),
+                    Some(ObjectKind::Tree),
+                    &Limits::default(),
+                )
+                .map(|frame| frame.payload)
+                .map_err(frame_error);
+                assert!(framed_trees.insert(oid, raw).is_none());
+            }
             "E" => {
                 let kind = match row[2].as_str() {
                     "tree" => Kind::Tree,
@@ -217,12 +246,12 @@ fn main() {
             _ => panic!("unknown fixture row"),
         }
     }
-    let mut arena: HashMap<_, Vec<_>> = owned
+    let mut arena: HashMap<_, Result<Vec<_>, String>> = owned
         .iter()
         .map(|(oid, entries)| {
             (
                 oid.as_slice(),
-                entries
+                Ok(entries
                     .iter()
                     .map(|(kind, name, oid, mode)| Entry {
                         kind: *kind,
@@ -230,7 +259,7 @@ fn main() {
                         oid,
                         mode,
                     })
-                    .collect(),
+                    .collect()),
             )
         })
         .collect();
@@ -238,6 +267,21 @@ fn main() {
         let records = VerifiedTreePayload::from_verified_bytes(raw, object_width(root.len()))
             .parse()
             .unwrap();
+        assert!(arena.insert(oid.as_slice(), Ok(records)).is_none());
+    }
+    // The Python fixture owner proves Git payload hashes before this adapter
+    // receives input; read_frame itself does not authenticate payload content.
+    // Replay parser errors at lookup to preserve the owner's traversal order.
+    for (oid, validated) in &framed_trees {
+        let records = match validated {
+            Ok(raw) => VerifiedTreePayload::from_verified_bytes(raw, object_width(root.len()))
+                .parse()
+                .map_err(|e| {
+                    let reason = record_reason(e);
+                    format!("PS-MSG-FRAME {reason}")
+                }),
+            Err(err) => Err(err.clone()),
+        };
         assert!(arena.insert(oid.as_slice(), records).is_none());
     }
     let trees = unpublished_trees.iter().map(Vec::as_slice).collect();
@@ -250,7 +294,11 @@ fn main() {
         max_bytes,
         &trees,
         &blobs,
-        |oid| arena.get(oid).map(Vec::as_slice).ok_or("missing-tree"),
+        |oid| match arena.get(oid) {
+            Some(Ok(rows)) => Ok(rows.as_slice()),
+            Some(Err(refusal)) => Err(refusal.as_str()),
+            None => Err("missing-tree"),
+        },
         |frontier| {
             writeln!(out.borrow_mut(), "G {frontier}").unwrap();
             let index = checks.get() + 1;

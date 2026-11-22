@@ -76,3 +76,21 @@ python -B native/operations/tests/git_batch_parity.py --driver <test-driver> --s
 The test executes the actual receiving byte-reader method against a local
 in-memory stream. It does not qualify a real subprocess, cancellation,
 deadline enforcement, content identity, or publication.
+
+
+## Publication receiving composition
+
+The same test driver can feed locally hash-verified Git tree fixtures through
+the batch decoder, borrowed record parser, and walker in one process.
+Errors are delivered at the corresponding tree lookup, so the test observes
+the exact prefix of valid coverage events followed by the refusal. A correct
+frame with a malformed authenticated tree still fails structural decoding.
+
+~~~text
+python -B native/operations/tests/publication_composition_parity.py --driver <test-driver> --source <receiving-check-publication-safety.py>
+~~~
+
+Fixture preparation verifies both Git object-ID algorithms with Python; neither
+the Rust framing decoder nor this test adapter provides hash authority. This
+is a test-only arena, not a production cache, dispatcher, or acquisition
+owner. It does not qualify the subject index, receipt, or publication path.
