@@ -18,7 +18,7 @@ import re
 import secrets
 import shutil
 import sqlite3
-from contextlib import asynccontextmanager, closing
+from contextlib import asynccontextmanager, closing, nullcontext
 import subprocess
 import sys
 import threading
@@ -3595,11 +3595,15 @@ async def _read_parent_graph_bounded(
     deadline: float,
     object_format: GitObjectFormat,
     input_bytes: bytes | None = None,
+    store_row: Callable[[str, tuple[str, ...]], bool] | None = None,
 ) -> tuple[tuple[str, tuple[str, ...]], ...] | Refusal:
     parsed: list[tuple[str, tuple[str, ...]]] = []
     seen: set[str] = set()
+    count = 0
+
     def consume(row: bytes) -> Refusal | None:
-        if len(parsed) >= _MAX_COMMITS:
+        nonlocal count
+        if count >= _MAX_COMMITS:
             return _refusal("PS-MSG-LIMIT", "count")
         fields = row.split(b" ")
         if not fields or any(len(field) != object_format.hex_length for field in fields):
@@ -3611,10 +3615,15 @@ async def _read_parent_graph_bounded(
         if any(not object_format.matches(value) for value in values):
             return _refusal("PS-MSG-FRAME", "parent-graph")
         oid, parents = values[0], values[1:]
-        if oid in seen:
-            return _refusal("PS-MSG-FRAME", "parent-graph")
-        seen.add(oid)
-        parsed.append((oid, parents))
+        if store_row is not None:
+            if not store_row(oid, parents):
+                return _refusal("PS-MSG-FRAME", "parent-graph")
+        else:
+            if oid in seen:
+                return _refusal("PS-MSG-FRAME", "parent-graph")
+            seen.add(oid)
+            parsed.append((oid, parents))
+        count += 1
         return None
 
     result = await _read_git_lines_bounded(
@@ -3644,11 +3653,14 @@ async def _read_git_oid_lines_bounded(
     deadline: float,
     object_format: GitObjectFormat = _SHA1_OBJECT_FORMAT,
     input_bytes: bytes | None = None,
+    store_row: Callable[[str], bool] | None = None,
 ) -> tuple[str, ...] | Refusal:
     rows: list[str] = []
     seen: set[str] = set()
+    count = 0
 
     def accept(raw: bytes) -> Refusal | None:
+        nonlocal count
         if len(raw) != object_format.hex_length:
             return _refusal("PS-MSG-FRAME", "oid")
         try:
@@ -3657,10 +3669,15 @@ async def _read_git_oid_lines_bounded(
             return _refusal("PS-MSG-FRAME", "oid")
         if not object_format.matches(oid) or oid in seen:
             return _refusal("PS-MSG-FRAME", "oid")
-        if len(rows) >= count_cap:
+        if store_row is not None:
+            if not store_row(oid):
+                return _refusal("PS-MSG-FRAME", "oid")
+        if count >= count_cap:
             return _refusal("PS-MSG-LIMIT", "count")
-        seen.add(oid)
-        rows.append(oid)
+        if store_row is None:
+            seen.add(oid)
+            rows.append(oid)
+        count += 1
         return None
 
     result = await _read_git_lines_bounded(
@@ -3860,7 +3877,10 @@ async def _native_prior_receiver_roots(
     )
 
 
-async def _native_push_selection(request: NativePushRequest, deadline: float) -> NativePushSelection | Refusal:
+async def _native_push_selection(
+    request: NativePushRequest, deadline: float, roots: tuple[str, ...],
+    index: "_HistoryIndex | None",
+) -> NativePushSelection | Refusal:
     try:
         if _detect_git_object_format(_remaining_seconds(deadline)) != request.object_format:
             return _refusal("PS-MSG-RANGE", "object-format")
@@ -3870,10 +3890,10 @@ async def _native_push_selection(request: NativePushRequest, deadline: float) ->
         return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
     except (OSError, ValueError):
         return _refusal("PS-MSG-RANGE", "native-repository")
-    zero = "0" * request.object_format.hex_length
-    roots = tuple(dict.fromkeys(row.local_oid for row in request.updates if row.local_oid != zero))
     if not roots:
         return NativePushSelection(request, (), (), request.object_format, ())
+    if index is None:
+        return _refusal("PS-MSG-READ", "coverage-storage")
     loop = asyncio.get_running_loop()
     loop_deadline = loop.time() + _remaining_seconds(deadline)
     candidate = _native_new_same_name_tag(request)
@@ -3894,6 +3914,7 @@ async def _native_push_selection(request: NativePushRequest, deadline: float) ->
     parent_graph = await _read_parent_graph_bounded(
         _range_git_argv("rev-list", "--parents", "--topo-order", "--stdin"),
         deadline=loop_deadline, object_format=request.object_format, input_bytes=revisions,
+        store_row=index.add_selected_commit,
     )
     if isinstance(parent_graph, Refusal):
         return parent_graph
@@ -3901,12 +3922,15 @@ async def _native_push_selection(request: NativePushRequest, deadline: float) ->
         _range_git_argv("rev-list", "--objects", "--no-object-names", "--stdin"),
         count_cap=_MAX_OBJECTS, byte_cap=request.object_format.list_byte_cap(_MAX_OBJECTS),
         deadline=loop_deadline, object_format=request.object_format, input_bytes=revisions,
+        store_row=index.add_selected_object,
     )
     if isinstance(objects, Refusal):
         return objects
-    commits = tuple(oid for oid, _parents in parent_graph)
-    if not set(commits).issubset(objects):
+    if not index.selected_commits_covered():
         return _refusal("PS-MSG-COVERAGE", "commit-object-set")
+    parent_graph = tuple(index.selected_commits())
+    objects = tuple(index.selected_objects())
+    commits = tuple(oid for oid, _parents in parent_graph)
     tag_inventory = (
         inventory if inventory is not None and not commits and objects == roots else None
     )
@@ -4688,6 +4712,9 @@ class _HistoryIndex:
         self.binary_blob_count = 0
         db.executescript("""
             PRAGMA temp_store=FILE;
+            CREATE TABLE selected_commit (sequence INTEGER PRIMARY KEY, oid TEXT UNIQUE,
+                parents TEXT NOT NULL);
+            CREATE TABLE selected_object (sequence INTEGER PRIMARY KEY, oid TEXT UNIQUE);
             CREATE TABLE blob (oid TEXT PRIMARY KEY, size INTEGER NOT NULL,
                 digest BLOB NOT NULL, binary INTEGER NOT NULL) WITHOUT ROWID;
             CREATE TABLE subject (owner TEXT, path BLOB, blob TEXT, mode TEXT NOT NULL,
@@ -4725,6 +4752,32 @@ class _HistoryIndex:
         return self.db.execute(
             "SELECT DISTINCT path, blob FROM subject ORDER BY path, blob"
         )
+
+    def add_selected_commit(self, oid, parents):
+        return self.db.execute(
+            "INSERT INTO selected_commit(oid, parents) VALUES (?, ?) ON CONFLICT(oid) DO NOTHING",
+            (oid, " ".join(parents)),
+        ).rowcount == 1
+
+    def add_selected_object(self, oid):
+        return self.db.execute(
+            "INSERT INTO selected_object(oid) VALUES (?) ON CONFLICT(oid) DO NOTHING", (oid,),
+        ).rowcount == 1
+
+    def selected_commits(self):
+        return ((oid, tuple(parents.split())) for oid, parents in self.db.execute(
+            "SELECT oid, parents FROM selected_commit ORDER BY sequence"
+        ))
+
+    def selected_objects(self):
+        return (oid for (oid,) in self.db.execute("SELECT oid FROM selected_object ORDER BY sequence"))
+
+    def selected_commits_covered(self):
+        return self.db.execute("""
+            SELECT 1 FROM selected_commit AS c
+            WHERE NOT EXISTS (SELECT 1 FROM selected_object AS o WHERE o.oid=c.oid)
+            LIMIT 1
+        """).fetchone() is None
 
     def add_blob(self, oid, size, digest, binary):
         self.db.execute("INSERT INTO blob VALUES (?, ?, ?, ?)", (oid, size, digest, binary))
@@ -4768,11 +4821,12 @@ class _HistoryIndex:
 
 
 async def _acquire_history(selection, reader, find_machine_paths, coverage_recorder,
-                           scan_deadline, **options):
-    # Close anonymous scratch before the outcome can confer any scan coverage.
+                           scan_deadline, *, history_index=None, **options):
+    # Borrow only from the native invocation that owns closure before publication.
     try:
-        with closing(sqlite3.connect("")) as db:
-            index = _HistoryIndex(db)
+        connection = closing(sqlite3.connect("")) if history_index is None else nullcontext(history_index.db)
+        with connection as db:
+            index = _HistoryIndex(db) if history_index is None else history_index
             clock = asyncio.get_running_loop().time
             db.set_progress_handler(lambda: int(clock() >= scan_deadline), 2048)
             wire = globals().get("__injected_matcher_wire__")
@@ -5313,6 +5367,7 @@ async def _scan_selected_history_async(
     coverage_fault: CoverageFaultPort | None = None,
     review_evaluation: "ReviewEvaluation | None" = None,
     review_capture=None,
+    history_index: _HistoryIndex | None = None,
 ) -> ScanOutcome:
     native = isinstance(selection, NativePushSelection)
     mode = "native-push" if native else "range"
@@ -5355,6 +5410,8 @@ async def _scan_selected_history_async(
                         review_arguments["excluded_tag_targets"] = excluded_tag_targets
                     if review_capture is not None:
                         review_arguments["review_capture"] = review_capture
+                    if history_index is not None:
+                        review_arguments["history_index"] = history_index
                     acquisition = await _acquire_history(
                         selection,
                         reader,
@@ -5511,14 +5568,25 @@ async def _scan_native_push_async(
         before, _exchanges = _capture_review_repository(policy, root, deadline)
         if before != request.repository_observation:
             return ScanOutcome("refusal", "native-push", refusal=_refusal("PS-INPUT-REFUSAL", "native-repository"))
-        selection = await _native_push_selection(request, deadline)
-        if isinstance(selection, Refusal):
-            return ScanOutcome("refusal", "native-push", refusal=selection)
-        outcome = await _scan_selected_history_async(
-            selection, find_machine_paths, wall_deadline=deadline,
-            reader_factory=reader_factory, coverage_observer=coverage_observer,
-            coverage_fault=coverage_fault, review_evaluation=review_evaluation, review_capture=review_capture,
-        )
+        zero = "0" * request.object_format.hex_length
+        roots = tuple(dict.fromkeys(row.local_oid for row in request.updates if row.local_oid != zero))
+        connection = closing(sqlite3.connect("")) if roots else nullcontext()
+        with connection as db:
+            index = None
+            if db is not None:
+                index = _HistoryIndex(db)
+                loop = asyncio.get_running_loop()
+                storage_deadline = loop.time() + _remaining_seconds(deadline)
+                db.set_progress_handler(lambda: int(loop.time() >= storage_deadline), 2048)
+            selection = await _native_push_selection(request, deadline, roots, index)
+            if isinstance(selection, Refusal):
+                return ScanOutcome("refusal", "native-push", refusal=selection)
+            outcome = await _scan_selected_history_async(
+                selection, find_machine_paths, wall_deadline=deadline,
+                reader_factory=reader_factory, coverage_observer=coverage_observer,
+                coverage_fault=coverage_fault, review_evaluation=review_evaluation,
+                review_capture=review_capture, history_index=index,
+            )
         if outcome.kind == "refusal":
             # This outcome cannot authorize publication. Preserve its first cause.
             return outcome
@@ -5538,6 +5606,11 @@ async def _scan_native_push_async(
         return outcome
     except subprocess.TimeoutExpired:
         return ScanOutcome("refusal", "native-push", refusal=_refusal("PS-MSG-READ-TIMEOUT", "deadline"))
+    except sqlite3.Error:
+        return ScanOutcome("refusal", "native-push", refusal=(
+            _refusal("PS-MSG-READ-TIMEOUT", "deadline") if time.monotonic() >= deadline
+            else _refusal("PS-MSG-READ", "coverage-storage")
+        ))
     except (OSError, ValueError, RuntimeError):
         return ScanOutcome("refusal", "native-push", refusal=_refusal("PS-INPUT-REFUSAL", "native-selection"))
 

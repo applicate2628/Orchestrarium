@@ -244,6 +244,17 @@ class TestNativePublicationEffects(unittest.TestCase):
                 self.assertEqual(value["inputSha256"], payload["inputSha256"])
                 self.assertIsNone(outcome.reap_certificate)
 
+    def test_deletion_and_empty_wire_do_not_require_scanner_storage(self):
+        deletion = [(b"(delete)", self.zero(), b"refs/heads/main", self.commit)]
+        for updates in ([], deletion):
+            with self.subTest(updates=len(updates)):
+                payload = self.payload(updates)
+                with mock.patch.object(self.module, "_HistoryIndex",
+                                       side_effect=AssertionError("no scanner storage needed")):
+                    outcome = self.scan(payload)
+                self.assertEqual(outcome.kind, "clean", outcome)
+                self.assertEqual(outcome.coverage.scanned_count, 0)
+
     def test_malformed_or_rebound_selection_does_not_become_noop(self):
         for field, value in (("inputSha256", "0" * 64), ("endpointIdentity", "sha256:" + "0" * 64),
                              ("objectFormat", "unknown"), ("wireBase64", None)):

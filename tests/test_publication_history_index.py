@@ -89,3 +89,20 @@ def test_blob_inventory_separates_identity_from_path_coverage():
         assert index.blob_coverage_complete()
         index.add(("c1", b"foreign", "b3"), "100644")
         assert not index.blob_coverage_complete()
+
+
+def test_selection_inventory_preserves_order_and_rejects_duplicate_rows():
+    scanner = runpy.run_path(str(SCANNER))
+    with closing(sqlite3.connect("")) as db:
+        index = scanner["_HistoryIndex"](db)
+        assert index.add_selected_commit("c2", ("c1", "c0"))
+        assert index.add_selected_commit("c1", ())
+        assert not index.add_selected_commit("c2", ("different",))
+        assert index.add_selected_object("c1")
+        assert index.add_selected_object("blob")
+        assert not index.add_selected_object("blob")
+        assert not index.selected_commits_covered()
+        assert index.add_selected_object("c2")
+        assert index.selected_commits_covered()
+        assert tuple(index.selected_commits()) == (("c2", ("c1", "c0")), ("c1", ()))
+        assert tuple(index.selected_objects()) == ("c1", "blob", "c2")
