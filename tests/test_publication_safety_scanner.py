@@ -6239,7 +6239,7 @@ def test_binary_matcher_batches_preserve_complete_findings_and_reject_short_outp
             raw, "fixture.bin", path, matcher, deadline, max_findings=1,
         )
         assert result == expected and len(visits) == 9002
-        assert matcher.batches == [8192, 810]
+        assert matcher.batches == [1, 2]
         with pytest.raises(ValueError):
             await scanner._binary_content_hits_with_matcher(
                 raw, "fixture.bin", path, Matcher(short=True), deadline,

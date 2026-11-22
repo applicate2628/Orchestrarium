@@ -2620,13 +2620,16 @@ def _binary_findings(rows, path, find_machine_paths, max_findings):
     return findings
 
 
+_SHORT_BINARY_LEXICAL_CHARS = 64
+
+
 def _binary_content_hits(
     raw: bytes, path: str, find_machine_paths, *, max_findings: int | None = None,
 ) -> list[Finding]:
     # The cache changes work, not the occurrence inventory.
     short_run_classes = lru_cache(maxsize=4096)(_binary_lexical_classes)
     return _binary_findings(
-        ((number, line, (short_run_classes if len(line) <= 64 else _binary_lexical_classes)(line))
+        ((number, line, (short_run_classes if len(line) <= _SHORT_BINARY_LEXICAL_CHARS else _binary_lexical_classes)(line))
          for number, line in _binary_runs(raw)),
         path, find_machine_paths, max_findings,
     )
@@ -2650,11 +2653,27 @@ async def _binary_content_hits_with_matcher(
 ):
     findings = []
     for batch in _matcher_batches(_binary_runs(raw)):
-        captures = await matcher.match(tuple((line, True) for _, line in batch), deadline)
+        # Deduplicate only short lexical inputs within the existing bounded
+        # batch. Expand them before classifying each original occurrence.
+        inputs = []
+        short_positions = {}
+        positions = []
+        for _, line in batch:
+            position = len(inputs)
+            if len(line) <= _SHORT_BINARY_LEXICAL_CHARS:
+                position = short_positions.setdefault(line, position)
+            if position == len(inputs):
+                inputs.append((line, True))
+            positions.append(position)
+        captures = await matcher.match(inputs, deadline)
+        classes = [
+            _binary_lexical_classes(line, matches)
+            for (line, _), matches in zip(inputs, captures, strict=True)
+        ]
         room = None if max_findings is None else max(0, max_findings - len(findings))
         findings.extend(_binary_findings(
-            ((number, line, _binary_lexical_classes(line, matches))
-             for (number, line), matches in zip(batch, captures, strict=True)),
+            ((number, line, classes[position])
+             for (number, line), position in zip(batch, positions, strict=True)),
             path, find_machine_paths, room,
         ))
     return findings
