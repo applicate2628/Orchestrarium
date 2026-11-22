@@ -944,11 +944,17 @@ def test_named_remote_keeps_private_endpoint_inside_captured_stdin(native_reposi
     canary = "SYNTHETIC_ENDPOINT_CANARY"
     endpoint = "https://synthetic-user:" + canary + "@example.invalid/synthetic.git"
     subprocess.run(["git", "-C", str(native_repository), "remote", "add", "origin", endpoint], check=True, timeout=20)
+    (native_repository / "public-progress.txt").write_bytes(b"synthetic harmless content\n")
+    subprocess.run(["git", "-C", str(native_repository), "add", "public-progress.txt"], check=True, timeout=20)
+    subprocess.run(["git", "-C", str(native_repository), "-c", "user.name=Synthetic",
+                    "-c", "user.email=synthetic@example.invalid",
+                    "commit", "-qm", "add public progress fixture"], check=True, timeout=20)
     commit = subprocess.check_output(["git", "-C", str(native_repository), "rev-parse", "HEAD"], timeout=20).strip()
     wire = b"HEAD " + commit + b" refs/heads/main " + b"0" * 40 + b"\n"
     original = owner._run_snapshot_child
     received_payloads = []
     progress_counts = []
+    phases = []
     def child(pending, payload, *args):
         assert all(canary not in value for value in pending.exact_argv)
         assert json.loads(payload)["nativePush"]["endpoint"] == endpoint
@@ -956,6 +962,7 @@ def test_named_remote_keeps_private_endpoint_inside_captured_stdin(native_reposi
         launched, records = original(pending, payload, *args)
         assert len(records) == 1
         progress_counts.append(records[0].verified_acquired_objects)
+        phases.append(records[0].verified_scan_phases)
         return launched, records
     output, errors = io.StringIO(), io.StringIO()
     with mock.patch.object(owner, "_run_snapshot_child", side_effect=child), \
@@ -965,6 +972,9 @@ def test_named_remote_keeps_private_endpoint_inside_captured_stdin(native_reposi
     assert result == 0, errors.getvalue()
     assert len(received_payloads) == 2
     assert progress_counts[0] == 0 and progress_counts[1] > 0
+    assert phases[0] == ()
+    assert tuple(name for name, _ in phases[1]) == ("commits", "objects", "acquired", "classified")
+    assert phases[1][-1] == ("classified", 1)
     lines = output.getvalue().splitlines()
     v3 = owner.parse_publication_safety_observation(lines[0])
     v4 = owner.parse_publication_safety_observation(lines[1])
@@ -1158,3 +1168,24 @@ def test_actual_first_publication_crosses_old_commit_count(native_repository, mo
     assert git("--git-dir", str(remote), "for-each-ref", "--format=%(refname) %(objectname)") == (
         b"refs/heads/received " + tip + b"\n"
     )
+
+
+
+def test_scan_progress_does_not_advance_on_an_obsolete_or_unknown_phase():
+    gate = module()
+    attempt = "a" * 32
+    progress = gate._ScanProgressFrames(attempt)
+
+    def frame(phase, count):
+        return b"\x1eORCHE-SCAN-PROGRESS-V1 " + attempt.encode("ascii") + b" " + phase + b" " + count + b"\n"
+
+    for phase, count in ((b"commits", b"9"), (b"objects", b"12"), (b"acquired", b"12"), (b"classified", b"3")):
+        assert progress.feed(frame(phase, count)) == b""
+    assert progress.completed == 12
+    accepted = progress.phase_counts
+    assert accepted == (("commits", 9), ("objects", 12), ("acquired", 12), ("classified", 3))
+    assert progress.feed(frame(b"commits", b"10") + frame(b"classified", b"2")) == b""
+    assert progress.phase_counts == accepted
+    unknown = frame(b"log", b"99")
+    assert progress.feed(unknown) == unknown
+    assert progress.phase_counts == accepted

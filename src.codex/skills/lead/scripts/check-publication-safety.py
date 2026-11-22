@@ -594,6 +594,39 @@ class CoverageEvent(str, Enum):
     SCANNED = "scanned"
 
 
+class _VerifiedWorkPhase:
+    """Report accepted semantic units, never a heartbeat or a receipt."""
+    def __init__(self, name: str, *, enabled: bool = True) -> None:
+        self._name = name
+        self._emit = globals().get("__injected_verified_completion__") if enabled else None
+        self._count = 0
+        self._reported = 0
+
+    def step(self) -> None:
+        if self._emit is None:
+            return
+        self._count += 1
+        if self._count == 1 or self._count % 128 == 0:
+            self.finish()
+
+    def observed(self, store):
+        if self._emit is None:
+            return store
+
+        def add(*args):
+            accepted = store(*args)
+            if accepted:
+                self.step()
+            return accepted
+
+        return add
+
+    def finish(self) -> None:
+        if self._emit is not None and self._count > self._reported:
+            self._emit(self._name, self._count)
+            self._reported = self._count
+
+
 class CoverageRecorder:
     """Single live owner of object-message multiplicity evidence."""
 
@@ -3969,21 +4002,25 @@ async def _native_push_selection(
     if isinstance(exclusions, Refusal):
         return exclusions
     revisions = _revision_stdin(roots, exclusions)
+    commit_progress = _VerifiedWorkPhase("commits")
     parent_graph = await _read_parent_graph_bounded(
         _range_git_argv("rev-list", "--parents", "--topo-order", "--stdin"),
         deadline=loop_deadline, object_format=request.object_format, input_bytes=revisions,
-        store_row=index.add_selected_commit,
+        store_row=commit_progress.observed(index.add_selected_commit),
     )
     if isinstance(parent_graph, Refusal):
         return parent_graph
+    commit_progress.finish()
+    object_progress = _VerifiedWorkPhase("objects")
     objects = await _read_git_oid_lines_bounded(
         _range_git_argv("rev-list", "--objects", "--no-object-names", "--stdin"),
         count_cap=_MAX_OBJECTS, byte_cap=request.object_format.list_byte_cap(_MAX_OBJECTS),
         deadline=loop_deadline, object_format=request.object_format, input_bytes=revisions,
-        store_row=index.add_selected_object,
+        store_row=object_progress.observed(index.add_selected_object),
     )
     if isinstance(objects, Refusal):
         return objects
+    object_progress.finish()
     if not index.selected_commits_covered():
         return _refusal("PS-MSG-COVERAGE", "commit-object-set")
     parent_graph = tuple(index.selected_commits())
@@ -5148,7 +5185,7 @@ async def _acquire_indexed_history(
         return True
 
     targets = index.acquisition_targets(lexical=lexical_acquisition)
-    announce_acquisition = globals().get("__injected_verified_acquisition__") if native else None
+    acquisition_progress = _VerifiedWorkPhase("acquired", enabled=native)
     for ordinal, (oid, target) in enumerate(zip_longest(selection.object_oids, targets)):
         if asyncio.get_running_loop().time() >= scan_deadline:
             return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
@@ -5254,10 +5291,8 @@ async def _acquire_indexed_history(
         else:
             return _refusal("PS-MSG-FRAME", "object-type")
         result = None  # Release the previous blob before the next reader allocation.
-        if announce_acquisition is not None:
-            completed = ordinal + 1
-            if completed == 1 or completed % 128 == 0 or completed == len(selection.object_oids):
-                announce_acquisition(completed)
+        acquisition_progress.step()
+    acquisition_progress.finish()
 
     if any(a != b for a, b in zip_longest(index.acquired_oids(), selection.object_oids)):
         return _refusal("PS-MSG-COVERAGE", "object-set")
@@ -5391,6 +5426,7 @@ async def _acquire_indexed_history(
     # retained memory independently of the cumulative admitted blob volume.
     # Rereads are at most the number of distinct blob/path pairs and share the
     # original deadline. No reread adds coverage events or receipt byte counts.
+    classified_progress = _VerifiedWorkPhase("classified", enabled=native)
     cached_blob_oid = None
     binary = False
     raw = b""
@@ -5399,6 +5435,7 @@ async def _acquire_indexed_history(
     index.prepare_path_queries()
     for path, blob_oid in index.path_pairs():
         scanned_paths += 1
+        classify_room = len(findings) < _MAX_FINDINGS
         if asyncio.get_running_loop().time() >= scan_deadline:
             return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
         if blob_oid != cached_blob_oid:
@@ -5481,6 +5518,9 @@ async def _acquire_indexed_history(
                 max_findings=max(0, _MAX_FINDINGS - len(findings)),
             )
         _append_findings(findings, content_findings)
+        if classify_room:
+            classified_progress.step()
+    classified_progress.finish()
 
     if native:
         for oid in index.acquired_oids(deferred=True):

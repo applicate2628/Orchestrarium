@@ -649,6 +649,7 @@ class TrustedExecutionRecord:
     interpreter_identity_after: InterpreterIdentity
     provenance_verdict: str
     verified_acquired_objects: int = 0
+    verified_scan_phases: tuple[tuple[str, int], ...] = ()
 
 
 # R2 public names remain aliases of the single lifecycle types.
@@ -1538,16 +1539,17 @@ scanner["__injected_matcher_wire__"]=wire
 if native_mode: scanner["__injected_native_push__"]=native
 if scoped_mode: scanner["__injected_receiver_scope__"]=receiver_scope
 if progress_attempt is not None:
-    def verified_acquisition(completed):
-        if type(completed) is not int or not 0<completed<=9223372036854775807:
+    def verified_completion(phase,completed):
+        if (phase not in ("commits","objects","acquired","classified")
+            or type(completed) is not int or not 0<completed<=9223372036854775807):
             return
         try:
-            line="\x1eORCHE-SCAN-PROGRESS-V1 "+progress_attempt+" "+str(completed)+"\n"
+            line="\x1eORCHE-SCAN-PROGRESS-V1 "+progress_attempt+" "+phase+" "+str(completed)+"\n"
             sys.stderr.buffer.write(line.encode("ascii"))
             sys.stderr.buffer.flush()
         except (OSError,ValueError):
             pass
-    scanner["__injected_verified_acquisition__"]=verified_acquisition
+    scanner["__injected_verified_completion__"]=verified_completion
 sys.argv=[scanner_path,*scan_argv]
 exec(compile(sources["scanner"],scanner_path,"exec"),scanner,scanner)
 '''
@@ -2808,11 +2810,49 @@ def _announce_scan_threshold(elapsed: float, report) -> None:
 class _ScanProgressFrames:
     """Split private attempt-bound progress frames from ordinary stderr."""
     _MAX_DIGITS = 19
+    _PHASES = (b"commits", b"objects", b"acquired", b"classified")
+    _MAX_PAYLOAD = max(map(len, _PHASES)) + 1 + _MAX_DIGITS
 
     def __init__(self, attempt: str) -> None:
         self._prefix = b"\x1eORCHE-SCAN-PROGRESS-V1 " + attempt.encode("ascii") + b" "
         self._tail = b""
-        self.completed = 0
+        self._counts: dict[bytes, int] = {}
+        self._rank = -1
+
+    @property
+    def completed(self) -> int:
+        return self._counts.get(b"acquired", 0)
+
+    @property
+    def phase_counts(self) -> tuple[tuple[str, int], ...]:
+        return tuple((phase.decode("ascii"), self._counts[phase])
+                     for phase in self._PHASES if phase in self._counts)
+
+    def _accept(self, payload: bytes) -> bool:
+        phase, sep, scalar = payload.partition(b" ")
+        if not sep:
+            phase, scalar = b"acquired", phase
+        if phase not in self._PHASES or re.fullmatch(rb"[1-9][0-9]{0,18}", scalar) is None:
+            return False
+        completed = int(scalar)
+        if completed > 9223372036854775807:
+            return False
+        rank = self._PHASES.index(phase)
+        if rank >= self._rank and completed > self._counts.get(phase, 0):
+            self._rank = rank
+            self._counts[phase] = completed
+        return True
+
+    def _partial(self, payload: bytes) -> bool:
+        if len(payload) > self._MAX_PAYLOAD:
+            return False
+        phase, sep, scalar = payload.partition(b" ")
+        if not sep and any(name.startswith(phase) for name in self._PHASES):
+            return True
+        if not sep:
+            scalar = phase
+        return ((not sep or phase in self._PHASES) and len(scalar) <= self._MAX_DIGITS
+                and (not scalar or re.fullmatch(rb"[1-9][0-9]*", scalar) is not None))
 
     def feed(self, chunk: bytes) -> bytes:
         normal = bytearray()
@@ -2830,15 +2870,11 @@ class _ScanProgressFrames:
                 break
             normal.extend(pending[:start])
             payload = pending[start + len(self._prefix):]
-            end = payload.find(b"\n", 0, self._MAX_DIGITS + 1)
-            if end >= 0 and re.fullmatch(rb"[1-9][0-9]{0,18}", payload[:end]):
-                completed = int(payload[:end])
-                if completed <= 9223372036854775807:
-                    self.completed = max(completed, self.completed)
-                    pending = payload[end + 1:]
-                    continue
-            if (end < 0 and len(payload) <= self._MAX_DIGITS
-                    and (not payload or re.fullmatch(rb"[1-9][0-9]*", payload))):
+            end = payload.find(b"\n", 0, self._MAX_PAYLOAD + 1)
+            if end >= 0 and self._accept(payload[:end]):
+                pending = payload[end + 1:]
+                continue
+            if end < 0 and self._partial(payload):
                 self._tail = pending[start:]
                 break
             normal.append(pending[start])
@@ -3118,6 +3154,7 @@ def _run_snapshot_child(
         bytes(output["stdout"]), bytes(output["stderr"]), settlement,
         pending.closure, pending.interpreter_identity, "pending",
         progress.completed if progress is not None else 0,
+        progress.phase_counts if progress is not None else (),
     )
     return launched, (execution,)
 
