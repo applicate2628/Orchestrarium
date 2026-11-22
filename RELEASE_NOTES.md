@@ -9,6 +9,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 - The Windows x64 pre-SDK bundle can carry the Rust publication matcher. The existing scanner uses it to accelerate binary-history and ordinary commit-text matching while keeping the same publication policy and finding decisions. The bundle builder and retainer verify the exact executable and its third-party notices. The matcher does not add provider SDK dependencies or require Rust on the target machine. See [bundle assembly](scripts/distribution/README.md) for package inputs.
 
+- Reuse parsed Git trees by object identity and scan identical short binary fragments once per batch. Every original path, commit owner and occurrence retains its coverage and finding checks.
+
 ## 2026-11-21
 
 - Keep exact historical path and commit coverage in a temporary index instead of rejecting a scan when the number of coverage rows grows. Tree cache capacity now causes eviction and verified rereads, not publication refusal; the proof, finding policy and publication gate are unchanged. Clean reviewed text no longer allocates exact byte-coordinate maps for nonexistent path matches. Shared engineering guidance distinguishes workload size, cache capacity, completeness, and eligibility.
