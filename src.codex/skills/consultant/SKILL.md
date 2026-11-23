@@ -12,16 +12,14 @@ description: "Consultant: advise on tradeoffs without approving gates."
 > 1. Read `.agents/.agents-mode.yaml` (or its global fallback) and determine `consultantMode` and the resolved external provider per the active `externalPriorityProfile`.
 > 2. **Branch on `consultantMode`:**
 >    - `disabled` or no overlay: return the standard "second opinion skipped — consultant disabled" memo immediately and stop. Do not improvise an internal advisory. Steps 3-6 do not apply.
->    - `internal`: proceed to formulate an internal advisory memo directly (skip steps 3-5). Steps 3-5 and the end-of-response violation clause do **not** apply in this mode; the memo is authored from your own reasoning by design. Continue to step 6 with "internal advisory" as the source.
->    - `external`: continue to steps 3-6 below; the violation clause at the end of this block applies.
+>    - `internal`: apply the admitted internal route and different-model rule before drafting. Skip external steps 3–5. Credit an independent internal advisory only if its actual model can be distinguished from the orchestrator’s; otherwise return the existing unavailable advisory with the observed restriction or unknown evidence.
+>    - `external`: only the orchestrating runtime performs steps 3–5 through the selected authorized transport. A dispatched Consultant goes directly to receiving in step 6.
 > 3. (external mode) Identify the selected external provider for the current lane. **Verification is a real shell call, not a text claim.** Run `command -v <provider>` (POSIX) or `Get-Command <provider>` (PowerShell) in the current session and record the output. Treat any reasoning that does not include such a shell call as unverified — the provider's unavailability is then a claim with no evidence, not a fact. **The absence of a repo-specific wrapper script is never sufficient to conclude the provider is unavailable**: wrappers are convenience surfaces, not authentication gates; the canonical availability check is whether the binary resolves on PATH. See the shared `Active-availability probe discipline` for the binding form of this rule. If the binary is genuinely not callable, return an unavailable memo and surface the gap; do not silently switch providers and do not author the opinion yourself.
 > 4. (external mode) Build the full advisory handoff for the approved installed `invoke-<provider>-prompt` wrapper. When the question is "which option", present the options symmetrically and omit the orchestrator's current preference or draft conclusion unless the request is explicitly to critique a chosen option; record the prompt form as `blind-options` or `critique-of-choice`. Require one single-turn, self-contained response between `BEGIN_REVIEW` / `END_REVIEW` markers, with all required sections and no deferred handoff, plan, or "what next?" ending.
 > 5. (external mode) Invoke the selected approved thin wrapper synchronously with one absolute caller-owned `--terminal-receipt` path. The owner in `../lead/external-dispatch.md` supplies the strict V2 parser, full external-nonauthorizing tuple, and untrusted/potentially-sensitive resultText contract; consume its single `ORCHESTRARIUM_PROVIDER_RESULT_V2` envelope and wrapper exit, requiring empty `closesRunIds`. If the caller-side wait loses stdout, read the exact settled line from that receipt. No raw provider process or wrapper-private capture is an approved route; the caller owns receipt retention/deletion. Apply the owner's timeout/oracle policy.
-> 6. Only after the wrapper returns (in external mode) or after you have completed your internal reasoning (in internal mode) may you formulate the consultant memo. In external mode, verify the envelope's complete `resultText`, terminal metadata, and requested review markers/sections; a stub, handoff-only response, or bare verdict is `REVISE`, not a memo. Return an unavailable memo only when the provider is genuinely unavailable and no wrapper result was delivered. The memo summarizes the external response and applies your own framing; it does not substitute your own opinion for the external one. In internal mode the memo is authored from your own reasoning and is explicitly labeled as `internal advisory` at the top.
+> 6. In external mode, summarize only the selected run's owner-verified terminal result supplied inline or by an approved reference under `../lead/external-dispatch.md`. Check that the evidence is current for this assignment and that the result has the requested markers and sections; a stub, handoff-only response, bare verdict, or unverified terminal outcome is not an advisory. If the owning runtime has not supplied a usable result, report the exact observed gap and return control to it without a relaunch or fallback. Missing receiving evidence cannot establish provider unavailability. In internal mode, author the memo from your own admitted reasoning and label it `internal advisory`.
 >
-> **Violation clause (external mode only):** if `consultantMode == external` and you reach the end of your response while step 5 was never actually executed via a tool call (shell-out), you have violated the role. Abort the response, return an unavailable memo with the explicit reason "external provider call was not actually executed", and surface the gap to the user. This clause does NOT fire for `internal` mode — internal advisory by design has no external shell-out — nor for `disabled` mode where the response stopped at step 2.
->
-> **Subagent spawn-and-wait trap (binding, the recurring role-confusion failure).** Background-completion notifications are delivered to the MAIN orchestrating loop, NOT to a dispatched subagent — a subagent is never re-invoked when a background child it launched finishes. So if you are running as a dispatched subagent in `external` mode, you must NOT launch the provider in the background (a `run_in_background` shell-out, or any launch you then "wait for the notification" on) and end your turn: that strands the provider run and returns an empty memo ("standing by for the consultant provider…" instead of a verdict). Exactly two compliant paths: **(a)** run the provider as ONE synchronous, in-turn blocking shell-out, then parse stdout and return the full memo in the SAME response; or **(b)** if a synchronous in-turn run is infeasible because the provider would exceed the in-turn blocking budget (typical for Codex `xhigh` or Claude `opus`/`max` deep review), return an unavailable memo IMMEDIATELY with `Deviation reason: external run needs orchestrating-runtime launch`, whose continuation prompt instructs the orchestrating runtime to launch the provider directly for this lane and feed the result back. External consultant execution is an orchestrating-runtime launch, never a subagent-hosted background spawn (see `No implicit fallback`). The shared external-dispatch contract's stall and timeout policy applies only to the orchestrating runtime that owns the background run and receives its completion notification — never to a subagent.
+> **External launch ownership:** a dispatched Consultant never launches the provider, synchronously or in the background. Before a settled result is available, return an unavailable advisory with `Deviation reason: external run needs orchestrating-runtime launch` (or the more specific observed hold). Only the orchestrating runtime may perform or settle an already-authorized external launch under the shared dispatch contract.
 
 ## Core stance
 
@@ -37,22 +35,9 @@ description: "Consultant: advise on tradeoffs without approving gates."
   Report exhausted admissible options or missing runtime/model evidence with the exact observed restriction
   or unknown fact; claim provider/model unavailability only from current observation. Different-provider selection alone proves neither measured model independence nor commission diversity.
 
-## Invocation by mode (the rule below is EXTERNAL-only)
+## Invocation by mode
 
-`consultantMode` has a switch: **`external`**, `internal`, and `disabled`. The runtime-launch /
-not-a-background-subagent rule applies ONLY to `external` mode; `internal` mode is unconstrained by it.
-
-- **`external` mode — a runtime-launched CLI, NOT a background subagent.** The consultant IS a direct
-  external-CLI launch (on a different-model provider) that the ORCHESTRATING RUNTIME owns: the runtime
-  starts the CLI, receives its completion notification, and reads the output. It must NOT be dispatched as a
-  background `Agent(subagent_type: consultant)` / `run_in_background` subagent — background-completion
-  notifications go only to the main orchestrating loop, so a consultant subagent that shells out strands
-  waiting for a notification it never receives and returns an empty "standing by for the consultant
-  provider…" memo (the recurring role-confusion). If you are the orchestrating runtime, **launch the
-  provider CLI directly**. If you nonetheless find yourself running AS a dispatched consultant subagent in
-  `external` mode, obey the **Subagent spawn-and-wait trap** clause in the Bootstrap (run the provider
-  synchronously in-turn, or return an unavailable memo telling the runtime to launch the CLI directly) —
-  never background-and-wait.
+- **`external` mode:** use the Bootstrap's launch-owner and receiving distinction. Do not route an external opinion through a dispatched proxy.
 - **`internal` mode — a synchronous internal advisory.** The consultant returns its memo in ONE turn from
   its own reasoning, with no external CLI and no background child. A synchronous (non-background) internal
   call is fine here; the external-mode rule above does not constrain it.
@@ -61,19 +46,11 @@ not-a-background-subagent rule applies ONLY to `external` mode; `internal` mode 
 
 ## Toggle file check
 
-Before any invocation, resolve the effective Codex overlay in this order:
+Before any invocation, resolve the effective `consultantMode` in memory through the [external dispatch owner](../lead/external-dispatch.md). Do not create or normalize a file to read it. Missing local configuration is not a disabled mode; inherited values still apply.
 
-- local `.agents/.agents-mode.yaml`
-- local legacy `.agents/.agents-mode`
-- global `~/.codex/.agents-mode.yaml`
-- global legacy `~/.codex/.agents-mode`
-
-- **No file** (default): if neither local nor global overlay exists, consultant is disabled. Notify "Second opinion skipped — consultant disabled (`/second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately. Do not invent a closeout blocker solely because consultant did not run.
-- **`consultantMode: external`**: external-only. Attempt the selected external CLI. If it fails or is unavailable, return an unavailable memo and require the lead to keep routing honest instead of downgrading to an internal consultant path.
-- **`consultantMode: internal`**: internal-only consultant. Use the internal consultant path for any consultant invocation that is still desired.
-- **`consultantMode: disabled`**: explicitly disabled. Same behavior as the no-file case.
-
-`.agents/.agents-mode.yaml` is the project-local override surface. When it is absent, read-only consultant routing falls back to the global Codex overlay at `~/.codex/.agents-mode.yaml`. Keep any project-local override local-only and do not commit it to git.
+- **`consultantMode: external`**: external-only. Attempt the selected external route. If it fails or is unavailable, return an unavailable memo; do not downgrade to an internal path.
+- **`consultantMode: internal`**: internal-only, including an inherited effective setting.
+- **`consultantMode: disabled`**: report "Second opinion skipped — consultant disabled (`/second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING`. Do not invent a closeout blocker solely because consultant did not run.
 
 The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/external-dispatch.md). Treat the canonical file as the shared routing schema plus the profile, opinion-count, and Codex-only Claude transport/profile keys:
 
@@ -95,10 +72,9 @@ The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/ext
 - `externalClaudeProfile`
 
 Read the effective Codex overlay and normalize its effective values in memory through the existing per-key resolver before routing. Valid sparse, comment-free, or older-layout files are compatibility input for routing reads; do not rewrite them merely to read or trust their flags.
-If local `.agents/.agents-mode.yaml` is missing, read local legacy `.agents/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.codex/.agents-mode.yaml`, pack-local global legacy `~/.codex/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override. Persist canonical formatting only within an authorized install/configuration write, into the canonical `.yaml` path in the same scope while preserving effective known values and unknown keys.
+If local `.agents/.agents-mode.yaml` is missing, read local legacy `.agents/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.codex/.agents-mode.yaml`, pack-local global legacy `~/.codex/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override. Persist canonical formatting only for a separately authorized normalization, into the canonical `.yaml` path in the same scope while preserving effective known values and unknown keys.
 
-When changing `consultantMode`, preserve the other keys, including the profile, reserve resolver, opinion-count, workdir, model-policy, Codex-profile, Claude-profile, and general `parallelMode` fields if they exist. When creating the file from scratch, initialize the full canonical shape and default `delegationMode` to `auto`, `parallelMode` to `auto`, `mcpMode` to `auto`, `externalProvider` to `auto`, `externalPriorityProfile` to `balanced`, `reserveResolver` to `claude-sonnet`, the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks, `externalCodexWorkdirMode` / `externalClaudeWorkdirMode` to `neutral`, `externalModelMode` to `runtime-default`, `externalCodexProfile` to `default`, and `externalClaudeProfile` to `opus-xhigh` unless the user explicitly requested a different Claude profile override.
-Within an authorized install/configuration write, normalization preserves effective known values and unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline comments plus the shipped profile/count blocks, and restores canonical key order.
+For consultant toggles follow the [dispatch owner's sparse-write contract](../lead/external-dispatch.md). A toggle is not installer normalization.
 
 ## When to invoke
 
@@ -125,6 +101,7 @@ Do not invoke for:
 ## Return exactly one artifact
 
 - Return one advisory memo covering recommended direction, alternatives considered, major tradeoffs, and key risks. Every recommendation carries `Would-flip-if: <concrete observation that reverses it>`, and every load-bearing unverified claim is labeled `ASSUMPTION (UNVERIFIED)` with the step that resolves it.
+- For a close decision, name the strongest counterargument to the recommendation and the least costly admitted observation that could change it. A different model is required by this route, but does not prove independent errors.
 - Every consultant memo must include a provenance header:
   - **Execution role:** `consultant`
   - **Assigned / replaced internal role:** `none`
@@ -164,11 +141,11 @@ Check the selected provider first:
 - Claude path: `claude` (macOS/Linux) or `claude.exe` / `claude.cmd` (Windows)
 - Kimi path: the approved canonical `invoke-kimi-prompt` wrapper
 
-Before provider-specific transport, classify the advisory as `planning`, `review`, or `critical-design`, call `describe_ordinary_native_role_options`, then call `resolve_ordinary_native_dispatch` with the nonempty approved scope and caller rationale. Disabled mode performs neither call. An omitted model and effort selects the policy-owned `frontier-high` candidate (`gpt-6.1-sol`, `high`); a complete explicit admissible pair wins; a partial pair fails; and `max` still requires explicit user approval. The default candidate is not a minimum effort and does not authorize forcing `xhigh`.
+Before provider-specific transport, classify the advisory as `planning`, `review`, or `critical-design`, call `describe_ordinary_native_role_options`, then choose an admissible model and effort informed by the task, genuine user controls and the default suggestion. When deciding by task, consciously select and pass both to `resolve_ordinary_native_dispatch` with the nonempty approved scope and caller rationale, including when choosing the suggested `frontier-high` candidate (`gpt-6.2-sol`, `high`). An omitted pair remains compatible and resolves to an explicit default pair; a partial pair fails. When the requested model or reasoning effort differs from the effective recommendation, put the reason in the existing selection call's separate preference-deviation-reason argument. Keep the returned reason with the existing dispatch evidence; it grants no authority. The selector does not classify rationale. Disabled mode performs neither call; `max` still requires explicit user approval. The default candidate is not a minimum effort and does not authorize forcing `xhigh`.
 
 - `internal` mode consumes the resolved generic skill-only invocation. Exclude the orchestrator's actual model from the usable options; if that leaves no different-model option, return the existing unavailable advisory.
 - External Codex passes `resolvedModel` and `resolvedEffort` to the existing wrapper as complete model/effort flags.
-- External Claude never receives the resolver's Codex model token. A complete explicit admissible `externalClaudeProfile` wins; otherwise the omitted `frontier`/`high` result maps to `sonnet-high`. If the resolved tier/effort has no existing Claude profile mapping, return unavailable with no fallback.
+- External Claude never receives the resolver's Codex model token. A complete explicit admissible `externalClaudeProfile` wins; otherwise a selected `frontier`/`high` result maps to `sonnet-high`. If the resolved tier/effort has no existing Claude profile mapping, return unavailable with no fallback.
 - External Kimi bypasses this effort mapping exactly as before: fixed `kimi-code/k3`, no caller-composed provider flags, independent verification, and nonauthorization. Grok remains unavailable.
 
 When `externalClaudeProfile` is selected, map it as follows:
@@ -177,16 +154,14 @@ When `externalClaudeProfile` is selected, map it as follows:
 - `opus-xhigh` → `--model opus --effort xhigh` (shipped default)
 - `opus-max` → `--model opus --effort max` (max-depth escalation; caller discretion for especially hard tasks)
 - `fable-xhigh` → `--model fable --effort xhigh` (current Claude flagship-family best-effort tier; the `fable` flagship alias as of 2026-07)
-- key missing for the omitted Consultant choice → `sonnet-high`; any other missing Consultant tier/effort mapping is unavailable with no fallback
+- key missing with the selected Consultant `frontier`/`high` result → `sonnet-high`; any other missing Consultant tier/effort mapping is unavailable with no fallback
 
 For non-Consultant callers, continue to honor `externalCodexProfile` and `externalModelMode` before provider-specific transport selection. Consultant callers use the ordinary selector result above:
 
 - `runtime-default` → keep the selected provider on its native runtime default model/profile.
 - `externalCodexProfile: default` → inherit the selected `externalModelMode` when Codex is selected or `auto` resolves to Codex.
-- `externalCodexProfile: gpt-6.1-sol-max` → request model `gpt-6.1-sol` with `model_reasoning_effort = "max"` when Codex is selected or `auto` resolves to Codex, for higher-complexity/hard lanes (NOT `gpt-6.1-sol-ultra`, which spawns subagents and must never be shipped on a subagent lane).
-- `externalCodexProfile: gpt-5.6-terra` → select the balanced Codex model tier (a distinct model; `model_reasoning_effort = "high"`, so this is a model choice, not merely an effort downgrade) when Codex is selected or `auto` resolves to Codex; record unavailable or deviated if that model cannot be verified against the installed runtime.
-- `externalCodexProfile: gpt-6.1-sol-xhigh` → explicitly request model `gpt-6.1-sol` with `model_reasoning_effort = "xhigh"` via `-c model_reasoning_effort=xhigh` regardless of `externalModelMode`, symmetric to `externalClaudeProfile: opus-xhigh`.
-- Explicit `externalCodexProfile: gpt-5.6-sol-xhigh` and `gpt-5.6-sol-max` values retain their named GPT-5.6 model and effort through 1.x.
+- `externalCodexProfile: gpt-6.2-sol-max` → request model `gpt-6.2-sol` with `model_reasoning_effort = "max"` when Codex is selected or `auto` resolves to Codex, for higher-complexity/hard lanes (NOT `gpt-6.2-sol-ultra`, which spawns subagents and must never be shipped on a subagent lane).
+- `externalCodexProfile: gpt-6.2-sol-xhigh` → explicitly request model `gpt-6.2-sol` with `model_reasoning_effort = "xhigh"` via `-c model_reasoning_effort=xhigh` regardless of `externalModelMode`, symmetric to `externalClaudeProfile: opus-xhigh`.
 Use the approved `invoke-claude-prompt` wrapper for substantive Claude consultation; do not substitute raw `claude -p` recipes.
 
 Reserve advisory candidate:
@@ -201,7 +176,7 @@ Reserve advisory candidate:
 - If the requested primary Claude profile fails on the plain Claude CLI path, do not silently convert that same run to the wrapper. Advisory lanes may later collect `reserve` as a separate profile candidate when enabled; otherwise return an unavailable memo.
 - If an advisory route resolves to `reserve` and that wrapper is unavailable, disclose a dependency/config failure instead of pretending the advisory path was complete.
 - Route every substantive task through the approved thin `invoke-<provider>-prompt` wrapper, which owns file/stdin prompt delivery and the governance capsule; raw provider CLI prompt routes are unsupported. Inline argv is only for a fixed synthetic non-substantive smoke token, never a provider limitation or real task.
-- **Never invoke a non-interactive Claude review with `--permission-mode plan`.** Plan mode makes Claude research and then present a plan for approval (ExitPlanMode) instead of emitting the verdict; under `claude -p` there is no approver, so the captured stdout is only the final handoff / "waiting for your direction" turn and the actual review never lands in the file. Use `--permission-mode bypassPermissions` exactly as the examples above show; if you want a read-only reviewer, constrain it with `--tools "Read,Grep,Glob"`, not with plan mode. The mode is not a safety lever here — the tool set and the prompt are.
+- Do not substitute a raw Claude invocation or compose permission flags in the advisory role. Use the canonical approved transport's bounded read-only capability; report it unavailable if the required capability cannot be established.
 - Do not use TTY when a non-interactive invocation is available.
 - On Windows, keep command-line prompts short enough to avoid `cmd.exe` truncation.
 - On Windows, keep the ordinary shell path unchanged and try the native Windows shell first. If that shell path fails because of shell bootstrap, execution-policy, or environment-policy problems, retry once through Git-for-Windows Bash / MSYS when available. Do not use the WSL `bash.exe` stub as a fallback, and do not reinterpret ordinary provider auth, quota, or model failures as shell-fallback triggers.
@@ -211,7 +186,7 @@ Reserve advisory candidate:
 ### No implicit fallback
 
 - `consultantMode: external` is external-only. If the selected external provider is unavailable, stalls, or fails, return an unavailable memo and let the lead reroute honestly.
-- `consultantMode: internal` is the only supported internal consultant path. It must be selected explicitly in `.agents/.agents-mode.yaml`; do not downgrade into it automatically after an external failure.
+- `consultantMode: internal` is the only supported internal consultant path. It must be the effective configured mode; do not downgrade into it automatically after an external failure.
 - Provider-backed consultant execution in `external` mode must use direct external launch from the orchestrating runtime or an approved transport wrapper script. If the current runtime cannot do that, disclose the dependency failure instead of proxying through an internal agent/helper/subagent host.
 - Never turn a failed external consultant run into a hidden internal substitute.
 

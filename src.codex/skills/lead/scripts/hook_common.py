@@ -9,7 +9,13 @@ import re
 import stat
 import sys
 from pathlib import Path
-from typing import Callable, NamedTuple
+from contextlib import contextmanager
+from typing import Callable, Iterable, NamedTuple
+from collections import namedtuple
+from concurrent.futures import Future
+import tempfile
+import threading
+import uuid
 
 # Harness-injected spans that ride inside user-role transcript entries but are
 # NOT typed by the human (system reminders, async task notifications, captured
@@ -27,6 +33,103 @@ _INJECTED_SPAN_RE = re.compile(
 NO_OBSERVED_FAILURE = "NO_OBSERVED_FAILURE"
 EXPLICIT_FAILURE = "EXPLICIT_FAILURE"
 AMBIGUOUS_STATUS = "AMBIGUOUS_STATUS"
+
+
+
+_WARNING_STAGES = frozenset({
+    "selection", "coverage", "scan", "verification", "report", "publication",
+    "acquisition", "matching", "snapshot",
+})
+_WARNING_UNITS = frozenset({
+    "seconds", "milliseconds", "bytes", "commits", "objects", "blobs", "paths",
+    "subjects", "refs", "findings", "lines",
+})
+
+
+class ThresholdWarning(namedtuple("_ThresholdWarning", "stage unit threshold observed completed")):
+    """A content-free threshold crossing. Strings are controlled labels only."""
+
+    __slots__ = ()
+
+    def __new__(cls, stage: str, unit: str, threshold: int, observed: int, completed: int):
+        if (type(stage) is not str or stage not in _WARNING_STAGES
+                or type(unit) is not str or unit not in _WARNING_UNITS
+                or any(type(n) is not int or not 0 <= n <= (1 << 63) - 1
+                       for n in (threshold, observed, completed))
+                or observed < threshold):
+            raise ValueError("Invalid threshold warning")
+        return super().__new__(cls, stage, unit, threshold, observed, completed)
+
+
+def _write_threshold_warning_report(home: Path, rows: tuple[ThresholdWarning, ...]) -> Path:
+    """Write a complete report atomically, without replacing an earlier file."""
+    directory = home.resolve(strict=True)
+    for component in (".orche", "reports"):
+        directory = directory / component
+        directory.mkdir(mode=0o700, exist_ok=True)
+        info = directory.lstat()
+        if (not stat.S_ISDIR(info.st_mode)
+                or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+            raise OSError("Report directory is not an ordinary directory")
+    payload = {
+        "version": 1,
+        "kind": "threshold-warnings",
+        "warnings": [row._asdict() for row in rows],
+    }
+    fd, name = tempfile.mkstemp(prefix=".threshold-", suffix=".tmp", dir=directory)
+    temporary = Path(name)
+    destination = directory / f"threshold-{uuid.uuid4().hex}.json"
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as file:
+            json.dump(payload, file, separators=(",", ":"))
+            file.write("\n")
+            file.flush()
+            os.fsync(file.fileno())
+        os.link(temporary, destination)
+    finally:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+    return destination
+
+
+def start_threshold_warning_report(
+    warnings: Iterable[ThresholdWarning], *, user_home: Path | None = None,
+) -> Future[Path | None]:
+    """Start one best-effort report per call; never wait for filesystem work.
+
+    The caller owns invocation deduplication and must check done() before
+    reading the future. None means no saved report; no verdict depends on it.
+    """
+    result: Future[Path | None] = Future()
+    rows: dict[tuple[str, str, int], ThresholdWarning] = {}
+    for row in warnings:
+        if type(row) is not ThresholdWarning:
+            raise ValueError("Expected a typed threshold warning")
+        # Tuple helper methods can construct instances without __new__.
+        validated = ThresholdWarning(*row)
+        rows.setdefault((validated.stage, validated.unit, validated.threshold), validated)
+    if not rows:
+        result.set_result(None)
+        return result
+
+    def write() -> None:
+        if not result.set_running_or_notify_cancel():
+            return
+        try:
+            saved = _write_threshold_warning_report(
+                Path.home() if user_home is None else user_home, tuple(rows.values()),
+            )
+        except (OSError, RuntimeError, ValueError):
+            saved = None
+        result.set_result(saved)
+
+    try:
+        threading.Thread(target=write, name="orche-threshold-report", daemon=True).start()
+    except RuntimeError:
+        result.set_result(None)
+    return result
 
 
 class CorrelatedToolResult(NamedTuple):
@@ -48,6 +151,216 @@ class ModelShellCommandOccurrence(NamedTuple):
     call_id: str
     tool_name: str | None
     command_text: str
+
+
+class NativeControlCall(NamedTuple):
+    """A native call's correlation and input carrier, without executing it."""
+
+    call_id: str
+    tool_name: str
+    input_kind: str
+    input_text: str
+
+
+class NativeControlResult(NamedTuple):
+    """Original text-block boundaries; these bytes confer no authority."""
+
+    call_id: str
+    text_blocks: tuple[str, ...]
+
+
+class NativeCommandObservation(NamedTuple):
+    """Typed Core or app-server command item; never status-looking stdout."""
+
+    item_id: str
+    command: str
+    cwd: str
+    status: str
+    exit_code: int | None
+    process_id: str | None
+    output: str | None
+    completed: bool
+    thread_id: str
+    turn_id: str
+    source: str
+    argv: tuple[str, ...] = ()
+
+
+def _native_file_uri_path(value: object) -> str | None:
+    """Convert the Core PathUri file form using Python 3.10's stdlib port.
+
+    Opaque PathUri forms and another platform's file paths are unavailable,
+    never guessed into a local operation. Percent decoding happens once.
+    """
+    if type(value) is not str or not value or "\0" in value:
+        return None
+    from urllib.parse import urlsplit, unquote_to_bytes
+    from urllib.request import url2pathname
+    try:
+        uri = urlsplit(value)
+        if uri.scheme != "file" or uri.query or uri.fragment or uri.username is not None or uri.password is not None:
+            return None
+        if re.search(r"%(?![0-9a-fA-F]{2})", uri.path):
+            return None
+        if os.name != "nt" and uri.netloc not in {"", "localhost"}:
+            return None
+        unquote_to_bytes(uri.path).decode("utf-8", errors="strict")
+        encoded_path = ("//" + uri.netloc + uri.path) if uri.netloc not in {"", "localhost"} else uri.path
+        path = url2pathname(encoded_path)
+        if not Path(path).is_absolute() or "\0" in path:
+            return None
+        if os.name != "nt" and re.match(r"^/[A-Za-z]:/", path):
+            return None
+        return path
+    except (ValueError, OSError, UnicodeError):
+        return None
+
+
+def extract_native_command_observation(entry: object) -> NativeCommandObservation | None:
+    """Normalize published Core JSONL and app-server notification shapes.
+
+    Core's argument vector remains an argument vector. Model tool calls and
+    arbitrary JSON tool output are never upgraded into native completion.
+    """
+    if not isinstance(entry, dict):
+        return None
+    if entry.get("type") == "event_msg":
+        payload = entry.get("payload")
+        if not isinstance(payload, dict) or payload.get("type") not in {"item_started", "item_completed"}:
+            return None
+        item = payload.get("item")
+        if not isinstance(item, dict) or item.get("type") != "CommandExecution":
+            return None
+        argv = item.get("command")
+        if not isinstance(argv, list) or not argv or any(type(word) is not str or "\0" in word for word in argv):
+            return None
+        if not argv[0] or type(item.get("id")) is not str or not item["id"]:
+            return None
+        if any(type(payload.get(key)) is not str or not payload[key] for key in ("thread_id", "turn_id")):
+            return None
+        if not isinstance(item.get("parsed_cmd"), list):
+            return None
+        cwd = _native_file_uri_path(item.get("cwd"))
+        if cwd is None:
+            return None
+        statuses = {"in_progress": "inProgress", "completed": "completed", "failed": "failed", "declined": "declined"}
+        sources = {"agent": "agent", "user_shell": "userShell", "unified_exec_startup": "unifiedExecStartup", "unified_exec_interaction": "unifiedExecInteraction"}
+        status, source = statuses.get(item.get("status")), sources.get(item.get("source"))
+        if status is None or source is None:
+            return None
+        code, process_id, output = item.get("exit_code"), item.get("process_id"), item.get("aggregated_output")
+        if code is not None and type(code) is not int:
+            return None
+        if process_id is not None and type(process_id) is not str:
+            return None
+        if output is not None and type(output) is not str:
+            return None
+        completed = payload["type"] == "item_completed"
+        if completed and type(payload.get("completed_at_ms", 0)) is not int:
+            return None
+        return NativeCommandObservation(
+            item["id"], "", cwd, status, code, process_id, output, completed,
+            payload["thread_id"], payload["turn_id"], source, tuple(argv),
+        )
+    if entry.get("method") not in {"item/started", "item/completed"}:
+        return None
+    params = entry.get("params")
+    if not isinstance(params, dict):
+        return None
+    item = params.get("item")
+    if not isinstance(item, dict) or item.get("type") != "commandExecution":
+        return None
+    if any(type(item.get(key)) is not str or not item[key] for key in ("id", "command", "cwd")):
+        return None
+    if any(type(params.get(key)) is not str or not params[key] for key in ("threadId", "turnId")):
+        return None
+    if item.get("status") not in {"inProgress", "completed", "failed", "declined"}:
+        return None
+    source = item.get("source", "agent")
+    if source not in {"agent", "userShell", "unifiedExecStartup", "unifiedExecInteraction"}:
+        return None
+    if not isinstance(item.get("commandActions"), list):
+        return None
+    code, process_id, output = item.get("exitCode"), item.get("processId"), item.get("aggregatedOutput")
+    if code is not None and type(code) is not int:
+        return None
+    if process_id is not None and type(process_id) is not str:
+        return None
+    if output is not None and type(output) is not str:
+        return None
+    completed = entry["method"] == "item/completed"
+    if completed and type(params.get("completedAtMs")) is not int:
+        return None
+    return NativeCommandObservation(
+        item["id"], item["command"], item["cwd"], item["status"], code,
+        process_id, output, completed, params["threadId"], params["turnId"], source,
+    )
+
+
+def extract_native_control_calls(entry: object) -> tuple[NativeControlCall, ...]:
+    if not isinstance(entry, dict):
+        return ()
+    payload = entry.get("payload")
+    if isinstance(payload, dict) and payload.get("type") in {"function_call", "custom_tool_call"}:
+        call_id, name = payload.get("call_id"), payload.get("name")
+        key = "arguments" if payload["type"] == "function_call" else "input"
+        value = payload.get(key)
+        if all(isinstance(value, str) and value for value in (call_id, name)) and isinstance(value, str):
+            kind = "json" if key == "arguments" else "raw"
+            return (NativeControlCall(call_id, name, kind, value),)
+        return ()
+    if not is_assistant_message(entry):
+        return ()
+    message = entry.get("message")
+    content = entry.get("content", message.get("content") if isinstance(message, dict) else None)
+    if not isinstance(content, list):
+        return ()
+    result: list[NativeControlCall] = []
+    for item in content:
+        if not isinstance(item, dict) or item.get("type") != "tool_use":
+            continue
+        call_id, name, value = item.get("id"), item.get("name"), item.get("input")
+        if all(isinstance(value, str) and value for value in (call_id, name)) and isinstance(value, dict):
+            result.append(NativeControlCall(call_id, name, "json", json.dumps(value)))
+    return tuple(result)
+
+
+def extract_native_control_results(entry: object) -> tuple[NativeControlResult, ...]:
+    """Project supported original result carriers, never a flattened repr."""
+    if not isinstance(entry, dict):
+        return ()
+
+    def blocks(value: object) -> tuple[str, ...]:
+        if isinstance(value, str):
+            return (value,)
+        if not isinstance(value, list):
+            return ()
+        return tuple(
+            item["text"] for item in value
+            if isinstance(item, dict) and isinstance(item.get("text"), str)
+        )
+
+    payload = entry.get("payload")
+    if isinstance(payload, dict) and payload.get("type") in {"function_call_output", "custom_tool_call_output"}:
+        call_id = payload.get("call_id")
+        if isinstance(call_id, str) and call_id:
+            return (NativeControlResult(call_id, blocks(payload.get("output"))),)
+        return ()
+    if entry.get("type") == "function_call_output":
+        call_id = entry.get("call_id")
+        if isinstance(call_id, str) and call_id:
+            return (NativeControlResult(call_id, blocks(entry.get("output"))),)
+        return ()
+    message = entry.get("message")
+    content = entry.get("content", message.get("content") if isinstance(message, dict) else None)
+    if not isinstance(content, list):
+        return ()
+    return tuple(
+        NativeControlResult(item["tool_use_id"], blocks(item.get("content")))
+        for item in content
+        if isinstance(item, dict) and item.get("type") == "tool_result"
+        and isinstance(item.get("tool_use_id"), str) and item["tool_use_id"]
+    )
 
 
 _CODEX_EXIT_STATUS_RE = re.compile(r"Exit code: ([+-]?[0-9]+)\Z")
@@ -155,6 +468,8 @@ def normalize_tool_operation(name: object) -> str | None:
         return None
     if any(not part or part != part.strip() for part in name.split(".")):
         return None
+    if name == "mcp__codex_apps__remote_desktop_commander_start_process":
+        return "rdc_start_process"
     operation = name.rsplit(".", 1)[-1].lower()
     return operation if operation in _DIRECT_FILE_TOOLS | _SHELL_TOOLS | {"apply_patch"} else None
 
@@ -185,7 +500,7 @@ def acquire_tool_input(name: object, payload: object) -> AcquiredToolInput:
             return AcquiredToolInput(name, operation, (), None, False)
         targets = _patch_targets(payload[keys[0]])
         return AcquiredToolInput(name, operation, targets or (), None, targets is not None)
-    if operation in _SHELL_TOOLS:
+    if operation in _SHELL_TOOLS or operation == "rdc_start_process":
         command = _acquire_shell_command(operation, payload)
         if command is None:
             return AcquiredToolInput(name, operation, (), None, False)
@@ -211,6 +526,72 @@ HISTORY_STATUSES = (
     HISTORY_STATUS_LIMIT,
     HISTORY_STATUS_RESOURCE_UNAVAILABLE,
 )
+
+
+
+class NativeHistorySourceError(OSError):
+    """Selected native-source acquisition/currentness, not body execution."""
+
+
+class NativeHistoryIdentity(NamedTuple):
+    logical_path: str
+    resolved_path: str
+    namespace: tuple[tuple[str, int, int, int, str | None], ...]
+    file_identity: tuple[int, int, int]
+
+
+def _native_history_identity(path: Path) -> NativeHistoryIdentity:
+    try:
+        logical = Path(os.path.abspath(path))
+        namespace = []
+        for node in (*reversed(logical.parents), logical):
+            observed = node.lstat()
+            reparse = bool(getattr(observed, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+            link = os.readlink(node) if stat.S_ISLNK(observed.st_mode) or reparse else None
+            namespace.append((str(node), observed.st_dev, observed.st_ino, stat.S_IFMT(observed.st_mode), link))
+        resolved = logical.resolve(strict=True)
+        observed = logical.stat()
+        if not stat.S_ISREG(observed.st_mode):
+            raise OSError("native history source is not a regular file")
+        return NativeHistoryIdentity(str(logical), str(resolved), tuple(namespace), (observed.st_dev, observed.st_ino, stat.S_IFMT(observed.st_mode)))
+    except OSError as exc:
+        raise NativeHistorySourceError("native history source unavailable") from exc
+
+
+class HeldNativeHistorySource(NamedTuple):
+    path: Path
+    stream: object
+    identity: NativeHistoryIdentity
+
+    def assert_current(self) -> None:
+        try:
+            observed = os.fstat(self.stream.fileno())
+            descriptor = (observed.st_dev, observed.st_ino, stat.S_IFMT(observed.st_mode))
+            if descriptor != self.identity.file_identity or _native_history_identity(self.path) != self.identity:
+                raise OSError("native history source association changed")
+        except OSError as exc:
+            raise NativeHistorySourceError("native history source association changed") from exc
+
+
+@contextmanager
+def hold_native_history_source(transcript_path: str):
+    """Own one selected source through receiving; allow same-file appends.
+
+    The descriptor and logical/resolved namespace witness live only for this
+    operation. No directory timestamps or perpetual inode promise are used.
+    Existing complete-history acquisition still proves each read's bytes.
+    """
+    path = Path(transcript_path)
+    identity = _native_history_identity(path)
+    try:
+        stream = path.open("rb")
+    except OSError as exc:
+        raise NativeHistorySourceError("native history source unavailable") from exc
+    with stream:
+        source = HeldNativeHistorySource(path, stream, identity)
+        source.assert_current()
+        yield source
+        source.assert_current()
 
 
 def read_transcript_history(

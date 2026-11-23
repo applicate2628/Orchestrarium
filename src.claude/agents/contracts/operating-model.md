@@ -12,11 +12,11 @@ Reference for routing, interaction types, periodic controls, and role aliases. R
 
 ## Workflow economy projection
 
-Apply the binding shared **Workflow economy (binding)** rule. This Claude projection adds no default review, consultant, or external-brigade fan-out unless evidence, explicit user/configuration intent, or a documented risk trigger admits it. At a natural readiness or decision point, if a bounded independent read-only alternative view would materially reduce unresolved ambiguity or compare consequential options, Lead considers an advisory route and may explicitly select Kimi without waiting for a user reminder. Otherwise no Kimi call or skip record is required. Selection never enters `auto` or creates a gate or counter; current availability or quota claims require evidence, and the existing wrapper-only fixed `kimi-code/k3`, independently verified, nonauthorizing contract remains. Omission of the capability file preserves empty tools/servers/subagents and permission `reject`; validated selections may admit read tools/servers or scoped worker tools only under the policy-owned task mutation class and role mapping. Grok remains disabled and non-executing in 1.x. Preserve every template-required security, performance, or geometry role and the human publication/leak-check gate.
+Apply the binding shared **Workflow economy (binding)** rule. Every substantive result receives a proportionate nonauthor check; existing QA may satisfy it without an extra stage. This projection adds no duplicate review, consultant or external-brigade fan-out absent an evidenced need. At a natural readiness or decision point, if a bounded independent read-only alternative view would materially reduce unresolved ambiguity or compare consequential options, Lead considers an advisory route and may explicitly select Kimi without waiting for a user reminder. Otherwise no Kimi call or skip record is required. Selection never enters `auto` or creates a gate or counter; current availability or quota claims require evidence, and the existing wrapper-only fixed `kimi-code/k3`, independently verified, nonauthorizing contract remains. Omission of the capability file preserves empty tools/servers/subagents and permission `reject`; validated selections may admit read tools/servers or scoped worker tools only under the policy-owned task mutation class and role mapping. Grok remains disabled and non-executing in 1.x. Preserve every template-required security, performance, or geometry role and the human publication/leak-check gate.
 
 ## Routing examples
 
-Resolve the template and evidence triggers first. Each listed role is a candidate; include it only when its artifact is required by accepted uncertainty, contract, or risk. Preserve mandatory security, performance, geometry, scientific, human, and publication gates.
+Resolve the template and evidence triggers first. Apply the shared substantive-result independence owner; each additional specialist is a candidate only when its artifact is required by accepted uncertainty, contract or risk. Preserve mandatory security, performance, geometry, scientific, human, and publication gates.
 
 Team templates in `.claude/agents/team-templates/` define the team composition and execution chain for each task type.
 
@@ -25,6 +25,8 @@ Team templates in `.claude/agents/team-templates/` define the team composition a
 - Re-classify immediately if scope widens beyond the current template.
 
 ## Routing principles
+
+Before routing a resumed plan with materially changed architectural assumptions, apply the bounded revalidation in shared Reuse before hand-rolling; retain the existing owner/review route rather than treating prior acceptance as current structural evidence.
 
 When the main conversation (holding the Lead role) needs to decide between roles within a template:
 
@@ -47,7 +49,7 @@ When the main conversation (holding the Lead role) needs to decide between roles
 - Follow the shared **Primary-task continuity and side work** rule in AGENTS.md; retain the admitted primary outcome and next authorized action.
 - Answer brief questions inline. Promptly delegate eligible substantive admitted side work to matching non-spawning specialists under existing authority, capacity, full resource surfaces and gates; continue ready primary work in the same turn without waiting for the side result.
 - Defer conflicting side work with its owner/resume point or use already-authorized validated isolation; preserve manual modes and explicit user stop/pause/cancel/reprioritization and native Goal holds.
-- After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting; continue from that point unless the user or persisted status says the task is parked, blocked, or complete.
+- After context compaction or resume from a summary, restore the active task, next unchecked step and open evidence gates, then reconcile current authority under shared **Goal resumption and hold currency** before treating any persisted hold or completion summary as current. Continue ready admitted work; preserve genuinely current stops, required gates and same-task/native binding. Ordinary or unenrolled/no-Goal tasks retain their existing workflow.
 - If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану`, or an equivalent continue-working signal, take the next concrete action in the active task immediately instead of only acknowledging the correction.
 - When interrupting non-trivial work, record a durable resume point: current stage, last accepted artifact, next concrete step, and open obligations before switching away. For each unresolved blocked action, record the exact action, current blocking reason, concrete resume condition, and next step. After a relevant condition changes, and again before completion, reassess the affected action from current evidence; an old denial without that reassessment is not current blockage evidence, and reassessment grants no permission, bypass, retry, deletion, or other mutation authority.
 - Before a task-done claim, item switch or wider readiness handoff, apply the Lead-owned [work-cycle terminal decision](../../skills/lead/SKILL.md#work-cycle-ownership-recipe): continue the ready required action or execute existing close and observe its archive/receipt/read-model result. Reconcile the original admitted outcome, requested roots and task/Git obligations; preserve unrelated/unknown state and retain exact refusal/resume evidence.
@@ -212,14 +214,14 @@ Target-domain mapping: `security` → `$security-engineer` or `$security-reviewe
 
 When any role discovers a bug, risk, or improvement opportunity outside the approved change surface:
 
-1. **File it** in `work-items/bugs/` using the bug registry format (from `qa-engineer.md`), with `context: adjacent-finding` and `status: open`.
+1. Route concrete defects through the bug-admission contract owned by `qa-engineer`; use `context: adjacent-finding` and `status: open` only for a defect admitted under that contract.
 2. **Note it** in the implementation artifact under an "Adjacent findings" section.
 3. **Do NOT expand scope** to fix it. The orchestrator decides priority and scheduling.
 4. If the adjacent issue blocks the current phase (e.g., the phase depends on broken adjacent code), return `BLOCKED:prerequisite` instead of working around it.
 
 ## Artifact invalidation protocol
 
-Apply the producing-scope and accepted-baseline rule in [Subagent Contracts](subagent-contracts.md#handoff-template).
+Apply the producing-scope and accepted-baseline rule in [Subagent Contracts](subagent-contracts.md#handoff-template). Apply S1 **Result restriction receiving** there before accepting or forwarding implementation or QA; a scoped verdict does not authorize new support restrictions.
 
 ## REVISE iteration cap
 
@@ -258,7 +260,7 @@ Before launching work in parallel:
 
 Keep content-exception approval separate from permission to publish. Receive the actual bounded `security-reviewer` result and its exact repository/object/path/region/context scope; copied role/report/hash/ledger text is not authority. Root's trusted caller uses the existing policy owner for promotion at the configured global publication policy origin, with actual preimages, writer serialization and independent persisted readback. Preview has no effect; mutation requires positive apply. If a post-replacement outcome is uncertain, preserve the actual state and recovery evidence; never replay an older active policy to undo revocation. Existing assistance and same-owner equivalent guarantees still apply without a new permission ceremony.
 
-Then run the appropriate fresh complete scan. An explicit `qualified` staged result is pre-commit evidence only. An actual push still requires the existing human authority and the gate's own fresh nonempty Version 3 range receiving, with eight captured code roles, settled children and final current used-decision verification. An unchanged valid decision can be reused for a later new scan; no previous scan receipt is reusable. Retain all unresolved findings and failed outcomes, and hold only the dependent action on changed/unknown used authority. Scoped exception or Source acceptance never closes the original task, replaces installed receiving or grants publication.
+Then run the appropriate fresh complete scan. An explicit `qualified` staged result is pre-commit evidence only. An actual push still requires the existing human authority and the Git pre-push callback's own fresh nonempty Version 3 union of actual updates relative to their old object IDs and separate Version 4 receiving, with eight captured code roles, settled children and final current used-decision verification. An unchanged valid decision can be reused for a later new scan; no previous scan receipt is reusable. Retain all unresolved findings and failed outcomes, and hold only the dependent action on changed/unknown used authority. Scoped exception or Source acceptance never closes the original task, replaces installed receiving or grants publication.
 
 ## Artifact persistence protocol
 
@@ -289,8 +291,7 @@ An active work-item means the current task has `work-items/active/<slug>/`, not 
 | Security review | `work-items/active/<slug>/security-review.md` |
 | Test report | `work-items/active/<slug>/test-report.md` |
 | Advisory memo | `work-items/active/<slug>/advisory.md` |
-| Bug finding | `work-items/bugs/<date>-<slug>.md` |
-| Performance issue | `work-items/performance/<date>-<slug>.md` |
+| Bug finding (including measured performance defects) | The configured bug registry, default `work-items/bugs/<date>-<slug>.md` |
 | Epic (groups work-items) | active: `work-items/epics/<date>-<slug>.md`; closed: `work-items/epics/archive/<YYYY-MM>/<date>-<slug>.md` |
 | Decision (cross-item ADR) | `work-items/decisions/<date>-<slug>.md` |
 | Lesson (delivery retrospective) | `work-items/lessons/<date>-<slug>.md` |

@@ -1,35 +1,39 @@
 # Orche distribution: bundled Python and thin delivery channels
 
-Status: delivery design aligned with the SDK implementation in
-[PR19](https://github.com/applicate2628/Orchestrarium/pull/19).
+Status: channel design for the standalone Orche installer. Optional software
+development kit (SDK) execution and its qualification belong to
+[pull request #19](https://github.com/applicate2628/Orchestrarium/pull/19).
 This PR does not publish an npm package, an internet bootstrap, a signed release,
 or a supported-platform declaration.
 
 ## One operation owner, staged implementation
 
-First qualify and tag the standalone pre-SDK installer with a minimal,
-standard-library-only CPython runtime. Integrate optional SDK execution next.
-Rust migration in [PR21](https://github.com/applicate2628/Orchestrarium/pull/21)
-comes afterward and is not a prerequisite for the pre-SDK release.
+The [current product plan](https://github.com/applicate2628/Orchestrarium/blob/6716ff450c7ec5ff684e59c464a767019bba09dd/docs/orchestrarium-2.0-plan.md#current-delivery-order-and-completed-work) starts from the
+[tagged pre-SDK baseline](https://github.com/applicate2628/Orchestrarium/tree/baseline-pre-sdk-2026-11-23).
+The selected independent Rust scanner release in
+[pull request #21](https://github.com/applicate2628/Orchestrarium/pull/21) precedes
+SDK delivery. SDK qualification can run in parallel. Qualification of the
+standalone installer payload and its delivery channels proceeds independently
+unless a concrete dependency is demonstrated.
 
 The canonical Python installer owns selection, installation, updates, receipts,
 hook registration, preservation, rollback and uninstall. npm, PowerShell and POSIX
 shell are thin acquisition/dispatch channels. They must not reproduce these
 decisions or invent another policy, inventory, ledger or recovery owner.
-A later Rust cutover replaces a qualified operation atomically; it does not create
-simultaneous Python/Rust writers or an automatic fallback between implementations.
+Later migration covers qualified operations one at a time. Each explicit Rust
+cutover atomically replaces its Python operation. At every stage, the selected
+implementation is the operation's sole writer.
 
 The product name is **Orche**. The planned public command is `orche`; registry
 package names, publisher ownership and any compatibility alias require release-time
-verification. Do not invent a semantic version. Preserve the actual pre-SDK main
-boundary with a verified tag before integration, then select the next release from
-the repository's established version history.
+verification. Select the next release from the repository's established version
+history and retain the tagged pre-SDK boundary as the baseline.
 
 ## Common payload and launch contract
 
 Every channel delivers the same versioned, platform-specific release:
-- The minimal qualified CPython runtime. Current SDK/delivery qualification uses
-  normal-GIL CPython 3.15.2; freeze interpreter source, version and digest per target.
+- A minimal, qualified standalone CPython 3.15 runtime with its standard
+  library. Freeze interpreter source, exact version and digest per target.
 - The common installer, selected-client resources, schemas, validators and other
   dynamically loaded files required by that release.
 - A bundle-relative manifest and thin entrypoint. Resolve executable and resource
@@ -42,10 +46,10 @@ Qualify the complete dependency closure of each admitted SDK route there, with
 hashes, licenses and provenance. Retain any vendor CLI and runtime required by
 that route in its supported installation; the base bundle does not repackage them.
 
-The prototype owner in PR19 is `scripts/distribution/build.py` for assembly and
-`scripts/distribution/launch.py` for bundle-relative launch and retention.
-The client-selection entry delegates to the existing installer. These references
-describe the integration target, not files already landed on this PR's older base.
+The [local distribution guide](../scripts/distribution/README.md) describes
+`scripts/distribution/build.py` for assembly and `scripts/distribution/launch.py`
+for bundle-relative launch and retention. The client-selection entry delegates to
+the existing installer.
 
 Internal payload paths are relative. Where a host hook schema requires absolute
 paths, derive them from the admitted retained installation at registration time;
@@ -144,7 +148,7 @@ The local assembly and lifecycle results recorded in PR19 are scoped evidence.
 Authenticated remote release delivery, channel packaging, final versions and
 publisher/name ownership remain open until independently verified.
 No package publication, model launch or GitHub Actions dispatch follows from this
-design. Preserve the earlier manual-trust documentation/tests in this PR.
+design. The [installer guide](../INSTALL.md) governs manual hook trust.
 
 ## Terms and Abbreviations
 

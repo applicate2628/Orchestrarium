@@ -1,0 +1,141 @@
+"""Rust matcher frame validation at the scanner boundary."""
+import json
+import os
+from pathlib import Path
+import re
+import runpy
+
+import pytest
+
+
+WIRE = runpy.run_path(str(Path(__file__).resolve().parents[1]
+                          / "scripts/universal-hooks/scripts/publication_match_wire.py"))
+decode = WIRE["decode_batch"]
+rules = ((True, re.compile(r"(ab)(x)?")), (False, re.compile(r"(b)")))
+
+
+def frame(value):
+    return json.dumps(value).encode("ascii") + b"\n"
+
+
+def test_utf8_offsets_and_absent_capture_are_preserved():
+    hits = [[[0, [[2, 4], [2, 4], None]], [1, [[3, 4], [3, 4]]]]]
+    observed, = decode(frame(hits), (("éab", False),), rules)
+    assert [(rule, match.span(), match.groups()) for rule, match in observed] == [
+        (0, (1, 3), ("ab", None)), (1, (2, 3), ("b",)),
+    ]
+
+
+@pytest.mark.parametrize("value", [
+    [],
+    [[[0, [[1, 4], [2, 4], None]]]],  # Continuation byte, not a character boundary.
+    [[[0, [[2, 4], [2, 3], None]]]],  # A capture is not what the rule matched.
+    [[[True, [[3, 4], [3, 4]]]]],
+    [[[2, [[3, 4], [3, 4]]]]],
+    [[[0, [[2, 4], [2, 4], None]], [0, [[2, 4], [2, 4], None]]]],
+    [[[1, [[3, 4], [3, 4]]], [0, [[2, 4], [2, 4], None]]]],
+    [[[0, [[2, 4], [2, 4], [4, 4]]]]],
+])
+def test_malformed_frame_does_not_return_observations(value):
+    with pytest.raises(ValueError, match="invalid matcher frame"):
+        decode(frame(value), (("éab", False),), rules)
+
+
+def test_binary_rows_do_not_admit_text_only_rules():
+    with pytest.raises(ValueError, match="invalid matcher frame"):
+        decode(frame([[[1, [[1, 2], [1, 2]]]]]), (("ab", True),), rules)
+
+
+def test_length_is_not_success_if_the_frame_is_unterminated():
+    with pytest.raises(ValueError, match="invalid matcher frame"):
+        decode(b"[[]]", (("", False),), rules)
+
+def test_frames_cross_pipe_chunks_without_losing_the_following_frame():
+    import asyncio
+
+    async def verify():
+        reader = asyncio.StreamReader(limit=64 * 1024)
+        reader.feed_data(b"[" + b" " * (150 * 1024) + b"]\n[]\n")
+        reader.feed_eof()
+        stream = WIRE["FrameReader"](reader)
+        deadline = asyncio.get_running_loop().time() + 2
+        assert await stream.read(deadline) == b"[" + b" " * (150 * 1024) + b"]\n"
+        assert await stream.read(deadline) == b"[]\n"
+
+    asyncio.run(verify())
+
+
+def test_eof_before_delimiter_is_not_a_frame():
+    import asyncio
+
+    async def verify():
+        reader = asyncio.StreamReader()
+        reader.feed_data(b"[[]]")
+        reader.feed_eof()
+        stream = WIRE["FrameReader"](reader)
+        with pytest.raises(ValueError, match="incomplete matcher frame"):
+            await stream.read(asyncio.get_running_loop().time() + 2)
+
+    asyncio.run(verify())
+
+@pytest.mark.parametrize("header", [b"orche-match-spans-v1\n", b"wrong-worker\n"])
+def test_owned_exchange_requires_the_declared_protocol(header):
+    import asyncio
+
+    class Writer:
+        def __init__(self):
+            self.sent = []
+
+        def write(self, data):
+            self.sent.append(json.loads(data))
+
+        async def drain(self):
+            pass
+
+    async def verify():
+        reader = asyncio.StreamReader()
+        reader.feed_data(header + frame([[[0, [[0, 2], [0, 2], None]]]]))
+        reader.feed_eof()
+        writer = Writer()
+        exchange = WIRE["MatcherExchange"](reader, writer, rules)
+        deadline = asyncio.get_running_loop().time() + 2
+        if header != WIRE["PROTOCOL_HEADER"]:
+            with pytest.raises(ValueError, match="unexpected matcher protocol"):
+                await exchange.match((("ab", False),), deadline)
+            assert len(writer.sent) == 1
+            return
+        rows = await exchange.match((("ab", False),), deadline)
+        assert rows[0][0][1].group(0) == "ab"
+        assert writer.sent[-1] == [{"text": "ab", "binary": False}]
+        assert await exchange.eof(deadline)
+
+    asyncio.run(verify())
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows x64 retained component")
+def test_retained_package_does_not_downgrade_a_declared_matcher(tmp_path):
+    import hashlib
+
+    python = tmp_path / "python/python.exe"
+    worker = tmp_path / "native/orche-publication-match.exe"
+    for member in (python, worker):
+        member.parent.mkdir()
+        member.write_bytes(b"fixture")
+    manifest = tmp_path / "bundle.json"
+    bind = WIRE["retained_matcher"]
+    data = {"schemaVersion": 3, "target": "windows-x64", "product": "Orche",
+            "python": "python/python.exe", "entry": "app/install.py"}
+    manifest.write_text(json.dumps(data), encoding="ascii")
+    assert bind(python) is None
+
+    data["schemaVersion"] = 4
+    data["publicationMatcher"] = {"path": "native/orche-publication-match.exe",
+                                  "sha256": hashlib.sha256(b"fixture").hexdigest()}
+    manifest.write_text(json.dumps(data), encoding="ascii")
+    assert bind(python) == worker
+
+    worker.write_bytes(b"mismatch")
+    with pytest.raises(ValueError, match="digest mismatch"):
+        bind(python)
+    worker.unlink()
+    with pytest.raises(OSError):
+        bind(python)

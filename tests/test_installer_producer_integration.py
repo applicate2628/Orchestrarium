@@ -10,6 +10,7 @@ import io
 import json
 import os
 import runpy
+import shlex
 from pathlib import Path
 import sys
 import subprocess
@@ -273,6 +274,9 @@ class ProducerIntegrationTests(unittest.TestCase):
                 source = capsule / "source"
                 source.mkdir()
                 (source / "body.py").write_bytes(b"new authored")
+                # Change topology so this exercises the staged publication
+                # and recovery owner even when Windows admits in-place updates.
+                (source / "new_member.txt").write_bytes(b"new managed member")
                 target = capsule / "lead"
                 target.mkdir()
                 (target / "body.py").write_bytes(b"old original")
@@ -308,6 +312,32 @@ class ProducerIntegrationTests(unittest.TestCase):
                 else:
                     self.assertEqual(injected, [True])
                     self.assertEqual((effect.quarantine / "__pycache__/raced.pyc").read_bytes(), b"unobserved race bytes")
+
+    @unittest.skipUnless(os.name == "nt", "Windows archive attribute")
+    def test_native_tree_write_declines_before_any_inplace_effect_if_archive_is_clear(self):
+        from stat import FILE_ATTRIBUTE_ARCHIVE
+
+        for name in ("first.txt", "second.txt"):
+            (self.target / name).write_bytes(b"before")
+            (self.source / name).write_bytes(b"after")
+        first = self.target / "first.txt"
+        second = self.target / "second.txt"
+        self.assertTrue(first.stat().st_file_attributes & FILE_ATTRIBUTE_ARCHIVE)
+        subprocess.run(["attrib.exe", "-A", str(second)], check=True, timeout=10)
+        self.assertFalse(second.stat().st_file_attributes & FILE_ATTRIBUTE_ARCHIVE)
+        before = PI._InstallTransaction._observe(self.target)
+        digest = PI._tree_sha256(self.target)
+        expected = PI._tree_sha256(self.source)
+        tx = self.transaction([self.target])
+        with self.assertRaisesRegex(RuntimeError, "fixture abort"), \
+                patch.object(tx, "transform_scalar", wraps=tx.transform_scalar) as scalar, tx:
+            self.owner(tx).replace_exact_tree(Path("target"), digest, self.source)
+            scalar.assert_not_called()
+            self.assertEqual(PI._tree_sha256(self.target), expected)
+            self.assertNotEqual(first.stat().st_ino, before[first].python_identity[1])
+            raise RuntimeError("fixture abort")
+        self.assertTrue(tx._image_matches(self.target, before))
+        self.assert_clean()
 
     def test_typed_recovery_rewrap_preserves_custody_and_exact_primary_fields(self):
         for committed in (False, True):
@@ -507,33 +537,61 @@ class ProducerIntegrationTests(unittest.TestCase):
         self.assertFalse(target.exists())
         self.assert_clean()
 
-    def test_typed_stale_file_tree_and_link_restore_original_objects(self):
+    def test_claude_instructions_preserve_custom_on_success_rerun_and_rollback(self):
+        for scope in ("agents", "commands"):
+            with self.subTest(scope=scope):
+                source = self.source / scope
+                target = self.target / scope
+                source.mkdir()
+                target.mkdir()
+                for name in ("custom.md", "equal.md", "new.md"):
+                    (source / name).write_bytes(b"---\nname: stock\n---\nstock body\n")
+                custom = target / "custom.md"
+                original = b"---\nname: user\nextra: retained\n---\nuser body\n"
+                custom.write_bytes(original)
+                equal = target / "equal.md"
+                equal.write_bytes((source / "equal.md").read_bytes())
+                new = target / "new.md"
+                paths = [custom, equal, new]
+                for _ in range(2):
+                    with self.transaction(paths, paths) as transaction:
+                        PI._sync_tree(source, target, False, mutable_owner=self.owner(transaction),
+                                      instruction_scope=scope)
+                        transaction.commit()
+                    self.assertEqual(original, custom.read_bytes())
+                    self.assertEqual((source / "equal.md").read_bytes(), equal.read_bytes())
+                    self.assertEqual((source / "new.md").read_bytes(), new.read_bytes())
+                new.unlink()
+                with self.assertRaisesRegex(RuntimeError, "forced failure"):
+                    with self.transaction(paths, paths) as transaction:
+                        PI._sync_tree(source, target, False, mutable_owner=self.owner(transaction),
+                                      instruction_scope=scope)
+                        raise RuntimeError("forced failure")
+                self.assertFalse(new.exists())
+                self.assertEqual(original, custom.read_bytes())
+        self.assert_clean()
+
+    def test_unowned_stale_file_tree_and_link_are_preserved(self):
         commands = self.target / "commands"
         skills = self.target / "skills"
         commands.mkdir()
         skills.mkdir()
         stale_file = commands / "agents-stale.md"
         stale_tree = skills / "agents-stale"
-        stale_file.write_bytes(b"stale file")
+        stale_file.write_bytes(b"user stale file")
         stale_tree.mkdir()
-        (stale_tree / "leaf").write_bytes(b"stale tree")
+        (stale_tree / "leaf").write_bytes(b"user stale tree")
         link = skills / "agents-link"
         link.symlink_to(stale_tree.name, target_is_directory=True)
         original = {p: PI._CreateOnlyMutablePath._identity(p) for p in (stale_file, stale_tree, link)}
-        transaction = self.transaction([stale_file, skills])
-        primary = RuntimeError("later")
-        with self.assertRaises(RuntimeError) as caught:
-            with transaction:
-                owner = self.owner(transaction)
-                PI._reclaim_claude_namespace(self.source, commands, skills, False,
-                                             commands_owner=owner, skills_owner=owner)
-                self.assertFalse(stale_file.exists())
-                self.assertFalse(stale_tree.exists())
-                self.assertFalse(link.is_symlink())
-                raise primary
-        self.assertIs(primary, caught.exception)
+        with self.transaction([]) as transaction:
+            owner = self.owner(transaction)
+            PI._reclaim_claude_namespace(self.source, commands, skills, False,
+                                         commands_owner=owner, skills_owner=owner)
+            transaction.commit()
         self.assertEqual(original, {p: PI._CreateOnlyMutablePath._identity(p) for p in original})
-        self.assertEqual(b"stale tree", (stale_tree / "leaf").read_bytes())
+        self.assertEqual(b"user stale file", stale_file.read_bytes())
+        self.assertEqual(b"user stale tree", (stale_tree / "leaf").read_bytes())
         self.assertEqual(stale_tree.name, os.readlink(link))
         self.assert_clean()
 
@@ -555,22 +613,20 @@ class ProducerIntegrationTests(unittest.TestCase):
         self.assertTrue(referent.is_dir())
         self.assert_clean()
 
-    def test_equal_byte_foreign_stale_leaf_is_refused_and_preserved(self):
-        commands = self.target / "commands"
-        commands.mkdir()
-        stale = commands / "agents-stale.md"
-        stale.write_bytes(b"stale")
-        transaction = self.transaction([stale])
-        with self.assertRaises(PI._InstallFailure) as caught:
+    def test_instruction_copy_race_is_refused_and_preserved(self):
+        source = self.source / "commands"
+        target = self.target / "commands"
+        source.mkdir()
+        target.mkdir()
+        (source / "new.md").write_bytes(b"stock")
+        destination = target / "new.md"
+        transaction = self.transaction([destination], [destination])
+        with self.assertRaises(PI._InstallFailure):
             with transaction:
-                foreign = self.target / "foreign"
-                foreign.write_bytes(b"stale")
-                os.replace(foreign, stale)
-                PI._reclaim_claude_namespace(self.source, commands, self.target / "skills", False,
-                                             commands_owner=self.owner(transaction))
-        self.assertIn("retention original source", str(caught.exception.cause))
-        self.assertEqual(b"stale", stale.read_bytes())
-        self.assertTrue(caught.exception.recovery_path.is_dir())
+                destination.write_bytes(b"concurrent user")
+                PI._sync_tree(source, target, False, mutable_owner=self.owner(transaction),
+                              instruction_scope="commands")
+        self.assertEqual(b"concurrent user", destination.read_bytes())
 
     def test_native_no_plan_config_uses_its_existing_migration_inverse(self):
         config = self.target / "config.toml"
@@ -601,8 +657,9 @@ class ProducerIntegrationTests(unittest.TestCase):
         legacy = self.target / "legacy.toml"
         legacy.write_bytes(b"synthetic frozen legacy")
         original_identity = PI._CreateOnlyMutablePath._identity(legacy)
-        plan = SimpleNamespace(config_exists=True, config_prior_digest=PI._file_sha256(config),
-                               config_payload=config.read_bytes(), legacy_exists=True, legacy_path=legacy)
+        selection, payload = PI._read_native_config_selection(config, self.transaction([]))
+        plan = SimpleNamespace(config_selection=selection, config_exists=True, config_prior_digest=PI._file_sha256(config),
+                               config_payload=payload, legacy_exists=True, legacy_path=legacy)
         transaction = self.transaction([])
         primary = RuntimeError("later")
         with patch.object(PI, "CODEX_LEGACY_LUNA_SHA256", PI._file_sha256(legacy)):
@@ -673,7 +730,9 @@ class ProducerIntegrationTests(unittest.TestCase):
                 backup.mkdir()
                 (backup / "leaf").write_bytes(b"historical")
                 foreign = transaction._capture_node(backup)
-                self.assertNotEqual(original.native_proof, foreign.native_proof)
+                self.assertNotEqual(original.python_identity, foreign.python_identity)
+                if os.name == "nt":
+                    self.assertNotEqual(original.native_proof, foreign.native_proof)
                 foreign_identity = PI._CreateOnlyMutablePath._identity(backup)
                 def observed(path, **kwargs):
                     if Path(path) == backup:
@@ -975,7 +1034,7 @@ class ProducerIntegrationTests(unittest.TestCase):
         (pack / "CLAUDE.md").write_text("@AGENTS.md\n# Claude Code Pack\n", encoding="utf-8")
         return pack
 
-    def test_codex_document_merge_is_inplace_lf_and_rolls_back_user_bytes(self):
+    def test_codex_document_merge_preserves_outside_bytes_and_rolls_back(self):
         pack = self.documentation_fixture()
         target = self.target / "AGENTS.md"
         original = ("user prefix\r\n" + PI.CODEX_BEGIN + "\r\nold\r\n" + PI.CODEX_END + "\r\nuser tail\r\n").encode()
@@ -990,7 +1049,10 @@ class ProducerIntegrationTests(unittest.TestCase):
                 current = target.read_bytes()
                 self.assertIn(b"new codex", current)
                 self.assertIn(b"user tail", current)
-                self.assertNotIn(b"\r", current)
+                self.assertEqual(
+                    b"user prefix\r\n" + PI.CODEX_BEGIN.encode()
+                    + b"\n# Shared Governance\nnew shared\n\nnew codex\n"
+                    + PI.CODEX_END.encode() + b"\r\nuser tail\r\n", current)
                 raise primary
         self.assertIs(primary, caught.exception)
         self.assertEqual(original, target.read_bytes())
@@ -1065,7 +1127,10 @@ class ProducerIntegrationTests(unittest.TestCase):
                     _body, after = body.split(end)
                     self.assertEqual(original, before + after)
                     self.assertEqual(original.count("@AGENTS.md"), text.count("@AGENTS.md"))
-                    self.assertNotIn(b"\r", target.read_bytes())
+                    raw_before, raw_body = target.read_bytes().split(begin.encode())
+                    raw_managed, raw_after = raw_body.split(end.encode())
+                    self.assertEqual(original.replace("\n", "\r\n").encode(), raw_before + raw_after)
+                    self.assertEqual(b"# Claude Code Pack\n", raw_managed)
                 changed = text + ("" if text.endswith("\n") else "\n") + "@AGENTS.md\nLater user import.\n"
                 target.write_text(changed)
                 with self.transaction([target, agents]) as transaction:
@@ -1494,7 +1559,17 @@ class ProducerIntegrationTests(unittest.TestCase):
                 real_write(path, content, owner)
                 written.append(path)
                 self.assertEqual(identities[path], PI._CreateOnlyMutablePath._identity(path))
-                self.assertNotIn(b"\r", path.read_bytes())
+                if path == target:
+                    expected = (b"user prefix\r\n@AGENTS.md\r\n"
+                        b"<!-- BEGIN ORCHESTRARIUM CLAUDE MANAGED -->\n"
+                        b"# Claude Code Pack\n<!-- END ORCHESTRARIUM CLAUDE MANAGED -->\n"
+                        b"user tail\r\n")
+                else:
+                    expected = (b"<!-- BEGIN ORCHESTRARIUM SHARED MANAGED -->\n"
+                        b"# Shared Governance\nnew shared\n"
+                        b"<!-- END ORCHESTRARIUM SHARED MANAGED -->\n\n"
+                        b"local agent instructions\r\n")
+                self.assertEqual(expected, path.read_bytes())
                 if fail_after_first:
                     raise primary
 
@@ -1518,30 +1593,6 @@ class ProducerIntegrationTests(unittest.TestCase):
             return I
         self.fail("unexpected helper execution surface: " + str(path))
 
-    def test_settings_atomic_change_and_nochange_share_original_snapshot(self):
-        target = self.target / "settings.json"
-        target.write_bytes(b'{"custom":"keep"}')
-        original = target.read_bytes()
-        transaction = self.transaction([target])
-        primary = RuntimeError("later")
-        with patch.object(PI, "_load_module_from_path", side_effect=self.helper_loader):
-            with self.assertRaises(RuntimeError) as caught:
-                with transaction:
-                    owner = self.owner(transaction)
-                    self.assertEqual("lead-default-written", PI._merge_claude_main_agent_settings(
-                        self.source, target, "force", False, mutable_owner=owner))
-                    self.assertEqual({"custom": "keep", "agent": "lead"}, json.loads(target.read_bytes()))
-                    after = target.read_bytes()
-                    identity = PI._CreateOnlyMutablePath._identity(target)
-                    self.assertEqual("lead-already-selected", PI._merge_claude_main_agent_settings(
-                        self.source, target, "force", False, mutable_owner=owner))
-                    self.assertEqual(identity, PI._CreateOnlyMutablePath._identity(target))
-                    self.assertEqual(after, target.read_bytes())
-                    raise primary
-        self.assertIs(primary, caught.exception)
-        self.assertEqual(original, target.read_bytes())
-        self.assert_clean()
-
     def hook_fixture(self, provider="codex", linked=False, directory_link=False):
         marker = "check-bugfix-discipline"
         script = self.source / (marker + ".py")
@@ -1556,7 +1607,7 @@ class ProducerIntegrationTests(unittest.TestCase):
                                              "windows" if os.name == "nt" else "posix", "codex", require_script=False)
         retired = H.build_codex_entry(retired_target, "windows" if os.name == "nt" else "posix",
                                      event, retired_matcher)
-        retired["hooks"].append(foreign)
+        retired["hooks"].insert(0, foreign)
         original = H.encode_hook_config({"custom": "保持", "hooks": {event: [retired]}})
         storage.write_bytes(original)
         selected = storage
@@ -1643,6 +1694,99 @@ class ProducerIntegrationTests(unittest.TestCase):
                 transaction.commit()
         self.assert_clean()
 
+    def test_repeated_hook_install_reconciles_stale_inventory_and_rolls_back(self):
+        specs, selected, storage, inventory, _original, _foreign = self.hook_fixture(linked=True)
+        host = "windows" if os.name == "nt" else "posix"
+        link = os.readlink(selected)
+        checks = []
+
+        def health(*_args):
+            arguments = _args[0]
+            selected_stems = {arguments[index + 1] for index, value in enumerate(arguments) if value == "--selected-hook"}
+            self.assertEqual(selected_stems, {marker for marker, _script, _event, _matcher in specs})
+            data = json.loads(storage.read_bytes())
+            targets = {marker: {str(script)} for marker, script, _event, _matcher in specs}
+            rows = list(I._iter_owned_hooks(data, set(targets), "codex", host, targets))
+            records = [{"eventName": event, "matcher": matcher, "handlerType": "command",
+                        "command": subprocess.list2cmdline(argv) if host == "windows" else shlex.join(argv),
+                        "sourcePath": str(storage), "enabled": True, "trustStatus": "trusted",
+                        "currentHash": "sha256:synthetic"}
+                       for event, _stem, argv, matcher in rows]
+            manifest = SimpleNamespace(registered_hook_specs=lambda _platform, _root: specs)
+            with patch.object(I, "_codex_hooks_list", return_value=records), patch.object(I, "_hook_manifest", return_value=manifest):
+                I.verify_config(target=selected, platform="codex", host_os=host, repo_root=self.source,
+                                verify_fires=False, inventory_path=inventory, codex_trust_mode="require",
+                                installed_root=self.source,
+                                selected_stems=selected_stems,
+                                codex_command=["synthetic-codex"], codex_home=self.root, query_cwd=self.root)
+            checks.append(True)
+            return subprocess.CompletedProcess([], 0)
+
+        def install(primary=None):
+            transaction = self.transaction([storage, inventory, selected], link_objects=(selected,))
+            with self.hook_support(specs, primary), patch.object(PI, "_run_hook_health_bounded", side_effect=health):
+                with transaction:
+                    PI._install_hooks(self.source, "codex", selected, self.source, "target", inventory,
+                                      transaction=transaction, mutable_owner=self.owner(transaction))
+                    transaction.commit()
+
+        install()
+        hooks_before = storage.read_bytes()
+        payload = json.loads(inventory.read_bytes())
+        payload["sourcePath"] = str(self.root / "unwitnessed-old-alias.json")
+        stale = json.dumps(payload).encode("utf-8")
+        inventory.write_bytes(stale)
+        install()
+        self.assertEqual(hooks_before, storage.read_bytes())
+        self.assertNotEqual(stale, inventory.read_bytes())
+        self.assertEqual(link, os.readlink(selected))
+        inventory.write_bytes(stale)
+        with self.assertRaisesRegex(RuntimeError, "synthetic later failure"):
+            install(RuntimeError("synthetic later failure"))
+        self.assertEqual(stale, inventory.read_bytes())
+        self.assertEqual(hooks_before, storage.read_bytes())
+        self.assertEqual(link, os.readlink(selected))
+        self.assertGreaterEqual(len(checks), 3)
+        self.assert_clean()
+
+    def test_changed_verified_legacy_is_rejected_before_registration_merge(self):
+        specs, selected, storage, inventory, _original, _foreign = self.hook_fixture()
+        marker = specs[0][0]
+        legacy = self.source / "scripts" / (marker + ".sh")
+        legacy.parent.mkdir()
+        legacy.write_bytes(b"synthetic-pinned-legacy\n")
+        digest = hashlib.sha256(legacy.read_bytes()).hexdigest()
+        config = {"hooks": {"PreToolUse": [{"matcher": specs[0][3], "hooks": [
+            {"type": "command", "command": subprocess.list2cmdline(["bash", str(legacy)])}
+        ]}]}}
+        storage.write_text(json.dumps(config), encoding="utf-8")
+        before = storage.read_bytes()
+        original = PI._verified_legacy_hook_targets
+        calls = []
+
+        def change_after_admission(*args, **kwargs):
+            result = original(*args, **kwargs)
+            calls.append(True)
+            if len(calls) == 1:
+                self.assertIn(str(legacy), result[marker])
+                self.assertIn(str(legacy), kwargs["witnesses"])
+                self.assertTrue(kwargs["witnesses"][str(legacy)])
+                legacy.write_bytes(b"changed-before-merge\n")
+            return result
+
+        transaction = self.transaction([storage, inventory])
+        with self.hook_support(specs), patch.dict(PI._CODEX_RETIRED_SH, {"scripts/" + legacy.name: digest}), \
+             patch.object(PI, "_verified_legacy_hook_targets", side_effect=change_after_admission):
+            with self.assertRaisesRegex(ValueError, "verified legacy hook artifact changed"):
+                with transaction:
+                    PI._install_hooks(self.source, "codex", selected, self.source, "target", inventory,
+                                      transaction=transaction, mutable_owner=self.owner(transaction))
+        self.assertGreaterEqual(len(calls), 2)
+        self.assertEqual(before, storage.read_bytes())
+        self.assertFalse(inventory.exists())
+        self.assertEqual(b"changed-before-merge\n", legacy.read_bytes())
+        self.assert_clean()
+
     def test_malformed_hook_json_systemexit_becomes_visible_stage_cause(self):
         specs, _selected, storage, _inventory, _original, _foreign = self.hook_fixture()
         storage.write_bytes(b"{")
@@ -1720,22 +1864,16 @@ class ProducerIntegrationTests(unittest.TestCase):
     def test_claude_empty_link_retirement_preserves_link_then_registers(self):
         self.receive_claude_empty_retirement(True)
 
-    def test_document_and_settings_dryrun_keep_no_effect_and_custom_policy(self):
+    def test_document_dryrun_preserves_user_document(self):
         pack = self.documentation_fixture()
         document = self.target / "AGENTS.md"
-        settings = self.target / "settings.json"
-        document.write_bytes(b"user doc\r\n")
-        settings.write_bytes(b'{"agent":"custom","other":0}')
-        before = {p: p.read_bytes() for p in (document, settings)}
-        transaction = self.transaction(list(before))
+        before = b"user doc\r\n"
+        document.write_bytes(before)
+        transaction = self.transaction([document])
         with transaction:
-            owner = self.owner(transaction)
-            PI._merge_codex_agents(self.source, pack, document, True, mutable_owner=owner)
-            self.assertEqual("preserved-nonlead-agent", PI._merge_claude_main_agent_settings(
-                self.source, settings, "force", False, mutable_owner=owner))
-            self.assertEqual("mode-unresolved", PI._merge_claude_main_agent_settings(
-                self.source, settings, "unresolved", True, mutable_owner=owner))
-            self.assertEqual(before, {p: p.read_bytes() for p in before})
+            PI._merge_codex_agents(
+                self.source, pack, document, True, mutable_owner=self.owner(transaction))
+            self.assertEqual(before, document.read_bytes())
             transaction.commit()
         self.assert_clean()
 

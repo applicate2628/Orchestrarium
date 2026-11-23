@@ -24,7 +24,7 @@ description: "External worker: run eligible worker roles externally."
 - Honor the contract-resolved `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, and `externalOpinionCounts`; this role does not reimplement their resolution.
 - Resolve config, provider, model/profile, workdir, fallback, and transport through the shared external-dispatch owner; consume effective values in memory and do not rewrite configuration on a routing read. Persisted normalization belongs only to an authorized install/configuration write.
 - Do not honor `reserve` for worker-side lanes. It is a supplemental read-only candidate only in `advisory.*` and `review.*` profile orders after primary `claude`/`codex`, and `reserveResolver` must not turn it into a worker transport, primary-Claude retry, or implementation/editing fallback.
-- Never select `gpt-6.1-sol-ultra` on this subagent lane; it spawns subagents and must not be shipped here.
+- Never select `gpt-6.2-sol-ultra` on this subagent lane; it spawns subagents and must not be shipped here.
 - For substantive prompts, prefer the working approved wrapper and its file/stdin delivery. If a helper is defective, use only the declared owner-equivalent route under shared Assistance and external-dispatch when every selected provider/capability, input, creator-resource, real-terminal, independent-receiving, and provenance guarantee remains satisfied. A helper failure alone does not establish provider unavailability; report any unmet guarantee without automatic fallback, internal relay, host-denial bypass, or fabricated wrapper frame.
 - If the selected primary Claude path fails for worker-side work, report Claude unavailable or reroute honestly instead of converting the same run to the secret-backed wrapper.
 - This adapter is a direct external launch contract. Do not spawn it as an internal Claude agent/helper host for another provider.
@@ -44,6 +44,8 @@ description: "External worker: run eligible worker roles externally."
 - Return one worker artifact containing the role-appropriate output, provenance header, verification evidence if available, residual risk, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED:dependency`.
 - If provenance is included inline, use the execution-record fields from `contracts/external-dispatch.md` verbatim instead of inventing a shorter custom header.
 - When a neutral-workdir run produced edits, return a reviewable edit payload and name whether it is a unified diff or a full-file set with repo-relative target paths; in-place editing follows the contract's isolation-worktree binding.
+
+- Before integrating an edit, independently match its frozen base revision or accepted input identity, and compare the observed changed paths and resulting bytes with the approved change surface. Use the existing artifact and provenance record; a provider success verdict alone is not evidence.
 
 ## Working rules
 

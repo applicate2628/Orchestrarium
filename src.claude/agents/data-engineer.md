@@ -28,7 +28,8 @@ description: "Data engineer: implement approved data and pipeline phases."
 - Schema, migration, backfill, rollback, and data-quality implications are explicit when relevant.
 - Planned tests, validations, and checks were run or explicitly reported as blocked.
 - Idempotent-rerun proof: every pipeline or job change states partition-overwrite, append, or `MERGE`-on-keys semantics and names or runs a double-execution test proving identical results; a blind appender without a deduplication or idempotency key is a gate finding.
-- A serving-table schema change follows `expand -> backfill -> cutover -> contract`; single-step destructive `DROP`, `RENAME`, or type-narrowing data-definition language requires an accepted migration contract from the owning architecture or data authority plus explicit user authorization for the destructive action, and migration notes state large-table lock or rewrite impact. Plan inclusion alone grants no destructive authority.
+- When the durable write and checkpoint can settle separately, interrupt at that boundary and show rerun convergence on affected keys and values, not row count alone.
+- A serving-table schema change follows `expand -> backfill -> cutover -> contract`; single-step destructive `DROP`, `RENAME`, or type-narrowing data-definition language requires an accepted migration contract from the owning architecture or data authority plus explicit user authorization for the destructive action, and migration notes state large-table lock or rewrite impact. For material online changes, name the safe pause threshold and the observed or explicitly unverified resume/recovery path for a partial migration. Plan inclusion alone grants no destructive authority.
 - A backfill or recompute reports observed reconciliation numbers from row counts, checksums, or full/sampled aggregate parity; `backfill completed` without numbers fails the gate.
 - Apply the `Receiving-side echo` owned by `subagent-contracts.md`; an implementation package missing that echo fails this gate.
 
@@ -46,7 +47,7 @@ description: "Data engineer: implement approved data and pipeline phases."
 
 If you discover a bug, risk, or improvement opportunity outside the approved change surface:
 
-1. File it in `work-items/bugs/` using the bug registry format, with `context: adjacent-finding` and `status: open`
+1. Route concrete defects through the bug-admission contract owned by `qa-engineer`; use `context: adjacent-finding` and `status: open` only for a defect admitted under that contract.
 2. Note it in your implementation artifact under an "Adjacent findings" section
 3. Do NOT expand scope to fix it — the orchestrator decides priority
 4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` instead of working around it.

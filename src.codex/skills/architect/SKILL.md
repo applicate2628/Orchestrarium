@@ -12,12 +12,15 @@ description: "Architecture design: contracts, seams, tradeoffs, risks."
 - Keep design explicit so implementation and review do not redefine architecture later.
 - Design for local change by preferring stable contracts, clear dependency direction, and explicit extension seams.
 
+For each material claim, make the actual enforcement mechanism explicit next to its probe; distinguish a known mechanism from a proposed one. Define affected resource and state lifetime, ownership transfer, failure/partial completion and compatibility when relevant. Prefer an existing owning seam that meets the contract. If authority or guarantees are unclear, resolve that gap before expanding the design.
+
 ## Input contract
 
 - Require an accepted research memo for research-backed design. For an early structural gate, accepted inputs and the exact unresolved structural choice are sufficient; do not manufacture a Research stage.
 - Take only the requirements, constraints, and repo context needed for the design decision. Before design, consume the shared handoff admission-to-assignment comparison: accepted original/effective requirements, assigned subset and retained remainder owner/action. For a material design choice, identify the quality attributes that determine the choice and their relative priority from accepted scenarios and constraints; record the decisive tradeoff in the existing decision/rationale. Preserve every mandatory guarantee. Unsettled priority holds only the affected choice and returns to its existing requirement/decision owner; it adds no fixed attribute count, separate artifact or stage. Request bounded correction for missing inputs without inventing a Research stage or changing scope.
 - Domain-only model, mathematics, or units uncertainty belongs to the existing domain owner unless it exposes a structural choice.
 - Challenge gaps in the research artifact instead of filling them with speculation.
+- For material plan-currency drift routed under shared Reuse before hand-rolling, reconcile the accepted owner/seam and missing-capability premise with current implementation and evidenced neighboring repositories. Return the bounded retained/revised structural decision and remaining gap through the existing artifact and review route; do not revive superseded scope or seek blanket re-approval of unchanged work.
 - Spot-check that the accepted research memo's load-bearing `file:line` citations still match the current tree before designing. A moved or materially changed citation is `REVISE`-to-analyst, not permission to redo the research silently.
 - Make the intended change surface, approved extension seams, and protected surfaces explicit before handing work to the planner.
 
@@ -56,10 +59,11 @@ If the trigger does not apply, record the evidence that the boundary remains ins
 
 ## Working rules
 
-- Prefer the smallest durable design that satisfies the validated requirements.
+- Prefer the smallest durable design that satisfies the validated requirements. For a shared defect class, compare direct repair at the confirmed owner with the next simplest option: name what becomes independent, which old paths stop existing, and any dependency you genuinely need. Reuse the existing class inventory and regression guard; do not require a new analysis for an ordinary local repair. For a material state-transition claim, use its existing enforcement-probe to distinguish a supported transition (and a valid no-op if applicable) from an invalid transition that must leave protected state unchanged.
 - Prefer additive extension at approved seams over cross-cutting edits to unrelated modules.
 - **CONDITIONAL SKILL:** Use `$generalize-from-instance` when deriving a reusable contract from a concrete fixture, geometry, dataset, user case, or one-off implementation. It is not required for unrelated design work.
 - Hand off a ready decision before optional prose polishing.
+- For a material choice with competing quality attributes, compare viable alternatives (including the existing mechanism when viable) against the same few scenarios: stimulus and operating condition → observable response and acceptable threshold. Reuse the accepted test strategy and claims rather than adding a separate artifact. Distinguish measured evidence, an agreed threshold, and a prediction; give a falsifier for consequential uncertainty.
 - Document rejected options when they materially affect future work. Each rejected alternative names its decisive rejection driver and traces it to a research-memo fact or named constraint; an unverifiable driver is `ASSUMPTION (UNVERIFIED)` with the probe that would resolve it.
 - When the design makes a cross-cutting or long-lived architecture decision (one that outlives this work-item or constrains others), file it in the `work-items/decisions/` registry as `status: proposed` (lead skill `## Decisions`) and REFERENCE it by id from this design package, rather than burying it in a `design.md` that will be archived with the item. Promotion `proposed -> accepted` is the `$architecture-reviewer` gate's call, not yours.
 - Name the modules or contracts that should remain untouched if the design is followed correctly.
@@ -90,7 +94,7 @@ Design as single-owner layers composed by thin assemblies, not per-feature silos
 
 When scope investigation reveals issues outside the admitted scope:
 
-1. File the issue in the configured bug registry path, if the repository uses one, using the bug registry format from `qa-engineer/SKILL.md`, with `context: adjacent-finding` and `status: open`.
+1. Route concrete defects through the bug-admission contract owned by `qa-engineer`; use `context: adjacent-finding` and `status: open` only for a defect admitted under that contract.
 2. Mention it in the current artifact under an "Adjacent findings" section.
 3. Do NOT include it in the current design — scope expansion is the orchestrator's decision.
 4. If the adjacent issue blocks the current task, return `BLOCKED:prerequisite` instead of working around it.

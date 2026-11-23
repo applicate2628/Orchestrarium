@@ -89,8 +89,8 @@ PACK_ROUTING_READ_ACTION_CASES = (
     (
         "codex", VALIDATORS[0], "src.codex/skills/consultant/SKILL.md",
         "consultant preserves precedence and authorized-write boundary",
-        ("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override", "Persist canonical formatting only within an authorized install/configuration write"),
-        (("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "All keys take one shared global value"), ("Persist canonical formatting only within an authorized install/configuration write", "Persist canonical formatting on every routing read")),
+        ("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override", "Persist canonical formatting only for a separately authorized normalization"),
+        (("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "All keys take one shared global value"), ("Persist canonical formatting only for a separately authorized normalization", "Persist canonical formatting on every routing read")),
     ),
     (
         "claude", VALIDATORS[1], "src.claude/agents/consultant.md",
@@ -101,8 +101,8 @@ PACK_ROUTING_READ_ACTION_CASES = (
     (
         "claude", VALIDATORS[1], "src.claude/agents/consultant.md",
         "consultant preserves precedence and authorized-write boundary",
-        ("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override", "Persist canonical formatting only within an authorized install/configuration write"),
-        (("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "All keys take one shared global value"), ("Persist canonical formatting only within an authorized install/configuration write", "Persist canonical formatting on every routing read")),
+        ("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override", "Persist canonical formatting only for a separately authorized normalization"),
+        (("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "All keys take one shared global value"), ("Persist canonical formatting only for a separately authorized normalization", "Persist canonical formatting on every routing read")),
     ),
     (
         "codex", VALIDATORS[0], "src.codex/skills/lead/subagent-contracts.md",
@@ -1481,8 +1481,9 @@ def test_shared_blueprint_checks_contract_without_whole_file_snapshot(
     assert result.errors == (1 if mutation == "required-heading" else 0)
 
 
+@pytest.mark.parametrize("newline", (b"\n", b"\r\n"), ids=("lf", "crlf"))
 def test_codex_addendum_h2_inventory_accepts_terms_and_rejects_shape_drift(
-    tmp_path: Path,
+    tmp_path: Path, newline: bytes,
 ) -> None:
     adapter = _load(VALIDATORS[0], "codex_addendum_h2_inventory")
     runtime = adapter._ENGINE
@@ -1522,9 +1523,14 @@ def test_codex_addendum_h2_inventory_accepts_terms_and_rejects_shape_drift(
         assert result.checks == 1
         return result.errors
 
+    source = source.replace(b"\r\n", b"\n").replace(b"\n", newline)
+    heading = newline + b"## Terms and Abbreviations" + newline
+    assert source.count(heading) == 1
+    without_terms = source.replace(heading, newline, 1)
+    assert without_terms != source
     assert check(source) == 0
-    assert check(source.replace(b"\n## Terms and Abbreviations\n", b"\n", 1)) == 1
-    assert check(source + b"\n## 1. Main rule for the lead\n") == 1
+    assert check(without_terms) == 1
+    assert check(source + newline + b"## 1. Main rule for the lead" + newline) == 1
 
 
 @pytest.mark.parametrize("provider,validator", zip(("codex", "claude"), VALIDATORS))
@@ -1538,8 +1544,8 @@ def test_initializer_read_contract_accepts_in_memory_and_rejects_boundary_loss(
         action for action in runtime._applicable_actions(adapter.ACTIONS, layout)
         if action[0] == "check_contains"
         and action[1].endswith(("/init-project/SKILL.md", "/agents-init-project.md"))
-        and ("before reading values" in action[-1]
-             or "read-time agents-mode normalization" in action[-1])
+        and ("reads effective preferences without write" in action[-1]
+             or "preserves read versus write boundary" in action[-1])
     )
     assert len(actions) == 2
     text = (ROOT / actions[0][1].removeprefix("@ROOT/")).read_text(encoding="utf-8")
@@ -1563,11 +1569,10 @@ def test_initializer_read_contract_accepts_in_memory_and_rejects_boundary_loss(
     assert accepted.errors == 0
     assert accepted.passed == 2
     losses = (
-        ("Normalize effective values in memory", "Rewrite the configuration file"),
-        ("do not rewrite borrowed/global configuration on read", "rewrite borrowed/global configuration on read"),
+        ("effective read order to inspect only", "effective read order to rewrite"),
+        ("without creating or rewriting any file", "after rewriting the configuration file"),
+        ("inspection grants no write", "inspection grants a write"),
         ("explicitly selected authorized project configuration", "project configuration"),
-        (f"local `.{ 'agents' if provider == 'codex' else 'claude' }/.agents-mode.yaml`",
-         "borrowed provider overlay"),
     )
     for clause, replacement in losses:
         assert clause in text
@@ -1634,23 +1639,27 @@ def test_current_provider_currency_pins_accept_source_and_reject_protected_drift
 
 
 @pytest.mark.parametrize("provider,validator", zip(("codex", "claude"), VALIDATORS))
-def test_initializer_presets_remain_guarded_by_existing_actions(
+def test_initializer_sparse_writes_remain_guarded_by_existing_actions(
     tmp_path: Path, provider: str, validator: Path,
 ) -> None:
-    adapter = _load(validator, f"initializer_preset_contract_{provider}")
+    adapter = _load(validator, f"initializer_sparse_contract_{provider}")
     runtime = adapter._ENGINE
     layout = runtime.detect_layout(validator, provider, ROOT)
     actions = tuple(
         action for action in runtime._applicable_actions(adapter.ACTIONS, layout)
         if action[0] == "check_contains"
-        and ("init-project exposes power-mode preset" in action[-1]
-             or "init-project correctness-first/power-mode presets raise" in action[-1])
+        and "init-project sparse preference writes" in action[-1]
     )
     assert len(actions) == 3
     text = (ROOT / actions[0][1].removeprefix("@ROOT/")).read_text(encoding="utf-8")
-    candidate = tmp_path / "presets.md"
+    candidate = tmp_path / "selected-preferences.md"
     selected = tuple((action[0], str(candidate), *action[2:]) for action in actions)
-    for content, errors in ((text, 0), (text.replace("review.security: 2", "review.security: 1"), 1)):
+    for content, errors in (
+        (text, 0),
+        (text.replace("If neither mode key changes, leave", "Always rewrite"), 1),
+        (text.replace("Preserve all unrelated bytes", "Normalize the full file"), 1),
+        (text.replace("Init itself does not launch external providers", "Init launches external providers"), 1),
+    ):
         candidate.write_text(content, encoding="utf-8")
         result = runtime.validate_pack(
             script=validator, provider=provider, actions=selected,
@@ -1829,12 +1838,13 @@ def test_scoped_action_registry_keeps_source_only_maintainer_checks_out_of_insta
         "all",
         "dev_repo",
         "dev_repo_nonstandalone",
+        "dev_repo_monorepo",
         "installed",
     )
     source_only_actions = tuple(
         action
         for scope, actions in module.ACTIONS
-        if scope in ("dev_repo", "dev_repo_nonstandalone")
+        if scope in ("dev_repo", "dev_repo_nonstandalone", "dev_repo_monorepo")
         for action in actions
         if module._is_source_only_maintainer_action(action)
     )
@@ -2526,3 +2536,208 @@ def test_current_owner_reuse_actions_cover_current_source_and_installed_scopes(
         assert {scope for scope, _ in selected} == (
             {"all"} if module.PROVIDER == "codex" else {"dev_repo_nonstandalone", "installed"}
         )
+
+
+@pytest.mark.parametrize("validator", VALIDATORS)
+@pytest.mark.parametrize("operation", (
+    "check_agent_run_ledger_contract", "check_arch_layering_slices",
+))
+def test_declared_behavioral_source_gates_are_selected_exactly_once(
+    validator: Path, operation: str,
+) -> None:
+    module = _load(validator, f"behavioral_source_gate_{validator.parent.parent.name}_{operation}")
+    declared = tuple(action for action in module._DECLARED_ACTIONS if action[0] == operation)
+    assert len(declared) == 1
+    selected = tuple(
+        (scope, action) for scope, group in module.ACTIONS
+        for action in group if action[0] == operation
+    )
+    scope = "dev_repo_monorepo" if operation == "check_agent_run_ledger_contract" else "dev_repo"
+    assert selected == ((scope, declared[0]),)
+
+
+@pytest.mark.parametrize("provider,validator", tuple(zip(("codex", "claude"), VALIDATORS)))
+@pytest.mark.parametrize("kind", ("monorepo", "export", "installed"))
+def test_behavioral_source_gate_applicability_uses_detected_layout(
+    tmp_path: Path, provider: str, validator: Path, kind: str,
+) -> None:
+    module = _load(validator, f"behavioral_layout_{provider}_{kind}")
+    extractor = _load(ROOT / "scripts/extract-provider-branch.py", f"gate_export_{provider}_{kind}")
+    root = tmp_path / kind
+    if kind == "installed":
+        files = (
+            {".agents/skills/lead/SKILL.md": "fixture", ".codex/AGENTS.md": "fixture"}
+            if provider == "codex"
+            else {".claude/agents/lead.md": "fixture", ".claude/AGENTS.md": "fixture"}
+        )
+        script = root / (".agents/skills/lead/scripts/validate-skill-pack.py" if provider == "codex"
+                         else ".claude/agents/scripts/validate-skill-pack.py")
+    else:
+        files = {
+            "shared/AGENTS.shared.md": "fixture shared policy",
+            "src.codex/AGENTS.codex.md": "fixture Codex addendum",
+            "src.claude/CLAUDE.md": "fixture Claude entrypoint",
+            "src.codex/skills/lead/SKILL.md": "fixture canonical skill",
+            "src.codex/agents/orchestrarium-role-manifest.json": "{}",
+            "src.codex/skills/lead/scripts/validate-skill-pack.py": "",
+            "src.claude/agents/scripts/validate-skill-pack.py": "",
+        }
+        if kind == "export":
+            files = {path: body for path, body in files.items()
+                     if extractor.include_from_main(path, provider)}
+            assert not extractor.include_from_main("tests/fixtures/agent-run-ledger/example.json", provider)
+        script = root / validator.relative_to(ROOT)
+    for relative, body in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    script.parent.mkdir(parents=True, exist_ok=True)
+    layout = module._ENGINE.detect_layout(script, provider, root)
+    assert layout.root == root.resolve()
+    assert layout.dev_repo is (kind != "installed")
+    if provider == "claude" and kind == "export":
+        assert not layout.standalone  # Canonical body ownership is unchanged.
+        assert layout.skills == root / "src.codex/skills"
+    assert not (root / "tests").exists()  # Missing fixtures must not disable a monorepo gate.
+    selected = tuple(module._ENGINE._applicable_actions(module.ACTIONS, layout))
+    for operation, expected in (
+        ("check_agent_run_ledger_contract", kind == "monorepo"),
+        ("check_arch_layering_slices", kind != "installed"),
+    ):
+        matches = tuple(action for action in selected if action[0] == operation)
+        assert len(matches) == int(expected)
+
+
+@pytest.mark.parametrize("validator", VALIDATORS)
+def test_state_contract_declarations_have_source_scope(validator: Path) -> None:
+    module = _load(validator, f"state_contract_registration_{validator.parent.parent.name}")
+    declarations = module._SOURCE_STATE_CONTRACT_ACTIONS
+    assert len(declarations) == (5 if module.PROVIDER == "codex" else 12)
+    for declaration in declarations:
+        registrations = tuple(scope for scope, group in module.ACTIONS
+                              for action in group if action == declaration)
+        assert registrations == ("dev_repo",), declaration
+
+
+@pytest.mark.parametrize(
+    "skill",
+    [
+        "github-pr-review-bot", "implementation-to-theory", "post-spawn-cleanup",
+        "repo-cleanup", "scientific-software-engineer", "vcpkg-ports-updater", "future-skill",
+    ],
+)
+@pytest.mark.parametrize(
+    ("dev_repo", "owned", "blocked"),
+    [(True, False, True), (False, True, True), (False, False, False)],
+    ids=("source-discovery", "installed-owned", "installed-foreign"),
+)
+def test_codex_skill_metadata_checks_catalog_without_claiming_foreign_skills(
+    tmp_path, skill, dev_repo, owned, blocked,
+):
+    from dataclasses import replace
+
+    module = _load(VALIDATORS[0], "codex_metadata_catalog")
+    runtime = module._ENGINE
+    layout = runtime.detect_layout(VALIDATORS[0], "codex", ROOT)
+    agents_text = f"## Common skills\n\n- ${skill}\n" if owned else ""
+    layout = replace(layout, skills=tmp_path, agents_text=agents_text, dev_repo=dev_repo)
+    validator = runtime.Validator(layout)
+    folder = tmp_path / skill
+    folder.mkdir()
+    (folder / "SKILL.md").write_text(
+        f"---\nname: {skill}\ndescription: |\n  multiline.\n---\n", encoding="utf-8"
+    )
+    actions = tuple(runtime._applicable_actions(module.ACTIONS, layout))
+    for action in actions:
+        if action[:2] == ("direct", "codex_skill_metadata"):
+            runtime._direct(
+                validator, *action[1:], maintainer_only_shared_reference_names=frozenset(),
+                utility_skills=frozenset(), curated_role_skills=frozenset(),
+                common_skill_pin_names=frozenset(),
+            )
+    assert validator.checks == 4
+    assert (validator.errors > 0) == blocked
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        ROOT / "src.codex/skills/second-opinion/SKILL.md",
+        ROOT / "src.claude/commands/agents-second-opinion.md",
+    ),
+)
+def test_consultant_reporting_uses_memory_only_normalization(path):
+    text = path.read_text(encoding="utf-8")
+    assert "Otherwise rewrite the effective file" not in text
+    assert "When reading, creating, or rewriting" not in text
+    assert "normalize it to the current canonical format in the same scope" not in text
+    assert "Do not change configuration files when reporting status." in text
+    assert "each key resolves to the highest-priority layer that defines it" in text
+
+
+@pytest.mark.parametrize(
+    "frontmatter",
+    [
+        "---\nname: fixture\ndescription: false\n---\n",
+        "---\nname: fixture\ndescription: null\n---\n",
+        "---\nname: fixture\ndescription: [x]\n---\n",
+        "---\nname: fixture\ndescription: {x: y}\n---\n",
+        "---\nname: fixture\ndescription: 24\n---\n",
+        "---\nname: fixture\ndescription: whitespace --- fake fence\n",
+        "---\nname: fixture\ndescription: real\n--- trailing text\n",
+        "--- title\nname: fixture\ndescription: real\n---\n",
+        "---\nname: fixture\ndescription: first\ndescription: second\n---\n",
+    ],
+)
+def test_skill_metadata_requires_exact_fences_and_string_fields(tmp_path, frontmatter):
+    module = _load(VALIDATORS[0], "codex_bad_metadata")
+    path = tmp_path / "SKILL.md"
+    path.write_text(frontmatter, encoding="utf-8")
+    assert not module._ENGINE.skill_frontmatter_valid(path, "fixture")
+
+
+def test_codex_description_budget_uses_the_fenced_quoted_value(tmp_path):
+    from dataclasses import replace
+
+    module = _load(VALIDATORS[0], "codex_quoted_metadata")
+    runtime = module._ENGINE
+    layout = runtime.detect_layout(VALIDATORS[0], "codex", ROOT)
+    folder = tmp_path / "fixture"
+    folder.mkdir()
+    body = folder / "SKILL.md"
+    body.write_text(
+        '---\nname: fixture\ndescription: "alpha --- beta" # comment\n---\n'
+        'description: not metadata\n', encoding="utf-8"
+    )
+    assert runtime.skill_frontmatter_valid(body, "fixture")
+    validator = runtime.Validator(replace(layout, skills=tmp_path))
+    validator.check_skill_frontmatter_yaml("fixture")
+    validator.check_skill_description_budget("14", "14", "fixture")
+    assert validator.checks == 4
+    assert validator.errors == 0
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"---\nname: fixture\ndescription:no separator\n---\n",
+        b"---\nname: fixture\ndescription: valid\nlicense: [\n---\n",
+        b"---\nname: fixture\vdescription: valid\n---\n",
+        b"---\nname: fixture\ndescription: broken \xff utf-8\n---\n",
+    ],
+)
+def test_skill_metadata_rejects_malformed_physical_bytes(tmp_path, content):
+    module = _load(VALIDATORS[0], "codex_malformed_metadata_bytes")
+    path = tmp_path / "SKILL.md"
+    path.write_bytes(content)
+    assert not module._ENGINE.skill_frontmatter_valid(path, "fixture")
+
+
+def test_skill_metadata_accepts_crlf_and_optional_metadata(tmp_path):
+    module = _load(VALIDATORS[0], "codex_optional_metadata")
+    path = tmp_path / "SKILL.md"
+    path.write_bytes(
+        b'---\r\nname: fixture\r\ndescription: "description"\r\n'
+        b'license: Apache-2.0\r\nversion: 2\r\nmetadata: {"label": "probe"}\r\n---\r\n'
+    )
+    assert module._ENGINE.skill_frontmatter_valid(path, "fixture")

@@ -29,7 +29,7 @@ description: "Review or QA run on external CLI provider; read-only."
 - Resolve config, provider, model/profile, workdir, fallback, and transport through the shared external-dispatch owner; consume effective values in memory and do not rewrite configuration on a routing read. Persisted normalization belongs only to an authorized install/configuration write.
 - Honor `reserve` only as a supplemental review or QA candidate after primary `claude` / `codex`; it is not a primary-Claude retry and never grants edit or implementation ownership.
 - Keep explicit-only and unavailable providers out of shipped and repo-local `auto` profiles.
-- Never select `gpt-6.1-sol-ultra` on this subagent lane; it spawns subagents and must not be shipped here.
+- Never select `gpt-6.2-sol-ultra` on this subagent lane; it spawns subagents and must not be shipped here.
 - For substantive prompts, prefer the working approved wrapper and its file/stdin delivery. If a helper is defective, use only the declared owner-equivalent route under shared Assistance and external-dispatch when every selected provider/capability, input, creator-resource, real-terminal, independent-receiving, and provenance guarantee remains satisfied. A helper failure alone does not establish provider unavailability; report any unmet guarantee without automatic fallback, internal relay, host-denial bypass, or fabricated wrapper frame.
 - If the selected primary Claude CLI path fails, do not silently convert that same run to the wrapper. A review lane may later collect `reserve` as a separate profile candidate when enabled; otherwise stop with the provider reason.
 - This adapter is a direct external launch contract. Do not spawn it as an internal specialist or helper; the orchestrator must launch the selected external provider directly or fail closed.
@@ -47,6 +47,7 @@ description: "Review or QA run on external CLI provider; read-only."
 
 - Return one external review report containing findings, risk surfaces, the gate decision, and a provenance header. Every finding carries a file:line anchor, reproduction command or falsifying probe, and one of the shared evidence categories or `ASSUMPTION (UNVERIFIED)`; an approval names every surface actually examined.
 - The returned verdict is input evidence for the orchestrating session, not stage closure: the orchestrator spot-checks load-bearing findings or the no-findings claim before pinning the gate.
+- Bind findings and no-findings claims to the frozen revision reviewed. For each material protected claim or accepted criterion in the assigned slice, mark it checked, not checked, or unverified and cite the evidence or limitation; do not treat silence as coverage.
 - For the provenance header, use the canonical execution record in `../lead/external-dispatch.md` verbatim instead of defining local fields.
 
 ## Gate
@@ -68,3 +69,7 @@ description: "Review or QA run on external CLI provider; read-only."
 - Do not edit files.
 - Do not do implementation, research, or design work.
 - Do not become a consultant substitute or a shadow reviewer for unrelated domains.
+
+Managed adapters supply actual assigned-role provenance and consume `--user-approved-launch` locally before `--`; that flag is only the caller projection of genuine exact-launch approval. Optional `--astra-task-authorization-json` instead carries a matching genuine Astra 6.2 High/Extra high task authorization; caller-checked scope, revocation and limits still bind before covered repeats, and Max never uses it. `provider_prompt.launch` and the native selector share the pure `model_routing/launch_policy.py` rule. A complete selected logical package includes that nested module, including relocated transports; a FILE link on R/P does not move its companion namespace to the referent directory. Missing/broken mandatory support fails truthfully before effects. Prefer completing the qualified package; declared same-owner Assistance with all canonical rule, scope, genuine permission where needed, resources and readback guarantees may be selected by Root without a new ordinary permission loop. There is no catch-and-allow, raw-flag authority or automatic retry. Roleless direct-user compatibility does not permit managed callers to omit their assigned profession.
+
+Public launchers retain their selected lexical script argument before importing P and pass the call-local `runtime_namespace` through `launch`/`kimi_main` to the shared rule. P correlates the actual runtime participant with that selected namespace. Direct P library calls without a launcher use the selected P module origin, never process argv0 or cwd. There is no provider/user namespace flag, search or physical-parent fallback; genuine task authority, package/native currentness and applicable exact-attempt or task-scoped user receiving remain separate.

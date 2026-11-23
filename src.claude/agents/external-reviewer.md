@@ -28,7 +28,7 @@ description: "External reviewer: run eligible review or QA externally."
 - Honor the contract-resolved `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, and `externalOpinionCounts`; this role does not reimplement their resolution.
 - Resolve config, provider, model/profile, workdir, fallback, and transport through the shared external-dispatch owner; consume effective values in memory and do not rewrite configuration on a routing read. Persisted normalization belongs only to an authorized install/configuration write.
 - Honor `reserve` only as a supplemental review or QA candidate after primary `claude` / `codex`; it is not a primary-Claude retry and never grants edit or implementation ownership.
-- Never select `gpt-6.1-sol-ultra` on this subagent lane; it spawns subagents and must not be shipped here.
+- Never select `gpt-6.2-sol-ultra` on this subagent lane; it spawns subagents and must not be shipped here.
 - For substantive prompts, prefer the working approved wrapper and its file/stdin delivery. If a helper is defective, use only the declared owner-equivalent route under shared Assistance and external-dispatch when every selected provider/capability, input, creator-resource, real-terminal, independent-receiving, and provenance guarantee remains satisfied. A helper failure alone does not establish provider unavailability; report any unmet guarantee without automatic fallback, internal relay, host-denial bypass, or fabricated wrapper frame.
 - Treat `reserve` as a supplemental reviewer candidate, not a retry for primary Claude and not permission for the reviewer adapter to edit files or take implementation ownership.
 - This adapter is a direct external launch contract. Do not spawn it as an internal Claude agent/helper host for another provider.
@@ -46,6 +46,8 @@ description: "External reviewer: run eligible review or QA externally."
 - Return one review artifact containing the reviewed surfaces, findings or approval, residual risk, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`. Every finding carries a file:line anchor, reproduction command or falsifying probe, and one of the shared evidence categories or `ASSUMPTION (UNVERIFIED)`; an approval names every surface actually examined.
 - If provenance is included inline, use the execution-record fields from `contracts/external-dispatch.md` verbatim instead of inventing a shorter custom header.
 - The returned verdict is input evidence for the orchestrating session, not stage closure: the orchestrator spot-checks load-bearing findings or the no-findings claim before pinning the gate.
+
+- Bind findings and no-findings claims to the frozen revision reviewed. For each material protected claim or accepted criterion in the assigned slice, mark it checked, not checked, or unverified and cite the evidence or limitation; do not treat silence as coverage.
 
 ## Working rules
 

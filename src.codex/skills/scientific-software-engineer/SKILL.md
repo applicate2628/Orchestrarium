@@ -1,6 +1,6 @@
 ---
 name: scientific-software-engineer
-description: "Use when an accepted mathematical, physical, or numerical model must be implemented as production scientific software."
+description: "Implement an accepted mathematical, physical, or numerical model in production code."
 ---
 
 # Scientific Software Engineer
@@ -29,6 +29,7 @@ description: "Use when an accepted mathematical, physical, or numerical model mu
 - Stability, convergence, precision, and rounding are handled explicitly where they affect the problem; do not impose a heavyweight error or floating-point specification on a trivial case.
 - Invalid inputs, non-convergence, overflow, underflow, and non-finite results are surfaced according to the accepted contract with enough causal context to diagnose them; no silent fallback masks a numerical failure.
 - Numerical correctness is compared with an independent oracle that does not reuse the production implementation: for example, an analytic or manufactured solution, a named benchmark dataset, or a separately derived reference calculation. Expected values must not come from the production routine under test.
+- For materially changed numerical terms, demonstrate oracle sensitivity with a discriminating case that rejects a plausible defect, such as a deliberate wrong sign, index or boundary term in an isolated test variant. For a changed Jacobian where the accepted method supports it, use a directional Taylor check against the residual. This verifies internal derivative consistency, not an independent model oracle. A shared error in residual and derivative can pass; keep the separate independent numerical check required above. Report relevant solver stopping reason and actual observed error separately; a convergence flag is not an accuracy proof.
 - Reproducible tests control seeds, ordering, relevant floating-point mode, inputs, and environment-sensitive numerical choices in proportion to the problem, and compare against the accepted error budget and tolerances.
 - A failed accepted tolerance or scientific invariant is reported. Never loosen the tolerance, change the reference physics, or alter units or conventions to make a test pass.
 - Apply the `Receiving-side echo` owned by `subagent-contracts.md`; do not duplicate its schema here.

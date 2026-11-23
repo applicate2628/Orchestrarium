@@ -9,7 +9,7 @@ Apply this command's flow automatically when the user's request matches any of:
 - performance budget or SLA breach: "this endpoint is over the latency budget", "we're missing the SLA", "the p99 regressed"
 - explicit slowness with a target or constraint: "reduce p99 below 200ms", "this query takes 30s, the budget is 1s", "startup must fit in 2 seconds"
 - throughput or resource pressure tied to a metric: "throughput dropped", "memory keeps climbing", "CPU is pegged under load"
-- performance issue filename reference: user mentions a `work-items/performance/<file>` slug
+- performance defect reference: the user identifies a record in the configured bug registry whose evidence describes a measurable performance problem
 
 The user does not need to type `/agents-perf` for this flow to fire. Apply it transparently, announce the routing decision in your first response ("I'm routing this through the performance flow because the report names a measurable budget/SLA breach"), and let the user redirect if the auto-routing was wrong.
 
@@ -19,7 +19,7 @@ The user does not need to type `/agents-perf` for this flow to fire. Apply it tr
 
 1. **Get the issue.** Check `$ARGUMENTS`:
    - If a description or file path is given, use that
-   - If empty, check `work-items/performance/` for files with `status: open`. If open issues exist, list them (severity, filename, metric, budget vs actual) and ask the user to pick one or describe a new issue.
+   - If empty, read current records from the configured bug registry (default `work-items/bugs/`). List only performance defects identified by their recorded Metric evidence (severity, filename, budget vs actual), then ask the user to pick one or describe a new issue.
    - If no open issues and no arguments, ask the user to describe the performance problem.
 
 2. **Analyze.** Invoke **Performance engineer** (Agent tool, `subagent_type: performance-engineer`):
@@ -58,7 +58,7 @@ The user does not need to type `/agents-perf` for this flow to fire. Apply it tr
 ## Rules
 
 - **Every stage MUST be invoked via the Agent tool** with the specified `subagent_type`. Do not role-play specialists inline.
-- When fixing a recorded performance issue, preserve the configured bug registry's schema and statuses owned by its canonical QA contract. Require QA confirmation, `$performance-reviewer` confirmation and user approval before proposing a fix disposition; an unresolved `REVISE` keeps the bug open. The lifecycle owner alone applies the authorized disposition and terminalization/archive transaction. Preserve accepted-tradeoff reasons and the surviving identity for a duplicate under that same contract.
+- When fixing a recorded performance issue, preserve the configured bug registry's schema and statuses owned by the shared lifecycle contract. Require QA confirmation, `$performance-reviewer` confirmation and user approval before proposing a fix disposition; an unresolved `REVISE` leaves the current record unresolved. The lifecycle owner alone applies the authorized disposition and terminalization/archive transaction. Preserve accepted-tradeoff reasons and the surviving identity for a duplicate under that same contract.
 - **Save recovery state** between stages in `work-items/active/<date>-<slug>/` per the recovery rule in CLAUDE.md: `status.md` + the accepted artifact from each completed stage.
 - Follow evidence-based completion: show measured results, not estimates.
 - Confirm the bottleneck before optimizing — do not guess.

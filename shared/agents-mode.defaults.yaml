@@ -62,11 +62,7 @@ externalCodexWorkdirMode: neutral  # allowed: neutral | project; default: neutra
 externalClaudeWorkdirMode: neutral  # allowed: neutral | project; default: neutral
 externalModelMode: runtime-default  # allowed: runtime-default | pinned-top-pro; default: runtime-default
 # externalCodexProfile notes: matches Claude opus-xhigh as the shipped best-effort default; `default` inherits externalModelMode;
-# `gpt-6.1-sol-xhigh` pins model = gpt-6.1-sol, reasoning_effort = xhigh; `gpt-6.1-sol-max` pins model = gpt-6.1-sol, reasoning_effort = max,
-# for higher-complexity/hard lanes (NOT gpt-6.1-sol-ultra — ultra spawns subagents itself and must never be shipped on a subagent lane);
-# explicit `gpt-5.6-sol-xhigh` and `gpt-5.6-sol-max` values retain their named model and effort for 1.x compatibility;
-# `gpt-5.6-terra` pins model = gpt-5.6-terra, reasoning_effort = high and is a balanced reasoning option — a distinct model
-# (not an effort suffix on gpt-5.6-sol); compare cost per verified result by task, model, and effort rather than assuming a static price or speed advantage; it remains materially
-# more capable than a volume tier. Verify against the installed runtime before reporting it as used; its output stays
-# review-gated like any external lane (it is a real second-choice reasoning model, not a bounded mechanical-overflow path)
-externalCodexProfile: gpt-6.1-sol-xhigh  # allowed: default | gpt-6.1-sol-high | gpt-6.1-sol-xhigh | gpt-6.1-sol-max | gpt-6-sol-high | gpt-6-sol-xhigh | gpt-6-sol-max | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-terra; default: gpt-6.1-sol-xhigh
+# `gpt-6.2-sol-xhigh` pins model = gpt-6.2-sol, reasoning_effort = xhigh; `gpt-6.2-sol-max` pins model = gpt-6.2-sol, reasoning_effort = max,
+# for higher-complexity/hard lanes (NOT gpt-6.2-sol-ultra — ultra spawns subagents itself and must never be shipped on a subagent lane);
+# Only the latest confirmed version of each admitted Codex family is selectable: GPT-6 Luna, GPT-6.1 Terra, GPT-6.2 Sol and GPT-6.2 Astra. Historical model/profile values are not executable compatibility routes; preserve existing user bytes and report a retired selection rather than silently substituting another model. Current role/task membership, host capability and launch approvals still apply.
+externalCodexProfile: gpt-6.2-sol-xhigh  # allowed: default | gpt-6.2-sol-high | gpt-6.2-sol-xhigh | gpt-6.2-sol-max; default: gpt-6.2-sol-xhigh

@@ -42,6 +42,73 @@ The orchestrator drives the loop to convergence **without a human gate per round
 
 For metadata-only reconciliation of a completed scout result, use `amend-scout-reconciliation --state <state> --operation-id <id> --round <current> --attempt-id <scout> --artifact-revision <revision> --metadata-file <json>`. The request contains exactly `version:1`, `scout_result_sha256` (lowercase SHA-256 of the entire original complete scout block under sorted-key compact JSON), required `expected_head` (explicit null initially, otherwise current operation ID), sorted complete `links` with `finding_index`/`reconciliation_index` into the immutable original arrays, and nonempty Root semantic comparison evidence inline or by accepted reference. Each genuine correction appends one immutable typed operation and advances `scout_reconciliation_amendment.operation_id`; superseded operations remain history and exact old replay never moves the head. Only the latest complete round's direct complete scout in a running loop is amendable. The same effective projection drives close and retained-origin validation. Original findings/dispositions, reviewed artifact, judgments, attempts, retries and caps do not change; this is no new review round or quality vote. Root verifies actual correspondence; evidence shape alone is not semantic proof. Existing frozen-artifact checks apply without a live-source or owner-selfhash requirement. The canonical write owner compares the prepared and committed serialized values before success; uncertainty preserves actual state for readback/replay. Older owners intentionally reject the optional round field; synchronize capable owner/readers before use. Actual helper execution alone emits the helper event. Declared manual-equivalent execution preserves the same logical transaction and uses `ORCHESTRARIUM_REVIEW_LOOP_STATE_V2_OWNER_EQUIVALENT_MANUAL`, `execution_path=owner-equivalent-manual` and truthful source evidence, never a fabricated helper receipt.
 
+
+### Receiving later evidence without rewriting a completed result
+
+A completed result is immutable. Do not invent an execution failure, edit an
+unchanged artifact to manufacture another revision, or overwrite a prior REVISE.
+
+- An originally empty scout reconciliation with nonempty findings can use the
+  existing `amend-scout-reconciliation` operation with metadata `version: 2`.
+  Keep the version-1 identity, predecessor, complete sorted links and evidence
+  fields, and add `reconciliation` containing the dispositions actually received
+  now. Links index these newly received rows. Version 2 is not allowed to replace
+  existing original disposition rows. The original scout block stays unchanged;
+  the immutable amendment supplies the effective view. Root must verify the
+  factual dispositions; structure and evidence text alone do not prove them.
+- A genuine recorded-equivalent review closing the same frozen verdict can use
+  `receive-verdict-closure --state <state> --operation-id <id> --round <n>
+  --lane <surgical|deep> --attempt-id <original> --artifact-revision <revision>
+  --metadata-file <json>`. Its version-2 metadata contains exactly:
+  `version`, `original_result_sha256`, `expected_head`, `work_item`,
+  `target_run_id`, `closer_run_id`, `ledger_lane`, `evidence`, and `source_binding`.
+  The digest pins the entire original completed lane block using sorted-key
+  compact JSON. The work-item path is repository-relative. The predecessor is
+  null initially, otherwise the current closure operation ID.
+- Root truthfully correlates the original loop obligation with the canonical
+  ledger target and actual replacement. The existing work-item closure owner
+  qualifies the current PASS relation and reviewer authority; a bare
+  `closesRunIds` link or helper label is insufficient. The owner must positively
+  identify this exact discharged target/closer pair after current qualification
+  and invalidation handling. Unrelated historical row diagnostics remain visible
+  to ledger audit but do not veto this selected receiving operation; incomplete
+  ledger parsing/projection, ambiguous selected identities, invalid selected
+  launch bindings, missing authority and stale evidence still refuse receiving.
+  Absence from an open-obligation list is never positive closure evidence. The version-1
+  `source_binding` is a current Root receiving record: it binds the exact loop,
+  round, lane, attempt and frozen revision; actual reviewed role; original
+  result, target summary and reviewer summary source anchors; explicit evidence
+  limitations; and the existing version-2 semantic closure proof. The original
+  result anchor selects the actual original result JSON and must match the
+  immutable completed lane. Complete original blocker coverage, actual report
+  bytes, role, scope, angle and independent-reviewer lineage are checked through
+  the existing work-item source reader. A bare PASS does not discharge a finding.
+  Root still owns the factual semantic comparison of actual retained evidence.
+  Legacy terminal rows need not invent historical revision or angle fields;
+  exposed contradictions are rejected and the current proof binds the same
+  frozen subject. Different opaque scope descriptions require honest semantic
+  receiving, not fabricated equal historical fields.
+- Summary anchors pin either the canonical report bytes or a verified current
+  content-addressed copy under the work item's existing
+  `review-artifact-custody/<sha256>` directory. Initial receiving verifies that
+  such a copy equals the actual canonical report. Later unrelated changes to the
+  live report do not invalidate that verified copy, but changing the copy does.
+  Live-report anchors remain sensitive to changes in that report. A capture made
+  now is not a recovered historical input transcript. Preserve evidence limits
+  and genuine earlier source-contract promises; never manufacture a commission,
+  a six-field result, or a second ledger closer to qualify legacy evidence.
+- Original results, attempts, failure edges and ledger rows remain unchanged.
+  Each distinct received replacement consumes the existing per-lane retry/review
+  budget alongside failure retries. Exact operation replay has no new effect.
+  Other lanes, scout findings and execution failures retain their own obligations.
+- Convergence and retained-lane admission use the effective verdict and recheck
+  the selected closure against its current ledger owner and bound evidence bytes. Terminal validation of
+  a converged closure-backed loop does the same. Structural history remains
+  readable separately; it is not current execution or publication authority.
+  The optional closure fields require capable readers before use. No new
+  independent review, model permission or publication permission is created.
+
+
 **Runaway guard:** cap at **N = 3** rounds; if not converged by round 3, stop and escalate the deadlock. Escalate EARLY if the same blocker survives unchanged across two rounds.
 
 ### Exact-delta correction rounds
@@ -64,6 +131,8 @@ Against false convergence (angles agreeing on a wrong-but-plausible result) and 
 8. **Fail-closed aggregation.** A missing/null sub-verdict or findings payload is NOT-clean. An aggregation or gate remains `REVISE` and exits non-zero until every expected lane has substantive output and every recorded failure is reconciled.
 
 ## review-loop-state ledger (structural backstop)
+Stopping before execution is distinct from finishing a review. For a latest admitted round whose fresh attempts were never dispatched, Root may use the existing `close --outcome drift|deadlock` with `--round`, `--artifact-revision` and a nonempty `--reason`. The owner verifies the exact admission and absence of recorded starts, results, failures or retries under its existing lock, then appends a bound `unstarted` close receipt without changing rounds, attempts, retained results, snapshots or the round budget. Root remains responsible for actual no-dispatch evidence; the state owner does not observe out-of-band execution. Partial execution still requires its existing settlement. This stop never supplies a verdict, discharges prior review obligations or grants convergence, implementation or publication authority. Previously readable schema-V2 records remain readable without backfill; missing new stop evidence is never proof that the new close operation ran. Existing completed-round closure remains compatible.
+
 The governed formal state path uses one serialized owner transaction, normally through its runtime helper or declared owner-equivalent execution under the shared assistance contract. The transaction freezes the artifact, atomically persists and reads back the admitted round. Actual helper execution then emits its committed receipt carrying fresh attempt IDs and the round artifact revision; a manual equivalent records real transaction provenance and the same canonical identity without impersonating that helper receipt. A correction-round receipt may also carry exact-delta coverage that binds the affected angles to the immediately previous round and revision; retained-angle provenance remains in the committed state. This binding is procedural, not an executable host-enforced dispatch gate. Provider bindings may add bounded dispatch-time observation, but the helper itself does not observe bypass; manual-equivalent transitions preserve the same data guarantees without claiming helper execution; unadmitted direct/ad-hoc launches remain outside its guarantees. The historical observer gap is fixed without expanding the helper's guarantees. Personal/operator-owned reviews remain outside this state path.
 
 The state owner records pinned objective/scope/runtime-root anchors, ordered idempotent operations, and per-round phase, diff, frozen artifact identity, fresh attempts, retained references when applicable, failures, results, and evidence. Each admitted lane's failures form one append-only immediate-successor chain (`A → B → C`) ending at its current attempt: it has one root and tip, no branch, merge, cycle, cross-lane reuse, dangling/disconnected node, or historical unresolved failure, and at most three retry edges. Every result or failed attempt asserts the owning round's identity. Retry keeps that identity; a corrective edit creates a new round and a newly frozen identity. Missing outputs, unresolved failures, mismatched identity, changed snapshots, conflicting operation replay, or failed commit/read-back remain non-clean. A stable lock file carries an operating-system exclusive kernel lock; file presence is not ownership. Graceful cancellation cleans owned uncommitted resources. Hard termination cannot clean synchronously; the next lock-owning invocation reconciles only unreferenced engine-owned resources. Invalid or uncertain state returns `RLSTATE_RECOVERY_REQUIRED` without deleting candidate evidence. A repository-only structural validator exposes the same schema for development and continuous integration, but does not own a second copy of the rules and still cannot judge semantic soundness. The runtime-root anchor and root-proven question retain their compatibility names for verified premises; those names do not assert runtime measurement.
@@ -86,9 +155,10 @@ green mechanical validator never closes it** (the always-on spine carries this c
 dispositions are the only alternatives: `WAIVED:user` (user-authorized, evidence-carried; never legal
 against protected or unclassified findings) and `WAIVED:security-reviewer` (completed, exact
 target-bound `manual-check` evidence, with `role` or `assignedRole` equal to `security-reviewer`). For
-TRACKED work-items the relation is mechanical: the wrapper-owner terminal-ledger protocol records
-launch+terminal events, the closer names the exact `closesRunIds`, and `check-work-items-state` fails on open
-obligations. Replacement-reviewer equivalence must preserve: the review scope, independence from the
+TRACKED work-items the selected ledger operation records actual launch+terminal events and names the
+exact `closesRunIds` for obligations it discharges. Ordinary task close separately assesses current
+required review obligations; historical bookkeeping alone does not establish a current obligation.
+Replacement-reviewer equivalence must preserve: the review scope, independence from the
 author, the same evidence target/version, and an equal-or-stronger declared tier — recorded in
 structured fields, not prose. Reviews outside any work-item remain governed by the spine clause alone
 (declared residual).
@@ -105,16 +175,17 @@ that edit makes a NEW snapshot and a NEW round; it never mutates what the curren
 Full lesson: `work-items/lessons/2026-07-17-review-a-frozen-snapshot-not-a-live-tree.md`.
 
 **Ledger read-back before reporting a verdict (2026-07-17, live incident).** On a tracked item, a
-lane's verdict may be reported or acted on ONLY after reading the ledger back and confirming the
-terminal event exists for that launch `runId`. The wrapper result's `resultText` is evidence of what the
+lane's accepted verdict requires actual terminal acceptance and canonical settlement/readback for
+the selected operation. For a wrapper ledger operation, confirm the terminal event for that launch
+`runId`. The wrapper result's `resultText` is evidence of what the
 reviewer said, never evidence that the obligation moved. This is the polling-anchor discipline
 applied to closure: anchor on the authoritative store, not on a self-derived signal. The incident
 that forced the rule: a validator defect rejected terminal events whose artifact was a repository
 file, the wrapper only WARNed, and TWO real `PASS` verdicts were reported to the operator from prose
 while the ledger held nothing (`work-items/bugs/2026-07-17-validator-artifact-workitem-relative-only.md`).
 
-**Close every open runId of the lane, not just the latest.** Each round's `REVISE` is its own
-obligation, so a lane that went `REVISE → fix → REVISE → fix → PASS` needs the final closer to carry
-`closesRunIds` for EVERY still-open runId of that lane. Closing only the most recent one silently
-leaves the earlier obligations open — the checker will say so at the gate, which is the backstop, not
-the plan.
+**Discharge current review obligations, not just the latest finding.** A commissioned loop must
+resolve each finding still relevant to its current accepted artifact through the required independent
+review. When an explicit ledger closer discharges multiple open events, it names the exact targets
+under that operation's contract. Old bookkeeping alone does not establish current relevance or create
+a new verdict; preserve the historical events as recorded.

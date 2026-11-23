@@ -1,20 +1,21 @@
 # Orche delivery and later native operations
 
-First qualify and tag the standalone pre-SDK release; integrate optional SDK
-execution next, then qualify and migrate native operations separately:
+The [current product plan](https://github.com/applicate2628/Orchestrarium/blob/6716ff450c7ec5ff684e59c464a767019bba09dd/docs/orchestrarium-2.0-plan.md#current-delivery-order-and-completed-work) starts from the
+standalone tagged baseline. The selected independent Rust scanner release comes
+before software development kit (SDK) delivery. SDK qualification can run in
+parallel, and channel qualification has its own acceptance evidence.
 
 - [Bundled Python and thin delivery channels](npm-distribution-project.md) owns
   one release payload for PowerShell, POSIX and optional npm distribution.
 - [Native operations in Rust](https://github.com/applicate2628/Orchestrarium/pull/21)
-  remains a later operation-by-operation replacement, not a delivery prerequisite.
+  owns the selected scanner release and later qualified operation-by-operation
+  migration.
 
 The linked delivery document owns the requirements; do not duplicate installation
 policy in channel wrappers. [PR18](https://github.com/applicate2628/Orchestrarium/pull/18) records the historical
 SDK design; [PR19](https://github.com/applicate2628/Orchestrarium/pull/19) owns
-current SDK implementation and qualification. The product release roadmap is in
-[PR13](https://github.com/applicate2628/Orchestrarium/pull/13).
-This index neither activates a runtime nor claims that those PRs are merged.
-The earlier manual-trust documentation/test correction remains unchanged.
+current SDK implementation and qualification. The
+[installer guide](../INSTALL.md) governs manual hook trust.
 
 ## Terms and Abbreviations
 

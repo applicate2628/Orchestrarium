@@ -5,7 +5,7 @@
 | Surface | Permitted role |
 |---|---|
 | Port's canonical project repository or official vendor release channel | Source/version/ref authority |
-| Immutable release tag or commit/checkin from that upstream | Selected revision |
+| Verified immutable release identity or exact commit/checkin from that upstream | Selected revision |
 | Archive fetched from that upstream with recorded digest | Build input |
 | Builtin vcpkg checkout and `microsoft/vcpkg` history | Comparison, packaging ideas, absorbed-fix evidence only |
 | Mirrors, forks, copied builtin ports | Never source authority unless the repository explicitly records an exception |
@@ -29,7 +29,7 @@ Every pre-existing local patch, replacement, option, feature, version field, and
 - Preserve the port's established version field and scheme unless an accepted migration says otherwise.
 - Pin an immutable upstream identity; moving branches and symbolic `latest` paths are comparison inputs, not build pins.
 - Record the selected archive digest from the actual source channel.
-- Prove the new manifest version is strictly ordered above the previous overlay version under vcpkg semantics.
+- For a comparable upstream version bump, verify ordering and reset `port-version` to zero. For a packaging-only change with the same upstream version, increment `port-version` instead. Treat different `version-string` values and version schemes as incomparable; prove the intended resolver selection against project policy rather than inventing an ordering. See the [vcpkg versioning reference](https://learn.microsoft.com/en-us/vcpkg/users/versioning).
 - Keep manifest features/default-features/supports/license contracts unless the upstream change and admitted scope require a named revision.
 
 ## Patch and anchor validation
@@ -44,9 +44,9 @@ Every pre-existing local patch, replacement, option, feature, version field, and
 
 | Change owner | Minimum evidence |
 |---|---|
-| Manifest/source-only, no local compatibility delta | Parse/schema, source digest, version ordering, overlay resolution, smallest targeted build when admitted |
+| Manifest/source-only, no local compatibility delta | Parse/schema, source digest, version transition, overlay resolution, smallest targeted build when admitted |
 | One compiler/platform-specific delta | Static contract plus targeted affected lane and installed/receiver oracle |
-| Common portfile/helper or feature contract | Every affected compiler/platform family named by repository ownership; do not extrapolate one lane |
+| Common portfile/helper or feature contract | Every affected compiler/platform family named by repository ownership; for a changed export or feature contract, name a receiving consumer and the relevant default/minimal and affected feature selections for the separately admitted build gate; do not extrapolate one lane |
 | Patch/anchor refresh | Ordered clean-tree application plus actual configure/build evidence that the fix executed |
 | Overlay removal or owner move | Resolution proves the intended replacement wins; prior consumers and affected lanes remain valid |
 
@@ -54,12 +54,12 @@ An exit-zero already-installed/no-op result is not proof of the new source. Runt
 
 ## Stop conditions
 
-Return `REVISE` without widening scope when official-upstream identity is ambiguous, digest/version ordering is unproved, a patch/anchor drifts, a local delta is `UNKNOWN`, overlay resolution chooses the wrong owner, or an affected runtime oracle fails. Return `BLOCKED` only for an external prerequisite or unresolved authority conflict.
+Return `REVISE` without widening scope when official-upstream identity is ambiguous, digest/version transition or resolver choice is unproved, a patch/anchor drifts, a local delta is `UNKNOWN`, overlay resolution chooses the wrong owner, or an affected runtime oracle fails. Return `BLOCKED` only for an external prerequisite or unresolved authority conflict.
 
 ## Terms and Abbreviations
 
 - `digest`: a cryptographic content identifier recorded for the selected source archive.
-- `immutable revision`: a fixed release tag or commit that cannot move after selection.
+- `immutable revision`: a commit or other release identity the source channel demonstrably makes immutable; a release tag alone is not proof of immutability.
 - `overlay`: a repository-owned port definition that overrides or supplements builtin vcpkg ports.
 - `portfile`: the vcpkg build recipe for one port.
 - `runtime oracle`: the admitted observation that proves the receiving-side behavior.

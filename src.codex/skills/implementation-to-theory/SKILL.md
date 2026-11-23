@@ -1,6 +1,6 @@
 ---
 name: implementation-to-theory
-description: Write or improve an engineering explanation that reconstructs the theory, numerical algorithms, and derivation behind existing scientific code, tracing every equation to implementation. Use for requests such as "от реализации к теории", "объясни физику реализации", or a step-by-step mathematical guide with technical illustrations. Not for changing solver behavior or generic API documentation.
+description: "Derive and explain scientific code's mathematics, physics, and algorithms from implementation."
 ---
 
 # От реализации к теории

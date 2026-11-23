@@ -22,11 +22,3 @@ def target_for(label: str, script_dir: Path) -> GateTarget:
         script_dir / "git_push_gate_preflight.py",
         script_dir / "hook_common.py",
     )
-
-
-def derive_pr_grant(policy, entries: list[dict], repository_workdir: str):
-    """Drive the real reducer directly for semantic unit assertions."""
-    reducer = policy._PrGrantReducer(repository_workdir)
-    for entry in entries:
-        reducer.consume(entry)
-    return reducer.finish()
