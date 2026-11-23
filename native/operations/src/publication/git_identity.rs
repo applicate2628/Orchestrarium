@@ -1,5 +1,5 @@
 //! Verify the type-prefixed Git content id before exposing a complete frame.
-use std::io::BufRead;
+use std::io::{self, BufRead};
 
 use crate::git_batch::{Frame, FrameError, Limits, ObjectKind, read_frame};
 
@@ -53,11 +53,29 @@ pub fn read_verified_object(
     expected_type: Option<ObjectKind>,
     limits: &Limits,
 ) -> Result<VerifiedObject, VerifiedReadError> {
-    let hash_kind = format.into();
-    let id = gix_hash::ObjectId::from_hex(requested_hex)
+    let id = request_id(format, requested_hex)?;
+    read_bound_object(input, id, requested_hex, expected_type, limits)
+}
+
+fn request_id(
+    format: ObjectFormat,
+    requested_hex: &[u8],
+) -> Result<gix_hash::ObjectId, VerifiedReadError> {
+    gix_hash::ObjectId::from_hex(requested_hex)
         .ok()
-        .filter(|id| id.kind() == hash_kind && !requested_hex.iter().any(u8::is_ascii_uppercase))
-        .ok_or(VerifiedReadError::InvalidRequestId)?;
+        .filter(|id| {
+            id.kind() == format.into() && !requested_hex.iter().any(u8::is_ascii_uppercase)
+        })
+        .ok_or(VerifiedReadError::InvalidRequestId)
+}
+
+fn read_bound_object(
+    input: &mut impl BufRead,
+    id: gix_hash::ObjectId,
+    requested_hex: &[u8],
+    expected_type: Option<ObjectKind>,
+    limits: &Limits,
+) -> Result<VerifiedObject, VerifiedReadError> {
     let frame = read_frame(input, requested_hex, expected_type, limits)
         .map_err(VerifiedReadError::Framing)?;
     let object_kind = match frame.kind {
@@ -66,10 +84,72 @@ pub fn read_verified_object(
         ObjectKind::Commit => gix_object::Kind::Commit,
         ObjectKind::Tag => gix_object::Kind::Tag,
     };
-    let actual = gix_object::compute_hash(hash_kind, object_kind, &frame.payload)
+    let actual = gix_object::compute_hash(id.kind(), object_kind, &frame.payload)
         .map_err(|_| VerifiedReadError::HashRejected)?;
     if actual != id {
         return Err(VerifiedReadError::IdentityMismatch);
     }
     Ok(VerifiedObject(frame))
+}
+
+/// Serial request framing over two pipes already held by a process supervisor.
+/// This object must remain bound to that one child; do not recreate it on the
+/// same pipes after an error. Cancellation, I/O deadlines and reaping remain
+/// the supervisor's responsibility.
+pub struct BatchSession<R, W> {
+    input: R,
+    output: W,
+    format: ObjectFormat,
+    limits: Limits,
+    failed: bool,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum BatchRequestError {
+    Poisoned,
+    Write,
+    Response(VerifiedReadError),
+}
+
+impl<R: BufRead, W: io::Write> BatchSession<R, W> {
+    pub fn new(input: R, output: W, format: ObjectFormat, limits: Limits) -> Self {
+        Self {
+            input,
+            output,
+            format,
+            limits,
+            failed: false,
+        }
+    }
+
+    pub fn fetch(
+        &mut self,
+        requested_hex: &[u8],
+        expected_type: Option<ObjectKind>,
+    ) -> Result<VerifiedObject, BatchRequestError> {
+        if self.failed {
+            return Err(BatchRequestError::Poisoned);
+        }
+        // A request that did not settle may have already moved either pipe.
+        // Restore admission only after the complete authenticated response.
+        self.failed = true;
+        let id = request_id(self.format, requested_hex).map_err(BatchRequestError::Response)?;
+        let mut wire = [b'\n'; 65];
+        let len = requested_hex.len();
+        wire[..len].copy_from_slice(requested_hex);
+        self.output
+            .write_all(&wire[..=len])
+            .and_then(|()| self.output.flush())
+            .map_err(|_| BatchRequestError::Write)?;
+        let object = read_bound_object(
+            &mut self.input,
+            id,
+            requested_hex,
+            expected_type,
+            &self.limits,
+        )
+        .map_err(BatchRequestError::Response)?;
+        self.failed = false;
+        Ok(object)
+    }
 }

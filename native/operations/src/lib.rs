@@ -6,4 +6,7 @@ mod git_batch;
 mod git_identity;
 
 pub use git_batch::{FrameError, Limits, ObjectKind, read_frame};
-pub use git_identity::{ObjectFormat, VerifiedObject, VerifiedReadError, read_verified_object};
+pub use git_identity::{
+    BatchRequestError, BatchSession, ObjectFormat, VerifiedObject, VerifiedReadError,
+    read_verified_object,
+};

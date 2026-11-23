@@ -1,7 +1,8 @@
 use std::io::Cursor;
 
 use orche_native_operations::{
-    FrameError, Limits, ObjectFormat, ObjectKind, VerifiedReadError, read_verified_object,
+    BatchRequestError, BatchSession, FrameError, Limits, ObjectFormat, ObjectKind,
+    VerifiedReadError, read_verified_object,
 };
 
 fn response(id: &str, kind: &str, raw: &[u8]) -> Cursor<Vec<u8>> {
@@ -160,4 +161,155 @@ fn truncated_or_unterminated_input_never_produces_a_verified_object() {
         ),
         Err(VerifiedReadError::Framing(FrameError::ShortRead)),
     );
+}
+
+#[test]
+fn a_batch_session_reuses_one_pair_of_pipes_only_after_a_verified_response() {
+    let id = "ce013625030ba8dba906f756967f9e9ca394464a";
+    let good = response(id, "blob", b"hello\n").into_inner();
+    let bad = response(id, "blob", b"wrong\n").into_inner();
+    let mut request = Vec::new();
+    let mut input = Cursor::new([good.as_slice(), &bad, &good].concat());
+    {
+        let mut session = BatchSession::new(
+            &mut input,
+            &mut request,
+            ObjectFormat::Sha1,
+            Limits::default(),
+        );
+        assert_eq!(
+            session
+                .fetch(id.as_bytes(), Some(ObjectKind::Blob))
+                .unwrap()
+                .bytes(),
+            b"hello\n"
+        );
+        assert_eq!(
+            session.fetch(id.as_bytes(), None),
+            Err(BatchRequestError::Response(
+                VerifiedReadError::IdentityMismatch
+            ))
+        );
+        assert_eq!(
+            session.fetch(id.as_bytes(), None),
+            Err(BatchRequestError::Poisoned)
+        );
+    }
+    assert_eq!(request, format!("{id}\n{id}\n").as_bytes());
+    assert_eq!(input.position(), (good.len() + bad.len()) as u64);
+}
+
+#[test]
+fn invalid_ids_never_reach_the_child_and_io_failure_cannot_retry() {
+    let mut requests = Vec::new();
+    let mut responses = Cursor::new(Vec::<u8>::new());
+    {
+        let mut session = BatchSession::new(
+            &mut responses,
+            &mut requests,
+            ObjectFormat::Sha256,
+            Limits::default(),
+        );
+        assert_eq!(
+            session.fetch(b"HEAD\n", None),
+            Err(BatchRequestError::Response(
+                VerifiedReadError::InvalidRequestId
+            ))
+        );
+        assert_eq!(
+            session.fetch(&[b'0'; 64], None),
+            Err(BatchRequestError::Poisoned)
+        );
+    }
+    assert!(requests.is_empty());
+    assert_eq!(responses.position(), 0);
+
+    struct FailedFlush(Vec<u8>);
+    impl std::io::Write for FailedFlush {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+    }
+    let mut sent = FailedFlush(Vec::new());
+    {
+        let mut session = BatchSession::new(
+            &mut responses,
+            &mut sent,
+            ObjectFormat::Sha256,
+            Limits::default(),
+        );
+        assert_eq!(
+            session.fetch(&[b'0'; 64], None),
+            Err(BatchRequestError::Write)
+        );
+        assert_eq!(
+            session.fetch(&[b'0'; 64], None),
+            Err(BatchRequestError::Poisoned)
+        );
+    }
+    assert_eq!(sent.0.len(), 65);
+    assert_eq!(responses.position(), 0);
+}
+
+#[test]
+#[ignore = "requires an operator-provided disposable fixture root and native Git"]
+fn native_git_keeps_one_batch_open_for_both_object_widths() {
+    use std::io::BufReader;
+    use std::process::{Command, Stdio};
+
+    let root = std::env::var_os("ORCHE_NATIVE_GIT_FIXTURES").unwrap();
+    for (format, algorithm, digits, empty_tree) in [
+        (
+            ObjectFormat::Sha1,
+            "sha1",
+            40,
+            "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+        ),
+        (
+            ObjectFormat::Sha256,
+            "sha256",
+            64,
+            "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321",
+        ),
+    ] {
+        let repo = std::path::Path::new(&root).join(algorithm);
+        assert!(!repo.exists(), "fixture checkout must be new");
+        let init = Command::new("git")
+            .args(["init", "--bare", &format!("--object-format={algorithm}")])
+            .arg(&repo)
+            .output()
+            .unwrap();
+        assert!(init.status.success(), "{:?}", init.stderr);
+        let mut git = Command::new("git")
+            .args(["--no-replace-objects", "cat-file", "--batch"])
+            .current_dir(&repo)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let input = BufReader::new(git.stdout.take().unwrap());
+        let output = git.stdin.take().unwrap();
+        let mut session = BatchSession::new(input, output, format, Limits::default());
+        let a = session.fetch(empty_tree.as_bytes(), Some(ObjectKind::Tree));
+        let b = session.fetch(empty_tree.as_bytes(), None);
+        // This unambiguous full ID cannot refer to a real object in the fixture.
+        let missing = session.fetch(&vec![b'1'; digits], None);
+        let rejected = session.fetch(empty_tree.as_bytes(), None);
+        drop(session);
+        let status = git.wait().unwrap();
+        assert!(status.success());
+        assert_eq!(a.unwrap().kind(), ObjectKind::Tree);
+        assert!(b.unwrap().bytes().is_empty());
+        assert_eq!(
+            missing,
+            Err(BatchRequestError::Response(VerifiedReadError::Framing(
+                FrameError::Missing
+            )))
+        );
+        assert_eq!(rejected, Err(BatchRequestError::Poisoned));
+    }
 }

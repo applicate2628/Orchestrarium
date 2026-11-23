@@ -128,3 +128,27 @@ frame with mutated content and the original header is rejected before its
 tree is parsed. This is a test-only arena, not the production cache,
 dispatcher, or acquisition owner. It does not qualify the subject index,
 receipt, or publication path.
+
+
+### Serial requests over an owned Git child
+
+A batch session binds one input/output pair and one repository hash format.
+It submits only complete validated object IDs, flushes each request, and
+restores admission only after receiving the full authenticated response.
+A partial pipe write or failed response makes the session unusable; the
+supervisor must dispose of the corresponding child. The batch session
+neither spawns children nor replaces the platform supervisor. Its inputs
+must provide the existing cancellation and deadline guarantees before
+production use. This does not change object size or publication policy.
+
+To also exercise the batch session with a real Git binary, set
+ORCHE_NATIVE_GIT_FIXTURES to an existing empty disposable directory, restrict
+Git to the local file protocol, and run the explicit fixture:
+
+~~~text
+cargo test --manifest-path native/operations/Cargo.toml --locked --offline --test git_object_identity -- --include-ignored
+~~~
+
+The test initializes two bare repositories, reuses one Git process for 2
+successful reads and a missing object in each format, and closes and waits
+for the process. It is not a process-tree cancellation or release test.
