@@ -54,12 +54,14 @@ fn index_decoded(
         } else {
             raw_replaced_bytes
         };
-        for ch in text.chars() {
-            lines.accept(
-                ch,
-                replaced_bytes.unwrap_or_else(|| ch.len_utf8()),
-                &mut emit,
-            )?;
+        if let Some(width) = replaced_bytes {
+            // The decoder emits one replacement scalar at a time for raw input.
+            debug_assert_eq!(text, "\u{fffd}");
+            lines.advance(width, 1);
+        } else if text.is_ascii() {
+            lines.accept_ascii(text.as_bytes(), &mut emit)?;
+        } else {
+            lines.accept_unicode(text, &mut emit)?;
         }
         Ok(())
     })?;
@@ -142,8 +144,65 @@ struct Lines {
     after_cr: bool,
 }
 
+fn is_line_separator(ch: char) -> bool {
+    matches!(
+        ch,
+        '\n' | '\r' | '\x0b' | '\x0c' | '\x1c'..='\x1e' | '\u{85}' | '\u{2028}' | '\u{2029}'
+    )
+}
+
 impl Lines {
-    fn accept(
+    fn accept_ascii(
+        &mut self,
+        bytes: &[u8],
+        emit: &mut impl FnMut(LineSpan) -> io::Result<()>,
+    ) -> io::Result<()> {
+        let mut start = 0;
+        for (position, &byte) in bytes.iter().enumerate() {
+            let ch = char::from(byte);
+            if is_line_separator(ch) {
+                let count = position - start;
+                self.advance(count, count);
+                self.accept_separator(ch, 1, emit)?;
+                start = position + 1;
+            }
+        }
+        let count = bytes.len() - start;
+        self.advance(count, count);
+        Ok(())
+    }
+
+    fn accept_unicode(
+        &mut self,
+        text: &str,
+        emit: &mut impl FnMut(LineSpan) -> io::Result<()>,
+    ) -> io::Result<()> {
+        let mut start = 0;
+        let mut chars = 0;
+        for (position, ch) in text.char_indices() {
+            if is_line_separator(ch) {
+                self.advance(position - start, chars);
+                let width = ch.len_utf8();
+                self.accept_separator(ch, width, emit)?;
+                start = position + width;
+                chars = 0;
+            } else {
+                chars += 1;
+            }
+        }
+        self.advance(text.len() - start, chars);
+        Ok(())
+    }
+
+    fn advance(&mut self, bytes: usize, chars: usize) {
+        if chars != 0 {
+            self.byte_pos += bytes as u64;
+            self.char_pos += chars as u64;
+            self.after_cr = false;
+        }
+    }
+
+    fn accept_separator(
         &mut self,
         ch: char,
         bytes: usize,
@@ -154,18 +213,10 @@ impl Lines {
         self.char_pos += 1;
         let crlf = self.after_cr && ch == '\n';
         self.after_cr = ch == '\r';
-        if !crlf
-            && matches!(
-                ch,
-                '\n' | '\r' | '\x0b' | '\x0c' | '\x1c'
-                    ..='\x1e' | '\u{85}' | '\u{2028}' | '\u{2029}'
-            )
-        {
+        if !crlf {
             self.next.byte_end = byte_start;
             emit(self.next)?;
             self.next.number += 1;
-        } else if !crlf {
-            return Ok(());
         }
         self.next.byte_start = self.byte_pos;
         self.next.char_start = self.char_pos;

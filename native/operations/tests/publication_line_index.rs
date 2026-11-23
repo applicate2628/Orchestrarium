@@ -82,6 +82,34 @@ fn identifies_late_nul_without_materializing_the_line() {
 }
 
 #[test]
+fn ascii_runs_keep_positions_at_and_between_chunk_boundaries() {
+    let mut source = vec![b'x'; 16 * 1024 - 1];
+    source.extend(b"\r\nA\0B\rC\x0bD\x0cE\x1cF\x1dG\x1eH\nI");
+    let expected = [
+        (1, 0, 0, 16383),
+        (2, 16385, 16385, 16388),
+        (3, 16389, 16389, 16390),
+        (4, 16391, 16391, 16392),
+        (5, 16393, 16393, 16394),
+        (6, 16395, 16395, 16396),
+        (7, 16397, 16397, 16398),
+        (8, 16399, 16399, 16400),
+        (9, 16401, 16401, 16402),
+    ];
+    for width in [1, 31, 16 * 1024 - 1, 16 * 1024, 16 * 1024 + 1] {
+        let mut spans = Vec::new();
+        assert!(
+            index_text(Chunk(&source, width), |s| {
+                spans.push((s.number, s.char_start, s.byte_start, s.byte_end));
+                Ok(())
+            })
+            .unwrap()
+        );
+        assert_eq!(spans, expected, "width={width}");
+    }
+}
+
+#[test]
 fn unfinished_read_is_not_a_verified_result() {
     let input = (&b"a\n"[..]).chain(Fails);
     let error = index_text(input, |_| Ok(())).unwrap_err();

@@ -13,6 +13,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 - Add independently tested Rust scanner stages for verified Git objects, normalized whole lines and shared PCRE2 lexical matching. The Windows private mapping is a candidate component; production publication ownership and the shipped scanner are unchanged.
 
+- In the draft Rust index, advance positions in runs between line separators rather than updating state per character. Preserve raw and normalized coordinates, Unicode replacement, and split CRLF behavior. This does not change the installed scanner.
+
 ## 2026-11-22
 
 - Let the guarded range scan continue while it reports newly verified work. Stalls still fail, and completed scans must still pass the same coverage, identity, and review checks.

@@ -181,6 +181,26 @@ The index does not run matching or apply source exemptions. The matching
 owner must still evaluate each whole selected line, including an oversized
 one, without unbounded heap growth or a coverage shortcut.
 
+### Line-index timing
+
+Use the opt-in release build to time in-memory decoding and indexing separately
+from Git, disk staging, match evaluation, and the publication verdict:
+
+~~~text
+cargo run --manifest-path native/operations/Cargo.toml --locked --release --example line_index_bench
+~~~
+
+The synthetic corpus covers a long ASCII line, ordinary ASCII text, dense line
+separators, and Unicode text. Compare byte and line counts and result checksums
+before comparing medians on the same machine and CPU placement. This is not a
+repository-scale scan or runtime performance guarantee.
+
+On one logical core on ASUS, paired runs against 6b016b0e returned identical
+row counts and all four-field span checksums. The median elapsed time averaged
+across the two orders was 48.1 to 28.4 ms (long ASCII), 43.3 to 28.8 ms (ordinary
+ASCII), 53.8 to 49.1 ms (dense separators), and 26.4 to 24.0 ms (Unicode).
+These are observations for this corpus, not bounds.
+
 ### Windows staged-worker composition fixture
 
 Build the existing test executable with Cargo, then use its reported path:

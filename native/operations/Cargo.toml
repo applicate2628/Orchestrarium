@@ -13,6 +13,10 @@ path = "tests/git_object_identity.rs"
 name = "tree_walk_driver"
 path = "tests/tree_walk_driver.rs"
 
+[[example]]
+name = "line_index_bench"
+path = "tests/line_index_bench.rs"
+
 [dependencies]
 gix-hash = { version = "=0.28.1", default-features = false, features = ["sha1", "sha256"] }
 gix-object = { version = "=0.66.1", default-features = false, features = ["sha1", "sha256"] }
