@@ -80,37 +80,18 @@ impl Engine {
     }
 }
 
-fn add_match(
-    hits: &mut Vec<Hit>,
-    i: usize,
-    offset: &mut usize,
+fn visit_occurrences(
+    engine: &Engine,
     text: &str,
-    start: usize,
-    end: usize,
-    groups: impl FnOnce() -> Vec<Span>,
+    binary_subject: bool,
+    mut emit: impl FnMut(Hit) -> Result<(), Failure>,
 ) -> Result<(), Failure> {
-    if end <= start || start < *offset {
-        return Err("invalid match range".into());
-    }
-    hits.push((i, groups()));
-    *offset = start
-        + text
-            .get(start..)
-            .and_then(|s| s.chars().next())
-            .ok_or("invalid match start")?
-            .len_utf8();
-    Ok(())
-}
-
-fn occurrences(engine: &Engine, case: &Case) -> Result<Vec<Hit>, Failure> {
-    let mut hits = Vec::new();
-    let text = case.text.as_str();
+    let bytes = text.as_bytes();
     for (i, (re, binary)) in engine.rules.iter().enumerate() {
-        if case.binary && !binary {
+        if binary_subject && !binary {
             continue;
         }
         let mut offset = 0;
-        let bytes = text.as_bytes();
         if re
             .find_at(bytes, 0)
             .map_err(|_| "PCRE2 JIT match failed")?
@@ -123,17 +104,28 @@ fn occurrences(engine: &Engine, case: &Case) -> Result<Vec<Hit>, Failure> {
             .captures_read_at(&mut locs, bytes, offset)
             .map_err(|_| "PCRE2 JIT match failed")?
         {
-            add_match(
-                &mut hits,
-                i,
-                &mut offset,
-                text,
-                whole.start(),
-                whole.end(),
-                || (0..re.captures_len()).map(|n| locs.get(n)).collect(),
-            )?;
+            let start = whole.start();
+            if whole.end() <= start || start < offset {
+                return Err("invalid match range".into());
+            }
+            offset = start
+                + text
+                    .get(start..)
+                    .and_then(|s| s.chars().next())
+                    .ok_or("invalid match start")?
+                    .len_utf8();
+            emit((i, (0..re.captures_len()).map(|n| locs.get(n)).collect()))?;
         }
     }
+    Ok(())
+}
+
+fn occurrences(engine: &Engine, case: &Case) -> Result<Vec<Hit>, Failure> {
+    let mut hits = Vec::new();
+    visit_occurrences(engine, &case.text, case.binary, |hit| {
+        hits.push(hit);
+        Ok(())
+    })?;
     Ok(hits)
 }
 
@@ -232,6 +224,52 @@ fn main() -> Result<(), Failure> {
 #[cfg(test)]
 mod scanner_pattern_tests {
     use super::*;
+
+    #[test]
+    fn borrowed_subject_preserves_order_overlap_and_binary_policy() {
+        let engine = Engine::new(&[
+            Rule {
+                regex: "(\u{e9}.)".into(),
+                binary: false,
+            },
+            Rule {
+                regex: "(\u{e9})".into(),
+                binary: true,
+            },
+        ])
+        .unwrap();
+        let owner = String::from("x\u{e9}\u{e9}!x");
+        let subject = &owner[1..owner.len() - 1];
+        let all = visit_test_hits(&engine, subject, false);
+        assert_eq!(
+            all,
+            [
+                (0, vec![Some((0, 4)), Some((0, 4))]),
+                (0, vec![Some((2, 5)), Some((2, 5))]),
+                (1, vec![Some((0, 2)), Some((0, 2))]),
+                (1, vec![Some((2, 4)), Some((2, 4))]),
+            ]
+        );
+        assert_eq!(visit_test_hits(&engine, subject, true), all[2..]);
+
+        let mut visited = 0;
+        let result = visit_occurrences(&engine, subject, false, |_| {
+            visited += 1;
+            Err("sink refused".into())
+        });
+        assert_eq!(result.unwrap_err().to_string(), "sink refused");
+        assert_eq!(visited, 1);
+    }
+
+    fn visit_test_hits(engine: &Engine, text: &str, binary: bool) -> Vec<Hit> {
+        let mut hits = Vec::new();
+        visit_occurrences(engine, text, binary, |hit| {
+            hits.push(hit);
+            Ok(())
+        })
+        .unwrap();
+        hits
+    }
 
     #[test]
     fn scanner_whitespace_is_engine_independent() {
