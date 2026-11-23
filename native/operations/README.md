@@ -210,6 +210,17 @@ across the two orders was 48.1 to 28.4 ms (long ASCII), 43.3 to 28.8 ms (ordinar
 ASCII), 53.8 to 49.1 ms (dense separators), and 26.4 to 24.0 ms (Unicode).
 These are observations for this corpus, not bounds.
 
+### Windows scratch path binding
+
+Bind a caller-verified private local directory before staging. The binding uses
+the local volume identifier rather than reopening through a drive letter and
+holds ordinary directory handles without delete sharing. A mapped stage borrows
+the binding and accepts only a fresh single stage leaf. Holding these handles
+does not establish private permissions or prevent every metadata change. The
+caller still owns the trusted ancestry and must supervise worker failure.
+See [Windows final path queries](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfinalpathnamebyhandlew)
+and [Rust Windows sharing options](https://doc.rust-lang.org/std/os/windows/fs/trait.OpenOptionsExt.html).
+
 ### Windows staged-worker composition fixture
 
 Build the existing test executable with Cargo, then use its reported path:

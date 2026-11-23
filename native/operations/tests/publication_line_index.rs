@@ -185,21 +185,25 @@ fn indexes_replacement_decoded_bytes_in_the_same_pass() {
 #[test]
 #[ignore = "requires an operator-provided disposable directory on local Windows storage"]
 fn mapped_normalized_stage_exclusively_owns_its_lines_and_cleanup() {
-    use orche_native_operations::MappedStagedText;
+    use orche_native_operations::{MappedStageDirectory, MappedStagedText};
     use std::{fs, path::PathBuf};
     let root = PathBuf::from(std::env::var_os("ORCHE_NATIVE_GIT_FIXTURES").unwrap());
-    let path = root.join("normalized-private-stage");
+    let renamed = root.join("bound-worker-moved");
+    let root = root.join("bound-worker-dir");
+    fs::create_dir(&root).unwrap();
+    let leaf = "stage-normalized";
+    let path = root.join(leaf);
+    // SAFETY: this fixture root is the caller-owned ordinary local directory.
+    let directory = unsafe { MappedStageDirectory::bind(&root) }.unwrap();
+    assert!(fs::rename(&root, &renamed).is_err());
+    assert!(MappedStagedText::stage(&directory, "stage-../escape", &b""[..], |_| Ok(())).is_err());
     let n = 16 * 1024 * 1024;
     let mut spans = Vec::new();
     let input = io::repeat(b'x').take(n).chain(&b"\xff\r\nZ\0"[..]);
-    // SAFETY: the caller supplies our disposable local Windows fixture root
-    // and this test alone owns the stage leaf under it.
-    let text = unsafe {
-        MappedStagedText::stage(&path, input, |span| {
-            spans.push(span);
-            Ok(())
-        })
-    }
+    let text = MappedStagedText::stage(&directory, leaf, input, |span| {
+        spans.push(span);
+        Ok(())
+    })
     .unwrap();
     assert!(text.has_nul());
     assert_eq!(spans.len(), 2);
@@ -218,27 +222,23 @@ fn mapped_normalized_stage_exclusively_owns_its_lines_and_cleanup() {
     assert!(!path.exists());
 
     fs::write(&path, b"incumbent").unwrap();
-    // SAFETY: our fixture owns the parent; the existing leaf must cause the
-    // create-new admission to refuse before accessing incumbent bytes.
-    let collision = unsafe { MappedStagedText::stage(&path, &b"new"[..], |_| Ok(())) };
+    let collision = MappedStagedText::stage(&directory, leaf, &b"new"[..], |_| Ok(()));
     assert!(collision.is_err());
     assert_eq!(fs::read(&path).unwrap(), b"incumbent");
     fs::remove_file(&path).unwrap();
 
-    // SAFETY: same exclusive disposable leaf after settlement of the collision
-    // fixture; the callback deliberately refuses without changing the backing.
-    let failed = unsafe {
-        MappedStagedText::stage(&path, &b"line\n"[..], |_| {
-            Err(io::Error::other("span sink"))
-        })
-    };
+    let failed = MappedStagedText::stage(&directory, leaf, &b"line\n"[..], |_| {
+        Err(io::Error::other("span sink"))
+    });
     assert!(failed.is_err());
     assert!(!path.exists());
 
-    // SAFETY: the test still has the unused leaf under its exclusively owned root.
     let empty =
-        unsafe { MappedStagedText::stage(&path, &b""[..], |_| panic!("empty index row")) }.unwrap();
+        MappedStagedText::stage(&directory, leaf, &b""[..], |_| panic!("empty index row")).unwrap();
     assert!(!empty.has_nul());
     drop(empty);
     assert!(!path.exists());
+    drop(directory);
+    fs::rename(&root, &renamed).unwrap();
+    fs::remove_dir(renamed).unwrap();
 }

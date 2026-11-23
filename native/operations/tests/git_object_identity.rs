@@ -331,18 +331,23 @@ fn native_git_keeps_one_batch_open_for_both_object_widths() {
         assert_eq!((object.kind(), object.size()), (ObjectKind::Blob, size));
         #[cfg(windows)]
         let (has_nul, rows) = {
-            let path = repo.join("normalized-object-stage");
+            let leaf = "stage-normalized-object";
+            let path = repo.join(leaf);
+            // SAFETY: this fixture provides an ordinary private local directory.
+            let directory =
+                unsafe { orche_native_operations::MappedStageDirectory::bind(&repo) }.unwrap();
             let result = object
                 .consume(|reader| {
                     let mut spans = Vec::new();
-                    // SAFETY: this process exclusively owns a new leaf in its
-                    // disposable local Windows fixture root.
-                    let stage = unsafe {
-                        orche_native_operations::MappedStagedText::stage(&path, reader, |span| {
+                    let stage = orche_native_operations::MappedStagedText::stage(
+                        &directory,
+                        leaf,
+                        reader,
+                        |span| {
                             spans.push(span);
                             Ok(())
-                        })
-                    }?;
+                        },
+                    )?;
                     assert_eq!(spans.len(), 1);
                     let span = spans[0];
                     assert_eq!((span.number, span.byte_start, span.byte_end), (1, 0, size));

@@ -19,4 +19,4 @@ pub use line_index::{LineSpan, index_text, normalize_and_index, normalize_staged
 #[path = "publication/mapped_stage_windows.rs"]
 mod mapped_stage_windows;
 #[cfg(windows)]
-pub use mapped_stage_windows::MappedStagedText;
+pub use mapped_stage_windows::{MappedStageDirectory, MappedStagedText};
