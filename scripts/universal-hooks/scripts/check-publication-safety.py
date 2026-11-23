@@ -466,6 +466,7 @@ class RangeSelection:
     expected_parents: tuple[tuple[str, tuple[str, ...]], ...] = ()
     destination_endpoint_sha256: str | None = None
     indexed_parent_graph: bool = False
+    prior_receiver_roots: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -511,6 +512,7 @@ class NativePushSelection:
     expected_parents: tuple[tuple[str, tuple[str, ...]], ...] = ()
     tag_receiver_inventory: tuple[RemoteRefTip, ...] | None = None
     indexed_parent_graph: bool = False
+    prior_receiver_roots: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -2818,7 +2820,7 @@ async def _binary_content_hits_with_matcher(
 
 
 async def _text_content_hits_with_matcher(
-    raw, path, find_machine_paths, matcher, deadline, *, max_findings=None,
+    raw, path, find_machine_paths, matcher, deadline, *, max_findings=None, machine_path_lines=None,
 ):
     kind = 'history-blob'
     rows = _selected_text_lines(raw.decode('utf-8', 'replace'), path, kind)
@@ -2830,7 +2832,7 @@ async def _text_content_hits_with_matcher(
         room = None if max_findings is None else max(0, max_findings - len(findings))
         findings.extend(_text_findings(
             ((*row, matches) for row, matches in zip(batch, captures, strict=True)),
-            path, find_machine_paths, kind, room,
+            path, find_machine_paths, kind, room, machine_path_lines,
         ))
     return findings
 
@@ -3823,8 +3825,8 @@ def _resolve_head(timeout: float | None = None) -> str:
 async def _read_git_oid_lines_bounded(
     argv: tuple[str, ...],
     *,
-    count_cap: int,
-    byte_cap: int,
+    count_cap: int | None,
+    byte_cap: int | None,
     deadline: float,
     object_format: GitObjectFormat = _SHA1_OBJECT_FORMAT,
     input_bytes: bytes | None = None,
@@ -3847,7 +3849,7 @@ async def _read_git_oid_lines_bounded(
         if store_row is not None:
             if not store_row(oid):
                 return _refusal("PS-MSG-FRAME", "oid")
-        if count >= count_cap:
+        if count_cap is not None and count >= count_cap:
             return _refusal("PS-MSG-LIMIT", "count")
         if store_row is None:
             seen.add(oid)
@@ -4012,6 +4014,7 @@ async def _range_selection(
         destination_oid=destination_oid,
         expected_parents=parent_graph,
         destination_endpoint_sha256=hashlib.sha256(_native_json_bytes(push_destination)).hexdigest(),
+        prior_receiver_roots=exclusions,
     )
 
 
@@ -4058,6 +4061,26 @@ async def _native_prior_receiver_roots(
         prior, deadline=loop_deadline, object_format=request.object_format,
         include_object_roots=True,
     )
+
+
+async def _subtract_receiver_object_intersection(index, prior_roots, object_format, deadline):
+    """Git's negative revision walk may retain shared old trees and blobs.
+
+    Compare candidate IDs against positive, qualified receiver reachability
+    before binding coverage. Stream object metadata, never old blob contents.
+    """
+    if not prior_roots or not index.has_object_candidates():
+        return None
+    tick = _loop_scan_deadline(deadline)
+    result = await _read_git_oid_lines_bounded(
+        _range_git_argv("rev-list", "--objects", "--no-object-names", "--use-bitmap-index", "--stdin"),
+        count_cap=None, byte_cap=None, deadline=tick, object_format=object_format,
+        input_bytes=_revision_stdin(prior_roots, ()), store_row=index.mark_receiver_object,
+    )
+    if isinstance(result, Refusal):
+        return result
+    index.subtract_marked_receiver_objects()
+    return None
 
 
 async def _native_push_selection(
@@ -4108,13 +4131,19 @@ async def _native_push_selection(
     object_progress = _VerifiedWorkPhase("objects", budget=deadline)
     objects = await _read_git_oid_lines_bounded(
         _range_git_argv("rev-list", "--objects", "--no-object-names", "--stdin"),
-        count_cap=_MAX_OBJECTS, byte_cap=request.object_format.list_byte_cap(_MAX_OBJECTS),
+        count_cap=None if exclusions else _MAX_OBJECTS,
+        byte_cap=None if exclusions else request.object_format.list_byte_cap(_MAX_OBJECTS),
         deadline=loop_deadline, object_format=request.object_format, input_bytes=revisions,
         store_row=object_progress.observed(index.add_selected_object),
     )
     if isinstance(objects, Refusal):
         return objects
     object_progress.finish()
+    receiver = await _subtract_receiver_object_intersection(index, exclusions, request.object_format, deadline)
+    if isinstance(receiver, Refusal):
+        return receiver
+    if not index.object_selection_within_limit():
+        return _refusal("PS-MSG-LIMIT", "count")
     if not index.selected_commits_covered():
         return _refusal("PS-MSG-COVERAGE", "commit-object-set")
     parent_graph = () if compact_graph else tuple(index.selected_commits())
@@ -4126,7 +4155,8 @@ async def _native_push_selection(
         if all(oid == root for oid, root in zip_longest(ordered_objects, roots)):
             tag_inventory = inventory
     return NativePushSelection(request, commits, objects, request.object_format, roots, parent_graph,
-                               tag_inventory, indexed_parent_graph=compact_graph)
+                               tag_inventory, indexed_parent_graph=compact_graph,
+                               prior_receiver_roots=exclusions)
 
 
 async def _native_commit_range_selection(
@@ -4168,23 +4198,28 @@ async def _native_commit_range_selection(
             return graph
         selected_objects = await _read_git_oid_lines_bounded(
             _range_git_argv("rev-list", "--objects", "--no-object-names", "--stdin"),
-            count_cap=_MAX_OBJECTS, byte_cap=object_format.list_byte_cap(_MAX_OBJECTS),
+            count_cap=None if prior_roots else _MAX_OBJECTS,
+            byte_cap=None if prior_roots else object_format.list_byte_cap(_MAX_OBJECTS),
             deadline=loop_deadline, object_format=object_format, input_bytes=revisions,
             store_row=lambda oid: index.add_selected_object(oid, stream=stream),
         )
         if isinstance(selected_objects, Refusal):
             return selected_objects
-        if not index.object_selection_within_limit():
-            return _refusal("PS-MSG-LIMIT", "count")
     if selected_primary != (primary.destination, primary.source):
         return _refusal("PS-MSG-RANGE", "native-primary")
+    receiver = await _subtract_receiver_object_intersection(index, prior_roots, object_format, deadline)
+    if isinstance(receiver, Refusal):
+        return receiver
+    if not index.object_selection_within_limit():
+        return _refusal("PS-MSG-LIMIT", "count")
     if not index.selected_commits_covered():
         return _refusal("PS-MSG-COVERAGE", "commit-object-set")
     parents = () if compact_graph else tuple(index.selected_commits())
     commits = tuple(index.selected_commit_ids()) if compact_graph else tuple(oid for oid, _ in parents)
     return RangeSelection(primary.remote, primary.destination, primary.source,
         primary.source, commits, tuple(index.selected_objects(sorted_ids=True)),
-        object_format, expected_parents=parents, indexed_parent_graph=compact_graph)
+        object_format, expected_parents=parents, indexed_parent_graph=compact_graph,
+        prior_receiver_roots=prior_roots)
 
 
 def _parse_batch_header(
@@ -5037,6 +5072,7 @@ class _HistoryIndex:
             CREATE TABLE selected_object (sequence INTEGER PRIMARY KEY, oid TEXT UNIQUE,
                 stream INTEGER NOT NULL, acquired_kind TEXT, acquired_sequence INTEGER,
                 reached INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE receiver_overlap (oid TEXT PRIMARY KEY) WITHOUT ROWID;
             CREATE TABLE coverage_event (sequence INTEGER PRIMARY KEY, stage TEXT NOT NULL,
                 oid TEXT NOT NULL);
             CREATE INDEX coverage_stage ON coverage_event(stage, sequence);
@@ -5127,6 +5163,20 @@ class _HistoryIndex:
             ON CONFLICT(oid) DO UPDATE SET stream=excluded.stream
             WHERE selected_object.stream <> excluded.stream
         """, (oid, stream)).rowcount == 1
+
+    def has_object_candidates(self):
+        return self.db.execute("SELECT 1 FROM selected_object LIMIT 1").fetchone() is not None
+
+    def mark_receiver_object(self, oid):
+        self.db.execute("""INSERT OR IGNORE INTO receiver_overlap
+                           SELECT oid FROM selected_object WHERE oid=?""", (oid,))
+        return True
+
+    def subtract_marked_receiver_objects(self):
+        self.db.execute("DELETE FROM selected_object WHERE oid IN (SELECT oid FROM receiver_overlap)")
+
+    def had_receiver_tree_candidate(self, oid):
+        return self.db.execute("SELECT 1 FROM receiver_overlap WHERE oid=?", (oid,)).fetchone() is not None
 
     def selected_commit_ids(self):
         return (oid for (oid,) in self.db.execute("SELECT oid FROM selected_commit ORDER BY sequence"))
@@ -5411,6 +5461,110 @@ def _follow_native_tag_chain(
     return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
 
 
+def _verified_published_blob_lines(proof_git, oid: str, object_format) -> list[str] | None:
+    if len(oid) != object_format.hex_length or re.fullmatch("[0-9a-f]+", oid) is None:
+        return None
+    size_record = proof_git(["cat-file", "-s", oid])
+    if size_record.returncode or not size_record.stdout.strip().isdigit():
+        return None
+    size = int(size_record.stdout)
+    if size > _MAX_BLOB_BYTES:
+        return None
+    blob = proof_git(["cat-file", "blob", oid])
+    data = blob.stdout
+    if blob.returncode or len(data) != size or _is_binary(data):
+        return None
+    digest = hashlib.new(object_format.name)
+    digest.update(f"blob {size}\0".encode("ascii"))
+    digest.update(data)
+    if digest.hexdigest() != oid:
+        return None
+    lines = data.decode("utf-8").splitlines()
+    if len(lines) != data.count(b"\n") + int(bool(data) and not data.endswith(b"\n")):
+        return None
+    return lines
+
+
+def _published_path_blob_history(proof_git, root: str, path: bytes, literal_path: str,
+                                 git_mode: str) -> tuple[str, ...]:
+    """Ask Git for object identities reached by this exact path at a receiver root."""
+    record = proof_git(["--literal-pathspecs", "log", "--full-history", "--root", "--raw", "-m", "-z",
+                        "--format=", "--no-abbrev", "--no-renames", root, "--", literal_path])
+    if record.returncode:
+        return ()
+    entries = iter(record.stdout.split(b"\0"))
+    result: dict[str, None] = {}
+    mode = git_mode.encode("ascii")
+    for entry in entries:
+        if not entry.strip(b"\n"):
+            continue
+        fields = entry.lstrip(b"\n").split()
+        if len(fields) != 5 or not fields[0].startswith(b":") or next(entries, None) != path:
+            return ()  # A partial or confused path inventory proves nothing.
+        for kind, oid in ((fields[0][1:], fields[2]), (fields[1], fields[3])):
+            if kind == mode:
+                result[oid.decode("ascii")] = None
+    return tuple(result)
+
+
+def _unpublished_machine_path_lines(
+    selection, path, raw, git_mode, find_machine_paths, deadline, prior_blobs,
+):
+    """Narrow machine-path findings only with exact same-path receiver evidence.
+
+    A same-path line needs exact evidence in a receiver-side version,
+    including earlier versions reachable from the receiver's prior ref.
+    A duplicate beyond the previously published multiplicity remains a finding.
+    Missing or unreadable evidence never waives an occurrence.
+    """
+    if not selection.prior_receiver_roots:
+        return None
+    try:
+        literal_path = path.decode("utf-8")
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    matching = {number for number, _, line in _selected_text_lines(text, literal_path, "history-blob")
+                if find_machine_paths(line)}
+    if not matching:
+        return frozenset()
+    current = text.splitlines()
+    if len(current) != raw.count(b"\n") + int(bool(raw) and not raw.endswith(b"\n")):
+        return None  # Git and the text classifier must agree on line boundaries.
+    wanted = Counter(current[number - 1] for number in matching)
+    now = asyncio.get_running_loop().time
+    # This optional proof must not use the primary object reader or consume
+    # its remaining time on a missing, oversized or corrupt baseline.
+    proof_deadline = now() + _time_left(deadline, now) / 2
+
+    def proof_git(args):
+        remaining = proof_deadline - now()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired("published-path-evidence", 0)
+        return _run_range_git(args, timeout=remaining)
+
+    # The range owner orders the advertised destination before additional
+    # receiver inventory. Anchor prior-line evidence to that selected history.
+    old_root = selection.prior_receiver_roots[0]
+    history_key = ("history", old_root, git_mode)
+    try:
+        if history_key not in prior_blobs:
+            prior_blobs[history_key] = _published_path_blob_history(
+                proof_git, old_root, path, literal_path, git_mode,
+            )
+        for previous_oid in prior_blobs[history_key]:
+            lines = _verified_published_blob_lines(proof_git, previous_oid, selection.object_format)
+            if lines is None:
+                continue
+            previously_seen = Counter(line for line in lines if line in wanted)
+            matching = {n for n in matching if previously_seen[current[n - 1]] < wanted[current[n - 1]]}
+            if not matching:
+                break
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass  # The still-unproved lines keep their original disposition.
+    return frozenset(matching)
+
+
 async def _acquire_indexed_history(
     selection: RangeSelection | NativePushSelection,
     reader: _AsyncGitObjectReader,
@@ -5680,7 +5834,8 @@ async def _acquire_indexed_history(
                 path = prefix + (b"/" if prefix else b"") + entry.name
                 if len(path) > _MAX_PATH_BYTES:
                     return _refusal("PS-MSG-LIMIT", "path-bytes")
-                if native and unpublished_tree and index.add_metadata(tree_oid, path):
+                if (native and (unpublished_tree or index.had_receiver_tree_candidate(tree_oid))
+                        and index.add_metadata(tree_oid, path)):
                     decoded_path = path.decode("utf-8", "surrogateescape")
                     filename_findings = _filename_findings(decoded_path, "tree-path")
                     _append_findings(findings, filename_findings)
@@ -5726,8 +5881,13 @@ async def _acquire_indexed_history(
     raw = b""
     result = None
     scanned_paths = 0
+    previous_path = None
+    prior_blobs = {}
     index.prepare_path_queries()
     for path, blob_oid in index.path_pairs():
+        if path != previous_path:
+            previous_path = path
+            prior_blobs.clear()
         scanned_paths += 1
         classify_room = len(findings) < _MAX_FINDINGS
         path_reviewed = False
@@ -5757,6 +5917,14 @@ async def _acquire_indexed_history(
             result = None
             cached_blob_oid = blob_oid
         decoded_path = path.decode("utf-8", "surrogateescape")
+        machine_path_lines = None
+        if not binary and selection.prior_receiver_roots:
+            modes = {mode if commit else None for _, mode, commit in index.owners(path, blob_oid)}
+            if len(modes) == 1 and modes <= {"100644", "100755"}:
+                machine_path_lines = _unpublished_machine_path_lines(
+                    selection, path, raw, next(iter(modes)), find_machine_paths,
+                    scan_deadline, prior_blobs,
+                )
         if not native:
             _append_findings(findings, _filename_findings(decoded_path, "history-blob"))
         if review_capture is not None:
@@ -5788,7 +5956,7 @@ async def _acquire_indexed_history(
                 unresolved = review_evaluation.scan_text_subject(
                     raw, decoded_path, find_machine_paths, subject_kind="history-blob",
                     mode="range-blob-text", commit_oid=commit_oid, raw_path=path,
-                    blob_oid=blob_oid, git_mode=git_mode,
+                    blob_oid=blob_oid, git_mode=git_mode, machine_path_lines=machine_path_lines,
                 )
                 # This owner was evaluated even if the display sample is full.
                 classified_progress.step()
@@ -5806,6 +5974,7 @@ async def _acquire_indexed_history(
             content_findings = await _text_content_hits_with_matcher(
                 raw, decoded_path, find_machine_paths, matcher, scan_deadline,
                 max_findings=max(0, _MAX_FINDINGS - len(findings)),
+                machine_path_lines=machine_path_lines,
             )
         else:
             content_findings = _content_hits(
@@ -5814,6 +5983,7 @@ async def _acquire_indexed_history(
                 find_machine_paths,
                 subject_kind="history-blob",
                 max_findings=max(0, _MAX_FINDINGS - len(findings)),
+                machine_path_lines=machine_path_lines,
             )
         _append_findings(findings, content_findings)
         if classify_room and not path_reviewed:
