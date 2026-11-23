@@ -1,6 +1,6 @@
 # Orche delivery and later native operations
 
-The [current product plan](https://github.com/applicate2628/Orchestrarium/blob/6716ff450c7ec5ff684e59c464a767019bba09dd/docs/orchestrarium-2.0-plan.md#current-delivery-order-and-completed-work) starts from the
+The [current product plan](https://github.com/applicate2628/Orchestrarium/blob/debdf7b9cf8f0078b62dd5d40f45318655572677/docs/orchestrarium-2.0-plan.md#current-delivery-order-and-completed-work) starts from the
 standalone tagged baseline. The selected independent Rust scanner release comes
 before software development kit (SDK) delivery. SDK qualification can run in
 parallel, and channel qualification has its own acceptance evidence.

@@ -8,7 +8,7 @@ or a supported-platform declaration.
 
 ## One operation owner, staged implementation
 
-The [current product plan](https://github.com/applicate2628/Orchestrarium/blob/6716ff450c7ec5ff684e59c464a767019bba09dd/docs/orchestrarium-2.0-plan.md#current-delivery-order-and-completed-work) starts from the
+The [current product plan](https://github.com/applicate2628/Orchestrarium/blob/debdf7b9cf8f0078b62dd5d40f45318655572677/docs/orchestrarium-2.0-plan.md#current-delivery-order-and-completed-work) starts from the
 [tagged pre-SDK baseline](https://github.com/applicate2628/Orchestrarium/tree/baseline-pre-sdk-2026-11-23).
 The selected independent Rust scanner release in
 [pull request #21](https://github.com/applicate2628/Orchestrarium/pull/21) precedes
