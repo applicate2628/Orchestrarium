@@ -49,6 +49,8 @@ def fixtures(algorithm):
         ("empty", empty, {empty: frame(empty, b"")}),
         ("wrong_root_identity", root, {root: child_frame, child: child_frame}),
         ("wrong_child_identity", root, {root: root_frame, child: root_frame}),
+        ("corrupt_root_payload", root, {root: frame(root, bytes((root_raw[0] ^ 1,)) + root_raw[1:]), child: child_frame}),
+        ("corrupt_child_payload", root, {root: root_frame, child: frame(child, bytes((child_raw[0] ^ 1,)) + child_raw[1:])}),
         ("wrong_root_type", root, {root: frame(root, root_raw, b"blob"), child: child_frame}),
         ("wrong_child_type", root, {root: root_frame, child: frame(child, child_raw, b"tag")}),
         ("missing_root", root, {root: root_hex + b" missing\n"}),
@@ -124,7 +126,10 @@ def main():
                     graph[oid] = Refusal("owner", result[2:])
                 else:
                     raw = bytes.fromhex(result[7:]) if result != "F tree -" else b""
-                    assert object_id(raw, b"tree", algorithm) == oid
+                    if object_id(raw, b"tree", algorithm) != oid:
+                        assert case in {"corrupt_root_payload", "corrupt_child_payload"}
+                        graph[oid] = Refusal("owner", "PS-MSG-FRAME identity")
+                        continue
                     row = parse(raw, SimpleNamespace(raw_length=width))
                     graph[oid] = (Refusal("owner", f"{row.code} {row.reason}")
                                   if isinstance(row, RecordRefusal) else row)

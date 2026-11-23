@@ -3,7 +3,7 @@
 use std::io::{self, BufRead};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ObjectKind {
+pub enum ObjectKind {
     Commit,
     Tree,
     Blob,
@@ -11,7 +11,7 @@ pub(crate) enum ObjectKind {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub(crate) enum FrameError {
+pub enum FrameError {
     Missing,
     Header,
     Identity,
@@ -25,18 +25,18 @@ pub(crate) enum FrameError {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub(crate) struct Frame {
-    pub(crate) kind: ObjectKind,
-    pub(crate) payload: Vec<u8>,
+pub struct Frame {
+    pub kind: ObjectKind,
+    pub payload: Vec<u8>,
 }
 
-pub(crate) struct Limits {
-    pub(crate) header: usize,
-    pub(crate) record: usize,
-    pub(crate) blob: usize,
+pub struct Limits {
+    pub header: usize,
+    pub record: usize,
+    pub blob: usize,
     // Preserve the receiving Python integer parser's configured decimal limit.
     // Zero represents Python's unlimited setting; the header remains bounded.
-    pub(crate) decimal_digits: usize,
+    pub decimal_digits: usize,
 }
 
 impl Default for Limits {
@@ -128,7 +128,7 @@ fn read_exact(input: &mut impl BufRead, dst: &mut [u8]) -> Result<(), FrameError
 /// object ID (40 or 64 hex bytes). A failure must poison the owner's session:
 /// no resynchronization or use of partially decoded data is provided here.
 /// A successful structural header match is not cryptographic identity proof.
-pub(crate) fn read_frame(
+pub fn read_frame(
     input: &mut impl BufRead,
     expected_oid: &[u8],
     expected_type: Option<ObjectKind>,
@@ -170,7 +170,7 @@ pub(crate) fn read_frame(
     read_exact(input, &mut payload)?;
     let mut delimiter = [0];
     read_exact(input, &mut delimiter)?;
-    if delimiter != [b'\n'] {
+    if delimiter[0] != b'\n' {
         return Err(FrameError::RecordDelimiter);
     }
     Ok(Frame { kind, payload })

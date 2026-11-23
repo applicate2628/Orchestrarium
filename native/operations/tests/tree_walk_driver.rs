@@ -1,11 +1,10 @@
-// A std-only test driver; this is not a scanner transport or release executable.
-#[path = "../src/publication/git_batch.rs"]
-mod git_batch;
+// A test driver; this is not a scanner transport or release executable.
 #[path = "../src/publication/tree_record.rs"]
 mod tree_record;
 #[path = "../src/publication/tree_walk.rs"]
 mod tree_walk;
-use git_batch::{FrameError, Limits, ObjectKind, read_frame};
+use orche_native_operations::{FrameError, Limits, ObjectKind, read_frame};
+use orche_native_operations::{ObjectFormat, VerifiedReadError, read_verified_object};
 use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
@@ -219,14 +218,22 @@ fn main() {
                     unhex(&row[4])
                 };
                 let mut input = io::BufReader::with_capacity(chunks, wire.as_slice());
-                let raw = read_frame(
+                let format = match object_width(root.len()) {
+                    ObjectWidth::Sha1 => ObjectFormat::Sha1,
+                    ObjectWidth::Sha256 => ObjectFormat::Sha256,
+                };
+                let raw = read_verified_object(
                     &mut input,
+                    format,
                     row[1].as_bytes(),
                     Some(ObjectKind::Tree),
                     &Limits::default(),
                 )
-                .map(|frame| frame.payload)
-                .map_err(frame_error);
+                .map(|object| object.into_bytes())
+                .map_err(|err| match err {
+                    VerifiedReadError::Framing(frame) => frame_error(frame),
+                    _ => String::from("PS-MSG-FRAME identity"),
+                });
                 assert!(framed_trees.insert(oid, raw).is_none());
             }
             "E" => {
@@ -269,9 +276,8 @@ fn main() {
             .unwrap();
         assert!(arena.insert(oid.as_slice(), Ok(records)).is_none());
     }
-    // The Python fixture owner proves Git payload hashes before this adapter
-    // receives input; read_frame itself does not authenticate payload content.
-    // Replay parser errors at lookup to preserve the owner's traversal order.
+    // Replay framing, identity, and parser errors at lookup to preserve
+    // the owner's traversal order.
     for (oid, validated) in &framed_trees {
         let records = match validated {
             Ok(raw) => VerifiedTreePayload::from_verified_bytes(raw, object_width(root.len()))

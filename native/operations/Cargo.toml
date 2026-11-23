@@ -1,0 +1,18 @@
+[package]
+name = "orche-native-operations"
+version = "0.1.0"
+edition = "2024"
+publish = false
+autotests = false
+
+[[test]]
+name = "git_object_identity"
+path = "tests/git_object_identity.rs"
+
+[[example]]
+name = "tree_walk_driver"
+path = "tests/tree_walk_driver.rs"
+
+[dependencies]
+gix-hash = { version = "=0.28.1", default-features = false, features = ["sha1", "sha256"] }
+gix-object = { version = "=0.66.1", default-features = false, features = ["sha1", "sha256"] }

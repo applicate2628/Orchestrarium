@@ -15,11 +15,11 @@ pending trees and does not double as a graph-size limit. Events do not get
 retained by the walker. No new detector, Git transport, tag selection,
 identity proof, admission, report, or publication decision is added.
 
-On an approved local toolchain, build the std-only test driver and compare it
+On an approved local toolchain, build the locked test driver and compare it
 against the actual Python walk loop in the chosen receiving checkout:
 
 ~~~text
-rustc --edition=2024 -D warnings native/operations/tests/tree_walk_driver.rs -o <test-driver>
+cargo build --manifest-path native/operations/Cargo.toml --example tree_walk_driver --locked --offline
 python -B native/operations/tests/tree_walk_parity.py --driver <test-driver> --source <receiving-check-publication-safety.py>
 ~~~
 
@@ -51,6 +51,28 @@ The test also feeds borrowed records into the walker without copying their
 fields. Git acquisition, ownership and publication authority remain outside
 this component.
 
+## Git object identity receiver
+
+After framing, the candidate receiver validates the requested ID against the
+repository format and hashes the complete object with its Git type and length.
+It exposes an owned payload only when the content ID matches. Gitoxide provides
+the Git object encoding and both hash implementations; the locked SHA-1
+implementation includes collision detection. The receiver does not acquire
+transport, recover a failed stream, authorize a push, or replace scanning
+policy. The caller must abandon a stream after a failed read.
+
+Run the native identity tests with the locked dependencies:
+
+~~~text
+cargo test --manifest-path native/operations/Cargo.toml --locked --offline
+~~~
+
+The fixtures cover both ID formats, all four Git object types, changed content
+under the original header, wrong type, wrong format, and invalid request ID.
+The framing size limits are still the existing compatibility bounds. The
+real transport, large-object processing, cancellation, and standalone release
+remain unqualified.
+
 ## Git batch frame decoder
 
 The decoder consumes one response from a buffered byte stream. The acquisition
@@ -80,8 +102,9 @@ deadline enforcement, content identity, or publication.
 
 ## Publication receiving composition
 
-The same test driver can feed locally hash-verified Git tree fixtures through
-the batch decoder, borrowed record parser, and walker in one process.
+The same test driver can feed Git tree fixtures through the batch decoder,
+native identity receiver, borrowed record parser, and walker in one process.
+The driver binary is under the Cargo target directory's debug/examples folder.
 Errors are delivered at the corresponding tree lookup, so the test observes
 the exact prefix of valid coverage events followed by the refusal. A correct
 frame with a malformed authenticated tree still fails structural decoding.
@@ -97,7 +120,8 @@ trees and the refusal for a missing child with actual Git output. No remote,
 hook, or publication operation is involved. Use the receiving Python source
 being qualified, not an incidental checkout of an older scanner.
 
-Fixture preparation verifies both Git object-ID algorithms with Python; neither
-the Rust framing decoder nor this test adapter provides hash authority. This
-is a test-only arena, not a production cache, dispatcher, or acquisition
-owner. It does not qualify the subject index, receipt, or publication path.
+The Python fixture verifies both ID algorithms independently. A complete
+frame with mutated content and the original header is rejected before its
+tree is parsed. This is a test-only arena, not the production cache,
+dispatcher, or acquisition owner. It does not qualify the subject index,
+receipt, or publication path.
