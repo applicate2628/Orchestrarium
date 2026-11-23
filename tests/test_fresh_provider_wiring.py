@@ -268,14 +268,21 @@ class FreshProviderWiringTests(unittest.TestCase):
         scope = next(node for node in ast.walk(install) if isinstance(node, ast.With)
                      and any(shape(item.context_expr) == shape(expression("transaction"))
                              for item in node.items))
-        final = self.one_call(scope, "_record_fresh_provider_receipt")
-        self.assertEqual(ast.unparse(final.args[-1]), "create_only")
-        self.assertEqual(ast.unparse(final.args[-2]), "fresh_receipt")
-        branch = scope.body[-2]
-        self.assertIsInstance(branch, ast.If)
-        self.require(branch.test, "selected_updates is not None")
-        self.assertIs(branch.orelse[0].value, final)
-        self.assertEqual(len(branch.orelse), 1)
+        final = self.one_call(scope, "_record_provider_install")
+        self.assertEqual(
+            [ast.unparse(arg) for arg in final.args],
+            ["root", "provider", "mode", "target", "mutable_anchor", "transaction",
+             "create_only", "ownership_before", "config_before", "docs_target",
+             "mode_target", "registration", "installed_hook_root", "hooks_enabled"],
+        )
+        self.assertEqual(
+            {kw.arg: ast.unparse(kw.value) for kw in final.keywords},
+            {"canonical_plan": "canonical_plan", "canonical_target": "canonical_skills_target",
+             "selected_updates": "selected_updates", "reclaimed": "reclaimed"},
+        )
+        lead_final = self.one_call(scope, "_finalize_canonical_lead_receipt")
+        self.assertLess(lead_final.lineno, final.lineno)
+        self.assertIs(scope.body[-2].value, final)
         self.assertEqual(ast.unparse(scope.body[-1]), "transaction.commit()")
         for call in calls(scope, "_CreateOnlyMutablePath") + calls(scope, "bind_or_create_anchor"):
             if any(isinstance(arg, ast.Name) and arg.id == "transaction" for arg in call.args):
