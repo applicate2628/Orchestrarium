@@ -1423,19 +1423,29 @@ async def _create_owned_async_process(
     process_group_owner = await _acquire_posix_process_group_owner()
     process_kwargs = process_group_owner.popen_kwargs
     try:
-        process = await asyncio.create_subprocess_exec(
+        creation = asyncio.create_task(asyncio.create_subprocess_exec(
             *argv, **kwargs, **process_kwargs
-        )
+        ))
+        process, cancelled = await _await_owned_task(creation)
         process_group_owner.bind_process_group(process.pid)
         direct_observation = _AsyncioDirectProcessObservation(process)
-        return process, process_group_owner, direct_observation
     except BaseException:
         if process_group_owner is not None:
             try:
-                await asyncio.to_thread(process_group_owner.close)
+                close_task = asyncio.create_task(asyncio.to_thread(process_group_owner.close))
+                await _await_owned_task(close_task)
             except PosixProcessGroupError:
                 pass
         raise
+    if cancelled is not None:
+        settled, _ = await _await_owned_task(asyncio.create_task(_settle_owned_async_process(
+            process, process_group_owner, direct_observation,
+            drain_readers=(process.stdout, process.stderr),
+        )))
+        if not settled:
+            raise RuntimeError("cancelled subprocess creation did not settle")
+        raise cancelled
+    return process, process_group_owner, direct_observation
 
 
 @asynccontextmanager
@@ -3419,19 +3429,27 @@ async def _read_git_lines_bounded(
                 )
             except asyncio.TimeoutError:
                 refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+            except asyncio.CancelledError:
+                refusal = _refusal("PS-MSG-READ", "cancelled")
             except Exception:
                 refusal = _refusal("PS-MSG-READ", "selection-wait")
 
-    cleanup_deadline = asyncio.get_running_loop().time() + _PROCESS_TREE_CLEANUP_SECONDS
-    child_settled = await _settle_owned_async_process(
-        process,
-        process_group_owner,
-        direct_observation,
-        drain_readers=(process.stdout,),
-    )
-    input_settled = await _settle_selection_input(input_task, cleanup_deadline)
-    if not child_settled or not input_settled:
+    async def finish_selection() -> bool:
+        cleanup_deadline = asyncio.get_running_loop().time() + _PROCESS_TREE_CLEANUP_SECONDS
+        child_settled = await _settle_owned_async_process(
+            process,
+            process_group_owner,
+            direct_observation,
+            drain_readers=(process.stdout,),
+        )
+        input_settled = await _settle_selection_input(input_task, cleanup_deadline)
+        return child_settled and input_settled
+
+    settled, cancelled = await _await_owned_task(asyncio.create_task(finish_selection()))
+    if not settled:
         return _selection_reap_refusal(refusal, input_task is not None)
+    if cancelled is not None and refusal is None:
+        refusal = _refusal("PS-MSG-READ", "cancelled")
     if refusal is not None:
         return refusal
     if process.returncode not in accepted_codes:
@@ -4647,15 +4665,7 @@ class _AsyncGitObjectReader:
         if self._finalizer_task is None or self._finalizer_task.done():
             self._finalizer_task = asyncio.create_task(self._drive_finalizer())
         task = self._finalizer_task
-        caller_cancelled = False
-        try:
-            result = await asyncio.shield(task)
-        except asyncio.CancelledError:
-            caller_cancelled = True
-            try:
-                result = await asyncio.shield(task)
-            except asyncio.CancelledError:
-                result = await task
+        result, caller_cancelled = await _await_owned_task(task)
         task_tick = asyncio.get_running_loop().time()
         task_identity = f"task:{id(task)}"
         finalizer = FinalizerObservation(

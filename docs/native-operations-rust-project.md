@@ -379,7 +379,7 @@ not claim whole-host cleanliness from a selected-resource check.
    parity on small changes over receiver history and large new disclosures.
    Verify progress, interruption and recovery, resource settlement, and actual
    receiving on supported installation targets before release. Follow the
-   release order in the [Orchestrarium 2.0 product plan](https://github.com/applicate2628/Orchestrarium/blob/6716ff450c7ec5ff684e59c464a767019bba09dd/docs/orchestrarium-2.0-plan.md#current-delivery-order-and-completed-work).
+   release order in the [Orchestrarium 2.0 product plan](https://github.com/applicate2628/Orchestrarium/blob/debdf7b9cf8f0078b62dd5d40f45318655572677/docs/orchestrarium-2.0-plan.md#current-delivery-order-and-completed-work).
 2. Qualify the selected SDK contracts and their input, session and result bindings
    in parallel. Release the SDK after the independently qualified scanner slice.
    Qualify PowerShell, POSIX and optional npm distribution in its own delivery lane.
