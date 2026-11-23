@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-23
 
+- Historical upgrade checks distinguish legacy lookup digests from structural Version 2 witnesses, verify unchanged targets when historical material lacks a witness, and exercise supported upgrade, no-op and rollback behavior using authenticated factory data. Receipt and explicit-adoption checks use their current versioned formats.
+
 - Coupled Lead and provider-transport upgrades recognize completed content writes by the same installation transaction. The check binds the captured predecessor, original file identities, current owned state and planned contents, so Windows updates can preserve their existing files without treating their own changes as foreign drift.
 
 - Removing an unchanged retired file after a Windows tree replacement retains the transaction's complete security and identity witnesses. Cleanup and rollback no longer discard that evidence by reopening the file with a weaker observation.
