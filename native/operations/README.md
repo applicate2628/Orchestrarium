@@ -180,3 +180,24 @@ provisional rows on an incomplete read or decide binary policy on a prefix.
 The index does not run matching or apply source exemptions. The matching
 owner must still evaluate each whole selected line, including an oversized
 one, without unbounded heap growth or a coverage shortcut.
+
+### Windows staged-worker composition fixture
+
+Build the existing test executable with Cargo, then use its reported path:
+
+~~~text
+cargo test --manifest-path native/operations/Cargo.toml --locked --test publication_line_index --no-run
+python -B native/operations/tests/windows_staging_worker.py --binary ABSOLUTE_TEST_EXE --fixture-root ABSOLUTE_DISPOSABLE_DIRECTORY
+~~~
+
+This uses the production scanner's Windows job supervisor and existing native
+directory identity and private-child primitives. A locally built Rust test
+maps a whole line, refuses an existing leaf without changing it, and leaves
+no stage file. A separate small child emits a provisional record and exits
+nonzero; both outcomes must settle, and the second is not a successful worker
+result. Use only an operator-owned local fixture directory and test executable. The test leaves
+empty fixture directories for disposal by the caller.
+
+This fixture uses parent-owned test scratch. It does not claim that the production
+scanner owns private scratch, consumes spooled text, or grants a publication
+receipt for the mapped stage. No scanner policy or dispatcher is changed.
