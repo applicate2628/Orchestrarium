@@ -1,4 +1,4 @@
-use orche_native_operations::{LineSpan, index_text};
+use orche_native_operations::{LineSpan, index_text, normalize_staged_text};
 use std::io::{self, Read};
 
 struct Chunk<'a>(&'a [u8], usize);
@@ -91,5 +91,32 @@ struct Fails;
 impl Read for Fails {
     fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
         Err(io::Error::other("fixture read failure"))
+    }
+}
+
+#[test]
+fn normalizes_staged_utf8_independent_of_read_boundaries() {
+    let input = b"alpha\0\r\n\xc2\x85\xf0\x9f\x92\n\x80\xe2\x82";
+    let expected = String::from_utf8_lossy(input);
+    for width in 1..=input.len() {
+        let mut output = Vec::new();
+        assert!(normalize_staged_text(Chunk(input, width), &mut output).unwrap());
+        assert_eq!(output, expected.as_bytes(), "width={width}");
+    }
+}
+
+#[test]
+fn normalization_propagates_source_and_sink_failures() {
+    assert!(normalize_staged_text((&b"prefix"[..]).chain(Fails), io::sink()).is_err());
+    assert!(normalize_staged_text(&b"prefix"[..], RejectWrites).is_err());
+}
+
+struct RejectWrites;
+impl io::Write for RejectWrites {
+    fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+        Err(io::Error::other("fixture sink failure"))
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
     }
 }

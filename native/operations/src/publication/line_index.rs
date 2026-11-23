@@ -1,4 +1,4 @@
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 
 /// One whole logical line, excluding its separator. Character offsets count
 /// Unicode scalars after UTF-8 replacement; byte offsets address the input.
@@ -14,13 +14,9 @@ pub struct LineSpan {
 /// provisional until the read succeeds and returns whether any byte was NUL.
 /// The caller owns binary policy, any span storage, and whole-line matching.
 pub fn index_text(
-    mut input: impl Read,
+    input: impl Read,
     mut emit: impl FnMut(LineSpan) -> io::Result<()>,
 ) -> io::Result<bool> {
-    // At most three bytes of an unfinished UTF-8 scalar carry into a read.
-    let mut buffer = [0; 16 * 1024 + 3];
-    let mut carry = 0;
-    let mut has_nul = false;
     let mut lines = Lines {
         next: LineSpan {
             number: 1,
@@ -32,7 +28,42 @@ pub fn index_text(
         byte_pos: 0,
         after_cr: false,
     };
+    let has_nul = visit_decoded(input, |text, replaced_bytes| {
+        for ch in text.chars() {
+            lines.accept(
+                ch,
+                replaced_bytes.unwrap_or_else(|| ch.len_utf8()),
+                &mut emit,
+            )?;
+        }
+        Ok(())
+    })?;
+    if lines.next.byte_start < lines.byte_pos {
+        lines.next.byte_end = lines.byte_pos;
+        emit(lines.next)?;
+    }
+    Ok(has_nul)
+}
 
+/// Write replacement-decoded UTF-8 into a separate private sink using fixed
+/// working memory. Returns whole-input NUL presence only after successful
+/// read, write and flush. The sink remains provisional on failure.
+pub fn normalize_staged_text(input: impl Read, mut sink: impl Write) -> io::Result<bool> {
+    let has_nul = visit_decoded(input, |text, _| sink.write_all(text.as_bytes()))?;
+    sink.flush()?;
+    Ok(has_nul)
+}
+
+// A valid prefix retains its byte widths. The replacement callback instead
+// records the width of the original invalid byte sequence.
+fn visit_decoded(
+    mut input: impl Read,
+    mut visit: impl FnMut(&str, Option<usize>) -> io::Result<()>,
+) -> io::Result<bool> {
+    // At most three bytes of an unfinished UTF-8 scalar carry into a read.
+    let mut buffer = [0; 16 * 1024 + 3];
+    let mut carry = 0;
+    let mut has_nul = false;
     loop {
         let count = match input.read(&mut buffer[carry..]) {
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
@@ -49,18 +80,18 @@ pub fn index_text(
                     e.error_len(),
                 ),
             };
-            for ch in prefix.chars() {
-                lines.accept(ch, ch.len_utf8(), &mut emit)?;
+            if !prefix.is_empty() {
+                visit(prefix, None)?;
             }
             rest = &rest[prefix.len()..];
             match invalid {
                 Some(0) => break,
                 Some(len) => {
-                    lines.accept('\u{fffd}', len, &mut emit)?;
+                    visit("\u{fffd}", Some(len))?;
                     rest = &rest[len..];
                 }
                 None if count == 0 => {
-                    lines.accept('\u{fffd}', rest.len(), &mut emit)?;
+                    visit("\u{fffd}", Some(rest.len()))?;
                     rest = &[];
                 }
                 None => break,
@@ -73,10 +104,6 @@ pub fn index_text(
         buffer.copy_within(end - carry..end, 0);
     }
 
-    if lines.next.byte_start < lines.byte_pos {
-        lines.next.byte_end = lines.byte_pos;
-        emit(lines.next)?;
-    }
     Ok(has_nul)
 }
 
