@@ -171,6 +171,8 @@ size; both an early-success callback and a premature end of input fail. Data
 written by a callback remains provisional until the complete read succeeds.
 The real Git fixture passes a blob larger than 64 MiB for each hash format
 directly from the fixture-owned staged file through the whole-line index.
+On Windows it also checks the mapped line and removal of the temporary mapping
+file before reporting fixture success.
 
 The staged reader removes the buffered payload ceiling from this receiving
 path only. It does not qualify the matching stage, disk-pressure handling,

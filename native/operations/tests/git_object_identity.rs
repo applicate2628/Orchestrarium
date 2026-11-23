@@ -329,6 +329,36 @@ fn native_git_keeps_one_batch_open_for_both_object_widths() {
 
         let object = large.unwrap();
         assert_eq!((object.kind(), object.size()), (ObjectKind::Blob, size));
+        #[cfg(windows)]
+        let (has_nul, rows) = {
+            let path = repo.join("normalized-object-stage");
+            let result = object
+                .consume(|reader| {
+                    let mut spans = Vec::new();
+                    // SAFETY: this process exclusively owns a new leaf in its
+                    // disposable local Windows fixture root.
+                    let stage = unsafe {
+                        orche_native_operations::MappedStagedText::stage(&path, reader, |span| {
+                            spans.push(span);
+                            Ok(())
+                        })
+                    }?;
+                    assert_eq!(spans.len(), 1);
+                    let span = spans[0];
+                    assert_eq!((span.number, span.byte_start, span.byte_end), (1, 0, size));
+                    let line = stage.line(span)?;
+                    assert_eq!(line.len() as u64, size);
+                    assert_eq!(
+                        (line.as_bytes().first(), line.as_bytes().last()),
+                        (Some(&0), Some(&0))
+                    );
+                    Ok((stage.has_nul(), spans.len()))
+                })
+                .unwrap();
+            assert!(!path.exists());
+            result
+        };
+        #[cfg(not(windows))]
         let (has_nul, rows) = object
             .consume(|reader| {
                 let mut rows = 0;
