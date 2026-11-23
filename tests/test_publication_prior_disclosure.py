@@ -102,6 +102,55 @@ class TestPriorDisclosure(native.TestNativePublicationEffects):
         self.assertEqual(outcome.kind, "clean", outcome)
         self.assertNotIn(published, outcome.history.commit_ids)
 
+    def test_edited_blob_distinguishes_inherited_and_new_machine_paths(self):
+        path = self.root / "trace.txt"
+        old = "retained=" + chr(68) + chr(58) + "/dev/synthetic-published/" + "\n"
+        fresh = "fresh=" + chr(69) + chr(58) + "/dev/synthetic-new/" + "\n"
+        path.write_text(old + "status=old\n", encoding="utf-8")
+        self.git("add", "trace.txt")
+        self.git("commit", "-qm", "synthetic baseline path")
+        published = self.git("rev-parse", "HEAD").strip().decode()
+        self.git("push", "-q", "origin", "HEAD:refs/heads/main")
+
+        def scan_edit(data, moved=False):
+            target = self.root / "other.txt" if moved else path
+            target.write_text(data, encoding="utf-8")
+            self.git("add", target.name)
+            tree = self.git("write-tree").strip().decode()
+            tip = self.git("commit-tree", tree, "-p", published, raw=b"synthetic transition\n").strip().decode()
+            payload = self.payload([(tip.encode(), tip, b"refs/heads/main", published)])
+            finder = self.module._path_finder(native.SOURCE)
+            with self.in_root(), mock.patch.object(self.module, "__injected_native_push__", payload, create=True):
+                return (
+                    self.module._scan_native_push(payload, finder),
+                    self.module._scan_range("origin", "refs/heads/main", finder, source_revision=tip),
+                )
+
+        for outcome in scan_edit(old + "status=updated\n"):
+            self.assertEqual(outcome.kind, "clean", [
+                (row.subject_kind, row.detector_class) for row in outcome.findings])
+
+        run_git = self.module._run_range_git
+        def unavailable_baseline(args, **kwargs):
+            if "ls-tree" in args and "--full-tree" in args:
+                raise self.module.subprocess.TimeoutExpired("optional baseline", 0)
+            return run_git(args, **kwargs)
+        with mock.patch.object(self.module, "_run_range_git", unavailable_baseline):
+            for outcome in scan_edit(old + "status=updated\n"):
+                self.assertEqual(outcome.kind, "findings")
+                self.assertTrue(any(row.detector_class == "machine-path" for row in outcome.findings))
+
+        for data in (old + "status=updated\n" + fresh, old + "status=updated\n" + old):
+            for outcome in scan_edit(data):
+                self.assertEqual(outcome.kind, "findings")
+                self.assertTrue(any(row.detector_class == "machine-path" for row in outcome.findings))
+        for outcome in scan_edit(old + "TOKEN=" + "aB9" * 16 + "\n"):
+            self.assertEqual(outcome.kind, "findings")
+            self.assertTrue(any(row.detector_class != "machine-path" for row in outcome.findings))
+        for outcome in scan_edit(old, moved=True):
+            self.assertEqual(outcome.kind, "findings")
+            self.assertTrue(any(row.detector_class == "machine-path" for row in outcome.findings))
+
     def test_new_disclosure_still_fails_after_prior_inventory(self):
         _published, tip = self.publish_marker()
         (self.root / "new.txt").write_text("TOKEN=" + "xY8" * 16 + "\n", encoding="utf-8")
