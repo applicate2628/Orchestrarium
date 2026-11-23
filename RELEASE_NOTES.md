@@ -7,7 +7,7 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-23
 
-- Clarify when an unchanged file needs no repeat review during a release rebuild, and when an exact-commit decision needs a new review. Fresh pre-push scans and existing decision scope are unchanged.
+- Clarify when an unchanged file needs no repeat review during a release rebuild, and when an exact-commit decision needs a new review. Lead opens the installed guidance only when handling scanner findings or rebuilding a release with prior findings. Fresh pre-push scans and existing decision scope are unchanged.
 
 - The model resolver now compares eligible models and reasoning efforts using benchmark quality, task time, and one relative cost unit (Sol 6.2 High = 1). The Lead selects and explains the best fit for each task; the default is a fallback. The benchmark figures are not prices, launch permissions, or runtime guarantees.
 
