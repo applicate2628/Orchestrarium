@@ -102,6 +102,138 @@ class TestPriorDisclosure(native.TestNativePublicationEffects):
         self.assertEqual(outcome.kind, "clean", outcome)
         self.assertNotIn(published, outcome.history.commit_ids)
 
+    def test_edited_blob_distinguishes_inherited_and_new_machine_paths(self):
+        path = self.root / "trace.txt"
+        old = "retained=" + chr(68) + chr(58) + "/dev/synthetic-published/" + "\n"
+        fresh = "fresh=" + chr(69) + chr(58) + "/dev/synthetic-new/" + "\n"
+        path.write_text(old + "status=old\n", encoding="utf-8")
+        self.git("add", "trace.txt")
+        self.git("commit", "-qm", "synthetic baseline path")
+        published = self.git("rev-parse", "HEAD").strip().decode()
+        self.git("push", "-q", "origin", "HEAD:refs/heads/main")
+
+        def scan_edit(data, moved=False):
+            target = self.root / "other.txt" if moved else path
+            target.write_text(data, encoding="utf-8")
+            self.git("add", target.name)
+            tree = self.git("write-tree").strip().decode()
+            tip = self.git("commit-tree", tree, "-p", published, raw=b"synthetic transition\n").strip().decode()
+            payload = self.payload([(tip.encode(), tip, b"refs/heads/main", published)])
+            finder = self.module._path_finder(native.SOURCE)
+            with self.in_root(), mock.patch.object(self.module, "__injected_native_push__", payload, create=True):
+                return (
+                    self.module._scan_native_push(payload, finder),
+                    self.module._scan_range("origin", "refs/heads/main", finder, source_revision=tip),
+                )
+
+        for outcome in scan_edit(old + "status=updated\n"):
+            self.assertEqual(outcome.kind, "clean", [
+                (row.subject_kind, row.detector_class) for row in outcome.findings])
+
+        run_git = self.module._run_range_git
+        def unavailable_baseline(args, **kwargs):
+            if "log" in args and "--raw" in args:
+                raise self.module.subprocess.TimeoutExpired("optional baseline", 0)
+            return run_git(args, **kwargs)
+        with mock.patch.object(self.module, "_run_range_git", unavailable_baseline):
+            for outcome in scan_edit(old + "status=updated\n"):
+                self.assertEqual(outcome.kind, "findings")
+                self.assertTrue(any(row.detector_class == "machine-path" for row in outcome.findings))
+
+        for data in (old + "status=updated\n" + fresh, old + "status=updated\n" + old):
+            for outcome in scan_edit(data):
+                self.assertEqual(outcome.kind, "findings")
+                self.assertTrue(any(row.detector_class == "machine-path" for row in outcome.findings))
+        for outcome in scan_edit(old + "TOKEN=" + "aB9" * 16 + "\n"):
+            self.assertEqual(outcome.kind, "findings")
+            self.assertTrue(any(row.detector_class != "machine-path" for row in outcome.findings))
+        for outcome in scan_edit(old, moved=True):
+            self.assertEqual(outcome.kind, "findings")
+            self.assertTrue(any(row.detector_class == "machine-path" for row in outcome.findings))
+
+    def test_older_published_machine_path_is_not_new_disclosure(self):
+        file = self.root / "history.txt"
+        prior = "trace=" + chr(68) + chr(58) + "/dev/synthetic-older/" + "\n"
+        file.write_text(prior, encoding="utf-8")
+        self.git("add", file.name)
+        self.git("commit", "-qm", "synthetic path in published history")
+        file.write_text("current public snapshot\n", encoding="utf-8")
+        self.git("add", file.name)
+        self.git("commit", "-qm", "synthetic ref no longer contains path")
+        published_tip = self.git("rev-parse", "HEAD").strip().decode()
+        self.git("push", "-q", "origin", "HEAD:refs/heads/main")
+
+        def scan_text(value):
+            file.write_text(value, encoding="utf-8")
+            self.git("add", file.name)
+            tree = self.git("write-tree").strip().decode()
+            tip = self.git("commit-tree", tree, "-p", published_tip, raw=b"synthetic history test\n").strip().decode()
+            payload = self.payload([(tip.encode(), tip, b"refs/heads/main", published_tip)])
+            finder = self.module._path_finder(native.SOURCE)
+            with self.in_root(), mock.patch.object(self.module, "__injected_native_push__", payload, create=True):
+                return (self.module._scan_native_push(payload, finder),
+                        self.module._scan_range("origin", "refs/heads/main", finder, source_revision=tip))
+
+        for outcome in scan_text(prior + "new unrelated line\n"):
+            self.assertEqual(outcome.kind, "clean")
+        for value in (prior + prior, prior.replace("older", "novel")):
+            for outcome in scan_text(value):
+                self.assertEqual(outcome.kind, "findings")
+                self.assertTrue(any(row.detector_class == "machine-path" for row in outcome.findings))
+
+    def test_qualified_receiver_object_difference_excludes_shared_older_blobs(self):
+        old = self.root / "already-published.txt"
+        published_text = "published=" + chr(68) + chr(58) + "/dev/synthetic-shared/" + "\n"
+        old.write_text(published_text, encoding="utf-8")
+        self.git("add", old.name)
+        self.git("commit", "-qm", "publish an ordinary object")
+        shared = self.git("rev-parse", "HEAD:" + old.name).strip().decode()
+        old.unlink()
+        self.git("add", "-u")
+        self.git("commit", "-qm", "delete the published object in final tree")
+        previous = self.git("rev-parse", "HEAD").strip().decode()
+        self.git("push", "-q", "origin", "HEAD:refs/heads/main")
+        (self.root / "new-location.txt").write_text(published_text, encoding="utf-8")
+        (self.root / "new-data.txt").write_text("Genuinely new synthetic object\n", encoding="utf-8")
+        self.git("add", "new-location.txt", "new-data.txt")
+        self.git("commit", "-qm", "publish new commit and reuse old object")
+        tip = self.git("rev-parse", "HEAD").strip().decode()
+        expected = (set(self.git("rev-list", "--objects", "--no-object-names", tip).decode().splitlines())
+                    - set(self.git("rev-list", "--objects", "--no-object-names", previous).decode().splitlines()))
+        self.assertNotIn(shared, expected)
+        payload = self.payload([(tip.encode(), tip, b"refs/heads/main", previous)])
+        mod = self.module
+
+        async def select():
+            request = mod._native_push_request(payload)
+            deadline = mod.time.monotonic() + 30
+            with mod._open_history_index(deadline) as index:
+                range_selection = await mod._native_commit_range_selection(
+                    mod.RangeRequest("origin", "refs/heads/main", tip), request, deadline, index,
+                )
+            with mod._open_history_index(deadline) as index:
+                native_selection = await mod._native_push_selection(request, deadline, (tip,), index)
+            return range_selection, native_selection
+
+        finder = mod._path_finder(native.SOURCE)
+        with self.in_root():
+            for selection in asyncio.run(select()):
+                self.assertNotIsInstance(selection, mod.Refusal)
+                self.assertEqual(set(selection.object_oids), expected)
+            outcome = mod._scan_native_push(payload, finder)
+            self.assertEqual(outcome.kind, "clean", outcome.refusal)
+
+        (self.root / "new-data.txt").write_text("TOKEN=" + "aB9" * 16 + "\n", encoding="utf-8")
+        self.git("add", "new-data.txt")
+        self.git("commit", "-qm", "exercise genuinely new content")
+        novel = self.git("rev-parse", "HEAD").strip().decode()
+        with self.in_root():
+            outcome = mod._scan_native_push(
+                self.payload([(novel.encode(), novel, b"refs/heads/main", previous)]), finder,
+            )
+        self.assertEqual(outcome.kind, "findings")
+        self.assertTrue(any(row.detector_class != "machine-path" for row in outcome.findings))
+
     def test_new_disclosure_still_fails_after_prior_inventory(self):
         _published, tip = self.publish_marker()
         (self.root / "new.txt").write_text("TOKEN=" + "xY8" * 16 + "\n", encoding="utf-8")
