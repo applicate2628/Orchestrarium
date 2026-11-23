@@ -181,6 +181,59 @@ class TestPriorDisclosure(native.TestNativePublicationEffects):
                 self.assertEqual(outcome.kind, "findings")
                 self.assertTrue(any(row.detector_class == "machine-path" for row in outcome.findings))
 
+    def test_qualified_receiver_object_difference_excludes_shared_older_blobs(self):
+        old = self.root / "already-published.txt"
+        published_text = "published=" + chr(68) + chr(58) + "/dev/synthetic-shared/" + "\n"
+        old.write_text(published_text, encoding="utf-8")
+        self.git("add", old.name)
+        self.git("commit", "-qm", "publish an ordinary object")
+        shared = self.git("rev-parse", "HEAD:" + old.name).strip().decode()
+        old.unlink()
+        self.git("add", "-u")
+        self.git("commit", "-qm", "delete the published object in final tree")
+        previous = self.git("rev-parse", "HEAD").strip().decode()
+        self.git("push", "-q", "origin", "HEAD:refs/heads/main")
+        (self.root / "new-location.txt").write_text(published_text, encoding="utf-8")
+        (self.root / "new-data.txt").write_text("Genuinely new synthetic object\n", encoding="utf-8")
+        self.git("add", "new-location.txt", "new-data.txt")
+        self.git("commit", "-qm", "publish new commit and reuse old object")
+        tip = self.git("rev-parse", "HEAD").strip().decode()
+        expected = (set(self.git("rev-list", "--objects", "--no-object-names", tip).decode().splitlines())
+                    - set(self.git("rev-list", "--objects", "--no-object-names", previous).decode().splitlines()))
+        self.assertNotIn(shared, expected)
+        payload = self.payload([(tip.encode(), tip, b"refs/heads/main", previous)])
+        mod = self.module
+
+        async def select():
+            request = mod._native_push_request(payload)
+            deadline = mod.time.monotonic() + 30
+            with mod._open_history_index(deadline) as index:
+                range_selection = await mod._native_commit_range_selection(
+                    mod.RangeRequest("origin", "refs/heads/main", tip), request, deadline, index,
+                )
+            with mod._open_history_index(deadline) as index:
+                native_selection = await mod._native_push_selection(request, deadline, (tip,), index)
+            return range_selection, native_selection
+
+        finder = mod._path_finder(native.SOURCE)
+        with self.in_root():
+            for selection in asyncio.run(select()):
+                self.assertNotIsInstance(selection, mod.Refusal)
+                self.assertEqual(set(selection.object_oids), expected)
+            outcome = mod._scan_native_push(payload, finder)
+            self.assertEqual(outcome.kind, "clean", outcome.refusal)
+
+        (self.root / "new-data.txt").write_text("TOKEN=" + "aB9" * 16 + "\n", encoding="utf-8")
+        self.git("add", "new-data.txt")
+        self.git("commit", "-qm", "exercise genuinely new content")
+        novel = self.git("rev-parse", "HEAD").strip().decode()
+        with self.in_root():
+            outcome = mod._scan_native_push(
+                self.payload([(novel.encode(), novel, b"refs/heads/main", previous)]), finder,
+            )
+        self.assertEqual(outcome.kind, "findings")
+        self.assertTrue(any(row.detector_class != "machine-path" for row in outcome.findings))
+
     def test_new_disclosure_still_fails_after_prior_inventory(self):
         _published, tip = self.publish_marker()
         (self.root / "new.txt").write_text("TOKEN=" + "xY8" * 16 + "\n", encoding="utf-8")

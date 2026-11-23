@@ -11,6 +11,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 - On Windows, the installer keeps existing owned files and their access rules when a standalone Lead upgrade only updates bytes and adds ordinary files under existing folders. The same transaction verifies new files and rolls back on failure. Coupled transport replacements retain their existing path.
 
+- Native Git publication checks now subtract verified receiver-reachable object IDs before scanning new content. A formerly shared blob or subtree cannot be reintroduced into the selected payload by the revision-exclusion walk. New content, applicable tree-path metadata, and both coverage stages are still verified; scanning the full history is not part of this check.
+
 - The publication scanner no longer reflags machine-path lines already published in the same tracked file in the verified receiver history. An edited blob does not erase that evidence. New lines, excess duplicates, different tracked paths, commit messages, binary subjects and other detectors retain their existing checks.
 
 ## 2026-11-22

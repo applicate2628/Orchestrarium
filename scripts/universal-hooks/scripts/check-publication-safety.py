@@ -3816,8 +3816,8 @@ def _resolve_head(timeout: float | None = None) -> str:
 async def _read_git_oid_lines_bounded(
     argv: tuple[str, ...],
     *,
-    count_cap: int,
-    byte_cap: int,
+    count_cap: int | None,
+    byte_cap: int | None,
     deadline: float,
     object_format: GitObjectFormat = _SHA1_OBJECT_FORMAT,
     input_bytes: bytes | None = None,
@@ -3840,7 +3840,7 @@ async def _read_git_oid_lines_bounded(
         if store_row is not None:
             if not store_row(oid):
                 return _refusal("PS-MSG-FRAME", "oid")
-        if count >= count_cap:
+        if count_cap is not None and count >= count_cap:
             return _refusal("PS-MSG-LIMIT", "count")
         if store_row is None:
             seen.add(oid)
@@ -4054,6 +4054,26 @@ async def _native_prior_receiver_roots(
     )
 
 
+async def _subtract_receiver_object_intersection(index, prior_roots, object_format, deadline):
+    """Git's negative revision walk may retain shared old trees and blobs.
+
+    Compare candidate IDs against positive, qualified receiver reachability
+    before binding coverage. Stream object metadata, never old blob contents.
+    """
+    if not prior_roots or not index.has_object_candidates():
+        return None
+    tick = _loop_scan_deadline(deadline)
+    result = await _read_git_oid_lines_bounded(
+        _range_git_argv("rev-list", "--objects", "--no-object-names", "--use-bitmap-index", "--stdin"),
+        count_cap=None, byte_cap=None, deadline=tick, object_format=object_format,
+        input_bytes=_revision_stdin(prior_roots, ()), store_row=index.mark_receiver_object,
+    )
+    if isinstance(result, Refusal):
+        return result
+    index.subtract_marked_receiver_objects()
+    return None
+
+
 async def _native_push_selection(
     request: NativePushRequest, deadline: float, roots: tuple[str, ...],
     index: "_HistoryIndex | None",
@@ -4102,13 +4122,19 @@ async def _native_push_selection(
     object_progress = _VerifiedWorkPhase("objects", budget=deadline)
     objects = await _read_git_oid_lines_bounded(
         _range_git_argv("rev-list", "--objects", "--no-object-names", "--stdin"),
-        count_cap=_MAX_OBJECTS, byte_cap=request.object_format.list_byte_cap(_MAX_OBJECTS),
+        count_cap=None if exclusions else _MAX_OBJECTS,
+        byte_cap=None if exclusions else request.object_format.list_byte_cap(_MAX_OBJECTS),
         deadline=loop_deadline, object_format=request.object_format, input_bytes=revisions,
         store_row=object_progress.observed(index.add_selected_object),
     )
     if isinstance(objects, Refusal):
         return objects
     object_progress.finish()
+    receiver = await _subtract_receiver_object_intersection(index, exclusions, request.object_format, deadline)
+    if isinstance(receiver, Refusal):
+        return receiver
+    if not index.object_selection_within_limit():
+        return _refusal("PS-MSG-LIMIT", "count")
     if not index.selected_commits_covered():
         return _refusal("PS-MSG-COVERAGE", "commit-object-set")
     parent_graph = () if compact_graph else tuple(index.selected_commits())
@@ -4163,16 +4189,20 @@ async def _native_commit_range_selection(
             return graph
         selected_objects = await _read_git_oid_lines_bounded(
             _range_git_argv("rev-list", "--objects", "--no-object-names", "--stdin"),
-            count_cap=_MAX_OBJECTS, byte_cap=object_format.list_byte_cap(_MAX_OBJECTS),
+            count_cap=None if prior_roots else _MAX_OBJECTS,
+            byte_cap=None if prior_roots else object_format.list_byte_cap(_MAX_OBJECTS),
             deadline=loop_deadline, object_format=object_format, input_bytes=revisions,
             store_row=lambda oid: index.add_selected_object(oid, stream=stream),
         )
         if isinstance(selected_objects, Refusal):
             return selected_objects
-        if not index.object_selection_within_limit():
-            return _refusal("PS-MSG-LIMIT", "count")
     if selected_primary != (primary.destination, primary.source):
         return _refusal("PS-MSG-RANGE", "native-primary")
+    receiver = await _subtract_receiver_object_intersection(index, prior_roots, object_format, deadline)
+    if isinstance(receiver, Refusal):
+        return receiver
+    if not index.object_selection_within_limit():
+        return _refusal("PS-MSG-LIMIT", "count")
     if not index.selected_commits_covered():
         return _refusal("PS-MSG-COVERAGE", "commit-object-set")
     parents = () if compact_graph else tuple(index.selected_commits())
@@ -5033,6 +5063,7 @@ class _HistoryIndex:
             CREATE TABLE selected_object (sequence INTEGER PRIMARY KEY, oid TEXT UNIQUE,
                 stream INTEGER NOT NULL, acquired_kind TEXT, acquired_sequence INTEGER,
                 reached INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE receiver_overlap (oid TEXT PRIMARY KEY) WITHOUT ROWID;
             CREATE TABLE coverage_event (sequence INTEGER PRIMARY KEY, stage TEXT NOT NULL,
                 oid TEXT NOT NULL);
             CREATE INDEX coverage_stage ON coverage_event(stage, sequence);
@@ -5123,6 +5154,20 @@ class _HistoryIndex:
             ON CONFLICT(oid) DO UPDATE SET stream=excluded.stream
             WHERE selected_object.stream <> excluded.stream
         """, (oid, stream)).rowcount == 1
+
+    def has_object_candidates(self):
+        return self.db.execute("SELECT 1 FROM selected_object LIMIT 1").fetchone() is not None
+
+    def mark_receiver_object(self, oid):
+        self.db.execute("""INSERT OR IGNORE INTO receiver_overlap
+                           SELECT oid FROM selected_object WHERE oid=?""", (oid,))
+        return True
+
+    def subtract_marked_receiver_objects(self):
+        self.db.execute("DELETE FROM selected_object WHERE oid IN (SELECT oid FROM receiver_overlap)")
+
+    def had_receiver_tree_candidate(self, oid):
+        return self.db.execute("SELECT 1 FROM receiver_overlap WHERE oid=?", (oid,)).fetchone() is not None
 
     def selected_commit_ids(self):
         return (oid for (oid,) in self.db.execute("SELECT oid FROM selected_commit ORDER BY sequence"))
@@ -5780,7 +5825,8 @@ async def _acquire_indexed_history(
                 path = prefix + (b"/" if prefix else b"") + entry.name
                 if len(path) > _MAX_PATH_BYTES:
                     return _refusal("PS-MSG-LIMIT", "path-bytes")
-                if native and unpublished_tree and index.add_metadata(tree_oid, path):
+                if (native and (unpublished_tree or index.had_receiver_tree_candidate(tree_oid))
+                        and index.add_metadata(tree_oid, path)):
                     decoded_path = path.decode("utf-8", "surrogateescape")
                     filename_findings = _filename_findings(decoded_path, "tree-path")
                     _append_findings(findings, filename_findings)
