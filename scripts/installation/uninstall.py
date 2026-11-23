@@ -69,7 +69,8 @@ def run(backend, root: Path, provider: str, args) -> int:
             path, authority = location(relative)
             selected = owner if authority is None else linked_owners[authority.logical_root]
             return selected, path.relative_to(selected.anchor)
-        observed, witnesses, documents = {}, [], {}
+        # Absence is also a selected state, retained through receipt publication.
+        observed, witnesses, documents, current_controls = {}, [], {}, {}
         configs = record.get("configs", {})
         for relative in sorted(set(record["files"]) | controls):
             selected, suffix = destination(relative)
@@ -78,8 +79,8 @@ def run(backend, root: Path, provider: str, args) -> int:
                 path = selected.destination(suffix, allow_leaf_reparse=True)
                 binding = transaction._bind_scalar_storage(path)
                 storage, node, chain, leaf = binding
-                if node is not None:
-                    documents[relative] = (binding, transaction._image_file_bytes(storage, node))
+                documents[relative] = (
+                    binding, None if node is None else transaction._image_file_bytes(storage, node))
                 witnesses.append((relative, None if node is None else
                                   (node.kind, node.data, node.python_identity)))
                 continue
@@ -90,6 +91,8 @@ def run(backend, root: Path, provider: str, args) -> int:
                 node = None
             witnesses.append((relative, None if node is None else
                               (node.kind, node.data, node.python_identity)))
+            if relative in controls:
+                current_controls[relative] = node
             if relative in record["files"] and node is not None:
                 observed[relative] = node.data if node.kind == "file" else None
         classified = codec.plan_file_removal(record, observed)
@@ -148,11 +151,16 @@ def run(backend, root: Path, provider: str, args) -> int:
             print("RESULT: preserved installation; control ownership is incomplete")
             return 2 if record["files"] or configs else 0
         current_documents = {key: value[0] for key, value in documents.items()}
-        def assert_documents():
+        def assert_control_state():
             for key, expected in current_documents.items():
                 if transaction._bind_scalar_storage(anchor / key) != expected:
                     raise ValueError("E_UNINSTALL_DOCUMENT_DRIFT")
-        assert_documents()
+            for key, expected in current_controls.items():
+                path = owner.destination(Path(key))
+                image = {} if expected is None else {path: expected}
+                if not transaction._image_matches(path, image):
+                    raise ValueError("E_UNINSTALL_CONTROL_DRIFT")
+        assert_control_state()
         for relative, replacement in block_updates.items():
             path = anchor / relative
             binding, original = documents[relative]
@@ -173,12 +181,14 @@ def run(backend, root: Path, provider: str, args) -> int:
                 # Expect absence at the same storage, with the same traversal witnesses.
                 storage, _, chain, leaf = current_documents[relative]
                 current_documents[relative] = (storage, None, chain, leaf)
+            if relative in current_controls:
+                current_controls[relative] = None
         for relative in remove:
             selected, suffix = destination(relative)
             selected.remove_exact_file(suffix, record["files"][relative])
         for _, authority in bindings.values():
             authority.assert_current()
-        assert_documents()
+        assert_control_state()
         residual = dict(record)
         residual["files"] = {p: record["files"][p] for p in preserve}
         residual["configs"] = {p: v for p, v in configs.items()
@@ -190,7 +200,7 @@ def run(backend, root: Path, provider: str, args) -> int:
             raise ValueError("E_UNINSTALL_RECEIPT_READBACK")
         for _, authority in bindings.values():
             authority.assert_current()
-        assert_documents()
+        assert_control_state()
         transaction.commit()
     print("RESULT: selected current content removed; unrecorded data retained")
     return 2 if preserve else 0
