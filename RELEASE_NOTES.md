@@ -149,6 +149,11 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 - Codex model routing now admits only the latest confirmed version in each family: Luna 6, Terra 6.1, Sol 6.2 and Astra 6.2. Older model profiles are removed from active choices rather than retained as launchable compatibility or quota-fallback routes. Existing user configuration is preserved and retired choices are reported explicitly; historical evidence and migration fixtures remain intact. This prevents new tasks from silently returning to obsolete model generations.
 
+- Reconciled the remaining product plan with delivered model-routing changes and
+  the approved SDK completion roadmap. Current SDK work is no longer mixed with
+  optional future 2.0 outcomes or repeated completed ranking work; distribution,
+  native Rust operations and separate installer acceptance retain their owners.
+
 ## 2026-11-17
 
 - Task-first routing now favors Sol 6.2 for ordinary implementation, Luna Extra high for bounded mechanics and Terra 6.1 High for fitting bounded/repository/visual work. Astra High/Extra high can use genuine task-scoped approval for scientific formulation, complex audit, architecture and security, including covered repeats; Max and separate launch/spending permissions remain protected. Substantive results now require a proportionate nonauthor check, not only critical results, without adding duplicate review loops.
@@ -424,15 +429,6 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 - Clarified scratch retention at the ledger recording step: callers choose the existing typed owner namespace before acquisition and distinguish completed PASS-terminal retention from preserving partial or failed results and later Version 3 close-time retention. Existing verdict, ownership and lifecycle requirements remain unchanged.
 
 - Historical README catalogues preserve the existing input role when receiving never-admitted retirement records. They retain stored incoming/source inventory and exact archived payload/digest checks without starting an unrelated current-consumer sweep; strict retirement and integrity audits still detect later stale citations.
-
-## 2026-11-18
-
-- Reconciled the remaining product plan with delivered model-routing changes and
-  the approved SDK completion roadmap. Current SDK work is no longer mixed with
-  optional future 2.0 outcomes or repeated completed ranking work; distribution,
-  native Rust operations and separate installer acceptance retain their owners.
-
-## 2026-10-26
 
 - Finish the npm/Rust review split by updating the remaining roadmap to reference their separate main-based PRs. No implementation or new dependency between the projects is introduced.
 

@@ -14,7 +14,7 @@ Use it together with:
 
 Current references and maintenance guidance:
 
-- [orchestrarium-2.0-plan.md](orchestrarium-2.0-plan.md) for the current SDK-first delivery order, completed routing work and independently scoped future 2.0 outcomes
+- [orchestrarium-2.0-plan.md](orchestrarium-2.0-plan.md) for the tagged baseline before software development kit (SDK) integration, the independent Rust scanner release ahead of SDK delivery, completed routing work and independently scoped future 2.0 outcomes
 - [focused routing design](superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md) for the proposed exact-profile comparison seam and deferred continuation safety boundary
 
 - [claude-instruction-unification.md](claude-instruction-unification.md) for current-line Claude instruction research, shared-default versus provider-specific ownership, runtime projection alternatives, and the bounded development handoff
