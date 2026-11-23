@@ -643,6 +643,9 @@ snapshot instead of reconstructing a prompt/model from new defaults. Lost
 acknowledgement or competing registration reconciles the same stable identity;
 conflicting content cannot replace it. Actual current authorization is checked
 again for each effect, not inferred from historical registration.
+Registry lookups take a consistent view of the in-memory state before checking
+the canonical receipt and Host authority. Ledger callbacks can perform those
+lookups while an independent admission is waiting for a ledger write.
 
 The private snapshot does not enter child proposal/result handoff. Existing
 credential scanning protects the persisted source; credential environments are
@@ -955,6 +958,9 @@ The delegated message is agent-originated, and actual model/effort are read back
 before and after the turn. Unsupported roles remain implementation work, not a
 permanent provider-name restriction.
 
+After output safety scanning and the current result authorization check, the
+Copilot adapter sends its bounded observations on the worker stream before the
+terminal result. The parent compares that stream with the result's observations.
 Canonical receiving validates the task or review, selected/observed metadata, evidence
 and process receipt before recording the existing ledger artifact. Genuine
 unobserved Copilot version fields are omitted, never fabricated. The selected

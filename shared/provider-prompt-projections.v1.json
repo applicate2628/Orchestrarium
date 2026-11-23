@@ -80,7 +80,7 @@
     "sdk_execution/copilot.py": {
       "source": "scripts/sdk_execution/copilot.py",
       "destination": "scripts/sdk_execution/copilot.py",
-      "sha256": "1a61b6d87bfefdff6a82ffa3122ab88193753c0a0398db1edb2f394d238ce086"
+      "sha256": "80ff9369971d2947ed362c5db77f013be956e6360883b15de1d09e7fa256af28"
     },
     "sdk_execution/codex.py": {
       "source": "scripts/sdk_execution/codex.py",
@@ -155,7 +155,7 @@
     "sdk_execution/runtime.py": {
       "source": "scripts/sdk_execution/runtime.py",
       "destination": "scripts/sdk_execution/runtime.py",
-      "sha256": "eb212c9f52d146da88b829cec70fdae1964370fcc854d7db0c27e84494242f65"
+      "sha256": "3c036e06a005c27f0463f2fa4b7b816c2ec74b4ac8d906dd43ccb1d41b120c3c"
     },
     "sdk_execution/worker.py": {
       "source": "scripts/sdk_execution/worker.py",

@@ -106,7 +106,7 @@ def test_fresh_worker_forwards_only_one_official_backend_and_checks_the_readback
     async def authorize(*_):
         pass
 
-    executor = copilot.create_copilot_adapter(req, SimpleNamespace(authorize=authorize), selected)
+    executor = copilot.create_copilot_adapter(req, SimpleNamespace(authorize=authorize, record=authorize), selected)
     assert "COPILOT_BYOK_API_KEY" not in os.environ
     result = asyncio.run(executor.execute(req))
     assert sdk.client_options["github"] == {"use_logged_in_user": False}
@@ -251,7 +251,7 @@ def test_byok_sdk_client_logging_is_suppressed_and_key_not_returned_on_failure(
     async def authorize(*_):
         pass
 
-    executor = copilot.create_copilot_adapter(req, SimpleNamespace(authorize=authorize), selected)
+    executor = copilot.create_copilot_adapter(req, SimpleNamespace(authorize=authorize, record=authorize), selected)
     result = asyncio.run(executor.execute(req))
     assert not logger.disabled  # Local suppression must not survive the operation.
     assert result.status == "incomplete" and result.execution_error == "copilot_sdk_failed"

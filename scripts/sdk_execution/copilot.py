@@ -171,7 +171,7 @@ class CopilotExecutor:
     """
     def __init__(self, *, runtime_path, base_directory, environment, github_token,
                  assert_current, output_context, timeout_seconds, cleanup_timeout_seconds, sdk=None, instructions="",
-                 authorize_tool=None, worker_selection=None, byok_api_key=None):
+                 authorize_tool=None, worker_selection=None, byok_api_key=None, record=None):
         import provider_prompt as owner
         self._runtime = Path(runtime_path)
         self._base = Path(base_directory)
@@ -212,6 +212,7 @@ class CopilotExecutor:
         if type(instructions) is not str: raise CopilotError("copilot_invalid_instructions")
         self._instructions = instructions
         self._authorize_tool = authorize_tool
+        self._record = record
         self._worker_selection = worker_selection
         self._workspace_identity = None
         self._tool_calls = set()
@@ -681,6 +682,9 @@ class CopilotExecutor:
         if failure is not None: raise CopilotError(failure)
         scan_execution_output(result,self._output)
         await self._current(request,"copilot_result")
+        if self._record is not None:
+            for observation in result.observations:
+                await self._record(observation)
         return result
 
 
@@ -716,4 +720,5 @@ def create_copilot_adapter(request, sink, selection):
         byok_api_key=environment.get(owner.COPILOT_BYOK_KEY_ENV), assert_current=current,
         output_context=output_context, timeout_seconds=selection.timeout_seconds,
         cleanup_timeout_seconds=selection.cleanup_timeout_seconds,
-        instructions=selection.instructions,authorize_tool=tool,worker_selection=selection)
+        instructions=selection.instructions,authorize_tool=tool,worker_selection=selection,
+        record=sink.record)

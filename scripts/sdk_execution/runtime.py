@@ -1480,27 +1480,36 @@ class RootTaskRegistry:
     def __init__(self,*,root_authority,root_selection,source_environment):
         self._root_authority=root_authority;self._root_selection=root_selection
         self._environment=dict(source_environment);self._entries={};self._prepared={};self._admission_active=set();self._lock=threading.RLock()
+        # Ledger transactions call back into resolve/assert_current. Serialize
+        # admissions separately so those readers never wait on a ledger writer.
+        self._admission_lock = threading.RLock()
 
     def resolve(self,request_id):
-        if request_id in self._entries:return self._entries[request_id][2]
-        if request_id in self._prepared:
-            if request_id not in self._admission_active:raise RuntimeBindingError("child_registration_not_received")
-            return self._prepared[request_id][2]
+        with self._lock:
+            if request_id in self._entries:return self._entries[request_id][2]
+            if request_id in self._prepared:
+                if request_id not in self._admission_active:raise RuntimeBindingError("child_registration_not_received")
+                return self._prepared[request_id][2]
         return self._root_authority.resolve(request_id)
 
     def assert_current(self,request,effect):
-        entries=[entry for entry in self._entries.values() if entry[2]==request]
-        pending=[key for key,entry in self._prepared.items() if entry[2]==request]
-        if entries:
-            authority,proposal_id,_request,selection=entries[0]
+        with self._lock:
+            entries = tuple(self._entries.values())
+            prepared = tuple(self._prepared.items())
+            active = self._admission_active.copy()
+        entry = next((entry for entry in entries if entry[2] == request), None)
+        if entry is not None:
+            authority,proposal_id,_request,selection=entry
             assignment=_load_child_assignment(self._root_selection,authority._child_id)
             outcome=authority.proposal_results(assignment).get(proposal_id)
             doc=_child_admission_document(authority,assignment,proposal_id)
             if (outcome is None or outcome["status"]!="accepted" or "registration" not in doc
                 or _decode_child_registration(doc["registration"],doc["request_sha256"])!=(request,selection)):
                 raise RuntimeBindingError("child_registration_changed")
-        elif pending and (effect not in {"child_task_admission","child_task_admission_commit"} or not any(key in self._admission_active for key in pending)):
-            raise RuntimeBindingError("child_registration_not_received")
+        else:
+            pending = [key for key, entry in prepared if entry[2] == request]
+            if pending and (effect not in {"child_task_admission","child_task_admission_commit"} or active.isdisjoint(pending)):
+                raise RuntimeBindingError("child_registration_not_received")
         _require_authority(self._root_authority.assert_current,request,effect)
 
     def _check_owner(self,authority):
@@ -1519,7 +1528,7 @@ class RootTaskRegistry:
     def admit(self,authority,proposal_id,request,selection,*,artifact,started_at,required=True):
         self._check_owner(authority)
         if type(required) is not bool:raise RuntimeBindingError("child_registration_invalid")
-        with self._lock:
+        with self._admission_lock:
             assignment=_load_child_assignment(self._root_selection,authority._child_id)
             outcome=authority.proposal_results(assignment).get(proposal_id)
             if outcome is None:raise RuntimeBindingError("child_proposal_unavailable")
@@ -1535,23 +1544,27 @@ class RootTaskRegistry:
                     or _decode_child_registration(doc["registration"],doc["request_sha256"])!=(request,selection)):
                     raise RuntimeBindingError("child_registration_conflict")
                 _require_authority(self._root_authority.assert_current,request,"child_registration_restore")
-                self._entries[request_id]=(authority,proposal_id,request,selection)
+                with self._lock:
+                    self._entries[request_id]=(authority,proposal_id,request,selection)
                 return outcome
             validate_admitted_request(request,selection)
             _require_authority(self._root_authority.assert_current,request,"child_registration_admission")
             registration=self._scan(request,selection)
             entry=(authority,proposal_id,request,selection)
-            if request_id in self._prepared and self._prepared[request_id][1:]!=entry[1:]:raise RuntimeBindingError("child_registration_conflict")
-            self._prepared[request_id]=entry
-            self._admission_active.add(request_id)
+            with self._lock:
+                if request_id in self._prepared and self._prepared[request_id][1:]!=entry[1:]:raise RuntimeBindingError("child_registration_conflict")
+                self._prepared[request_id]=entry
+                self._admission_active.add(request_id)
             try:
                 outcome=publish_child_task_admission(authority=authority,proposal_id=proposal_id,accepted=True,
                     request_id=request_id,selection=selection,artifact=artifact,started_at=started_at,required=required,registration=registration)
-                self._entries[request_id]=entry
-                self._prepared.pop(request_id,None)
+                with self._lock:
+                    self._entries[request_id]=entry
+                    self._prepared.pop(request_id,None)
                 return outcome
             finally:
-                self._admission_active.discard(request_id)
+                with self._lock:
+                    self._admission_active.discard(request_id)
 
     def restore(self,authority):
         self._check_owner(authority)
@@ -1571,7 +1584,8 @@ class RootTaskRegistry:
             except Exception:
                 unavailable[request_id]="current_registration_authority_unavailable"
                 continue
-            self._entries[request_id]=(authority,proposal_id,request,selection)
+            with self._lock:
+                self._entries[request_id]=(authority,proposal_id,request,selection)
             restored[request_id]=selection
         return {"selections":restored,"unavailable":unavailable}
 

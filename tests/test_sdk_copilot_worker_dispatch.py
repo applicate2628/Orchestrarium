@@ -79,12 +79,16 @@ def execute_worker(operation, monkeypatch, sdk):
             if context is None:
                 return kwargs["authority"](value, effect)
             return kwargs["authority"](value, effect, context)
+        observations = []
+        async def record(value):
+            observations.append(value)
         with monkeypatch.context() as patch:
             for row in kwargs["environment"]:
                 patch.setenv(row.name, row.value)
             executor = copilot.create_copilot_adapter(request,
-                SimpleNamespace(authorize=authorize), selection)
+                SimpleNamespace(authorize=authorize, record=record), selection)
             result = asyncio.run(executor.execute(request))
+            assert tuple(observations) == result.observations
             return sealed_result(request, selection, result)
     monkeypatch.setattr(worker, "run_sdk_worker", simulated)
     with ProcessRunnerV1() as process:

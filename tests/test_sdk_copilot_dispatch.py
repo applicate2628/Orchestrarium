@@ -3,17 +3,15 @@
 The injected official-shaped SDK and settled process fixture prove offline wiring,
 not native Copilot acceptance or Windows containment.
 """
-import asyncio
 from dataclasses import replace
+from functools import partial
 import time
-import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from test_sdk_dispatch import fixture as base_fixture, owner, dispatch, runtime
 import test_sdk_receiving as process_fixture
-from test_sdk_copilot import FakeSdk
+from _sdk_copilot_support import FakeSdk, simulate_worker_process
 from sdk_execution import copilot
 from sdk_execution.contracts import json_text
 
@@ -43,36 +41,22 @@ def prepare(tmp_path, monkeypatch, *, authentication=None):
 
 
 def execute_offline(operation, monkeypatch, *, sdk=None):
-    import process_supervision.sdk_worker as worker
-    from process_supervision.process_runner import ProcessRunnerV1
+    from process_supervision import process_runner as processes
+
     sdk = sdk or FakeSdk()
     req = operation.request
     sdk.content = json_text(dict(run_id=req.external_evidence_run_id,
         artifact_id=req.artifact_id, role=req.role, content="Bounded advice."))
     monkeypatch.setattr(copilot, "_load_sdk", lambda: sdk)
     calls = []
-    def simulated(process, request, **kwargs):
-        calls.append(request)
-        selection = runtime.runtime_selection_from_dict("copilot", kwargs["runtime_selection"])
-        async def authorize(value, effect):
-            return kwargs["authority"](value, effect)
-        # Mirror only the worker environment boundary; do not bypass Host/ledger.
-        with monkeypatch.context() as patch:
-            for row in kwargs["environment"]:
-                patch.setenv(row.name, row.value)
-            executor = copilot.create_copilot_adapter(request,
-                SimpleNamespace(authorize=authorize), selection)
-            result = asyncio.run(executor.execute(request))
-            return sealed_result(request, selection, result)
-    monkeypatch.setattr(worker, "run_sdk_worker", simulated)
-    with ProcessRunnerV1() as process:
+    with processes.ProcessRunnerV1() as process, monkeypatch.context() as patch:
+        patch.setattr(process, "run", partial(simulate_worker_process, requests=calls))
         operation.execute(process)
     return sdk, calls
 
 
-
 def sealed_result(request, selection, result):
-    # Same process peer as test_sdk_receiving, retaining the actual SDK stream.
+    # Codec/receiving fixture for tests that start with a completed adapter result.
     from process_supervision import process_runner as processes
     run_sdk_worker = process_fixture.run_sdk_worker
     from sdk_execution.worker import encode_frame
@@ -110,6 +94,11 @@ def sealed_result(request, selection, result):
 def test_public_dispatch_factory_and_canonical_receiving(tmp_path, monkeypatch):
     operation = prepare(tmp_path, monkeypatch)
     sdk, calls = execute_offline(operation, monkeypatch)
+    observed = operation.runtime_run.observation
+    assert observed.protocol_error is None
+    assert len(observed.observations) == 1
+    assert observed.observations == observed.result.observations
+    assert sdk.calls[-3:] == ["unsubscribe", "disconnect", "stop"]
     result = operation.receive()
     assert result.exit_code == 0
     assert result.terminal["status"] == "completed"

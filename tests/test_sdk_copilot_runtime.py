@@ -44,12 +44,16 @@ def test_factory_actual_governance_and_observed_controls(tmp_path,monkeypatch):
     selected=selection(tmp_path); req=request(); sdk=FakeSdk(); effects=[]
     async def authorize(value,effect):
         assert value==req; effects.append(effect)
+    observations=[]
+    async def record(observation):
+        observations.append(observation)
     monkeypatch.setattr(runtime,'assert_current_launch',lambda *args: None)
     monkeypatch.setattr(copilot,'_load_sdk',lambda:sdk)
     monkeypatch.setenv('COPILOT_GITHUB_TOKEN','fixture-'+'private-token')
-    adapter=copilot.create_copilot_adapter(req,SimpleNamespace(authorize=authorize),selected)
+    adapter=copilot.create_copilot_adapter(req,SimpleNamespace(authorize=authorize,record=record),selected)
     result=asyncio.run(adapter.execute(req))
     assert result.status=='completed'
+    assert tuple(observations) == result.observations
     assert sdk.options['system_message']=={'mode':'append','content':selected.instructions}
     assert sdk.prompt==req.prompt
     assert result.sdk_execution['model']==req.model

@@ -9,6 +9,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1] / 'scripts'))
 import provider_prompt
 from sdk_execution.copilot import CopilotExecutor
 from sdk_execution.contracts import ExecutionRequest, ExecutionResult, json_text
+from _sdk_copilot_support import FakeSdk, payload
 
 
 def request(**changes):
@@ -19,77 +20,6 @@ def request(**changes):
         result_kind='task',tool_profile='prompt-only')
     values.update(changes)
     return ExecutionRequest(**values)
-
-
-def payload(**changes):
-    values=dict(run_id='evidence',artifact_id='advice.json',role='consultant',content='Bounded advice.')
-    values.update(changes)
-    return values
-
-
-class FakeSdk:
-    def __init__(self):
-        self.calls=[]; self.options=None; self.runtime=None; self.send_options=None
-        self.history=[]; self.turn='native-turn'
-        self.content=json_text(payload()); self.failure=None; self.cleanup_failure=None
-        self.events=[]; self.permission=False; self.handler=None; self.on_send=None
-        self.profile_model='selected-model'; self.profile_effort='high'
-        self.rpc=SimpleNamespace(model=SimpleNamespace(get_current=self.get_current))
-        self.session_id='native-session'; self.agent_id=None; self.reply_none=False
-        self.RuntimeConnection=SimpleNamespace(for_spawned_stdio=self.connection)
-        self.AgentMessageSource=lambda identity: SimpleNamespace(agent_id=identity)
-        self.PermissionDecisionReject=lambda **kw: SimpleNamespace(kind='reject',**kw)
-    def connection(self,**kwargs):
-        self.calls.append('runtime'); self.runtime=kwargs; return kwargs
-    def CopilotClient(self,**kwargs):
-        self.calls.append('client'); self.client_options=kwargs; return self
-    async def start(self):
-        self.calls.append('start')
-        if self.failure=='start': raise RuntimeError('private startup error')
-    async def create_session(self,**kwargs):
-        self.calls.append('create'); self.options=kwargs
-        if self.failure=='create': raise RuntimeError('private create error')
-        return self
-    def on(self,handler):
-        self.handler=handler
-        return lambda: self.calls.append('unsubscribe')
-    async def send_and_wait(self,prompt,**kwargs):
-        self.calls.append('send'); self.prompt=prompt; self.send_options=kwargs
-        if self.on_send: await self.on_send()
-        if self.permission:
-            self.permission_result=self.options['permissions']['on_request']({}, {})
-        for event in self.events: self.handler(event)
-        if self.failure=='send': raise RuntimeError('private send error')
-        if self.failure=='timeout': raise TimeoutError()
-        if self.reply_none:return None
-        final=SimpleNamespace(type='assistant.message',id='message-'+self.turn,agent_id=self.agent_id,
-            data=SimpleNamespace(content=self.content,turn_id=self.turn))
-        if type(self).get_events is FakeSdk.get_events:
-            def event(kind):
-                return SimpleNamespace(type=kind,id=kind+'-'+self.turn,agent_id=None,
-                    data=SimpleNamespace(turn_id=self.turn))
-            self.history.extend((event('assistant.turn_start'),final,event('assistant.turn_end')))
-        return final
-    async def get_events(self):
-        self.calls.append('history')
-        return list(self.history)
-    async def resume_session(self,session_id,**kwargs):
-        self.calls.append('resume'); self.options=kwargs
-        assert session_id==self.session_id
-        assert kwargs['continue_pending_work'] is False and kwargs['allow_transcript_recovery'] is False
-        return self
-    async def get_current(self,*,timeout):
-        self.calls.append('profile')
-        return SimpleNamespace(model_id=self.profile_model,reasoning_effort=self.profile_effort,provider_id=None)
-    async def abort(self):
-        self.calls.append('abort')
-        if self.cleanup_failure=='abort':raise RuntimeError('private abort error')
-    async def disconnect(self):
-        self.calls.append('disconnect')
-        if self.cleanup_failure=='disconnect':raise RuntimeError('private disconnect error')
-    async def stop(self):
-        self.calls.append('stop')
-        if self.cleanup_failure=='stop':raise RuntimeError('private stop error')
 
 
 def make_executor(tmp_path, sdk=None, **changes):

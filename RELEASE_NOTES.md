@@ -2,6 +2,12 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-11-23
+
+- Send Copilot Software Development Kit (SDK) observations through the worker's bounded stream after output safety scanning. The parent can now verify the observations against the terminal result and record eligible evidence in the ledger.
+
+- Keep Root's task registry consistent during concurrent admission and worker authorization checks. A newly admitted task no longer causes the registry iteration to fail while checking an independent task's existing permission. The registry still checks the canonical admission receipt and current Host authority.
+
 ## 2026-11-19
 
 - Align specialist instructions and native Claude wrappers with the existing QA-owned defect-admission contract. Roles report qualified adjacent findings in-band by default and use the configured registry only when explicitly authorized. The default directory is not a provider-specific requirement.

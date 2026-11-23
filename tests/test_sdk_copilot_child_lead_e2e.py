@@ -62,13 +62,17 @@ def test_copilot_child_lead_persists_native_session_and_recovers_received_intent
                 "action":"finish" if done else "execute","request_id":None if done else "task-one"})
             sdk=PersistentSdk(request,native_history)
             sdk.content=text
+            observations = []
             class Sink:
                 async def authorize(self,req,effect,*args):
                     return kwargs["authority"](req,effect)
+                async def record(self,observation):
+                    observations.append(observation)
             with patch.object(copilot,"_load_sdk",return_value=sdk):
                 instance=create_copilot_adapter(request,Sink(),selected)
                 result=asyncio.run(instance.execute(request))
             assert result.status=="completed",result.execution_error
+            assert tuple(observations) == result.observations
             native_history[:]=sdk.history
             native_calls.extend(call for call in sdk.calls if call in {"create","resume"})
             kind="coordination_result";counts["decisions"]+=1
