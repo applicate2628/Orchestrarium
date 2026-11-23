@@ -5,47 +5,80 @@ pre-SDK tag `3d8ac64b`, and the current pull requests below. The October outcome
 remain in the register, not as prerequisites for every release. This plan does
 not authorize provider calls, publication, installation, or merges.
 
+## Contents
+
+- [Current delivery order and completed work](#current-delivery-order-and-completed-work)
+- [Open ticket closeout](#open-ticket-closeout)
+- [Goal and boundary](#goal-and-boundary)
+- [General mechanisms, revisable plans](#general-mechanisms-revisable-plans)
+- [Existing foundation and known limits](#existing-foundation-and-known-limits)
+- [Outcome register](#outcome-register)
+- [Delivery decisions and next slices](#delivery-decisions-and-next-slices)
+- [Design economy and verification](#design-economy-and-verification)
+- [Terms and Abbreviations](#terms-and-abbreviations)
+
 ## Current delivery order and completed work
 
-1. **Settle pre-SDK follow-ups without reopening the baseline.** The standalone
-   baseline is [tagged](https://github.com/applicate2628/Orchestrarium/tree/baseline-pre-sdk-2026-11-23)
-   after [PR53](https://github.com/applicate2628/Orchestrarium/pull/53); it has
-   no provider SDK dependency. [PR55](https://github.com/applicate2628/Orchestrarium/pull/55)
-   is merged, and the receiver-scope incident was verified on Wave and archived.
-   [PR54](https://github.com/applicate2628/Orchestrarium/pull/54) and
-   [PR56?59](https://github.com/applicate2628/Orchestrarium/pulls) remain open:
-   primary-path principle, recovery, on-demand publication guidance, active-only
-   audit reporting, and Lead acceptance. Reconcile their shared release-note
-   conflicts in integration order. Verify installed receiving where the ticket
-   requires it, then archive only completed tickets. Unattributed runs remain unknown.
-2. **Release the independent Rust scanner slice before SDK.**
-   [PR21](https://github.com/applicate2628/Orchestrarium/pull/21) owns native
-   operations. Reconcile its current head (`26089ea6`) with receiver-aware main.
-   Wave qualified Git receipt and Windows line indexing for both object formats;
-   the isolated matcher probe proves lexical composition, not a candidate release
-   or permission to lower pins. Select one contained execution path. Qualify full
-   findings and receipt parity, small delta over old receiver history and large
-   new disclosure, progress and interruption/resume, resource settlement and
-   actual receiving on the supported installation targets. Defer unrelated migrations.
-3. **Qualify SDK in parallel; release it after Rust.**
+Use three delivery steps. Keep the detailed evidence with each existing owner;
+this register does not create a second implementation tracker.
+
+1. **Reconcile and correct the source at its existing owners.** Preserve the
+   [tagged standalone pre-SDK baseline](https://github.com/applicate2628/Orchestrarium/tree/baseline-pre-sdk-2026-11-23)
+   after [PR53](https://github.com/applicate2628/Orchestrarium/pull/53) and the
+   merged receiver-history correction [PR55](https://github.com/applicate2628/Orchestrarium/pull/55).
+   Integrate the small [PR54](https://github.com/applicate2628/Orchestrarium/pull/54),
+   [PR56](https://github.com/applicate2628/Orchestrarium/pull/56),
+   [PR57](https://github.com/applicate2628/Orchestrarium/pull/57),
+   [PR58](https://github.com/applicate2628/Orchestrarium/pull/58),
+   [PR59](https://github.com/applicate2628/Orchestrarium/pull/59) and
+   [PR60](https://github.com/applicate2628/Orchestrarium/pull/60) follow-ups without
+   duplicating them. Reconcile the dated release entries and verify the combined
+   governance, source projections and selected audit modes. Correct cancellation
+   at the scanner and SDK worker owners and control-state drift at uninstall
+   ([PR61](https://github.com/applicate2628/Orchestrarium/pull/61) for the current
+   installer, with the SDK receipt path retained in PR19);
+   regression tests must distinguish the old failure from completed cleanup or
+   preserved state. Reconcile SDK with current main using one integrated candidate,
+   retaining current receiver/progress checks, exact ownership and rollback, and
+   the selected-client installation contract. A conflict-free Git tree alone is
+   not integration evidence.
+
+2. **Qualify the selected releases in dependency order.**
+   [PR21](https://github.com/applicate2628/Orchestrarium/pull/21) owns the independent
+   Rust scanner slice, which releases before SDK. Verify full findings and receipt
+   parity, both Git object formats, a small delta over large receiver history and
+   large new disclosure, progress, interruption/resume, resource settlement and
+   actual receiving on supported installation targets. Existing primitive probes
+   do not qualify the complete scanner or permit lower protections. In parallel,
    [PR19](https://github.com/applicate2628/Orchestrarium/pull/19) and its
-   `docs/sdk-execution.md` own implementation and qualification. Reconcile
-   `95d26b9b` with main and qualify offline, package, platform, and failure paths
-   before any separately authorized live qualification of official provider routes.
-   [PR18](https://github.com/applicate2628/Orchestrarium/pull/18) retains design
-   and evidence only. Historical runs do not establish current readiness or activation.
-4. **Qualify distribution separately.** [PR17](https://github.com/applicate2628/Orchestrarium/pull/17)
-   owns PowerShell, POSIX and optional npm acquisition of the same qualified
-   platform payload. Do not add a second installer or bundle provider SDKs.
-   Reconcile the delivery design and qualify each admitted channel. Independent
-   platform evidence does not gate Rust or SDK without a demonstrated dependency.
-5. **Close remaining product outcomes at their owners.** This register keeps
-   the native-role lifecycle, task-specific selection, empirical quality/cost
-   feedback, conditional stopped cross-host continuation and optional preferences
-   (2, 3, 4, 6, 7). Move optional instructions to on-demand guides only after
-   verifying installed entry points. Keep the Orche rebrand and English README
-   and instruction cleanup separate from Rust/SDK qualification; preserve
-   historical names and compatibility where required.
+   `docs/sdk-execution.md` own SDK offline, package, platform and failure-path
+   qualification; its release follows the selected Rust slice. Historical native
+   runs apply only to their recorded source and route. Any further provider calls
+   or installed receiving retain their own authorization. [PR18](https://github.com/applicate2628/Orchestrarium/pull/18)
+   remains the historical design/evidence reference. [PR17](https://github.com/applicate2628/Orchestrarium/pull/17)
+   independently qualifies PowerShell, POSIX and optional npm delivery of the same
+   accepted platform payload through the existing installer. Do not bundle provider
+   SDKs, create another installer or turn unrelated platform/migration work into a
+   prerequisite without a demonstrated dependency.
+
+3. **Close verified outcomes and continue the remaining product work.** Verify
+   installed receiving wherever an open ticket requires it, then archive only the
+   ticket whose actual closure conditions are met. Preserve unknown historical
+   run outcomes. Native-role lifecycle, task-specific selection, empirical
+   quality/cost feedback, conditional stopped cross-host continuation and optional
+   preferences remain independently scoped outcomes 2, 3, 4, 6 and 7 below. Move
+   optional instructions to on-demand guides only after checking installed entry
+   points. Keep the Orche rebrand and English README/instruction cleanup separate
+   from scanner/SDK qualification, preserving historical names and compatibility.
+
+The SDK integration keeps one authored skill catalog and independent ordinary
+copies for selected clients, as already specified by PR19 and PR17. Existing
+shared installations are migration inputs: preserve their referents and foreign
+state, use explicit selected-client migration, and refuse a transition that
+would silently change an unselected client. Main's newer hook, transaction,
+Windows access-rule and publication protections must survive that reconciliation.
+This is a source integration contract, not evidence that a working installation
+has been migrated or that a live provider route has been qualified.
 
 Task-first ranking and scoped Astra authorization (PR43), latest confirmed model
 families only (PR44), and exclusion of Low for every active choice (PR45) are
@@ -70,6 +103,8 @@ any target with SDK or model-ranking completion.
 This is an index into the existing shared bug inbox, not a second tracker.
 The ticket owns its detailed evidence and disposition. Reconcile that record
 before work; archive it only after verifying its actual closure conditions.
+
+**Table 1. Open tickets, existing owners and closure evidence.**
 
 | Ticket | Owner / next action | Closure evidence |
 | --- | --- | --- |
@@ -177,12 +212,13 @@ not interchangeable. No runtime root cause is established by this plan.
   classifier-only policy realization with execution unavailable, not an enabled
   worker. The [external dispatch contract](../src.codex/skills/lead/external-dispatch.md)
   controls real paths. A native-profile comparator cannot automatically cover them.
-- Known documentation drift: the comment on `externalProvider` in
+- Pending documentation correction: the comment on `externalProvider` in
   [defaults](../shared/agents-mode.defaults.yaml) still describes an older Kimi
   read-only/no-tools restriction, unlike current
   [provider realization policy](../shared/role-routing-policy.v1.json) and README.
-  The configuration-documentation owner must reconcile it in an owner-scoped
-  correction; this plan does not silently edit runtime configuration.
+  [PR62](https://github.com/applicate2628/Orchestrarium/pull/62) reconciles that
+  comment with the existing contract and leaves all configuration values intact;
+  its source correction remains pending until merged.
 - [Installation rules](../INSTALL.md) retain limited create-only/hash-pinned native
   role handling and reserve broader adoption/update/deletion/reclaim for 2.0.
   [Runtime limitations](../README.md) include unavailable generic Windows command
