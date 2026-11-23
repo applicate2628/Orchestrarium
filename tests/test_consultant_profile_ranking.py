@@ -30,6 +30,7 @@ SCOPE = {
     "allowedTools": ["functions.exec"],
     "changeSurface": ["consultant advisory selection"],
 }
+CHOICE_REASON = "Compare the requested profile on this bounded advisory task."
 
 
 def _describe(task_class: str) -> dict[str, object]:
@@ -54,7 +55,7 @@ def test_omitted_consultant_choice_uses_frontier_high_and_reports_model_tier() -
     assert description["roleKind"] == "skill-only"
     assert description["mutationClass"] == "read-only"
     assert description["defaultProfile"] == "frontier-high"
-    assert description["defaultModel"] == "gpt-6.1-sol"
+    assert description["defaultModel"] == "gpt-6.2-sol"
     assert description["defaultEffort"] == "high"
     assert description["profession"]["skill"] == "$consultant"
     assert all("modelTier" in option for option in description["options"])
@@ -64,13 +65,13 @@ def test_omitted_consultant_choice_uses_frontier_high_and_reports_model_tier() -
     assert decision["status"] == "resolved"
     assert decision["modelTier"] == "frontier"
     assert decision["resolvedProfile"] == "frontier-high"
-    assert decision["resolvedModel"] == "gpt-6.1-sol"
+    assert decision["resolvedModel"] == "gpt-6.2-sol"
     assert decision["resolvedEffort"] == "high"
     assert decision["invocation"] == {
         "mode": "generic-explicit-profile",
         "omitAgentType": True,
         "forkTurns": "none",
-        "model": "gpt-6.1-sol",
+        "model": "gpt-6.2-sol",
         "reasoningEffort": "high",
         "professionSkill": "$consultant",
         "promptPreamble": description["profession"]["instructions"],
@@ -83,29 +84,33 @@ def test_explicit_consultant_choice_wins_but_partial_and_unapproved_max_deny() -
 
     balanced = _resolve(
         description,
-        requested_model="gpt-5.6-terra",
+        requested_model="gpt-6.1-terra",
         requested_effort="high",
+        preference_deviation_reason=CHOICE_REASON,
     )
     xhigh = _resolve(
         description,
-        requested_model="gpt-6.1-sol",
+        requested_model="gpt-6.2-sol",
         requested_effort="xhigh",
+        preference_deviation_reason=CHOICE_REASON,
     )
-    partial = _resolve(description, requested_model="gpt-5.6-terra")
+    partial = _resolve(description, requested_model="gpt-6.1-terra")
     unapproved_max = _resolve(
         description,
-        requested_model="gpt-6.1-sol",
+        requested_model="gpt-6.2-sol",
         requested_effort="max",
+        preference_deviation_reason=CHOICE_REASON,
     )
     approved_max = _resolve(
         description,
-        requested_model="gpt-6.1-sol",
+        requested_model="gpt-6.2-sol",
         requested_effort="max",
         user_approved_max=True,
+        preference_deviation_reason=CHOICE_REASON,
     )
 
     assert (balanced["resolvedProfile"], balanced["modelTier"]) == (
-        "balanced-high",
+        "terra-6.1-high",
         "balanced",
     )
     assert (xhigh["resolvedProfile"], xhigh["modelTier"]) == (
@@ -114,10 +119,17 @@ def test_explicit_consultant_choice_wins_but_partial_and_unapproved_max_deny() -
     )
     assert partial["stableId"] == "E_ORDINARY_NATIVE_SELECTION_INVALID"
     assert unapproved_max["stableId"] == "E_ORDINARY_NATIVE_SELECTION_INVALID"
+    assert unapproved_max["configurationDiagnostic"]["reason"] == "individual-launch-approval-required"
     assert (approved_max["resolvedProfile"], approved_max["modelTier"]) == (
         "apex-max",
         "apex",
     )
+    for retired_model in ("gpt-5.6-terra", "gpt-6.1-sol"):
+        retired = _resolve(description, requested_model=retired_model,
+                           requested_effort="high", user_approved_launch=True,
+                           preference_deviation_reason=CHOICE_REASON)
+        assert retired["stableId"] == "E_ORDINARY_NATIVE_SELECTION_INVALID"
+        assert retired["fallback"] == "none"
 
 
 def test_consultant_task_intersections_are_policy_owned() -> None:
@@ -125,7 +137,6 @@ def test_consultant_task_intersections_are_policy_owned() -> None:
         "planning": [
             "terra-6.1-high",
             "terra-6.1-xhigh",
-            "balanced-high",
             "frontier-high",
             "frontier-xhigh",
             "apex-max",
@@ -138,7 +149,6 @@ def test_consultant_task_intersections_are_policy_owned() -> None:
         "review": [
             "terra-6.1-high",
             "terra-6.1-xhigh",
-            "balanced-high",
             "frontier-high",
             "frontier-xhigh",
             "apex-max",
@@ -164,8 +174,10 @@ def test_consultant_task_intersections_are_policy_owned() -> None:
 
     for effort in ("high", "xhigh"):
         assert _resolve(_describe("planning"), requested_model="gpt-6.1-terra",
-                        requested_effort=effort)["status"] == "resolved"
-    max_choice = dict(requested_model="gpt-6.1-terra", requested_effort="max")
+                        requested_effort=effort,
+                        preference_deviation_reason=CHOICE_REASON)["status"] == "resolved"
+    max_choice = dict(requested_model="gpt-6.1-terra", requested_effort="max",
+                      preference_deviation_reason=CHOICE_REASON)
     denied_max = _resolve(_describe("planning"), **max_choice)
     assert denied_max["status"] == "denied" and denied_max["fallback"] == "none"
     assert denied_max["configurationDiagnostic"]["reason"] == "individual-launch-approval-required"
