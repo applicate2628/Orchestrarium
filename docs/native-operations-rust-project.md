@@ -1,11 +1,11 @@
 # Native operations in Rust
 
-[Goal](#goal-quality-attributes-and-architecture) · [Delivery](#delivery-channels-and-native-installer-ownership) · [Ownership](#state-process-and-cutover-ownership) · [First slice](#candidate-first-vertical-slice-mcp-usage-reminder) · [Work plan](#bounded-work-plan-and-audit-receiving-2026-11-12) · [Verification](#acceptance-parity-and-deliberate-improvements) · [Admission](#receiving-and-implementation-admission) · [Terms](#terms-and-abbreviations)
+[Goal](#goal-quality-attributes-and-architecture) · [Delivery](#delivery-channels-and-native-installer-ownership) · [Ownership](#state-process-and-cutover-ownership) · [Release sequence](#delivery-sequence-and-review-loop) · [First slice](#candidate-first-vertical-slice-mcp-usage-reminder) · [Work plan](#bounded-work-plan-and-audit-receiving-2026-11-12) · [Verification](#acceptance-parity-and-deliberate-improvements) · [Admission](#receiving-and-implementation-admission) · [Terms](#terms-and-abbreviations)
 
 Status: independent design with an isolated publication matcher candidate; no native activation. Historical
 observation baseline main `317e1448a020aeaa58f65aaceb180e835741d6de`; source observations do not prove
-installed behavior. PowerShell/npm delivery and SDK coordination are independent consumers,
-not blanket prerequisites or mandatory phases of a Rust port.
+installed behavior. The plan tracks native operations, PowerShell and optional
+npm distribution, and software development kit (SDK) coordination separately.
 
 ## Publication matcher candidate
 
@@ -14,11 +14,10 @@ just-in-time compilation and Rayon. The current scanner remains the sole
 owner of line framing, review identity, classification and Git decisions.
 The candidate accepts already-framed rows and returns ordered UTF-8 byte
 spans only. Its batch threshold selects scheduling; it does not limit coverage.
-An error is not an empty result. The publication matcher is the narrowly scoped
-pre-SDK delivery exception: the qualified Windows x64 worker ships in the
-normal pre-SDK bundle with no SDK dependency. It is an internal scanner
-component, not a second installed CLI. Other native operations remain under
-the broader migration and receiving plan.
+An error is not an empty result. The qualified Windows x64 matcher worker
+ships as an internal scanner component in the normal pre-SDK bundle and has no
+SDK dependency. The selected Rust scanner release has its own qualification
+under the [delivery sequence](#delivery-sequence-and-review-loop).
 
 Before activating the worker, verify the exact retained artifact, complete
 gate and receiver effects, and full VFEM timing at the ordinary gate budget.
@@ -182,7 +181,7 @@ Installation of source-only components remains a separate decision. Owner-equiva
 manual execution retains the same guarantees and is not a host-denial bypass.
 
 
-## Progressive reduction of model instructions (SDK to Rust)
+## Progressive reduction of model instructions
 
 Treat instruction-budget reduction as migration of obligations, not text compression
 or an automatic benefit of changing language. The SDK supplies supported session,
@@ -205,9 +204,10 @@ affected consumers, current owner, replacement/interception boundary, verificati
 and uncovered routes, and the exact procedural text eligible for retirement.
 This is review evidence, not a new tracker, runtime gate or parallel rules registry.
 
-Proceed through the supported SDK bindings first, then the independently admitted
-Rust slices under O0--O6. SDK completion does not require finishing Rust. Remove
-procedural duplicates only for consumers whose actual path is covered and verified;
+Qualify the supported SDK bindings and the selected Rust scanner slice in parallel.
+Release the scanner first under the [delivery sequence](#delivery-sequence-and-review-loop).
+Additional Rust migrations under O0--O6 have individual admission and qualification.
+Remove procedural duplicates only for consumers whose actual path is covered and verified;
 retain the concise obligation and necessary instructions for unsupported hosts.
 Update the owning shared source and affected provider projections together, not
 one provider's text by analogy. Keep a practical recovery path if a mechanism is
@@ -374,14 +374,19 @@ not claim whole-host cleanliness from a selected-resource check.
 
 ### Delivery sequence and review loop
 
-1. Reconcile the accepted SDK/Rust boundaries and map the relevant obligations,
-   owners and consumers in this existing plan. Separate existing behavior,
-   proposed semantic improvements and unsupported capabilities.
-2. Finish the selected SDK contracts and verify their input/session/result bindings.
-   These provide integration seams, not proof that every native action is intercepted.
-3. Execute one admitted O0--O5 deterministic slice with its causal tests and existing
-   packaging/installer path. The reminder remains a candidate; select a slice for
-   demonstrated maintenance benefit, not a promise to port everything.
+1. Keep the tagged pre-SDK baseline as the reference and reconcile the selected
+   Rust scanner slice with receiver-aware main. Qualify findings and receipt
+   parity on small changes over receiver history and large new disclosures.
+   Verify progress, interruption and recovery, resource settlement, and actual
+   receiving on supported installation targets before release. Follow the
+   release order in the [Orchestrarium 2.0 product plan](https://github.com/applicate2628/Orchestrarium/blob/6716ff450c7ec5ff684e59c464a767019bba09dd/docs/orchestrarium-2.0-plan.md#current-delivery-order-and-completed-work).
+2. Qualify the selected SDK contracts and their input, session and result bindings
+   in parallel. Release the SDK after the independently qualified scanner slice.
+   Qualify PowerShell, POSIX and optional npm distribution in its own delivery lane.
+3. Admit further deterministic operations individually under O0--O5 when they
+   demonstrate a maintenance benefit. The reminder remains a candidate for
+   this broader migration. Use each operation's own tests and supported
+   packaging and installer path.
 4. Proceed through pure validation/reducers, then state/resource/install operations
    according to dependency and risk. Publication and transfer retain separate
    qualification. Independent slices may proceed in isolated ownership lanes.

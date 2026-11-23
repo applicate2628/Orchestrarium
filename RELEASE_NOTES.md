@@ -21,6 +21,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 - Recognize intentional scanner declarations in history from the approved SDK layout while retaining the shipped runtime layout. Ordinary findings and staged files still use the existing rules.
 
+- Align the draft Rust tree walker with receiver-aware publication scanning. A previously published tree in the receiver overlap still contributes path metadata at every visited prefix, while unpublished-tree coverage credits only newly selected trees. The release plan now places qualification of the selected Rust scanner after the tagged pre-SDK baseline, with the scanner release ahead of the SDK release and distribution qualification tracked separately.
+
 ## 2026-11-22
 
 - Let the guarded range scan continue while it reports newly verified work. Stalls still fail, and completed scans must still pass the same coverage, identity, and review checks.

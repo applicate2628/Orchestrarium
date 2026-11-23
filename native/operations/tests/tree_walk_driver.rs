@@ -11,7 +11,7 @@ use std::{
     io::{self, BufRead, Write},
 };
 use tree_record::{ObjectWidth, TreeRecordError, VerifiedTreePayload};
-use tree_walk::{Entry, Event, Kind, WalkError, walk};
+use tree_walk::{Entry, Event, Kind, Selection, WalkError, walk};
 
 fn unhex(input: &str) -> Vec<u8> {
     let (pairs, remainder) = input.as_bytes().as_chunks::<2>();
@@ -190,11 +190,15 @@ fn main() {
     let mut framed_trees = HashMap::new();
     let mut unpublished_trees = HashSet::new();
     let mut unpublished_blobs = HashSet::new();
+    let mut receiver_trees = HashSet::new();
     for row in lines.iter().skip(1) {
         let oid = unhex(&row[1]);
         match row[0].as_str() {
             "B" => {
                 unpublished_blobs.insert(oid);
+            }
+            "O" => {
+                receiver_trees.insert(oid);
             }
             "T" => {
                 if row[2] == "new" {
@@ -293,14 +297,18 @@ fn main() {
     }
     let trees = unpublished_trees.iter().map(Vec::as_slice).collect();
     let blobs = unpublished_blobs.iter().map(Vec::as_slice).collect();
+    let receiver_trees = receiver_trees.iter().map(Vec::as_slice).collect();
     let stdout = io::stdout();
     let out = RefCell::new(io::BufWriter::new(stdout.lock()));
     let checks = Cell::new(0usize);
     let result = walk(
         &root,
         max_bytes,
-        &trees,
-        &blobs,
+        Selection {
+            unpublished_trees: &trees,
+            unpublished_blobs: &blobs,
+            receiver_trees: &receiver_trees,
+        },
         |oid| match arena.get(oid) {
             Some(Ok(rows)) => Ok(rows.as_slice()),
             Some(Err(refusal)) => Err(refusal.as_str()),

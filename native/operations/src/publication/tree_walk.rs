@@ -17,6 +17,14 @@ pub struct Entry<'graph> {
     pub mode: &'graph [u8],
 }
 
+pub struct Selection<'set, 'graph> {
+    pub unpublished_trees: &'set HashSet<&'graph [u8]>,
+    pub unpublished_blobs: &'set HashSet<&'graph [u8]>,
+    /// Trees removed from the selection by receiver reachability whose paths
+    /// still need metadata checks.
+    pub receiver_trees: &'set HashSet<&'graph [u8]>,
+}
+
 #[derive(Debug, Eq, PartialEq)]
 pub enum Event<'event> {
     ReachedTree(&'event [u8]),
@@ -44,13 +52,14 @@ enum Pending<'graph> {
 }
 
 /// Expand one root in scanner order. The caller supplies only verified parsed
-/// graph entries and owns the root's identity, budget, metadata admission,
-/// index/proof, and all findings. Events borrow the current path for the call.
+/// graph entries and supplies the selection and budget. The caller owns the
+/// root's identity, index/proof, and findings. The walker emits reached-tree
+/// events for unpublished trees and metadata for both tree sets. Events
+/// borrow the current path for the call.
 pub fn walk<'graph, E>(
     root: &'graph [u8],
     max_path_bytes: usize,
-    unpublished_trees: &HashSet<&[u8]>,
-    unpublished_blobs: &HashSet<&[u8]>,
+    selection: Selection<'_, '_>,
     mut load: impl FnMut(&'graph [u8]) -> Result<&'graph [Entry<'graph>], E>,
     mut guard: impl FnMut(usize) -> Result<(), E>,
     mut emit: impl FnMut(Event<'_>) -> Result<(), E>,
@@ -74,10 +83,11 @@ pub fn walk<'graph, E>(
         }
         let entries = load(oid).map_err(WalkError::Owner)?;
         stack.push(Pending::Leave(oid));
-        let unpublished = unpublished_trees.contains(oid);
+        let unpublished = selection.unpublished_trees.contains(oid);
         if unpublished {
             emit(Event::ReachedTree(oid)).map_err(WalkError::Owner)?;
         }
+        let check_metadata = unpublished || selection.receiver_trees.contains(oid);
         let prefix_len = path.len();
         for entry in entries.iter().rev() {
             guard(frontier).map_err(WalkError::Owner)?;
@@ -94,7 +104,7 @@ pub fn walk<'graph, E>(
                 path.push(b'/');
             }
             path.extend_from_slice(entry.name);
-            if unpublished {
+            if check_metadata {
                 emit(Event::Metadata {
                     tree: oid,
                     path: &path,
@@ -107,7 +117,7 @@ pub fn walk<'graph, E>(
                     stack.push(Pending::Enter(entry.oid, path.clone()));
                     frontier += 1;
                 }
-                Kind::Blob if unpublished_blobs.contains(entry.oid) => {
+                Kind::Blob if selection.unpublished_blobs.contains(entry.oid) => {
                     emit(Event::Subject {
                         path: &path,
                         blob: entry.oid,

@@ -49,10 +49,14 @@ def loop_from(source):
     return ns["reference"]
 
 
-def run_reference(loop, root, graph, trees, blobs, max_bytes, frontier_limit, expire):
+def run_reference(loop, root, graph, trees, blobs, max_bytes, frontier_limit, expire,
+                  receiver_trees=()):
     trace = []
 
     class Index:
+        def had_receiver_tree_candidate(self, oid):
+            return oid in receiver_trees
+
         def add_metadata(self, oid, path):
             trace.append(f"M {oid.hex()} {path.hex()}")
             return False
@@ -85,9 +89,10 @@ def run_reference(loop, root, graph, trees, blobs, max_bytes, frontier_limit, ex
     return ("\n".join(trace) + "\n").encode("ascii")
 
 
-def driver_input(root, graph, trees, blobs, max_bytes, frontier, expire):
+def driver_input(root, graph, trees, blobs, max_bytes, frontier, expire, receiver_trees=()):
     rows = [f"{root.hex()} {max_bytes} {frontier} {expire}"]
     rows.extend(f"B {oid.hex()}" for oid in sorted(blobs))
+    rows.extend(f"O {oid.hex()}" for oid in sorted(receiver_trees))
     for oid, entries in graph.items():
         rows.append(f"T {oid.hex()} {'new' if oid in trees else 'known'}")
         rows.extend(f"E {oid.hex()} {e.kind} {e.name.hex()} {e.oid.hex()} {e.mode}" for e in entries)
@@ -109,6 +114,8 @@ def fixtures(width):
     yield "shared_subtree", (root, shared, {root,a,b}, {file}, 64, 8, 0)
     yield "known_tree_has_new_blob_subject", (root, shared, set(), {file}, 64, 8, 0)
     yield "known_blob_has_new_tree_metadata", (root, shared, {root,a,b}, set(), 64, 8, 0)
+    yield "receiver_overlap_under_reused_paths", (root, shared, {root, b}, {file}, 64, 8, 0, {a})
+    yield "receiver_overlap_metadata_only", (root, shared, set(), set(), 64, 8, 0, {c})
     yield "frontier_exact_limit", (root, shared, {root,a,b}, {file}, 64, 3, 0)
     yield "frontier_exceeded", (root, shared, {root,a,b}, {file}, 64, 2, 0)
     yield "deadline_precedes_frontier", (root, shared, {root,a,b}, {file}, 64, 0, 2)
