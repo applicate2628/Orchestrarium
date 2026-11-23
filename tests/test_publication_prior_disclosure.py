@@ -132,7 +132,7 @@ class TestPriorDisclosure(native.TestNativePublicationEffects):
 
         run_git = self.module._run_range_git
         def unavailable_baseline(args, **kwargs):
-            if "ls-tree" in args and "--full-tree" in args:
+            if "log" in args and "--raw" in args:
                 raise self.module.subprocess.TimeoutExpired("optional baseline", 0)
             return run_git(args, **kwargs)
         with mock.patch.object(self.module, "_run_range_git", unavailable_baseline):
@@ -150,6 +150,36 @@ class TestPriorDisclosure(native.TestNativePublicationEffects):
         for outcome in scan_edit(old, moved=True):
             self.assertEqual(outcome.kind, "findings")
             self.assertTrue(any(row.detector_class == "machine-path" for row in outcome.findings))
+
+    def test_older_published_machine_path_is_not_new_disclosure(self):
+        file = self.root / "history.txt"
+        prior = "trace=" + chr(68) + chr(58) + "/dev/synthetic-older/" + "\n"
+        file.write_text(prior, encoding="utf-8")
+        self.git("add", file.name)
+        self.git("commit", "-qm", "synthetic path in published history")
+        file.write_text("current public snapshot\n", encoding="utf-8")
+        self.git("add", file.name)
+        self.git("commit", "-qm", "synthetic ref no longer contains path")
+        published_tip = self.git("rev-parse", "HEAD").strip().decode()
+        self.git("push", "-q", "origin", "HEAD:refs/heads/main")
+
+        def scan_text(value):
+            file.write_text(value, encoding="utf-8")
+            self.git("add", file.name)
+            tree = self.git("write-tree").strip().decode()
+            tip = self.git("commit-tree", tree, "-p", published_tip, raw=b"synthetic history test\n").strip().decode()
+            payload = self.payload([(tip.encode(), tip, b"refs/heads/main", published_tip)])
+            finder = self.module._path_finder(native.SOURCE)
+            with self.in_root(), mock.patch.object(self.module, "__injected_native_push__", payload, create=True):
+                return (self.module._scan_native_push(payload, finder),
+                        self.module._scan_range("origin", "refs/heads/main", finder, source_revision=tip))
+
+        for outcome in scan_text(prior + "new unrelated line\n"):
+            self.assertEqual(outcome.kind, "clean")
+        for value in (prior + prior, prior.replace("older", "novel")):
+            for outcome in scan_text(value):
+                self.assertEqual(outcome.kind, "findings")
+                self.assertTrue(any(row.detector_class == "machine-path" for row in outcome.findings))
 
     def test_new_disclosure_still_fails_after_prior_inventory(self):
         _published, tip = self.publish_marker()

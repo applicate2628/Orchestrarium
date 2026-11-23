@@ -2923,16 +2923,15 @@ def _staged_post_image(oid: str) -> bytes:
     return proc.stdout
 
 
-def _staged_added_line_numbers(old_oid: str, new_oid: str, *, run_git=None,
-                               timeout: float = 30) -> frozenset[int]:
+def _staged_added_line_numbers(old_oid: str, new_oid: str) -> frozenset[int]:
     if old_oid == new_oid:
         return frozenset()
-    proc = (run_git or _run_git)(
+    proc = _run_git(
         [
             "diff", "--text", "--unified=0", "--no-color", "--no-ext-diff",
             "--no-textconv", old_oid, new_oid,
         ],
-        timeout=timeout,
+        timeout=30,
     )
     if proc.returncode:
         raise RuntimeError("could not diff staged blobs")
@@ -5408,13 +5407,60 @@ def _follow_native_tag_chain(
     return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
 
 
+def _verified_published_blob_lines(proof_git, oid: str, object_format) -> list[str] | None:
+    if len(oid) != object_format.hex_length or re.fullmatch("[0-9a-f]+", oid) is None:
+        return None
+    size_record = proof_git(["cat-file", "-s", oid])
+    if size_record.returncode or not size_record.stdout.strip().isdigit():
+        return None
+    size = int(size_record.stdout)
+    if size > _MAX_BLOB_BYTES:
+        return None
+    blob = proof_git(["cat-file", "blob", oid])
+    data = blob.stdout
+    if blob.returncode or len(data) != size or _is_binary(data):
+        return None
+    digest = hashlib.new(object_format.name)
+    digest.update(f"blob {size}\0".encode("ascii"))
+    digest.update(data)
+    if digest.hexdigest() != oid:
+        return None
+    lines = data.decode("utf-8").splitlines()
+    if len(lines) != data.count(b"\n") + int(bool(data) and not data.endswith(b"\n")):
+        return None
+    return lines
+
+
+def _published_path_blob_history(proof_git, root: str, path: bytes, literal_path: str,
+                                 git_mode: str) -> tuple[str, ...]:
+    """Ask Git for object identities reached by this exact path at a receiver root."""
+    record = proof_git(["--literal-pathspecs", "log", "--full-history", "--root", "--raw", "-m", "-z",
+                        "--format=", "--no-abbrev", "--no-renames", root, "--", literal_path])
+    if record.returncode:
+        return ()
+    entries = iter(record.stdout.split(b"\0"))
+    result: dict[str, None] = {}
+    mode = git_mode.encode("ascii")
+    for entry in entries:
+        if not entry.strip(b"\n"):
+            continue
+        fields = entry.lstrip(b"\n").split()
+        if len(fields) != 5 or not fields[0].startswith(b":") or next(entries, None) != path:
+            return ()  # A partial or confused path inventory proves nothing.
+        for kind, oid in ((fields[0][1:], fields[2]), (fields[1], fields[3])):
+            if kind == mode:
+                result[oid.decode("ascii")] = None
+    return tuple(result)
+
+
 def _unpublished_machine_path_lines(
-    selection, path, oid, raw, git_mode, find_machine_paths, deadline, prior_blobs,
+    selection, path, raw, git_mode, find_machine_paths, deadline, prior_blobs,
 ):
     """Narrow machine-path findings only with exact same-path receiver evidence.
 
-    Only Git's unchanged lines at the same verified receiver-side file can
-    inherit that evidence. A newly added duplicate remains a finding.
+    A same-path line needs exact evidence in a receiver-side version,
+    including earlier versions reachable from the receiver's prior ref.
+    A duplicate beyond the previously published multiplicity remains a finding.
     Missing or unreadable evidence never waives an occurrence.
     """
     if not selection.prior_receiver_roots:
@@ -5428,7 +5474,7 @@ def _unpublished_machine_path_lines(
                 if find_machine_paths(line)}
     if not matching:
         return frozenset()
-    current = text.splitlines(keepends=True)
+    current = text.splitlines()
     if len(current) != raw.count(b"\n") + int(bool(raw) and not raw.endswith(b"\n")):
         return None  # Git and the text classifier must agree on line boundaries.
     wanted = Counter(current[number - 1] for number in matching)
@@ -5437,54 +5483,31 @@ def _unpublished_machine_path_lines(
     # its remaining time on a missing, oversized or corrupt baseline.
     proof_deadline = now() + _time_left(deadline, now) / 2
 
-    def proof_git(args, *, timeout=None):
+    def proof_git(args):
         remaining = proof_deadline - now()
         if remaining <= 0:
             raise subprocess.TimeoutExpired("published-path-evidence", 0)
         return _run_range_git(args, timeout=remaining)
 
-    for root in selection.prior_receiver_roots:
-        key = (root, git_mode)
-        if key not in prior_blobs:
-            evidence = None
-            try:
-                tree = proof_git(["--literal-pathspecs", "ls-tree", "-z", "--full-tree", root, "--", literal_path])
-                header, separator, leaf = tree.stdout.partition(b"\t")
-                fields = header.split()
-                if (tree.returncode == 0 and separator and leaf == path + b"\0"
-                        and len(fields) == 3 and fields[:2] == [git_mode.encode("ascii"), b"blob"]):
-                    previous_oid = fields[2].decode("ascii")
-                    if (len(previous_oid) == selection.object_format.hex_length
-                            and re.fullmatch("[0-9a-f]+", previous_oid)):
-                        size_result = proof_git(["cat-file", "-s", previous_oid])
-                        if size_result.returncode == 0 and size_result.stdout.strip().isdigit():
-                            size = int(size_result.stdout)
-                            if size <= _MAX_BLOB_BYTES:
-                                blob = proof_git(["cat-file", "blob", previous_oid])
-                                data = blob.stdout
-                                digest = hashlib.new(selection.object_format.name)
-                                digest.update(f"blob {len(data)}\0".encode("ascii"))
-                                digest.update(data)
-                                if (blob.returncode == 0 and len(data) == size and digest.hexdigest() == previous_oid
-                                        and not _is_binary(data)):
-                                    lines = data.decode("utf-8").splitlines(keepends=True)
-                                    if len(lines) == data.count(b"\n") + int(bool(data) and not data.endswith(b"\n")):
-                                        evidence = previous_oid, Counter(lines)
-            except (OSError, ValueError, subprocess.SubprocessError):
-                pass
-            prior_blobs[key] = evidence
-        evidence = prior_blobs[key]
-        if evidence is None:
-            continue
-        previous_oid, previous_lines = evidence
-        try:
-            added = _staged_added_line_numbers(previous_oid, oid, run_git=proof_git)
-        except (OSError, RuntimeError, subprocess.SubprocessError):
-            break
-        if any(n > len(current) for n in added):
-            break
-        return frozenset(n for n in matching if n in added
-                         or previous_lines[current[n - 1]] < wanted[current[n - 1]])
+    # The range owner orders the advertised destination before additional
+    # receiver inventory. Anchor prior-line evidence to that selected history.
+    old_root = selection.prior_receiver_roots[0]
+    history_key = ("history", old_root, git_mode)
+    try:
+        if history_key not in prior_blobs:
+            prior_blobs[history_key] = _published_path_blob_history(
+                proof_git, old_root, path, literal_path, git_mode,
+            )
+        for previous_oid in prior_blobs[history_key]:
+            lines = _verified_published_blob_lines(proof_git, previous_oid, selection.object_format)
+            if lines is None:
+                continue
+            previously_seen = Counter(line for line in lines if line in wanted)
+            matching = {n for n in matching if previously_seen[current[n - 1]] < wanted[current[n - 1]]}
+            if not matching:
+                break
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass  # The still-unproved lines keep their original disposition.
     return frozenset(matching)
 
 
@@ -5844,7 +5867,7 @@ async def _acquire_indexed_history(
             modes = {mode if commit else None for _, mode, commit in index.owners(path, blob_oid)}
             if len(modes) == 1 and modes <= {"100644", "100755"}:
                 machine_path_lines = _unpublished_machine_path_lines(
-                    selection, path, blob_oid, raw, next(iter(modes)), find_machine_paths,
+                    selection, path, raw, next(iter(modes)), find_machine_paths,
                     scan_deadline, prior_blobs,
                 )
         if not native:

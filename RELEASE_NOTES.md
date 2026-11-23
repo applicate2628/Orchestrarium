@@ -11,7 +11,7 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 - On Windows, the installer keeps existing owned files and their access rules when a standalone Lead upgrade only updates bytes and adds ordinary files under existing folders. The same transaction verifies new files and rolls back on failure. Coupled transport replacements retain their existing path.
 
-- The publication scanner no longer reports an unchanged machine-path line merely because adjacent lines gave its file a new Git object identity. It compares only the same tracked file at a verified receiver baseline; new or moved detections, commit messages, binary subjects and other detectors keep their existing checks.
+- The publication scanner no longer reflags machine-path lines already published in the same tracked file in the verified receiver history. An edited blob does not erase that evidence. New lines, excess duplicates, different tracked paths, commit messages, binary subjects and other detectors retain their existing checks.
 
 ## 2026-11-22
 
