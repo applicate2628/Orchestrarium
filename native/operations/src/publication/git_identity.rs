@@ -106,9 +106,29 @@ impl<S> VerifiedStagedObject<S> {
     pub fn size(&self) -> u64 {
         self.size
     }
+}
 
-    pub fn into_stage(self) -> S {
-        self.stage
+impl<S: io::Read + io::Seek> VerifiedStagedObject<S> {
+    /// Rewind and expose only the verified payload, never writable storage.
+    /// A consumer result is usable only after it reads exactly that extent.
+    /// The consumer must keep any side effects provisional until this returns.
+    pub fn consume<T>(
+        self,
+        consume: impl FnOnce(&mut dyn io::Read) -> io::Result<T>,
+    ) -> io::Result<T> {
+        let mut stage = self.stage;
+        if stage.seek(io::SeekFrom::Start(0))? != 0 {
+            return Err(io::Error::other("verified stage could not be rewound"));
+        }
+        let mut reader = stage.take(self.size);
+        let outcome = consume(&mut reader)?;
+        if reader.limit() != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "verified stage was not fully consumed",
+            ));
+        }
+        Ok(outcome)
     }
 }
 

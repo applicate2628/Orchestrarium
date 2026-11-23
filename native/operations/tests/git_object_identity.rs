@@ -299,7 +299,12 @@ fn native_git_keeps_one_batch_open_for_both_object_widths() {
             .unwrap();
         assert!(hash.status.success(), "{:?}", hash.stderr);
         let large_oid = std::str::from_utf8(&hash.stdout).unwrap().trim_end();
-        let stage = std::fs::File::create_new(repo.join("large-object-stage")).unwrap();
+        let stage = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(repo.join("large-object-stage"))
+            .unwrap();
         let mut git = Command::new("git")
             .args(["--no-replace-objects", "cat-file", "--batch"])
             .current_dir(&repo)
@@ -324,7 +329,18 @@ fn native_git_keeps_one_batch_open_for_both_object_widths() {
 
         let object = large.unwrap();
         assert_eq!((object.kind(), object.size()), (ObjectKind::Blob, size));
-        assert_eq!(object.into_stage().metadata().unwrap().len(), size);
+        let (has_nul, rows) = object
+            .consume(|reader| {
+                let mut rows = 0;
+                let has_nul = orche_native_operations::index_text(reader, |span| {
+                    rows += 1;
+                    assert_eq!((span.number, span.byte_start, span.byte_end), (1, 0, size));
+                    Ok(())
+                })?;
+                Ok((has_nul, rows))
+            })
+            .unwrap();
+        assert_eq!((has_nul, rows), (true, 1));
         assert_eq!(
             missing,
             Err(BatchRequestError::Response(VerifiedReadError::Framing(
@@ -333,6 +349,47 @@ fn native_git_keeps_one_batch_open_for_both_object_widths() {
         );
         assert_eq!(rejected, Err(BatchRequestError::Poisoned));
     }
+}
+
+#[test]
+fn staged_consumer_must_read_the_verified_extent() {
+    let oid = b"ce013625030ba8dba906f756967f9e9ca394464a";
+    let make = || {
+        let input = response(std::str::from_utf8(oid).unwrap(), "blob", b"hello\n");
+        let mut session =
+            BatchSession::new(input, Vec::new(), ObjectFormat::Sha1, Limits::default());
+        session
+            .fetch_staged(oid, Some(ObjectKind::Blob), Cursor::new(Vec::new()))
+            .unwrap()
+    };
+    let indexed = make()
+        .consume(|reader| {
+            let mut spans = Vec::new();
+            let has_nul = orche_native_operations::index_text(reader, |span| {
+                spans.push(span);
+                Ok(())
+            })?;
+            Ok((has_nul, spans))
+        })
+        .unwrap();
+    assert!(!indexed.0);
+    assert_eq!(indexed.1.len(), 1);
+    assert_eq!((indexed.1[0].byte_start, indexed.1[0].byte_end), (0, 5));
+
+    let incomplete = make().consume(|reader| {
+        let mut byte = [0_u8];
+        reader.read_exact(&mut byte)?;
+        assert_eq!(byte, [b'h']);
+        Ok(())
+    });
+    assert_eq!(
+        incomplete.unwrap_err().kind(),
+        std::io::ErrorKind::UnexpectedEof
+    );
+
+    let rejected =
+        make().consume(|_reader| Err::<(), _>(std::io::Error::other("consumer refused")));
+    assert_eq!(rejected.unwrap_err().kind(), std::io::ErrorKind::Other);
 }
 
 #[test]
@@ -362,7 +419,14 @@ fn stage_checks_content_and_frame_even_above_the_buffered_cap() {
         } else {
             let object = result.unwrap();
             assert_eq!((object.kind(), object.size()), (ObjectKind::Blob, 6));
-            assert_eq!(object.into_stage().into_inner(), b"hello\n");
+            let payload = object
+                .consume(|reader| {
+                    let mut bytes = Vec::new();
+                    reader.read_to_end(&mut bytes)?;
+                    Ok(bytes)
+                })
+                .unwrap();
+            assert_eq!(payload, b"hello\n");
         }
     }
 }

@@ -165,6 +165,13 @@ a successful flush. An existing nonempty stage is rejected before sending
 a request. Failed staging yields no verified object; the owner must ensure
 exclusive access and dispose of scratch material when discarded.
 
+A downstream consumer can take the verified stage through the read-only
+handoff. The stage is rewound and exposure is bounded to the verified object
+size; both an early-success callback and a premature end of input fail. Data
+written by a callback remains provisional until the complete read succeeds.
+The real Git fixture passes a blob larger than 64 MiB for each hash format
+directly from the fixture-owned staged file through the whole-line index.
+
 The staged reader removes the buffered payload ceiling from this receiving
 path only. It does not qualify the matching stage, disk-pressure handling,
 threshold warnings, production cancellation, or complete scanner coverage.
