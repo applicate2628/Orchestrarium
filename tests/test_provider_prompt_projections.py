@@ -1573,6 +1573,18 @@ def _current_canonical_with_historical_projection(
     return source, canonical, paths
 
 
+def test_recovery_wording_upgrades_exact_previous_main_projection(tmp_path: Path) -> None:
+    installer = _load_installer()
+    commit = "14a4e74a"
+    expected = dict(installer.ACCEPTED_CLAUDE_TRANSPORT_PROJECTION_PRIORS[commit])
+    source, canonical, _ = _current_canonical_with_historical_projection(tmp_path, commit, expected)
+    projection = tmp_path / "claude" / "agents" / "scripts"
+    staged = installer._stage_claude_transport_projection(source, canonical, projection)
+    assert staged.accepted_prior_set == commit
+    assert {name for name, _ in staged.pending_files} == {"provider_prompt.py", "external-prompt-governance.md"}
+    assert staged.manifest_pending
+
+
 def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> None:
     installer = _load_installer()
     canonical, projection, paths = _current_canonical_with_stock_8f92_projection(

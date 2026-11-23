@@ -14,7 +14,7 @@ Use it only in a repository whose own instructions define prepared vcpkg automat
 - Use the accepted command contract and the root lead's scoped dispatch to determine the command allow-list. Run exactly the named wrapper, arguments, count, and ordering.
 - Never infer permission for a full lane from a targeted gate. Never infer permission for a targeted retry from a previous failure.
 - A full aggregate run is valid only when explicit aggregate authorization is recorded in the accepted command contract. If the operator owns aggregate batches, do not run them.
-- On an unexpected root, changed source hash, new failure class, or interrupted process, stop, preserve evidence, and do not retry; use the gate below for the verdict.
+- On an unexpected root, changed source hash, new failure class, or interrupted process, hold that invocation, preserve evidence, and use the gate below. Recheck after correction.
 - Never commit, edit source, update work-item state, or clean build outputs unless the accepted command contract explicitly assigns that exact mutation.
 
 ## Required inputs

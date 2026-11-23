@@ -77,9 +77,9 @@ class TestOwnerEquivalentExecutionContract(unittest.TestCase):
             "bound source/destination/link/board pre/post bytes",
             "joint archive/active-absence/disposition/link/receipt/README readback",
             "never impersonated completion frames",
-            "No new scope/host-denial bypass/retry",
-            "No new scope/host-denial bypass/retry/external-only-to-native switch/corridor/model/commission weakening",
-            "No new scope/host-denial bypass/retry/external-only-to-native switch/corridor/model/commission weakening/trust-publication bypass/human-review replacement",
+            "No new scope/active host-denial bypass",
+            "No new scope/active host-denial bypass/external-only-to-native switch/corridor/model/commission weakening",
+            "No new scope/active host-denial bypass/external-only-to-native switch/corridor/model/commission weakening/trust-publication bypass/human-review replacement",
         ):
             with self.subTest(guarantee=guarantee):
                 self.assertIn(guarantee, contract)
