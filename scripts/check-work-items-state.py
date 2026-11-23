@@ -555,7 +555,8 @@ def command_check(args: argparse.Namespace, *, ledger_resource_budget=None, tran
             print(f"  - {item.name} -- Next action: {next_action_line(item, validator)}")
 
     if failed:
-        print(f"RESULT: FAIL ({failed} failures across active+archived work-items)")
+        scope = "active" if args.active_only else "active+archived"
+        print(f"RESULT: FAIL ({failed} failures across {scope} work-items)")
         return 1
 
     if not items:

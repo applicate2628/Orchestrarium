@@ -1948,6 +1948,16 @@ def test_active_only_keeps_periodic_archive_failures_out_of_publication_scope(
     assert "archive obligation scan skipped" in publication.stdout
 
 
+def test_active_failure_summary_reports_only_selected_scope(tmp_path: Path) -> None:
+    item = write_valid_item(tmp_path)
+    (item / "agent-runs.jsonl").unlink()
+    active = run_checker(tmp_path, "--active-only")
+    full = run_checker(tmp_path)
+    for result, scope in ((active, "active"), (full, "active+archived")):
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert f"RESULT: FAIL (1 failures across {scope} work-items)" in result.stdout
+
+
 def test_publication_preflight_ignores_unrelated_active_lifecycle_state(
     tmp_path: Path, monkeypatch
 ) -> None:
