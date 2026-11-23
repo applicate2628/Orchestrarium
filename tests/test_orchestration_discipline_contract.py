@@ -181,7 +181,7 @@ PINS = [
     # Batch 3 acceptance — role floors augment retained/canonical obligations.
     ("B1-S1-input", "inputs required by the canonical S1 `Receiving-side echo` in `subagent-contracts.md`",
      ["src.claude/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
-    ("B1-S1-class-audit", "actual defects outside admitted scope must be reported as `out-of-scope` or `unresolved`, never `not-affected`",
+    ("B1-S1-class-audit", "Apply the canonical S1 Receiving-side echo and Class-completeness trigger owned by subagent-contracts.md.",
      ["src.claude/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
     ("F2-receiving-classification", "actual defects outside admitted scope must be reported as `out-of-scope` or `unresolved`, never `not-affected`",
      list(HANDOFF_CONTRACTS)),

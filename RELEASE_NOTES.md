@@ -7,7 +7,7 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-23
 
-- Prioritize the smallest working end-to-end result. During planning and review, the Lead defers speculative safeguards and unrelated work to the existing plan unless needed for that result. Existing safety and approval requirements are unchanged; no new workflow gate is introduced.
+- Prioritize the smallest working end-to-end result. During planning and review, the Lead defers speculative safeguards and unrelated work to the existing plan unless needed for that result. Existing safety and approval requirements are unchanged; no new workflow gate is introduced. Contract tests check the QA roles' referral and still check that both owning contracts state the classification rule.
 
 - The model resolver now compares eligible models and reasoning efforts using benchmark quality, task time, and one relative cost unit (Sol 6.2 High = 1). The Lead selects and explains the best fit for each task; the default is a fallback. The benchmark figures are not prices, launch permissions, or runtime guarantees.
 
