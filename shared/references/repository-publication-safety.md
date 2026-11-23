@@ -94,6 +94,14 @@ Additional payload reads are at most the number of distinct blob/path pairs; non
 
 The direct scanner's deadline is cooperative: a synchronous detector is not preempted, but its late result is rejected. The gate's external child supervisor supplies the independent timeout boundary for publication. Neither route claims a hard resident-memory ceiling. Timeout, output overflow and unknown child settlement remain fail-closed. A stopped scan provides no partial approval and does not resume from an unauthenticated receipt.
 
+### Scanner source layout transitions
+
+Distinguish exact source-owner names used for text classification from the
+runtime code closure. An approved compatible layout may be recognized for
+intentional declaration lines in selected history without admitting that layout
+as current installed code. Metadata, arbitrary copies, and ordinary content
+remain evaluated. The historical selection itself is unchanged.
+
 ## Terms and Abbreviations
 
 - **HEAD** — the current local Git commit; it may differ from the separately approved publication source.

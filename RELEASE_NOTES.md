@@ -15,6 +15,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 - In the draft Rust index, advance positions in runs between line separators rather than updating state per character. Preserve raw and normalized coordinates, Unicode replacement, and split CRLF behavior. This does not change the installed scanner.
 
+- Recognize intentional scanner declarations in history from the approved SDK layout while retaining the shipped runtime layout. Ordinary findings and staged files still use the existing rules.
+
 ## 2026-11-22
 
 - Let the guarded range scan continue while it reports newly verified work. Stalls still fail, and completed scans must still pass the same coverage, identity, and review checks.

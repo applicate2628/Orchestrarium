@@ -220,6 +220,11 @@ _SCANNER_EXEMPT_PATHS = frozenset({
     "src.codex/skills/lead/scripts/check-publication-safety.py",
     "src.claude/agents/scripts/check-publication-safety.py",
 })
+# The approved receiving layout can appear in selected history before it
+# becomes a current runtime. Do not use it to resolve scanner code.
+_HISTORICAL_SCANNER_SOURCE_PATHS = frozenset({
+    "adapters/claude/agents/scripts/check-publication-safety.py",
+})
 _SIMPLE_RULES = (
     (True, re.compile(r"AKIA[0-9A-Z]{16}")),
     (True, re.compile(r"ghp_[A-Za-z0-9]{36}")),
@@ -1639,7 +1644,11 @@ def _text_lines(text: str) -> Iterator[tuple[int, int, str]]:
 
 
 def _selected_text_lines(text: str, path: str, subject_kind: str) -> Iterator[tuple[int, int, str]]:
-    scanner = _is_source_text_subject(subject_kind) and path.replace("\\", "/") in _SCANNER_EXEMPT_PATHS
+    source_path = path.replace("\\", "/")
+    scanner = _is_source_text_subject(subject_kind) and (
+        source_path in _SCANNER_EXEMPT_PATHS
+        or (subject_kind == "history-blob" and source_path in _HISTORICAL_SCANNER_SOURCE_PATHS)
+    )
     for number, offset, line in _text_lines(text):
         if not scanner or not _intentional_scanner_line(line):
             yield number, offset, line
