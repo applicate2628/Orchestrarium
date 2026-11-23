@@ -38,7 +38,12 @@ this register does not create a second implementation tracker.
    ([PR61](https://github.com/applicate2628/Orchestrarium/pull/61) for the current
    installer, with the SDK receipt path retained in PR19);
    regression tests must distinguish the old failure from completed cleanup or
-   preserved state. Reconcile SDK with current main using one integrated candidate,
+   preserved state. Keep the same-owner installer update/retirement correction
+   ([PR63](https://github.com/applicate2628/Orchestrarium/pull/63)) and the initially
+   absent ledger read correction ([PR64](https://github.com/applicate2628/Orchestrarium/pull/64))
+   with their existing owners. Carry only applicable deltas into SDK and retain
+   each correction's own receiving evidence.
+   Reconcile SDK with current main using one integrated candidate,
    retaining current receiver/progress checks, exact ownership and rollback, and
    the selected-client installation contract. A conflict-free Git tree alone is
    not integration evidence.
