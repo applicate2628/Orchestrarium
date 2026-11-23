@@ -10,3 +10,7 @@ pub use git_identity::{
     BatchRequestError, BatchSession, ObjectFormat, VerifiedObject, VerifiedReadError,
     VerifiedStagedObject, read_verified_object,
 };
+
+#[path = "publication/line_index.rs"]
+mod line_index;
+pub use line_index::{LineSpan, index_text};

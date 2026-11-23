@@ -16,3 +16,7 @@ path = "tests/tree_walk_driver.rs"
 [dependencies]
 gix-hash = { version = "=0.28.1", default-features = false, features = ["sha1", "sha256"] }
 gix-object = { version = "=0.66.1", default-features = false, features = ["sha1", "sha256"] }
+
+[[test]]
+name = "publication_line_index"
+path = "tests/publication_line_index.rs"

@@ -168,3 +168,15 @@ exclusive access and dispose of scratch material when discarded.
 The staged reader removes the buffered payload ceiling from this receiving
 path only. It does not qualify the matching stage, disk-pressure handling,
 threshold warnings, production cancellation, or complete scanner coverage.
+
+### Whole-line coordinates from staged bytes
+
+The text consumer can index a verified stage into byte ranges for complete
+lines, with the original decoded character coordinates. It uses fixed
+working memory even for a single long line. A successful traversal reports
+whether a NUL occurred anywhere in the input. Callers must not publish
+provisional rows on an incomplete read or decide binary policy on a prefix.
+
+The index does not run matching or apply source exemptions. The matching
+owner must still evaluate each whole selected line, including an oversized
+one, without unbounded heap growth or a coverage shortcut.
