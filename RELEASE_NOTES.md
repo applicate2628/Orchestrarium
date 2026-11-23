@@ -7,7 +7,7 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-23
 
-- On systems supporting the Portable Operating System Interface (POSIX), repeated cancellation of a publication scan waits for process-owner acquisition, cleanup and pipe draining to settle. Cancellation no longer strands the Linux child-reaper lock or returns before the owned process tree has finished cleanup; owner failures remain visible.
+- Repeated cancellation of a publication scan retains its object-reader finalizer and selection cleanup until the owned child and input have settled. On systems supporting the Portable Operating System Interface (POSIX), process-owner acquisition, process creation and failed-start cleanup also retain their eventual results, so cancellation cannot abandon a newly created child or the Linux child-reaper lock during the handoff. Existing cleanup deadlines, failure results and reap certificates remain enforced.
 
 - Deliver the current publication scanner through both source packs so new and rebuilt Lead installations use the same receiver-aware path checks as the canonical scanner. Previously published content is handled consistently after installation instead of producing stale findings from an older mirror.
 
