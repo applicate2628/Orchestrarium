@@ -7215,13 +7215,19 @@ class _CreateOnlyMutablePath:
         self.transaction._assert_scalar_binding({"links": record.selection_links}, check_storage=False)
 
     def _update_windows_tree_contents(self, target: Path, source: Path, before_digest: str,
-                                      after_digest: str, *, ignore_runtime_cache: bool) -> bool:
+                                      after_digest: str, *, ignore_runtime_cache: bool,
+                                      allow_file_additions: bool = False) -> bool:
         """Preserve historical access policy by keeping the original file objects."""
         transaction = self.transaction
         old = dict(_stage_tree_manifest(target, ignore_runtime_cache=ignore_runtime_cache))
         new = dict(_stage_tree_manifest(source, ignore_runtime_cache=ignore_runtime_cache))
-        if old.keys() != new.keys() or any((old[k] == "directory") != (new[k] == "directory") for k in old):
-            return False  # Topology changes retain the strict staged tree publisher.
+        added = new.keys() - old.keys()
+        if (old.keys() - new.keys()
+                or (added and not allow_file_additions)
+                or any((old[k] == "directory") != (new[k] == "directory") for k in old)
+                or any(new[k] == "directory" or (Path(k).parent != Path(".")
+                       and old.get(Path(k).parent.as_posix()) != "directory") for k in added)):
+            return False  # Removed, retyped, or new parent objects need the staged tree publisher.
         if (_tree_manifest_sha256(tuple(old.items())) != before_digest
                 or _tree_manifest_sha256(tuple(new.items())) != after_digest):
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: tree selection drift")
@@ -7233,8 +7239,16 @@ class _CreateOnlyMutablePath:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing tree snapshot")
         secured = transaction._windows_tree_security(target, original)
         plan = []
+        introductions = []
         for member, digest in new.items():
             path = target / member
+            if member in added:
+                self._final_absence(path)
+                payload = (source / member).read_bytes()
+                if hashlib.sha256(payload).hexdigest() != digest:
+                    raise ValueError("E_MUTABLE_PATH_POSTCONDITION: tree addition payload drift")
+                introductions.append((path, payload))
+                continue
             if secured[path].data != (None if old[member] == "directory" else old[member]):
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION: tree snapshot digest drift")
             if digest != old[member]:
@@ -7254,7 +7268,16 @@ class _CreateOnlyMutablePath:
         for path, payload, digest in plan:
             transaction.transform_scalar(path, None, lambda _: payload, self, windows_origin=secured[path])
             secured[path] = replace(secured[path], data=digest)
-        if ignore_runtime_cache and plan:
+        for path, payload in introductions:
+            starting_effect = len(transaction._effects)
+            self.create_file(path.relative_to(self.anchor), payload)
+            created = [effect for effect in transaction._effects[starting_effect:] if effect.path == path]
+            if (len(created) != 1 or created[0].before or created[0].published_state is None
+                    or set(created[0].published_state) != {path}):
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: tree addition lacks creator proof")
+            transaction.assert_effect_current(created[0])
+            secured[path] = created[0].published_state[path]
+        if ignore_runtime_cache and (plan or introductions):
             # Invalidate only the ordinary bytecode the staged publisher would
             # drop; retain originals transactionally and leave containers alone.
             for path, node in tuple(secured.items()):
@@ -7276,6 +7299,7 @@ class _CreateOnlyMutablePath:
         source: Path,
         *,
         ignore_runtime_cache: bool = False,
+        allow_file_additions: bool = False,
     ) -> Path:
         """Transaction-owned upgrade for one hash-pinned accepted-prior skill tree."""
         target = self.destination(relative)
@@ -7290,7 +7314,8 @@ class _CreateOnlyMutablePath:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: invalid source tree")
         if (os.name == "nt" and self.transaction.enabled
                 and self._update_windows_tree_contents(target, source, expected_digest, current_digest,
-                                                       ignore_runtime_cache=ignore_runtime_cache)):
+                                                       ignore_runtime_cache=ignore_runtime_cache,
+                                                       allow_file_additions=allow_file_additions)):
             return target
         effect = self.transaction.arm_replacement(target, None, self)
         self.transaction.capture_replacement_security(effect)
@@ -10623,6 +10648,8 @@ def _apply_canonical_skills_plan(
             lead.accepted_prior,
             lead.source,
             ignore_runtime_cache=lead.ignore_runtime_cache,
+            # A coupled peer transition still consumes the retained tree witness.
+            allow_file_additions=plan.transport_stage is None,
         )
     else:
         owner.create_tree(
