@@ -81,9 +81,9 @@ class TestOwnerEquivalentExecutionContract(unittest.TestCase):
             "bound source/destination/link/board pre/post bytes",
             "joint archive/active-absence/disposition/link/receipt/README readback",
             "never impersonated completion frames",
-            "No new scope/host-denial bypass/retry",
-            "No new scope/host-denial bypass/retry/external-only-to-native switch/corridor/model/commission weakening",
-            "No new scope/host-denial bypass/retry/external-only-to-native switch/corridor/model/commission weakening/trust-publication bypass/human-review replacement",
+            "No new scope/active host-denial bypass",
+            "No new scope/active host-denial bypass/external-only-to-native switch/corridor/model/commission weakening",
+            "No new scope/active host-denial bypass/external-only-to-native switch/corridor/model/commission weakening/trust-publication bypass/human-review replacement",
         ):
             with self.subTest(guarantee=guarantee):
                 self.assertIn(guarantee, contract)
@@ -185,7 +185,7 @@ PINS = [
     # Batch 3 acceptance — role floors augment retained/canonical obligations.
     ("B1-S1-input", "inputs required by the canonical S1 `Receiving-side echo` in `subagent-contracts.md`",
      [f"{CLAUDE_SOURCE}/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
-    ("B1-S1-class-audit", "actual defects outside admitted scope must be reported as `out-of-scope` or `unresolved`, never `not-affected`",
+    ("B1-S1-class-audit", "Apply the canonical S1 Receiving-side echo and Class-completeness trigger owned by subagent-contracts.md.",
      [f"{CLAUDE_SOURCE}/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
     ("F2-receiving-classification", "actual defects outside admitted scope must be reported as `out-of-scope` or `unresolved`, never `not-affected`",
      list(HANDOFF_CONTRACTS)),
@@ -300,7 +300,7 @@ PINS = [
     # A8 — defect-class dispatch (both subagent-contracts)
     ("A8-field", "Defect-class inventory:",
      [f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
-    ("A8-rule", "**Class-completeness trigger (mandatory):** when a reviewer, bot, or test cites one instance of a defect class",
+    ("A8-rule", "**Class-completeness trigger (mandatory):** when evidence identifies one instance of a plausible defect class",
      [f"{CLAUDE_SOURCE}/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
 
     # A7 — diff-invisible invariants + named regression guard (both subagent-contracts)

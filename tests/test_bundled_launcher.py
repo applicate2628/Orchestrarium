@@ -4,6 +4,7 @@ import importlib.util
 import json
 import hashlib
 import os
+import subprocess
 import sys
 from pathlib import Path
 import pytest
@@ -307,3 +308,45 @@ def test_changed_expected_record_refused_before_launch(launcher, tmp_path):
     (root / 'runtime-evidence.json').write_bytes(b'changed')
     with pytest.raises(ValueError):
         launcher.resolve_launch(root, exe)
+
+
+
+@pytest.mark.parametrize("args", [["--help"], ["--global", "--dry-run"]])
+def test_preview_executes_real_entry_without_bundle_bytecode(launcher, tmp_path, monkeypatch, args):
+    root, exe, _ = bundle(tmp_path, launcher)
+    source = PATH.parents[2]
+    entry = root / "app/install.py"
+    entry.write_bytes((source / "install.py").read_bytes())
+    scripts = root / "app/scripts"
+    scripts.mkdir()
+    bootstrap = "python_installer_bootstrap.py"
+    (scripts / bootstrap).write_bytes((source / "scripts" / bootstrap).read_bytes())
+    (scripts / "install-claude.py").write_text("import sys\nprint(repr(sys.argv[1:]))\n", encoding="utf-8")
+    home = tmp_path / "home"
+    home.mkdir()
+    actual_python = sys.executable
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("PYTHONPYCACHEPREFIX", raising=False)
+    monkeypatch.setattr(launcher, "__file__", str(root / "launch.py"))
+    monkeypatch.setattr(launcher.sys, "executable", str(exe))
+
+    observed = []
+    def execute(python, argv, env):
+        # The fixture's fake bundled executable is only for manifest resolution.
+        # Exercise the actual installer and CPython isolation with unchanged flags.
+        assert python == argv[0] == str(exe)
+        result = subprocess.run(
+            [actual_python, *argv[1:]], input="2\n",
+            env=env, capture_output=True, text=True, timeout=20,
+        )
+        observed.append(result)
+        return result.returncode
+
+    monkeypatch.setattr(launcher, "_exec_child", execute)
+    before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    assert launcher.main(args) == 0, observed[0].stderr
+    assert repr(args) in observed[0].stdout
+    after = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    assert after == before
+    assert list(home.iterdir()) == []

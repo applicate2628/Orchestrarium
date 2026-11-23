@@ -9,12 +9,12 @@
     },
     "provider_prompt.py": {
       "source": "scripts/provider_prompt.py",
-      "sha256": "56ad4f6ce8a5270936695de228a8f44fd48be4b145331813a101af20faa40b6d",
+      "sha256": "37c927dc92cec22024d35cf16380d48f25824f2b85b6ad8173203e1404ecbb5b",
       "destination": "scripts/provider_prompt.py"
     },
     "process_supervision/process_runner.py": {
       "source": "scripts/process_supervision/process_runner.py",
-      "sha256": "98372368a2c8cba9c95a463ee896f6b3717094fb1d630799a85de6250b11809b",
+      "sha256": "e6d3fc06ebc493a24402a43a044052d1453e45d56acdc3a49f7501f04ecd4b90",
       "destination": "scripts/process_supervision/process_runner.py"
     },
     "invoke-codex-prompt.py": {
@@ -44,7 +44,7 @@
     },
     "external-prompt-governance.md": {
       "source": "shared/external-prompt-governance.md",
-      "sha256": "034e9c1eda3a2bd1421860289e299df2ac08abd9ba5deb381e130cd8d0e3e7df",
+      "sha256": "eac074f31532dd68e167075f43cdf1eafdb7b25b82cdaf4649d43b51f5039260",
       "destination": "scripts/external-prompt-governance.md"
     },
     "external-role-taxonomy.v1.json": {
@@ -80,7 +80,7 @@
     "sdk_execution/copilot.py": {
       "source": "scripts/sdk_execution/copilot.py",
       "destination": "scripts/sdk_execution/copilot.py",
-      "sha256": "80ff9369971d2947ed362c5db77f013be956e6360883b15de1d09e7fa256af28"
+      "sha256": "27dce07290c4af677ff47a0d4769f38f56a19ebcac224ff0f5dd6ee06cb2f7a3"
     },
     "sdk_execution/codex.py": {
       "source": "scripts/sdk_execution/codex.py",

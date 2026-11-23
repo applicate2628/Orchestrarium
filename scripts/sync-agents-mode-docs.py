@@ -16,16 +16,6 @@ INIT_SURFACES = {
     "claude": Path("adapters/claude/commands/agents-init-project.md"),
 }
 
-INIT_ROLE_LABELS = {
-    "default": "safe-init",
-    "absolute-balance": "everyday center",
-    "external-aggressive": "aggressive external use",
-    "correctness-first": "no-time-limit correctness",
-    "power-mode": "hardest-task maximum result",
-    "max-speed": "speed-first",
-}
-
-
 class SyncError(Exception):
     """Raised when a generated documentation surface cannot be synchronized."""
 
@@ -64,20 +54,6 @@ def reference_count_cell(mode: str) -> str:
     if mode == "advisory-review-2":
         return "advisory+review `2`, others `1`"
     raise SyncError(f"unknown externalOpinionCounts mode: {mode}")
-
-
-def init_count_cell(mode: str) -> str:
-    if mode == "all-1":
-        return "all `1`"
-    if mode == "advisory-review-2":
-        return "advisory+review lanes `2`, others `1`"
-    raise SyncError(f"unknown externalOpinionCounts mode: {mode}")
-
-
-def preset_value_cell(value: str) -> str:
-    if value == "shipped-as-is":
-        return "shipped as-is"
-    return code(value)
 
 
 def reference_available_presets_table(presets_data: dict[str, Any]) -> str:
@@ -149,102 +125,12 @@ def reference_expansion_table(presets_data: dict[str, Any]) -> str:
     return render_table(headers, rows)
 
 
-def init_expansion_table(presets_data: dict[str, Any], provider: str) -> str:
-    order = preset_order(presets_data)
-    presets = preset_map(presets_data)
-    headers = ["Key"] + [
-        f"`{preset}` ({INIT_ROLE_LABELS[preset]})" for preset in order
-    ]
-    keys = [
-        "consultantMode",
-        "delegationMode",
-        "parallelMode",
-        "mcpMode",
-        "preferExternalWorker",
-        "preferExternalReviewer",
-        "externalProvider",
-        "externalPriorityProfile",
-        "reserveResolver",
-        "externalPriorityProfiles",
-        "externalOpinionCounts",
-        "externalCodexWorkdirMode",
-        "externalClaudeWorkdirMode",
-        "externalModelMode",
-        "externalCodexProfile",
-    ]
-    if provider == "codex":
-        keys.append("externalClaudeProfile")
-
-    rows: list[list[str]] = []
-    for key in keys:
-        row = [code(key)]
-        for preset in order:
-            value = str(presets[preset]["expansion"][key])
-            if key == "externalOpinionCounts":
-                row.append(init_count_cell(value))
-            else:
-                row.append(preset_value_cell(value))
-        rows.append(row)
-    return render_table(headers, rows)
-
-
 def raised_count_block(presets_data: dict[str, Any]) -> str:
     lines = ["`correctness-first` and `power-mode` lane-specific opinion counts:"]
     lines.extend(
         f"- `{lane}: 2`" for lane in presets_data["raisedOpinionCountLanes"]
     )
     lines.append("- all other lanes: `1`")
-    return "\n".join(lines)
-
-
-def scalar_keys_for_provider(
-    schema_data: dict[str, Any],
-    provider: str,
-) -> list[dict[str, Any]]:
-    result = []
-    for scalar in schema_data["scalarKeys"]:
-        providers = scalar.get("providers")
-        if providers and provider not in providers:
-            continue
-        result.append(scalar)
-    return result
-
-
-def scalar_comment(scalar: dict[str, Any]) -> str:
-    name = scalar["name"]
-    allowed_values = [str(value) for value in scalar["allowed"]]
-    default = scalar["default"]
-    if name == "externalProvider":
-        selectable = " | ".join(
-            value
-            for value in allowed_values
-            if value not in {"gemini", "qwen", "kimi", "grok"}
-        )
-        return (
-            f"# selectable here: {selectable}; default: {default}; "
-            "kimi is explicit-only and is not initialized as a project-local "
-            "scalar; grok remains unavailable "
-            "in 1.x; removed gemini/qwen values fail closed with "
-            "E_EXTERNAL_PROVIDER_REMOVED"
-        )
-    allowed = " | ".join(allowed_values)
-    return f"# allowed: {allowed}; default: {default}"
-
-
-def canonical_shape(schema_data: dict[str, Any], provider: str) -> str:
-    lines: list[str] = []
-    for scalar in scalar_keys_for_provider(schema_data, provider):
-        name = scalar["name"]
-        lines.append(f"{name}: {{value}}  {scalar_comment(scalar)}")
-        if name != "reserveResolver":
-            continue
-
-        lines.append(
-            "externalPriorityProfiles: {value}  # allowed: structured profile map"
-        )
-        lines.append(
-            "externalOpinionCounts: {value}  # allowed: structured lane-count map"
-        )
     return "\n".join(lines)
 
 
@@ -336,19 +222,18 @@ def generated_reference_text(
     return replace_raised_count_block(text, raised_count_block(presets_data))
 
 
-def generated_init_text(
-    original: str,
-    schema_data: dict[str, Any],
-    presets_data: dict[str, Any],
-    provider: str,
-) -> str:
-    text = replace_table_after_heading(
-        original,
-        "## Preset expansion table",
-        init_expansion_table(presets_data, provider),
-    )
-    text = replace_raised_count_block(text, raised_count_block(presets_data))
-    return replace_canonical_shape(text, canonical_shape(schema_data, provider))
+def init_selection_shape(schema_data: dict[str, Any]) -> str:
+    choices = {
+        "consultantMode": ("external", "disabled"),
+        "mcpMode": ("auto", "force"),
+    }
+    allowed = {scalar["name"]: scalar["allowed"] for scalar in schema_data["scalarKeys"]}
+    lines = []
+    for key, values in choices.items():
+        if not set(values) <= set(allowed.get(key, ())):
+            raise SyncError(f"init choices for {key} are outside the schema")
+        lines.append(f"{key}: {{value}}  # selectable here: {' | '.join(values)}")
+    return "\n".join(lines)
 
 
 def target_updates(root: Path) -> dict[Path, str]:
@@ -361,13 +246,10 @@ def target_updates(root: Path) -> dict[Path, str]:
         reference_path.read_text(encoding="utf-8"),
         presets_data,
     )
-    for provider, relative_path in INIT_SURFACES.items():
+    for relative_path in INIT_SURFACES.values():
         full_path = root / relative_path
-        updates[full_path] = generated_init_text(
-            full_path.read_text(encoding="utf-8"),
-            schema_data,
-            presets_data,
-            provider,
+        updates[full_path] = replace_canonical_shape(
+            full_path.read_text(encoding="utf-8"), init_selection_shape(schema_data),
         )
     return updates
 

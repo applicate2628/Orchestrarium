@@ -1064,12 +1064,14 @@ def test_obligations_json_exposes_effective_state_without_raw_counts(fixture, ex
         assert any("unsettled launch:" in message for message in payload["diagnostics"])
 
 
-def test_obligations_json_missing_required_ledger_is_unavailable(tmp_path):
-    result = subprocess.run([sys.executable, "-B", str(VALIDATOR), "--work-item", str(tmp_path), "--obligations-json"], capture_output=True, text=True)
+@pytest.mark.parametrize("resource_args", [(), ("--ledger-max-events", "1", "--ledger-max-bytes", "1")], ids=["omitted", "finite"])
+def test_obligations_json_missing_required_ledger_is_unavailable(tmp_path, resource_args):
+    write(tmp_path / "status.md", minimal_staged_status())
+    result = subprocess.run([sys.executable, "-B", str(VALIDATOR), "--work-item", str(tmp_path), "--obligations-json", *resource_args], capture_output=True, text=True)
     payload = json.loads(result.stdout)
     assert result.returncode == 1 and payload["result"] == "FAIL"
     assert payload["obligations"] is None and payload["ledgerSha256"] is None
-    assert payload["selection"] == "live" and payload["diagnostics"]
+    assert payload["selection"] == "live" and any("missing ledger:" in error for error in payload["diagnostics"])
 
 
 def test_obligations_json_candidate_and_triage_are_explicit():
@@ -1102,12 +1104,15 @@ def test_load_jsonl_count_limit_records_incomplete_in_same_pass(tmp_path):
     assert any("bounded event count" in value for value in errors)
 
 
-def test_obligations_json_approved_ledger_free_is_explicit(tmp_path):
+@pytest.mark.parametrize("resource_args", [(), ("--ledger-max-events", "1", "--ledger-max-bytes", "1")], ids=["omitted", "finite"])
+def test_obligations_json_approved_ledger_free_is_explicit(tmp_path, resource_args):
     write(tmp_path / "status.md", minimal_quick_fix_status())
-    result = subprocess.run([sys.executable, "-B", str(VALIDATOR), "--work-item", str(tmp_path), "--obligations-json"], capture_output=True, text=True)
+    result = subprocess.run([sys.executable, "-B", str(VALIDATOR), "--work-item", str(tmp_path), "--obligations-json", *resource_args], capture_output=True, text=True)
     payload = json.loads(result.stdout)
-    assert result.returncode == 0 and payload["selection"] == "ledger-free"
-    assert payload["ledgerSha256"] is None and payload["obligations"]["openLaunches"] == []
+    assert result.returncode == 0 and payload["selection"] == "ledger-free", payload
+    assert payload["result"] == "PASS" and payload["diagnostics"] == []
+    assert payload["ledgerSha256"] is None
+    assert payload["obligations"] == {"openLaunches": [], "openRevises": [], "unresolvedHistory": []}
 
 
 @pytest.mark.parametrize("candidate", [False, True], ids=["staged", "candidate"])
@@ -1178,6 +1183,33 @@ def test_obligations_absence_preserves_physical_acquisition_failures(tmp_path, m
     assert observed["result"] == "FAIL" and observed["obligations"] is None, observed
     assert observed["selection"] == "live" and observed["ledgerSha256"] is None
     assert any("WI-LEDGER-RESOURCE-DRIFT" in value for value in observed["diagnostics"])
+
+
+@pytest.mark.parametrize("explicit_budget", [False, True], ids=["omitted", "finite"])
+def test_ledger_disappearance_after_initial_presence_is_not_absence(tmp_path, monkeypatch, explicit_budget):
+    module = load_validator_module()
+    item, captured = _selection_revise_fixture(tmp_path)
+    selected = item / "agent-runs.jsonl"
+    selected.write_bytes(captured)
+    retained = item / "retained-ledger.jsonl"
+    observed_presence = []
+    original_lstat = Path.lstat
+
+    def disappear_after_presence(path, *args, **kwargs):
+        observed = original_lstat(path, *args, **kwargs)
+        if path == selected and not observed_presence:
+            selected.rename(retained)
+            observed_presence.append(observed)
+        return observed
+
+    monkeypatch.setattr(Path, "lstat", disappear_after_presence)
+    budget = module.resolve_ledger_resource_budget() if explicit_budget else None
+    observed = module._obligations_observation(item, None, True, {}, ledger_resource_budget=budget)
+    assert len(observed_presence) == 1 and retained.read_bytes() == captured
+    assert observed["result"] == "FAIL" and observed["selection"] == "live", observed
+    assert observed["obligations"] is None and observed["ledgerSha256"] is None
+    assert any("WI-LEDGER-RESOURCE-DRIFT" in error for error in observed["diagnostics"])
+
 
 
 def _selection_revise_fixture(tmp_path):

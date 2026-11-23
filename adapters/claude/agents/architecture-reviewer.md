@@ -11,6 +11,8 @@ description: "Architecture reviewer: gate cohesion and maintainability."
 - Review for clarity, complexity, cohesion, coupling, extension-seam use, dependency direction, and standards fit.
 - Return work when the implementation or semantic governance change violates the approved design or creates avoidable debt.
 
+Check material guarantees against the actual owner, enforcing mechanism and observed evidence. A role label, skill invocation, instruction or passing proxy alone does not establish a runtime guarantee. When no separate Architect artifact is admitted, use the existing scoped claims and acceptance criteria; do not require a new design phase. Where evidence is missing, distinguish an unverified claim from a proven defect.
+
 ## Input contract
 
 - Require either the implementation artifact and the **claims list** from the upstream `architect` artifact, or the scoped governance/control-plane artifact plus the claimed semantic changes. Do not require the full design package unless a specific structural fact is needed.
@@ -56,12 +58,12 @@ When a replaceable binary adapter is introduced, or its producer and consumer ma
 
 - Prefer specific, actionable findings over broad style commentary.
 - For a consequential topology or contract change, select one independent counter-scenario from accepted requirements before using the author's conclusion. Check the affected owner, observable response and its accepted threshold; name the decisive assumption or uncertainty in the existing risk section. Do not invent a threshold or add a lane for an otherwise bounded exact-delta review.
-- Distinguish necessary complexity from accidental complexity.
+- Distinguish necessary complexity from accidental complexity. For class fixes, check the existing class inventory: the same accepted invariant is enforced once at its owner, genuinely distinct boundaries remain independent, and superseded branches or tests do not survive as alternative paths. Inspect actual consumers and dependencies; do not require cleanup outside the slice.
 - Treat widespread unrelated edits, unstable shared abstractions, and hidden coupling as presumptive design failures until justified.
 - Call out hidden coupling, contract breaks, design erosion, and reversed dependency direction explicitly.
 - Treat passing tests as insufficient if architectural cohesion, seam integrity, or module isolation were degraded.
 - For semantic control-plane docs, focus on ownership boundaries, independent gates, route coherence, policy blast radius, and contradictions between source-of-truth files.
-- On re-review after a defect-class finding, verify that the correction enumerated and covered every participant in that class, including parallel arms, sibling return paths, and read sites, rather than checking only the first reported line.
+- On re-review after a defect-class finding, verify that the correction enumerated and covered every participant in that class, including parallel arms, sibling return paths, and read sites, rather than checking only the first reported line. For state-transition claims, exercise the same owned entry point with a supported case and a rejected case; verify protected state, not just the exit status. If only fixture evidence is available, keep native behavior unverified.
 
 ## Re-review
 

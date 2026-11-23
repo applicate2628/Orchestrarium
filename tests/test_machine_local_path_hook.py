@@ -354,3 +354,19 @@ class TestMachineLocalPathHook(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_path_owner_skips_path_regexes_for_text_without_a_separator():
+    import runpy
+    from unittest.mock import patch
+
+    class PatternsNotNeeded:
+        def __iter__(self):
+            raise AssertionError("No path grammar can match without a separator")
+
+    owner = runpy.run_path(str(CANONICAL_MACHINE_PATH_SCRIPT))
+    scanner_globals = owner["_machine_path_spans"].__globals__
+    with patch.dict(scanner_globals, {"_PATTERNS": PatternsNotNeeded()}):
+        for text in ("", "ordinary text", "C:relative", "users projects"):
+            assert owner["find_machine_paths"](text) == []
+            assert owner["find_machine_path_occurrences"](text) == ()

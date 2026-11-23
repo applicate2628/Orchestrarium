@@ -43,7 +43,7 @@
 <a id="evidence"></a>
 ## Проверенные основания
 
-**Прямое сравнение с прежней Astra `medium`.** В [Artificial Analysis Intelligence Index v4.3.2](https://artificialanalysis.ai/models/releases/comparisons/gpt-6-1-sol-vs-gpt-6-astra) доступны следующие результаты. Стоимость — взвешенная средняя API-стоимость задачи именно этого индекса; её нельзя смешивать с таблицей 2.
+**Прямое сравнение с прежней Astra `medium`.** В [Artificial Analysis Intelligence Index v4.3.2](https://artificialanalysis.ai/models/comparisons/gpt-6-1-sol-vs-gpt-6-astra) доступны следующие результаты. Стоимость — взвешенная средняя API-стоимость задачи именно этого индекса; её нельзя смешивать с таблицей 2.
 
 | Профиль | Общий округлённый индекс | Инженерный индекс | Доллары / задачу |
 |---|---:|---:|---:|
@@ -134,7 +134,7 @@ Sol `high` против Astra `medium`: Terminal-Bench 51.5% / 49.5%, GDP.pdf 32
 2. [OpenAI: выбор модели](https://developers.openai.com/api/docs/guides/model-selection), [карточка модели](https://developers.openai.com/api/docs/models/gpt-6.1-sol), [миграция](https://developers.openai.com/api/docs/guides/deployment-checklist).
 3. [Artificial Analysis: Coding Agent Index v1.5 в Codex](https://artificialanalysis.ai/agents/coding-agents/comparisons/claude-code-vs-codex).
 4. [Vals: Sol 6.1](https://www.vals.ai/models/openai_gpt-6.1-sol) и [Astra](https://www.vals.ai/models/openai_gpt-6-astra).
-5. [Artificial Analysis: сравнение Sol 6.1 и Astra по effort](https://artificialanalysis.ai/models/releases/comparisons/gpt-6-1-sol-vs-gpt-6-astra).
+5. [Artificial Analysis: сравнение Sol 6.1 и Astra по effort](https://artificialanalysis.ai/models/comparisons/gpt-6-1-sol-vs-gpt-6-astra).
 6. [Пересмотр SciCode](https://artificialanalysis.ai/evaluations/scicode) и [CritPt](https://artificialanalysis.ai/evaluations/critpt).
 
 [Методология DeepSWE](https://deepswe.datacurve.ai/blog/deepswe) ограничивает перенос результатов: нет C++/Java, поиск причин ошибок и рефакторинг представлены неполно, обвязка отличается от рабочих клиентов. [Terminal-Bench Science](https://www.terminal-bench-science.ai/announcement) проверяет конкретные научные рабочие процессы; это не доказательство автономного выбора новой научной модели.

@@ -6,9 +6,9 @@
 
 **Current production note:** Shipped production `externalProvider: auto` routing remains limited to the Codex/Claude pair. Kimi Code is an explicit-only Windows route through the canonical fixed `kimi-code/k3` file-prompt wrapper for policy-admitted read-only work or engineering whose task eligibility and assigned profession map to `external-worker`. Omitting the capability file keeps tools, Model Context Protocol servers and subagents empty with permission `reject`; a validated selected file can supply admitted read tools/servers or caller-scoped worker tools under the existing mutation class and role mapping, not authority or a sandbox. Normal launch does not require executable enrollment, remains independently verified and nonauthorizing, and does not attest the actual server-side model. Grok remains unavailable in 1.x. Neither participates in shipped production profiles.
 
-## Problem
+## Original problem
 
-The current role architecture has no universal implementer or reviewer that works through an external CLI provider. Every implementation task requires selecting a domain-specific specialist (backend-engineer, frontend-engineer, etc.), even when the task is simple/mechanical or the external CLI is better suited. There is no "economy mode" toggle to prefer external dispatch for cost or workflow reasons.
+Before this design, the role architecture had no universal implementer or reviewer that works through an external CLI provider. Every implementation task requires selecting a domain-specific specialist (backend-engineer, frontend-engineer, etc.), even when the task is simple/mechanical or the external CLI is better suited. There is no "economy mode" toggle to prefer external dispatch for cost or workflow reasons.
 
 ## Decision
 
@@ -18,7 +18,7 @@ Introduce two new roles and a shared dispatch module:
 - `$external-reviewer` — universal reviewer/QA via external CLI
 - `external-dispatch.md` — shared CLI dispatch protocol (DRY, used by consultant + both new roles)
 
-## New roles
+## Adapter roles
 
 ### `$external-worker`
 
@@ -65,14 +65,14 @@ Introduce two new roles and a shared dispatch module:
 
 Full value-by-value operator semantics now live in [`agents-mode-reference.md`](agents-mode-reference.md). Keep this design spec at the decision level and let the dedicated reference own the complete `value | meaning` tables.
 
-1. **Config file location**
+1. **Project configuration location**
 
    | Platform | Path |
    |----------|------|
    | Claude Code | `.claude/.agents-mode.yaml` |
    | Codex | `.agents/.agents-mode.yaml` |
 
-2. **Extended config format**
+2. **Illustrative configuration (not installer defaults)**
 
    ```
    consultantMode: external
@@ -122,7 +122,7 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
    - `mcpMode` — `auto` vs `force` MCP routing policy
    - `preferExternalWorker` — external-worker as default on eligible worker-side lanes
    - `preferExternalReviewer` — external-reviewer as default on `review` + `QA` stages
-   - `externalProvider` — shipped production provider universe `auto`, `claude`, or `codex` for provider-backed consultant / adapter selection
+   - `externalProvider` — `auto` resolves only to Codex and Claude. See the operator reference and the production note above for explicit routes and unavailable values.
    - `externalPriorityProfile` — active named provider-order profile used only when `externalProvider: auto`
    - `reserveResolver` — concrete read-only resolver for symbolic `reserve`: `disabled`, `claude-sonnet`, `claude-wrapper`, or `wrapper:<command>`
    - `externalPriorityProfiles` — per-profile lane matrix with ordered provider lists; the shipped production profile set stays on Codex plus Claude provider families, with `reserve` only as the supplemental advisory/review candidate
@@ -132,7 +132,7 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
    - `reserve` — symbolic supplemental candidate that may appear only in advisory/review profile orders; it is not a scalar provider key, not a primary `claude` retry, and not available to worker-side implementation/editing lanes
    - `externalClaudeProfile` — Codex-line only optional Claude CLI execution profile: `sonnet-high`, `opus-xhigh` (shipped default), `opus-max` (max-depth escalation), or `fable-xhigh` (current flagship-family best-effort tier; the `fable` flagship alias as of 2026-07)
    - Each toggle is independent
-   - Default full shape on first creation: `delegationMode: auto`, `parallelMode: auto`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`, `externalPriorityProfile: balanced`, `reserveResolver: claude-sonnet`, shipped `externalPriorityProfiles` on the Codex/Claude pair plus advisory/review-only `reserve`, and `externalOpinionCounts` defaulting every documented lane to `1`; provider-specific workdir keys default to `neutral`; the shared model policy defaults to `externalModelMode: runtime-default`; the Codex profile override defaults to `externalCodexProfile: default`; Codex also writes `externalClaudeProfile: opus-xhigh`
+   - First-creation defaults come from the [operator schema and presets](agents-mode-reference.md); the values in this example are illustrative overrides.
 
 3. **Dispatch protocol (platform-dependent)**
 
@@ -243,7 +243,7 @@ Always available in both directions, regardless of toggle state.
 
 Normal routing fallback to domain specialist. Not an error — standard routing behavior.
 
-## Affected files
+## Original implementation scope
 
 | File | Change |
 |------|--------|

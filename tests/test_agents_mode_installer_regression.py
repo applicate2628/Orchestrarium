@@ -18,11 +18,10 @@ def _isolated_validator():
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    module.load_json = lambda _path: {}
     module.run_installer = lambda *_args: None
-    module.run_python_codex_global_installer = lambda *_args: None
-    module.validate_overlay = lambda *_args, **_kwargs: None
+    module.run_global_installer = lambda *_args: None
     module.validate_codex_native_role_install = lambda *_args: None
+    module.validate_shared_preference_resolution = lambda *_args: None
     return module
 
 
@@ -151,6 +150,49 @@ class AgentsModeInstallerRegressionTest(unittest.TestCase):
             finally:
                 if owned.exists():
                     original(owned)
+
+    def test_fresh_project_and_global_overlay_creation_is_not_a_pass(self) -> None:
+        for scope in ("project", "provider-global", "shared-global"):
+            with self.subTest(scope=scope), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                validator = _isolated_validator()
+                original_global = validator.run_global_installer
+
+                def create(path):
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(b"consultantMode: disabled\n")
+
+                def project_install(root, case, target):
+                    if scope == "project" and target.name.endswith("-fresh-project"):
+                        create(root / target / case.overlay)
+
+                def global_install(root, case, home):
+                    original_global(root, case, home)
+                    if home.name.endswith("-fresh-global-home"):
+                        if scope == "provider-global":
+                            create(home / f".{case.name}" / ".agents-mode.yaml")
+                        elif scope == "shared-global":
+                            create(home / ".agents-mode")
+
+                validator.run_installer = project_install
+                validator.run_global_installer = global_install
+                with self.assertRaisesRegex(validator.InstallerRegressionError, "created a preferences file"):
+                    validator.run_regression(root)
+
+    def test_shared_preference_rewrite_is_not_a_pass(self) -> None:
+        validator = _isolated_validator()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+
+            def rewrite_shared(_root, _case, home):
+                shared = home / ".agents-mode.yaml"
+                if shared.is_file():
+                    shared.write_bytes(shared.read_bytes().replace(
+                        b"externalClaudeApiMode: disabled", b"reserveResolver: disabled"))
+
+            validator.run_global_installer = rewrite_shared
+            with self.assertRaisesRegex(validator.InstallerRegressionError, "shared global: preference bytes or file type changed"):
+                validator.run_regression(root)
 
     def test_installer_regression_validator_passes(self) -> None:
         root = Path(__file__).resolve().parents[1]

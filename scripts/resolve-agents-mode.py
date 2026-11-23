@@ -1440,6 +1440,58 @@ def _profession_skill_metadata(repo_root: Path, role: str, instructions: str) ->
     }
 
 
+def _catalog_record(record, *keys):
+    for key in keys:
+        record = record.get(key) if isinstance(record, dict) else None
+    return record
+
+
+def _catalog_number(value):
+    return type(value) in (int, float) and 0 <= value < 1e300
+
+
+def _advisory_model_catalog(policy, provider, options):
+    reference = _catalog_record(policy, "modelReference")
+    snapshot = _catalog_record(reference, "benchmarkSnapshot")
+    baseline = _catalog_record(snapshot, "costBaseline")
+    basis = None
+    baseline_cost = None
+    if baseline == {"provider": "codex", "model": "gpt-6.2-sol", "effort": "high"}:
+        baseline_cost = _catalog_record(snapshot, "models", baseline["provider"], baseline["model"],
+                                        "efforts", baseline["effort"], "costUsdPerTask")
+        provenance = {k: snapshot.get(k) for k in ("publisher", "methodology", "observedDate")}
+        if (_catalog_number(baseline_cost) and baseline_cost > 0
+                and all(isinstance(v, str) and v.strip() for v in provenance.values())):
+            basis = {**provenance, "costUnit": "baseline-task", "baseline": baseline}
+    by_model = {}
+    for option in options:
+        model, profile, effort = option["model"], option["profile"], option["effort"]
+        if model not in by_model:
+            row = by_model[model] = {"model": model}
+            for key in ("strength", "tradeoff"):
+                value = _catalog_record(reference, "models", provider, model, key)
+                if isinstance(value, str) and value.strip():
+                    row[key] = value
+        row = by_model[model]
+        if basis is None:
+            continue
+        source = _catalog_record(snapshot, "models", provider, model, "sourceUrl")
+        point = _catalog_record(snapshot, "models", provider, model, "efforts", effort)
+        if not isinstance(point, dict) or not isinstance(source, str) or not source.startswith("https://"):
+            continue
+        score, cost, minutes = (point.get(k) for k in ("intelligenceIndex", "costUsdPerTask", "minutesPerTask"))
+        if not all(_catalog_number(v) for v in (score, cost, minutes)):
+            continue
+        units = cost / baseline_cost
+        if not _catalog_number(units):
+            continue
+        row["benchmarkSourceUrl"] = source
+        row.setdefault("benchmarkByProfile", {})[profile] = {
+            "score": score, "costUnits": round(units, 4), "minutes": minutes,
+        }
+    return list(by_model.values()), basis if any("benchmarkByProfile" in row for row in by_model.values()) else None
+
+
 def _describe_ordinary_native_role_options_in_layout(
     role: Any,
     task_class: Any,
@@ -1693,6 +1745,14 @@ def _describe_ordinary_native_role_options_in_layout(
     if default_error is not None:
         values.update(defaultProfile=None, defaultModel=None, defaultEffort=None)
     values["carrierConfigurationError"] = carrier_error
+    values["modelCatalog"], basis = _advisory_model_catalog(policy, "codex", options)
+    if basis is not None:
+        values["modelCatalogBenchmark"] = basis
+    values["decisionGuidance"] = (
+        "The default is a fallback, not a priority. Choose the eligible profile that best meets "
+        "the task's quality requirements at the lowest expected total time and cost, including rework. "
+        "Briefly justify the choice, even if it matches the default."
+    )
     return _NativeRoleSelection(values, snapshots, linked_authority, carrier, launch_package)
 
 
@@ -1747,6 +1807,7 @@ def resolve_ordinary_native_dispatch(
     requested_effort: Any = None,
     caller_rationale: Any,
     approved_execution_scope: Any,
+    preference_deviation_reason: Any = None,
     user_approved_max: bool = False,
     user_approved_launch: bool = False,
     astra_task_authorization: dict | None = None,
@@ -1838,6 +1899,19 @@ def resolve_ordinary_native_dispatch(
     if reason is not None:
         return _ordinary_native_denied(description.get("taskClass"), description.get("role"),
             "E_ORDINARY_NATIVE_SELECTION_INVALID", diagnostic={"stage": "model-launch-policy", "reason": reason})
+    preferred = (description.get("defaultModel"), description.get("defaultEffort"))
+    deviation = None
+    if all(isinstance(value, str) and value for value in preferred) and (resolved_model, resolved_effort) != preferred:
+        if not isinstance(preference_deviation_reason, str) or not preference_deviation_reason.strip():
+            return _ordinary_native_denied(
+                description["taskClass"], description["role"],
+                "E_ORDINARY_NATIVE_PREFERENCE_DEVIATION_REASON_REQUIRED",
+                diagnostic={"stage": "preference-deviation", "reason": "separate-choice-reason-required",
+                            "preferredModel": preferred[0], "preferredEffort": preferred[1],
+                            "requestedModel": resolved_model, "requestedEffort": resolved_effort},
+            )
+        deviation = {"preferredModel": preferred[0], "preferredEffort": preferred[1],
+                     "reason": preference_deviation_reason.strip()}
     return {
         "schemaVersion": 1,
         "status": "resolved",
@@ -1853,6 +1927,7 @@ def resolve_ordinary_native_dispatch(
         "hostCapability": host_capability,
         "profession": copy.deepcopy(description["profession"]),
         "callerRationale": caller_rationale,
+        **({"preferenceDeviation": deviation} if deviation is not None else {}),
         "approvedExecutionScope": copy.deepcopy(approved_execution_scope),
         "astraTaskAuthorization": copy.deepcopy(astra_task_authorization),
         "invocation": invocation,
@@ -2379,12 +2454,19 @@ def _installed_external_policy_root(
 
 def layer_paths(provider: str, project_root: Path, home: Path) -> list[tuple[str, Path]]:
     provider_dir = PROVIDER_DIRS[provider]
+    shared = home / ".agents-mode.yaml"
+    # The former shared migration selected a whole file only when the canonical
+    # pathname was absent. An empty file or occupied pointer never merged keys.
+    try:
+        shared.lstat()
+    except FileNotFoundError:
+        shared = home / ".agents-mode"
     return [
         ("local", project_root / provider_dir / ".agents-mode.yaml"),
         ("local-legacy", project_root / provider_dir / ".agents-mode"),
         ("global", home / f".{provider}" / ".agents-mode.yaml"),
         ("global-legacy", home / f".{provider}" / ".agents-mode"),
-        ("shared-global", home / ".agents-mode.yaml"),
+        ("shared-global", shared),
     ]
 
 
@@ -2408,6 +2490,12 @@ def resolve(provider: str, project_root: Path, home: Path, repo_root: Path) -> d
             path.read_text(encoding="utf-8"),
             normalizer.decode_supported_yaml_scalar,
         )
+        # Read-only layers retain the explicit retired disable without rewriting
+        # shared preferences or overriding a canonical choice in the same layer.
+        legacy_reserve = parsed.get("externalClaudeApiMode")
+        if ("reserveResolver" not in parsed and isinstance(legacy_reserve, str)
+                and legacy_reserve.lower() == "disabled"):
+            parsed["reserveResolver"] = "disabled"
         if "reserveResolver" in parsed:
             reserve_resolver_layers.append((rank, parsed["reserveResolver"]))
         for key, value in parsed.items():
@@ -2460,6 +2548,8 @@ def main() -> int:
     parser.add_argument("--requested-model")
     parser.add_argument("--requested-effort")
     parser.add_argument("--caller-rationale")
+    parser.add_argument("--preference-deviation-reason",
+                        help="Explain why the requested model or effort differs from the effective preferred pair")
     parser.add_argument("--approved-scope-json")
     parser.add_argument("--user-approved-max", action="store_true")
     parser.add_argument("--user-approved-launch", action="store_true")
@@ -2559,6 +2649,7 @@ def main() -> int:
                 requested_effort=args.requested_effort,
                 caller_rationale=args.caller_rationale,
                 approved_execution_scope=approved_scope,
+                preference_deviation_reason=args.preference_deviation_reason,
                 user_approved_max=args.user_approved_max,
                 user_approved_launch=args.user_approved_launch,
                 astra_task_authorization=args.astra_task_authorization_json,

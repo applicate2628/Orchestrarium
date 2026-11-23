@@ -145,6 +145,62 @@ class TestInstallHypothesisHook(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "verified legacy hook artifact changed"):
                     producer._recheck_legacy_hook_targets("codex", package, marker, witnesses, old_provider)
 
+    def test_codex_remove_refuses_shift_of_foreign_handler_slot(self) -> None:
+        marker = "check-bugfix-discipline"
+        managed_path = "/managed/check-bugfix-discipline.py"
+        owned = {"type": "command", "command": f"python {managed_path}"}
+        foreign = {"type": "command", "command": "user-hook --custom"}
+        entry = {"matcher": "Bash", "hooks": [owned]}
+        for exact in (True, False):
+            with self.subTest(exact=exact):
+                data = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [owned, foreign]}]}}
+                before = HOOK_MODULE.encode_hook_config(data)
+                with self.assertRaisesRegex(ValueError, "E_CODEX_HOOK_SLOT_SHIFT"):
+                    HOOK_MODULE.remove(
+                        data, "PreToolUse", marker, platform="codex",
+                        expected_entry=entry if exact else None,
+                        managed_targets={marker: {managed_path}},
+                    )
+                self.assertEqual(HOOK_MODULE.encode_hook_config(data), before)
+
+    def test_codex_install_refuses_dedup_or_relocation_that_shifts_foreign_slot(self) -> None:
+        marker = "check-bugfix-discipline"
+        command = "python /managed/check-bugfix-discipline.py"
+        owned = {"type": "command", "command": command}
+        foreign = {"type": "command", "command": "user-hook --custom"}
+        for matcher, handlers in (("Bash", [owned, dict(owned), foreign]),
+                                  ("ChangedTool", [owned, foreign])):
+            with self.subTest(matcher=matcher):
+                data = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": handlers}]}}
+                before = HOOK_MODULE.encode_hook_config(data)
+                new = {"matcher": matcher, "hooks": [{"type": "command", "command": command,
+                                                       "statusMessage": "updated"}]}
+                with self.assertRaisesRegex(ValueError, "E_CODEX_HOOK_SLOT_SHIFT"):
+                    HOOK_MODULE.install(data, new, "PreToolUse", marker, platform="codex")
+                self.assertEqual(HOOK_MODULE.encode_hook_config(data), before)
+
+    def test_codex_update_same_slot_and_remove_trailing_owned_handler(self) -> None:
+        marker = "check-bugfix-discipline"
+        managed_path = "/managed/check-bugfix-discipline.py"
+        owned = {"type": "command", "command": f"python {managed_path}"}
+        foreign = {"type": "command", "command": "user-hook --custom"}
+        new_handler = {**owned, "statusMessage": "updated"}
+        new = {"matcher": "Bash", "hooks": [new_handler]}
+        data = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [owned, foreign]}]}}
+        self.assertTrue(HOOK_MODULE.install(data, new, "PreToolUse", marker, platform="codex"))
+        self.assertEqual(data["hooks"]["PreToolUse"][0]["hooks"], [new_handler, foreign])
+
+        for exact in (True, False):
+            with self.subTest(exact=exact):
+                group = {"matcher": "Bash", "hooks": [foreign, new_handler]}
+                data = {"hooks": {"PreToolUse": [group]}}
+                self.assertTrue(HOOK_MODULE.remove(
+                    data, "PreToolUse", marker, platform="codex",
+                    expected_entry=new if exact else None,
+                    managed_targets={marker: {managed_path}},
+                ))
+                self.assertEqual(data["hooks"]["PreToolUse"][0]["hooks"], [foreign])
+
     def test_marker_only_remove_uses_logical_package_and_preserves_foreign(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary) / "project"
@@ -487,7 +543,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
             "metadata": {"keep": True},
             "hooks": {
                 "PreToolUse": [
-                    {"matcher": matcher, "groupMetadata": "keep", "hooks": [owned, sibling, near_match]},
+                    {"matcher": matcher, "groupMetadata": "keep", "hooks": [sibling, near_match, owned]},
                     changed_matcher,
                 ],
                 "Stop": [changed_event],
@@ -561,7 +617,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
                 {"matcher": "SyntheticTool", "hooks": [{"type": "command", "command": command}]},
                 {
                     "matcher": "SyntheticTool", "metadata": "keep",
-                    "hooks": [{"type": "command", "command": command}, sibling],
+                    "hooks": [sibling, {"type": "command", "command": command}],
                 },
                 foreign_group,
             ]},
@@ -603,7 +659,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.target.write_text(json.dumps({
             "metadata": "keep",
             "hooks": {"PreToolUse": [{
-                "matcher": matcher, "hooks": [{"type": "command", "command": command}, sibling],
+                "matcher": matcher, "hooks": [sibling, {"type": "command", "command": command}],
             }]},
         }) + "\n", encoding="utf-8")
         before = self.target.read_bytes()

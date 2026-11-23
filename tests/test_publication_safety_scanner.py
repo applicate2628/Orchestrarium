@@ -42,6 +42,7 @@ import contextlib
 import ctypes
 import dataclasses
 import importlib.util
+import json
 import hashlib
 import inspect
 import io
@@ -54,6 +55,8 @@ import tempfile
 import threading
 import time
 import unittest
+
+import pytest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -67,6 +70,9 @@ PUSH_GATE = REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-git
 SCANNERS = (CODEX_SCANNER, CLAUDE_SCANNER)
 
 BACKSLASH = chr(92)  # keep the literal backslash out of source path literals
+
+
+pytestmark = pytest.mark.usefixtures("isolated_standalone_review_modules")
 
 
 def _join(*parts: str) -> str:
@@ -1813,6 +1819,164 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             )
             return self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
 
+    @staticmethod
+    def _synthetic_history_message() -> str:
+        return _join("Audit fixture C:", BACKSLASH, "Users", BACKSLASH,
+                     "synthetic", BACKSLASH, ".config", BACKSLASH, "example.txt")
+
+    def test_machine_path_review_uses_the_canonical_match_locations(self):
+        scan = _load_canonical_scanner("_scanner_machine_path_review_owner")
+        fixture = self._synthetic_history_message()
+        raw = f"{fixture}\n{fixture}\n".encode("utf-8")
+        finder = scan._manual_path_finder(CANONICAL_SCANNER)
+        prefix_hits = finder(fixture)
+        self.assertTrue(prefix_hits)
+        self.assertEqual({fixture[a:b] for a, b in finder._review_occurrences(fixture)},
+                         set(prefix_hits))
+        rows = scan.analyze_review_candidates(
+            raw, b"example.txt", subject_kind="history-blob",
+            policy_module=scan._load_review_policy_module(), find_machine_paths=finder,
+        )
+        self.assertTrue(rows["complete"])
+        self.assertTrue(rows["pathsRepresented"])
+        self.assertEqual({row["line"] for row in rows["candidates"]
+                          if row["detectorClass"] == "machine-path"}, {1, 2})
+        self.assertEqual(rows["unresolved"], ())
+
+    def test_reviewed_history_grouping_before_cap(self):
+        scan = _load_canonical_scanner("_scanner_reviewed_grouping")
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            self._commit_file(repo, "a.txt", "synthetic fixture")
+            for n in range(5):
+                self._commit_file(repo, "progress.txt", str(n))
+            self._commit_file(repo, "z.txt", "second synthetic fixture")
+            seen = []
+
+            def evaluate(_raw, path, _finder, **scope):
+                if path not in {"a.txt", "z.txt"}:
+                    return []
+                seen.append((path, scope["commit_oid"]))
+                return [scan.Finding("PS-FINDING-CONTENT", "history-blob", path, 1,
+                                     "value-password" if path == "a.txt" else "machine-path")]
+
+            previous = Path.cwd()
+            try:
+                os.chdir(repo)
+                with mock.patch.object(scan, "_MAX_FINDINGS", 2):
+                    result = scan._scan_range(
+                        "origin", "main", lambda _line: [], source_revision="claude",
+                        review_evaluation=SimpleNamespace(scan_text_subject=evaluate),
+                    )
+            finally:
+                os.chdir(previous)
+            self.assertEqual(result.kind, "findings")
+            self.assertEqual(len(set(seen)), 8)
+            self.assertEqual([(x.locator, x.detector_class) for x in result.findings],
+                             [("a.txt", "value-password"), ("z.txt", "machine-path")])
+
+    def test_local_history_diagnostics_bind_distinct_commit_messages(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            git = _git()
+
+            def oid(revision):
+                return subprocess.check_output(
+                    [git, "-C", str(repo), "rev-parse", revision], text=True,
+                ).strip()
+
+            message = self._synthetic_history_message()
+            commits = set()
+            for number in range(2):
+                self._commit_file(repo, "file" + str(number), "clean", message=message)
+                commits.add(oid("HEAD"))
+
+            argv = [
+                sys.executable, str(CANONICAL_SCANNER), "--range", "origin",
+                "main", "--range-source", "claude",
+            ]
+            ordinary = subprocess.run(argv, cwd=repo, capture_output=True, text=True)
+            self.assertEqual(ordinary.returncode, 1, ordinary.stderr)
+            self.assertIn("PS-FINDING-COMMIT-MESSAGE", ordinary.stderr)
+            self.assertTrue(all(commit not in ordinary.stderr for commit in commits))
+            diag = subprocess.run(
+                [*argv, "--history-diagnostics"], cwd=repo, capture_output=True, text=True,
+            )
+            self.assertEqual(diag.returncode, 1, diag.stderr)
+            report = json.loads(diag.stdout)
+            self.assertEqual(report["status"], "findings")
+            self.assertFalse(report["publicationAuthority"])
+            self.assertTrue(report["reportComplete"])
+            self.assertEqual(report["scope"]["sourceOid"], oid("HEAD"))
+            self.assertEqual(report["scope"]["destinationOid"], oid("main"))
+            self.assertRegex(report["scope"]["repositorySha256"], r"^[0-9a-f]{64}$")
+            rows = report["commitMessages"]
+            self.assertEqual({row["commitOid"] for row in rows}, commits)
+            self.assertEqual({(row["field"], row["line"], row["class"]) for row in rows},
+                             {("message", 1, "machine-path")})
+            self.assertNotIn("synthetic", diag.stdout + diag.stderr)
+            self.assertRegex(report["scope"]["destinationEndpointSha256"], r"^[0-9a-f]{64}$")
+
+            other = repo.parent / "other.git"
+            subprocess.run([git, "clone", "-q", "--bare", str(repo.parent / "origin.git"),
+                            str(other)], check=True, capture_output=True)
+            subprocess.run([git, "-C", str(repo), "remote", "set-url", "--push", "origin",
+                            str(other)], check=True, capture_output=True)
+            moved = subprocess.run(
+                [*argv, "--history-diagnostics"], cwd=repo, capture_output=True, text=True,
+            )
+            self.assertEqual(moved.returncode, 1, moved.stderr)
+            new_scope = json.loads(moved.stdout)["scope"]
+            self.assertEqual(new_scope["destinationOid"], report["scope"]["destinationOid"])
+            self.assertNotEqual(new_scope["destinationEndpointSha256"],
+                                report["scope"]["destinationEndpointSha256"])
+            self.assertNotEqual(new_scope["selectionSha256"], report["scope"]["selectionSha256"])
+            self.assertNotIn("other.git", moved.stdout)
+
+    def test_local_history_diagnostics_marks_a_full_report_cap_as_partial(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            line = self._synthetic_history_message()
+            self._commit_file(repo, "clean.txt", "clean", message="\n".join([line] * 40))
+            diag = subprocess.run(
+                [sys.executable, str(CANONICAL_SCANNER), "--range", "origin", "main",
+                 "--range-source", "claude", "--history-diagnostics"],
+                cwd=repo, capture_output=True, text=True,
+            )
+            self.assertEqual(diag.returncode, 1, diag.stderr)
+            report = json.loads(diag.stdout)
+            self.assertFalse(report["reportComplete"])
+            self.assertEqual(len(report["commitMessages"]), report["reportLimit"])
+            self.assertLess(len(report["commitMessages"]), 40)
+            self.assertNotIn("synthetic", diag.stdout + diag.stderr)
+
+    def test_local_history_diagnostics_is_not_a_receipt_for_clean_or_nonmessage_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            self._commit_file(repo, "clean.txt", "clean")
+            argv = [
+                sys.executable, str(CANONICAL_SCANNER), "--range", "origin", "main",
+                "--range-source", "claude", "--history-diagnostics",
+            ]
+            clean = subprocess.run(argv, cwd=repo, capture_output=True, text=True)
+            self.assertEqual(clean.returncode, 0, clean.stderr)
+            report = json.loads(clean.stdout)
+            self.assertFalse(report["publicationAuthority"])
+            self.assertNotIn("receipt", clean.stdout.lower())
+
+            self._commit_file(repo, "blocked.txt", self._synthetic_history_message())
+            block = subprocess.run(argv, cwd=repo, capture_output=True, text=True)
+            self.assertEqual(block.returncode, 1, block.stderr)
+            report = json.loads(block.stdout)
+            self.assertEqual(report["status"], "findings")
+            self.assertEqual(report["commitMessages"], [])
+            self.assertGreater(report["otherFindingsShown"], 0)
+            self.assertEqual(report["reviewPolicy"], "not-applied")
+            self.assertEqual(report["historyFileFindingUnit"], "path-and-blob")
+            self.assertEqual(sum(report["otherFindingClassesShown"].values()),
+                             report["otherFindingsShown"])
+            self.assertIn("machine-path", report["otherFindingClassesShown"])
+
     def test_range_mode_clean_scan_reports_remote_dst_tip_receipt(self) -> None:
         # The exact receipt shape check-git-push-gate.py's SCAN_CLEAN_RANGE_
         # REGEX matches: mode word "range", a non-empty examined count, and
@@ -2295,6 +2459,7 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             "scripts/universal-hooks/scripts/check-publication-safety.py",
             "src.codex/skills/lead/scripts/check-publication-safety.py",
             "adapters/claude/agents/scripts/check-publication-safety.py",
+            "src.claude/agents/scripts/check-publication-safety.py",
         )
         for path in approved:
             with self.subTest(path=path), tempfile.TemporaryDirectory() as td:
@@ -2303,6 +2468,33 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
                 rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
                 self.assertEqual(rc, 0, out + err)
                 self.assertIn("receipt=v3", out)
+
+    def test_historical_scanner_catalog_exemption_is_history_only(self) -> None:
+        module = _load_canonical_scanner("_scanner_historical_catalog")
+        historical = "src.claude/agents/scripts/check-publication-safety.py"
+        catalog = _join('re.compile(r"BEGIN PRIVATE', ' KEY"),')
+        leak = "pass" + "word" + ": hunter2"
+
+        for kind in ("history-blob", "git-object-blob"):
+            with self.subTest(kind=kind):
+                self.assertFalse(module._content_hits(
+                    catalog, historical, lambda _line: (), subject_kind=kind,
+                ))
+                for path, content in (
+                    ("decoy/check-publication-safety.py", catalog),
+                    (historical, catalog + " # " + leak),
+                    (historical, catalog + "\n" + leak),
+                ):
+                    with self.subTest(path=path, content_kind="catalog or synthetic leak"):
+                        self.assertTrue(module._content_hits(
+                            content, path, lambda _line: (), subject_kind=kind,
+                        ))
+
+        for kind in ("tracked-blob", "path-blob", "commit-message", "tag-annotation"):
+            with self.subTest(kind=kind):
+                self.assertTrue(module._content_hits(
+                    catalog, historical, lambda _line: (), subject_kind=kind,
+                ))
 
     def test_bounded_oid_reader_refuses_count_bytes_and_deadline(self) -> None:
         module = _load_canonical_scanner("_scanner_v3_oid_stream")
@@ -2362,7 +2554,7 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
                 self.assertIsInstance(result, module.Refusal)
                 self.assertEqual(result.failure_id, failure_id, result)
 
-    def test_tree_traversal_refuses_frontier_visit_and_cache_caps(self) -> None:
+    def test_tree_traversal_frontier_is_bounded_without_a_cache_admission_cap(self) -> None:
         deadline_module = _load_canonical_scanner("_scanner_v3_tree_deadline")
 
         async def expired_guard():
@@ -2370,9 +2562,6 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             return deadline_module._tree_traversal_guard(
                 deadline=loop.time() - 1.0,
                 frontier=0,
-                visits=0,
-                visited=0,
-                cache_entries=0,
             )
 
         deadline_refusal = asyncio.run(expired_guard())
@@ -2384,19 +2573,17 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             previous = Path.cwd()
             try:
                 os.chdir(repo)
-                for name in (
-                    "_MAX_TREE_FRONTIER",
-                    "_MAX_TREE_VISITS",
-                    "_MAX_TREE_CACHE_ENTRIES",
-                ):
+                for name, expected in (("_MAX_TREE_FRONTIER", "refusal"),
+                                       ("_MAX_TREE_CACHE_ENTRIES", "clean")):
                     module = _load_canonical_scanner("_scanner_v3_tree_" + name.lower())
                     setattr(module, name, 0)
                     with self.subTest(cap=name):
                         outcome = module._scan_range(
                             "origin", "claude", lambda _line: []
                         )
-                        self.assertEqual(outcome.kind, "refusal")
-                        self.assertEqual(outcome.refusal.failure_id, "PS-MSG-LIMIT")
+                        self.assertEqual(outcome.kind, expected)
+                        if expected == "refusal":
+                            self.assertEqual(outcome.refusal.reason, "tree-frontier")
             finally:
                 os.chdir(previous)
 
@@ -2736,6 +2923,146 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
                 proc = self._run_range(repo)
                 self.assertEqual(proc.returncode, 1, f"case={case} out={proc.stdout!r} err={proc.stderr!r}")
                 self.assertNotIn("A1B2C3D4E5F6G7H8IJK", proc.stdout + proc.stderr)
+
+    def test_history_diagnostics_matches_constructed_graph(self) -> None:
+        # Build the expected disclosure set from the fixture topology, not the
+        # same revision-walk command being tested.
+        for depth, destination in ((1, "main"), (3, "main"), (3, "new-branch")):
+            with self.subTest(depth=depth, destination=destination), tempfile.TemporaryDirectory() as td:
+                repo = self._init_range_repo(Path(td))
+                self._git_run(repo, "branch", "unrelated")
+                self._git_run(repo, "switch", "-q", "unrelated")
+                self._commit(repo, "outside.txt", "unrelated local state", "unrelated")
+                self._git_run(repo, "switch", "-q", "main")
+                self._git_run(repo, "branch", "side")
+                expected = [
+                    self._commit(repo, f"main-{n}.txt", str(n), f"main {n}")
+                    for n in range(depth)
+                ]
+                self._git_run(repo, "switch", "-q", "side")
+                expected.extend(
+                    self._commit(repo, f"side-{n}.txt", str(n), f"side {n}")
+                    for n in range(depth)
+                )
+                self._git_run(repo, "switch", "-q", "main")
+                self._git_run(repo, "merge", "-q", "--no-ff", "side", "-m", "merged")
+                source = self._git_run(repo, "rev-parse", "HEAD").stdout.strip()
+                expected.append(source)
+                proc = subprocess.run(
+                    [sys.executable, str(CANONICAL_SCANNER), "--range", "origin",
+                     destination, "--range-source", "main", "--history-diagnostics"],
+                    cwd=repo, capture_output=True, text=True, encoding="utf-8",
+                )
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                report = json.loads(proc.stdout)
+                self.assertEqual(report["status"], "clean")
+                self.assertFalse(report["publicationAuthority"])
+                self.assertTrue(report["reportComplete"])
+                self.assertEqual(report["scope"]["sourceOid"], source)
+                # V3 binds traversal order. Accept either parent order and any
+                # interleaving that respects both parent chains.
+                from itertools import combinations
+
+                valid_digests = set()
+                for slots in combinations(range(2 * depth), depth):
+                    left = iter(reversed(expected[:depth]))
+                    right = iter(reversed(expected[depth:-1]))
+                    order = [source] + [
+                        next(left if i in slots else right) for i in range(2 * depth)
+                    ]
+                    valid_digests.add(self._expected_digest(order))
+                self.assertIn(report["scope"]["commitSetSha256"], valid_digests)
+                self.assertEqual(report["commitMessages"], [])
+
+    def test_history_metadata_volume_does_not_stop_individually_valid_commits(self):
+        module = _load_canonical_scanner("_scanner_metadata_volume")
+        ids = tuple(f"{index:040x}" for index in range(1, 34))
+        tree = hashlib.sha1(b"tree 0\0").hexdigest()
+        parents = tuple((oid, ids[i + 1:i + 2]) for i, oid in enumerate(ids))
+        selection = module.RangeSelection(
+            "origin", "main", "main", ids[0], ids, (*ids, tree),
+            expected_parents=parents,
+        )
+        message = b"synthetic fixture data\n" * 24_000
+        self.assertGreater(len(message) * len(ids), 16 * 1024 * 1024)
+        self.assertLess(len(message) + 100, 1024 * 1024)
+
+        class Reader:
+            async def read(self, oid, _object_type, *, scan_deadline):
+                if oid == tree:
+                    return module.ObjectReadSuccess(oid, oid, "tree", b"")
+                prefix = b"tree " + tree.encode() + b"\n"
+                for parent in dict(parents)[oid]:
+                    prefix += b"parent " + parent.encode() + b"\n"
+                return module.ObjectReadSuccess(oid, oid, "commit", prefix + b"\n" + message)
+
+        seen = []
+
+        def check_text(text, oid, _find_machine_paths, **kwargs):
+            self.assertEqual(kwargs["subject_kind"], "commit-message")
+            seen.append((oid, len(text)))
+            return ()
+
+        async def exercise():
+            recorder = module.CoverageRecorder(ids)
+            with mock.patch.object(module, "_content_hits", side_effect=check_text):
+                result = await module._acquire_history(
+                    selection, Reader(), None, recorder,
+                    asyncio.get_running_loop().time() + 30,
+                )
+            self.assertNotIsInstance(result, module.Refusal)
+            history, coverage, findings = result
+            self.assertEqual(seen, [(oid, len(message)) for oid in ids])
+            self.assertEqual(history.commit_set, self._expected_digest(list(ids)))
+            self.assertEqual(coverage.scanned_message_oids, ids)
+            self.assertEqual(findings, ())
+
+        asyncio.run(exercise())
+
+    def test_history_line_bound_is_checked_once_per_verified_blob(self):
+        module = _load_canonical_scanner("_scanner_line_bound_owner")
+        commit, tree = "1" * 40, "2" * 40
+        paths = (b"a.txt", b"b.txt")
+        for payload, clean in ((b"clean\nlines\n", True), (b"unbroken\n", False)):
+            with self.subTest(clean=clean):
+                blob = hashlib.sha1(f"blob {len(payload)}\0".encode() + payload).hexdigest()
+                raw_tree = b"".join(b"100644 " + path + b"\0" + bytes.fromhex(blob)
+                                    for path in paths)
+                records = {
+                    commit: ("commit", b"tree " + tree.encode() + b"\n\nsynthetic"),
+                    tree: ("tree", raw_tree), blob: ("blob", payload),
+                }
+                selection = module.RangeSelection(
+                    "origin", "main", "main", commit, (commit,), (commit, tree, blob)
+                )
+
+                class Reader:
+                    async def read(self, oid, _object_type, *, scan_deadline):
+                        kind, raw = records[oid]
+                        return module.ObjectReadSuccess(oid, oid, kind, raw)
+
+                async def exercise():
+                    with (mock.patch.object(module, "_line_limit_refusal",
+                                            wraps=module._line_limit_refusal) as bounds,
+                          mock.patch.object(module, "_MAX_LINE_BYTES", 7),
+                          mock.patch.object(module, "_content_hits", return_value=()) as detector):
+                        result = await module._acquire_history(
+                            selection, Reader(), None, module.CoverageRecorder((commit,)),
+                            asyncio.get_running_loop().time() + 10,
+                        )
+                    bounds.assert_called_once_with(payload)
+                    if not clean:
+                        self.assertEqual((result.failure_id, result.reason),
+                                         ("PS-MSG-LIMIT", "line-bytes"))
+                        return
+                    history, _coverage, findings = result
+                    self.assertEqual({call.args[1] for call in detector.call_args_list
+                                      if call.kwargs["subject_kind"] == "history-blob"},
+                                     {path.decode() for path in paths})
+                    self.assertEqual(len(history.subjects), len(paths))
+                    self.assertEqual(findings, ())
+
+                asyncio.run(exercise())
 
     def test_range_first_push_empty_remote_scans_clean_initial_commit(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -3389,6 +3716,123 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
 
         self.assertIsInstance(outcome, module.Refusal)
         self.assertEqual(outcome.failure_id, "PS-MSG-LIMIT")
+
+    def test_verified_prior_roots_use_bounded_revision_stdin(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_revision_stdin")
+        for fmt in (module._SHA1_OBJECT_FORMAT, module._SHA256_OBJECT_FORMAT):
+            tip = "a" * fmt.hex_length
+            long_roots = tuple(f"{n:0{fmt.hex_length}x}" for n in range(1, 901))
+            self.assertLess(len(long_roots), module._MAX_REMOTE_REFS)
+            self.assertGreater(sum(len(oid) + 1 for oid in long_roots), 32767)
+            for native in (False, True):
+                for exclusions in ((), (long_roots[0],), long_roots):
+                    with self.subTest(format=fmt.name, native=native, roots=len(exclusions)):
+                        async def run_case():
+                            calls = []
+                            expected = (tip + "\n" + "".join("^" + oid + "\n" for oid in exclusions)).encode("ascii")
+
+                            async def reader(argv, **kwargs):
+                                self.assertTrue("--stdin" in argv, "revisions must not be expanded in Git argv")
+                                self.assertLess(len(subprocess.list2cmdline(argv)), 32767)
+                                self.assertIs(kwargs["object_format"], fmt)
+                                calls.append(argv)
+                                store_row = kwargs.get("store_row")
+                                if "--use-bitmap-index" in argv:
+                                    self.assertEqual(kwargs["input_bytes"], "".join(oid + "\n" for oid in exclusions).encode("ascii"))
+                                    self.assertIsNone(kwargs["count_cap"])
+                                    self.assertIsNone(kwargs["byte_cap"])
+                                    for oid in exclusions:
+                                        self.assertTrue(store_row(oid))
+                                    return ()
+                                self.assertEqual(kwargs["input_bytes"], expected)
+                                if "--parents" in argv:
+                                    if store_row is None:
+                                        return ((tip, ()),)
+                                    self.assertTrue(store_row(tip, ()))
+                                else:
+                                    if store_row is None:
+                                        return (tip,)
+                                    self.assertTrue(store_row(tip))
+                                    if native and exclusions:
+                                        self.assertTrue(store_row(exclusions[0]))
+                                return ()
+
+                            destination = "refs/heads/new"
+                            primary = module.RangeRequest("origin", destination, tip)
+                            request = module.NativePushRequest(
+                                fmt, {}, "synthetic-endpoint", "", "", "", "", "",
+                                (module.NativePushUpdate(b"refs/heads/source", tip,
+                                                         destination.encode(), "0" * fmt.hex_length),),
+                            )
+                            with (
+                                mock.patch.object(module, "_detect_git_object_format", return_value=fmt),
+                                mock.patch.object(module, "_graft_overlay_present", return_value=False),
+                                mock.patch.object(module, "_resolve_commit", return_value=tip),
+                                mock.patch.object(module, "_run_range_git", return_value=
+                                                  subprocess.CompletedProcess([], 0, "origin\n", "")),
+                                mock.patch.object(module, "_unique_push_destination", new=mock.AsyncMock(
+                                                  return_value="synthetic-endpoint")),
+                                mock.patch.object(module, "_remote_destination_oid", new=mock.AsyncMock(
+                                                  return_value=exclusions[0] if len(exclusions) == 1 else None)),
+                                mock.patch.object(module, "_remote_ref_tip_oids", new=mock.AsyncMock(return_value=())),
+                                mock.patch.object(module, "_local_remote_commit_tip_oids", new=mock.AsyncMock(
+                                                  return_value=exclusions)),
+                                mock.patch.object(module, "_native_prior_receiver_roots", new=mock.AsyncMock(
+                                                  return_value=exclusions)),
+                                mock.patch.object(module, "_read_parent_graph_bounded", new=reader),
+                                mock.patch.object(module, "_read_git_oid_lines_bounded", new=reader),
+                            ):
+                                if native:
+                                    deadline = module.time.monotonic() + 30
+                                    with module._open_history_index(deadline) as index:
+                                        result = await module._native_commit_range_selection(
+                                            primary, request, deadline, index)
+                                else:
+                                    result = await module._range_selection(primary)
+
+                            self.assertEqual(len(calls), 2 + int(native and bool(exclusions)))
+                            self.assertEqual(result.expected_parents, ((tip, ()),))
+                            self.assertEqual(result.expected_oids, (tip,))
+                            self.assertEqual(result.object_oids, (tip,))
+
+                        asyncio.run(run_case())
+
+    def test_revision_stdin_matches_git_argv_on_synthetic_graph(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_revision_stdin_real")
+        for fmt in (module._SHA1_OBJECT_FORMAT, module._SHA256_OBJECT_FORMAT):
+            with self.subTest(format=fmt.name), tempfile.TemporaryDirectory() as td:
+                repo = self._init_range_repo(Path(td), publish_seed=False, object_format=fmt.name)
+                prior = self._commit(repo, "ancestor.txt", "prior", "prior")
+                self._commit(repo, "first.txt", "first", "first")
+                tip = self._commit(repo, "tip.txt", "tip", "tip")
+                for exclusions in ((), (prior,)):
+                    exclusion_args = ("--not", *exclusions) if exclusions else ()
+                    flags = ("--parents", "--topo-order")
+                    baseline_graph = self._git_run(
+                        repo, "--no-replace-objects", "rev-list", *flags, tip, *exclusion_args
+                    ).stdout.splitlines()
+                    object_flags = ("--objects", "--no-object-names")
+                    baseline_objects = self._git_run(
+                        repo, "--no-replace-objects", "rev-list", *object_flags, tip, *exclusion_args
+                    ).stdout.splitlines()
+
+                    async def read_graph():
+                        deadline = asyncio.get_running_loop().time() + 20
+                        revisions = module._revision_stdin((tip,), exclusions)
+                        argv = (_git(), "-C", str(repo), "--no-replace-objects", "rev-list")
+                        graph = await module._read_parent_graph_bounded(
+                            (*argv, *flags, "--stdin"), deadline=deadline,
+                            object_format=fmt, input_bytes=revisions)
+                        objects = await module._read_git_oid_lines_bounded(
+                            (*argv, *object_flags, "--stdin"), deadline=deadline,
+                            object_format=fmt, input_bytes=revisions, count_cap=100,
+                            byte_cap=fmt.list_byte_cap(100))
+                        return graph, objects
+
+                    graph, objects = asyncio.run(read_graph())
+                    self.assertEqual(graph, tuple((oid, tuple(parents)) for oid, *parents in
+                                                 (row.split() for row in baseline_graph)))
+                    self.assertEqual(objects, tuple(baseline_objects))
 
     def test_range_missing_destination_accepts_exact_ref_cap_with_tag_peels(self) -> None:
         module = _load_canonical_scanner("_scanner_v3_remote_ref_inventory_exact_cap")
@@ -4436,6 +4880,74 @@ class TestPublicationSafetyScannerR2Contract(unittest.TestCase):
 
     def _module(self, suffix: str):
         return _load_canonical_scanner("_scanner_r2_" + suffix)
+
+    def test_object_reader_uses_owner_deadline_without_inventing_shorter_limit(self) -> None:
+        module = self._module("object_deadline")
+        oid = "a" * 40
+        for operation in ("read", "classify"):
+            for case, owner, explicit, expected, writes in (
+                ("within-owner", 120.0, None, None, True),
+                ("expired-owner", 100.0, None, "PS-MSG-READ-TIMEOUT", False),
+                ("invalid-owner", float("inf"), None, "PS-MSG-READ-TIMEOUT", False),
+                ("short-owner", 104.0, None, "PS-MSG-READ-TIMEOUT", True),
+                ("short-explicit", 120.0, 4.0, "PS-MSG-READ-TIMEOUT", True),
+                ("standalone-default", None, None, "PS-MSG-READ-TIMEOUT", True),
+                ("standalone-explicit", None, 8.0, None, True),
+            ):
+                with self.subTest(operation=operation, case=case):
+                    async def exercise():
+                        loop = asyncio.get_running_loop()
+                        elapsed = 100.0
+                        read_deadlines = []
+                        stdin = mock.Mock(drain=mock.AsyncMock())
+                        stdout = mock.Mock(
+                            readline=mock.AsyncMock(return_value=(oid + " blob 1\n").encode("ascii")),
+                            readexactly=mock.AsyncMock(side_effect=(b"x", b"\n")),
+                        )
+                        reader = module._AsyncGitObjectReader(
+                            **({} if explicit is None else {"request_timeout": explicit})
+                        )
+                        reader._process = mock.Mock(stdin=stdin, stdout=stdout)
+                        reader._state = module.ReaderState.ACTIVE
+
+                        async def complete(awaitable, deadline):
+                            nonlocal elapsed
+                            read_deadlines.append(deadline)
+                            # More than the old five-second default before the first operation completes.
+                            elapsed = 106.0
+                            if elapsed >= deadline:
+                                awaitable.close()
+                                raise asyncio.TimeoutError
+                            return await awaitable
+
+                        with mock.patch.object(loop, "time", side_effect=lambda: elapsed), \
+                                mock.patch.object(reader, "_within", new=complete):
+                            if operation == "read":
+                                result = await reader.read(oid, "blob", scan_deadline=owner)
+                            else:
+                                result = await reader.classify(
+                                    oid, object_format=module._SHA1_OBJECT_FORMAT, scan_deadline=owner)
+
+                        self.assertEqual(stdin.write.called, writes)
+                        if expected is None:
+                            self.assertNotIsInstance(result, module.Refusal)
+                            if operation == "read":
+                                self.assertEqual(result.raw, b"x")
+                            else:
+                                self.assertEqual(result.object_type, "blob")
+                        else:
+                            self.assertEqual(result.failure_id, expected)
+                            self.assertTrue(reader._poisoned)
+                        if writes:
+                            limit = (owner if explicit is None and owner is not None
+                                     else min(owner, 100.0 + explicit) if owner is not None
+                                     else 100.0 + (5.0 if explicit is None else explicit))
+                            self.assertTrue(read_deadlines)
+                            self.assertEqual(set(read_deadlines), {limit})
+                        else:
+                            self.assertEqual(read_deadlines, [])
+
+                    asyncio.run(exercise())
 
     def test_r2_async_reader_and_coverage_contract_exist(self) -> None:
         module = self._module("owners")
@@ -5807,3 +6319,77 @@ class TestThisTestFileIsGateSafe(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_binary_run_memo_preserves_each_finding_and_machine_path_check(monkeypatch):
+    from types import SimpleNamespace
+
+    scanner = _load_canonical_scanner("_scanner_binary_run_memo")
+    lexical_inputs = []
+    path_inputs = []
+
+    def observations(line, number, offset, kind, *, binary, raw_matches=None):
+        assert raw_matches is None
+        lexical_inputs.append(line)
+        assert binary and kind == "history-blob"
+        if line.startswith("FLAG"):
+            item = SimpleNamespace(diagnostic_class="synthetic")
+            yield item
+            yield item
+
+    def paths(line):
+        path_inputs.append(line)
+        return line == "FLAG"
+
+    monkeypatch.setattr(scanner, "_line_observations", observations)
+    monkeypatch.setattr(scanner, "_observation_key", lambda item: item.diagnostic_class)
+    large = "FLAG" + "X" * 4096
+    raw = b"\0quiet\0FLAG\0quiet\n\0FLAG\0" + large.encode("ascii")
+    findings = scanner._binary_content_hits(raw, "fixture.bin", paths)
+    assert [(f.line, f.detector_class) for f in findings] == [
+        (1, "synthetic"), (1, "machine-path"),
+        (2, "synthetic"), (2, "machine-path"), (2, "synthetic"),
+    ]
+    assert path_inputs == ["quiet", "FLAG", "quiet", "FLAG", large]
+    assert lexical_inputs == ["quiet", "FLAG", large]
+    scanner._binary_content_hits(raw, "fixture.bin", paths)
+    assert lexical_inputs == ["quiet", "FLAG", large] * 2
+
+def test_binary_matcher_batches_preserve_complete_findings_and_reject_short_output():
+    scanner = _load_canonical_scanner("_scanner_binary_matcher")
+    raw = b"\0quiet\r\n" * 9000 + b"\0ordinary\n\0ordinary"
+    visits = []
+
+    class Matcher:
+        def __init__(self, short=False):
+            self.batches = []
+            self.short = short
+
+        async def match(self, rows, deadline):
+            self.batches.append(len(rows))
+            assert all(binary for _, binary in rows)
+            return tuple(tuple(scanner._python_rule_matches(line, binary=True))
+                         for line, _ in (rows[:-1] if self.short else rows))
+
+    def path(line):
+        visits.append(line)
+        return line == "ordinary"
+
+    expected = scanner._binary_content_hits(raw, "fixture.bin", path, max_findings=1)
+    assert len(expected) == 1 and len(visits) == 9002
+    visits.clear()
+
+    async def verify():
+        deadline = asyncio.get_running_loop().time() + 10
+        matcher = Matcher()
+        result = await scanner._binary_content_hits_with_matcher(
+            raw, "fixture.bin", path, matcher, deadline, max_findings=1,
+        )
+        assert result == expected and len(visits) == 9002
+        assert matcher.batches == [1, 2]
+        with pytest.raises(ValueError):
+            await scanner._binary_content_hits_with_matcher(
+                raw, "fixture.bin", path, Matcher(short=True), deadline,
+            )
+
+    asyncio.run(verify())

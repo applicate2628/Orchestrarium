@@ -12,6 +12,8 @@ description: "Architecture design: contracts, seams, tradeoffs, risks."
 - Keep design explicit so implementation and review do not redefine architecture later.
 - Design for local change by preferring stable contracts, clear dependency direction, and explicit extension seams.
 
+For each material claim, make the actual enforcement mechanism explicit next to its probe; distinguish a known mechanism from a proposed one. Define affected resource and state lifetime, ownership transfer, failure/partial completion and compatibility when relevant. Prefer an existing owning seam that meets the contract. If authority or guarantees are unclear, resolve that gap before expanding the design.
+
 ## Input contract
 
 - Require an accepted research memo for research-backed design. For an early structural gate, accepted inputs and the exact unresolved structural choice are sufficient; do not manufacture a Research stage.
@@ -57,7 +59,7 @@ If the trigger does not apply, record the evidence that the boundary remains ins
 
 ## Working rules
 
-- Prefer the smallest durable design that satisfies the validated requirements.
+- Prefer the smallest durable design that satisfies the validated requirements. For a shared defect class, compare direct repair at the confirmed owner with the next simplest option: name what becomes independent, which old paths stop existing, and any dependency you genuinely need. Reuse the existing class inventory and regression guard; do not require a new analysis for an ordinary local repair. For a material state-transition claim, use its existing enforcement-probe to distinguish a supported transition (and a valid no-op if applicable) from an invalid transition that must leave protected state unchanged.
 - Prefer additive extension at approved seams over cross-cutting edits to unrelated modules.
 - **CONDITIONAL SKILL:** Use `$generalize-from-instance` when deriving a reusable contract from a concrete fixture, geometry, dataset, user case, or one-off implementation. It is not required for unrelated design work.
 - Hand off a ready decision before optional prose polishing.

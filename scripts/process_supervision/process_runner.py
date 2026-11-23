@@ -1583,6 +1583,7 @@ class WindowsArgvAdmissionOwnerV1:
         probe = (
             str(executable),
             "-I",
+            "-B",
             "-c",
             _PYTHON_ARGV_ECHO_HELPER,
             *_WINDOWS_ARGV_PROBE_CANARIES,

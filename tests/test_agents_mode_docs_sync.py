@@ -59,8 +59,8 @@ class AgentsModeDocsSyncTest(unittest.TestCase):
             codex_init = tmp_root / SYNC.INIT_SURFACES["codex"]
             codex_init.write_text(
                 codex_init.read_text(encoding="utf-8").replace(
-                    "externalClaudeProfile: {value}",
-                    "externalCodexProfile: {value}",
+                    "consultantMode: {value}",
+                    "externalProvider: {value}",
                     1,
                 ),
                 encoding="utf-8",

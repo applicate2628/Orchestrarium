@@ -328,3 +328,9 @@ def test_pristine_cpython_site_packages_marker_requires_upstream_projection(buil
         build_synthetic_bundle(builder, source, runtime, output, target="linux-x64", release="development")
     assert marker.read_bytes() == before
     assert not output.exists()
+
+
+
+@pytest.mark.parametrize("wrapper", ["SH", "PS"])
+def test_wrapper_disables_bytecode_before_retention_can_import_builder(builder, wrapper):
+    assert "-I -B" in getattr(builder, wrapper)

@@ -109,7 +109,7 @@ interval. Remote and long-path Windows variants have no new verification claim.
 | Native roles | `~/.codex/agents/<role>.toml` | Absent roles are created and identical files are no-ops. Manifest v2 preserves compatible user runtime settings and descriptions byte-for-byte while binding owned profession instructions. Incompatible instructions, names, registration shapes or file types refuse without mutation; only explicitly pinned stock migrations may replace existing role payloads. The source manifest is not installed as an ownership receipt. |
 | Validation script | `$HOME/.agents/skills/lead/scripts/validate-skill-pack.sh` | Same lead script tree as the repo source |
 | Publication-safety scan | `$HOME/.agents/skills/lead/scripts/check-publication-safety.sh` | PowerShell runs the sibling `.py` entrypoint with Python |
-| Global operator overlay | `~/.codex/.agents-mode.yaml` | Orchestrarium-owned default operator file seeded on first global install and preserved on reinstall; legacy sibling `~/.codex/.agents-mode` is compatibility input only |
+| Global operator overlay | `~/.codex/.agents-mode.yaml` | Optional user preferences; omitted keys inherit. Global installs preserve explicit choices; project installs do not write this file. |
 
 ### Local
 
@@ -120,7 +120,7 @@ interval. Remote and long-path Windows variants have no new verification claim.
 | Skill tree | `<project>/.agents/skills/<role>/SKILL.md` | Mirrors the global `skills/` structure |
 | Design-panel binding | `<project>/.agents/skills/design-panel/SKILL.md` + `agents/openai.yaml` | Project-level mirror of the global design-panel binding; no panel-state validator is installed |
 | Native roles | `<project>/.codex/agents/<role>.toml` | Absent roles are created and identical files are no-ops. Manifest v2 preserves compatible user runtime settings and descriptions byte-for-byte while binding owned profession instructions. Incompatible instructions, names, registration shapes or file types refuse without mutation; only explicitly pinned stock migrations may replace existing role payloads. The source manifest is not installed as an ownership receipt. |
-| Local config | `<project>/.agents/.agents-mode.yaml` | Canonical Orchestrarium local state file; local install seeds the default and `$init-project` reviews or updates it, while legacy sibling `<project>/.agents/.agents-mode` remains compatibility input only. Decision-driving reads use this local scope first, then fall back to the global Codex overlay when the local scope is absent. |
+| Local config | `<project>/.agents/.agents-mode.yaml` | Optional user preferences; omitted keys inherit. Global installs preserve explicit choices; project installs do not write this file. |
 | Validation script | `<project>/.agents/skills/lead/scripts/validate-skill-pack.sh` | Run from the target project root after install |
 | Publication-safety scan | `<project>/.agents/skills/lead/scripts/check-publication-safety.sh` | PowerShell runs the sibling `.py` entrypoint with Python |
 
@@ -135,7 +135,7 @@ interval. Remote and long-path Windows variants have no new verification claim.
 | Global personal subagents | `~/.claude/agents/*.md` | Official user-level custom subagent surface |
 | Design-panel binding | `~/.claude/agents/contracts/design-panel.md` + `~/.claude/commands/agents-design-panel.md` | Independent multi-lane design generation on one pinned problem, converged through one mandatory synthesis; no panel-state validator is installed |
 | Global legacy commands | `~/.claude/commands/*.md` | Still supported, but Claude docs now recommend skills as the preferred model |
-| Global operator overlay | `~/.claude/.agents-mode.yaml` | Orchestrarium-owned default operator file seeded on first global install and preserved on reinstall; not a Claude-native file from official docs, and legacy sibling `~/.claude/.agents-mode` is compatibility input only |
+| Global operator overlay | `~/.claude/.agents-mode.yaml` | Optional user preferences; omitted keys inherit. Global installs preserve explicit choices; project installs do not write this file. |
 
 ### Local
 
@@ -148,7 +148,7 @@ interval. Remote and long-path Windows variants have no new verification claim.
 | Design-panel binding | `<project>/.claude/agents/contracts/design-panel.md` + `<project>/.claude/commands/agents-design-panel.md` | Project-level mirror of the global design-panel binding; no panel-state validator is installed |
 | Legacy commands | `<project>/.claude/commands/*.md` | Still work, but lose precedence to a skill with the same name |
 | Orchestrarium shared governance copy | `<project>/.claude/AGENTS.md` | Repo-local overlay copied by Orchestrarium install scripts; not a Claude-native runtime requirement |
-| Orchestrarium local config | `<project>/.claude/.agents-mode.yaml` | Canonical Orchestrarium local state file; local install seeds the default and `/agents-init-project` reviews or updates it, while legacy sibling `<project>/.claude/.agents-mode` remains compatibility input only. Decision-driving reads use this local scope first, then fall back to the global Claude overlay when the local scope is absent. |
+| Orchestrarium local config | `<project>/.claude/.agents-mode.yaml` | Optional user preferences; omitted keys inherit. Global installs preserve explicit choices; project installs do not write this file. |
 
 ## Quick comparison
 

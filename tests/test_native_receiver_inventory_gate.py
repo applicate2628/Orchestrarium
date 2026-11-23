@@ -89,6 +89,42 @@ class ReceiverInventoryQualificationTests(unittest.TestCase):
             }):
                 self.assertFalse(self.g._native_receiver_inventory_qualified(native, root, git))
 
+    def test_owned_push_default_https_is_nonredirecting_without_persisting_config(self):
+        import os
+        import shutil
+        import subprocess
+        import tempfile
+        git = shutil.which("git")
+        if git is None:
+            self.skipTest("Git unavailable")
+        with tempfile.TemporaryDirectory() as root, mock.patch.dict(os.environ, {
+            "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+        }):
+            def command(*args):
+                return subprocess.check_output([git, "-C", root, *args])
+            command("init", "-q")
+            command("remote", "add", "origin", "https://fetch.example.invalid/fetch.git")
+            command("remote", "set-url", "--push", "origin", self.native.endpoint)
+            before = (Path(root) / ".git" / "config").read_bytes()
+            options = self.g._native_default_receiver_config("origin", root, git)
+            self.assertEqual(options, ("-c", f"http.{self.native.endpoint}.followRedirects=false"))
+            hook = Path(root) / ".git" / "hooks" / "pre-push"
+            hook.write_bytes(b'#!/bin/sh\ntest "$(git config --type=bool --get-urlmatch http.followRedirects "$1")" = false\n')
+            hook.chmod(0o755)
+            command(*options, "hook", "run", "pre-push", "--", self.native.endpoint)
+            self.assertEqual(
+                command(*options, "config", "--type=bool", "--get-urlmatch",
+                        "http.followRedirects", self.native.endpoint), b"false\n")
+            self.assertEqual((Path(root) / ".git" / "config").read_bytes(), before)
+            command("config", "http.followRedirects", "initial")
+            self.assertEqual(self.g._native_default_receiver_config("origin", root, git), ())
+            command("config", "--unset", "http.followRedirects")
+            command("config", "remote.origin.vcs", "custom")
+            self.assertEqual(self.g._native_default_receiver_config("origin", root, git), ())
+            command("config", "--unset", "remote.origin.vcs")
+            command("remote", "set-url", "--push", "--add", "origin", "https://other.example.invalid/a.git")
+            self.assertEqual(self.g._native_default_receiver_config("origin", root, git), ())
+
     def test_selection_hash_binds_qualification(self):
         with mock.patch.object(self.g,"_native_receiver_inventory_qualified",return_value=False):
             old,old_binding=self.g._native_push_selection(self.native,observation(),self.g._native_canonical_bytes)

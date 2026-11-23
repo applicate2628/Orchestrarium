@@ -1,10 +1,8 @@
-"""Claude main-agent Lead binding stays explicit, reversible, and narrowly owned."""
+"""Claude selects its main agent; the installer preserves operator settings."""
 from __future__ import annotations
 
-import copy
 import importlib.util
 import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -29,82 +27,25 @@ def _load_installer():
 INSTALLER = _load_installer()
 
 
-@pytest.mark.parametrize(
-    ("mode", "has_agent", "agent", "expected_agent", "outcome", "changed"),
-    (
-        ("force", False, None, "lead", "lead-default-written", True),
-        ("FORCE", False, None, "lead", "lead-default-written", True),
-        ("force", True, "lead", "lead", "lead-already-selected", False),
-        ("force", True, "other", "other", "preserved-nonlead-agent", False),
-        ("auto", False, None, None, "mode-preserved", False),
-        ("manual", True, "lead", "lead", "mode-preserved", False),
-        ("unresolved", False, None, None, "mode-unresolved", False),
-    ),
-)
-def test_claude_main_agent_merge_matrix(
-    mode: str,
-    has_agent: bool,
-    agent: object,
-    expected_agent: object,
-    outcome: str,
-    changed: bool,
-) -> None:
-    settings: dict[str, object] = {
-        "theme": "dark",
-        "hooks": {"SessionStart": [{"hooks": []}]},
-    }
-    if has_agent:
-        settings["agent"] = agent
-    before = copy.deepcopy(settings)
-
-    actual_outcome, actual_changed = INSTALLER._merge_claude_main_agent(
-        settings, mode
-    )
-
-    assert (actual_outcome, actual_changed) == (outcome, changed)
-    assert settings["theme"] == before["theme"]
-    assert settings["hooks"] == before["hooks"]
-    if expected_agent is None:
-        assert "agent" not in settings
-    else:
-        assert settings["agent"] == expected_agent
-
-
 @pytest.mark.parametrize("invalid_agent", ([], {}, {"nested": "agent"}))
-def test_claude_main_agent_merge_rejects_non_scalar_agent(
-    invalid_agent: object,
+def test_claude_settings_validation_rejects_non_scalar_agent(
+    tmp_path: Path, invalid_agent: object
 ) -> None:
-    settings = {"agent": invalid_agent, "theme": "dark"}
-    before = copy.deepcopy(settings)
+    settings_path = tmp_path / "settings.json"
+    before = json.dumps({"agent": invalid_agent, "theme": "dark"}).encode()
+    settings_path.write_bytes(before)
 
     with pytest.raises(ValueError, match="agent.*scalar"):
-        INSTALLER._merge_claude_main_agent(settings, "force")
+        INSTALLER._load_claude_settings(settings_path)
 
-    assert settings == before
+    assert settings_path.read_bytes() == before
 
 
-@pytest.mark.parametrize(
-    ("mode", "agent", "expected_agent", "warning"),
-    (
-        ("force", None, "lead", None),
-        (
-            "force",
-            "operator-agent",
-            "operator-agent",
-            "WARN: Claude main agent preserved; force lead binding not installed",
-        ),
-        ("auto", None, None, None),
-        ("manual", "lead", "lead", None),
-    ),
-)
+@pytest.mark.parametrize("agent", (None, "operator-agent", "lead"))
 def test_synthetic_claude_install_and_reinstall_preserve_settings(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    mode: str,
     agent: str | None,
-    expected_agent: str | None,
-    warning: str | None,
 ) -> None:
     home = tmp_path / "home"
     project = tmp_path / "project"
@@ -126,9 +67,9 @@ def test_synthetic_claude_install_and_reinstall_preserve_settings(
     if agent is not None:
         settings["agent"] = agent
     settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
-    (project / ".claude" / ".agents-mode.yaml").write_text(
-        f"delegationMode: {mode}\n", encoding="utf-8"
-    )
+    before_settings = settings_path.read_bytes()
+    before_identity = settings_path.stat().st_ino
+    before_document = claude_path.read_bytes()
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("USERPROFILE", raising=False)
 
@@ -139,15 +80,14 @@ def test_synthetic_claude_install_and_reinstall_preserve_settings(
         "--allow-unsafe-target",
         "--no-hypothesis-hook",
     ]
+    assert INSTALLER.install("claude", [*arguments, "--dry-run"]) == 0
+    assert settings_path.read_bytes() == before_settings
+    assert claude_path.read_bytes() == before_document
+    assert not (project / ".claude" / "agents" / "lead.md").exists()
+
     assert INSTALLER.install("claude", arguments) == 0
-    first_output = capsys.readouterr().out
-    after_first = json.loads(settings_path.read_text(encoding="utf-8"))
-    assert after_first["theme"] == "dark"
-    assert after_first["hooks"] == settings["hooks"]
-    if expected_agent is None:
-        assert "agent" not in after_first
-    else:
-        assert after_first["agent"] == expected_agent
+    assert settings_path.read_bytes() == before_settings
+    assert settings_path.stat().st_ino == before_identity
     assert (project / ".claude" / "agents" / "lead.md").is_file()
     assert (project / ".claude" / "skills" / "lead" / "SKILL.md").is_file()
     installed_claude = claude_path.read_text(encoding="utf-8")
@@ -196,8 +136,8 @@ def test_synthetic_claude_install_and_reinstall_preserve_settings(
         assert warning in first_output
 
     assert INSTALLER.install("claude", arguments) == 0
-    after_second = json.loads(settings_path.read_text(encoding="utf-8"))
-    assert after_second == after_first
+    assert settings_path.read_bytes() == before_settings
+    assert settings_path.stat().st_ino == before_identity
     assert claude_path.read_text(encoding="utf-8") == installed_claude
 
 
@@ -211,20 +151,23 @@ def test_failed_claude_install_rolls_back_settings_and_lead_definition(
     settings_path = claude_root / "settings.json"
     lead_path = claude_root / "agents" / "lead.md"
     lead_path.parent.mkdir(parents=True)
-    settings_path.write_bytes(b'{"theme":"dark","hooks":{}}\n')
+    settings_path.write_bytes(b'{"agent":"operator-agent","theme":"dark","hooks":{}}\n')
     lead_path.write_bytes(b"old lead definition\n")
-    (claude_root / ".agents-mode.yaml").write_text(
-        "delegationMode: force\n", encoding="utf-8"
-    )
     before_settings = settings_path.read_bytes()
     before_lead = lead_path.read_bytes()
+    installed_help = claude_root / "commands" / "agents-help.md"
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("USERPROFILE", raising=False)
-    monkeypatch.setattr(
-        INSTALLER,
-        "_verify_files",
-        lambda *_args, **_kwargs: ["forced rollback"],
-    )
+    reached_verify = False
+
+    def refuse_after_apply(*_args, **_kwargs):
+        nonlocal reached_verify
+        reached_verify = True
+        assert installed_help.is_file()
+        assert settings_path.read_bytes() == before_settings
+        return ["forced rollback"]
+
+    monkeypatch.setattr(INSTALLER, "_verify_files", refuse_after_apply)
 
     assert INSTALLER.install(
         "claude",
@@ -237,8 +180,10 @@ def test_failed_claude_install_rolls_back_settings_and_lead_definition(
         ],
     ) == 1
 
+    assert reached_verify
     assert settings_path.read_bytes() == before_settings
     assert lead_path.read_bytes() == before_lead
+    assert not installed_help.exists()
 
 
 def test_dual_safe_lead_definition_and_current_state_documentation() -> None:

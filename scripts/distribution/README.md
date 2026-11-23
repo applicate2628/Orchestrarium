@@ -73,6 +73,78 @@ Applying an installation requires explicit
 --retain-to ABSOLUTE_DIRECTORY or --permanent-runtime; retain the selected
 interpreter while installed hooks reference it.
 
+### Optional Windows x64 publication matcher
+
+An independently built and qualified Windows x64 matcher can be selected with
+--publication-matcher FILE and --publication-matcher-sha256 SHA256, together
+with --publication-matcher-notices FILE and --publication-matcher-notices-sha256
+SHA256. The pack contains the executable at native/orche-publication-match.exe
+and its qualified notice file at native/THIRD-PARTY-NOTICES.txt. The Rust
+toolchain and source tree are not
+packaged and no build runs during installation. This is an application
+component rather than a Python module or an SDK.
+
+The builder checks its image type and SHA-256 before and after copy. A bundle
+with no selection remains manifest version 3. Version 4 binds both the matcher
+and its notice file. The notice is verified before and after copy, independently
+of CPython runtime evidence. Predecessor manifests remain readable without
+opening the old matcher;
+active launch and retention reject a declared member that is absent, linked,
+or different. Retention passes the original identity to the same builder.
+
+A passing package check is not build provenance, publisher authentication,
+dependency license evidence, or actual activation. Release qualification must
+establish the executable and its applicable notices independently. The
+existing stock hook registration and Python runtime lifetime do not change.
+
+## Shared Codex hook file
+
+Use this only when multiple global Codex profiles already link to a synchronized
+`hooks.json`. Keep the bundle local, in the same absolute directory on each host
+of the same platform. Select an ordinary, permanent directory managed by the
+local installation owner, not a synchronized folder or an arbitrary workspace.
+On Windows the selected directory must satisfy the installer’s direct-command
+path grammar. No interpreter is found through `PATH`.
+
+Run the bundle launcher with `--retain-only ABSOLUTE_DIRECTORY` on every host
+first. This stages the checked release without changing any provider profile.
+For a registration-only update, preview from the existing retained bundle with
+`--permanent-runtime --global --shared-hook-runtime --hooks-only --dry-run`.
+For an upgrade from a different retained bundle, supply
+--previous-retained-release ABSOLUTE_DIRECTORY with the already trusted bundle
+that owns the current registrations. Use the same selection for preview and apply;
+the previous bundle is inspected, never launched. Repeating the same update
+cannot rewrite an already matched registration. An unchanged registration is
+not evidence of Codex trust; complete any pending approval natively before
+expecting a successful health check on a repeat run.
+On the host owning publication of the common file, remove only `--dry-run` to
+apply. This requires the current shared file and its neighboring installer
+inventory to agree with the current retained release or with a receipt-verified
+ordinary installation. The older interpreter may be missing, but its complete
+owned registration and script paths must still be independently identifiable.
+Each retained release supplies its own hook catalog. The installer can add,
+update or retire its own entries without moving unrelated native handler slots.
+Only those registrations and the generated portable inventory can change.
+The installer preserves the Codex profile link, unrelated hooks, skills,
+roles, documents, settings and trust. Legacy commands outside the qualified
+inventory are not part of this operation.
+
+
+Omit `--hooks-only` for the existing full Codex pack installation with shared
+hook registration. It selects Codex without the provider menu. The shared
+registrations point at the selected retained Python and script paths; the
+portable inventory carries the expected commands across different local
+sync and profile paths.
+
+Do not run the apply step before all consumers have the same verified retained
+release. Review changed definitions in Codex’s native `/hooks` interface on
+each applicable host; the package does not transfer hook trust. To verify the
+retained route explicitly, pass its `app/src.codex/skills/lead` directory as the
+health checker’s `--installed-root`. Retain the release as long as any hook
+references it. This mode initially migrates the installer’s ordinary installed
+hooks; re-running the same release is supported. Changing to a different
+retained root requires requalifying the predecessor, not editing the shared file.
+
 Earlier distribution assets and qualification records are preserved in the
 [original pre-SDK checkpoint](https://github.com/applicate2628/Orchestrarium/tree/082d46cd83324117abcb965842005d3c15ab99ed/scripts/distribution).
 The last historical SDK wheel locks, notices and receipts are preserved at
@@ -80,6 +152,26 @@ The last historical SDK wheel locks, notices and receipts are preserved at
 The retired assets and records in those snapshots are not current build inputs
 and do not qualify new runtimes.
 Do not relabel earlier records or rewrite historical releases.
+
+### Shared upgrade contract
+
+The installer owns the transition: the verified previous release identifies
+which existing registrations may be changed; the desired release supplies the
+replacement. Preview and apply evaluate the same selection. An already matched
+registration needs no rewrite. Hook trust is separate and remains owned by
+Codex; an unchanged registration does not establish that trust.
+
+The regression probe runs the normal entry point for A-to-B upgrade, wrong
+predecessor, and repeat. Check the shared files and unrelated profile state,
+not just the exit code. Keep product-native health distinct from fixture
+results; a repeat while Codex approval is pending is not proof of readiness.
+
+For design background, see [Effective ML Revisited](https://blog.janestreet.com/effective-ml-revisited/#make-illegal-states-unrepresentable),
+[Parse, Don't Validate](https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/),
+and [Applying Design by Contract](https://www.kth.se/social/files/59526bfb56be5b4f17000807/meyer-92-contracts.pdf).
+[Hypothesis stateful testing](https://hypothesis.readthedocs.io/en/latest/stateful.html)
+describes a way to explore longer operation sequences if focused probes cease
+to cover the risk; it is not a dependency of this installer.
 
 ## Terms and abbreviations
 

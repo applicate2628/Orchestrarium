@@ -5811,7 +5811,9 @@ def _record_project_absence_at(path: Path, evidence: list, failure_id: str) -> N
 
 def _observe_project_path_at(path: Path, expected_kind: str, evidence: list,
     failure_id: str):
-    _lifecycle_reject_unreduced_reparse(path, failure_id=failure_id,
+    # The leaf's first observation owns presence. A reparse walk of the leaf
+    # followed by a second lstat could turn disappearance into initial absence.
+    _lifecycle_reject_unreduced_reparse(path.parent, failure_id=failure_id,
         message="selected structural path is unsafe")
     try:
         info = path.lstat()
@@ -5820,6 +5822,11 @@ def _observe_project_path_at(path: Path, expected_kind: str, evidence: list,
         return None
     except OSError as exc:
         raise LifecycleError(failure_id, "selected structural path unavailable") from exc
+    if stat.S_ISLNK(info.st_mode) or bool(
+        getattr(info, "st_file_attributes", 0)
+        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    ):
+        raise LifecycleError(failure_id, "selected structural path is unsafe")
     if (expected_kind == "file" and not stat.S_ISREG(info.st_mode)) or (expected_kind == "directory" and not stat.S_ISDIR(info.st_mode)):
         raise LifecycleError(failure_id, "selected structural path has an unsupported type")
     if expected_kind == "file":

@@ -362,7 +362,7 @@ def _validate_candidate(value: Any, blob_size: int, review_region: Mapping[str, 
         "candidate",
     )
     normal_form = _require_id(obj["normalFormId"], "candidate-normal-form")
-    if normal_form not in ("nf-simple-match-v1", "nf-value-assignment-v1"):
+    if normal_form not in ("nf-simple-match-v1", "nf-value-assignment-v1", "nf-machine-path-match-v1"):
         raise PolicyInputError("candidate-normal-form")
     span = {
         "startByte": obj["startByte"],
@@ -373,7 +373,7 @@ def _validate_candidate(value: Any, blob_size: int, review_region: Mapping[str, 
     if not _inside(span, review_region):
         raise PolicyInputError("candidate-review-region")
     assignment_value = obj["assignment"]
-    if normal_form == "nf-simple-match-v1":
+    if normal_form in ("nf-simple-match-v1", "nf-machine-path-match-v1"):
         if assignment_value is not None:
             raise PolicyInputError("candidate-simple-assignment")
     else:
@@ -412,7 +412,7 @@ def _validate_candidate(value: Any, blob_size: int, review_region: Mapping[str, 
         contributor_keys.append((leaf, *_region_key(item["fullMatch"])))
     if contributor_keys != sorted(set(contributor_keys)):
         raise PolicyInputError("candidate-contributor-order")
-    if normal_form == "nf-simple-match-v1":
+    if normal_form in ("nf-simple-match-v1", "nf-machine-path-match-v1"):
         if len(contributors) != 1 or _region_key(span) != _region_key(contributors[0]["fullMatch"]):
             raise PolicyInputError("candidate-simple-witness")
 
@@ -2897,3 +2897,201 @@ def validate_record_transition(
             raise PolicyInputError("record-revocation-mutates-grant")
         return "revocation-update"
     raise PolicyInputError("record-transition")
+
+
+def materialize_portable_review(
+    decision: Mapping[str, Any],
+    *,
+    received_decision_sha256: str,
+    observed_project: Mapping[str, Any],
+    selected_repository: Mapping[str, Any],
+    current_record: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Prepare one native record from an owner-received portable review batch.
+
+    Like promote_decision, the caller is the authority boundary. It must obtain
+    received_decision_sha256 from the actual accepted reviewer decision, and
+    observed_project from the authenticated provider, not from repository files
+    or remote configuration. This function does not authenticate JSON labels.
+    It writes nothing and never converts a legacy native report into portable
+    authorization. Existing promotion, currentness and revocation still apply.
+    """
+    value = _thaw(decision)
+    _exact_object(value, ("schema", "scope", "project", "record"), "portable-decision")
+    if value["schema"] != "orchestrarium.portable-review.v1" or value["scope"] != "native-repository-content":
+        raise PolicyInputError("portable-schema")
+    expected = _require_sha(received_decision_sha256, "portable-received-sha")
+    if hashlib.sha256(C(value)).hexdigest() != expected:
+        raise PolicyInputError("portable-decision-drift")
+
+    def project(value):
+        checked = _exact_object(value, ("provider", "authority", "repositoryId"), "portable-project")
+        for name in ("provider", "authority", "repositoryId"):
+            _require_text(checked[name], "portable-project-" + name)
+        return checked
+
+    logical = project(value["project"])
+    if logical != project(_thaw(observed_project)):
+        raise PolicyInputError("portable-project-mismatch")
+    repository = _validate_repository(_thaw(selected_repository))
+    body = _thaw(value["record"])
+    if type(body) is not dict or "repository" in body or "recordSha256" in body:
+        raise PolicyInputError("portable-native-binding")
+    source_id = _require_id(body.get("id"), "portable-id")
+    if body.get("state") != "active" or body.get("revision") != 1 or body.get("previousRecordSha256") is not None:
+        raise PolicyInputError("portable-not-active-initial-decision")
+    # Stable across repeat materialization and content revisions: a revoked
+    # native grant cannot be resurrected merely by changing the decision bytes.
+    identity = {"project": logical, "decisionId": source_id, "repository": repository}
+    body["id"] = "portable-" + hashlib.sha256(C(identity)).hexdigest()
+    body["repository"] = repository
+    artifact = {"reference": "portable-review:" + source_id, "sha256": expected}
+    authorization = body.get("authorization")
+    if type(authorization) is not dict or type(authorization.get("supportingArtifacts")) is not list:
+        raise PolicyInputError("portable-authorization")
+    supporting = list(authorization["supportingArtifacts"])
+    authorization["supportingArtifacts"] = supporting
+    if any(type(item) is not dict or (item.get("reference") == artifact["reference"] and item != artifact) for item in supporting):
+        raise PolicyInputError("portable-artifact-conflict")
+    if artifact not in supporting:
+        supporting.append(artifact)
+    supporting.sort(key=lambda item: (item.get("reference", ""), item.get("sha256", "")))
+    prepared = seal_record(body)
+    if current_record is not None:
+        existing = _thaw(current_record)
+        _validate_record(existing)
+        if existing != prepared:
+            raise PolicyInputError("portable-existing-record-conflict")
+        return existing
+    return prepared
+
+
+def review_candidate_id(occurrence_body: Mapping[str, Any]) -> str:
+    """Stable identity of every generated occurrence field, excluding only ID.
+
+    This is content correlation, not reviewer authentication or policy credit.
+    Both the scanner producer and receiving projection use this single owner.
+    """
+    body = _thaw(occurrence_body)
+    _exact_object(body, ("rawPathBase64", "blobOid", "blobSha256", "blobByteCount",
+                         "gitMode", "detector", "candidate", "reviewRegion", "contexts"),
+                  "review-candidate")
+    return "finding-" + hashlib.sha256(
+        b"orchestrarium.review-candidate.v1\0" + C(body)
+    ).hexdigest()
+
+
+def prepare_candidate_review(record_body: Mapping[str, Any],
+                             verdicts: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """Pure projection for the existing trusted receiving owner; no authority.
+
+    record_body contains scanner-produced occurrences plus the owner's existing
+    repository/scope/provenance fields. Verdict rows are the accepted reviewer's
+    id/verdict/reason decisions, not replacement occurrences. This function does
+    not authenticate an input file, receive a review, or change trusted policy.
+    Only the existing receiving owner may subsequently call promote_decision.
+    """
+    body = _thaw(record_body)
+    if "recordSha256" in body:
+        raise PolicyInputError("candidate-review-unsealed-input-required")
+    # Validate the complete scanner/owner projection before selecting findings.
+    seal_record(body)
+    by_id = {}
+    for occurrence in body["occurrences"]:
+        finding_id = occurrence["id"]
+        occurrence_body = {key: value for key, value in occurrence.items() if key != "id"}
+        if finding_id != review_candidate_id(occurrence_body):
+            raise PolicyInputError("candidate-review-content-id-mismatch")
+        by_id[finding_id] = occurrence
+    selected = []
+    seen = set()
+    reasons = []
+    for value in verdicts:
+        row = _exact_object(_thaw(value), ("id", "verdict", "reason"), "candidate-verdict")
+        finding_id = _require_id(row["id"])
+        reason = _require_text(row["reason"], "candidate-verdict-reason")
+        if finding_id not in by_id or finding_id in seen:
+            raise PolicyInputError("candidate-verdict-unknown-or-duplicate")
+        seen.add(finding_id)
+        if row["verdict"] not in ("approve", "reject"):
+            raise PolicyInputError("candidate-verdict-invalid")
+        if row["verdict"] == "approve":
+            selected.append(by_id[finding_id])
+            reasons.append(finding_id + ": " + reason)
+    if not selected:
+        raise PolicyInputError("candidate-review-no-approved-findings")
+    # Omitted and explicitly rejected findings receive no credit.
+    body["occurrences"] = sorted(selected, key=lambda row: row["id"])
+    body["reason"] = "\n".join(reasons)
+    return seal_record(body)
+
+
+def candidate_packet_id(packet_body: Mapping[str, Any]) -> str:
+    """Bind the full generated review scope, not merely occurrence IDs."""
+    body = _thaw(packet_body)
+    _exact_object(body, ("repository", "modes", "rangeScope", "occurrences"), "candidate-packet")
+    return hashlib.sha256(b"orchestrarium.review-packet.v1\0" + C(body)).hexdigest()
+
+
+def finalize_received_review(
+    trusted_origin: OriginSelection,
+    candidate_packet: Mapping[str, Any],
+    received_review: bytes,
+    *,
+    receiving_reference: str,
+    review_artifact_reference: str,
+    apply: bool = False,
+) -> dict[str, Any]:
+    """Root-owned projection and atomic promotion of an actually received review.
+
+    Like promote_decision, this is a trusted-owner API, NOT authentication of
+    arbitrary JSON, report files, role labels or ledger entries. Root receives
+    the real reviewer result and serializes writers before calling. Packet and
+    review hashes and policy preimages are computed here, never hand-entered.
+    The result is the existing promotion result, not scan/publication success.
+    """
+    if type(apply) is not bool or type(received_review) is not bytes:
+        raise PolicyInputError("received-review-input")
+    packet = _exact_object(_thaw(candidate_packet),
+        ("packetId", "repository", "modes", "rangeScope", "occurrences"), "candidate-packet")
+    packet_body = {key: value for key, value in packet.items() if key != "packetId"}
+    packet_id = candidate_packet_id(packet_body)
+    if packet["packetId"] != packet_id:
+        raise PolicyInputError("candidate-packet-drift")
+    try:
+        review = _materialize(json.loads(received_review.decode("utf-8", errors="strict"),
+            object_pairs_hook=_JSONObject, parse_int=_IntegerToken,
+            parse_float=_FloatToken, parse_constant=_FloatToken))
+    except (UnicodeError, ValueError, RecursionError) as exc:
+        raise PolicyInputError("received-review-json") from exc
+    review = _exact_object(review, ("packetId", "decisions", "removalCondition"), "received-review")
+    if review["packetId"] != packet_id:
+        raise PolicyInputError("received-review-packet-mismatch")
+    decisions = review["decisions"]
+    if type(decisions) is not list or not decisions:
+        raise PolicyInputError("received-review-decisions")
+    first = _exact_object(decisions[0], ("id", "verdict", "reason"), "candidate-verdict")
+    review_sha = hashlib.sha256(received_review).hexdigest()
+    # Root supplies the actual host result identity, never an invented label.
+    # One result+packet cannot regrant after revocation; a genuinely new result
+    # can express a new decision without changing its reviewed content/reasons.
+    receiving_reference = _require_text(receiving_reference)
+    record_id = "review-" + hashlib.sha256(C([receiving_reference, packet_id])).hexdigest()
+    body = dict(packet_body, id=record_id, revision=1, previousRecordSha256=None,
+        state="active", reason=_require_text(first["reason"], "candidate-verdict-reason"),
+        removalCondition=_require_text(review["removalCondition"], "record-removal-condition"),
+        authorization={
+            "reviewArtifact": {"reference": _require_text(review_artifact_reference), "sha256": review_sha},
+            "rootReceivingReference": _require_text(receiving_reference),
+            "supportingArtifacts": [{"reference": "candidate-packet:" + packet_id,
+                                      "sha256": hashlib.sha256(C(packet)).hexdigest()}],
+        }, revocation=None)
+    prepared = prepare_candidate_review(body, decisions)
+    repository = prepared["repository"]
+    snapshot, decoded, _selection = _load_policy_change_state(trusted_origin, repository)
+    existing = _current_record(decoded, record_id)
+    # No retry with newer preimages: concurrent changes retain existing refusal.
+    return promote_decision(trusted_origin, repository, prepared,
+        expected_document_sha256=_actual_document_sha(snapshot),
+        expected_record_sha256=existing["recordSha256"] if existing is not None else None,
+        apply=apply)

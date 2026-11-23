@@ -1093,7 +1093,6 @@ POST_MATERIALIZATION_WRITER_IDS = {
     "native-role",
     "provider-doc",
     "agents-mode",
-    "claude-main-settings",
     "retired-reclaim",
 }
 POST_MATERIALIZATION_ARTIFACT_CLASSES = {
@@ -1105,7 +1104,6 @@ POST_MATERIALIZATION_ARTIFACT_CLASSES = {
     "native-role",
     "provider-doc",
     "agents-mode",
-    "claude-main-settings",
     "retired-reclaim",
 }
 
@@ -3599,7 +3597,6 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
         "native-role": "native-role",
         "provider-doc": "provider-doc",
         "agents-mode": "agents-mode",
-        "claude-main-settings": "claude-main-settings",
         "retired-reclaim": "retired-reclaim",
     }
     published = False
@@ -3761,14 +3758,6 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
 
     monkeypatch.setattr(installer, "_normalize_agents_mode", agents_mode)
 
-    original_settings = installer._merge_claude_main_agent_settings
-
-    def settings(root, target, delegation_mode, dry_run, **kwargs):
-        original_settings(root, target, delegation_mode, dry_run, **kwargs)
-        emit("claude-main-settings", target)
-
-    monkeypatch.setattr(installer, "_merge_claude_main_agent_settings", settings)
-
     original_reclaim = installer._reclaim_retired
 
     def reclaim(target_root, manifest, dry_run, **kwargs):
@@ -3788,6 +3777,7 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
 
     monkeypatch.setattr(installer, "_finalize_canonical_lead_receipt", receipt)
 
+    monkeypatch.setenv("CODEX_BIN", codex_hook_host_env({}, ROOT)["CODEX_BIN"])
     for provider in ("codex", "claude"):
         published = False
         run_observed.append([])

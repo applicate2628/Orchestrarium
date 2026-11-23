@@ -31,7 +31,7 @@ class DirectoryProbeSettlementTests(unittest.TestCase):
                      if isinstance(node, ast.FunctionDef) and node.name in names]
         assert {node.name for node in cls.nodes} == names
 
-    def invoke(self, *, primary=None, cleanup=None, posix_hold=False):
+    def invoke(self, *, primary=None, cleanup=None, unsupported_cleanup=False):
         # Every filesystem participant is a closed in-memory double. Only the
         # extracted owner and diagnostic declarations run, not installer imports.
         events = self.events = []
@@ -95,7 +95,7 @@ class DirectoryProbeSettlementTests(unittest.TestCase):
 
             def _dispose_image(self, path, state):
                 events.append("dispose")
-                if posix_hold:
+                if unsupported_cleanup:
                     scope["_require_transaction_disposal_backend"]()
                 if cleanup is not None:
                     raise cleanup
@@ -115,7 +115,7 @@ class DirectoryProbeSettlementTests(unittest.TestCase):
         scope = {
             "Path": InertPath,
             "tempfile": SimpleNamespace(mkdtemp=acquire),
-            "os": SimpleNamespace(name="posix" if posix_hold else "nt"),
+            "os": SimpleNamespace(name="unsupported-platform" if unsupported_cleanup else "nt"),
             "_CreateOnlyMutablePath": InertOwner,
             "_InstallTransaction": InertTransaction,
             "_InstallFailure": DIAGNOSTICS._InstallFailure,
@@ -184,11 +184,12 @@ class DirectoryProbeSettlementTests(unittest.TestCase):
                          ["acquire", "observe", "mkdir", "observe", "move",
                           "mkdir", "observe", "move", "dispose"])
 
-    def test_posix_refusal_remains_cleanup_failure_not_backend_admission(self):
+    def test_unsupported_disposal_remains_cleanup_failure_not_backend_admission(self):
         primary = FalseError("primary")
         with self.assertRaises(DIAGNOSTICS._InstallFailure) as caught:
-            self.invoke(primary=primary, posix_hold=True)
+            self.invoke(primary=primary, unsupported_cleanup=True)
         failure = caught.exception
+        self.assertEqual(failure.stable_id, "E_ROLLBACK_SETTLEMENT_FAILED")
         self.assertIs(failure.cause, primary)
         self.assertIs(failure.__cause__, primary)
         self.assertIsInstance(failure.__context__, ValueError)

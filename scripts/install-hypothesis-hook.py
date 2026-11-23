@@ -445,6 +445,20 @@ def write_atomic(target: Path, data: dict[str, Any]) -> None:
         raise
 
 
+class CodexHookSlotShift(ValueError):
+    """The requested edit would move an untouched native trust key."""
+
+    stable_id = "E_CODEX_HOOK_SLOT_SHIFT"
+
+
+def _check_retained_slot(platform: str, original: int, planned: int) -> None:
+    if platform == "codex" and original != planned:
+        raise CodexHookSlotShift(
+            f"{CodexHookSlotShift.stable_id}: change would move another Codex hook; "
+            "registration was not rewritten"
+        )
+
+
 def install(
     data: dict[str, Any],
     new_entry: dict[str, Any],
@@ -503,6 +517,7 @@ def install(
             elif position in owned_positions:
                 removed_owned = True
             else:
+                _check_retained_slot(platform, handler_index, len(handlers))
                 handlers.append(handler)
         if removed_owned and not handlers and platform != "codex" and set(group) <= {"hooks", "matcher"}:
             continue
@@ -540,40 +555,42 @@ def remove(
     indices = find_our_entry_indices(hook_entries, script_marker, platform, host_os, owner=owner, managed_targets=managed_targets)
     if not indices:
         return False
-    changed = False
+    updated = []
     expected_handler = expected_entry["hooks"][0] if expected_entry is not None else None
-    # Delete from the end so earlier indices stay valid.
+    # Plan every edited group before publishing any of them.
     for idx in reversed(indices):
         entry = hook_entries[idx]
-        if expected_entry is None:
-            retained = [handler for handler in entry["hooks"]
-                        if not (isinstance(handler, dict) and _hook_contains_marker(
-                            handler, script_marker, platform, host_os, owner=owner, managed_targets=managed_targets))]
-        elif entry.get("matcher") != expected_entry.get("matcher"):
+        if expected_entry is not None and entry.get("matcher") != expected_entry.get("matcher"):
             continue
-        else:
-            retained = [
-                handler
-                for handler in entry["hooks"]
-                if not (
-                    isinstance(handler, dict)
-                    and all(handler.get(key) == expected_handler.get(key) for key in ("type", "command", "args"))
-                    and not set(handler).difference({"type", "command", "args", "statusMessage"})
+        retained = []
+        for handler_index, handler in enumerate(entry["hooks"]):
+            if isinstance(handler, dict):
+                matched = (
+                    _hook_contains_marker(
+                        handler, script_marker, platform, host_os, owner=owner, managed_targets=managed_targets
+                    ) if expected_handler is None else (
+                        all(handler.get(key) == expected_handler.get(key) for key in ("type", "command", "args"))
+                        and not set(handler).difference({"type", "command", "args", "statusMessage"})
+                    )
                 )
-            ]
-        if len(retained) == len(entry["hooks"]):
-            continue
+                if matched:
+                    continue
+            _check_retained_slot(platform, handler_index, len(retained))
+            retained.append(handler)
+        if len(retained) != len(entry["hooks"]):
+            updated.append((idx, retained))
+    for idx, retained in updated:
+        entry = hook_entries[idx]
         entry["hooks"] = retained
         if expected_entry is None and not retained and platform != "codex" and set(entry) <= {"hooks", "matcher"}:
             del hook_entries[idx]
-        changed = True
     # Marker-only removal may empty event containers. Exact removal retains
     # valid empty groups: no runnable handler, but later native group slots stay stable.
     if not hook_entries:
         del hooks[hook_event]
     if not hooks:
         del data["hooks"]
-    return changed
+    return bool(updated)
 
 
 def main() -> int:

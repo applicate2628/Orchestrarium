@@ -100,7 +100,11 @@ def test_false_event_validity_cannot_settle_revise_or_register_terminal(tmp_path
     assert errors == []
     # Caller booleans can restrict an issued result, never create authority.
     refused: list[str] = []
-    assert validator.validate_closure(events, refused, event_validity=[True] * 3) == ([], [])
+    closed_relations = {"revise-001": "stale-closer"}
+    assert validator.validate_closure(
+        events, refused, event_validity=[True] * 3, closed_relations_out=closed_relations
+    ) == ([], [])
+    assert closed_relations == {}
     assert any("EFFECTIVE-VIEW-BYPASS" in error for error in refused)
     assert ledger.read_bytes() == before
 
@@ -113,12 +117,17 @@ def test_invalid_launch_does_not_enter_authority_reduction():
         "launchRunId": "launch-001", "status": "completed", "gate": "PASS",
     }
     errors: list[str] = []
+    closed_relations = {"revise-001": "stale-closer"}
 
-    _open_revise, open_launches = validator.validate_closure(
-        [launch, terminal], errors, event_validity=[False, True]
+    open_revise, open_launches = validator.validate_closure(
+        [launch, terminal], errors, event_validity=[False, True],
+        closed_relations_out=closed_relations,
     )
 
-    assert open_launches == []
+    assert errors == ["WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: "
+                      "launch-bound current authority requires an issued context"]
+    assert (open_revise, open_launches) == ([], [])
+    assert closed_relations == {}
 
 
 def valid_status() -> str:
@@ -309,6 +318,7 @@ def _goal_fixture(tmp_path: Path, *, criterion_ids=("alpha", "omega", "useful"),
     return checker, owner, roots, goal, write_goal, close_member
 
 
+@unittest.skipUnless(os.name == "nt", "requires Windows native creator-bound flat close")
 class TestLegacyFlatGoalConsumer(unittest.TestCase):
     def setUp(self):
         # Ordinary import reuses the one real producer module/class already
@@ -1994,6 +2004,34 @@ def test_active_only_keeps_periodic_archive_failures_out_of_publication_scope(
     assert publication.returncode == 0, publication.stdout
     assert "(ARCHIVED)" not in publication.stdout
     assert "archive obligation scan skipped" in publication.stdout
+
+
+def test_active_failure_summary_reports_only_selected_scope(tmp_path: Path) -> None:
+    item = write_valid_item(tmp_path)
+    (item / "agent-runs.jsonl").unlink()
+    active = run_checker(tmp_path, "--active-only")
+    full = run_checker(tmp_path)
+    for result, scope in (
+        (active, "in active-only audit"),
+        (full, "across active+archived work-items"),
+    ):
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert f"RESULT: FAIL (1 failures {scope})" in result.stdout
+
+
+
+def test_active_only_summary_preserves_global_archive_lifecycle_failures(tmp_path: Path) -> None:
+    (tmp_path / "work-items" / "active").mkdir(parents=True)
+    unbound = tmp_path / "work-items" / "archive" / "2026-07" / "unbound-fixture"
+    unbound.mkdir(parents=True)
+    (unbound / "note.md").write_text("Synthetic unbound archive fixture.\n", encoding="utf-8")
+
+    result = run_checker(tmp_path, "--active-only")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "FAIL category lifecycle: WI-ARCHIVE-ENTITY-UNBOUND" in result.stdout
+    assert "RESULT: FAIL (1 failures in active-only audit)" in result.stdout
+
 
 
 def test_publication_preflight_ignores_unrelated_active_lifecycle_state(

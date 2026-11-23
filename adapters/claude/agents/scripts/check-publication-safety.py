@@ -5,15 +5,21 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
-from collections import Counter
+from collections import Counter, OrderedDict
+from copy import deepcopy
 from enum import Enum
+from functools import lru_cache
 import hashlib
+from itertools import chain, zip_longest
 import importlib.util
 import json
+import math
 import os
 import re
 import secrets
 import shutil
+import sqlite3
+from contextlib import asynccontextmanager, closing, contextmanager, nullcontext
 import subprocess
 import sys
 import threading
@@ -216,6 +222,11 @@ _SCANNER_EXEMPT_PATHS = frozenset({
     "src.codex/skills/lead/scripts/check-publication-safety.py",
     "adapters/claude/agents/scripts/check-publication-safety.py",
 })
+# Selected Git history retains the pre-relocation scanner owner. This grants
+# only its existing catalog-line treatment, never a current runtime source.
+_HISTORICAL_SCANNER_SOURCE_PATHS = frozenset({
+    "src.claude/agents/scripts/check-publication-safety.py",
+})
 _SIMPLE_RULES = (
     (True, re.compile(r"AKIA[0-9A-Z]{16}")),
     (True, re.compile(r"ghp_[A-Za-z0-9]{36}")),
@@ -240,6 +251,41 @@ _BINARY_ASCII_RUN = re.compile(rb"[\x09\x20-\x7e]+")
 _IDENTIFIER_PREFIX = re.compile(
     r"[A-Za-z_][A-Za-z0-9_]*(?:(?:::|[-._:/\\])[A-Za-z_][A-Za-z0-9_]*)*(?:::|[-._:/\\])?$"
 )
+def _identifier_prefix_match(prefix: str) -> re.Match[str] | None:
+    """Find the anchored identifier suffix without retrying every start offset.
+
+    The suffix grammar is identifier (separator identifier)* separator?, with
+    ASCII identifier starts and one-character separators or a double colon.
+    Walk that grammar backwards once, then use the original regex at the one
+    proved start to preserve its Match object and offsets. Python's dollar
+    anchor also accepts the position immediately before one final newline.
+    """
+    end = len(prefix) - int(prefix.endswith("\n"))
+    separators = "-.:/\\"
+    if end and prefix[end - 1] in separators:
+        end -= 1
+        if prefix[end] == ":" and end and prefix[end - 1] == ":":
+            end -= 1
+    candidate = None
+    while end:
+        component_end = end
+        while end and (prefix[end - 1] == "_" or "a" <= prefix[end - 1] <= "z"
+                       or "A" <= prefix[end - 1] <= "Z" or "0" <= prefix[end - 1] <= "9"):
+            end -= 1
+        start = end
+        while start < component_end and "0" <= prefix[start] <= "9":
+            start += 1
+        if start == component_end:
+            break
+        candidate = start
+        if start != end or not end or prefix[end - 1] not in separators:
+            break
+        end -= 1
+        if prefix[end] == ":" and end and prefix[end - 1] == ":":
+            end -= 1
+    return _IDENTIFIER_PREFIX.match(prefix, candidate) if candidate is not None else None
+
+
 _VALUE = r"[A-Za-z0-9_./+=-]"
 _DIGIT_SHAPE = rf"(?:{_VALUE}{{5,}}[0-9]{_VALUE}*|{_VALUE}*[0-9]{_VALUE}{{5,}})"
 _QUOTED = rf"""["'`!@#$%^&*?|](?:{_VALUE}{{12,}}|{_DIGIT_SHAPE})["'`!@#$%^&*?|]"""
@@ -297,7 +343,6 @@ _VALUE_RULES = (("token", _CONCATENATED_CREDENTIAL_TOKEN),) + tuple(
     for family, keyword, title, upper in _KEYWORDS
 )
 _VALUE_PATTERNS = tuple(pattern for _family, pattern in _VALUE_RULES)
-_VALUE_ASSIGNMENT_HINT = re.compile(r"(?:password|secret|token|key)\s*[:=]")
 _IDENTIFIER_COMPONENT = re.compile(
     r"[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+|[A-Z]+|[0-9]+"
 )
@@ -311,22 +356,31 @@ _SCANNER_REGEX_CATALOG_LINE = re.compile(
 _MAX_COMMITS = 10_000
 _MAX_OBJECTS = 100_000
 _MAX_BLOBS = 50_000
-_MAX_SUBJECTS = 1_000_000
-_MAX_BLOB_PATHS = 50_000
 _MAX_PATH_BYTES = 4_096
 _MAX_MESSAGE_BYTES = 1_048_576
-_MAX_AGGREGATE_MESSAGE_BYTES = 16_777_216
 _MAX_COMMIT_TREE_BYTES = 1_048_576
-_MAX_TREE_CACHE_BYTES = 64 * 1_048_576
+_TREE_CACHE_BYTES = 64 * 1_048_576
 _MAX_BLOB_BYTES = 64 * 1_048_576
+_MAX_REVIEW_CAPTURE_BYTES = 64 * 1_048_576
+# Blob payloads are not retained across acquisition: the per-object reader
+# bound limits resident payload memory, while aggregate_bytes remains evidence.
 _MAX_LINE_BYTES = 8 * 1_048_576
 _MAX_PARENT_GRAPH_BYTES = 16 * 1_048_576
 _MAX_FINDINGS = 32
 _READ_CHUNK_BYTES = 64 * 1_024
-# Full baseline scans measured 485–530 seconds; retain a finite 15-minute ceiling.
-_SCAN_DEADLINE_SECONDS = 900.0
-_MAX_TREE_VISITS = _MAX_SUBJECTS
+def _publication_scan_budget_seconds() -> float:
+    """Explicit, bounded per-process budget; never changes scan coverage."""
+    value = os.environ.get("ORCHE_PUBLICATION_SCAN_SECONDS")
+    if value is None:
+        return 240.0
+    if not re.fullmatch(r"[1-9][0-9]{2,3}", value) or not 240 <= int(value) <= 3600:
+        raise ValueError("invalid publication scan budget (expected 240..3600 seconds)")
+    return float(value)
+
+
+_SCAN_DEADLINE_SECONDS = _publication_scan_budget_seconds()
 _MAX_TREE_FRONTIER = _MAX_OBJECTS
+_TREE_FRONTIER_PAGE = 32
 _MAX_TREE_CACHE_ENTRIES = _MAX_OBJECTS
 # Budget base refnames and optional tag peels within the parent-graph byte cap.
 _MAX_REMOTE_REFS = _MAX_PARENT_GRAPH_BYTES // (2 * _MAX_PATH_BYTES)
@@ -412,6 +466,9 @@ class RangeSelection:
     object_format: GitObjectFormat = _SHA1_OBJECT_FORMAT
     destination_oid: str | None = None
     expected_parents: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    destination_endpoint_sha256: str | None = None
+    indexed_parent_graph: bool = False
+    prior_receiver_roots: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -434,17 +491,30 @@ class NativePushRequest:
     repository_observation_sha256: str
     updates: tuple[NativePushUpdate, ...]
     receiver_inventory: bool = False
+    receiver_scope: object | None = None
+
+
+@dataclass(frozen=True)
+class _IndexedObjectSelection:
+    """Binding to the native scan's ordered, exclusive index; not coverage proof."""
+    count: int
+    order: str
+
+    def __len__(self) -> int:
+        return self.count
 
 
 @dataclass(frozen=True)
 class NativePushSelection:
     request: NativePushRequest
-    expected_oids: tuple[str, ...]
-    object_oids: tuple[str, ...]
+    expected_oids: tuple[str, ...] | _SealedRows
+    object_oids: tuple[str, ...] | _IndexedObjectSelection
     object_format: GitObjectFormat
     roots: tuple[str, ...]
     expected_parents: tuple[tuple[str, tuple[str, ...]], ...] = ()
     tag_receiver_inventory: tuple[RemoteRefTip, ...] | None = None
+    indexed_parent_graph: bool = False
+    prior_receiver_roots: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -523,10 +593,90 @@ class CoverageProof:
     coverage_digest: str
 
 
+@dataclass(frozen=True)
+class _ReceiptCoverage:
+    """In-process evidence from the live index, never accepted from a report."""
+    expected_count: int
+    selection_set: str
+    coverage_digest: str
+    selection_order: str
+
+
+def _coverage_digest(scanned: Iterable[str]) -> str:
+    digest = hashlib.sha256(b"publication-safety-coverage-v1\0")
+    for position, oid in enumerate(scanned):
+        if position:
+            digest.update(b"\0")
+        digest.update(oid.encode("ascii"))
+    return digest.hexdigest()
+
+
 class CoverageEvent(str, Enum):
     REQUESTED = "requested"
     ACQUIRED = "acquired"
     SCANNED = "scanned"
+
+
+class _ScanInactivity:
+    """Scanner-owned quiet deadline; expired work cannot revive it."""
+    def __init__(self, initial_deadline: float, interval: float, *, clock=None) -> None:
+        self._deadline = initial_deadline
+        self.interval = interval
+        self.clock = clock or time.monotonic
+
+    def remaining(self) -> float:
+        return self._deadline - self.clock()
+
+    def observe_unit(self) -> float | None:
+        now = self.clock()
+        if now >= self._deadline:
+            return None
+        self._deadline = now + self.interval
+        return now
+
+
+class _VerifiedWorkPhase:
+    """Report accepted semantic units, never a heartbeat or a receipt."""
+    def __init__(self, name: str, *, enabled: bool = True, budget=None) -> None:
+        self._name = name
+        self._emit = globals().get("__injected_verified_completion__") if enabled else None
+        self._budget = budget if isinstance(budget, _ScanInactivity) and enabled else None
+        self._count = 0
+        self._reported = 0
+        self._last_report_at = None
+
+    def step(self) -> None:
+        if self._emit is None and self._budget is None:
+            return
+        accepted_at = self._budget.observe_unit() if self._budget is not None else None
+        if self._budget is not None and accepted_at is None:
+            return
+        self._count += 1
+        due = (self._budget is not None and accepted_at is not None
+               and self._last_report_at is not None
+               and accepted_at - self._last_report_at >= self._budget.interval / 4)
+        if self._count == 1 or self._count % 128 == 0 or due:
+            self.finish()
+
+    def observed(self, store):
+        if self._emit is None and self._budget is None:
+            return store
+
+        def add(*args):
+            accepted = store(*args)
+            if accepted:
+                self.step()
+            return accepted
+
+        return add
+
+    def finish(self) -> None:
+        if (self._emit is not None and self._count > self._reported
+                and (self._budget is None or self._budget.remaining() > 0)):
+            self._emit(self._name, self._count)
+            self._reported = self._count
+            if self._budget is not None:
+                self._last_report_at = self._budget.clock()
 
 
 class CoverageRecorder:
@@ -534,33 +684,55 @@ class CoverageRecorder:
 
     def __init__(
         self,
-        expected_oids: Iterable[str],
+        expected_oids: Iterable[str] | _IndexedObjectSelection,
         observer: Callable[[CoverageEvent, str], None] | None = None,
         fault_port: "CoverageFaultPort | None" = None,
         *,
         allow_empty: bool = False,
+        history_index: "_HistoryIndex | None" = None,
+        receipt_coverage: str | None = None,
     ) -> None:
-        self.expected_oids = tuple(expected_oids)
-        self._events: dict[CoverageEvent, list[str]] = {
-            event: [] for event in CoverageEvent
-        }
+        if isinstance(expected_oids, _IndexedObjectSelection):
+            if history_index is None or receipt_coverage != "objects":
+                raise ValueError("indexed object selection requires compact native coverage")
+            self.expected_oids = expected_oids
+        else:
+            self.expected_oids = tuple(expected_oids)
+        self._receipt_coverage = receipt_coverage
+        self._history_index = history_index
+        self._events = {event: [] for event in CoverageEvent} if history_index is None else None
         self._observer = observer
         self._fault_port = fault_port
         self._allow_empty = allow_empty
 
+    @property
+    def compact_native_receipt(self) -> bool:
+        return self._history_index is not None and self._receipt_coverage == "objects"
+
     def record(self, event: CoverageEvent, oid: str) -> None:
         rows = ((event, oid),) if self._fault_port is None else self._fault_port.transform(event, oid)
         for observed_event, observed_oid in rows:
-            self._events[observed_event].append(observed_oid)
+            if self._history_index is None:
+                self._events[observed_event].append(observed_oid)
+            else:
+                self._history_index.record_coverage(observed_event, observed_oid)
             if self._observer is not None:
                 self._observer(observed_event, observed_oid)
 
-    def proof(self) -> CoverageProof | Refusal:
+    def proof(self) -> CoverageProof | _ReceiptCoverage | Refusal:
+        if self._receipt_coverage and self._history_index is not None:
+            return self._history_index.seal_receipt_coverage(
+                self.expected_oids, commits=self._receipt_coverage == "commits",
+            )
+
+        def events(stage: CoverageEvent) -> Iterable[str]:
+            if self._history_index is None:
+                return self._events[stage]
+            return self._history_index.coverage_events(stage)
+
         return _build_coverage_proof(
-            self.expected_oids,
-            self._events[CoverageEvent.REQUESTED],
-            self._events[CoverageEvent.ACQUIRED],
-            self._events[CoverageEvent.SCANNED],
+            self.expected_oids, events(CoverageEvent.REQUESTED),
+            events(CoverageEvent.ACQUIRED), events(CoverageEvent.SCANNED),
             allow_empty=self._allow_empty,
         )
 
@@ -663,7 +835,6 @@ ReapCertificate = ReaderReapCertificate
 @dataclass(frozen=True)
 class DecodedMessage:
     text: str
-    raw_size: int
 
 
 @dataclass(frozen=True)
@@ -703,21 +874,35 @@ class RangeReceiptV3:
 
 
 @dataclass(frozen=True)
+class _SealedRows:
+    count: int
+    digest: str
+
+    def __len__(self) -> int:
+        return self.count
+
+
+@dataclass(frozen=True)
+class _SealedOids(_SealedRows):
+    singleton: str | None
+
+
+@dataclass(frozen=True)
 class HistoryProof:
-    commit_ids: tuple[str, ...]
-    object_ids: tuple[str, ...]
-    blob_ids: tuple[str, ...]
+    commit_ids: tuple[str, ...] | _SealedRows
+    object_ids: tuple[str, ...] | _SealedOids
+    blob_ids: tuple[str, ...] | _SealedOids
     blob_bytes: int
     text_blobs: int
     binary_blobs: int
-    subjects: tuple[tuple[str, bytes, str], ...]
-    paths: tuple[tuple[str, bytes], ...]
+    subjects: _SealedRows | tuple[tuple[str, bytes, str], ...]
+    paths: _SealedRows | tuple[tuple[str, bytes], ...]
     commit_set: str
     object_set: str
     blob_set: str
     subject_set: str
     path_set: str
-    tag_ids: tuple[str, ...] = ()
+    tag_ids: tuple[str, ...] | _SealedOids = ()
     direct_tag_commit: str | None = None
 
 
@@ -729,7 +914,7 @@ class ScanOutcome:
     findings: tuple[Finding, ...] = ()
     refusal: Refusal | None = None
     selection: RangeSelection | None = None
-    coverage: CoverageProof | None = None
+    coverage: CoverageProof | _ReceiptCoverage | None = None
     reap_certificate: ReaderReapCertificate | None = None
     history: HistoryProof | None = None
     review: "ReviewedEvidence | None" = None
@@ -930,16 +1115,30 @@ def _run_range_git(
     )
 
 
+async def _await_owned_task(task):
+    """Keep ownership until the task settles, retaining the first cancellation."""
+    cancelled: asyncio.CancelledError | None = None
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError as exc:
+            if cancelled is None:
+                cancelled = exc
+    return task.result(), cancelled
+
+
 async def _acquire_posix_process_group_owner() -> PosixProcessGroupOwnerV1:
     task = asyncio.create_task(
         asyncio.to_thread(PosixProcessGroupOwnerV1.acquire)
     )
-    try:
-        return await asyncio.shield(task)
-    except asyncio.CancelledError:
-        owner = await task
-        await asyncio.to_thread(owner.close)
-        raise
+    owner, cancelled = await _await_owned_task(task)
+    if cancelled is None:
+        return owner
+    # Cancelling a to_thread future cannot stop acquisition or close. Keep
+    # their results owned even if the caller cancels cleanup again.
+    close_task = asyncio.create_task(asyncio.to_thread(owner.close))
+    await _await_owned_task(close_task)
+    raise cancelled
 
 
 class _AsyncioDirectProcessObservation:
@@ -1226,19 +1425,58 @@ async def _create_owned_async_process(
     process_group_owner = await _acquire_posix_process_group_owner()
     process_kwargs = process_group_owner.popen_kwargs
     try:
-        process = await asyncio.create_subprocess_exec(
+        creation = asyncio.create_task(asyncio.create_subprocess_exec(
             *argv, **kwargs, **process_kwargs
-        )
+        ))
+        process, cancelled = await _await_owned_task(creation)
         process_group_owner.bind_process_group(process.pid)
         direct_observation = _AsyncioDirectProcessObservation(process)
-        return process, process_group_owner, direct_observation
     except BaseException:
         if process_group_owner is not None:
             try:
-                await asyncio.to_thread(process_group_owner.close)
+                close_task = asyncio.create_task(asyncio.to_thread(process_group_owner.close))
+                await _await_owned_task(close_task)
             except PosixProcessGroupError:
                 pass
         raise
+    if cancelled is not None:
+        settled, _ = await _await_owned_task(asyncio.create_task(_settle_owned_async_process(
+            process, process_group_owner, direct_observation,
+            drain_readers=(process.stdout, process.stderr),
+        )))
+        if not settled:
+            raise RuntimeError("cancelled subprocess creation did not settle")
+        raise cancelled
+    return process, process_group_owner, direct_observation
+
+
+@asynccontextmanager
+async def _owned_matcher_exchange(verified_executable, wire_factory, rules, deadline):
+    """Use the same process and pipe owner as Git selection and acquisition."""
+    process, owner, observation = await _create_owned_async_process(
+        (os.fspath(verified_executable),),
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    try:
+        if process.stdin is None or process.stdout is None:
+            raise ValueError("matcher pipes unavailable")
+        exchange = wire_factory(process.stdout, process.stdin, rules)
+        yield exchange
+        process.stdin.close()
+        finish_by = _deadline_snapshot(deadline, asyncio.get_running_loop().time)
+        async with asyncio.timeout_at(finish_by):
+            await process.stdin.wait_closed()
+            if not await exchange.eof(finish_by):
+                raise ValueError("unexpected matcher output after last batch")
+            if await _wait_owned_async_direct(
+                process, observation, max(0.0, finish_by - asyncio.get_running_loop().time()),
+            ) != 0:
+                raise ValueError("matcher did not exit successfully")
+    finally:
+        if not await _settle_owned_async_process(process, owner, observation):
+            raise ValueError("matcher process did not settle")
 
 
 async def _drain_owned_async_reader(
@@ -1323,34 +1561,31 @@ async def _settle_owned_async_process(
     if process_group_owner is None or direct_observation is None:
         return False
     remaining = max(0.000001, cleanup_deadline - time.monotonic())
-    settle_task = asyncio.create_task(
-        asyncio.to_thread(
-            process_group_owner.settle,
-            remaining,
-            direct_process=direct_observation,
+
+    async def finish_posix() -> bool:
+        try:
+            closure = await asyncio.to_thread(
+                process_group_owner.settle,
+                remaining,
+                direct_process=direct_observation,
+            )
+        except PosixProcessGroupError:
+            return False
+        drained = True
+        for reader in drain_readers:
+            if not await _drain_owned_async_reader(reader, cleanup_deadline):
+                drained = False
+        observed_returncode = direct_observation.poll()
+        return (
+            closure.complete
+            and closure.lock_released
+            and observed_returncode is not None
+            and process.returncode == observed_returncode
+            and direct_observation.task.done()
+            and drained
         )
-    )
-    cancelled: asyncio.CancelledError | None = None
-    try:
-        closure = await asyncio.shield(settle_task)
-    except asyncio.CancelledError as exc:
-        cancelled = exc
-        closure = await settle_task
-    except PosixProcessGroupError:
-        return False
-    drained = True
-    for reader in drain_readers:
-        if not await _drain_owned_async_reader(reader, cleanup_deadline):
-            drained = False
-    observed_returncode = direct_observation.poll()
-    complete = (
-        closure.complete
-        and closure.lock_released
-        and observed_returncode is not None
-        and process.returncode == observed_returncode
-        and direct_observation.task.done()
-        and drained
-    )
+
+    complete, cancelled = await _await_owned_task(asyncio.create_task(finish_posix()))
     if cancelled is not None:
         raise cancelled
     return complete
@@ -1379,6 +1614,8 @@ def _manual_path_finder(script: Path):
         raise RuntimeError("cannot compose path owner") from exc
     if not callable(finder):
         raise RuntimeError("cannot compose path owner")
+    finder._review_occurrences = namespace.get("find_machine_path_occurrences")
+    finder._review_source_sha256 = hashlib.sha256(source).hexdigest()
     return finder
 
 
@@ -1432,7 +1669,12 @@ def _text_lines(text: str) -> Iterator[tuple[int, int, str]]:
 
 
 def _selected_text_lines(text: str, path: str, subject_kind: str) -> Iterator[tuple[int, int, str]]:
-    scanner = _is_source_text_subject(subject_kind) and path.replace("\\", "/") in _SCANNER_EXEMPT_PATHS
+    source_path = path.replace("\\", "/")
+    scanner = _is_source_text_subject(subject_kind) and (
+        source_path in _SCANNER_EXEMPT_PATHS
+        or (subject_kind in {"history-blob", "git-object-blob"}
+            and source_path in _HISTORICAL_SCANNER_SOURCE_PATHS)
+    )
     for number, offset, line in _text_lines(text):
         if not scanner or not _intentional_scanner_line(line):
             yield number, offset, line
@@ -1457,32 +1699,38 @@ def _line_observations(
     subject_kind: str,
     *,
     binary: bool = False,
+    raw_matches: Iterable[tuple[int, re.Match[str]]] | None = None,
 ) -> Iterator[_TextObservation]:
+    if raw_matches is None:
+        raw_matches = _python_rule_matches(line, binary=binary)
+    simple_count = len(_SIMPLE_RULES)
+    for key, match in raw_matches:
+        if key < simple_count:
+            _, pattern = _SIMPLE_RULES[key]
+            yield _TextObservation(line, line_number, line_start, None, key, pattern, match)
+            continue
+        index = key - simple_count
+        family, pattern = _VALUE_RULES[index]
+        # Callable syntax is meaningful in blob text. Retain the legacy
+        # commit-message contract without granting it to new metadata.
+        if (_is_source_text_subject(subject_kind) or subject_kind == "commit-message") and _is_callable_rhs(line, match):
+            continue
+        if binary:
+            if _is_public_key_token_match(line, family, match):
+                continue
+        elif _is_annotated_public_token_match(line, family, match, subject_kind):
+            continue
+        yield _TextObservation(line, line_number, line_start, family, index, pattern, match)
+
+
+def _python_rule_matches(line: str, *, binary: bool) -> Iterator[tuple[int, re.Match[str]]]:
     for index, (binary_rule, pattern) in enumerate(_SIMPLE_RULES):
-        if binary and not binary_rule:
-            continue
+        if not binary or binary_rule:
+            for match in _matching_starts(pattern, line):
+                yield index, match
+    for index, (_, pattern) in enumerate(_VALUE_RULES, len(_SIMPLE_RULES)):
         for match in _matching_starts(pattern, line):
-            yield _TextObservation(line, line_number, line_start, None, index, pattern, match)
-    # Every value rule requires its family keyword. ASCII-only prefiltering
-    # preserves Python re's additional Unicode IGNORECASE equivalents.
-    ascii_lower = line.lower() if line.isascii() else None
-    if ascii_lower is not None and _VALUE_ASSIGNMENT_HINT.search(ascii_lower) is None:
-        return
-    for index, (family, pattern) in enumerate(_VALUE_RULES):
-        required = "key" if family == "api-key" else family
-        if ascii_lower is not None and required not in ascii_lower:
-            continue
-        for match in _matching_starts(pattern, line):
-            # Callable syntax is meaningful in blob text. Retain the legacy
-            # commit-message contract without granting it to new metadata.
-            if (_is_source_text_subject(subject_kind) or subject_kind == "commit-message") and _is_callable_rhs(line, match):
-                continue
-            if binary:
-                if _is_public_key_token_match(line, family, match):
-                    continue
-            elif _is_annotated_public_token_match(line, family, match, subject_kind):
-                continue
-            yield _TextObservation(line, line_number, line_start, family, index, pattern, match)
+            yield index, match
 
 
 def _assignment_coordinates(observation: _TextObservation) -> tuple[int, ...] | None:
@@ -1500,7 +1748,7 @@ def _assignment_coordinates(observation: _TextObservation) -> tuple[int, ...] | 
     identifier_end = separator_start
     while identifier_end > match.start() and line[identifier_end - 1].isspace():
         identifier_end -= 1
-    prefix = _IDENTIFIER_PREFIX.search(line[:match.start()])
+    prefix = _identifier_prefix_match(line[:match.start()])
     identifier_start = prefix.start() if prefix is not None else match.start()
     if identifier_end <= identifier_start:
         return None
@@ -1743,15 +1991,79 @@ def _load_review_policy_module():
     return module
 
 
-def detector_definitions(policy_module) -> dict[str, dict]:
+def _machine_path_review_definition(finder, policy_module) -> dict | None:
+    """Meaning comes from the captured classifier, never from a policy record."""
+    source_sha = getattr(finder, "_review_source_sha256", None)
+    if (not callable(getattr(finder, "_review_occurrences", None))
+        or type(source_sha) is not str or re.fullmatch(r"[0-9a-f]{64}", source_sha) is None):
+        return None
+    definition = {
+        "schemaVersion": 1, "ruleId": "machine-path-prefix-v1",
+        "normalFormId": "nf-machine-path-match-v1", "domain": "blob-text-v1",
+        "coordinate": "utf8-original-bytes-v1", "equivalence": "exact-occurrence-v1",
+        "classifierSourceSha256": source_sha,
+        "engine": "canonical-path-owner-occurrences-v1",
+    }
+    return {"definition": definition, "detector": {
+        "ruleId": definition["ruleId"],
+        "meaningSha256": policy_module.H("orchestrarium.publication-review.detector.v1", definition),
+    }}
+
+
+def _machine_path_review_rows(raw: bytes, path: str, subject_kind: str, finder, policy_module,
+                              machine_path_lines: frozenset[int] | None = None) -> tuple[dict, ...] | None:
+    owner = _machine_path_review_definition(finder, policy_module)
+    if owner is None:
+        return None
+    text = raw.decode("utf-8", "strict")
+    boundaries = None
+    rows = []
+    for number, offset, line in _selected_text_lines(text, path, subject_kind):
+        if machine_path_lines is not None and number not in machine_path_lines:
+            continue
+        spans = finder._review_occurrences(line)
+        if type(spans) is not tuple or spans != tuple(sorted(set(spans))):
+            raise RuntimeError("review-path-witness")
+        for span in spans:
+            if (type(span) is not tuple or len(span) != 2 or any(type(x) is not int for x in span)
+                or not 0 <= span[0] < span[1] <= len(line)):
+                raise RuntimeError("review-path-witness")
+        # Classifier stays the coverage owner. A disagreement cannot grant credit.
+        if set(finder(line)) != {line[a:b] for a,b in spans}:
+            raise RuntimeError("review-path-witness")
+        if spans and boundaries is None:
+            _, boundaries = _original_byte_boundaries(raw)
+        for start, end in spans:
+            region = _byte_region(raw, boundaries[offset+start], boundaries[offset+end])
+            candidate = {"normalFormId": "nf-machine-path-match-v1", **region,
+                         "assignment": None,
+                         "contributors": [{"leafId": "machine-path-prefix-v1", "fullMatch": region}]}
+            candidate["occurrenceSha256"] = policy_module.H(
+                "orchestrarium.publication-review.occurrence.v1", {"detector": owner["detector"], **candidate})
+            rows.append({"detector": owner["detector"], "candidate": candidate,
+                         "line": number, "detectorClass": "machine-path"})
+    return tuple(rows)
+
+
+def detector_definitions(policy_module, *, find_machine_paths=None) -> dict[str, dict]:
     definitions, _leaves = _build_detector_catalog(policy_module.H)
-    return {definition["ruleId"]: {
+    result = {definition["ruleId"]: {
         "detector": {"ruleId": definition["ruleId"], "meaningSha256": policy_module.H("orchestrarium.publication-review.detector.v1", definition)},
         "definition": definition,
     } for definition in definitions}
+    finder = find_machine_paths if find_machine_paths is not None else _path_finder(Path(__file__))
+    path_owner = _machine_path_review_definition(finder, policy_module)
+    if path_owner is not None:
+        result[path_owner["detector"]["ruleId"]] = path_owner
+    return result
 
 
 def resolve_review_detector(diagnostic_class: str, *, policy_module) -> dict:
+    if diagnostic_class == "machine-path":
+        owner = detector_definitions(policy_module).get("machine-path-prefix-v1")
+        if owner is None:
+            raise ValueError("unknown-detector")
+        return owner["detector"]
     _definitions, leaves = _build_detector_catalog(policy_module.H)
     for index in range(len(_SIMPLE_RULES)):
         if diagnostic_class == f"simple-{index + 1}":
@@ -1763,7 +2075,8 @@ def resolve_review_detector(diagnostic_class: str, *, policy_module) -> dict:
 
 
 def analyze_review_candidates(raw: bytes, path: bytes, *, subject_kind: str, policy_module,
-                              clean_lines: _CleanLineAnalysis | None = None) -> dict:
+                              clean_lines: _CleanLineAnalysis | None = None,
+                              find_machine_paths=None, machine_path_lines=None) -> dict:
     if not isinstance(raw, bytes) or not isinstance(path, bytes) or not path or b"\0" in path:
         return {"complete": False, "candidates": (), "unresolved": (),
                 "refusal": _refusal("PS-INPUT-REFUSAL", "review-evaluation")}
@@ -1771,6 +2084,10 @@ def analyze_review_candidates(raw: bytes, path: bytes, *, subject_kind: str, pol
     try:
         rows = _analyze_review_candidates(raw, decoded_path, subject_kind=subject_kind,
             digest=policy_module.H, canonical=policy_module.C, clean_lines=clean_lines)
+        finder = find_machine_paths if find_machine_paths is not None else _path_finder(Path(__file__))
+        path_rows = _machine_path_review_rows(raw, decoded_path, subject_kind, finder, policy_module, machine_path_lines)
+        if path_rows is not None:
+            rows = (*rows, *path_rows)
     except UnicodeError:
         return {"complete": True, "candidates": (), "unresolved": tuple(_content_hits(
             raw.decode("utf-8", "replace"), decoded_path, lambda _line: (), subject_kind=subject_kind,
@@ -1783,7 +2100,220 @@ def analyze_review_candidates(raw: bytes, path: bytes, *, subject_kind: str, pol
         "PS-FINDING-COMMIT-MESSAGE" if subject_kind == "commit-message" else "PS-FINDING-CONTENT",
         subject_kind, _safe_locator(decoded_path, subject_kind), row["line"], row["detectorClass"],
     ) for row in rows if row["candidate"] is None)
-    return {"complete": True, "candidates": candidates, "unresolved": unresolved, "refusal": None}
+    return {"complete": True, "candidates": candidates, "unresolved": unresolved, "refusal": None, "pathsRepresented": path_rows is not None}
+
+
+def build_review_occurrences(raw: bytes, path: bytes, *, object_format: str,
+                             git_mode: str, policy_module,
+                             machine_path_lines=None) -> tuple[dict, ...]:
+    """Generate review input from captured blob bytes, never grant exceptions.
+
+    The owner supplies bytes from its captured Git object. Identity and byte
+    coordinates are generated here, not transcribed by the reviewer. Full-blob
+    context deliberately makes this an exact-content decision.
+    """
+    if object_format not in ("sha1", "sha256") or git_mode not in ("100644", "100755"):
+        raise ValueError("unsupported-review-subject")
+    analysis = analyze_review_candidates(raw, path, subject_kind="tracked-blob",
+                                         policy_module=policy_module,
+                                         machine_path_lines=machine_path_lines)
+    if not analysis["complete"] or analysis["refusal"] is not None or analysis["unresolved"]:
+        raise ValueError("incomplete-review-candidates")
+    header = b"blob " + str(len(raw)).encode("ascii") + b"\0"
+    blob_oid = hashlib.new(object_format, header + raw).hexdigest()
+    occurrences = []
+    for row in analysis["candidates"]:
+        candidate = row["candidate"]
+        body = {
+            "rawPathBase64": base64.b64encode(path).decode("ascii"),
+            "blobOid": blob_oid,
+            "blobSha256": hashlib.sha256(raw).hexdigest(),
+            "blobByteCount": len(raw),
+            "gitMode": git_mode,
+            "detector": row["detector"],
+            "candidate": candidate,
+            "reviewRegion": _byte_region(raw,
+                min(item["fullMatch"]["startByte"] for item in candidate["contributors"]),
+                max(item["fullMatch"]["endByteExclusive"] for item in candidate["contributors"])),
+            "contexts": [{"id": "complete-blob", "region": _byte_region(raw, 0, len(raw))}],
+        }
+        occurrence_id = policy_module.review_candidate_id(body)
+        occurrences.append(dict(body, id=occurrence_id))
+    return tuple(sorted(occurrences, key=lambda row: row["id"]))
+
+
+def _review_packet(occurrences, repository, modes, range_scope, policy_module):
+    occurrences = sorted(occurrences, key=lambda row: row["id"])
+    ids = [row["id"] for row in occurrences]
+    if not ids or len(ids) != len(set(ids)):
+        raise ValueError("empty-or-duplicate-review-candidates")
+    body = {"repository": repository, "modes": modes, "rangeScope": range_scope,
+            "occurrences": occurrences}
+    body = json.loads(policy_module.C(body))
+    return dict(body, packetId=policy_module.candidate_packet_id(body))
+
+
+def build_review_packet(subjects, *, repository: dict, modes: list[str],
+                        range_scope: dict | None, policy_module) -> dict:
+    """Build one review assignment from the scan owner's captured blob inputs.
+
+    Subjects are (raw bytes, raw Git path, Git mode) triples from the selected
+    scan, not reviewer-supplied replacement occurrences. Scope is supplied by
+    that same scan owner; packet identity binds it for the returned decisions.
+    """
+    occurrences = []
+    for raw, path, git_mode in subjects:
+        occurrences.extend(build_review_occurrences(raw, path,
+            object_format=repository["objectFormat"], git_mode=git_mode,
+            policy_module=policy_module))
+    return _review_packet(occurrences, repository, modes, range_scope, policy_module)
+
+
+def capture_staged_review() -> dict:
+    """Capture a private reviewer assignment from the current repository index.
+
+    Root must deliver this evidence privately to the real commissioned reviewer.
+    This read-only API neither approves findings nor prints potentially secret
+    content. It is staged-only, not a native-push/range capture or clean receipt.
+    """
+    root = _repo_root()
+    if Path.cwd().resolve() != root.resolve():
+        raise ValueError("staged-review-requires-repository-root")
+    policy = _load_review_policy_module()
+    deadline = time.monotonic() + _SCAN_DEADLINE_SECONDS
+    observed, _ = _capture_review_repository(policy, root, deadline)
+    if observed["status"] != "captured":
+        raise ValueError("staged-review-repository-unavailable")
+    bindings = {}
+    paths, blobs, lines = _tracked_files(review_bindings=bindings)
+    occurrences, unsupported, content = [], [], {}
+    for path in paths:
+        git_mode, blob_oid, raw_path = bindings[path]
+        raw = blobs[path]
+        locator = base64.b64encode(raw_path).decode("ascii")
+        if _filename_findings(path, "tracked-blob"):
+            unsupported.append({"rawPathBase64": locator, "reason": "filename-finding"})
+        if git_mode not in ("100644", "100755") or _is_binary(raw):
+            unsupported.append({"rawPathBase64": locator, "reason": "unsupported-review-subject"})
+            continue
+        try:
+            rows = build_review_occurrences(raw, raw_path,
+                object_format=observed["repository"]["objectFormat"], git_mode=git_mode,
+                policy_module=policy, machine_path_lines=lines[path])
+        except ValueError:
+            unsupported.append({"rawPathBase64": locator, "reason": "incomplete-review-candidates"})
+            continue
+        if any(row["blobOid"] != blob_oid for row in rows):
+            raise ValueError("staged-review-object-mismatch")
+        occurrences.extend(rows)
+        if rows:
+            content[blob_oid] = {"rawBase64": base64.b64encode(raw).decode("ascii"),
+                                "sha256": hashlib.sha256(raw).hexdigest()}
+    current = {}
+    current_paths, current_blobs, current_lines = _tracked_files(review_bindings=current)
+    again, _ = _capture_review_repository(policy, root, deadline)
+    if (current_paths != paths or current_blobs != blobs or current_lines != lines
+            or current != bindings or again != observed):
+        raise ValueError("staged-review-drift")
+    packet = (_review_packet(occurrences, observed["repository"],
+              ["staged-blob-text"], None, policy) if occurrences else None)
+    return {"status": "unsupported" if unsupported else "reviewable" if packet else "no-candidates",
+            "packet": packet, "content": content, "unsupported": unsupported}
+
+
+class _HistoryReviewCapture:
+    """Private bounded evidence sink, never an authorization or receipt owner."""
+    def __init__(self, policy):
+        self.policy = policy
+        self.occurrences = {}
+        self.content = {}
+        self.unsupported = set()
+        self.byte_count = 0
+        self.metadata_bytes = 0
+        self.limit_hit = False
+
+    def metadata(self, text, kind, finder):
+        if _content_hits(text, "review-metadata", finder, subject_kind=kind, max_findings=1):
+            self.unsupported.add(kind)
+
+    def observe(self, raw, path, blob_oid, owners, object_format, *, binary):
+        if _filename_findings(path.decode("utf-8", "surrogateescape"), "history-blob"):
+            self.unsupported.add("filename-finding")
+        if binary:
+            self.unsupported.add("binary-subject")
+            return
+        modes = set()
+        for _owner, mode, is_commit in owners:
+            if not is_commit or mode not in ("100644", "100755"):
+                self.unsupported.add("non-commit-or-nonordinary-subject")
+            else:
+                modes.add(mode)
+        for mode in sorted(modes):
+            try:
+                rows = build_review_occurrences(raw, path, object_format=object_format,
+                    git_mode=mode, policy_module=self.policy)
+            except ValueError:
+                self.unsupported.add("incomplete-review-candidates")
+                continue
+            if any(row["blobOid"] != blob_oid for row in rows):
+                raise ValueError("history-review-object-mismatch")
+            if rows and blob_oid not in self.content:
+                if self.byte_count + len(raw) > _MAX_REVIEW_CAPTURE_BYTES:
+                    self.limit_hit = True
+                    raise ValueError("history-review-capture-budget")
+                self.byte_count += len(raw)
+                self.content[blob_oid] = {"rawBase64": base64.b64encode(raw).decode("ascii"),
+                                         "sha256": hashlib.sha256(raw).hexdigest()}
+            for row in rows:
+                if row["id"] not in self.occurrences:
+                    self.metadata_bytes += len(self.policy.C(row))
+                    if self.metadata_bytes > _MAX_REVIEW_CAPTURE_BYTES:
+                        self.limit_hit = True
+                        raise ValueError("history-review-capture-budget")
+                    self.occurrences[row["id"]] = row
+
+
+def capture_history_review(remote=None, destination=None, *, source_revision=None,
+                           native_payload=None) -> dict:
+    """Capture through existing range/native traversal; no model or policy write.
+
+    Native input must come from the existing native selection owner. Returning
+    private content is not proof of receiving, approval, or transfer authority.
+    """
+    native = native_payload is not None
+    if ((native and (remote is not None or destination is not None or source_revision is not None))
+            or (not native and (not remote or not destination))):
+        raise ValueError("history-review-selection")
+    root = _repo_root()
+    if Path.cwd().resolve() != root.resolve():
+        raise ValueError("history-review-requires-repository-root")
+    policy = _load_review_policy_module()
+    deadline = time.monotonic() + _SCAN_DEADLINE_SECONDS
+    observed, _ = _capture_review_repository(policy, root, deadline)
+    if observed["status"] != "captured":
+        raise ValueError("history-review-repository-unavailable")
+    capture = _HistoryReviewCapture(policy)
+    finder = _path_finder(Path(__file__))
+    if native:
+        outcome = _scan_native_push(native_payload, finder, review_capture=capture,
+                                   scan_timeout=_remaining_seconds(deadline))
+    else:
+        outcome = _scan_range(remote, destination, finder, source_revision=source_revision,
+                             review_capture=capture, scan_timeout=_remaining_seconds(deadline))
+    again, _ = _capture_review_repository(policy, root, deadline)
+    if (outcome.kind not in ("clean", "findings") or outcome.history is None
+            or outcome.coverage is None or again != observed):
+        return {"status": "refused", "packet": None, "content": {},
+                "unsupported": ["history-review-capture-budget" if capture.limit_hit
+                                else "history-capture-unqualified"]}
+    commits = sorted(outcome.history.commit_ids)
+    if not commits and capture.occurrences:
+        raise ValueError("history-review-commit-scope")
+    packet = (_review_packet(list(capture.occurrences.values()), observed["repository"],
+              ["range-blob-text"], {"kind": "exact-commits", "commits": commits}, policy)
+              if capture.occurrences else None)
+    return {"status": "unsupported" if capture.unsupported else "reviewable" if packet else "no-candidates",
+            "packet": packet, "content": capture.content, "unsupported": sorted(capture.unsupported)}
 
 
 def project_review_candidate(raw: bytes, path: bytes, detector: dict, review_region: dict, *, policy_module) -> dict:
@@ -1866,10 +2396,11 @@ class ReviewEvaluation:
             raise RuntimeError("review-policy-snapshot")
         self.policy = policy_module
         self.read = decoded
-        self.repository_observation = repository_observation
+        self.repository_observation = deepcopy(repository_observation)
+        self._origin_outside_repository: bool | None = None
         self.execution = execution
         self.unresolved = 0
-        self._analysis: dict[tuple, dict] = {}
+        self._analysis: tuple[tuple, dict] | None = None
         self._machine_path_analysis = None
         self._clean_line_analysis = _CleanLineAnalysis()
         self._applications: list[tuple[dict, dict, dict, dict]] = []
@@ -1894,8 +2425,13 @@ class ReviewEvaluation:
         repository = self.repository
         if repository is None:
             return None
-        # Policy's pure origin boundary check is the only source of origin credit.
-        if not self.policy.origin_is_outside_repository(self.read.snapshot, repository):
+        # The capture is owned by this evaluation. Its origin proof is independent
+        # of the subject; matching and final live authority checks are not cached.
+        if self._origin_outside_repository is None:
+            self._origin_outside_repository = self.policy.origin_is_outside_repository(
+                self.read.snapshot, repository,
+            )
+        if not self._origin_outside_repository:
             return None
         choices = []
         for record in self.read.usable_records:
@@ -1937,12 +2473,20 @@ class ReviewEvaluation:
                 display_locator=display_locator, staged_index=staged_index)
             self.unresolved += len(findings)
             return findings
-        key = (raw_path, blob_oid, git_mode, subject_kind, hashlib.sha256(raw).digest())
-        analysis = self._analysis.get(key)
-        if analysis is None:
-            analysis = analyze_review_candidates(raw, raw_path, subject_kind=subject_kind, policy_module=self.policy,
-                                                 clean_lines=self._clean_line_analysis)
-            self._analysis[key] = analysis
+        content_key = (raw_path, blob_oid, git_mode, subject_kind, hashlib.sha256(raw).digest())
+        key = (*content_key, machine_path_lines, id(find_machine_paths))
+        cached = self._analysis
+        if cached is None or cached[0] != key:
+            analysis = analyze_review_candidates(
+                raw, raw_path, subject_kind=subject_kind, policy_module=self.policy,
+                clean_lines=self._clean_line_analysis, find_machine_paths=find_machine_paths,
+                machine_path_lines=machine_path_lines,
+            )
+            # Path-ordered traversal visits related owners together. This is
+            # derived lexical work, never permission or application evidence.
+            self._analysis = (key, analysis)
+        else:
+            analysis = cached[1]
         if not analysis["complete"] or analysis["refusal"] is not None:
             raise RuntimeError("review-evaluation")
         repository = self.repository
@@ -1974,19 +2518,20 @@ class ReviewEvaluation:
                 raise RuntimeError("review-evaluation-duplicate")
             self._applied_keys.add(applied_key)
             self._applications.append((subject, row["candidate"], row["detector"], application))
-        # The classifier is pure for one captured scan. Retain only one
-        # payload/path's matching line numbers, never its bytes or a verdict.
-        # Commit authorization and occurrence accounting above remain per subject.
-        cached = self._machine_path_analysis
-        if cached is None or cached[0] != (key, path) or cached[1] is not find_machine_paths:
-            numbers = tuple(number for number, _offset, line in
-                            _selected_text_lines(raw.decode("utf-8", "replace"), path, subject_kind)
-                            if find_machine_paths(line))
-            cached = ((key, path), find_machine_paths, numbers)
-            self._machine_path_analysis = cached
-        for number in cached[2]:
-            if machine_path_lines is None or number in machine_path_lines:
-                findings.append(Finding("PS-FINDING-CONTENT", subject_kind, locator, number, "machine-path", display_locator, staged_index))
+        if not analysis.get("pathsRepresented", False):
+            # The classifier is pure for one captured scan. Retain only one
+            # payload/path's matching line numbers, never its bytes or a verdict.
+            # Commit authorization and occurrence accounting above remain per subject.
+            cached = self._machine_path_analysis
+            if cached is None or cached[0] != (content_key, path) or cached[1] is not find_machine_paths:
+                numbers = tuple(number for number, _offset, line in
+                                _selected_text_lines(raw.decode("utf-8", "replace"), path, subject_kind)
+                                if find_machine_paths(line))
+                cached = ((content_key, path), find_machine_paths, numbers)
+                self._machine_path_analysis = cached
+            for number in cached[2]:
+                if machine_path_lines is None or number in machine_path_lines:
+                    findings.append(Finding("PS-FINDING-CONTENT", subject_kind, locator, number, "machine-path", display_locator, staged_index))
         self.unresolved += len(findings)
         return findings
 
@@ -2081,11 +2626,19 @@ def _content_hits(
     display_locator: str | None = None,
     staged_index: int | None = None,
 ) -> list[Finding]:
+    rows = ((*line, None) for line in _selected_text_lines(text, path, subject_kind))
+    return _text_findings(rows, path, find_machine_paths, subject_kind, max_findings,
+                          machine_path_lines, display_locator, staged_index)
+
+
+def _text_findings(rows, path, find_machine_paths, subject_kind, max_findings=None,
+                   machine_path_lines=None, display_locator=None, staged_index=None):
     findings: list[Finding] = []
     locator = _safe_locator(path, subject_kind)
-    for line_number, line_start, line in _selected_text_lines(text, path, subject_kind):
+    for line_number, line_start, line, raw_matches in rows:
         seen: set[tuple] = set()
-        for observation in _line_observations(line, line_number, line_start, subject_kind):
+        for observation in _line_observations(line, line_number, line_start, subject_kind,
+                                              raw_matches=raw_matches):
             key = _observation_key(observation)
             if key in seen:
                 continue
@@ -2124,7 +2677,7 @@ def _is_callable_rhs(line: str, match: re.Match[str]) -> bool:
 
 def _is_public_token_credential_identifier(line: str, match: re.Match[str]) -> bool:
     credential_identifier = match.groupdict().get("credential_token_identifier")
-    prefix = _IDENTIFIER_PREFIX.search(line[:match.start()])
+    prefix = _identifier_prefix_match(line[:match.start()])
     identifier_suffix = (
         credential_identifier
         if credential_identifier is not None
@@ -2187,48 +2740,124 @@ def _is_annotated_public_token_match(
 def _is_public_key_token_match(line: str, family: str, match: re.Match[str]) -> bool:
     if family != "token":
         return False
-    prefix = _IDENTIFIER_PREFIX.search(line[:match.start()])
+    prefix = _identifier_prefix_match(line[:match.start()])
     identifier = (prefix.group(0) if prefix is not None else "") + line[
         match.start():match.start() + len("Token")
     ]
     return identifier == "publicKeyToken"
 
 
-def _binary_content_hits(
-    raw: bytes,
-    path: str,
-    find_machine_paths,
-    *,
-    max_findings: int | None = None,
-) -> list[Finding]:
+def _binary_runs(raw: bytes):
+    for number, raw_line in enumerate(raw.splitlines(), 1):
+        for run in _BINARY_ASCII_RUN.findall(raw_line):
+            yield number, run.decode("ascii")
+
+
+def _binary_lexical_classes(line: str, raw_matches=None) -> tuple[str, ...]:
+    classes: list[str] = []
+    seen: set[tuple] = set()
+    for observation in _line_observations(
+        line, 0, 0, "history-blob", binary=True, raw_matches=raw_matches,
+    ):
+        key = _observation_key(observation)
+        if key not in seen:
+            seen.add(key)
+            classes.append(observation.diagnostic_class)
+    return tuple(classes)
+
+
+def _binary_findings(rows, path, find_machine_paths, max_findings):
     findings: list[Finding] = []
     locator = _safe_locator(path, "history-blob")
-    for line_number, raw_line in enumerate(raw.splitlines(), 1):
-        for raw_run in _BINARY_ASCII_RUN.findall(raw_line):
-            line = raw_run.decode("ascii")
-            seen: set[tuple] = set()
-            for observation in _line_observations(
-                line, line_number, 0, "history-blob", binary=True
-            ):
-                key = _observation_key(observation)
-                if key in seen:
-                    continue
-                seen.add(key)
-                if max_findings is None or len(findings) < max_findings:
-                    findings.append(Finding(
-                        "PS-FINDING-CONTENT", "history-blob", locator,
-                        line_number, observation.diagnostic_class,
-                    ))
-            if find_machine_paths(line) and (
-                max_findings is None or len(findings) < max_findings
-            ):
+    for number, line, classes in rows:
+        for diagnostic_class in classes:
+            if max_findings is None or len(findings) < max_findings:
                 findings.append(Finding(
-                    "PS-FINDING-CONTENT",
-                    "history-blob",
-                    locator,
-                    line_number,
-                    "machine-path",
+                    "PS-FINDING-CONTENT", "history-blob", locator, number, diagnostic_class,
                 ))
+        if find_machine_paths(line) and (
+            max_findings is None or len(findings) < max_findings
+        ):
+            findings.append(Finding(
+                "PS-FINDING-CONTENT", "history-blob", locator, number, "machine-path",
+            ))
+    return findings
+
+
+_SHORT_BINARY_LEXICAL_CHARS = 64
+
+
+def _binary_content_hits(
+    raw: bytes, path: str, find_machine_paths, *, max_findings: int | None = None,
+) -> list[Finding]:
+    # The cache changes work, not the occurrence inventory.
+    short_run_classes = lru_cache(maxsize=4096)(_binary_lexical_classes)
+    return _binary_findings(
+        ((number, line, (short_run_classes if len(line) <= _SHORT_BINARY_LEXICAL_CHARS else _binary_lexical_classes)(line))
+         for number, line in _binary_runs(raw)),
+        path, find_machine_paths, max_findings,
+    )
+
+
+def _matcher_batches(rows):
+    batch = []
+    size = 0
+    for row in rows:
+        batch.append(row)
+        size += len(row[-1])
+        if len(batch) >= 8192 or size >= 2 * 1024 * 1024:
+            yield batch
+            batch, size = [], 0
+    if batch:
+        yield batch
+
+
+async def _binary_content_hits_with_matcher(
+    raw, path, find_machine_paths, matcher, deadline, *, max_findings=None,
+):
+    findings = []
+    for batch in _matcher_batches(_binary_runs(raw)):
+        # Deduplicate only short lexical inputs within the existing bounded
+        # batch. Expand them before classifying each original occurrence.
+        inputs = []
+        short_positions = {}
+        positions = []
+        for _, line in batch:
+            position = len(inputs)
+            if len(line) <= _SHORT_BINARY_LEXICAL_CHARS:
+                position = short_positions.setdefault(line, position)
+            if position == len(inputs):
+                inputs.append((line, True))
+            positions.append(position)
+        captures = await matcher.match(inputs, _deadline_snapshot(deadline, asyncio.get_running_loop().time))
+        classes = [
+            _binary_lexical_classes(line, matches)
+            for (line, _), matches in zip(inputs, captures, strict=True)
+        ]
+        room = None if max_findings is None else max(0, max_findings - len(findings))
+        findings.extend(_binary_findings(
+            ((number, line, classes[position])
+             for (number, line), position in zip(batch, positions, strict=True)),
+            path, find_machine_paths, room,
+        ))
+    return findings
+
+
+async def _text_content_hits_with_matcher(
+    raw, path, find_machine_paths, matcher, deadline, *, max_findings=None, machine_path_lines=None,
+):
+    kind = 'history-blob'
+    rows = _selected_text_lines(raw.decode('utf-8', 'replace'), path, kind)
+    findings = []
+    for batch in _matcher_batches(rows):
+        captures = await matcher.match(
+            tuple((line, False) for _, _, line in batch), _deadline_snapshot(deadline, asyncio.get_running_loop().time),
+        )
+        room = None if max_findings is None else max(0, max_findings - len(findings))
+        findings.extend(_text_findings(
+            ((*row, matches) for row, matches in zip(batch, captures, strict=True)),
+            path, find_machine_paths, kind, room, machine_path_lines,
+        ))
     return findings
 
 
@@ -2462,6 +3091,21 @@ def _oid_set_digest(domain: bytes, object_ids: Iterable[str]) -> str:
     )
 
 
+def _seal_sorted_oids(domain: bytes, values: Iterable[str]) -> _SealedOids:
+    count = 0
+    singleton = None
+
+    def rows():
+        nonlocal count, singleton
+        for oid in values:
+            count += 1
+            singleton = oid if count == 1 else None
+            yield oid.lower().encode("ascii")
+
+    digest = _digest_frames(domain, rows())
+    return _SealedOids(count, digest, singleton)
+
+
 def _native_json_bytes(value: object) -> bytes:
     return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("ascii")
 
@@ -2535,8 +3179,23 @@ def _native_push_request(payload: object) -> NativePushRequest | Refusal:
         return _refusal("PS-INPUT-REFUSAL", "native-selection")
 
 
-def _remaining_seconds(deadline: float) -> float:
-    remaining = deadline - time.monotonic()
+def _time_left(deadline, clock=None) -> float:
+    return deadline.remaining() if isinstance(deadline, _ScanInactivity) else deadline - (clock or time.monotonic)()
+
+
+def _deadline_snapshot(deadline, clock=None) -> float:
+    return ((clock or time.monotonic)() + deadline.remaining()
+            if isinstance(deadline, _ScanInactivity) else deadline)
+
+
+def _loop_scan_deadline(deadline):
+    if isinstance(deadline, _ScanInactivity):
+        return deadline
+    return asyncio.get_running_loop().time() + _remaining_seconds(deadline)
+
+
+def _remaining_seconds(deadline) -> float:
+    remaining = _time_left(deadline)
     if remaining <= 0:
         raise subprocess.TimeoutExpired("publication-safety-range", 0)
     return remaining
@@ -2603,7 +3262,7 @@ async def _feed_selection_input(stream, data: bytes, deadline: float) -> None:
     try:
         for offset in range(0, len(data), _READ_CHUNK_BYTES):
             stream.write(data[offset:offset + _READ_CHUNK_BYTES])
-            remaining = deadline - asyncio.get_running_loop().time()
+            remaining = _time_left(deadline, asyncio.get_running_loop().time)
             if remaining <= 0:
                 raise asyncio.TimeoutError
             await asyncio.wait_for(stream.drain(), remaining)
@@ -2622,7 +3281,7 @@ async def _finish_selection_input(task, deadline: float, *, cancel: bool) -> Ref
         if cancel:
             task.cancel()
         else:
-            remaining = deadline - asyncio.get_running_loop().time()
+            remaining = _time_left(deadline, asyncio.get_running_loop().time)
             if remaining <= 0:
                 raise asyncio.TimeoutError
             await asyncio.wait_for(asyncio.shield(task), remaining)
@@ -2644,7 +3303,7 @@ async def _settle_selection_input(task, deadline: float) -> bool:
         return True
     try:
         if not task.done():
-            remaining = deadline - asyncio.get_running_loop().time()
+            remaining = _time_left(deadline, asyncio.get_running_loop().time)
             if remaining <= 0:
                 return False
             await asyncio.wait_for(asyncio.shield(task), remaining)
@@ -2672,12 +3331,15 @@ def _selection_reap_refusal(prior: Refusal | None, has_input: bool) -> Refusal:
 async def _read_git_lines_bounded(
     argv: tuple[str, ...],
     *,
-    byte_cap: int,
+    byte_cap: int | None,
     line_cap: int,
     deadline: float,
     accepted_codes: frozenset[int],
     env: dict[str, str] | None = None,
     input_bytes: bytes | None = None,
+    on_line: Callable[[bytes], Refusal | None] | None = None,
+    frame_reason: str = 'selection-line',
+    byte_reason: str = 'selection-bytes',
 ) -> tuple[int, tuple[bytes, ...]] | Refusal:
     process_group_owner: PosixProcessGroupOwnerV1 | None = None
     direct_observation: _AsyncioDirectProcessObservation | None = None
@@ -2709,7 +3371,7 @@ async def _read_git_lines_bounded(
     input_task = None if input_bytes is None else asyncio.create_task(_feed_selection_input(process.stdin, input_bytes, deadline))
     try:
         while refusal is None:
-            remaining = deadline - asyncio.get_running_loop().time()
+            remaining = _time_left(deadline, asyncio.get_running_loop().time)
             if remaining <= 0:
                 refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
                 break
@@ -2722,28 +3384,35 @@ async def _read_git_lines_bounded(
                 break
             if not chunk:
                 break
-            total_bytes += len(chunk)
-            if total_bytes > byte_cap:
-                refusal = _refusal("PS-MSG-LIMIT", "selection-bytes")
-                break
+            if byte_cap is not None:
+                total_bytes += len(chunk)
+                if total_bytes > byte_cap:
+                    refusal = _refusal("PS-MSG-LIMIT", byte_reason)
+                    break
             pending.extend(chunk)
             while refusal is None:
                 newline = pending.find(b"\n")
                 if newline < 0:
                     if len(pending) > line_cap:
-                        refusal = _refusal("PS-MSG-FRAME", "selection-line")
+                        refusal = _refusal("PS-MSG-FRAME", frame_reason)
                     break
                 raw = bytes(pending[:newline])
                 del pending[:newline + 1]
                 if len(raw) > line_cap:
-                    refusal = _refusal("PS-MSG-FRAME", "selection-line")
+                    refusal = _refusal("PS-MSG-FRAME", frame_reason)
                 else:
-                    rows.append(raw)
+                    if on_line is None:
+                        rows.append(raw)
+                    else:
+                        refusal = on_line(raw)
         if refusal is None and pending:
             if len(pending) > line_cap:
-                refusal = _refusal("PS-MSG-FRAME", "selection-line")
+                refusal = _refusal("PS-MSG-FRAME", frame_reason)
             else:
-                rows.append(bytes(pending))
+                if on_line is None:
+                    rows.append(bytes(pending))
+                else:
+                    refusal = on_line(bytes(pending))
     except asyncio.CancelledError:
         refusal = _refusal("PS-MSG-READ", "cancelled")
     except Exception:
@@ -2753,7 +3422,7 @@ async def _read_git_lines_bounded(
     if refusal is None:
         refusal = input_refusal
     if refusal is None:
-        remaining = deadline - asyncio.get_running_loop().time()
+        remaining = _time_left(deadline, asyncio.get_running_loop().time)
         if remaining <= 0:
             refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
         else:
@@ -2763,19 +3432,27 @@ async def _read_git_lines_bounded(
                 )
             except asyncio.TimeoutError:
                 refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+            except asyncio.CancelledError:
+                refusal = _refusal("PS-MSG-READ", "cancelled")
             except Exception:
                 refusal = _refusal("PS-MSG-READ", "selection-wait")
 
-    cleanup_deadline = asyncio.get_running_loop().time() + _PROCESS_TREE_CLEANUP_SECONDS
-    child_settled = await _settle_owned_async_process(
-        process,
-        process_group_owner,
-        direct_observation,
-        drain_readers=(process.stdout,),
-    )
-    input_settled = await _settle_selection_input(input_task, cleanup_deadline)
-    if not child_settled or not input_settled:
+    async def finish_selection() -> bool:
+        cleanup_deadline = asyncio.get_running_loop().time() + _PROCESS_TREE_CLEANUP_SECONDS
+        child_settled = await _settle_owned_async_process(
+            process,
+            process_group_owner,
+            direct_observation,
+            drain_readers=(process.stdout,),
+        )
+        input_settled = await _settle_selection_input(input_task, cleanup_deadline)
+        return child_settled and input_settled
+
+    settled, cancelled = await _await_owned_task(asyncio.create_task(finish_selection()))
+    if not settled:
         return _selection_reap_refusal(refusal, input_task is not None)
+    if cancelled is not None and refusal is None:
+        refusal = _refusal("PS-MSG-READ", "cancelled")
     if refusal is not None:
         return refusal
     if process.returncode not in accepted_codes:
@@ -3122,23 +3799,19 @@ async def _read_parent_graph_bounded(
     deadline: float,
     object_format: GitObjectFormat,
     input_bytes: bytes | None = None,
+    store_row: Callable[[str, tuple[str, ...]], bool] | None = None,
+    indexed_only: bool = False,
 ) -> tuple[tuple[str, tuple[str, ...]], ...] | Refusal:
-    result = await _read_git_lines_bounded(
-        argv,
-        byte_cap=_MAX_PARENT_GRAPH_BYTES,
-        line_cap=_MAX_COMMIT_TREE_BYTES,
-        deadline=deadline,
-        accepted_codes=frozenset({0}),
-        **({"input_bytes": input_bytes} if input_bytes is not None else {}),
-    )
-    if isinstance(result, Refusal):
-        return result
-    _returncode, rows = result
-    if len(rows) > _MAX_COMMITS:
-        return _refusal("PS-MSG-LIMIT", "count")
     parsed: list[tuple[str, tuple[str, ...]]] = []
     seen: set[str] = set()
-    for row in rows:
+    count = 0
+
+    def consume(row: bytes) -> Refusal | None:
+        nonlocal count
+        # The indexed route has no extra commit-only ceiling. Its exact
+        # object inventory already bounds how many commits can be admitted.
+        if store_row is None and count >= _MAX_COMMITS:
+            return _refusal("PS-MSG-LIMIT", "count")
         fields = row.split(b" ")
         if not fields or any(len(field) != object_format.hex_length for field in fields):
             return _refusal("PS-MSG-FRAME", "parent-graph")
@@ -3149,10 +3822,30 @@ async def _read_parent_graph_bounded(
         if any(not object_format.matches(value) for value in values):
             return _refusal("PS-MSG-FRAME", "parent-graph")
         oid, parents = values[0], values[1:]
-        if oid in seen:
-            return _refusal("PS-MSG-FRAME", "parent-graph")
-        seen.add(oid)
-        parsed.append((oid, parents))
+        if store_row is not None:
+            if not store_row(oid, parents):
+                return _refusal("PS-MSG-FRAME", "parent-graph")
+        else:
+            if oid in seen:
+                return _refusal("PS-MSG-FRAME", "parent-graph")
+            seen.add(oid)
+            parsed.append((oid, parents))
+        count += 1
+        return None
+
+    result = await _read_git_lines_bounded(
+        argv,
+        # Indexed-only captures do not retain a second graph in memory.
+        # A record's caller-supplied frame boundary is still enforced.
+        byte_cap=None if indexed_only and store_row is not None else _MAX_PARENT_GRAPH_BYTES,
+        line_cap=_MAX_COMMIT_TREE_BYTES,
+        deadline=deadline,
+        accepted_codes=frozenset({0}),
+        on_line=consume,
+        **({"input_bytes": input_bytes} if input_bytes is not None else {}),
+    )
+    if isinstance(result, Refusal):
+        return result
     return tuple(parsed)
 
 
@@ -3164,42 +3857,19 @@ def _resolve_head(timeout: float | None = None) -> str:
 async def _read_git_oid_lines_bounded(
     argv: tuple[str, ...],
     *,
-    count_cap: int,
-    byte_cap: int,
+    count_cap: int | None,
+    byte_cap: int | None,
     deadline: float,
     object_format: GitObjectFormat = _SHA1_OBJECT_FORMAT,
     input_bytes: bytes | None = None,
+    store_row: Callable[[str], bool] | None = None,
 ) -> tuple[str, ...] | Refusal:
-    process_group_owner: PosixProcessGroupOwnerV1 | None = None
-    direct_observation: _AsyncioDirectProcessObservation | None = None
-    try:
-        (
-            process,
-            process_group_owner,
-            direct_observation,
-        ) = await _create_owned_async_process(
-            argv,
-            stdin=asyncio.subprocess.DEVNULL if input_bytes is None else asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-    except (OSError, subprocess.SubprocessError, WindowsJobError):
-        return _refusal("PS-MSG-SPAWN", "selection")
-    if process.stdout is None or (input_bytes is not None and process.stdin is None):
-        if not await _settle_owned_async_process(
-            process, process_group_owner, direct_observation
-        ):
-            return _refusal("PS-MSG-REAP", "selection-child")
-        return _refusal("PS-MSG-READ", "selection-pipe")
-
     rows: list[str] = []
     seen: set[str] = set()
-    pending = bytearray()
-    total_bytes = 0
-    refusal: Refusal | None = None
-    input_task = None if input_bytes is None else asyncio.create_task(_feed_selection_input(process.stdin, input_bytes, deadline))
+    count = 0
 
     def accept(raw: bytes) -> Refusal | None:
+        nonlocal count
         if len(raw) != object_format.hex_length:
             return _refusal("PS-MSG-FRAME", "oid")
         try:
@@ -3208,80 +3878,32 @@ async def _read_git_oid_lines_bounded(
             return _refusal("PS-MSG-FRAME", "oid")
         if not object_format.matches(oid) or oid in seen:
             return _refusal("PS-MSG-FRAME", "oid")
-        if len(rows) >= count_cap:
+        if store_row is not None:
+            if not store_row(oid):
+                return _refusal("PS-MSG-FRAME", "oid")
+        if count_cap is not None and count >= count_cap:
             return _refusal("PS-MSG-LIMIT", "count")
-        seen.add(oid)
-        rows.append(oid)
+        if store_row is None:
+            seen.add(oid)
+            rows.append(oid)
+        count += 1
         return None
 
-    try:
-        while refusal is None:
-            remaining = deadline - asyncio.get_running_loop().time()
-            if remaining <= 0:
-                refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
-                break
-            try:
-                chunk = await asyncio.wait_for(
-                    process.stdout.read(_READ_CHUNK_BYTES), timeout=remaining
-                )
-            except asyncio.TimeoutError:
-                refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
-                break
-            if not chunk:
-                break
-            total_bytes += len(chunk)
-            if total_bytes > byte_cap:
-                refusal = _refusal("PS-MSG-LIMIT", "bytes")
-                break
-            pending.extend(chunk)
-            while refusal is None:
-                newline = pending.find(b"\n")
-                if newline < 0:
-                    if len(pending) > object_format.hex_length:
-                        refusal = _refusal("PS-MSG-FRAME", "oid")
-                    break
-                raw = bytes(pending[:newline])
-                del pending[:newline + 1]
-                refusal = accept(raw)
-        if refusal is None and pending:
-            refusal = accept(bytes(pending))
-    except asyncio.CancelledError:
-        refusal = _refusal("PS-MSG-READ", "cancelled")
-    except Exception:
-        refusal = _refusal("PS-MSG-READ", "selection")
-
-    input_refusal = await _finish_selection_input(input_task, deadline, cancel=refusal is not None)
-    if refusal is None:
-        refusal = input_refusal
-    if refusal is None:
-        remaining = deadline - asyncio.get_running_loop().time()
-        if remaining <= 0:
-            refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
-        else:
-            try:
-                await _wait_owned_async_direct(
-                    process, direct_observation, remaining
-                )
-            except asyncio.TimeoutError:
-                refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
-            except Exception:
-                refusal = _refusal("PS-MSG-READ", "selection-wait")
-
-    cleanup_deadline = asyncio.get_running_loop().time() + _PROCESS_TREE_CLEANUP_SECONDS
-    child_settled = await _settle_owned_async_process(
-        process,
-        process_group_owner,
-        direct_observation,
-        drain_readers=(process.stdout,),
+    result = await _read_git_lines_bounded(
+        argv,
+        byte_cap=byte_cap,
+        line_cap=object_format.hex_length,
+        deadline=deadline,
+        accepted_codes=frozenset({0}),
+        input_bytes=input_bytes,
+        on_line=accept,
+        frame_reason="oid",
+        byte_reason="bytes",
     )
-    input_settled = await _settle_selection_input(input_task, cleanup_deadline)
-    if not child_settled or not input_settled:
-        return _selection_reap_refusal(refusal, input_task is not None)
-    if refusal is not None:
-        return refusal
-    if process.returncode != 0:
-        return _refusal("PS-MSG-RANGE", "selection-child")
+    if isinstance(result, Refusal):
+        return result
     return tuple(rows)
+
 
 
 def _range_request(
@@ -3295,9 +3917,18 @@ def _range_request(
     return RangeRequest(remote, destination, effective_source)
 
 
+def _revision_stdin(roots: tuple[str, ...], exclusions: tuple[str, ...]) -> bytes:
+    """Frame already verified object IDs for the owned, bounded Git stdin feeder."""
+    positive = b"".join(oid.encode("ascii") + b"\n" for oid in roots)
+    return positive + b"".join(b"^" + oid.encode("ascii") + b"\n" for oid in exclusions)
+
+
 async def _range_selection(
     request: RangeRequest,
     deadline: float | None = None,
+    *,
+    history_index: "_HistoryIndex | None" = None,
+    compact_graph: bool = False,
 ) -> RangeSelection | Refusal:
     deadline = deadline if deadline is not None else time.monotonic() + _SCAN_DEADLINE_SECONDS
     native_payload = globals().get("__injected_native_push__")
@@ -3305,7 +3936,12 @@ async def _range_selection(
         native = _native_push_request(native_payload)
         if isinstance(native, Refusal):
             return native
-        return await _native_commit_range_selection(request, native, deadline)
+        if history_index is not None:
+            return await _native_commit_range_selection(
+                request, native, deadline, history_index, compact_graph=compact_graph,
+            )
+        with _open_history_index(deadline) as index:
+            return await _native_commit_range_selection(request, native, deadline, index)
     try:
         remotes = _run_range_git(
             ["remote"], text=True, timeout=_remaining_seconds(deadline)
@@ -3369,27 +4005,28 @@ async def _range_selection(
         )
         if isinstance(local_commit_tips, Refusal):
             return local_commit_tips
-        exclusion = () if not local_commit_tips else ("--not", *local_commit_tips)
+        exclusions = local_commit_tips
     else:
-        exclusion = ("--not", destination_oid)
+        exclusions = (destination_oid,)
+    revisions = _revision_stdin((tip,), exclusions)
     parent_graph = await _read_parent_graph_bounded(
-        _range_git_argv("rev-list", "--parents", "--topo-order", tip, *exclusion),
+        _range_git_argv("rev-list", "--parents", "--topo-order", "--stdin"),
         deadline=asyncio.get_running_loop().time()
         + max(0.0, deadline - time.monotonic()),
         object_format=object_format,
+        input_bytes=revisions,
     )
     if isinstance(parent_graph, Refusal):
         return parent_graph
     commit_ids = tuple(oid for oid, _parents in parent_graph)
     object_ids = await _read_git_oid_lines_bounded(
-        _range_git_argv(
-            "rev-list", "--objects", "--no-object-names", tip, *exclusion
-        ),
+        _range_git_argv("rev-list", "--objects", "--no-object-names", "--stdin"),
         count_cap=_MAX_OBJECTS,
         byte_cap=object_format.list_byte_cap(_MAX_OBJECTS),
         deadline=asyncio.get_running_loop().time()
         + max(0.0, deadline - time.monotonic()),
         object_format=object_format,
+        input_bytes=revisions,
     )
     if isinstance(object_ids, Refusal):
         return object_ids
@@ -3408,6 +4045,8 @@ async def _range_selection(
         object_format=object_format,
         destination_oid=destination_oid,
         expected_parents=parent_graph,
+        destination_endpoint_sha256=hashlib.sha256(_native_json_bytes(push_destination)).hexdigest(),
+        prior_receiver_roots=exclusions,
     )
 
 
@@ -3435,7 +4074,12 @@ async def _native_prior_receiver_roots(
     zero = "0" * request.object_format.hex_length
     prior = tuple(RemoteRefTip(row.remote_ref, row.remote_oid)
                   for row in request.updates if row.remote_oid != zero)
-    loop_deadline = asyncio.get_running_loop().time() + _remaining_seconds(deadline)
+    loop_deadline = _loop_scan_deadline(deadline)
+    if request.receiver_scope is not None:
+        if request.receiver_inventory or inventory is not None:
+            return _refusal("PS-INPUT-REFUSAL", "receiver-scope")
+        # The held target-local owner alone supplies its qualified prior roots.
+        prior += tuple(RemoteRefTip(b"", oid) for oid in request.receiver_scope.excluded_roots)
     if request.receiver_inventory and inventory is None:
         inventory = await _remote_ref_tip_oids(
             request.endpoint, deadline=loop_deadline, object_format=request.object_format,
@@ -3451,7 +4095,31 @@ async def _native_prior_receiver_roots(
     )
 
 
-async def _native_push_selection(request: NativePushRequest, deadline: float) -> NativePushSelection | Refusal:
+async def _subtract_receiver_object_intersection(index, prior_roots, object_format, deadline):
+    """Git's negative revision walk may retain shared old trees and blobs.
+
+    Compare candidate IDs against positive, qualified receiver reachability
+    before binding coverage. Stream object metadata, never old blob contents.
+    """
+    if not prior_roots or not index.has_object_candidates():
+        return None
+    tick = _loop_scan_deadline(deadline)
+    result = await _read_git_oid_lines_bounded(
+        _range_git_argv("rev-list", "--objects", "--no-object-names", "--use-bitmap-index", "--stdin"),
+        count_cap=None, byte_cap=None, deadline=tick, object_format=object_format,
+        input_bytes=_revision_stdin(prior_roots, ()), store_row=index.mark_receiver_object,
+    )
+    if isinstance(result, Refusal):
+        return result
+    index.subtract_marked_receiver_objects()
+    return None
+
+
+async def _native_push_selection(
+    request: NativePushRequest, deadline: float, roots: tuple[str, ...],
+    index: "_HistoryIndex | None",
+    *, compact_graph: bool = False,
+) -> NativePushSelection | Refusal:
     try:
         if _detect_git_object_format(_remaining_seconds(deadline)) != request.object_format:
             return _refusal("PS-MSG-RANGE", "object-format")
@@ -3461,12 +4129,12 @@ async def _native_push_selection(request: NativePushRequest, deadline: float) ->
         return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
     except (OSError, ValueError):
         return _refusal("PS-MSG-RANGE", "native-repository")
-    zero = "0" * request.object_format.hex_length
-    roots = tuple(dict.fromkeys(row.local_oid for row in request.updates if row.local_oid != zero))
     if not roots:
         return NativePushSelection(request, (), (), request.object_format, ())
+    if index is None:
+        return _refusal("PS-MSG-READ", "coverage-storage")
     loop = asyncio.get_running_loop()
-    loop_deadline = loop.time() + _remaining_seconds(deadline)
+    loop_deadline = _loop_scan_deadline(deadline)
     candidate = _native_new_same_name_tag(request)
     inventory = None
     if candidate is not None:
@@ -3481,33 +4149,51 @@ async def _native_push_selection(request: NativePushRequest, deadline: float) ->
     exclusions = await _native_prior_receiver_roots(request, deadline, inventory=inventory)
     if isinstance(exclusions, Refusal):
         return exclusions
-    revisions = b"".join((oid.encode("ascii") + b"\n") for oid in roots)
-    revisions += b"".join((b"^" + oid.encode("ascii") + b"\n") for oid in exclusions)
+    revisions = _revision_stdin(roots, exclusions)
+    commit_progress = _VerifiedWorkPhase("commits", budget=deadline)
     parent_graph = await _read_parent_graph_bounded(
         _range_git_argv("rev-list", "--parents", "--topo-order", "--stdin"),
         deadline=loop_deadline, object_format=request.object_format, input_bytes=revisions,
+        store_row=commit_progress.observed(index.add_selected_commit),
+        indexed_only=compact_graph,
     )
     if isinstance(parent_graph, Refusal):
         return parent_graph
+    commit_progress.finish()
+    object_progress = _VerifiedWorkPhase("objects", budget=deadline)
     objects = await _read_git_oid_lines_bounded(
         _range_git_argv("rev-list", "--objects", "--no-object-names", "--stdin"),
-        count_cap=_MAX_OBJECTS, byte_cap=request.object_format.list_byte_cap(_MAX_OBJECTS),
+        count_cap=None if exclusions else _MAX_OBJECTS,
+        byte_cap=None if exclusions else request.object_format.list_byte_cap(_MAX_OBJECTS),
         deadline=loop_deadline, object_format=request.object_format, input_bytes=revisions,
+        store_row=object_progress.observed(index.add_selected_object),
     )
     if isinstance(objects, Refusal):
         return objects
-    commits = tuple(oid for oid, _parents in parent_graph)
-    if not set(commits).issubset(objects):
+    object_progress.finish()
+    receiver = await _subtract_receiver_object_intersection(index, exclusions, request.object_format, deadline)
+    if isinstance(receiver, Refusal):
+        return receiver
+    if not index.object_selection_within_limit():
+        return _refusal("PS-MSG-LIMIT", "count")
+    if not index.selected_commits_covered():
         return _refusal("PS-MSG-COVERAGE", "commit-object-set")
-    tag_inventory = (
-        inventory if inventory is not None and not commits and objects == roots else None
-    )
+    parent_graph = () if compact_graph else tuple(index.selected_commits())
+    objects = index.bind_object_selection() if compact_graph else tuple(index.selected_objects())
+    commits = index.bind_commit_selection() if compact_graph else tuple(oid for oid, _parents in parent_graph)
+    tag_inventory = None
+    if inventory is not None and not commits and len(objects) == len(roots):
+        ordered_objects = index.selected_objects() if isinstance(objects, _IndexedObjectSelection) else objects
+        if all(oid == root for oid, root in zip_longest(ordered_objects, roots)):
+            tag_inventory = inventory
     return NativePushSelection(request, commits, objects, request.object_format, roots, parent_graph,
-                               tag_inventory)
+                               tag_inventory, indexed_parent_graph=compact_graph,
+                               prior_receiver_roots=exclusions)
 
 
 async def _native_commit_range_selection(
-    primary: RangeRequest, request: NativePushRequest, deadline: float,
+    primary: RangeRequest, request: NativePushRequest, deadline: float, index: "_HistoryIndex",
+    *, compact_graph: bool = False,
 ) -> RangeSelection | Refusal:
     """Union newly disclosed actual update graphs for this receiver.
 
@@ -3518,14 +4204,11 @@ async def _native_commit_range_selection(
     if _detect_git_object_format(_remaining_seconds(deadline)) != object_format or _graft_overlay_present(_remaining_seconds(deadline)):
         return _refusal("PS-MSG-RANGE", "native-repository")
     zero = "0" * object_format.hex_length
-    parents: dict[str, tuple[str, ...]] = {}
-    objects: set[str] = set()
     selected_primary = None
     prior_roots = await _native_prior_receiver_roots(request, deadline)
     if isinstance(prior_roots, Refusal):
         return prior_roots
-    exclusion = ("--not", *prior_roots) if prior_roots else ()
-    for row in request.updates:
+    for stream, row in enumerate(request.updates, start=1):
         if row.local_oid == zero:
             continue
         try:
@@ -3536,30 +4219,39 @@ async def _native_commit_range_selection(
         if selected_primary is None:
             selected_primary = (os.fsdecode(row.remote_ref), tip)
         loop_deadline = asyncio.get_running_loop().time() + _remaining_seconds(deadline)
+        revisions = _revision_stdin((tip,), prior_roots)
         graph = await _read_parent_graph_bounded(
-            _range_git_argv("rev-list", "--parents", "--topo-order", tip, *exclusion),
-            deadline=loop_deadline, object_format=object_format,
+            _range_git_argv("rev-list", "--parents", "--topo-order", "--stdin"),
+            deadline=loop_deadline, object_format=object_format, input_bytes=revisions,
+            store_row=lambda oid, parents: index.add_selected_commit(oid, parents, stream=stream),
+            indexed_only=compact_graph,
         )
         if isinstance(graph, Refusal):
             return graph
         selected_objects = await _read_git_oid_lines_bounded(
-            _range_git_argv("rev-list", "--objects", "--no-object-names", tip, *exclusion),
-            count_cap=_MAX_OBJECTS, byte_cap=object_format.list_byte_cap(_MAX_OBJECTS),
-            deadline=loop_deadline, object_format=object_format,
+            _range_git_argv("rev-list", "--objects", "--no-object-names", "--stdin"),
+            count_cap=None if prior_roots else _MAX_OBJECTS,
+            byte_cap=None if prior_roots else object_format.list_byte_cap(_MAX_OBJECTS),
+            deadline=loop_deadline, object_format=object_format, input_bytes=revisions,
+            store_row=lambda oid: index.add_selected_object(oid, stream=stream),
         )
         if isinstance(selected_objects, Refusal):
             return selected_objects
-        parents.update(graph)
-        objects.update(selected_objects)
-        if len(parents) > _MAX_COMMITS or len(objects) > _MAX_OBJECTS:
-            return _refusal("PS-MSG-LIMIT", "count")
     if selected_primary != (primary.destination, primary.source):
         return _refusal("PS-MSG-RANGE", "native-primary")
-    if not set(parents).issubset(objects):
+    receiver = await _subtract_receiver_object_intersection(index, prior_roots, object_format, deadline)
+    if isinstance(receiver, Refusal):
+        return receiver
+    if not index.object_selection_within_limit():
+        return _refusal("PS-MSG-LIMIT", "count")
+    if not index.selected_commits_covered():
         return _refusal("PS-MSG-COVERAGE", "commit-object-set")
+    parents = () if compact_graph else tuple(index.selected_commits())
+    commits = tuple(index.selected_commit_ids()) if compact_graph else tuple(oid for oid, _ in parents)
     return RangeSelection(primary.remote, primary.destination, primary.source,
-        primary.source, tuple(parents), tuple(sorted(objects)), object_format,
-        expected_parents=tuple(parents.items()))
+        primary.source, commits, tuple(index.selected_objects(sorted_ids=True)),
+        object_format, expected_parents=parents, indexed_parent_graph=compact_graph,
+        prior_receiver_roots=prior_roots)
 
 
 def _parse_batch_header(
@@ -3652,7 +4344,7 @@ class _AsyncGitObjectReader:
         self,
         *,
         argv: tuple[str, ...] | None = None,
-        request_timeout: float = _OBJECT_REQUEST_TIMEOUT_SECONDS,
+        request_timeout: float | None = None,
         settle_timeout: float = OBJECT_REAP_ATTEMPT_SECONDS,
     ) -> None:
         self._command_mode = argv is None
@@ -3709,8 +4401,28 @@ class _AsyncGitObjectReader:
         self._state = ReaderState.ACTIVE
         return None
 
+    def _request_deadline(self, scan_deadline: float | _ScanInactivity | None) -> float:
+        now = asyncio.get_running_loop().time()
+        if isinstance(scan_deadline, _ScanInactivity):
+            scan_deadline = now + scan_deadline.remaining()
+        if scan_deadline is None:
+            budget = (
+                self._request_timeout
+                if self._request_timeout is not None else _OBJECT_REQUEST_TIMEOUT_SECONDS
+            )
+            deadline = now + budget
+        elif not math.isfinite(scan_deadline):
+            raise asyncio.TimeoutError
+        elif self._request_timeout is None:
+            deadline = scan_deadline
+        else:
+            deadline = min(scan_deadline, now + self._request_timeout)
+        if not math.isfinite(deadline) or deadline <= now:
+            raise asyncio.TimeoutError
+        return deadline
+
     async def _within(self, awaitable, deadline: float):
-        remaining = deadline - asyncio.get_running_loop().time()
+        remaining = _time_left(deadline, asyncio.get_running_loop().time)
         if remaining <= 0:
             close = getattr(awaitable, "close", None)
             if callable(close):
@@ -3734,10 +4446,8 @@ class _AsyncGitObjectReader:
             or process.stdout is None
         ):
             return _refusal("PS-MSG-READ", "reader-state")
-        deadline = asyncio.get_running_loop().time() + self._request_timeout
-        if scan_deadline is not None:
-            deadline = min(deadline, scan_deadline)
         try:
+            deadline = self._request_deadline(scan_deadline)
             process.stdin.write((b"contents " if self._command_mode else b"") + oid.encode("ascii") + b"\n")
             await self._within(process.stdin.drain(), deadline)
             header = await self._within(process.stdout.readline(), deadline)
@@ -3810,10 +4520,8 @@ class _AsyncGitObjectReader:
             or b"\r" in encoded_name
         ):
             return _refusal("PS-MSG-FRAME", "batch-check-request")
-        deadline = asyncio.get_running_loop().time() + self._request_timeout
-        if scan_deadline is not None:
-            deadline = min(deadline, scan_deadline)
         try:
+            deadline = self._request_deadline(scan_deadline)
             process.stdin.write((b"info " if self._command_mode else b"") + encoded_name + b"\n")
             await self._within(process.stdin.drain(), deadline)
             header = await self._within(process.stdout.readline(), deadline)
@@ -3961,15 +4669,7 @@ class _AsyncGitObjectReader:
         if self._finalizer_task is None or self._finalizer_task.done():
             self._finalizer_task = asyncio.create_task(self._drive_finalizer())
         task = self._finalizer_task
-        caller_cancelled = False
-        try:
-            result = await asyncio.shield(task)
-        except asyncio.CancelledError:
-            caller_cancelled = True
-            try:
-                result = await asyncio.shield(task)
-            except asyncio.CancelledError:
-                result = await task
+        result, caller_cancelled = await _await_owned_task(task)
         task_tick = asyncio.get_running_loop().time()
         task_identity = f"task:{id(task)}"
         finalizer = FinalizerObservation(
@@ -4019,7 +4719,7 @@ def _decode_commit_message(raw: bytes) -> DecodedMessage | Refusal:
     if declared not in (None, b"utf-8", b"utf8"):
         return _refusal("PS-MSG-DECODE", "encoding")
     try:
-        return DecodedMessage(message.decode("utf-8", "strict"), len(message))
+        return DecodedMessage(message.decode("utf-8", "strict"))
     except UnicodeDecodeError:
         return _refusal("PS-MSG-DECODE", "utf8")
 
@@ -4105,6 +4805,9 @@ def _parse_tree(
 
 
 def _line_limit_refusal(raw: bytes) -> Refusal | None:
+    # No individual line can be larger than the entire payload.
+    if len(raw) <= _MAX_LINE_BYTES:
+        return None
     start = 0
     while True:
         end = raw.find(b"\n", start)
@@ -4183,17 +4886,13 @@ def _build_coverage_proof(
         or not (len(expected) == len(requested) == len(acquired) == len(scanned))
     ):
         return _refusal("PS-MSG-COVERAGE", "multiplicity")
-    coverage_digest = hashlib.sha256(
-        b"publication-safety-coverage-v1\0"
-        + b"\0".join(oid.encode("ascii") for oid in scanned)
-    ).hexdigest()
-    counter_rows = lambda value: tuple(sorted(value.items()))
+    # Equality above proves all four canonical multiplicity tables identical.
+    counter_rows = tuple(sorted(exact.items()))
     return CoverageProof(
         expected, requested, acquired, scanned,
-        counter_rows(expected_counter), counter_rows(requested_counter),
-        counter_rows(acquired_counter), counter_rows(scanned_counter),
+        counter_rows, counter_rows, counter_rows, counter_rows,
         len(expected), len(requested), len(acquired), len(scanned),
-        coverage_digest,
+        _coverage_digest(scanned),
     )
 
 
@@ -4245,53 +4944,718 @@ def _tree_traversal_guard(
     *,
     deadline: float,
     frontier: int,
-    visits: int,
-    visited: int,
-    cache_entries: int,
 ) -> Refusal | None:
-    if asyncio.get_running_loop().time() >= deadline:
+    if _time_left(deadline, asyncio.get_running_loop().time) <= 0:
         return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
     if frontier > _MAX_TREE_FRONTIER:
         return _refusal("PS-MSG-LIMIT", "tree-frontier")
-    if visits > _MAX_TREE_VISITS:
-        return _refusal("PS-MSG-LIMIT", "tree-visits")
-    if visited > _MAX_TREE_CACHE_ENTRIES:
-        return _refusal("PS-MSG-LIMIT", "tree-visited")
-    if cache_entries > _MAX_TREE_CACHE_ENTRIES:
-        return _refusal("PS-MSG-LIMIT", "tree-cache-count")
     return None
 
 
-async def _acquire_history(
+class _PendingTrees:
+    """Oldest pending tasks on disk, newest page in memory, one LIFO order."""
+
+    def __init__(self, db: sqlite3.Connection) -> None:
+        self._db = db
+        self._page: list[tuple[str, bytes, tuple[str, ...]]] = []
+        self._stored = 0
+        db.execute(
+            "CREATE TEMP TABLE tree_frontier (ordinal INTEGER PRIMARY KEY, "
+            "oid TEXT NOT NULL, path BLOB NOT NULL, ancestors TEXT NOT NULL)"
+        )
+
+    def __bool__(self) -> bool:
+        return bool(self._page or self._stored)
+
+    def append(self, task: tuple[str, bytes, tuple[str, ...]]) -> None:
+        if len(self._page) == _TREE_FRONTIER_PAGE:
+            self._db.executemany(
+                "INSERT INTO tree_frontier VALUES (?, ?, ?, ?)",
+                ((self._stored + offset, oid, path, ",".join(ancestors))
+                 for offset, (oid, path, ancestors) in enumerate(self._page)),
+            )
+            self._stored += len(self._page)
+            self._page.clear()
+        self._page.append(task)
+
+    def pop(self) -> tuple[str, bytes, tuple[str, ...]]:
+        if not self._page and self._stored:
+            start = max(0, self._stored - _TREE_FRONTIER_PAGE)
+            for expected, (ordinal, oid, path, ancestors) in enumerate(
+                self._db.execute(
+                    "SELECT ordinal, oid, path, ancestors FROM tree_frontier "
+                    "WHERE ordinal >= ? ORDER BY ordinal", (start,)
+                ), start
+            ):
+                if ordinal != expected or ordinal >= self._stored:
+                    raise sqlite3.DatabaseError("tree frontier order")
+                self._page.append((oid, path, tuple(ancestors.split(",")) if ancestors else ()))
+            if len(self._page) != self._stored - start:
+                raise sqlite3.DatabaseError("tree frontier coverage")
+            self._db.execute("DELETE FROM tree_frontier WHERE ordinal >= ?", (start,))
+            self._stored = start
+        return self._page.pop()
+
+
+class _IndexedTagTargets:
+    """Verified tag edges in acquisition order, owned by the history index."""
+
+    def __init__(self, db: sqlite3.Connection) -> None:
+        self._db = db
+        self._populated = False
+
+    def __setitem__(self, oid: str, target: tuple[str, str]) -> None:
+        if not self._populated:
+            self._db.execute(
+                "CREATE TEMP TABLE selected_tag_target (sequence INTEGER PRIMARY KEY, "
+                "oid TEXT UNIQUE NOT NULL, target_oid TEXT NOT NULL, declared_type TEXT NOT NULL)"
+            )
+            self._populated = True
+        self._db.execute(
+            "INSERT INTO selected_tag_target(oid, target_oid, declared_type) VALUES (?, ?, ?)",
+            (oid, *target),
+        )
+
+    def __len__(self) -> int:
+        if not self._populated:
+            return 0
+        count, = self._db.execute("SELECT COUNT(*) FROM selected_tag_target").fetchone()
+        return count
+
+    def get(self, oid: str) -> tuple[str, str] | None:
+        if not self._populated:
+            return None
+        return self._db.execute(
+            "SELECT target_oid, declared_type FROM selected_tag_target WHERE oid=?", (oid,),
+        ).fetchone()
+
+    def values(self) -> Iterable[tuple[str, str]]:
+        if not self._populated:
+            return ()
+        return self._db.execute(
+            "SELECT target_oid, declared_type FROM selected_tag_target ORDER BY sequence"
+        )
+
+
+class _IndexedExcludedTagTargets:
+    """First declaration per excluded target, retained until the second reader settles."""
+
+    def __init__(self, db: sqlite3.Connection) -> None:
+        self._db = db
+        self._size = 0
+
+    def __bool__(self) -> bool:
+        return bool(self._size)
+
+    def setdefault(self, oid: str, declared_type: str) -> str:
+        if not self._size:
+            self._db.execute(
+                "CREATE TEMP TABLE excluded_tag_target (sequence INTEGER PRIMARY KEY, "
+                "oid TEXT UNIQUE NOT NULL, declared_type TEXT NOT NULL)"
+            )
+        added = self._db.execute(
+            "INSERT INTO excluded_tag_target(oid, declared_type) VALUES (?, ?) "
+            "ON CONFLICT(oid) DO NOTHING", (oid, declared_type),
+        ).rowcount
+        if added:
+            self._size += 1
+            return declared_type
+        stored = self._db.execute(
+            "SELECT declared_type FROM excluded_tag_target WHERE oid=?", (oid,),
+        ).fetchone()
+        if stored is None:
+            raise sqlite3.DatabaseError("excluded tag target coverage")
+        return stored[0]
+
+    def items(self) -> Iterable[tuple[str, str]]:
+        if not self._size:
+            return
+        count = 0
+        for row in self._db.execute(
+            "SELECT oid, declared_type FROM excluded_tag_target ORDER BY sequence"
+        ):
+            count += 1
+            yield row
+        if count != self._size:
+            raise sqlite3.DatabaseError("excluded tag target coverage")
+
+
+class _HistoryIndex:
+    """Scan-owned temporary state; exact path bytes, never blob bodies."""
+
+    def __init__(self, db: sqlite3.Connection):
+        self.db = db
+        self.subject_count = 0
+        self.blob_count = 0
+        self.binary_blob_count = 0
+        self.unexpected_parent_key = False
+        db.executescript("""
+            PRAGMA temp_store=FILE;
+            CREATE TABLE selected_commit (sequence INTEGER PRIMARY KEY, oid TEXT UNIQUE,
+                parents TEXT, stream INTEGER NOT NULL, root_tree TEXT,
+                parent_mismatch INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE selected_object (sequence INTEGER PRIMARY KEY, oid TEXT UNIQUE,
+                stream INTEGER NOT NULL, acquired_kind TEXT, acquired_sequence INTEGER,
+                reached INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE receiver_overlap (oid TEXT PRIMARY KEY) WITHOUT ROWID;
+            CREATE TABLE coverage_event (sequence INTEGER PRIMARY KEY, stage TEXT NOT NULL,
+                oid TEXT NOT NULL);
+            CREATE INDEX coverage_stage ON coverage_event(stage, sequence);
+            CREATE TABLE blob (oid TEXT PRIMARY KEY, size INTEGER NOT NULL,
+                digest BLOB NOT NULL, binary INTEGER NOT NULL) WITHOUT ROWID;
+            CREATE TABLE subject (owner TEXT, path BLOB, blob TEXT, mode TEXT NOT NULL,
+                PRIMARY KEY(owner, path, blob)) WITHOUT ROWID;
+            CREATE TABLE metadata_path (tree TEXT, path BLOB,
+                PRIMARY KEY(tree, path)) WITHOUT ROWID;
+        """)
+
+    def add(self, key, mode):
+        inserted = self.db.execute(
+            "INSERT INTO subject VALUES (?, ?, ?, ?) ON CONFLICT(owner,path,blob) DO NOTHING",
+            (*key, mode),
+        ).rowcount == 1
+        self.subject_count += inserted
+        return inserted
+
+    def add_metadata(self, tree, path):
+        return self.db.execute(
+            "INSERT INTO metadata_path VALUES (?, ?) ON CONFLICT(tree,path) DO NOTHING",
+            (tree, path),
+        ).rowcount == 1
+
+    def prepare_path_queries(self):
+        # The bulk build avoids maintaining this lookup index during admission.
+        # The primary key continues to enforce subject uniqueness on every row.
+        self.db.execute("CREATE INDEX subject_path ON subject(path, blob, owner)")
+
+    def owners(self, path, blob):
+        return ((oid, mode, bool(is_commit)) for oid, mode, is_commit in self.db.execute(
+            "SELECT s.owner, s.mode, c.oid IS NOT NULL FROM subject s "
+            "LEFT JOIN selected_commit c ON c.oid=s.owner "
+            "WHERE s.path=? AND s.blob=? ORDER BY s.owner", (path, blob),
+        ))
+
+    def path_pairs(self):
+        return self.db.execute(
+            "SELECT DISTINCT path, blob FROM subject ORDER BY path, blob"
+        )
+
+    def add_selected_commit(self, oid, parents, *, stream=0):
+        # Another walk can replace Git's parent view, but not first-seen order.
+        return self.db.execute("""
+            INSERT INTO selected_commit(oid, parents, stream) VALUES (?, ?, ?)
+            ON CONFLICT(oid) DO UPDATE SET parents=excluded.parents, stream=excluded.stream
+            WHERE selected_commit.stream <> excluded.stream
+        """, (oid, None if parents is None else " ".join(parents), stream)).rowcount == 1
+
+    def seed_standalone_commits(self, selection) -> bool:
+        for oid in selection.expected_oids:
+            if not self.add_selected_commit(oid, None):
+                return False
+        for oid, parents in selection.expected_parents:
+            updated = self.db.execute(
+                "UPDATE selected_commit SET parents=? WHERE oid=?", (" ".join(parents), oid),
+            ).rowcount
+            self.unexpected_parent_key |= updated != 1
+        return True
+
+    def record_commit_root(self, oid: str, root_tree: str, parents: tuple[str, ...]) -> bool:
+        return self.db.execute("""
+            UPDATE selected_commit SET root_tree=?,
+                parent_mismatch=CASE WHEN parents IS NOT NULL AND parents<>? THEN 1 ELSE 0 END
+            WHERE oid=? AND root_tree IS NULL
+        """, (root_tree, " ".join(parents), oid)).rowcount == 1
+
+    def commit_coverage_problem(self, *, check_parents: bool) -> str | None:
+        if self.db.execute("SELECT 1 FROM selected_commit WHERE root_tree IS NULL LIMIT 1").fetchone():
+            return "commit-set"
+        if not check_parents:
+            return None
+        if self.unexpected_parent_key or self.db.execute(
+            "SELECT 1 FROM selected_commit WHERE parents IS NULL LIMIT 1",
+        ).fetchone():
+            return "parent-graph-set"
+        if self.db.execute("SELECT 1 FROM selected_commit WHERE parent_mismatch=1 LIMIT 1").fetchone():
+            return "parent-graph"
+        return None
+
+    def commit_roots(self) -> Iterable[tuple[str, str]]:
+        return self.db.execute("SELECT oid, root_tree FROM selected_commit ORDER BY sequence")
+
+    def add_selected_object(self, oid, *, stream=0):
+        return self.db.execute("""
+            INSERT INTO selected_object(oid, stream) VALUES (?, ?)
+            ON CONFLICT(oid) DO UPDATE SET stream=excluded.stream
+            WHERE selected_object.stream <> excluded.stream
+        """, (oid, stream)).rowcount == 1
+
+    def has_object_candidates(self):
+        return self.db.execute("SELECT 1 FROM selected_object LIMIT 1").fetchone() is not None
+
+    def mark_receiver_object(self, oid):
+        self.db.execute("""INSERT OR IGNORE INTO receiver_overlap
+                           SELECT oid FROM selected_object WHERE oid=?""", (oid,))
+        return True
+
+    def subtract_marked_receiver_objects(self):
+        self.db.execute("DELETE FROM selected_object WHERE oid IN (SELECT oid FROM receiver_overlap)")
+
+    def had_receiver_tree_candidate(self, oid):
+        return self.db.execute("SELECT 1 FROM receiver_overlap WHERE oid=?", (oid,)).fetchone() is not None
+
+    def selected_commit_ids(self):
+        return (oid for (oid,) in self.db.execute("SELECT oid FROM selected_commit ORDER BY sequence"))
+
+    def selected_commits(self):
+        return ((oid, tuple(parents.split())) for oid, parents in self.db.execute(
+            "SELECT oid, parents FROM selected_commit ORDER BY sequence"
+        ))
+
+    def bind_commit_selection(self) -> _SealedRows | tuple[()]:
+        count, = self.db.execute("SELECT COUNT(*) FROM selected_commit").fetchone()
+        if not count:
+            return ()
+        return _SealedRows(count, _commit_set_digest(self.selected_commit_ids()))
+
+    def selected_objects(self, *, sorted_ids=False):
+        order = "oid" if sorted_ids else "sequence"
+        return (oid for (oid,) in self.db.execute(f"SELECT oid FROM selected_object ORDER BY {order}"))
+
+    def bind_object_selection(self) -> _IndexedObjectSelection | tuple[()]:
+        count, = self.db.execute("SELECT COUNT(*) FROM selected_object").fetchone()
+        if not count:
+            return ()
+        return _IndexedObjectSelection(count, _ordered_receipt_selection_digest(self.selected_objects()))
+
+    def acquisition_targets(self, *, lexical: bool = False) -> Iterable[tuple[str, bool]]:
+        order = "o.oid" if lexical else "o.sequence"
+        after = "" if lexical else 0
+        # Close the read statement before handing off each bounded page.
+        # Acquisition updates other columns on these same selected rows.
+        while True:
+            page = self.db.execute(f"""
+                SELECT {order}, o.oid, c.oid IS NOT NULL FROM selected_object o
+                LEFT JOIN selected_commit c ON c.oid=o.oid
+                WHERE {order}>? ORDER BY {order} LIMIT 512
+            """, (after,)).fetchall()
+            if not page:
+                return
+            after = page[-1][0]
+            for _, oid, is_commit in page:
+                yield oid, bool(is_commit)
+
+    def record_acquired(self, oid: str, kind: str, ordinal: int) -> bool:
+        return self.db.execute(
+            "UPDATE selected_object SET acquired_kind=?, acquired_sequence=? "
+            "WHERE oid=? AND acquired_kind IS NULL", (kind, ordinal, oid),
+        ).rowcount == 1
+
+    def acquired_oids(self, *, deferred: bool = False) -> Iterable[str]:
+        kind = "acquired_kind IN ('tree', 'blob')" if deferred else "acquired_kind IS NOT NULL"
+        return (oid for (oid,) in self.db.execute(
+            f"SELECT oid FROM selected_object WHERE {kind} ORDER BY acquired_sequence",
+        ))
+
+    def acquired_kind(self, oid: str) -> str | None:
+        row = self.db.execute("SELECT acquired_kind FROM selected_object WHERE oid=?", (oid,)).fetchone()
+        return None if row is None else row[0]
+
+    def record_reached_tree(self, oid: str) -> bool:
+        row = self.db.execute(
+            "SELECT reached FROM selected_object WHERE oid=? AND acquired_kind='tree'", (oid,),
+        ).fetchone()
+        if row is None:
+            return False
+        if not row[0]:
+            self.db.execute("UPDATE selected_object SET reached=1 WHERE oid=?", (oid,))
+        return True
+
+    def tree_coverage_complete(self) -> bool:
+        return self.db.execute(
+            "SELECT 1 FROM selected_object WHERE acquired_kind='tree' AND reached=0 LIMIT 1",
+        ).fetchone() is None
+
+    def has_blob(self, oid: str) -> bool:
+        return self.db.execute("SELECT 1 FROM blob WHERE oid=?", (oid,)).fetchone() is not None
+
+    def object_selection_within_limit(self):
+        objects, = self.db.execute("SELECT COUNT(*) FROM selected_object").fetchone()
+        return objects <= _MAX_OBJECTS
+
+    def selected_commits_covered(self):
+        return self.db.execute("""
+            SELECT 1 FROM selected_commit AS c
+            WHERE NOT EXISTS (SELECT 1 FROM selected_object AS o WHERE o.oid=c.oid)
+            LIMIT 1
+        """).fetchone() is None
+
+    def record_coverage(self, stage: CoverageEvent, oid: str) -> None:
+        # Preserve every observation, including duplicates, for the proof owner.
+        self.db.execute("INSERT INTO coverage_event(stage, oid) VALUES (?, ?)", (stage.value, oid))
+
+    def coverage_events(self, stage: CoverageEvent) -> Iterable[str]:
+        return (oid for (oid,) in self.db.execute(
+            "SELECT oid FROM coverage_event WHERE stage=? ORDER BY sequence", (stage.value,),
+        ))
+
+    def seal_receipt_coverage(
+        self, expected: tuple[str, ...] | _IndexedObjectSelection, *, commits: bool = False,
+    ) -> _ReceiptCoverage | Refusal:
+        def invalid():
+            return _refusal("PS-MSG-COVERAGE", "multiplicity")
+
+        def selected(order):
+            table = "selected_commit" if commits else "selected_object"
+            return (oid for (oid,) in self.db.execute(f"SELECT oid FROM {table} ORDER BY {order}"))
+
+        if isinstance(expected, _IndexedObjectSelection):
+            if commits or self.bind_object_selection() != expected:
+                return invalid()
+            ordered_digest = expected.order
+        else:
+            if not expected or any(a != b for a, b in zip_longest(expected, selected("sequence"))):
+                return invalid()
+            ordered_digest = _ordered_receipt_selection_digest(expected)
+        for stage in CoverageEvent:
+            observed = self.db.execute(
+                "SELECT oid, COUNT(*) FROM coverage_event WHERE stage=? GROUP BY oid ORDER BY oid",
+                (stage.value,),
+            )
+            exact = ((oid, 1) for oid in selected("oid"))
+            if any(a != b for a, b in zip_longest(exact, observed)):
+                return invalid()
+        return _ReceiptCoverage(
+            len(expected),
+            _commit_set_digest(expected) if commits else _digest_frames(
+                b"object-set", (oid.lower().encode("ascii") for oid in selected("oid")),
+            ),
+            _coverage_digest(self.coverage_events(CoverageEvent.SCANNED)),
+            ordered_digest,
+        )
+
+    def add_blob(self, oid, size, digest, binary):
+        self.db.execute("INSERT INTO blob VALUES (?, ?, ?, ?)", (oid, size, digest, binary))
+        self.blob_count += 1
+        self.binary_blob_count += binary
+
+    def blob_record(self, oid):
+        row = self.db.execute("SELECT size, digest, binary FROM blob WHERE oid=?", (oid,)).fetchone()
+        if row is None:
+            return None
+        size, digest, binary = row
+        return size, digest, bool(binary)
+
+    def seal_native_identities(self) -> tuple[_SealedOids, _SealedOids, _SealedOids] | Refusal:
+        if self.db.execute("""
+            SELECT 1 FROM blob b LEFT JOIN selected_object o ON o.oid=b.oid
+            WHERE o.acquired_kind IS NULL OR o.acquired_kind<>'blob' LIMIT 1
+        """).fetchone():
+            return _refusal("PS-MSG-COVERAGE", "blob-set")
+        blob_count, = self.db.execute(
+            "SELECT COUNT(*) FROM selected_object WHERE acquired_kind='blob'",
+        ).fetchone()
+        blobs = _seal_sorted_oids(b"blob-set", self.recorded_blob_ids())
+        if len(blobs) != blob_count or len(blobs) != self.blob_count:
+            return _refusal("PS-MSG-COVERAGE", "blob-set")
+        tags = _seal_sorted_oids(b"tag-set", (oid for (oid,) in self.db.execute(
+            "SELECT oid FROM selected_object WHERE acquired_kind='tag' ORDER BY oid",
+        )))
+        objects = _seal_sorted_oids(b"object-set", self.selected_objects(sorted_ids=True))
+        return objects, blobs, tags
+
+    def recorded_blob_ids(self):
+        return (oid for (oid,) in self.db.execute("SELECT oid FROM blob ORDER BY oid"))
+
+    def blob_coverage_complete(self):
+        path_blobs = (oid for (oid,) in self.db.execute(
+            "SELECT DISTINCT blob FROM subject ORDER BY blob"
+        ))
+        return all(a == b for a, b in zip_longest(self.recorded_blob_ids(), path_blobs))
+
+    def _seal(self, query, digest):
+        count = 0
+
+        def rows():
+            nonlocal count
+            for row in self.db.execute(query):
+                count += 1
+                yield row
+
+        return _SealedRows(digest=digest(rows()), count=count)
+
+    def seal(self):
+        return (
+            self._seal("SELECT owner, path, blob FROM subject ORDER BY owner, path, blob",
+                       _subject_set_digest),
+            self._seal("SELECT DISTINCT blob, path FROM subject ORDER BY blob, path",
+                       _path_set_digest),
+        )
+
+
+@contextmanager
+def _open_history_index(wall_deadline):
+    with closing(sqlite3.connect("")) as db:
+        index = _HistoryIndex(db)
+        loop = asyncio.get_running_loop()
+        deadline = _loop_scan_deadline(wall_deadline)
+        db.set_progress_handler(lambda: int(_time_left(deadline, loop.time) <= 0), 2048)
+        yield index
+
+
+async def _acquire_history(selection, reader, find_machine_paths, coverage_recorder,
+                           scan_deadline, *, history_index=None, **options):
+    # Borrow only from the native invocation that owns closure before publication.
+    try:
+        connection = closing(sqlite3.connect("")) if history_index is None else nullcontext(history_index.db)
+        with connection as db:
+            index = _HistoryIndex(db) if history_index is None else history_index
+            clock = asyncio.get_running_loop().time
+            db.set_progress_handler(lambda: int(_time_left(scan_deadline, clock) <= 0), 2048)
+            if history_index is None:
+                if selection.indexed_parent_graph:
+                    return _refusal("PS-MSG-COVERAGE", "parent-graph-set")
+                # Standalone selection was formed before this local index opened.
+                for oid in selection.object_oids:
+                    if not index.add_selected_object(oid):
+                        return _refusal("PS-MSG-COVERAGE", "object-set")
+                if not index.seed_standalone_commits(selection):
+                    return _refusal("PS-MSG-COVERAGE", "commit-set")
+            elif isinstance(selection, RangeSelection):
+                options["lexical_acquisition"] = True
+            wire = globals().get("__injected_matcher_wire__")
+            try:
+                executable = None if wire is None else wire["retained_matcher"](sys.executable)
+            except (OSError, ValueError):
+                return _refusal("PS-MSG-READ", "matcher-package")
+            if executable is None:
+                result = await _acquire_indexed_history(
+                    selection, reader, find_machine_paths, coverage_recorder, scan_deadline,
+                    index, **options,
+                )
+            else:
+                rules = tuple(_SIMPLE_RULES) + tuple((True, pattern) for _, pattern in _VALUE_RULES)
+                try:
+                    async with _owned_matcher_exchange(
+                        executable, wire["MatcherExchange"], rules, scan_deadline,
+                    ) as matcher:
+                        await matcher.match((), _deadline_snapshot(scan_deadline, asyncio.get_running_loop().time))
+                        result = await _acquire_indexed_history(
+                            selection, reader, find_machine_paths, coverage_recorder,
+                            scan_deadline, index, matcher=matcher, **options,
+                        )
+                except TimeoutError:
+                    return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+                except (OSError, ValueError, subprocess.SubprocessError, WindowsJobError):
+                    return _refusal("PS-MSG-READ", "matcher-worker")
+            # Native receipts formerly rehashed retained rows. Re-read and
+            # verify them while their owner is live, then close the scratch.
+            if isinstance(selection, NativePushSelection) and isinstance(result, tuple):
+                history, _, findings = result
+                if not findings and index.seal() != (history.subjects, history.paths):
+                    return _refusal("PS-MSG-COVERAGE", "history-index")
+            if isinstance(result, tuple) and _time_left(scan_deadline, clock) <= 0:
+                return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+            return result
+    except sqlite3.Error:
+        if _time_left(scan_deadline, asyncio.get_running_loop().time) <= 0:
+            return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+        return _refusal("PS-MSG-READ", "coverage-storage")
+
+
+def _follow_native_tag_chain(
+    root: str, lookup: Callable[[str], tuple[str, str] | None],
+    deadline: float | _ScanInactivity,
+) -> str | Refusal:
+    # Brent's cycle detection: retain one checkpoint, not every tag visited.
+    clock = asyncio.get_running_loop().time
+    anchor = selected = root
+    span = 1
+    steps = 0
+    while _time_left(deadline, clock) > 0:
+        target = lookup(selected)
+        if target is None:
+            if _time_left(deadline, clock) > 0:
+                return selected
+            break
+        selected = target[0]
+        if selected == anchor:
+            return _refusal("PS-MSG-FRAME", "tag-cycle")
+        steps += 1
+        if steps == span:
+            anchor, span, steps = selected, span * 2, 0
+    return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+
+
+def _verified_published_blob_lines(proof_git, oid: str, object_format) -> list[str] | None:
+    if len(oid) != object_format.hex_length or re.fullmatch("[0-9a-f]+", oid) is None:
+        return None
+    size_record = proof_git(["cat-file", "-s", oid])
+    if size_record.returncode or not size_record.stdout.strip().isdigit():
+        return None
+    size = int(size_record.stdout)
+    if size > _MAX_BLOB_BYTES:
+        return None
+    blob = proof_git(["cat-file", "blob", oid])
+    data = blob.stdout
+    if blob.returncode or len(data) != size or _is_binary(data):
+        return None
+    digest = hashlib.new(object_format.name)
+    digest.update(f"blob {size}\0".encode("ascii"))
+    digest.update(data)
+    if digest.hexdigest() != oid:
+        return None
+    lines = data.decode("utf-8").splitlines()
+    if len(lines) != data.count(b"\n") + int(bool(data) and not data.endswith(b"\n")):
+        return None
+    return lines
+
+
+def _published_path_blob_history(proof_git, root: str, path: bytes, literal_path: str,
+                                 git_mode: str) -> tuple[str, ...]:
+    """Ask Git for object identities reached by this exact path at a receiver root."""
+    record = proof_git(["--literal-pathspecs", "log", "--full-history", "--root", "--raw", "-m", "-z",
+                        "--format=", "--no-abbrev", "--no-renames", root, "--", literal_path])
+    if record.returncode:
+        return ()
+    entries = iter(record.stdout.split(b"\0"))
+    result: dict[str, None] = {}
+    mode = git_mode.encode("ascii")
+    for entry in entries:
+        if not entry.strip(b"\n"):
+            continue
+        fields = entry.lstrip(b"\n").split()
+        if len(fields) != 5 or not fields[0].startswith(b":") or next(entries, None) != path:
+            return ()  # A partial or confused path inventory proves nothing.
+        for kind, oid in ((fields[0][1:], fields[2]), (fields[1], fields[3])):
+            if kind == mode:
+                result[oid.decode("ascii")] = None
+    return tuple(result)
+
+
+def _unpublished_machine_path_lines(
+    selection, path, raw, git_mode, find_machine_paths, deadline, prior_blobs,
+):
+    """Narrow machine-path findings only with exact same-path receiver evidence.
+
+    A same-path line needs exact evidence in a receiver-side version,
+    including earlier versions reachable from the receiver's prior ref.
+    A duplicate beyond the previously published multiplicity remains a finding.
+    Missing or unreadable evidence never waives an occurrence.
+    """
+    if not selection.prior_receiver_roots:
+        return None
+    try:
+        literal_path = path.decode("utf-8")
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    matching = {number for number, _, line in _selected_text_lines(text, literal_path, "history-blob")
+                if find_machine_paths(line)}
+    if not matching:
+        return frozenset()
+    current = text.splitlines()
+    if len(current) != raw.count(b"\n") + int(bool(raw) and not raw.endswith(b"\n")):
+        return None  # Git and the text classifier must agree on line boundaries.
+    wanted = Counter(current[number - 1] for number in matching)
+    now = asyncio.get_running_loop().time
+    # This optional proof must not use the primary object reader or consume
+    # its remaining time on a missing, oversized or corrupt baseline.
+    proof_deadline = now() + _time_left(deadline, now) / 2
+
+    def proof_git(args):
+        remaining = proof_deadline - now()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired("published-path-evidence", 0)
+        return _run_range_git(args, timeout=remaining)
+
+    # The range owner orders the advertised destination before additional
+    # receiver inventory. Anchor prior-line evidence to that selected history.
+    old_root = selection.prior_receiver_roots[0]
+    history_key = ("history", old_root, git_mode)
+    try:
+        if history_key not in prior_blobs:
+            prior_blobs[history_key] = _published_path_blob_history(
+                proof_git, old_root, path, literal_path, git_mode,
+            )
+        for previous_oid in prior_blobs[history_key]:
+            lines = _verified_published_blob_lines(proof_git, previous_oid, selection.object_format)
+            if lines is None:
+                continue
+            previously_seen = Counter(line for line in lines if line in wanted)
+            matching = {n for n in matching if previously_seen[current[n - 1]] < wanted[current[n - 1]]}
+            if not matching:
+                break
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass  # The still-unproved lines keep their original disposition.
+    return frozenset(matching)
+
+
+async def _acquire_indexed_history(
     selection: RangeSelection | NativePushSelection,
     reader: _AsyncGitObjectReader,
     find_machine_paths,
     coverage_recorder: CoverageRecorder,
     scan_deadline: float,
+    index: _HistoryIndex,
     *,
     review_evaluation: "ReviewEvaluation | None" = None,
-    excluded_tag_targets: dict[str, str] | None = None,
-) -> tuple[HistoryProof, CoverageProof, tuple[Finding, ...]] | Refusal:
-    commit_set = set(selection.expected_oids)
+    excluded_tag_targets: dict[str, str] | _IndexedExcludedTagTargets | None = None,
+    review_capture=None,
+    matcher=None,
+    lexical_acquisition: bool = False,
+) -> tuple[HistoryProof, CoverageProof | _ReceiptCoverage, tuple[Finding, ...]] | Refusal:
     native = isinstance(selection, NativePushSelection)
-    object_types: dict[str, str] = {}
-    commit_records: dict[str, CommitRecord] = {}
-    tag_targets: dict[str, tuple[str, str]] = {}
+    tag_targets: dict[str, tuple[str, str]] | _IndexedTagTargets = (
+        _IndexedTagTargets(index.db) if coverage_recorder.compact_native_receipt else {}
+    )
     direct_tag_commit = None
-    tree_cache: dict[str, bytes] = {}
-    blob_records: dict[str, tuple[int, bytes, bool]] = {}
+    tree_cache: OrderedDict[str, tuple[bytes | tuple[TreeEntry, ...], int]] = OrderedDict()
     findings: list[Finding] = []
-    aggregate_messages = 0
     # Total unique bytes are receipt evidence, not retained-cache allocation.
     # Payload memory is independent of this total; object/count/deadline guards
     # remain owned by the reader, traversal, and publication supervisor.
     aggregate_blobs = 0
-    aggregate_trees = 0
+    retained_tree_bytes = 0
 
-    for oid in selection.object_oids:
-        if asyncio.get_running_loop().time() >= scan_deadline:
+    def retain_tree(oid: str, payload: bytes | tuple[TreeEntry, ...]) -> bool:
+        nonlocal retained_tree_bytes
+        cost = sys.getsizeof(payload)
+        if isinstance(payload, tuple):
+            # Charge parsed objects and their fields to the same cache budget.
+            for entry in payload:
+                cost += (sys.getsizeof(entry) + sys.getsizeof(entry.__dict__)
+                         + sys.getsizeof(entry.kind) + sys.getsizeof(entry.name)
+                         + sys.getsizeof(entry.oid) + sys.getsizeof(entry.mode))
+        if cost > _TREE_CACHE_BYTES or _MAX_TREE_CACHE_ENTRIES <= 0:
+            return False
+        previous = tree_cache.pop(oid, None)
+        if previous is not None:
+            retained_tree_bytes -= previous[1]
+        while tree_cache and (
+            retained_tree_bytes + cost > _TREE_CACHE_BYTES
+            or len(tree_cache) >= _MAX_TREE_CACHE_ENTRIES
+        ):
+            _, (_, evicted_cost) = tree_cache.popitem(last=False)
+            retained_tree_bytes -= evicted_cost
+        tree_cache[oid] = (payload, cost)
+        retained_tree_bytes += cost
+        return True
+
+    targets = index.acquisition_targets(lexical=lexical_acquisition)
+    indexed_objects = isinstance(selection.object_oids, _IndexedObjectSelection)
+    if indexed_objects and (lexical_acquisition or not native):
+        return _refusal("PS-MSG-COVERAGE", "object-set")
+    ordered_targets = ((target[0], target) for target in targets) if indexed_objects else (
+        zip_longest(selection.object_oids, targets)
+    )
+    observe_work = native or isinstance(scan_deadline, _ScanInactivity)
+    acquisition_progress = _VerifiedWorkPhase("acquired", enabled=observe_work, budget=scan_deadline)
+    for ordinal, (oid, target) in enumerate(ordered_targets):
+        if _time_left(scan_deadline, asyncio.get_running_loop().time) <= 0:
             return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
-        expected_type = "commit" if oid in commit_set else None
+        if target is None or oid != target[0]:
+            return _refusal("PS-MSG-COVERAGE", "object-set")
+        expected_type = "commit" if target[1] else None
         if native or expected_type == "commit":
             coverage_recorder.record(CoverageEvent.REQUESTED, oid)
         result = await reader.read(
@@ -4307,9 +5671,10 @@ async def _acquire_history(
             if actual_oid != oid:
                 return _refusal("PS-MSG-COVERAGE", "object-content-identity")
             coverage_recorder.record(CoverageEvent.ACQUIRED, oid)
-        object_types[oid] = result.object_type
+        if not index.record_acquired(oid, result.object_type, ordinal):
+            return _refusal("PS-MSG-COVERAGE", "object-set")
         if result.object_type == "commit":
-            if oid not in commit_set:
+            if expected_type != "commit":
                 return _refusal("PS-MSG-COVERAGE", "unexpected-commit")
             if not native:
                 coverage_recorder.record(CoverageEvent.ACQUIRED, result.returned_oid)
@@ -4321,13 +5686,15 @@ async def _acquire_history(
                 line_refusal = _line_limit_refusal(header)
                 if line_refusal is not None:
                     return line_refusal
+                header_text = header.decode("utf-8", "replace")
                 _append_findings(findings, _content_hits(
-                    header.decode("utf-8", "replace"), oid, find_machine_paths,
+                    header_text, oid, find_machine_paths,
                     subject_kind="commit-header", max_findings=max(0, _MAX_FINDINGS - len(findings)),
                 ))
-            aggregate_messages += record.message.raw_size
-            if aggregate_messages > _MAX_AGGREGATE_MESSAGE_BYTES:
-                return _refusal("PS-MSG-LIMIT", "aggregate-message-bytes")
+            if review_capture is not None:
+                review_capture.metadata(record.message.text, "commit-message", find_machine_paths)
+                if native:
+                    review_capture.metadata(header_text, "commit-header", find_machine_paths)
             _append_findings(findings, _content_hits(
                 record.message.text,
                 oid,
@@ -4336,22 +5703,28 @@ async def _acquire_history(
                 max_findings=max(0, _MAX_FINDINGS - len(findings)),
             ))
             coverage_recorder.record(CoverageEvent.SCANNED, oid)
-            commit_records[oid] = record
+            # Content is scanned synchronously; only topology survives this object.
+            if not index.record_commit_root(oid, record.root_tree, record.parents):
+                return _refusal("PS-MSG-COVERAGE", "commit-set")
+            del record
+            if native:
+                del header, header_text
         elif native and result.object_type == "tag":
             target = _decode_tag_target(result.raw, selection.object_format)
             if isinstance(target, Refusal):
                 return target
-            aggregate_messages += len(result.raw)
-            if aggregate_messages > _MAX_AGGREGATE_MESSAGE_BYTES:
-                return _refusal("PS-MSG-LIMIT", "aggregate-message-bytes")
             line_refusal = _line_limit_refusal(result.raw)
             if line_refusal is not None:
                 return line_refusal
+            tag_text = result.raw.decode("utf-8", "replace")
             _append_findings(findings, _content_hits(
-                result.raw.decode("utf-8", "replace"), oid, find_machine_paths,
+                tag_text, oid, find_machine_paths,
                 subject_kind="tag-object", max_findings=max(0, _MAX_FINDINGS - len(findings)),
             ))
             coverage_recorder.record(CoverageEvent.SCANNED, oid)
+            if review_capture is not None:
+                review_capture.metadata(tag_text, "tag-object", find_machine_paths)
+            del tag_text
             tag_targets[oid] = target
             if selection.tag_receiver_inventory is not None:
                 tag_row = _native_new_same_name_tag(selection.request)
@@ -4361,43 +5734,47 @@ async def _acquire_history(
                         == [tag_row.remote_ref.removeprefix(b"refs/tags/")]):
                     direct_tag_commit = target[0]
         elif result.object_type == "tree":
-            aggregate_trees += len(result.raw)
-            if aggregate_trees > _MAX_TREE_CACHE_BYTES:
-                return _refusal("PS-MSG-LIMIT", "tree-cache-bytes")
-            tree_cache[oid] = result.raw
+            retain_tree(oid, result.raw)
         elif result.object_type == "blob":
-            if len(blob_records) >= _MAX_BLOBS:
+            if not native and hashlib.new(selection.object_format.name,
+                                          f"blob {len(result.raw)}\0".encode("ascii") + result.raw).hexdigest() != oid:
+                return _refusal("PS-MSG-COVERAGE", "object-content-identity")
+            # Only the raw receipt path retains the full list of blob IDs.
+            # The compact native receipt seals the exact SQLite-backed set.
+            if not coverage_recorder.compact_native_receipt and index.blob_count >= _MAX_BLOBS:
                 return _refusal("PS-MSG-LIMIT", "blob-count")
+            # The line bound is a property of the verified bytes, not their paths.
+            # Every path reuses only data whose identity is checked again.
+            line_refusal = _line_limit_refusal(result.raw)
+            if line_refusal is not None:
+                return line_refusal
             aggregate_blobs += len(result.raw)
             # Keep identity and disposition, not the complete payload history.
-            blob_records[oid] = (
-                len(result.raw), hashlib.sha256(result.raw).digest(),
+            index.add_blob(
+                oid, len(result.raw), hashlib.sha256(result.raw).digest(),
                 _is_binary(result.raw),
             )
         else:
             return _refusal("PS-MSG-FRAME", "object-type")
         result = None  # Release the previous blob before the next reader allocation.
+        acquisition_progress.step()
+    acquisition_progress.finish()
 
-    if tuple(object_types) != selection.object_oids:
+    expected_objects = index.selected_objects() if indexed_objects else selection.object_oids
+    if any(a != b for a, b in zip_longest(index.acquired_oids(), expected_objects)):
         return _refusal("PS-MSG-COVERAGE", "object-set")
-    if set(commit_records) != commit_set:
-        return _refusal("PS-MSG-COVERAGE", "commit-set")
-    if selection.expected_parents:
-        expected_parents = dict(selection.expected_parents)
-        if set(expected_parents) != commit_set:
-            return _refusal("PS-MSG-COVERAGE", "parent-graph-set")
-        if any(
-            commit_records[oid].parents != expected_parents[oid]
-            for oid in selection.expected_oids
-        ):
-            return _refusal("PS-MSG-COVERAGE", "parent-graph")
+    commit_problem = index.commit_coverage_problem(
+        check_parents=selection.indexed_parent_graph or bool(selection.expected_parents),
+    )
+    if commit_problem is not None:
+        return _refusal("PS-MSG-COVERAGE", commit_problem)
     coverage = None
     if not native:
         coverage = coverage_recorder.proof()
         if isinstance(coverage, Refusal):
             return coverage
     for target_oid, declared_type in tag_targets.values():
-        actual_type = object_types.get(target_oid)
+        actual_type = index.acquired_kind(target_oid)
         if actual_type is None:
             if excluded_tag_targets is None:
                 return _refusal("PS-MSG-FRAME", "tag-target")
@@ -4405,119 +5782,92 @@ async def _acquire_history(
         if actual_type != declared_type:
             return _refusal("PS-MSG-FRAME", "tag-target")
 
-    async def load_tree(oid: str) -> bytes | Refusal:
-        nonlocal aggregate_trees
-        guard = _tree_traversal_guard(
-            deadline=scan_deadline,
-            frontier=0,
-            visits=0,
-            visited=0,
-            cache_entries=len(tree_cache),
-        )
-        if guard is not None:
-            return guard
+    async def load_tree(oid: str) -> tuple[TreeEntry, ...] | Refusal:
         cached = tree_cache.get(oid)
         if cached is not None:
-            return cached
-        guard = _tree_traversal_guard(
-            deadline=scan_deadline,
-            frontier=0,
-            visits=0,
-            visited=0,
-            cache_entries=len(tree_cache) + 1,
-        )
-        if guard is not None:
-            return guard
-        result = await reader.read(oid, "tree", scan_deadline=scan_deadline)
-        if isinstance(result, Refusal):
-            return result
-        if native and hashlib.new(selection.object_format.name,
-                                  f"tree {len(result.raw)}\0".encode("ascii") + result.raw).hexdigest() != oid:
-            return _refusal("PS-MSG-COVERAGE", "object-content-identity")
-        aggregate_trees += len(result.raw)
-        if aggregate_trees > _MAX_TREE_CACHE_BYTES:
-            return _refusal("PS-MSG-LIMIT", "tree-cache-bytes")
-        tree_cache[oid] = result.raw
-        return result.raw
+            tree_cache.move_to_end(oid)
+            raw = cached[0]
+            if isinstance(raw, tuple):
+                return raw
+        else:
+            result = await reader.read(oid, "tree", scan_deadline=scan_deadline)
+            if isinstance(result, Refusal):
+                return result
+            if (result.returned_oid != oid or result.object_type != "tree"
+                    or hashlib.new(selection.object_format.name,
+                                   f"tree {len(result.raw)}\0".encode("ascii") + result.raw).hexdigest() != oid):
+                return _refusal("PS-MSG-COVERAGE", "object-content-identity")
+            raw = result.raw
+        # Parse at first traversal, not during acquisition, so errors are not
+        # moved ahead of the original checks. Reuse only successful results.
+        entries = _parse_tree(raw, selection.object_format)
+        if not isinstance(entries, Refusal) and not retain_tree(oid, entries) and cached is None:
+            # A parsed tree may not fit even when its verified raw bytes do.
+            retain_tree(oid, raw)
+        return entries
 
-    unpublished_trees = {
-        oid for oid, object_type in object_types.items() if object_type == "tree"
-    }
-    unpublished_blobs = set(blob_records)
-    reached_unpublished_trees: set[str] = set()
-    visited_tree_ids: set[str] = set()
-    tree_visits = 0
-    subjects: list[tuple[str, bytes, str]] = []
-    subject_modes: dict[tuple[str, bytes, str], str] = {}
-    subject_set: set[tuple[str, bytes, str]] = set()
-    native_metadata_paths: set[tuple[str, bytes]] = set()
-    tree_roots = [(oid, commit_records[oid].root_tree) for oid in selection.expected_oids]
+    # Acquisition is complete. These small caches store immutable scope
+    # membership and already-recorded tree visits, not object payloads.
+    selected_tree_reached = lru_cache(maxsize=4096)(index.record_reached_tree)
+    selected_blob = lru_cache(maxsize=4096)(index.has_blob)
+    commit_roots = index.commit_roots()
+    direct_trees = []
     direct_blobs = []
     if native:
         for root in selection.roots:
-            selected = root
-            chain = set()
-            while selected in tag_targets:
-                if selected in chain:
-                    return _refusal("PS-MSG-FRAME", "tag-cycle")
-                chain.add(selected)
-                selected = tag_targets[selected][0]
-            if object_types.get(selected) == "tree":
-                tree_roots.append((root, selected))
-            elif object_types.get(selected) == "blob":
+            selected = _follow_native_tag_chain(root, tag_targets.get, scan_deadline)
+            if isinstance(selected, Refusal):
+                return selected
+            kind = index.acquired_kind(selected)
+            if kind == "tree":
+                direct_trees.append((root, selected))
+            elif kind == "blob":
                 direct_blobs.append((root, b"", selected))
-    for commit_oid, root_tree in tree_roots:
+    traversal_progress = _VerifiedWorkPhase("traversed", enabled=observe_work, budget=scan_deadline)
+    compact_frontier = coverage_recorder.compact_native_receipt
+    stack = _PendingTrees(index.db) if compact_frontier else []
+    for commit_oid, root_tree in chain(commit_roots, direct_trees):
         guard = _tree_traversal_guard(
             deadline=scan_deadline,
             frontier=0,
-            visits=tree_visits,
-            visited=len(visited_tree_ids),
-            cache_entries=len(tree_cache),
         )
         if guard is not None:
             return guard
-        stack: list[tuple[str, bytes, tuple[str, ...]]] = [(root_tree, b"", ())]
+        stack.append((root_tree, b"", ()))
         while stack:
-            next_tree_oid = stack[-1][0]
             guard = _tree_traversal_guard(
                 deadline=scan_deadline,
-                frontier=len(stack),
-                visits=tree_visits + 1,
-                visited=len(visited_tree_ids) + (next_tree_oid not in visited_tree_ids),
-                cache_entries=len(tree_cache),
+                frontier=0 if compact_frontier else len(stack),
             )
             if guard is not None:
                 return guard
             tree_oid, prefix, ancestors = stack.pop()
-            tree_visits += 1
-            visited_tree_ids.add(tree_oid)
             if tree_oid in ancestors:
                 return _refusal("PS-MSG-FRAME", "tree-cycle")
-            raw_tree = await load_tree(tree_oid)
-            if isinstance(raw_tree, Refusal):
-                return raw_tree
-            if tree_oid in unpublished_trees:
-                reached_unpublished_trees.add(tree_oid)
-            entries = _parse_tree(raw_tree, selection.object_format)
+            entries = await load_tree(tree_oid)
             if isinstance(entries, Refusal):
                 return entries
+            unpublished_tree = selected_tree_reached(tree_oid)
+            child_ancestors = ancestors + (tree_oid,)
             for entry in reversed(entries):
                 guard = _tree_traversal_guard(
                     deadline=scan_deadline,
-                    frontier=len(stack),
-                    visits=tree_visits,
-                    visited=len(visited_tree_ids),
-                    cache_entries=len(tree_cache),
+                    frontier=0 if compact_frontier else len(stack),
                 )
                 if guard is not None:
                     return guard
                 path = prefix + (b"/" if prefix else b"") + entry.name
                 if len(path) > _MAX_PATH_BYTES:
                     return _refusal("PS-MSG-LIMIT", "path-bytes")
-                if native and tree_oid in unpublished_trees and (tree_oid, path) not in native_metadata_paths:
-                    native_metadata_paths.add((tree_oid, path))
+                if (native and (unpublished_tree or index.had_receiver_tree_candidate(tree_oid))
+                        and index.add_metadata(tree_oid, path)):
                     decoded_path = path.decode("utf-8", "surrogateescape")
-                    _append_findings(findings, _filename_findings(decoded_path, "tree-path"))
+                    filename_findings = _filename_findings(decoded_path, "tree-path")
+                    _append_findings(findings, filename_findings)
+                    if review_capture is not None:
+                        review_capture.metadata(decoded_path, "tree-path", find_machine_paths)
+                        if filename_findings:
+                            review_capture.unsupported.add("filename-finding")
                     _append_findings(findings, _content_hits(
                         decoded_path, tree_oid, find_machine_paths, subject_kind="tree-path",
                         max_findings=max(0, _MAX_FINDINGS - len(findings)),
@@ -4525,54 +5875,48 @@ async def _acquire_history(
                 if entry.kind == "tree":
                     guard = _tree_traversal_guard(
                         deadline=scan_deadline,
-                        frontier=len(stack) + 1,
-                        visits=tree_visits,
-                        visited=len(visited_tree_ids),
-                        cache_entries=len(tree_cache),
+                        frontier=0 if compact_frontier else len(stack) + 1,
                     )
                     if guard is not None:
                         return guard
-                    stack.append((entry.oid, path, ancestors + (tree_oid,)))
-                elif entry.kind == "blob" and entry.oid in unpublished_blobs:
+                    stack.append((entry.oid, path, child_ancestors))
+                elif entry.kind == "blob" and selected_blob(entry.oid):
                     subject = (commit_oid, path, entry.oid)
-                    if subject in subject_set:
+                    if not index.add(subject, entry.mode):
                         return _refusal("PS-MSG-COVERAGE", "duplicate-subject")
-                    subject_set.add(subject)
-                    subjects.append(subject)
-                    subject_modes[subject] = entry.mode
-                    if len(subjects) > _MAX_SUBJECTS:
-                        return _refusal("PS-MSG-LIMIT", "subject-count")
+            # Each selected owner/path tree occurrence has finished its
+            # entries; cycles, invalid paths and failed reads return first.
+            traversal_progress.step()
+    traversal_progress.finish()
 
     for subject in direct_blobs:
-        if subject not in subject_set:
-            subject_set.add(subject)
-            subjects.append(subject)
-            subject_modes[subject] = ""
-    if reached_unpublished_trees != unpublished_trees:
+        index.add(subject, "")
+    if not index.tree_coverage_complete():
         return _refusal("PS-MSG-COVERAGE", "tree-subjects")
-    if {blob for _commit, _path, blob in subjects} != unpublished_blobs:
+    if not index.blob_coverage_complete():
         return _refusal("PS-MSG-COVERAGE", "blob-subjects")
-    blob_paths = {(path, blob) for _commit, path, blob in subjects}
-    if len(blob_paths) > _MAX_BLOB_PATHS:
-        return _refusal("PS-MSG-LIMIT", "blob-path-count")
 
-    binary_blobs = {oid for oid, (_, _, binary) in blob_records.items() if binary}
-    text_blobs = set(blob_records) - binary_blobs
-    subjects_by_path: dict[tuple[bytes, str], list[tuple[str, str]]] = {}
-    if review_evaluation is not None:
-        for commit_oid, raw_path, blob_oid in sorted(subjects):
-            subjects_by_path.setdefault((raw_path, blob_oid), []).append(
-                (commit_oid, subject_modes[(commit_oid, raw_path, blob_oid)])
-            )
     # Preserve path-first finding/review order. A single payload cache bounds
     # retained memory independently of the cumulative admitted blob volume.
     # Rereads are at most the number of distinct blob/path pairs and share the
-    # original deadline. No reread adds coverage events or receipt byte counts.
+    # shared scan budget. No reread adds coverage events or receipt byte counts.
+    classified_progress = _VerifiedWorkPhase("classified", enabled=observe_work, budget=scan_deadline)
     cached_blob_oid = None
+    binary = False
     raw = b""
     result = None
-    for path, blob_oid in sorted(blob_paths):
-        if asyncio.get_running_loop().time() >= scan_deadline:
+    scanned_paths = 0
+    previous_path = None
+    prior_blobs = {}
+    index.prepare_path_queries()
+    for path, blob_oid in index.path_pairs():
+        if path != previous_path:
+            previous_path = path
+            prior_blobs.clear()
+        scanned_paths += 1
+        classify_room = len(findings) < _MAX_FINDINGS
+        path_reviewed = False
+        if _time_left(scan_deadline, asyncio.get_running_loop().time) <= 0:
             return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
         if blob_oid != cached_blob_oid:
             raw = b""  # Release before allocating the next payload.
@@ -4580,7 +5924,10 @@ async def _acquire_history(
             result = await reader.read(blob_oid, "blob", scan_deadline=scan_deadline)
             if isinstance(result, Refusal):
                 return result
-            size, content_digest, _binary = blob_records[blob_oid]
+            blob_record = index.blob_record(blob_oid)
+            if blob_record is None:
+                return _refusal("PS-MSG-COVERAGE", "blob-subjects")
+            size, content_digest, binary = blob_record
             if (result.returned_oid != blob_oid or result.object_type != "blob"
                     or len(result.raw) != size
                     or hashlib.sha256(result.raw).digest() != content_digest):
@@ -4595,34 +5942,65 @@ async def _acquire_history(
             result = None
             cached_blob_oid = blob_oid
         decoded_path = path.decode("utf-8", "surrogateescape")
+        machine_path_lines = None
+        if not binary and selection.prior_receiver_roots:
+            modes = {mode if commit else None for _, mode, commit in index.owners(path, blob_oid)}
+            if len(modes) == 1 and modes <= {"100644", "100755"}:
+                machine_path_lines = _unpublished_machine_path_lines(
+                    selection, path, raw, next(iter(modes)), find_machine_paths,
+                    scan_deadline, prior_blobs,
+                )
         if not native:
             _append_findings(findings, _filename_findings(decoded_path, "history-blob"))
-        line_refusal = _line_limit_refusal(raw)
-        if line_refusal is not None:
-            return line_refusal
-        if blob_oid in binary_blobs:
-            content_findings = _binary_content_hits(
-                raw,
-                decoded_path,
-                find_machine_paths,
-                max_findings=max(0, _MAX_FINDINGS - len(findings)),
-            )
+        if review_capture is not None:
+            review_capture.observe(raw, path, blob_oid,
+                index.owners(path, blob_oid),
+                selection.object_format.name, binary=binary)
+        if binary:
+            room = max(0, _MAX_FINDINGS - len(findings))
+            if matcher is None:
+                content_findings = _binary_content_hits(
+                    raw, decoded_path, find_machine_paths, max_findings=room,
+                )
+            else:
+                content_findings = await _binary_content_hits_with_matcher(
+                    raw, decoded_path, find_machine_paths, matcher, scan_deadline, max_findings=room,
+                )
         elif review_evaluation is not None:
             content_findings = []
-            for commit_oid, git_mode in subjects_by_path[(path, blob_oid)]:
-                if asyncio.get_running_loop().time() >= scan_deadline:
+            shown_locations = set()
+            for commit_oid, git_mode, is_commit in index.owners(path, blob_oid):
+                if _time_left(scan_deadline, asyncio.get_running_loop().time) <= 0:
                     return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
-                if commit_oid not in commit_set:
+                if not is_commit:
                     _append_findings(content_findings, _content_hits(
                         raw.decode("utf-8", "replace"), decoded_path, find_machine_paths,
                         subject_kind="git-object-blob", max_findings=max(0, _MAX_FINDINGS - len(content_findings)),
                     ))
                     continue
-                _append_findings(content_findings, review_evaluation.scan_text_subject(
+                unresolved = review_evaluation.scan_text_subject(
                     raw, decoded_path, find_machine_paths, subject_kind="history-blob",
                     mode="range-blob-text", commit_oid=commit_oid, raw_path=path,
-                    blob_oid=blob_oid, git_mode=git_mode,
-                ))
+                    blob_oid=blob_oid, git_mode=git_mode, machine_path_lines=machine_path_lines,
+                )
+                # This owner was evaluated even if the display sample is full.
+                classified_progress.step()
+                path_reviewed = True
+                # Policy still evaluates every commit. Only the display sample
+                # groups unresolved rows for this exact path/blob pair.
+                for row in unresolved:
+                    if len(content_findings) >= _MAX_FINDINGS:
+                        break
+                    location = (row.failure_id, row.line, row.detector_class)
+                    if location not in shown_locations:
+                        shown_locations.add(location)
+                        content_findings.append(row)
+        elif matcher is not None:
+            content_findings = await _text_content_hits_with_matcher(
+                raw, decoded_path, find_machine_paths, matcher, scan_deadline,
+                max_findings=max(0, _MAX_FINDINGS - len(findings)),
+                machine_path_lines=machine_path_lines,
+            )
         else:
             content_findings = _content_hits(
                 raw.decode("utf-8", "replace"),
@@ -4630,42 +6008,69 @@ async def _acquire_history(
                 find_machine_paths,
                 subject_kind="history-blob",
                 max_findings=max(0, _MAX_FINDINGS - len(findings)),
+                machine_path_lines=machine_path_lines,
             )
         _append_findings(findings, content_findings)
-        if asyncio.get_running_loop().time() >= scan_deadline:
-            return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+        if classify_room and not path_reviewed:
+            classified_progress.step()
+    classified_progress.finish()
 
     if native:
-        for oid in selection.object_oids:
-            if object_types[oid] in {"tree", "blob"}:
-                coverage_recorder.record(CoverageEvent.SCANNED, oid)
+        for oid in index.acquired_oids(deferred=True):
+            coverage_recorder.record(CoverageEvent.SCANNED, oid)
         coverage = coverage_recorder.proof()
         if isinstance(coverage, Refusal):
             return coverage
 
-    canonical_subjects = tuple(sorted(subjects))
-    canonical_paths = tuple(sorted((blob, path) for path, blob in blob_paths))
-    canonical_objects = tuple(sorted(selection.object_oids))
-    canonical_blobs = tuple(sorted(blob_records))
+    canonical_subjects, canonical_paths = index.seal()
+    if len(canonical_subjects) != index.subject_count or len(canonical_paths) != scanned_paths:
+        return _refusal("PS-MSG-COVERAGE", "history-index")
+    if native and isinstance(coverage, _ReceiptCoverage):
+        identities = index.seal_native_identities()
+        if isinstance(identities, Refusal):
+            return identities
+        canonical_objects, canonical_blobs, canonical_tags = identities
+        if (len(canonical_objects) != coverage.expected_count
+                or canonical_objects.digest != coverage.selection_set
+                or len(canonical_tags) != len(tag_targets)):
+            return _refusal("PS-MSG-COVERAGE", "history-index")
+        object_digest, blob_digest = canonical_objects.digest, canonical_blobs.digest
+    else:
+        if isinstance(tag_targets, _IndexedTagTargets):
+            return _refusal("PS-MSG-COVERAGE", "tag-set")
+        canonical_objects = tuple(sorted(selection.object_oids))
+        canonical_blobs = tuple(index.recorded_blob_ids())
+        canonical_tags = tuple(sorted(tag_targets))
+        object_digest = _oid_set_digest(b"object-set", canonical_objects)
+        blob_digest = _oid_set_digest(b"blob-set", canonical_blobs)
+    commit_ids = selection.expected_oids
+    if isinstance(commit_ids, _SealedRows):
+        if (not native or not isinstance(coverage, _ReceiptCoverage)
+                or not selection.indexed_parent_graph
+                or index.bind_commit_selection() != commit_ids):
+            return _refusal("PS-MSG-COVERAGE", "commit-set")
+        commit_digest = commit_ids.digest
+    else:
+        commit_digest = _commit_set_digest(commit_ids)
     proof = HistoryProof(
-        selection.expected_oids,
+        commit_ids,
         canonical_objects,
         canonical_blobs,
         aggregate_blobs,
-        len(text_blobs),
-        len(binary_blobs),
+        index.blob_count - index.binary_blob_count,
+        index.binary_blob_count,
         canonical_subjects,
         canonical_paths,
-        _commit_set_digest(selection.expected_oids),
-        _oid_set_digest(b"object-set", canonical_objects),
-        _oid_set_digest(b"blob-set", canonical_blobs),
-        _subject_set_digest(canonical_subjects),
-        _path_set_digest(canonical_paths),
-        tuple(sorted(tag_targets)),
+        commit_digest,
+        object_digest,
+        blob_digest,
+        canonical_subjects.digest,
+        canonical_paths.digest,
+        canonical_tags,
         direct_tag_commit,
     )
     # Synchronous detectors and proof hashing may cross the shared deadline.
-    if asyncio.get_running_loop().time() >= scan_deadline:
+    if _time_left(scan_deadline, asyncio.get_running_loop().time) <= 0:
         return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
     return proof, coverage, tuple(findings)
 
@@ -4682,29 +6087,47 @@ async def _scan_range_async(
     coverage_fault: CoverageFaultPort | None = None,
     scan_timeout: float = _SCAN_DEADLINE_SECONDS,
     review_evaluation: "ReviewEvaluation | None" = None,
+    review_capture=None,
+    receipt_coverage: bool = False,
+    work_budget: _ScanInactivity | None = None,
 ) -> ScanOutcome:
-    wall_deadline = time.monotonic() + scan_timeout
+    wall_deadline = work_budget if work_budget is not None else time.monotonic() + scan_timeout
     request = _range_request(remote, destination, source_revision)
     if isinstance(request, Refusal):
         return ScanOutcome("refusal", "range", refusal=request)
-    selection = await _range_selection(request, wall_deadline)
-    if isinstance(selection, Refusal):
-        return ScanOutcome("refusal", "range", refusal=selection)
-    if not selection.expected_oids:
-        return ScanOutcome("refusal", "range", refusal=_refusal("PS-MSG-COVERAGE", "empty-selection"), selection=selection)
-    return await _scan_selected_history_async(
-        selection, find_machine_paths, wall_deadline=wall_deadline, tip_resolver=tip_resolver,
-        reader_factory=reader_factory, coverage_observer=coverage_observer, coverage_fault=coverage_fault,
-        review_evaluation=review_evaluation,
-    )
+    try:
+        storage = (_open_history_index(wall_deadline)
+                   if globals().get("__injected_native_push__") is not None else nullcontext())
+        with storage as index:
+            options = {"history_index": index} if index is not None else {}
+            selection = await _range_selection(
+                request, wall_deadline, **options,
+                **({"compact_graph": True} if receipt_coverage and index is not None else {}),
+            )
+            if isinstance(selection, Refusal):
+                return ScanOutcome("refusal", "range", refusal=selection)
+            if not selection.expected_oids:
+                return ScanOutcome("refusal", "range", refusal=_refusal("PS-MSG-COVERAGE", "empty-selection"), selection=selection)
+            return await _scan_selected_history_async(
+                selection, find_machine_paths, wall_deadline=wall_deadline, tip_resolver=tip_resolver,
+                reader_factory=reader_factory, coverage_observer=coverage_observer, coverage_fault=coverage_fault,
+                review_evaluation=review_evaluation, review_capture=review_capture,
+                receipt_coverage=receipt_coverage and index is not None, **options,
+            )
+    except sqlite3.Error:
+        return ScanOutcome("refusal", "range", refusal=(
+            _refusal("PS-MSG-READ-TIMEOUT", "deadline") if _time_left(wall_deadline) <= 0
+            else _refusal("PS-MSG-READ", "coverage-storage")
+        ))
 
 
 async def _verify_excluded_tag_targets(
-    targets: dict[str, str], object_format: GitObjectFormat, wall_deadline: float,
+    targets: dict[str, str] | _IndexedExcludedTagTargets,
+    object_format: GitObjectFormat, wall_deadline: float,
 ) -> Refusal | None:
     # Previously disclosed objects need exact identity and type, not a second
     # scan of their payload. The content reader has already been reaped.
-    remaining = wall_deadline - time.monotonic()
+    remaining = _time_left(wall_deadline)
     if remaining <= 0:
         return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
     deadline = asyncio.get_running_loop().time() + remaining
@@ -4722,6 +6145,10 @@ async def _verify_excluded_tag_targets(
                     break
     except asyncio.CancelledError:
         pending = _refusal("PS-MSG-READ", "cancelled")
+    except sqlite3.Error:
+        pending = _refusal("PS-MSG-READ-TIMEOUT", "deadline") if _time_left(wall_deadline) <= 0 else (
+            _refusal("PS-MSG-READ", "coverage-storage")
+        )
     except Exception:
         pending = _refusal("PS-MSG-READ", "unexpected")
     finalization = await _finalize_reader(reader)
@@ -4747,6 +6174,9 @@ async def _scan_selected_history_async(
     coverage_observer: Callable[[CoverageEvent, str], None] | None = None,
     coverage_fault: CoverageFaultPort | None = None,
     review_evaluation: "ReviewEvaluation | None" = None,
+    review_capture=None,
+    history_index: _HistoryIndex | None = None,
+    receipt_coverage: bool = False,
 ) -> ScanOutcome:
     native = isinstance(selection, NativePushSelection)
     mode = "native-push" if native else "range"
@@ -4758,14 +6188,19 @@ async def _scan_selected_history_async(
         coverage = _build_coverage_proof((), (), (), (), allow_empty=True)
         return ScanOutcome("clean", mode, coverage=coverage, history=empty, **selection_fields)
     coverage_recorder = CoverageRecorder(
-        selection.object_oids if native else selection.expected_oids, coverage_observer, coverage_fault
+        selection.object_oids if native else selection.expected_oids, coverage_observer, coverage_fault,
+        history_index=history_index,
+        receipt_coverage=("objects" if native else "commits") if receipt_coverage else None,
     )
     pending: ScanOutcome | None = None
     acquired: tuple[
-        HistoryProof, CoverageProof, tuple[Finding, ...]
+        HistoryProof, CoverageProof | _ReceiptCoverage, tuple[Finding, ...]
     ] | None = None
     reader: _AsyncGitObjectReader | None = None
-    excluded_tag_targets: dict[str, str] = {}
+    excluded_tag_targets: dict[str, str] | _IndexedExcludedTagTargets = (
+        _IndexedExcludedTagTargets(history_index.db)
+        if history_index is not None and coverage_recorder.compact_native_receipt else {}
+    )
 
     if selection.object_oids:
         reader = reader_factory()
@@ -4777,7 +6212,7 @@ async def _scan_selected_history_async(
                 )
             else:
                 loop = asyncio.get_running_loop()
-                remaining = wall_deadline - time.monotonic()
+                remaining = _time_left(wall_deadline)
                 if remaining <= 0:
                     acquisition = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
                 else:
@@ -4787,12 +6222,16 @@ async def _scan_selected_history_async(
                     )
                     if native:
                         review_arguments["excluded_tag_targets"] = excluded_tag_targets
+                    if review_capture is not None:
+                        review_arguments["review_capture"] = review_capture
+                    if history_index is not None:
+                        review_arguments["history_index"] = history_index
                     acquisition = await _acquire_history(
                         selection,
                         reader,
                         find_machine_paths,
                         coverage_recorder,
-                        loop.time() + remaining,
+                        wall_deadline if isinstance(wall_deadline, _ScanInactivity) else loop.time() + remaining,
                         **review_arguments,
                     )
                 if isinstance(acquisition, Refusal):
@@ -4847,7 +6286,7 @@ async def _scan_selected_history_async(
                 resolver = tip_resolver or (
                     lambda timeout=None: _resolve_commit(selection.source, timeout, object_format=selection.object_format)
                 )
-                drift = _confirm_tip(selection.tip, resolver, max(0.001, wall_deadline - time.monotonic()))
+                drift = _confirm_tip(selection.tip, resolver, max(0.001, _time_left(wall_deadline)))
         except Exception:
             pending = ScanOutcome(
                 "refusal", mode,
@@ -4889,7 +6328,10 @@ def _scan_range(
     source_revision: str | None = None,
     tip_resolver: Callable[[float | None], str] | None = None,
     review_evaluation: "ReviewEvaluation | None" = None,
+    review_capture=None,
     scan_timeout: float = _SCAN_DEADLINE_SECONDS,
+    receipt_coverage: bool = False,
+    work_budget: _ScanInactivity | None = None,
 ) -> ScanOutcome:
     try:
         return asyncio.run(_scan_range_async(
@@ -4898,8 +6340,9 @@ def _scan_range(
             find_machine_paths,
             source_revision=source_revision,
             tip_resolver=tip_resolver,
-            review_evaluation=review_evaluation,
-            scan_timeout=scan_timeout,
+            review_evaluation=review_evaluation, review_capture=review_capture,
+            scan_timeout=scan_timeout, receipt_coverage=receipt_coverage,
+            work_budget=work_budget,
         ))
     except KeyboardInterrupt:
         return ScanOutcome(
@@ -4920,25 +6363,49 @@ async def _scan_native_push_async(
     coverage_fault: CoverageFaultPort | None = None,
     scan_timeout: float = _SCAN_DEADLINE_SECONDS,
     review_evaluation: "ReviewEvaluation | None" = None,
+    review_capture=None,
+    receiver_scope=None,
+    receipt_coverage: bool = False,
+    work_budget: _ScanInactivity | None = None,
 ) -> ScanOutcome:
     request = _native_push_request(payload)
     if isinstance(request, Refusal):
         return ScanOutcome("refusal", "native-push", refusal=request)
-    deadline = time.monotonic() + scan_timeout
+    if receiver_scope is not None:
+        from transfer_binding import ScopeBinding
+        if (type(receiver_scope) is not ScopeBinding
+            or request.receiver_inventory
+            or receiver_scope.endpoint_identity != request.endpoint_identity
+            or receiver_scope.object_format != request.object_format.name):
+            return ScanOutcome("refusal", "native-push", refusal=_refusal("PS-INPUT-REFUSAL", "receiver-scope"))
+        request = replace(request, receiver_scope=receiver_scope,
+                          selection_sha256=receiver_scope.selection_digest(payload))
+    deadline = work_budget if work_budget is not None else time.monotonic() + scan_timeout
     try:
         root = _repo_root()
         policy = _load_review_policy_module()
         before, _exchanges = _capture_review_repository(policy, root, deadline)
         if before != request.repository_observation:
             return ScanOutcome("refusal", "native-push", refusal=_refusal("PS-INPUT-REFUSAL", "native-repository"))
-        selection = await _native_push_selection(request, deadline)
-        if isinstance(selection, Refusal):
-            return ScanOutcome("refusal", "native-push", refusal=selection)
-        outcome = await _scan_selected_history_async(
-            selection, find_machine_paths, wall_deadline=deadline,
-            reader_factory=reader_factory, coverage_observer=coverage_observer,
-            coverage_fault=coverage_fault, review_evaluation=review_evaluation,
-        )
+        zero = "0" * request.object_format.hex_length
+        roots = tuple(dict.fromkeys(row.local_oid for row in request.updates if row.local_oid != zero))
+        storage = _open_history_index(deadline) if roots else nullcontext()
+        with storage as index:
+            selection = await _native_push_selection(
+                request, deadline, roots, index, compact_graph=receipt_coverage,
+            )
+            if isinstance(selection, Refusal):
+                return ScanOutcome("refusal", "native-push", refusal=selection)
+            outcome = await _scan_selected_history_async(
+                selection, find_machine_paths, wall_deadline=deadline,
+                reader_factory=reader_factory, coverage_observer=coverage_observer,
+                coverage_fault=coverage_fault, review_evaluation=review_evaluation,
+                review_capture=review_capture, history_index=index,
+                receipt_coverage=receipt_coverage,
+            )
+        if outcome.kind == "refusal":
+            # This outcome cannot authorize publication. Preserve its first cause.
+            return outcome
         if (outcome.kind == "clean" and outcome.history is not None
                 and outcome.history.direct_tag_commit is not None):
             current_inventory = await _remote_ref_tip_oids(
@@ -4952,19 +6419,29 @@ async def _scan_native_push_async(
         after, _exchanges = _capture_review_repository(policy, root, deadline)
         if after != before:
             return replace(outcome, kind="refusal", refusal=_refusal("PS-INPUT-REFUSAL", "native-repository-currentness"))
-        return outcome
+        return _inactivity_checked_outcome(outcome, work_budget)
     except subprocess.TimeoutExpired:
         return ScanOutcome("refusal", "native-push", refusal=_refusal("PS-MSG-READ-TIMEOUT", "deadline"))
+    except sqlite3.Error:
+        return ScanOutcome("refusal", "native-push", refusal=(
+            _refusal("PS-MSG-READ-TIMEOUT", "deadline") if _time_left(deadline) <= 0
+            else _refusal("PS-MSG-READ", "coverage-storage")
+        ))
     except (OSError, ValueError, RuntimeError):
         return ScanOutcome("refusal", "native-push", refusal=_refusal("PS-INPUT-REFUSAL", "native-selection"))
 
 
 def _scan_native_push(payload: object, find_machine_paths, *,
                       review_evaluation: "ReviewEvaluation | None" = None,
-                      scan_timeout: float = _SCAN_DEADLINE_SECONDS) -> ScanOutcome:
+                      scan_timeout: float = _SCAN_DEADLINE_SECONDS,
+                      review_capture=None, receiver_scope=None,
+                      receipt_coverage: bool = False,
+                      work_budget: _ScanInactivity | None = None) -> ScanOutcome:
     try:
         return asyncio.run(_scan_native_push_async(payload, find_machine_paths,
-                           review_evaluation=review_evaluation, scan_timeout=scan_timeout))
+                           review_evaluation=review_evaluation, review_capture=review_capture, scan_timeout=scan_timeout,
+                           receiver_scope=receiver_scope, receipt_coverage=receipt_coverage,
+                           work_budget=work_budget))
     except KeyboardInterrupt:
         return ScanOutcome("refusal", "native-push", refusal=_refusal("PS-MSG-READ", "cancelled"))
     except Exception:
@@ -4972,24 +6449,87 @@ def _scan_native_push(payload: object, find_machine_paths, *,
 
 
 def _serialize_native_receipt_v4(outcome: ScanOutcome) -> str:
+    if outcome.native_selection is not None and outcome.native_selection.request.receiver_scope is not None:
+        raise ValueError("scoped selection requires V5")
+    return _serialize_native_receipt_common(outcome)
+
+
+def _serialize_receiver_scoped_receipt_v5(outcome: ScanOutcome) -> str:
+    if outcome.native_selection is None or outcome.native_selection.request.receiver_scope is None:
+        raise ValueError("missing receiver scope")
+    result = json.loads(_serialize_native_receipt_common(outcome))
+    result["version"] = 5
+    result["receiverScopeSha256"] = outcome.native_selection.request.receiver_scope.digest()
+    return _native_json_bytes(result).decode("ascii")
+
+
+def _ordered_receipt_selection_digest(object_ids: Iterable[str]) -> str:
+    return _digest_frames(b"native-receipt-selection-order", (oid.encode("ascii") for oid in object_ids))
+
+
+def _exact_oid_singleton(rows: tuple[str, ...] | _SealedOids, oid: str, domain: bytes) -> bool:
+    if isinstance(rows, _SealedOids):
+        return len(rows) == 1 and rows.singleton == oid and rows.digest == _oid_set_digest(domain, (oid,))
+    return rows == (oid,)
+
+
+def _serialize_native_receipt_common(outcome: ScanOutcome) -> str:
     selection, history, coverage = outcome.native_selection, outcome.history, outcome.coverage
     if outcome.kind != "clean" or selection is None or history is None or coverage is None:
         raise ValueError("native receipt")
-    actual = _build_coverage_proof(coverage.expected_oids, coverage.requested_oids,
-                                   coverage.acquired_oids, coverage.scanned_message_oids, allow_empty=True)
+    if isinstance(coverage, _ReceiptCoverage):
+        expected_order = (
+            selection.object_oids.order if isinstance(selection.object_oids, _IndexedObjectSelection)
+            else _ordered_receipt_selection_digest(selection.object_oids)
+        )
+        exact_coverage = (
+            isinstance(history.object_ids, _SealedOids)
+            and isinstance(history.blob_ids, _SealedOids)
+            and isinstance(history.tag_ids, _SealedOids)
+            and coverage.expected_count == len(history.object_ids) == len(selection.object_oids)
+            and coverage.selection_set == history.object_set == history.object_ids.digest
+            and history.blob_set == history.blob_ids.digest
+            and len(history.commit_ids) + len(history.blob_ids) + len(history.tag_ids) <= len(history.object_ids)
+            and coverage.selection_order == expected_order
+        )
+    else:
+        actual = _build_coverage_proof(coverage.expected_oids, coverage.requested_oids,
+                                       coverage.acquired_oids, coverage.scanned_message_oids, allow_empty=True)
+        exact_coverage = (
+            not isinstance(selection.object_oids, _IndexedObjectSelection)
+            and actual == coverage and set(coverage.expected_oids) == set(history.object_ids)
+            and set(selection.object_oids) == set(history.object_ids)
+            and tuple(sorted(set(history.object_ids))) == history.object_ids
+            and set(history.blob_ids).issubset(history.object_ids)
+            and set(history.tag_ids).issubset(history.object_ids)
+            and history.object_set == _oid_set_digest(b"object-set", history.object_ids)
+            and history.blob_set == _oid_set_digest(b"blob-set", history.blob_ids)
+        )
+    expected_commits = selection.expected_oids
+    if isinstance(expected_commits, _SealedRows):
+        exact_commits = (
+            isinstance(coverage, _ReceiptCoverage)
+            and selection.indexed_parent_graph
+            and history.commit_ids == expected_commits
+            and history.commit_set == expected_commits.digest
+        )
+    else:
+        exact_commits = (
+            isinstance(history.commit_ids, tuple)
+            and history.commit_ids == expected_commits
+            and history.commit_set == _commit_set_digest(history.commit_ids)
+        )
     if (
-        isinstance(actual, Refusal) or actual != coverage
-        or history.commit_ids != selection.expected_oids
-        or set(coverage.expected_oids) != set(history.object_ids)
-        or set(selection.object_oids) != set(history.object_ids)
-        or tuple(sorted(set(history.object_ids))) != history.object_ids
-        or not set(history.blob_ids).issubset(history.object_ids)
-        or not set(history.tag_ids).issubset(history.object_ids)
-        or history.object_set != _oid_set_digest(b"object-set", history.object_ids)
-        or history.commit_set != _commit_set_digest(history.commit_ids)
-        or history.blob_set != _oid_set_digest(b"blob-set", history.blob_ids)
-        or history.subject_set != _subject_set_digest(history.subjects)
-        or history.path_set != _path_set_digest(history.paths)
+        not exact_coverage
+        or not exact_commits
+        or history.subject_set != (
+            history.subjects.digest if isinstance(history.subjects, _SealedRows)
+            else _subject_set_digest(history.subjects)
+        )
+        or history.path_set != (
+            history.paths.digest if isinstance(history.paths, _SealedRows)
+            else _path_set_digest(history.paths)
+        )
         or history.text_blobs + history.binary_blobs != len(history.blob_ids)
         or history.blob_bytes < 0
         or (history.object_ids and (outcome.reap_certificate is None or not outcome.reap_certificate.complete))
@@ -5003,7 +6543,8 @@ def _serialize_native_receipt_v4(outcome: ScanOutcome) -> str:
         row = _native_new_same_name_tag(request)
         inventory = selection.tag_receiver_inventory
         if (row is None or not inventory or history.commit_ids or history.blob_ids
-                or history.object_ids != (row.local_oid,) or history.tag_ids != history.object_ids
+                or not _exact_oid_singleton(history.object_ids, row.local_oid, b"object-set")
+                or not _exact_oid_singleton(history.tag_ids, row.local_oid, b"tag-set")
                 or history.direct_tag_commit == row.local_oid
                 or not selection.object_format.matches(history.direct_tag_commit)):
             raise ValueError("native tag-only coverage")
@@ -5115,6 +6656,8 @@ def _parser() -> argparse.ArgumentParser:
     group.add_argument("--range", nargs=2, metavar=("REMOTE", "DST"))
     group.add_argument("--native-push", action="store_true")
     parser.add_argument("--range-source", metavar="REVISION")
+    parser.add_argument("--history-diagnostics", action="store_true",
+                        help="show safe commit-message locations for a manual --range scan")
     parser.add_argument("legacy_path", nargs="?")
     return parser
 
@@ -5288,7 +6831,8 @@ def _format_outcome(outcome: ScanOutcome) -> tuple[str, str, int]:
         )
     if outcome.mode == "native-push":
         try:
-            return _serialize_native_receipt_v4(outcome), "", 0
+            scoped = outcome.native_selection is not None and outcome.native_selection.request.receiver_scope is not None
+            return (_serialize_receiver_scoped_receipt_v5(outcome) if scoped else _serialize_native_receipt_v4(outcome)), "", 0
         except (ValueError, TypeError, UnicodeError):
             return "", "publication-safety: refusing id=PS-INPUT-REFUSAL reason=native-receipt phase=input", 2
     if outcome.mode == "range":
@@ -5309,7 +6853,17 @@ def _format_outcome(outcome: ScanOutcome) -> tuple[str, str, int]:
                 "phase=input reason=unexpected",
                 2,
             )
-        if not coverage.scanned_message_oids:
+        if isinstance(coverage, _ReceiptCoverage):
+            exact = (
+                coverage.expected_count > 0
+                and coverage.expected_count == len(history.commit_ids) == len(selection.expected_oids)
+                and coverage.selection_order == _ordered_receipt_selection_digest(selection.expected_oids)
+                and history.commit_ids == selection.expected_oids
+                and coverage.selection_set == history.commit_set == _commit_set_digest(history.commit_ids)
+            )
+            if not exact:
+                return "", "publication-safety: refusing id=PS-MSG-COVERAGE reason=receipt-binding phase=coverage", 2
+        elif not coverage.scanned_message_oids:
             return (
                 "",
                 "publication-safety: refusing id=PS-MSG-COVERAGE "
@@ -5346,13 +6900,101 @@ def _format_outcome(outcome: ScanOutcome) -> tuple[str, str, int]:
     return f"publication-safety: clean ({outcome.mode}, examined {count} {noun})", "", 0
 
 
-def _emit_outcome(outcome: ScanOutcome) -> int:
+def _inactivity_checked_outcome(
+    outcome: ScanOutcome, budget: _ScanInactivity | None,
+) -> ScanOutcome:
+    if outcome.kind == "clean" and budget is not None and budget.remaining() <= 0:
+        return replace(outcome, kind="refusal", refusal=_refusal("PS-MSG-READ-TIMEOUT", "deadline"))
+    return outcome
+
+
+def _emit_outcome(outcome: ScanOutcome, *, work_budget: _ScanInactivity | None = None) -> int:
+    outcome = _inactivity_checked_outcome(outcome, work_budget)
     stdout, stderr, exit_code = _format_outcome(outcome)
+    current = _inactivity_checked_outcome(outcome, work_budget)
+    if current is not outcome:
+        stdout, stderr, exit_code = _format_outcome(current)
     if stdout:
         print(stdout)
     if stderr:
         print(stderr, file=sys.stderr)
     return exit_code
+
+
+def _emit_history_diagnostics(repo_root, remote, destination, source_revision, find_machine_paths) -> int:
+    """Report only redacted locations from an identity- and coverage-checked range."""
+    deadline = time.monotonic() + _SCAN_DEADLINE_SECONDS
+    policy = _load_review_policy_module()
+    observed, _ = _capture_review_repository(policy, repo_root, deadline)
+
+    def unqualified() -> int:
+        return _emit_outcome(ScanOutcome(
+            "refusal", "range", refusal=_refusal("PS-MSG-COVERAGE", "history-diagnostics"),
+        ))
+
+    if observed["status"] != "captured":
+        return unqualified()
+    outcome = _scan_range(
+        remote, destination, find_machine_paths, source_revision=source_revision,
+        scan_timeout=_remaining_seconds(deadline),
+    )
+    if outcome.kind == "refusal":
+        return _emit_outcome(outcome)
+    selection, history = outcome.selection, outcome.history
+    again, _ = _capture_review_repository(policy, repo_root, deadline)
+    if (again != observed or outcome.kind not in ("clean", "findings")
+            or selection is None or selection.destination_endpoint_sha256 is None
+            or history is None or outcome.coverage is None):
+        return unqualified()
+
+    commits = set(history.commit_ids)
+    rows = []
+    for finding in outcome.findings:
+        if finding.subject_kind != "commit-message":
+            continue
+        if finding.locator not in commits:
+            return unqualified()
+        rows.append({
+            "commitOid": finding.locator,
+            "field": "message",
+            "line": finding.line,
+            "class": finding.detector_class,
+        })
+
+    scope = {
+        "repositorySha256": policy.repository_digest(observed["repository"]),
+        "sourceOid": selection.tip,
+        "destinationOid": selection.destination_oid,
+        "destinationEndpointSha256": selection.destination_endpoint_sha256,
+        "commitSetSha256": history.commit_set,
+    }
+    # The invocation supplies the names. Bind them without echoing configured
+    # names, endpoints, filesystem paths or arbitrary message text to stdout.
+    scope["selectionSha256"] = hashlib.sha256(
+        b"history-diagnostics-selection-v1\0" + policy.C({
+            **scope,
+            "remote": selection.remote,
+            "destination": selection.destination,
+            "source": selection.source,
+        })
+    ).hexdigest()
+    print(json.dumps({
+        "schemaVersion": 1,
+        "status": outcome.kind,
+        "publicationAuthority": False,
+        "scope": scope,
+        "reportComplete": len(outcome.findings) < _MAX_FINDINGS,
+        "reportLimit": _MAX_FINDINGS,
+        "commitMessages": rows,
+        "reviewPolicy": "not-applied",
+        "historyFileFindingUnit": "path-and-blob",
+        "otherFindingsShown": len(outcome.findings) - len(rows),
+        "otherFindingClassesShown": dict(sorted(Counter(
+            finding.detector_class for finding in outcome.findings
+            if finding.subject_kind != "commit-message"
+        ).items())),
+    }, ensure_ascii=True, sort_keys=True))
+    return int(outcome.kind == "findings")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -5361,18 +7003,26 @@ def main(argv: list[str] | None = None) -> int:
         _parser().error("unexpected extra path argument")
     if args.range_source is not None and not args.range:
         _parser().error("--range-source requires --range")
+    if args.history_diagnostics and (not args.range or "__injected_native_push__" in globals()):
+        _parser().error("--history-diagnostics requires a standalone --range invocation")
     script = Path(__file__).resolve()
     try:
         repo_root = _repo_root()
         os.chdir(repo_root)
         find_machine_paths = _path_finder(script)
+        initial_deadline = time.monotonic() + _SCAN_DEADLINE_SECONDS
+        work_budget = (_ScanInactivity(initial_deadline, _SCAN_DEADLINE_SECONDS)
+                       if callable(globals().get("__injected_verified_completion__")) else None)
         if args.native_push:
-            deadline = time.monotonic() + _SCAN_DEADLINE_SECONDS
+            deadline = work_budget if work_budget is not None else initial_deadline
             evaluation, exchanges = _prepare_review_evaluation(repo_root, deadline)
             payload = globals().get("__injected_native_push__")
             outcome = _scan_native_push(payload, find_machine_paths,
                                        review_evaluation=evaluation if evaluation.read.usable_records else None,
-                                       scan_timeout=_remaining_seconds(deadline))
+                                       scan_timeout=_remaining_seconds(deadline),
+                                       receiver_scope=globals().get("__injected_receiver_scope__"),
+                                       receipt_coverage=True,
+                                       work_budget=work_budget)
 
             def recheck_native() -> bool:
                 request = _native_push_request(payload)
@@ -5381,11 +7031,16 @@ def main(argv: list[str] | None = None) -> int:
                 observed, _exchange = _capture_review_repository(evaluation.policy, repo_root, deadline)
                 return observed == request.repository_observation
 
-            return _emit_outcome(_finalize_review_evaluation(outcome, evaluation, repo_root, deadline,
-                                                            recheck_native, exchanges))
+            outcome = _finalize_review_evaluation(outcome, evaluation, repo_root, deadline,
+                                                  recheck_native, exchanges)
+            return _emit_outcome(outcome, work_budget=work_budget)
         if args.range:
             remote, dst = args.range
-            review_deadline = time.monotonic() + _SCAN_DEADLINE_SECONDS
+            if args.history_diagnostics:
+                return _emit_history_diagnostics(
+                    repo_root, remote, dst, args.range_source, find_machine_paths,
+                )
+            review_deadline = work_budget if work_budget is not None else initial_deadline
             review_evaluation, exchanges = _prepare_review_evaluation(repo_root, review_deadline)
             outcome = _scan_range(
                 remote,
@@ -5394,6 +7049,8 @@ def main(argv: list[str] | None = None) -> int:
                 source_revision=args.range_source,
                 review_evaluation=review_evaluation if review_evaluation.read.usable_records else None,
                 scan_timeout=_remaining_seconds(review_deadline),
+                receipt_coverage=globals().get("__injected_native_push__") is not None,
+                work_budget=work_budget,
             )
 
             def recheck_range() -> bool:
@@ -5406,7 +7063,7 @@ def main(argv: list[str] | None = None) -> int:
 
             return _emit_outcome(_finalize_review_evaluation(
                 outcome, review_evaluation, repo_root, review_deadline, recheck_range, exchanges,
-            ))
+            ), work_budget=work_budget)
         elif args.path or args.legacy_path:
             mode = "path"
             paths, blobs = _path_files(args.path or args.legacy_path)
@@ -5420,7 +7077,8 @@ def main(argv: list[str] | None = None) -> int:
             review_deadline = time.monotonic() + _SCAN_DEADLINE_SECONDS
             need_repository = any(
                 not _is_binary(blobs[path]) and _content_hits(
-                    blobs[path].decode("utf-8", "replace"), path, lambda _line: (), max_findings=1,
+                    blobs[path].decode("utf-8", "replace"), path, find_machine_paths,
+                    machine_path_lines=machine_path_lines_by_path[path], max_findings=1,
                 ) for path in paths
             )
             review_evaluation, exchanges = _prepare_review_evaluation(

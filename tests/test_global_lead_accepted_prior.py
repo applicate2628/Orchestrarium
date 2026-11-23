@@ -977,6 +977,19 @@ def _copy_current_staged_lead(
     return destination
 
 
+def test_staged_lead_resolves_conditional_publication_guidance_offline(tmp_path: Path) -> None:
+    lead = _copy_current_staged_lead(_load_installer(), tmp_path / "lead")
+    skill = (lead / "SKILL.md").read_text(encoding="utf-8")
+    trigger = "When handling a scan finding or a rebuild with prior findings"
+    link = "operating-model.md#reviewed-publication-exceptions"
+    assert skill.count(link) == 1
+    assert any(trigger in line and link in line for line in skill.splitlines())
+    guide = (lead / link.split("#")[0]).read_text(encoding="utf-8")
+    section = guide.split("## Reviewed publication exceptions", 1)[1].split("\n## ", 1)[0]
+    assert "same receiver already has the unchanged blob" in section
+    assert "standard history decisions apply only to their recorded commits" in section
+
+
 def _seed_partial_push_gate_staged_lead(destination: Path) -> Path:
     lead = _seed_revision_staged_lead(
         PARTIAL_PUSH_GATE_GLOBAL_LEAD_REVISION, destination
@@ -2420,3 +2433,58 @@ def test_claude_global_adoption_dry_run_skips_codex_preflight(
     assert f"{observed}: 2 replacements" in output
     assert _tree_bytes(anchor) == before
     assert not receipt.exists()
+
+
+@pytest.mark.parametrize("selection", ("flag-optout", "environment-optout", "hooks-selected"))
+def test_global_codex_dry_run_reads_linked_inventory_only_for_selected_hooks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], selection: str,
+) -> None:
+    installer = _load_installer()
+    home = tmp_path / "home"
+    registration = home / ".codex" / "hooks.json"
+    registration.parent.mkdir(parents=True)
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    actual = shared / "hooks.json"
+    actual.write_bytes(b'{"hooks": {}}\n')
+    inventory = shared / "codex-hook-inventory.json"
+    inventory.write_bytes(b'{"schemaVersion": 99}\n')
+    try:
+        registration.symlink_to(actual)
+    except OSError as exc:
+        pytest.skip(f"file symlinks unavailable: {exc}")
+    link = registration.readlink()
+    before = _tree_bytes(home)
+    shared_before = _tree_bytes(shared)
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK", raising=False)
+
+    args = ["--global", "--dry-run"]
+    if selection == "flag-optout":
+        args.append("--no-hypothesis-hook")
+    elif selection == "environment-optout":
+        monkeypatch.setenv("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK", "1")
+
+    probes: list[Path] = []
+    find = installer._find_portable_codex_inventory
+
+    def track(root, path):
+        probes.append(path)
+        return find(root, path)
+
+    monkeypatch.setattr(installer, "_find_portable_codex_inventory", track)
+    status = installer.install("codex", args)
+    output = capsys.readouterr()
+    if selection == "hooks-selected":
+        assert status == 1
+        assert probes == [registration]
+        assert "E_SHARED_HOOK_RUNTIME" in output.err
+    else:
+        assert status == 0, output.out + output.err
+        assert not probes
+        assert "RESULT: DRY-RUN complete" in output.out
+    assert registration.readlink() == link
+    assert _tree_bytes(home) == before
+    assert _tree_bytes(shared) == shared_before

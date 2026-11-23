@@ -412,3 +412,29 @@ def test_walk_time_budget_stops_early_and_discloses_partial_coverage(
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__]))
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "plain.txt",
+        "пример α.txt",
+        pytest.param('quoted "line\nbreak".txt', marks=pytest.mark.skipif(
+            os.name == "nt", reason="Windows does not permit quotation marks or newlines in file names"
+        )),
+    ],
+)
+def test_hash_object_batch_reads_exact_bytes_and_quotes_paths(tmp_path, name):
+    _init_git_repo(tmp_path)
+    (tmp_path / ".gitattributes").write_text("*.txt text\n", encoding="utf-8")
+    raw_bytes = b"scratch evidence with original line endings\r\nsecond line\r\n"
+    candidate = tmp_path / name
+    candidate.write_bytes(raw_bytes)
+    expected = subprocess.run(
+        ["git", "hash-object", "--stdin"], cwd=tmp_path,
+        input=raw_bytes, check=True, capture_output=True,
+    ).stdout.decode("ascii").strip()
+    assert hook._hash_object_batch(tmp_path, [candidate], FUNCTIONAL_TEST_BUDGET_SECONDS) == {
+        candidate: expected,
+    }
+    assert candidate.read_bytes() == raw_bytes

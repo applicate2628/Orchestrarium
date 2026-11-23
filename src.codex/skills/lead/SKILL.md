@@ -16,6 +16,10 @@ adopt Lead, invent grants or close Root/sibling work. Child evidence remains
 subject to independent acceptance. The shared scoped-child contract owns the
 boundary; existing SDK execution and lifecycle owners enforce effects.
 
+## Verify first. Reuse what works.
+
+**Do not reinvent a working solution.** For any task, check what exists and works before changing the approach or commissioning custom work. Apply shared **Reuse before hand-rolling** to choose a ready library or tool, keep the working path, and address only the verified gap. This applies to automation and ongoing monitoring too. Preserve the applicable bootstrap and approval requirements below.
+
 ## Bootstrap — first action
 
 For an enrolled native Goal, first apply shared **Goal resumption and hold currency**, including current same-task/native binding and consumed one-off holds, before any Goal-dependent step below; otherwise execute the existing sequence.
@@ -203,7 +207,7 @@ Every substantive result receives a separate nonauthoring check under the shared
    - For each reviewer, choose the review strategy before delegating (see Review strategy rule below).
 7. Human or CI gate
    - Output: explicit human approval, CI status, or documented external blocker.
-   - For publication, `$lead` runs the publication-safety scan and `$knowledge-archivist` is the default publication-gate approver; the approver must be a different role than the role that accepted the artifact into the pipeline.
+   - For publication, `$lead` runs the publication-safety scan and `$knowledge-archivist` is the default publication-gate approver; the approver must be a different role than the role that accepted the artifact into the pipeline. When handling a scan finding or a rebuild with prior findings, read [Reviewed publication exceptions](operating-model.md#reviewed-publication-exceptions).
 8. Optional batch-close consultant sweep
    - Role: `$consultant`
    - Output: one non-binding advisory memo that performs a final missed-change and residual-risk sweep, then ends with an explicit reusable second prompt for continuing the work.
@@ -234,7 +238,7 @@ If any field is missing, tighten the task before delegating it.
 
 Use the templates in [subagent-contracts.md](subagent-contracts.md) for concrete handoffs and response format.
 
-Before choosing an approach for a new design/mechanism or nontrivial implementation, including direct execution, apply the current-owner reuse check in subagent-contracts.md; a stale accepted plan does not make duplicate creation scope ready for assignment.
+Before choosing an approach or assigning work, apply the current-owner reuse check in [subagent-contracts.md](subagent-contracts.md) and pass the ready solution and verified gap through the existing handoff. A stale plan does not make duplicate creation scope ready for assignment.
 
 - **Evidence discipline required**: the handoff must include the template's `Evidence discipline` field with the four accepted evidence categories, `ASSUMPTION (UNVERIFIED)` fallback, and banned correctness-drivers; a handoff without it is incomplete.
 - **Tool selection recorded**: immediately before each native spawn, discover the current tool surface and fill `Allowed tools` exactly as required by the installed `AGENTS.md`; inherited availability does not widen that recorded selection. When the selected tool schema requires a context-dependent argument, bind that argument from the existing `Scope` or `Approved inputs` rather than recording only its name.
@@ -410,7 +414,7 @@ When an accepted artifact asserts a root cause, a fix verification, or `diagnosi
 ## Parallelism rule
 
 - Parallelize read-heavy work such as research, triage, summarization, and test analysis when the scopes are independent.
-- `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes eligible refill a standing instruction whenever scopes are independent and the merge cost is justified.
+- Run ready, independent, authorized work in parallel whenever capacity and safe isolation permit; serialize only genuinely dependent or held work. Do not fabricate tasks or spawn a helper for indivisible work.
 - Apply the installed operating-model parallel-isolation protocol before launch; mutating or Git-using parallel lanes require one requested, cleanup-owned worktree each.
 - Be conservative with write-heavy work. Parallel edits are acceptable only when write scopes and contracts are already fixed.
 - Same-provider external helper reuse is allowed when each parallel external item owns a different admitted artifact or disjoint slice; `externalOpinionCounts` still governs distinct-provider requirements for one lane on top of the general `parallelMode` rule.

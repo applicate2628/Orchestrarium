@@ -39,8 +39,6 @@ EXPECTED_HIT_FILES = frozenset({
     "src.codex/skills/design-panel/SKILL.md",
     "src.codex/skills/external-brigade/SKILL.md",
     "src.codex/skills/external-worker/SKILL.md",
-    "src.codex/skills/init-project/SKILL.md",
-    "src.codex/skills/init-project/agents/openai.yaml",
     "src.codex/skills/lead/external-dispatch.md",
     "src.codex/skills/lead/operating-model.md",
     "src.codex/skills/review-loop/SKILL.md",

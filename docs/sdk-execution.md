@@ -958,9 +958,16 @@ The delegated message is agent-originated, and actual model/effort are read back
 before and after the turn. Unsupported roles remain implementation work, not a
 permanent provider-name restriction.
 
-After output safety scanning and the current result authorization check, the
-Copilot adapter sends its bounded observations on the worker stream before the
-terminal result. The parent compares that stream with the result's observations.
+Before native cleanup, the Copilot adapter scans the acquired bounded observation
+batch and sends it on the worker stream. Token fragments stay buffered until this
+whole-output check, which scans both the serialized observations and their ordered
+contents. Any new observations delivered during cleanup are scanned together with
+earlier contents before transmission; split credentials are refused even if no
+complete message arrives. The terminal result receives the same check when no
+recording callback is supplied. Failed writes are not retried. A later current result
+authorization refusal withholds the terminal result while the parent retains the
+already received safe evidence. The parent compares a returned terminal with its
+captured observation stream.
 Canonical receiving validates the task or review, selected/observed metadata, evidence
 and process receipt before recording the existing ledger artifact. Genuine
 unobserved Copilot version fields are omitted, never fabricated. The selected
@@ -1012,7 +1019,10 @@ owned-task drain. A self-cancelled cleanup is recorded as failed cleanup, does
 not skip remaining cleanup owners, and does not discard already acquired
 terminal evidence. It is not reported as successful settlement. Caller
 cancellation retains the interrupted outcome; no inference or cleanup retry is
-introduced. Offline regression cases cover native self-cancellation and repeated
+introduced. Once native teardown begins, later cancellation does not start an
+additional abort task after its drain point or race abort against disconnect and
+client stop. Observation persistence failures remain separate capture errors and
+do not skip native cleanup. Offline regression cases cover native self-cancellation and repeated
 caller cancellation during cleanup; live Copilot behavior remains separately
 unqualified.
 

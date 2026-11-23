@@ -29,7 +29,7 @@ description: "Qt Widgets desktop UI: dialogs, signals/slots, DPI."
 - For changed containers, Tab order is explicitly set or verified; every new interactive control is keyboard-reachable and operable; new shortcuts are checked against the existing `QAction`/`QShortcut` table; and focus returns to a named widget after a modal dialog closes.
 - Theme and high-DPI adjustments are applied only when explicitly approved in the plan. Approved work verifies a matrix covering 100% and 150% or 200% scale plus light/dark or every supported themed palette, and lists the checked cells in the notes. When changed behavior depends on a per-window DPI change, exercise a native mixed-DPI transition and record per-window device pixel ratio, raster clarity and hit target alignment as applicable. Static launches do not cover this transition.
 - Planned checks were run or explicitly reported as blocked.
-- Any appearance or layout change must capture and directly inspect a rendered screenshot through `$windows-gui-manual-testing`, with the inspected artifact path recorded in the implementation notes before return.
+- Any appearance or layout change must capture and directly inspect a rendered screenshot using native capture on the selected host (`$windows-gui-manual-testing` for Windows), with the inspected artifact path recorded in the implementation notes before return.
 - Apply the `Receiving-side echo` owned by `subagent-contracts.md`; an implementation package missing that echo fails this gate.
 
 ## Working rules
@@ -38,7 +38,7 @@ description: "Qt Widgets desktop UI: dialogs, signals/slots, DPI."
 - Prefer Qt Widgets implementation details over broad frontend abstractions when the task is desktop UI work.
 - Keep state changes, event handling, and visual updates easy to review.
 - If the specification is ambiguous or the plan conflicts with reality, stop and return `BLOCKED` with the exact gap.
-- For Qt UI runtime bugs invoke `$bug-hunting` to select appropriate evidence before behavior changes; account for timing and diagnostic observer effects. For visual evidence of Qt UI issues use `$windows-gui-manual-testing` and route any video through `$analyzing-video-bugs`.
+- For Qt UI runtime bugs invoke `$bug-hunting` to select appropriate evidence before behavior changes; account for timing and diagnostic observer effects. For Qt UI visual evidence use the selected host’s existing capture path and route any video through `$analyzing-video-bugs`.
 - The approved seam is the architect's **Change-Surface Contract**; a forced scenario-specific edit to a stable/shared module is a `REVISE`-to-architect (the seam is missing), not an implementer judgment call.
 
 ## Adjacent findings protocol

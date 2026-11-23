@@ -61,8 +61,8 @@ These exist because each was learned by getting it wrong once. Full detail + the
   to refute findings and catch overclaims or wrong anchors. Never transmit private source material
   or invoke a paid runner just because this workflow calls for independence. Without a permitted
   independent check, mark findings provisional and say independent readiness remains unverified.
-- **Cyrillic search via Bash `grep`, not PowerShell `Select-String`** (Select-String mangles
-  Cyrillic and em-dashes). `pdftotext` also mangles Cyrillic — grep Latin tokens only.
+- **Text and page anchors:** follow Unicode extraction and source-anchor checks in
+  `references/verification-discipline.md`; rendering, not the text layer, controls formula findings.
 
 ## Workflow
 
@@ -76,11 +76,11 @@ These exist because each was learned by getting it wrong once. Full detail + the
 4. **Boundary review-loop.** Use an available, authorized independent reviewer; leave independently
    unverified findings provisional and retain the exact source anchors.
 5. **Assemble** the DOCX only when requested, via the generator pipeline (`references/deliverables-and-pipeline.md`):
-   edit the canonical `gen_*.js` generators (never the output `.docx`), rebuild, add table borders,
-   convert MathType placeholders to OLE for the formula-bearing lists, copy finals out.
-6. **Verify any DOCX build.** Check extracted markers against the expected counts, confirm
-   0 unresolved `@@` formula placeholders and expected OLE object counts, then render and inspect
-   affected pages. Counts check build completeness, not factual correctness of findings.
+   reuse the selected DOCX toolchain and edit its actual source of truth; keep requested equations
+   editable without imposing a specific generator or equation engine.
+6. **Verify any DOCX build.** Inspect the rendered affected pages and requested editable equations.
+   Use the format-appropriate build checks in that reference; factual closure is governed by
+   `references/verification-discipline.md`.
 7. **Reconcile and report.** State what was covered, what stays out of scope (see below), and keep
    the tone advisory. When the current task has `work-items/active/<slug>/`, persist only the
    canonical VAK artifact there and return concise result/provenance for the root

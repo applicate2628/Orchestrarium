@@ -73,7 +73,7 @@ When an admitted maintenance change finds an independent `.sh` or `.ps1` impleme
 
 - `adapters/claude/agents/scripts/` — Claude pack: co-locates blocking-enforcement hooks (`check-bugfix-discipline.*`, `check-git-push-gate.*`, `check-passive-polling-stop.*`, plus the shared `hook_common.py`), SessionStart context hooks (`mcp-usage-reminder.*`, `agents-mode-reminder.*`), provider invocation wrappers (`invoke-claude-api.*`, `invoke-claude-prompt.*`, `invoke-codex-prompt.*`), publication gates (`check-publication-safety.*`), and pack validators (`validate-skill-pack.*`).
 
-- `src.codex/skills/lead/scripts/` — Codex pack: same entity-type co-location pattern (minus the prompt-invocation wrappers, which are Claude-side only).
+- `src.codex/skills/lead/scripts/` — Codex pack: same entity-type co-location pattern (without locally authored prompt-invocation wrappers; the installer projects the canonical wrappers from `scripts/` into both runtimes).
 
 - `scripts/` (repo root) — co-locates production installer entrypoints (`install-{claude,codex}.py` plus thin `.sh` launchers and `install-hypothesis-hook.py`), agents-mode helpers (`normalize-agents-mode.py`, `sync-agents-mode-docs.py`, `validate-agents-mode-{contract,installers}.py`), work-item helpers (`agent-run-ledger.*`, `check-agent-run-ledger-contract.py`, `check-work-items-state.*`, `validate-work-item-state.*`), and the publication gate (`check-publication-gate.py` plus its thin `.sh` launcher).
 

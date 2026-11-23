@@ -217,6 +217,7 @@ class CopilotExecutor:
         self._workspace_identity = None
         self._tool_calls = set()
         self._tools_closed = False
+        self._cleanup_started = False
         self._tool_lock = asyncio.Lock()
         self._output = owner.ProviderOutputContext(tuple(dict.fromkeys((*output_context.needles,credential.encode("utf-8")))))
         self._timeout, self._cleanup_timeout = timeout_seconds, cleanup_timeout_seconds
@@ -229,6 +230,8 @@ class CopilotExecutor:
         self._event_count = self._output_bytes = 0
         self._event_error = None
         self._observations = []
+        self._published_observations = 0
+        self._capture_error = None
 
     def _runtime_identity(self):
         stat = self._runtime.stat()
@@ -277,8 +280,48 @@ class CopilotExecutor:
         return True
 
     def _request_abort(self):
-        if self._session is not None and self._abort_task is None:
+        if not self._cleanup_started and self._session is not None and self._abort_task is None:
             self._abort_task = asyncio.create_task(self._abort())
+
+    def _scan_observations(self, observations):
+        """Scan the bounded transport and its ordered text, including prior batches."""
+        import provider_prompt as owner
+        content = "".join(strict_json(value.payload_json,
+            max_bytes=self._request.max_output_bytes)["content"] for value in observations)
+        return owner.provider_output_safety_scan_terminal(
+            "copilot", self._output.needles,
+            stdout=json_text({"observations": [value.to_dict() for value in observations]}).encode("utf-8"),
+            stderr=content.encode("utf-8"))
+
+    async def _publish_observations(self):
+        """Retain an acquired batch before cleanup, preserving whole-output scanning.
+
+        Scan cumulative ordered content so a credential split across fragments
+        or cleanup batches is refused even without a later complete message.
+        The existing bounded list remains the only buffer; failed writes are
+        never retried and final result authority remains a separate check.
+        """
+        if (self._record is None or self._capture_error
+                or self._published_observations == len(self._observations)):
+            return
+        observations = tuple(self._observations)
+        failure_kind = "copilot_evidence_scan_failed"
+        try:
+            failure = self._scan_observations(observations)
+            if failure is not None:
+                self._capture_error = failure
+                return
+            failure_kind = "copilot_evidence_sink_failed"
+            for observation in observations[self._published_observations:]:
+                await self._record(observation)
+                self._published_observations += 1
+        except asyncio.CancelledError:
+            self._capture_error = "copilot_evidence_sink_cancelled"
+        except Exception:
+            self._capture_error = failure_kind
+        finally:
+            if self._capture_error:
+                self._event_error = self._event_error or "copilot_evidence_persistence_failed"
 
     def _retain_content(self, content, kind):
         if not isinstance(content,str) or not content: return
@@ -635,20 +678,29 @@ class CopilotExecutor:
             error = "copilot_sdk_failed"
         finally:
             self._tools_closed = True
-            if error or self._cancel_requested or self._event_error:
-                self._request_abort()
-            if self._abort_task is not None and not await drain_owned(self._abort_task):
-                cleanup_error = "copilot_abort_failed"
-            if unsubscribe is not None:
-                try: unsubscribe()
-                except Exception: cleanup_error = "copilot_unsubscribe_failed"
-            for obj,method in ((self._session,"disconnect"),(self._client,"stop")):
-                if obj is not None:
-                    if not await self._settle_sdk_cleanup(getattr(obj,method)):
-                        cleanup_error = "copilot_cleanup_failed"
-            closed = self._client is not None and cleanup_error is None
+            await self._publish_observations()
+            try:
+                if error or self._cancel_requested or self._event_error:
+                    self._request_abort()
+                # Once teardown starts, cancellation cannot create a new abort
+                # task after its drain point or race it against disconnect/stop.
+                self._cleanup_started = True
+                if self._abort_task is not None and not await drain_owned(self._abort_task):
+                    cleanup_error = "copilot_abort_failed"
+                if unsubscribe is not None:
+                    try: unsubscribe()
+                    except Exception: cleanup_error = "copilot_unsubscribe_failed"
+                for obj,method in ((self._session,"disconnect"),(self._client,"stop")):
+                    if obj is not None:
+                        if not await self._settle_sdk_cleanup(getattr(obj,method)):
+                            cleanup_error = "copilot_cleanup_failed"
+                closed = self._client is not None and cleanup_error is None
+            finally:
+                # Native cleanup may deliver a final event. Preserve its newly
+                # acquired batch too, without replaying any earlier write.
+                await self._publish_observations()
         error = error or self._event_error
-        status = "interrupted" if self._cancel_requested else "completed" if evidence_result is not None and not error and not cleanup_error else "incomplete"
+        status = "interrupted" if self._cancel_requested else "completed" if evidence_result is not None and not error and not cleanup_error and not self._capture_error else "incomplete"
         metadata = None
         if self._observed_profile is not None:
             metadata = {"schemaVersion":1,"adapter":"microsoft-copilot-sdk",
@@ -665,7 +717,7 @@ class CopilotExecutor:
             sdk_execution_json=json_text(metadata) if metadata is not None else None,
             native_thread_id=session_id, native_turn_id=native_turn_id,
             observations=tuple(self._observations), execution_error=error,
-            cleanup_error=cleanup_error, protocol_closed=closed)
+            capture_error=self._capture_error, cleanup_error=cleanup_error, protocol_closed=closed)
         if coordination:
             result = CoordinationInferenceResult(request, status, intent_json=evidence_result, **values)
         else:
@@ -675,16 +727,12 @@ class CopilotExecutor:
         self.execution_result = result
         # Observations are retained privately on refusal, but never returned unscanned.
         import provider_prompt as owner
-        evidence = json_text({"native_thread_id":result.native_thread_id, "native_turn_id":result.native_turn_id,
-            "observations":[item.to_dict() for item in result.observations]})
-        failure = owner.provider_output_safety_scan_terminal("copilot",self._output.needles,
+        evidence = json_text({"native_thread_id":result.native_thread_id, "native_turn_id":result.native_turn_id})
+        failure = self._scan_observations(result.observations) or owner.provider_output_safety_scan_terminal("copilot",self._output.needles,
             stdout=evidence.encode("utf-8"),stderr=b"")
         if failure is not None: raise CopilotError(failure)
         scan_execution_output(result,self._output)
         await self._current(request,"copilot_result")
-        if self._record is not None:
-            for observation in result.observations:
-                await self._record(observation)
         return result
 
 

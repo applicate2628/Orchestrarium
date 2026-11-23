@@ -34,6 +34,19 @@ def test_duplicate_clients_do_not_duplicate_operations(installer):
     assert calls == [('codex', ['--global'])]
 
 
+def test_shared_hook_runtime_selects_codex_without_interactive_selection(installer):
+    module, calls = installer
+    assert module.main(['--global', '--shared-hook-runtime', '--dry-run']) == 0
+    assert calls == [('codex', ['--global', '--shared-hook-runtime', '--dry-run'])]
+
+
+def test_shared_hook_runtime_rejects_other_client_selection_before_effects(installer):
+    module, calls = installer
+    with pytest.raises(SystemExit):
+        module.main(['--clients', 'codex', 'claude', '--global', '--shared-hook-runtime'])
+    assert calls == []
+
+
 def test_noninteractive_without_selection_has_no_effect(installer, monkeypatch):
     module, calls = installer
     monkeypatch.setattr(module.sys.stdin, 'isatty', lambda: False)

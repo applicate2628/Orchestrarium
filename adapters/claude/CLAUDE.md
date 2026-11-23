@@ -4,7 +4,7 @@ Apply the shared **Assistance and owner-equivalent execution (binding)** contrac
 
 # Claude Code Pack
 
-`AGENTS.md` is the required shared-governance owner. This file contains only the Claude Code runtime delta.
+`AGENTS.md` owns shared governance; this file adds the Claude Code runtime rules.
 
 ## Claude tool mapping
 
@@ -36,11 +36,11 @@ Read per-key configuration in this order: project `.claude/.agents-mode.yaml`, l
 
 - Every specialist invocation uses the Agent tool with the matching `subagent_type`; the built-in `general-purpose` agent does not replace a typed role.
 - The curated inline role identities are exactly `lead`, `product-manager`, `analyst`, `architect`, and `planner`. Architect's sole authored role-contract body is `src.codex/skills/architect/SKILL.md`, installed as an ordinary copy at `.claude/skills/architect/SKILL.md`. Explicit Skill invocation may adopt these identities inline; the shared quick-fix route may self-invoke only its already-admitted bounded intake/factual/seam decision. Inline adoption is neither isolated nor an independent gate.
-- `lead` is a host-selected main agent and inline `/lead` role. Lead is never spawned as a subagent. The wrapper rejects a stale dispatched `subagent_type: lead`; only a stale `subagent_type: lead` dispatch is fail-closed. `product-manager`, `analyst`, and `planner` remain typed Agent targets whose wrappers load their same-named Claude skill; the Architect wrapper loads the universal body.
+- `lead` is a host-selected main agent and inline `/lead` role. Lead is never spawned as a subagent; only a stale `subagent_type: lead` dispatch is fail-closed. `product-manager`, `analyst`, and `planner` remain typed Agent targets whose wrappers load their same-named Claude skill; the Architect wrapper loads the universal body.
 - For `requiresLead: false` routes, the main conversation invokes the declared Agent chain directly. For `requiresLead: true`, it adopts `/lead`, owns integration/recovery, and invokes leaf specialists; `requiresLead` never creates a Lead subagent.
 - Launch independent Agent calls together only when their complete resource surfaces are disjoint. External worker/reviewer substitution follows the installed [external-dispatch contract](agents/contracts/external-dispatch.md).
 
-Team-template JSON files under `.claude/agents/team-templates/` are the sole owners of each chain, trigger, required role, and `requiresLead` value. Select the exact file after classification; apply the `requiresLead` rules above.
+Team-template JSON files under `.claude/agents/team-templates/` are the sole owners of each chain, trigger, required role, and `requiresLead` value.
 
 `externalProvider: auto | codex | claude | kimi | grok` is the policy vocabulary. Shipped `auto` uses only Codex/Claude. Kimi selection is explicit-only; prefer the working approved thin wrapper or declared owner-equivalent launch when defective under the shared assistance contract; its installed external-dispatch contract owns admitted read-only/engineering capabilities, independent verification, and the independently verified and nonauthorizing result. Grok remains unavailable in 1.x and is not launched or probed.
 
@@ -55,14 +55,11 @@ Auto-match user intent against the installed command contracts and apply the own
 
 ## Role definitions
 
-Ordinary roles live in `.claude/agents/<role>.md`. The curated inline roles
-`lead`, `product-manager`, `analyst`, `architect`, and `planner` load the
-selected Claude install's ordinary copies at `.claude/skills/<role>/SKILL.md`.
+Ordinary roles live in `.claude/agents/<role>.md`. The inline roles above load
+the selected Claude install's ordinary copies at `.claude/skills/<role>/SKILL.md`.
 The common authored contracts come from `src.codex/skills/`; Claude does not
 read the Codex installation's skill files. `.claude/agents/lead.md` uses
 `initialPrompt: /lead` for main-agent activation and refuses stale dispatch.
-The other curated wrappers retain Claude dispatch authority and load their own
-same-named skill.
 
 ## Publication safety scan
 

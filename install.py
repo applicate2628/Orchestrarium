@@ -100,6 +100,10 @@ def main(argv: list[str] | None = None) -> int:
     if options.list_clients:
         _show_clients()
         return 0
+    if "--shared-hook-runtime" in forwarded:
+        if options.clients is not None and set(options.clients) != {"codex"}:
+            parser.error("Shared hook runtime is a Codex-only installation.")
+        return _run_selected(("codex",), forwarded)
     if options.clients is not None:
         selected = tuple(name for name, _ in CLIENTS if name in options.clients)
         return _run_selected(selected, forwarded)

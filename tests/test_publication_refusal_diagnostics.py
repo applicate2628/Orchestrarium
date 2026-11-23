@@ -40,8 +40,12 @@ class TestRefusalDiagnostics(unittest.TestCase):
                         exc = g._ScannerRefusalDenied("PGG-SCAN-REFUSAL",
                             f"publication-safety: refusing id={identifier} {fields}{ending}")
                         self.assertEqual(exc.failure_id, "PGG-SCAN-REFUSAL")
+                        guidance = (
+                            " The history check did not complete within its time budget; the stage is not known."
+                            if identifier == "PS-MSG-READ-TIMEOUT" else ""
+                        )
                         self.assertEqual(g._format_scanner_refusal(exc),
-                            f" Scanner diagnostic: id={identifier}.")
+                            f" Scanner diagnostic: id={identifier}.{guidance}")
 
     def test_redaction_and_unknown_ids(self):
         g = self.gate
@@ -62,9 +66,14 @@ class TestRefusalDiagnostics(unittest.TestCase):
     def test_correlated_refusal_keeps_failure_and_id(self):
         g = self.gate
         good = b"publication-safety: refusing id=PS-MSG-READ-TIMEOUT reason=deadline phase=reader\r\n"
+        findings = (b"PS-FINDING-COMMIT-MESSAGE kind=commit-message field=message line=3 class=machine-path\n"
+                    b"PS-FINDING-CONTENT kind=history-blob line=5 class=generic-secret\n"
+                    b"PS-FINDING-CONTENT kind=private_kind line=6 class=private_class\n"
+                    b"publication-safety scan found potential tracked-content leak markers\n")
         for route, prefix in (("generic", "PGG"), ("strict", "PRG")):
             for code, output, expected in ((2, good, "PS-MSG-READ-TIMEOUT"),
-                    (2, good + b"private", None), (1, b"", None)):
+                    (2, good + b"private", None), (1, b"", None),
+                    (1, findings, None), (1, findings + b"private", None)):
                 with self.subTest(route=route, code=code, expected=expected):
                     binding = g.PushScanBinding(route, "origin", "refs/heads/main", "1" * 40, "1" * 40)
                     interpreter = g._interpreter_identity()
@@ -100,6 +109,11 @@ class TestRefusalDiagnostics(unittest.TestCase):
                         self.assertIsInstance(exc, g._ScannerRefusalDenied)
                     self.assertEqual(pending.state, g.PendingState.FAILED)
                     self.assertIsNone(pending.consumption_id)
+                    if code == 1:
+                        self.assertEqual(g._format_scanner_refusal(exc),
+                            " Scanner finding sample: commit-message machine-path=1; history-blob other=1; other-object other=1."
+                            if output == findings else "")
+                        self.assertNotIn("generic-secret", repr(exc.__dict__))
                     self.assertNotIn("private", repr(exc.__dict__))
 
     def test_native_and_tool_surfaces_still_deny(self):

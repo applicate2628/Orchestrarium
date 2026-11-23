@@ -79,7 +79,8 @@ def _run_owned_copies(backend, root: Path, provider: str, args) -> int:
             minimal_paths.append(path)
     with backend._InstallTransaction(minimal_paths, enabled=apply) as transaction:
         owner = backend._CreateOnlyMutablePath(anchor, transaction, dry_run=not apply)
-        if backend._read_owned_text(receipt_path, owner).encode("utf-8") != before:
+        current_receipt = backend._read_owned_text(receipt_path, owner, preserve_newlines=True)
+        if current_receipt is None or current_receipt.encode("utf-8") != before:
             raise ValueError("Ownership record changed during uninstall")
         observed = {}
         for relative in record["files"]:
@@ -100,9 +101,13 @@ def _run_owned_copies(backend, root: Path, provider: str, args) -> int:
         preserve.update(set(plan["remove"]) - set(remove))
         config_effects = []
         residual_configs = {}
+        current_configs = {}
         for relative, spec in record["configs"].items():
             path = owner.destination(Path(relative))
-            text = backend._read_owned_text(path, owner)
+            # Retain absence and original identities even when no edit is planned.
+            current_configs[relative] = backend._admitted_mutation_image(transaction, path)
+            # File hashes and foreign text slices use the exact stored bytes.
+            text = backend._read_owned_text(path, owner, preserve_newlines=True)
             if text is None:
                 continue
             payload = text.encode("utf-8")
@@ -137,15 +142,23 @@ def _run_owned_copies(backend, root: Path, provider: str, args) -> int:
         if not apply:
             print("RESULT: uninstall preview only; pass --apply to remove owned content")
             return 0
+        def assert_config_state():
+            for relative, expected in current_configs.items():
+                path = owner.destination(Path(relative))
+                if not transaction._image_matches(path, expected):
+                    raise ValueError("E_UNINSTALL_CONTROL_DRIFT")
+        assert_config_state()
         # Deactivate registrations/instructions before removing their runtime payload.
         for relative, payload, after in config_effects:
             path = anchor / relative
-            if backend._read_owned_text(path, owner).encode("utf-8") != payload:
+            current = backend._read_owned_text(path, owner, preserve_newlines=True)
+            if current is None or current.encode("utf-8") != payload:
                 raise ValueError("Configuration changed during uninstall")
             if after is None:
                 owner.remove_exact_file(Path(relative), backend.hashlib.sha256(payload).hexdigest())
             else:
                 owner.replace_file_atomic(Path(relative), after, fsync="required")
+            current_configs[relative] = backend._admitted_mutation_image(transaction, path)
         # Retain maximal wholly-owned trees before individual file tombstones
         # are created. Otherwise those rollback artifacts make every containing
         # directory appear nonempty until commit, leaving empty install trees.
@@ -189,9 +202,12 @@ def _run_owned_copies(backend, root: Path, provider: str, args) -> int:
                 remaining_directories.append(relative)
         remaining = {path: record["files"][path] for path in sorted(preserve)}
         payload = codec.encode_record(remaining, provider, scope, configs=residual_configs, directories=sorted(remaining_directories))
+        assert_config_state()
         owner.replace_file_atomic(receipt_path.relative_to(anchor), payload, fsync="required")
-        if backend._read_owned_text(receipt_path, owner).encode("utf-8") != payload:
+        current_receipt = backend._read_owned_text(receipt_path, owner, preserve_newlines=True)
+        if current_receipt is None or current_receipt.encode("utf-8") != payload:
             raise ValueError("Uninstall record readback failed")
+        assert_config_state()
         transaction.commit()
     if preserve or residual_configs:
         print("RESULT: partial uninstall; modified content preserved")
@@ -250,7 +266,8 @@ def _run_selected_current(backend, root: Path, provider: str, args) -> int:
         authority.assert_current()
     with backend._InstallTransaction(paths, enabled=apply) as transaction:
         owner = backend._CreateOnlyMutablePath(anchor, transaction, dry_run=not apply)
-        if backend._read_owned_text(receipt, owner, preserve_newlines=True).encode("utf-8") != before:
+        current_receipt = backend._read_owned_text(receipt, owner, preserve_newlines=True)
+        if current_receipt is None or current_receipt.encode("utf-8") != before:
             raise ValueError("E_UNINSTALL_RECEIPT_DRIFT")
         receipt_node = transaction._capture_node(receipt)
         linked_owners = {
@@ -261,7 +278,8 @@ def _run_selected_current(backend, root: Path, provider: str, args) -> int:
             path, authority = location(relative)
             selected = owner if authority is None else linked_owners[authority.logical_root]
             return selected, path.relative_to(selected.anchor)
-        observed, witnesses, documents = {}, [], {}
+        # Absence is also a selected state, retained through receipt publication.
+        observed, witnesses, documents, current_controls = {}, [], {}, {}
         configs = record.get("configs", {})
         for relative in sorted(set(record["files"]) | controls):
             selected, suffix = destination(relative)
@@ -270,8 +288,8 @@ def _run_selected_current(backend, root: Path, provider: str, args) -> int:
                 path = selected.destination(suffix, allow_leaf_reparse=True)
                 binding = transaction._bind_scalar_storage(path)
                 storage, node, chain, leaf = binding
-                if node is not None:
-                    documents[relative] = (binding, transaction._image_file_bytes(storage, node))
+                documents[relative] = (
+                    binding, None if node is None else transaction._image_file_bytes(storage, node))
                 witnesses.append((relative, None if node is None else
                                   (node.kind, node.data, node.python_identity)))
                 continue
@@ -282,6 +300,8 @@ def _run_selected_current(backend, root: Path, provider: str, args) -> int:
                 node = None
             witnesses.append((relative, None if node is None else
                               (node.kind, node.data, node.python_identity)))
+            if relative in controls:
+                current_controls[relative] = node
             if relative in record["files"] and node is not None:
                 observed[relative] = node.data if node.kind == "file" else None
         classified = codec.plan_file_removal(record, observed)
@@ -340,11 +360,16 @@ def _run_selected_current(backend, root: Path, provider: str, args) -> int:
             print("RESULT: preserved installation; control ownership is incomplete")
             return 2 if record["files"] or configs else 0
         current_documents = {key: value[0] for key, value in documents.items()}
-        def assert_documents():
+        def assert_control_state():
             for key, expected in current_documents.items():
                 if transaction._bind_scalar_storage(anchor / key) != expected:
                     raise ValueError("E_UNINSTALL_DOCUMENT_DRIFT")
-        assert_documents()
+            for key, expected in current_controls.items():
+                path = owner.destination(Path(key))
+                image = {} if expected is None else {path: expected}
+                if not transaction._image_matches(path, image):
+                    raise ValueError("E_UNINSTALL_CONTROL_DRIFT")
+        assert_control_state()
         for relative, replacement in block_updates.items():
             path = anchor / relative
             binding, original = documents[relative]
@@ -361,12 +386,18 @@ def _run_selected_current(backend, root: Path, provider: str, args) -> int:
             current_documents[relative] = after
         for relative in control_remove:
             owner.remove_exact_file(Path(relative), configs[relative]["sha256"])
+            if relative in current_documents:
+                # Expect absence at the same storage, with the same traversal witnesses.
+                storage, _, chain, leaf = current_documents[relative]
+                current_documents[relative] = (storage, None, chain, leaf)
+            if relative in current_controls:
+                current_controls[relative] = None
         for relative in remove:
             selected, suffix = destination(relative)
             selected.remove_exact_file(suffix, record["files"][relative])
         for _, authority in bindings.values():
             authority.assert_current()
-        assert_documents()
+        assert_control_state()
         residual = dict(record)
         residual["files"] = {p: record["files"][p] for p in preserve}
         residual["configs"] = {p: v for p, v in configs.items()
@@ -374,11 +405,12 @@ def _run_selected_current(backend, root: Path, provider: str, args) -> int:
                                and p not in absent_blocks and state.get(p) is not None}
         payload = codec.serialize_record(residual, provider, scope)
         owner.replace_file_atomic(receipt.relative_to(anchor), payload, fsync="required")
-        if backend._read_owned_text(receipt, owner, preserve_newlines=True).encode("utf-8") != payload:
+        current_receipt = backend._read_owned_text(receipt, owner, preserve_newlines=True)
+        if current_receipt is None or current_receipt.encode("utf-8") != payload:
             raise ValueError("E_UNINSTALL_RECEIPT_READBACK")
         for _, authority in bindings.values():
             authority.assert_current()
-        assert_documents()
+        assert_control_state()
         transaction.commit()
     print("RESULT: selected current content removed; unrecorded data retained")
     return 2 if preserve else 0

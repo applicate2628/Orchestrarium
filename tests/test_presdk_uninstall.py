@@ -91,6 +91,71 @@ class PhysicalTests(unittest.TestCase):
         self.receipt.write_bytes(ownership.serialize_record(record, "claude", "global"))
         return raw
 
+    def fresh_documents(self):
+        home = self.home / "fresh"
+        target = home / ".claude"
+        target.mkdir(parents=True)
+        receipt = target / ownership.RECEIPT_NAME
+        guide, rules = target / "CLAUDE.md", target / "AGENTS.md"
+        payload = target / "agents" / "created.md"
+        user = target / "user.md"
+        user.write_bytes(b"user-owned content")
+        with self.backend._InstallTransaction(
+            [receipt, guide, rules, payload], enabled=True, track_fresh_files=True
+        ) as tx:
+            owner = self.backend._CreateOnlyMutablePath(home, tx, dry_run=False)
+            self.backend._merge_claude_docs(
+                ROOT, ROOT / "src.claude", guide, False, mutable_owner=owner
+            )
+            owner.create_file(payload.relative_to(home), b"owned payload")
+            self.backend._record_fresh_provider_receipt("claude", "global", receipt, owner)
+            tx.commit()
+        patch.object(self.backend, "_target", return_value=("global", target, None)).start()
+        patch.object(self.backend, "_resolve_global_home", return_value=home).start()
+        return guide, rules, payload, user, receipt
+
+    def test_fresh_owned_documents_are_removed_with_payload_and_repeat(self):
+        guide, rules, payload, user, receipt = self.fresh_documents()
+        before = {path: path.read_bytes() for path in (guide, rules, payload, user, receipt)}
+        _, report = self.call()
+        self.assertEqual(report["removeControls"], [".claude/AGENTS.md", ".claude/CLAUDE.md"])
+        self.assertEqual(before, {path: path.read_bytes() for path in before})
+        self.assertEqual(self.call(True, report["selection"])[0], 0)
+        self.assertTrue(all(not path.exists() for path in (guide, rules, payload)))
+        self.assertEqual(user.read_bytes(), before[user])
+        residual = ownership.decode_record(receipt.read_bytes(), "claude", "global")
+        self.assertEqual(residual["files"], {})
+        self.assertEqual(residual.get("configs", {}), {})
+        _, report = self.call()
+        self.assertEqual(self.call(True, report["selection"])[0], 0)
+
+    def test_fresh_owned_document_edit_invalidates_preview_without_removal(self):
+        guide, rules, payload, user, receipt = self.fresh_documents()
+        _, report = self.call()
+        guide.write_bytes(b"operator edit after preview")
+        before = {path: path.read_bytes() for path in (guide, rules, payload, user, receipt)}
+        with self.assertRaisesRegex(ValueError, "E_UNINSTALL_SELECTION_DRIFT"):
+            self.call(True, report["selection"])
+        self.assertEqual(before, {path: path.read_bytes() for path in before})
+
+    def test_fresh_owned_documents_restore_on_late_receipt_failure(self):
+        guide, rules, payload, user, receipt = self.fresh_documents()
+        before = {path: path.read_bytes() for path in (guide, rules, payload, user, receipt)}
+        _, report = self.call()
+        original = self.backend._CreateOnlyMutablePath.replace_file_atomic
+
+        def fail(owner, relative, *args, **kwargs):
+            if relative.name == ownership.RECEIPT_NAME:
+                self.assertFalse(guide.exists())
+                self.assertFalse(rules.exists())
+                raise RuntimeError("late receipt failpoint")
+            return original(owner, relative, *args, **kwargs)
+
+        with patch.object(self.backend._CreateOnlyMutablePath, "replace_file_atomic", fail):
+            with self.assertRaisesRegex(RuntimeError, "late receipt failpoint"):
+                self.call(True, report["selection"])
+        self.assertEqual(before, {path: path.read_bytes() for path in before})
+
     def test_owned_document_block_preserves_exact_user_bytes_and_repeat(self):
         self.add_document()
         _, report = self.call()

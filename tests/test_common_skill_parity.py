@@ -19,6 +19,33 @@ IMPLEMENTATION_TO_THEORY_BODY_SHA256 = (
     "2a62f5489701d38a7252a9f3964a8b31f7fd064893075b95da34d17a5855bb78"
 )
 
+ACCEPTED_CANONICAL_WITH_FROZEN_MIGRATION_WITNESS = {
+    'analyzing-video-bugs': {
+        'adapters/claude': '5998cc2273e3c2f0994f2d1ae6dd22dbc7916bf1689ece5f5ea8ef7034cde603',
+        'src.codex': '2346f3f55e327877552e5db2a6c57f1475a23aeb46c46d44340104ad187d996f',
+    },
+    'repo-cleanup': {
+        'adapters/claude': '942d2eed5941b4468b28fcb8c89d3ac03416d963c598613c0e8e3cb5553b2616',
+        'src.codex': '6da4714557cae88de6ac967e52e7fc89ad852d8e279e441fcdef70b7432f231f',
+    },
+    'vak-dissertation-review': {
+        'adapters/claude': 'e259d114a1ea2372d9152a07445aeba82c51493b9caf7b39f3b6b96678e9b261',
+        'src.codex': '0ba50252acb53b2f3b2f7df573864b3f99a10b3969d04ce8107699293e2e7597',
+    },
+    'vcpkg-builder': {
+        'adapters/claude': '72208f4bec6ebf30eb49e99da12cc4e3cef6ef2572bb1583232a5fb1ebe791dc',
+        'src.codex': '0b250657452a93a77bcb73a3796f2d6795ba727e239bf47676639016467f0cc0',
+    },
+    'vcpkg-ports-updater': {
+        'adapters/claude': '17aedafce43a1de5c0917e2a14cba131fcd5dcccca67902ad42852108d90816f',
+        'src.codex': 'bd1ca0e83dafd29a4cb2b2486ee2e9058764f396702f7bd45b72dfe719711734',
+    },
+    'windows-gui-manual-testing': {
+        'adapters/claude': '7dd186bbeee1fab2eb44e2d4f1c4772ffea87d918605efdcc00a5a8fb3c272b8',
+        'src.codex': '3e5a0dd384fba8f6e6e840d579cdfb64fff1a5ebd136048a2635803d9912a30e',
+    },
+}
+
 
 def _runtime():
     return importlib.import_module("scripts.skill_pack_validator_runtime")
@@ -62,13 +89,11 @@ def _live_common_skill_hashes(root: Path = ROOT) -> dict[str, dict[str, str]]:
             assert path.is_file(), f"live common-skill {name} missing from {pack}"
             _assert_frontmatter(path, f"{pack}/{name}")
             hashes[pack] = digest(path.read_bytes())
-        # Claude's source tree is a protected historical migration input, not
-        # a second live owner. The installer projection is checked separately.
-        if name == "repo-cleanup":
-            assert hashes == {
-                "src.codex": "80d1a331232eb39aafbc1f328831212b1bb4633a0a7efe8aedaec99c04ad4234",
-                "adapters/claude": "942d2eed5941b4468b28fcb8c89d3ac03416d963c598613c0e8e3cb5553b2616",
-            }, f"repo-cleanup canonical or historical body drifted: {hashes}"
+        # These source-owned updates retain exact historical migration witnesses.
+        # Do not overwrite those witnesses or accept an unpinned body difference.
+        accepted = ACCEPTED_CANONICAL_WITH_FROZEN_MIGRATION_WITNESS.get(name)
+        if accepted is not None:
+            assert hashes == accepted, f"{name} canonical or historical body drifted: {hashes}"
             result[name] = hashes
             continue
         result[name] = hashes

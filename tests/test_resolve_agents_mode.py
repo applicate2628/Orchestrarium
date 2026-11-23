@@ -91,6 +91,120 @@ class ResolveAgentsModeTest(unittest.TestCase):
 
             self.assertFalse((project / ".agents" / ".agents-mode.yaml.generated").exists())
 
+    def test_shared_extensionless_preferences_are_read_without_migration(self) -> None:
+        for provider in ("codex", "claude"):
+            with self.subTest(provider=provider), tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp)
+                project, home = base / "project", base / "home"
+                project.mkdir()
+                legacy = home / ".agents-mode"
+                self._write(legacy, "# Retained preferences\nmcpMode: force\nexternalClaudeApiMode: disabled\n")
+                original, identity = legacy.read_bytes(), legacy.stat().st_ino
+
+                resolved = self._resolve(provider, project, home)
+
+                for key, value in (("mcpMode", "force"), ("reserveResolver", "disabled")):
+                    self.assertEqual(resolved["values"][key], value)
+                    self.assertEqual(resolved["sources"][key],
+                                     {"rank": "shared-global", "path": str(legacy)})
+                self.assertEqual((legacy.read_bytes(), legacy.stat().st_ino), (original, identity))
+                self.assertEqual(list(home.iterdir()), [legacy])
+                self.assertEqual(list(project.iterdir()), [])
+
+    def test_shared_canonical_file_suppresses_legacy_keys_and_wrapper_confirmation(self) -> None:
+        for provider, local_dir in (("codex", ".agents"), ("claude", ".claude")):
+            for canonical_text in ("", "mcpMode: auto\n"):
+                with self.subTest(provider=provider, canonical=canonical_text), tempfile.TemporaryDirectory() as tmp:
+                    base = Path(tmp)
+                    project, home = base / "project", base / "home"
+                    canonical, legacy = home / ".agents-mode.yaml", home / ".agents-mode"
+                    self._write(canonical, canonical_text)
+                    self._write(legacy, "consultantMode: internal\nmcpMode: force\nreserveResolver: wrapper:shared-review\n")
+                    self._write(project / local_dir / ".agents-mode.yaml",
+                                "reserveResolver: wrapper:shared-review\n")
+                    before = {path: path.read_bytes() for path in (canonical, legacy)}
+
+                    resolved = self._resolve(provider, project, home)
+
+                    self.assertEqual(resolved["values"]["consultantMode"], "disabled")
+                    self.assertEqual(resolved["sources"]["consultantMode"]["rank"], "defaults")
+                    self.assertEqual(resolved["values"]["mcpMode"], "auto")
+                    self.assertEqual(resolved["reserveResolverTrust"], "project-UNCONFIRMED")
+                    self.assertNotIn(str(legacy), {value["path"] for value in resolved["sources"].values()})
+                    self.assertEqual({path: path.read_bytes() for path in before}, before)
+
+    def test_shared_extensionless_selection_keeps_provider_and_project_precedence(self) -> None:
+        for provider, local_dir in (("codex", ".agents"), ("claude", ".claude")):
+            with self.subTest(provider=provider), tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp)
+                project, home = base / "project", base / "home"
+                legacy = home / ".agents-mode"
+                self._write(legacy, "mcpMode: force\nconsultantMode: internal\nreserveResolver: wrapper:shared-review\n")
+                self._write(home / f".{provider}" / ".agents-mode.yaml", "mcpMode: auto\n")
+                self._write(project / local_dir / ".agents-mode", "consultantMode: disabled\n")
+
+                resolved = self._resolve(provider, project, home)
+
+                for key, value, rank in (("mcpMode", "auto", "global"),
+                                         ("consultantMode", "disabled", "local-legacy")):
+                    self.assertEqual(resolved["values"][key], value)
+                    self.assertEqual(resolved["sources"][key]["rank"], rank)
+                self.assertEqual(resolved["values"]["reserveResolver"], "wrapper:shared-review")
+                self.assertEqual(resolved["sources"]["reserveResolver"],
+                                 {"rank": "shared-global", "path": str(legacy)})
+                self.assertEqual(resolved["reserveResolverTrust"], "user-global")
+
+    def test_occupied_shared_canonical_path_does_not_select_legacy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            project, home = base / "project", base / "home"
+            project.mkdir()
+            canonical = home / ".agents-mode.yaml"
+            canonical.mkdir(parents=True)
+            self._write(home / ".agents-mode", "consultantMode: internal\n")
+
+            resolved = self._resolve("codex", project, home)
+
+            self.assertEqual(resolved["values"]["consultantMode"], "disabled")
+            self.assertEqual(resolved["sources"]["consultantMode"]["rank"], "defaults")
+            self.assertTrue(canonical.is_dir())
+
+    def test_dispatch_owners_keep_second_opinion_toggle_sparse(self) -> None:
+        owners = {
+            "codex": ("src.codex/skills/lead/external-dispatch.md", ".codex", ".agents"),
+            "claude": ("adapters/claude/agents/contracts/external-dispatch.md", ".claude", ".claude"),
+        }
+        for provider, (owner, global_pack, local_pack) in owners.items():
+            with self.subTest(provider=provider), tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp)
+                project, home = base / "project", base / "home"
+                project.mkdir()
+                config = home / global_pack / ".agents-mode.yaml"
+                self._write(config, "consultantMode: internal\nexternalProvider: kimi\ndelegationMode: manual\n")
+                inherited = self._resolve(provider, project, home)
+                self.assertEqual(inherited["values"]["consultantMode"], "internal")
+                local = project / local_pack / ".agents-mode.yaml"
+                self.assertFalse(local.exists())
+                self._write(local, "consultantMode: external\n")
+                effective = self._resolve(provider, project, home)
+                self.assertEqual(effective["values"]["consultantMode"], "external")
+                for key in ("externalProvider", "delegationMode"):
+                    self.assertEqual(effective["values"][key], inherited["values"][key])
+                    self.assertEqual(effective["sources"][key], inherited["sources"][key])
+                    self.assertEqual(effective["sources"][key]["rank"], "global")
+                self._write(local, "consultantMode: internal\nfutureSetting: retained\n")
+                before = local.read_bytes()
+                readback = self._resolve(provider, project, home)
+                self.assertEqual(readback["values"]["consultantMode"], "internal")
+                for key in ("externalProvider", "delegationMode"):
+                    self.assertEqual(readback["sources"][key], inherited["sources"][key])
+                self.assertEqual(local.read_bytes(), before)
+                policy = (ROOT / owner).read_text(encoding="utf-8")
+                self.assertIn("A Second Opinion toggle writes only the local `consultantMode` key", policy)
+                self.assertIn("Authorized installer normalization is separate", policy)
+                self.assertNotIn("write the full default shape", policy)
+                self.assertNotIn("must not rewrite the file back to a consultant-only shape", policy)
+
     def test_project_local_wrapper_resolver_is_flagged_project_unconfirmed(self) -> None:
         """F9: a repo-supplied executable-bearing reserveResolver must not be silently trusted."""
         with tempfile.TemporaryDirectory() as tmp:
