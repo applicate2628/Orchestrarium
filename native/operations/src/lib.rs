@@ -14,3 +14,9 @@ pub use git_identity::{
 #[path = "publication/line_index.rs"]
 mod line_index;
 pub use line_index::{LineSpan, index_text, normalize_and_index, normalize_staged_text};
+
+#[cfg(windows)]
+#[path = "publication/mapped_stage_windows.rs"]
+mod mapped_stage_windows;
+#[cfg(windows)]
+pub use mapped_stage_windows::MappedStagedText;
