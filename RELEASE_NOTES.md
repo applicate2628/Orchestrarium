@@ -7,6 +7,10 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-23
 
+- Coupled Lead and provider-transport upgrades recognize completed content writes by the same installation transaction. The check binds the captured predecessor, original file identities, current owned state and planned contents, so Windows updates can preserve their existing files without treating their own changes as foreign drift.
+
+- Removing an unchanged retired file after a Windows tree replacement retains the transaction's complete security and identity witnesses. Cleanup and rollback no longer discard that evidence by reopening the file with a weaker observation.
+
 - The model resolver now compares eligible models and reasoning efforts using benchmark quality, task time, and one relative cost unit (Sol 6.2 High = 1). The Lead selects and explains the best fit for each task; the default is a fallback. The benchmark figures are not prices, launch permissions, or runtime guarantees.
 
 - On Windows, the installer keeps existing owned files and their access rules when a standalone Lead upgrade only updates bytes and adds ordinary files under existing folders. The same transaction verifies new files and rolls back on failure. Coupled transport replacements retain their existing path.
