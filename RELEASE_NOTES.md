@@ -7,7 +7,7 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-23
 
-- Historical upgrade checks distinguish legacy lookup digests from structural Version 2 witnesses, verify unchanged targets when historical material lacks a witness, and exercise supported upgrade, no-op and rollback behavior using authenticated factory data. Receipt and explicit-adoption checks use their current versioned formats.
+- Historical upgrade checks distinguish legacy lookup digests from structural Version 2 witnesses, verify unchanged targets when historical material lacks a witness, and exercise supported upgrade, no-op and rollback behavior using authenticated factory data. Receipt and explicit-adoption checks use their current versioned formats. Archive fixtures pin Git newline settings per command so host checkout defaults cannot change historical payload bytes.
 
 - Coupled Lead and provider-transport upgrades recognize completed content writes by the same installation transaction. The check binds the captured predecessor, original file identities, current owned state and planned contents, so Windows updates can preserve their existing files without treating their own changes as foreign drift.
 

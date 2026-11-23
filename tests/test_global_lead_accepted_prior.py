@@ -498,14 +498,22 @@ def _load_installer():
     return module
 
 
-def _seed_revision_staged_lead(revision: str, destination: Path) -> Path:
-    source = destination.parent / "historical-source"
-    archive = subprocess.run(
-        ["git", "archive", "--format=tar", revision],
+def _git_archive_bytes(revision: str, *paths: str) -> bytes:
+    # Older revisions lack the byte-preserving attributes in the current tree.
+    # Keep host checkout defaults out of frozen archive fixtures without
+    # rewriting payloads or changing repository/global Git configuration.
+    return subprocess.run(
+        ["git", "-c", "core.autocrlf=false", "-c", "core.eol=lf",
+         "archive", "--format=tar", revision, *paths],
         cwd=ROOT,
         check=True,
         capture_output=True,
     ).stdout
+
+
+def _seed_revision_staged_lead(revision: str, destination: Path) -> Path:
+    source = destination.parent / "historical-source"
+    archive = _git_archive_bytes(revision)
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
         package.extractall(source, filter="data")
 
@@ -590,12 +598,7 @@ def _remove_historical_members(lead: Path, relatives: tuple[str, ...]) -> None:
 
 def _extract_8521_skill(name: str, destination: Path) -> Path:
     if name == "lead":
-        archive = subprocess.run(
-            ["git", "archive", "--format=tar", "8521b638"],
-            cwd=ROOT,
-            check=True,
-            capture_output=True,
-        ).stdout
+        archive = _git_archive_bytes("8521b638")
         with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
             package.extractall(destination, filter="data")
         target = destination / "installed"
@@ -615,30 +618,14 @@ def _extract_8521_skill(name: str, destination: Path) -> Path:
         )
         assert result.returncode == 0, result.stdout + result.stderr
         return target / ".agents" / "skills" / "lead"
-    archive = subprocess.run(
-        ["git", "archive", "--format=tar", "8521b638", f"src.codex/skills/{name}"],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-    ).stdout
+    archive = _git_archive_bytes("8521b638", f"src.codex/skills/{name}")
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
         package.extractall(destination, filter="data")
     return destination / "src.codex" / "skills" / name
 
 
 def _extract_7872_skill(name: str, destination: Path) -> Path:
-    archive = subprocess.run(
-        [
-            "git",
-            "archive",
-            "--format=tar",
-            PRE_KIMI_GLOBAL_LEAD_REVISION,
-            f"src.codex/skills/{name}",
-        ],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-    ).stdout
+    archive = _git_archive_bytes(PRE_KIMI_GLOBAL_LEAD_REVISION, f"src.codex/skills/{name}")
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
         package.extractall(destination, filter="data")
     return destination / "src.codex" / "skills" / name
@@ -677,36 +664,14 @@ def _extract_additional_stock_skill(
             path.write_bytes(payload)
         return target
 
-    archive = subprocess.run(
-        [
-            "git",
-            "archive",
-            "--format=tar",
-            revision,
-            f"src.codex/skills/{name}",
-        ],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-    ).stdout
+    archive = _git_archive_bytes(revision, f"src.codex/skills/{name}")
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
         package.extractall(destination, filter="data")
     return destination / "src.codex" / "skills" / name
 
 
 def _extract_stock_consultant(destination: Path, revision: str) -> Path:
-    archive = subprocess.run(
-        [
-            "git",
-            "archive",
-            "--format=tar",
-            revision,
-            "src.codex/skills/consultant",
-        ],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-    ).stdout
+    archive = _git_archive_bytes(revision, "src.codex/skills/consultant")
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
         package.extractall(destination, filter="data")
     return destination / "src.codex" / "skills" / "consultant"
@@ -735,6 +700,23 @@ def _assert_preflight_refusal_preserves_tree(installer, skills: Path, failure: s
         unexpected = installer._preflight_canonical_skills(ROOT / "src.codex/skills", skills, root=ROOT)
         installer._discard_canonical_skills_plan(unexpected)
     assert installer._InstallTransaction._observe(skills) == before
+
+
+@pytest.mark.parametrize(
+    ("revision", "expected_prior"), STOCK_CONSULTANT_PRIORS + SUPPORTED_CONSULTANT_PRIORS,
+)
+def test_historical_archive_ignores_checkout_newline_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, revision: str, expected_prior: str,
+) -> None:
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "2")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "true")
+    monkeypatch.setenv("GIT_CONFIG_KEY_1", "core.eol")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_1", "crlf")
+    historical = _extract_stock_consultant(tmp_path / "historical", revision)
+    assert _load_installer()._legacy_tree_sha256(historical) == expected_prior
+    for relative, payload in _tree_bytes(historical).items():
+        assert payload == _historical_blob(revision, f"src.codex/skills/consultant/{relative.as_posix()}")
 
 
 @pytest.mark.parametrize(("revision", "expected_prior"), STOCK_CONSULTANT_PRIORS)
@@ -2079,10 +2061,7 @@ def test_receipted_lead_provider_orders_without_git_keep_links_and_hooks(
     installer = _load_installer()
     receiver = tmp_path / "receiver"
     receiver.mkdir()
-    archive = subprocess.run(
-        ["git", "archive", "--format=tar", "HEAD"], cwd=ROOT,
-        check=True, capture_output=True,
-    ).stdout
+    archive = _git_archive_bytes("HEAD")
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
         package.extractall(receiver, filter="data")
     assert not (receiver / ".git").exists()
