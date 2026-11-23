@@ -25,6 +25,7 @@ import sys
 import threading
 import time
 import types
+from contextvars import ContextVar
 from dataclasses import (
     dataclass,
     field,
@@ -83,7 +84,8 @@ def _publication_scan_budget_seconds() -> float:
     return float(value)
 
 
-SCAN_TIMEOUT_SECONDS = _publication_scan_budget_seconds() + 60.0
+SCAN_THRESHOLD_SECONDS = _publication_scan_budget_seconds()
+SCAN_TIMEOUT_SECONDS = SCAN_THRESHOLD_SECONDS + 60.0
 SCAN_SETTLEMENT_ATTEMPT_SECONDS = 3.0
 SCAN_SETTLEMENT_MAX_ENTRIES = 2
 
@@ -108,8 +110,10 @@ class _ScannerRefusalDenied(PrRouteDenied):
            )},
         ("PS-MSG-COVERAGE", "empty-selection", "coverage"):
             " The verified range contained no new selected coverage; check the source and receiver binding.",
+        ("PS-MSG-READ", "coverage-storage", "reader"):
+            " Local scan scratch storage is unavailable; coverage is incomplete.",
         ("PS-MSG-READ-TIMEOUT", "deadline", "reader"):
-            " The bounded reader timed out; check Git object availability before retrying.",
+            " The history check did not complete within its time budget; the stage is not known.",
     }
 
     def __init__(self, failure_id: str, scanner_output: str):
@@ -126,7 +130,38 @@ class _ScannerRefusalDenied(PrRouteDenied):
                 match.group(2) or match.group(5), match.group(3) or match.group(4)), "")
 
 
+class _ScannerFindingDenied(PrRouteDenied):
+    # Only closed bucket names and integer sample counts may cross this boundary.
+    _ROW = re.compile(
+        r"PS-FINDING-(?:COMMIT-MESSAGE kind=(commit-message) field=message|"
+        r"CONTENT kind=([a-z][a-z0-9_-]*)) "
+        r"line=[1-9][0-9]* class=([a-z][a-z0-9_-]*)"
+    )
+    _FOOTER = "publication-safety scan found potential tracked-content leak markers"
+    _KINDS = frozenset({"commit-message", "commit-header", "history-blob", "path-blob", "tag-object", "tree-path"})
+
+    def __init__(self, failure_id: str, scanner_output: str) -> None:
+        super().__init__(failure_id)
+        self.sample: tuple[tuple[str, str, int], ...] = ()
+        rows = scanner_output.replace("\r\n", "\n").removesuffix("\n").split("\n")
+        if len(rows) < 2 or rows[-1] != self._FOOTER:
+            return
+        counts: dict[tuple[str, str], int] = {}
+        for row in rows[:-1]:
+            match = self._ROW.fullmatch(row)
+            if match is None:
+                return
+            kind = match[1] or match[2]
+            key = (kind if kind in self._KINDS else "other-object",
+                   "machine-path" if match[3] == "machine-path" else "other")
+            counts[key] = counts.get(key, 0) + 1
+        self.sample = tuple((*key, count) for key, count in sorted(counts.items()))
+
+
 def _format_scanner_refusal(exc: PrRouteDenied) -> str:
+    if type(exc) is _ScannerFindingDenied and exc.sample:
+        counts = "; ".join(f"{kind} {category}={count}" for kind, category, count in exc.sample)
+        return f" Scanner finding sample: {counts}."
     if type(exc) is _ScannerRefusalDenied and exc.scanner_id in _ScannerRefusalDenied._IDS:
         return f" Scanner diagnostic: id={exc.scanner_id}." + exc.detail
     return ""
@@ -264,7 +299,7 @@ class SourceLayout:
 
 SOURCE_ROLE_ORDER = (
     "gate", "hook_common", "classifier", "posix_helper", "windows_job",
-    "scanner", "publication_review_policy", "linked_runtime_subroots", "receiver_scope",
+    "scanner", "publication_review_policy", "linked_runtime_subroots", "receiver_scope", "matcher_wire",
 )
 
 
@@ -281,6 +316,7 @@ SOURCE_LAYOUTS = (
             ("publication_review_policy", "universal-hooks/scripts/publication_review_policy.py"),
             ("linked_runtime_subroots", "linked_runtime_subroots.py"),
             ("receiver_scope", "universal-hooks/scripts/transfer_binding.py"),
+            ("matcher_wire", "universal-hooks/scripts/publication_match_wire.py"),
         ),
     ),
     SourceLayout(
@@ -295,6 +331,7 @@ SOURCE_LAYOUTS = (
             ("publication_review_policy", "src.codex/skills/lead/scripts/publication_review_policy.py"),
             ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
             ("receiver_scope", "src.codex/skills/lead/scripts/transfer_binding.py"),
+            ("matcher_wire", "src.codex/skills/lead/scripts/publication_match_wire.py"),
         ),
     ),
     SourceLayout(
@@ -309,6 +346,7 @@ SOURCE_LAYOUTS = (
             ("publication_review_policy", "src.claude/agents/scripts/publication_review_policy.py"),
             ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
             ("receiver_scope", "src.claude/agents/scripts/transfer_binding.py"),
+            ("matcher_wire", "src.claude/agents/scripts/publication_match_wire.py"),
         ),
     ),
     SourceLayout(
@@ -323,6 +361,7 @@ SOURCE_LAYOUTS = (
             ("publication_review_policy", "scripts/publication_review_policy.py"),
             ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
             ("receiver_scope", "scripts/transfer_binding.py"),
+            ("matcher_wire", "scripts/publication_match_wire.py"),
         ),
     ),
 )
@@ -424,6 +463,7 @@ class PendingScanInvocation:
     consumption_id: str | None = field(init=False, default=None)
     _transition_lock: threading.Lock = field(init=False, repr=False, default_factory=threading.Lock)
     _identity_sealed: bool = field(init=False, repr=False, default=False)
+    _settled_progress_at: float | None = field(init=False, repr=False, default=None)
 
     def __setattr__(self, name, value):
         if getattr(self, "_identity_sealed", False) and name in {
@@ -449,6 +489,15 @@ class PendingScanInvocation:
     def __deepcopy__(self, memo):
         raise TypeError("pending invocation is non-copyable")
 
+    def _consumption_deadline(self) -> float:
+        deadline = float(self.authorization_deadline)
+        if self._settled_progress_at is not None:
+            # Active work is bounded by the owner's quiet window; bound the
+            # final local settlement/currentness phase from observed completion.
+            deadline = max(deadline, self._settled_progress_at
+                           + SCAN_SETTLEMENT_ATTEMPT_SECONDS * SCAN_SETTLEMENT_MAX_ENTRIES)
+        return deadline
+
     def correlate_and_consume_once(
         self,
         launched: "LaunchedScanInvocation",
@@ -468,7 +517,7 @@ class PendingScanInvocation:
                 raise PrRouteDenied(prefix + "-RECEIPT-USED")
             if (
                 self.state is not PendingState.SETTLED
-                or time.monotonic() > float(self.authorization_deadline)
+                or time.monotonic() > self._consumption_deadline()
                 or len(records) != 1
             ):
                 self.state = PendingState.FAILED
@@ -534,7 +583,7 @@ class PendingScanInvocation:
                 else:
                     parsed = parse_publication_safety_observation(text)
                 if execution.exit_code == 1:
-                    raise PrRouteDenied(prefix + "-SCAN-FINDING")
+                    raise _ScannerFindingDenied(prefix + "-SCAN-FINDING", text)
                 if execution.exit_code == 2:
                     raise _ScannerRefusalDenied(prefix + "-SCAN-REFUSAL", text)
                 if execution.exit_code != 0:
@@ -603,7 +652,7 @@ class PendingScanInvocation:
                         or review_finalization.get("resourcesSettled") is not True
                     ):
                         raise PrRouteDenied(prefix + "-SCAN-CORRELATION")
-                if time.monotonic() > float(self.authorization_deadline):
+                if time.monotonic() > self._consumption_deadline():
                     raise PrRouteDenied(prefix + "-SCAN-CORRELATION")
             except BaseException:
                 self.state = PendingState.FAILED
@@ -640,6 +689,8 @@ class TrustedExecutionRecord:
     closure_after: CanonicalSourceClosure
     interpreter_identity_after: InterpreterIdentity
     provenance_verdict: str
+    verified_acquired_objects: int = 0
+    verified_scan_phases: tuple[tuple[str, int], ...] = ()
 
 
 # R2 public names remain aliases of the single lifecycle types.
@@ -1403,7 +1454,7 @@ if type(bundle) is not dict or type(bundle.get("payloadVersion")) is not int or 
 native_mode=bundle["payloadVersion"] in (2,3)
 scoped_mode=bundle["payloadVersion"]==3
 exact_object(bundle,(("payloadVersion","sources","review","nativePush","receiverScope") if scoped_mode else ("payloadVersion","sources","review","nativePush")) if native_mode else ("payloadVersion","sources","review"),"payload shape")
-roles=("hook_common","classifier","posix_helper","windows_job","scanner","publication_review_policy","linked_runtime_subroots","receiver_scope")
+roles=("hook_common","classifier","posix_helper","windows_job","scanner","publication_review_policy","linked_runtime_subroots","receiver_scope","matcher_wire")
 encoded_sources=exact_object(bundle["sources"],roles,"source roles")
 sources={}
 for key,value in encoded_sources.items():
@@ -1509,15 +1560,40 @@ if policy.H("orchestrarium.publication-review.snapshot.v1",snapshot)!=review["sn
     raise RuntimeError("snapshot id")
 if len(sys.argv)<3 or sys.argv[1]!="--gate-git-executable":
     raise RuntimeError("git executable contract")
-if native_mode and not (sys.argv[3:]==["--native-push"] or (len(sys.argv[3:])==5 and sys.argv[3]=="--range" and sys.argv[6]=="--range-source")):
+scan_argv=sys.argv[3:]
+progress_attempt=None
+def native_scan_mode(args):
+    return args==["--native-push"] or (len(args)==5 and args[0]=="--range" and args[3]=="--range-source")
+if scan_argv[:1]==["--gate-progress-attempt"]:
+    if (not native_mode or len(scan_argv)<3 or not native_scan_mode(scan_argv[2:])
+        or re.fullmatch(r"[0-9a-f]{32}",scan_argv[1]) is None):
+        raise RuntimeError("scanner progress attempt")
+    progress_attempt=scan_argv[1]
+    scan_argv=scan_argv[2:]
+if native_mode and not native_scan_mode(scan_argv):
     raise RuntimeError("native scanner mode")
 git_executable=sys.argv[2]
 scanner_path="<closure>/check-publication-safety.py"
 scanner={"__name__":"__main__","__file__":scanner_path,"__package__":None,"__cached__":None,"__injected_find_machine_paths__":finder,"__injected_git_executable__":git_executable,"__injected_posix_process_group_module__":posix_helper,"__injected_windows_job_module__":windows_job,"__injected_review_policy_snapshot__":snapshot,"__injected_review_repository_observation__":observation,"__injected_review_execution__":"gate-captured-v1"}
 scanner[policy.POLICY_INJECTION_KEY]=policy
+wire={"__name__":"_orchestrarium_matcher_wire_v1","__file__":"<closure>/publication_match_wire.py"}
+exec(compile(sources["matcher_wire"],wire["__file__"],"exec"),wire,wire)
+scanner["__injected_matcher_wire__"]=wire
 if native_mode: scanner["__injected_native_push__"]=native
 if scoped_mode: scanner["__injected_receiver_scope__"]=receiver_scope
-sys.argv=[scanner_path,*sys.argv[3:]]
+if progress_attempt is not None:
+    def verified_completion(phase,completed):
+        if (phase not in ("commits","objects","acquired","traversed","classified")
+            or type(completed) is not int or not 0<completed<=9223372036854775807):
+            return
+        try:
+            line="\x1eORCHE-SCAN-PROGRESS-V1 "+progress_attempt+" "+phase+" "+str(completed)+"\n"
+            sys.stderr.buffer.write(line.encode("ascii"))
+            sys.stderr.buffer.flush()
+        except (OSError,ValueError):
+            pass
+    scanner["__injected_verified_completion__"]=verified_completion
+sys.argv=[scanner_path,*scan_argv]
 exec(compile(sources["scanner"],scanner_path,"exec"),scanner,scanner)
 '''
 
@@ -2086,7 +2162,7 @@ def _closure_payload(
         node.role: base64.b64encode(node.source).decode("ascii")
         for node in closure.nodes if node.role != "gate"
     }
-    if len(sources) != 8 or tuple(sources) != SOURCE_ROLE_ORDER[1:]:
+    if tuple(sources) != SOURCE_ROLE_ORDER[1:]:
         raise ValueError("source-role-cardinality")
     encoder = canonical_bytes
     if not callable(encoder):
@@ -2722,6 +2798,144 @@ class ChildSupervisor:
         return self._settlement
 
 
+@dataclass
+class _ScanThresholdNotice:
+    elapsed: float | None = None
+    report: object | None = None
+
+    def observe(self, elapsed: float) -> None:
+        if self.elapsed is not None or elapsed < SCAN_THRESHOLD_SECONDS:
+            return
+        self.elapsed = elapsed
+        try:
+            self.report = _start_scan_threshold_report(elapsed)
+        except Exception:
+            # Reporting is not part of scanner authority or process settlement.
+            pass
+
+    def announce(self) -> None:
+        if self.elapsed is not None:
+            _announce_scan_threshold(self.elapsed, self.report)
+
+
+_scan_threshold_scope: ContextVar[_ScanThresholdNotice | None] = ContextVar(
+    "publication_scan_threshold_scope", default=None,
+)
+
+
+def _start_scan_threshold_report(elapsed: float):
+    from hook_common import ThresholdWarning, start_threshold_warning_report
+
+    threshold = max(1, int(SCAN_THRESHOLD_SECONDS * 1000))
+    return start_threshold_warning_report((
+        ThresholdWarning("scan", "milliseconds", threshold, max(threshold, int(elapsed * 1000)), 0),
+    ))
+
+
+def _announce_scan_threshold(elapsed: float, report) -> None:
+    destination = "report not saved"
+    try:
+        if report is not None:
+            if report.done():
+                path = report.result()
+                if path is not None:
+                    destination = f"report: {path}"
+            else:
+                destination = "report not confirmed"
+    except Exception:
+        pass
+    try:
+        print(
+            f"PGG-SCAN-THRESHOLD: Scan exceeded the {SCAN_THRESHOLD_SECONDS:g}s "
+            f"advisory threshold (observed {elapsed:.1f}s); {destination}.",
+            file=sys.stderr,
+        )
+    except (OSError, ValueError):
+        pass
+
+
+class _ScanProgressFrames:
+    """Split private attempt-bound progress frames from ordinary stderr."""
+    _MAX_DIGITS = 19
+    _PHASES = (b"commits", b"objects", b"acquired", b"traversed", b"classified")
+    _MAX_PAYLOAD = max(map(len, _PHASES)) + 1 + _MAX_DIGITS
+
+    def __init__(self, attempt: str, *, on_advance=None) -> None:
+        self._on_advance = on_advance
+        self._prefix = b"\x1eORCHE-SCAN-PROGRESS-V1 " + attempt.encode("ascii") + b" "
+        self._tail = b""
+        self._counts: dict[bytes, int] = {}
+        self._rank = -1
+
+    @property
+    def completed(self) -> int:
+        return self._counts.get(b"acquired", 0)
+
+    @property
+    def phase_counts(self) -> tuple[tuple[str, int], ...]:
+        return tuple((phase.decode("ascii"), self._counts[phase])
+                     for phase in self._PHASES if phase in self._counts)
+
+    def _accept(self, payload: bytes) -> bool:
+        phase, sep, scalar = payload.partition(b" ")
+        if not sep:
+            phase, scalar = b"acquired", phase
+        if phase not in self._PHASES or re.fullmatch(rb"[1-9][0-9]{0,18}", scalar) is None:
+            return False
+        completed = int(scalar)
+        if completed > 9223372036854775807:
+            return False
+        rank = self._PHASES.index(phase)
+        if rank >= self._rank and completed > self._counts.get(phase, 0):
+            self._rank = rank
+            self._counts[phase] = completed
+            if self._on_advance is not None:
+                self._on_advance()
+        return True
+
+    def _partial(self, payload: bytes) -> bool:
+        if len(payload) > self._MAX_PAYLOAD:
+            return False
+        phase, sep, scalar = payload.partition(b" ")
+        if not sep and any(name.startswith(phase) for name in self._PHASES):
+            return True
+        if not sep:
+            scalar = phase
+        return ((not sep or phase in self._PHASES) and len(scalar) <= self._MAX_DIGITS
+                and (not scalar or re.fullmatch(rb"[1-9][0-9]*", scalar) is not None))
+
+    def feed(self, chunk: bytes) -> bytes:
+        normal = bytearray()
+        pending, self._tail = self._tail + chunk, b""
+        while pending:
+            start = pending.find(self._prefix)
+            if start < 0:
+                # Only a suffix starting with the reserved separator could
+                # become a frame on the next read. Ordinary stderr is exact.
+                suffix = pending.rfind(self._prefix[:1])
+                if suffix >= 0 and self._prefix.startswith(pending[suffix:]):
+                    self._tail = pending[suffix:]
+                    pending = pending[:suffix]
+                normal.extend(pending)
+                break
+            normal.extend(pending[:start])
+            payload = pending[start + len(self._prefix):]
+            end = payload.find(b"\n", 0, self._MAX_PAYLOAD + 1)
+            if end >= 0 and self._accept(payload[:end]):
+                pending = payload[end + 1:]
+                continue
+            if end < 0 and self._partial(payload):
+                self._tail = pending[start:]
+                break
+            normal.append(pending[start])
+            pending = pending[start + 1:]
+        return bytes(normal)
+
+    def finish(self) -> bytes:
+        tail, self._tail = self._tail, b""
+        return tail
+
+
 def _run_snapshot_child(
     pending: PendingScanInvocation, payload: bytes, repository_workdir: str,
 ) -> tuple[LaunchedScanInvocation, tuple[TrustedExecutionRecord, ...]]:
@@ -2747,6 +2961,31 @@ def _run_snapshot_child(
     primary_failure: BaseException | None = None
     primary_traceback = None
     settlement_failures: list[BaseException] = []
+
+    notice_scope = _scan_threshold_scope.get()
+    threshold_notice = notice_scope if notice_scope is not None else _ScanThresholdNotice()
+    quiet_deadline = None
+    completed_with_progress_at = None
+    interval = SCAN_TIMEOUT_SECONDS
+
+    def advance_quiet_window() -> None:
+        # Called only under output_lock for new verified semantic work.
+        nonlocal quiet_deadline
+        observed_at = time.monotonic()
+        if quiet_deadline is not None and observed_at < quiet_deadline:
+            quiet_deadline = observed_at + interval
+
+    args = pending.exact_argv[6:]
+    native_scan = (("--native-push",) if isinstance(pending.binding, NativePushScanBinding) else
+                   ("--range", pending.binding.remote, pending.binding.destination,
+                    "--range-source", pending.binding.source_oid))
+    progress = (
+        _ScanProgressFrames(pending.attempt_id, on_advance=advance_quiet_window)
+        if args == ("--gate-progress-attempt", pending.attempt_id, *native_scan)
+        and isinstance(pending.attempt_id, str)
+        and re.fullmatch(r"[0-9a-f]{32}", pending.attempt_id)
+        else None
+    )
 
     def retain_child_outcome(primary: BaseException) -> None:
         actual_streams = []
@@ -2793,17 +3032,22 @@ def _run_snapshot_child(
                 pass
 
     def drain(name: str, stream) -> None:
+        frames = progress if name == "stderr" else None
+        read = getattr(stream, "read1", stream.read) if frames is not None else stream.read
         try:
             while not overflow.is_set():
-                chunk = stream.read(8192)
-                if not chunk:
-                    return
+                chunk = read(8192)
+                eof = not chunk
                 with output_lock:
+                    if frames is not None:
+                        chunk = frames.finish() if eof else frames.feed(chunk)
                     total = len(output["stdout"]) + len(output["stderr"])
                     if total + len(chunk) > SCAN_OUTPUT_BYTE_CAP:
                         overflow.set()
                         return
                     output[name].extend(chunk)
+                if eof:
+                    return
         except BaseException as exc:
             reader_failures.append(exc)
             overflow.set()
@@ -2842,16 +3086,32 @@ def _run_snapshot_child(
             ("stdout", lambda: threading.Thread(target=drain, args=("stdout", process.stdout))),
             ("stderr", lambda: threading.Thread(target=drain, args=("stderr", process.stderr))),
         )
+        started = time.monotonic()
+        quiet_deadline = started + interval
         for name, construct in workers:
             worker = construct()
             supervisor.start_worker(worker, name=name)
-        deadline = time.monotonic() + SCAN_TIMEOUT_SECONDS
         while True:
+            if progress is not None:
+                with output_lock:
+                    expired = time.monotonic() >= quiet_deadline
+                if expired:
+                    break
             return_code = process.poll()
             if return_code is not None:
-                bounded = not overflow.is_set()
+                with output_lock:
+                    observed_exit_at = time.monotonic()
+                    bounded = not overflow.is_set() and (
+                        progress is None or observed_exit_at < quiet_deadline
+                    )
+                    if bounded and progress is not None and progress.phase_counts:
+                        completed_with_progress_at = observed_exit_at
                 break
-            if overflow.is_set() or time.monotonic() >= deadline:
+            now = time.monotonic()
+            threshold_notice.observe(now - started)
+            with output_lock:
+                expired = (time.monotonic() if progress is not None else now) >= quiet_deadline
+            if overflow.is_set() or expired:
                 break
             time.sleep(0.01)
     except BaseException as exc:
@@ -2908,6 +3168,8 @@ def _run_snapshot_child(
                             )
                             else PendingState.FAILED
                         )
+                        if pending.state is PendingState.SETTLED:
+                            pending._settled_progress_at = completed_with_progress_at
             except BaseException as exc:
                 settlement_failures.append(exc)
                 try:
@@ -2929,6 +3191,9 @@ def _run_snapshot_child(
                 raise PrRouteDenied(prefix + "-SCAN-EXECUTION") from primary_failure
             raise primary_failure.with_traceback(primary_traceback)
         raise PrRouteDenied(prefix + "-SCAN-EXECUTION")
+
+    if notice_scope is None:
+        threshold_notice.announce()
 
     if primary_failure is None and reader_failures:
         primary_failure = reader_failures[0]
@@ -2967,6 +3232,8 @@ def _run_snapshot_child(
         process.returncode if process.returncode is not None else -1,
         bytes(output["stdout"]), bytes(output["stderr"]), settlement,
         pending.closure, pending.interpreter_identity, "pending",
+        progress.completed if progress is not None else 0,
+        progress.phase_counts if progress is not None else (),
     )
     return launched, (execution,)
 
@@ -3121,6 +3388,8 @@ def _run_authoritative_scan(
         scan_arguments = ("--native-push",) if native_objects else (
             "--range", binding.remote, binding.destination, "--range-source", binding.source_oid,
         )
+        if native is not None:
+            scan_arguments = ("--gate-progress-attempt", attempt_id, *scan_arguments)
         argv = (
             interpreter_before.absolute_resolved_path, "-I", "-c", _SCAN_BOOTSTRAP,
             "--gate-git-executable", git_exe,
@@ -3797,6 +4066,16 @@ def _single_new_named_tag_row(wire: bytes) -> str | None:
 
 def _native_pre_push_main(arguments: list[str]) -> int:
     """Git owns invocation and transfer; any failure here stops this callback."""
+    notice = _ScanThresholdNotice()
+    token = _scan_threshold_scope.set(notice)
+    try:
+        return _run_native_pre_push(arguments)
+    finally:
+        _scan_threshold_scope.reset(token)
+        notice.announce()
+
+
+def _run_native_pre_push(arguments: list[str]) -> int:
     stage = "native-binding"
     try:
         if len(arguments) != 2:

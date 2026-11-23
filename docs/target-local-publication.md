@@ -27,11 +27,45 @@ Unit coverage includes exact argv dispatch, malformed arguments, native qualific
 - DIRECT_ARGV: parser-owned direct argument-vector provenance.
 - V3/V4: existing range and native-object scan receipt versions.
 
+## Local commit-message diagnostics
+
+Use the same repository, remote, destination and source as the standalone
+range scan you are investigating:
+
+```text
+python PATH_TO_SCANNER --range origin main --range-source WORKING_REF --history-diagnostics
+```
+
+Use a local terminal; keep the JSON within the review scope. It lists the
+full commit object ID, message field, line and detector class without
+printing the message, the matching text, local filesystem paths or the
+configured remote URL. The scope binds the checked repository, source commit,
+destination endpoint digest and ref, and observed destination commit (null
+for a new ref). The report is local, but the existing read-only range
+discovery contacts the configured receiver. It describes the range checked
+at selection time, not a later remote state. A native pre-push callback
+checks the actual ref updates and receiver evidence it was given. A standalone
+report does not reproduce that callback or authorize a retry.
+`reportComplete: false` means the report reached its display limit, not that
+the listed rows are the complete set. Other finding types remain redacted;
+only aggregate detector-class counts are shown. Diagnostic output is
+unreviewed and counts history-file findings per path and blob. Ordinary
+publication evaluation checks reviewed text per commit. Its display groups
+repeated unresolved locations within the same path and blob before applying
+the output limit, without changing the review decision. Neither report
+authorizes a push.
+
+A finding still exits with status 1; an unqualified scan exits with status 2
+without a locations report. No history, hook, policy or remote ref is changed.
+This JSON is for diagnosis, not a clean-scan receipt, approval, or transfer
+authorization. The separate diagnostic mode does not change the ordinary
+publication check or its output.
+
 ## Large full-history checks
 
 New native branches may require a conservative full-history scan. Blob payloads are reacquired and hash-verified per path instead of retained for the entire history. Every selected object is still checked, with existing per-object, count, tree, coverage and cleanup constraints.
 
-For an explicitly initiated full-history run, set `ORCHE_PUBLICATION_SCAN_SECONDS` before launching the gate process, for that invocation only (for example, `900`). Do not mutate it inside an already-loaded gate process. Canonical decimal integers from `240` to `3600` are accepted; absent means `240`. Invalid values fail closed. The supervising gate permits 60 additional seconds for settlement. Do not persist this as a live client setting. The budget never supplies scan credit, changes graph selection, suppresses findings or skips currentness checks. Both fresh V3 and V4 evidence remain mandatory before Git transfers.
+For an explicitly initiated full-history run, set `ORCHE_PUBLICATION_SCAN_SECONDS` before launching the gate process, for that invocation only (for example, `900`). Do not mutate it inside an already-loaded gate process. Canonical decimal integers from `240` to `3600` are accepted; absent means `240`. Invalid values fail closed. Git object reads use this same deadline. A shorter explicit reader deadline still takes precedence; a reader without a scan owner retains its short fallback. The supervising gate permits 60 additional seconds for settlement. Do not persist this as a live client setting. The budget never supplies scan credit, changes graph selection, suppresses findings or skips currentness checks. Both fresh V3 and V4 evidence remain mandatory before Git transfers.
 
 ## What the scanner limits protect
 
@@ -45,9 +79,18 @@ publication, and display truncation of findings is not permission to continue.
 | Git subprocess input and selection output | `selection-bytes`, `bytes`, `count` | Bound revision input, framed output and the in-memory selection or union. Fixed-width object IDs tie the output byte envelope to its row budget; malformed output still must not grow the buffer. |
 | Remote advertisement | `destination-ref`, `remote-ref-count` | Bound individual names and accumulated ref records before using the advertisement as evidence. |
 | Individual acquired objects | `commit-bytes`, `tree-bytes`, `tag-bytes`, `blob-bytes` | Reject an oversized object before reading its declared body into memory. |
-| Text processing | `message`, `aggregate-message-bytes`, `line-bytes` | Bound strict message decoding, cumulative message/tag work and individual line processing. A payload no larger than the line limit proves the line bound without scanning for separators. |
-| Tree traversal and cache | `tree-frontier`, `tree-visits`, `tree-visited`, `tree-cache-count`, `tree-cache-bytes` | Bound pending paths, recurring traversal work, distinct tree identities and retained cache memory. A repeated tree at a different path still contributes path evidence. |
-| Paths and scan subjects | `path-bytes`, `subject-count`, `blob-count`, `blob-path-count` | Bound expanded paths, coverage records, distinct blobs and path-specific blob work; one blob may appear at multiple paths. |
+| Text processing | `message`, `line-bytes` | Bound individual decoding and line processing. Commit and tag text is processed one object at a time under the scan deadline; only commit topology and tag targets are retained. A verified blob's line bound is checked once, while each path still receives its own detector and review context. |
+| Tree traversal | tree-frontier | Bound simultaneously pending paths. Cache capacity evicts entries, not evidence; a repeated tree at a different path keeps its own path evidence. |
+| Paths and scanned blobs | path-bytes, blob-count | Bound an individual expanded path and the current unique blob inventory. Exact coverage rows and distinct path/blob pairs do not have a cardinality ceiling. |
+
+Historical coverage and path ownership are indexed in scan-owned temporary SQLite
+storage rather than retained in Python collections. The index streams exact
+ordered rows to the existing receipt digest and closes before a receipt is
+emitted. Temporary storage errors mean incomplete coverage, not a finding.
+Tree payload retention is a bounded eviction cache, not admission policy. A
+cache miss reloads and verifies the Git object's identity. The single scan
+deadline still bounds elapsed work and its generic refusal does not identify
+which phase used the time.
 
 These are distinct resource concerns, not proof that every current numeric
 default is appropriate for supported repositories. Before changing a default,

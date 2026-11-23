@@ -5,16 +5,22 @@ import sys
 import unittest
 from unittest import mock
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("_clean_lines_scanner", ROOT / "scripts/universal-hooks/scripts/check-publication-safety.py")
 scanner = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = scanner
 SPEC.loader.exec_module(scanner)
-policy = scanner._load_review_policy_module()
+
+pytestmark = pytest.mark.usefixtures("isolated_standalone_review_modules")
 
 class CleanLinesTests(unittest.TestCase):
+    def setUp(self):
+        self.policy = scanner._load_review_policy_module()
+
     def analyze(self, raw, cache=None, path=b"example.py", kind="history-blob"):
-        return scanner.analyze_review_candidates(raw, path, subject_kind=kind, policy_module=policy, clean_lines=cache)
+        return scanner.analyze_review_candidates(raw, path, subject_kind=kind, policy_module=self.policy, clean_lines=cache)
 
     def test_repeated_clean_line_avoids_second_detection(self):
         cache = scanner._CleanLineAnalysis()

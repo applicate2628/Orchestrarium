@@ -14,7 +14,8 @@ import unittest
 from unittest.mock import patch
 
 
-_POLICY_KEY = "_orchestrarium_publication_review_policy_v1"
+# Use a test-only module slot so collection does not occupy the native gate slot.
+_POLICY_KEY = "_test_orchestrarium_publication_review_policy"
 _POLICY_PATH = (
     Path(__file__).resolve().parents[1]
     / "scripts"
@@ -28,6 +29,7 @@ if _SPEC is None or _SPEC.loader is None:
 policy = importlib.util.module_from_spec(_SPEC)
 sys.modules[_POLICY_KEY] = policy
 _SPEC.loader.exec_module(policy)
+policy.LINKED_RUNTIME_SUBROOTS_MODULE_KEY = "_test_orchestrarium_linked_runtime_subroots"
 
 
 def _sha(raw: bytes) -> str:

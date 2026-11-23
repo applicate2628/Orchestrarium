@@ -1433,6 +1433,58 @@ def _profession_skill_metadata(repo_root: Path, role: str, instructions: str) ->
     }
 
 
+def _catalog_record(record, *keys):
+    for key in keys:
+        record = record.get(key) if isinstance(record, dict) else None
+    return record
+
+
+def _catalog_number(value):
+    return type(value) in (int, float) and 0 <= value < 1e300
+
+
+def _advisory_model_catalog(policy, provider, options):
+    reference = _catalog_record(policy, "modelReference")
+    snapshot = _catalog_record(reference, "benchmarkSnapshot")
+    baseline = _catalog_record(snapshot, "costBaseline")
+    basis = None
+    baseline_cost = None
+    if baseline == {"provider": "codex", "model": "gpt-6.2-sol", "effort": "high"}:
+        baseline_cost = _catalog_record(snapshot, "models", baseline["provider"], baseline["model"],
+                                        "efforts", baseline["effort"], "costUsdPerTask")
+        provenance = {k: snapshot.get(k) for k in ("publisher", "methodology", "observedDate")}
+        if (_catalog_number(baseline_cost) and baseline_cost > 0
+                and all(isinstance(v, str) and v.strip() for v in provenance.values())):
+            basis = {**provenance, "costUnit": "baseline-task", "baseline": baseline}
+    by_model = {}
+    for option in options:
+        model, profile, effort = option["model"], option["profile"], option["effort"]
+        if model not in by_model:
+            row = by_model[model] = {"model": model}
+            for key in ("strength", "tradeoff"):
+                value = _catalog_record(reference, "models", provider, model, key)
+                if isinstance(value, str) and value.strip():
+                    row[key] = value
+        row = by_model[model]
+        if basis is None:
+            continue
+        source = _catalog_record(snapshot, "models", provider, model, "sourceUrl")
+        point = _catalog_record(snapshot, "models", provider, model, "efforts", effort)
+        if not isinstance(point, dict) or not isinstance(source, str) or not source.startswith("https://"):
+            continue
+        score, cost, minutes = (point.get(k) for k in ("intelligenceIndex", "costUsdPerTask", "minutesPerTask"))
+        if not all(_catalog_number(v) for v in (score, cost, minutes)):
+            continue
+        units = cost / baseline_cost
+        if not _catalog_number(units):
+            continue
+        row["benchmarkSourceUrl"] = source
+        row.setdefault("benchmarkByProfile", {})[profile] = {
+            "score": score, "costUnits": round(units, 4), "minutes": minutes,
+        }
+    return list(by_model.values()), basis if any("benchmarkByProfile" in row for row in by_model.values()) else None
+
+
 def _describe_ordinary_native_role_options_in_layout(
     role: Any,
     task_class: Any,
@@ -1686,6 +1738,14 @@ def _describe_ordinary_native_role_options_in_layout(
     if default_error is not None:
         values.update(defaultProfile=None, defaultModel=None, defaultEffort=None)
     values["carrierConfigurationError"] = carrier_error
+    values["modelCatalog"], basis = _advisory_model_catalog(policy, "codex", options)
+    if basis is not None:
+        values["modelCatalogBenchmark"] = basis
+    values["decisionGuidance"] = (
+        "The default is a fallback, not a priority. Choose the eligible profile that best meets "
+        "the task's quality requirements at the lowest expected total time and cost, including rework. "
+        "Briefly justify the choice, even if it matches the default."
+    )
     return _NativeRoleSelection(values, snapshots, linked_authority, carrier, launch_package)
 
 

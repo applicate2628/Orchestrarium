@@ -267,6 +267,69 @@ class WindowsTreeSecurityPreservationTests(unittest.TestCase):
             self.assertEqual((historical.stat().st_ino, _security(historical)), before)
             transaction.commit()
 
+    def test_additive_upgrade_preserves_historical_inheritance(self):
+        historical = self._same_shape_with_historical_inheritance()
+        before = {p: (p.stat().st_ino, _security(p))
+                  for p in (self.target, *self.target.rglob("*"))}
+        relative = Path("shared/schemas/new.json")
+        (self.source / relative).write_bytes(b"new admitted member\n")
+        expected = installer._tree_sha256(self.target)
+        with installer._InstallTransaction([self.target], enabled=True) as transaction:
+            owner = installer._CreateOnlyMutablePath(self.root, transaction, dry_run=False)
+            owner.replace_exact_tree(self.target.relative_to(self.root), expected, self.source, allow_file_additions=True)
+            self.assertEqual(installer._tree_sha256(self.target), installer._tree_sha256(self.source))
+            self.assertEqual((self.target / relative).read_bytes(), b"new admitted member\n")
+            self.assertEqual(historical.read_bytes(), b"updated\n")
+            for path, identity in before.items():
+                self.assertEqual((path.stat().st_ino, _security(path)), identity)
+            transaction.commit()
+
+    def test_additive_upgrade_rollback_preserves_original_members(self):
+        historical = self._same_shape_with_historical_inheritance()
+        before = {p: (p.read_bytes(), p.stat().st_ino, _security(p))
+                  for p in self.target.rglob("*") if p.is_file()}
+        relative = Path("shared/schemas/new.json")
+        (self.source / relative).write_bytes(b"new admitted member\n")
+        expected = installer._tree_sha256(self.target)
+        with self.assertRaisesRegex(RuntimeError, "after additive publication"):
+            with installer._InstallTransaction([self.target], enabled=True) as transaction:
+                owner = installer._CreateOnlyMutablePath(self.root, transaction, dry_run=False)
+                owner.replace_exact_tree(self.target.relative_to(self.root), expected, self.source, allow_file_additions=True)
+                self.assertTrue((self.target / relative).is_file())
+                self.assertEqual(historical.read_bytes(), b"updated\n")
+                raise RuntimeError("after additive publication")
+        self.assertFalse((self.target / relative).exists())
+        self.assertEqual({p: (p.read_bytes(), p.stat().st_ino, _security(p))
+                          for p in self.target.rglob("*") if p.is_file()}, before)
+
+    def test_additive_upgrade_does_not_adopt_equal_foreign_leaf(self):
+        self._same_shape_with_historical_inheritance()
+        relative = Path("shared/schemas/new.json")
+        added = self.target / relative
+        payload = b"same bytes, distinct creator\n"
+        (self.source / relative).write_bytes(payload)
+        expected = installer._tree_sha256(self.target)
+        born = []
+        with self.assertRaises((ValueError, installer._InstallFailure)):
+            with installer._InstallTransaction([self.target], enabled=True) as transaction:
+                owner = installer._CreateOnlyMutablePath(self.root, transaction, dry_run=False)
+                real_create = owner.create_file
+
+                def competing_writer(path, data):
+                    self.assertEqual(self.root / path, added)
+                    self.assertEqual(data, payload)
+                    added.write_bytes(payload)
+                    born.append(added.stat().st_ino)
+                    return real_create(path, data)
+
+                with mock.patch.object(owner, "create_file", competing_writer):
+                    owner.replace_exact_tree(self.target.relative_to(self.root), expected, self.source,
+                                             allow_file_additions=True)
+                self.fail("foreign leaf must not be accepted as an owned publication")
+        self.assertEqual(len(born), 1)
+        self.assertEqual(added.stat().st_ino, born[0])
+        self.assertEqual(added.read_bytes(), payload)
+
     def test_same_shape_late_rollback_restores_original_files_and_cache(self):
         historical = self._same_shape_with_historical_inheritance()
         cache = self.target / "__pycache__" / "historical.cpython-315.pyc"
