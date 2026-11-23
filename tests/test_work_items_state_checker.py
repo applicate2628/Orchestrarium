@@ -1953,9 +1953,25 @@ def test_active_failure_summary_reports_only_selected_scope(tmp_path: Path) -> N
     (item / "agent-runs.jsonl").unlink()
     active = run_checker(tmp_path, "--active-only")
     full = run_checker(tmp_path)
-    for result, scope in ((active, "active"), (full, "active+archived")):
+    for result, scope in (
+        (active, "in active-only audit"),
+        (full, "across active+archived work-items"),
+    ):
         assert result.returncode == 1, result.stdout + result.stderr
-        assert f"RESULT: FAIL (1 failures across {scope} work-items)" in result.stdout
+        assert f"RESULT: FAIL (1 failures {scope})" in result.stdout
+
+
+def test_active_only_summary_preserves_global_archive_lifecycle_failures(tmp_path: Path) -> None:
+    (tmp_path / "work-items" / "active").mkdir(parents=True)
+    unbound = tmp_path / "work-items" / "archive" / "2026-07" / "unbound-fixture"
+    unbound.mkdir(parents=True)
+    (unbound / "note.md").write_text("Synthetic unbound archive fixture.\n", encoding="utf-8")
+
+    result = run_checker(tmp_path, "--active-only")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "FAIL category lifecycle: WI-ARCHIVE-ENTITY-UNBOUND" in result.stdout
+    assert "RESULT: FAIL (1 failures in active-only audit)" in result.stdout
 
 
 def test_publication_preflight_ignores_unrelated_active_lifecycle_state(

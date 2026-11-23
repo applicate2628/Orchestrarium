@@ -7,7 +7,7 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-23
 
-- Report only active work items in active-only audit failure summaries; the full audit still reports its combined scope.
+- Name the selected active-only audit mode in failure summaries without attributing every failure to an active work item: global lifecycle checks can still report invalid archive structure. The full-audit summary, failure count, exit status and archive checks are unchanged.
 
 - The model resolver now compares eligible models and reasoning efforts using benchmark quality, task time, and one relative cost unit (Sol 6.2 High = 1). The Lead selects and explains the best fit for each task; the default is a fallback. The benchmark figures are not prices, launch permissions, or runtime guarantees.
 
