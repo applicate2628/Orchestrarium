@@ -14,9 +14,12 @@ class Refusal:
 
 
 def loop_from(source):
-    start = source.index("    for commit_oid, root_tree in tree_roots:")
+    receiving_v3 = "    for commit_oid, root_tree in chain(commit_roots, direct_trees):"
+    legacy = "    for commit_oid, root_tree in tree_roots:"
+    marker = receiving_v3 if receiving_v3 in source else legacy
+    start = source.index(marker)
     end = source.index("\n    for subject in direct_blobs:", start)
-    lines = source[start:end].splitlines()
+    loop = source[start:end]
     # This evaluates the canonical tree walk rather than a reimplementation.
     # The stubbed owner methods record admission requests without classifying.
     fn = """async def reference(root, graph, reached_unpublished_trees, index,
@@ -26,7 +29,23 @@ def loop_from(source):
     scan_deadline = 1
 """
     ns = {}
-    exec(fn + "\n".join(lines) + "\n", ns)
+    if marker == receiving_v3:
+        from itertools import chain
+
+        ns["chain"] = chain
+        fn += """    commit_roots, direct_trees = tree_roots, ()
+    compact_frontier = False
+    stack = []
+    traversal_progress = progress()
+    selected_blob = unpublished_blobs.__contains__
+    def selected_tree_reached(oid):
+        if oid not in unpublished_trees:
+            return False
+        reached_unpublished_trees.add(oid)
+        return True
+"""
+        ns["progress"] = lambda: SimpleNamespace(step=lambda: None, finish=lambda: None)
+    exec(fn + loop + "\n", ns)
     return ns["reference"]
 
 

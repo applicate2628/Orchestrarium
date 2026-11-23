@@ -118,7 +118,10 @@ compare unmodified git cat-file --batch output from file-only bare Git
 repositories in both SHA-1 and SHA-256 formats. This checks empty and nested
 trees and the refusal for a missing child with actual Git output. No remote,
 hook, or publication operation is involved. Use the receiving Python source
-being qualified, not an incidental checkout of an older scanner.
+being qualified, not an incidental checkout of an older scanner. The fixture
+adapter executes either the legacy receiving loop or the V3 receiving loop
+with the ordinary in-memory frontier; it does not qualify the compact receipt
+frontier or verified progress reporting.
 
 The Python fixture verifies both ID algorithms independently. A complete
 frame with mutated content and the original header is rejected before its
