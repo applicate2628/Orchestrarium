@@ -26,6 +26,7 @@ if __package__ in {None, ""}:
 
 from process_supervision.process_runner import ENGINE_POLL_INTERVAL_SECONDS, MAX_STDIN_BYTES
 from process_supervision.windows_job import WindowsJobError
+from sdk_execution._async import drain_owned
 from sdk_execution.contracts import CancelReceipt, ExecutionRequest, ExecutionResult, Observation, json_text, strict_json
 from sdk_execution.runtime import RuntimeBindingError
 from sdk_execution.coordination import CoordinationInferenceRequest, CoordinationInferenceResult
@@ -161,17 +162,7 @@ async def serve_operation(
         terminal_emitted = True  # A partial/failed write must never be retried.
         await write_frame(payload)
 
-    try:
-        done, _pending = await asyncio.wait(
-            (execution, control), return_when=asyncio.FIRST_COMPLETED
-        )
-        if control in done:
-            control.result()
-        result = await execution
-        await emit_terminal(result)
-    finally:
-        if authority_sink is not None:
-            authority_sink.close_authority()
+    async def finish() -> None:
         control.cancel()
         await asyncio.gather(control, return_exceptions=True)
         try:
@@ -188,6 +179,31 @@ async def serve_operation(
                 # Preserve an acquired result even when a concurrent control or
                 # cleanup failure makes this worker exit non-cleanly.
                 await emit_terminal(execution.result())
+
+    operation_failed = False
+    try:
+        done, _pending = await asyncio.wait(
+            (execution, control), return_when=asyncio.FIRST_COMPLETED
+        )
+        if control in done:
+            control.result()
+        result = await execution
+        await emit_terminal(result)
+    except BaseException:
+        operation_failed = True
+        raise
+    finally:
+        if authority_sink is not None:
+            authority_sink.close_authority()
+        # Repeated caller cancellation must not skip any cleanup owner or its
+        # acquired terminal result. The process owner still bounds settlement.
+        finalizer = asyncio.create_task(finish())
+        try:
+            await asyncio.shield(finalizer)
+        except asyncio.CancelledError:
+            await drain_owned(finalizer)
+            if not operation_failed:
+                raise
 
 
 class _PipeFrames:
