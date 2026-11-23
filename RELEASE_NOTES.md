@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-23
 
+- On systems supporting the Portable Operating System Interface (POSIX), repeated cancellation of a publication scan waits for process-owner acquisition, cleanup and pipe draining to settle. Cancellation no longer strands the Linux child-reaper lock or returns before the owned process tree has finished cleanup; owner failures remain visible.
+
 - The model resolver now compares eligible models and reasoning efforts using benchmark quality, task time, and one relative cost unit (Sol 6.2 High = 1). The Lead selects and explains the best fit for each task; the default is a fallback. The benchmark figures are not prices, launch permissions, or runtime guarantees.
 
 - On Windows, the installer keeps existing owned files and their access rules when a standalone Lead upgrade only updates bytes and adds ordinary files under existing folders. The same transaction verifies new files and rolls back on failure. Coupled transport replacements retain their existing path.

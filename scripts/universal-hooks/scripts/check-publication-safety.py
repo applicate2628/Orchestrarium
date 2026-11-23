@@ -1113,16 +1113,30 @@ def _run_range_git(
     )
 
 
+async def _await_owned_task(task):
+    """Keep ownership until the task settles, retaining the first cancellation."""
+    cancelled: asyncio.CancelledError | None = None
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError as exc:
+            if cancelled is None:
+                cancelled = exc
+    return task.result(), cancelled
+
+
 async def _acquire_posix_process_group_owner() -> PosixProcessGroupOwnerV1:
     task = asyncio.create_task(
         asyncio.to_thread(PosixProcessGroupOwnerV1.acquire)
     )
-    try:
-        return await asyncio.shield(task)
-    except asyncio.CancelledError:
-        owner = await task
-        await asyncio.to_thread(owner.close)
-        raise
+    owner, cancelled = await _await_owned_task(task)
+    if cancelled is None:
+        return owner
+    # Cancelling a to_thread future cannot stop acquisition or close. Keep
+    # their results owned even if the caller cancels cleanup again.
+    close_task = asyncio.create_task(asyncio.to_thread(owner.close))
+    await _await_owned_task(close_task)
+    raise cancelled
 
 
 class _AsyncioDirectProcessObservation:
@@ -1535,34 +1549,31 @@ async def _settle_owned_async_process(
     if process_group_owner is None or direct_observation is None:
         return False
     remaining = max(0.000001, cleanup_deadline - time.monotonic())
-    settle_task = asyncio.create_task(
-        asyncio.to_thread(
-            process_group_owner.settle,
-            remaining,
-            direct_process=direct_observation,
+
+    async def finish_posix() -> bool:
+        try:
+            closure = await asyncio.to_thread(
+                process_group_owner.settle,
+                remaining,
+                direct_process=direct_observation,
+            )
+        except PosixProcessGroupError:
+            return False
+        drained = True
+        for reader in drain_readers:
+            if not await _drain_owned_async_reader(reader, cleanup_deadline):
+                drained = False
+        observed_returncode = direct_observation.poll()
+        return (
+            closure.complete
+            and closure.lock_released
+            and observed_returncode is not None
+            and process.returncode == observed_returncode
+            and direct_observation.task.done()
+            and drained
         )
-    )
-    cancelled: asyncio.CancelledError | None = None
-    try:
-        closure = await asyncio.shield(settle_task)
-    except asyncio.CancelledError as exc:
-        cancelled = exc
-        closure = await settle_task
-    except PosixProcessGroupError:
-        return False
-    drained = True
-    for reader in drain_readers:
-        if not await _drain_owned_async_reader(reader, cleanup_deadline):
-            drained = False
-    observed_returncode = direct_observation.poll()
-    complete = (
-        closure.complete
-        and closure.lock_released
-        and observed_returncode is not None
-        and process.returncode == observed_returncode
-        and direct_observation.task.done()
-        and drained
-    )
+
+    complete, cancelled = await _await_owned_task(asyncio.create_task(finish_posix()))
     if cancelled is not None:
         raise cancelled
     return complete
