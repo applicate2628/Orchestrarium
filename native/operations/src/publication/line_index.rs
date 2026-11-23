@@ -15,6 +15,25 @@ pub struct LineSpan {
 /// The caller owns binary policy, any span storage, and whole-line matching.
 pub fn index_text(
     input: impl Read,
+    emit: impl FnMut(LineSpan) -> io::Result<()>,
+) -> io::Result<bool> {
+    index_decoded(input, None::<io::Sink>, emit)
+}
+
+/// Normalize staged text and emit whole-line byte spans into that normalized
+/// image in one pass. Bytes and spans belong to the caller's provisional
+/// stage and are only usable after the successful return (including flush).
+pub fn normalize_and_index(
+    input: impl Read,
+    normalized: impl Write,
+    emit: impl FnMut(LineSpan) -> io::Result<()>,
+) -> io::Result<bool> {
+    index_decoded(input, Some(normalized), emit)
+}
+
+fn index_decoded(
+    input: impl Read,
+    mut normalized: Option<impl Write>,
     mut emit: impl FnMut(LineSpan) -> io::Result<()>,
 ) -> io::Result<bool> {
     let mut lines = Lines {
@@ -28,7 +47,13 @@ pub fn index_text(
         byte_pos: 0,
         after_cr: false,
     };
-    let has_nul = visit_decoded(input, |text, replaced_bytes| {
+    let has_nul = visit_decoded(input, |text, raw_replaced_bytes| {
+        let replaced_bytes = if let Some(sink) = &mut normalized {
+            sink.write_all(text.as_bytes())?;
+            None
+        } else {
+            raw_replaced_bytes
+        };
         for ch in text.chars() {
             lines.accept(
                 ch,
@@ -41,6 +66,9 @@ pub fn index_text(
     if lines.next.byte_start < lines.byte_pos {
         lines.next.byte_end = lines.byte_pos;
         emit(lines.next)?;
+    }
+    if let Some(mut sink) = normalized {
+        sink.flush()?;
     }
     Ok(has_nul)
 }

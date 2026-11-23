@@ -120,3 +120,35 @@ impl io::Write for RejectWrites {
         Ok(())
     }
 }
+
+#[test]
+fn indexes_replacement_decoded_bytes_in_the_same_pass() {
+    use orche_native_operations::normalize_and_index;
+    let input = b"\r\none\x80\xff\r\n\xc2\x85two\xf0\x9f\x92\x0b\0tail\xe2\x82";
+    let expected = String::from_utf8_lossy(input);
+    let mut expected_spans = Vec::new();
+    index_text(expected.as_bytes(), |span| {
+        expected_spans.push(span);
+        Ok(())
+    })
+    .unwrap();
+    for width in 1..=input.len() {
+        let mut bytes = Vec::new();
+        let mut spans = Vec::new();
+        let has_nul = normalize_and_index(Chunk(input, width), &mut bytes, |span| {
+            spans.push(span);
+            Ok(())
+        })
+        .unwrap();
+        assert!(has_nul);
+        assert_eq!(bytes, expected.as_bytes());
+        assert_eq!(spans, expected_spans);
+    }
+    assert!(normalize_and_index(input.as_slice(), RejectWrites, |_| Ok(())).is_err());
+    assert!(
+        normalize_and_index(input.as_slice(), io::sink(), |_| Err(io::Error::other(
+            "index"
+        )))
+        .is_err()
+    );
+}

@@ -13,4 +13,4 @@ pub use git_identity::{
 
 #[path = "publication/line_index.rs"]
 mod line_index;
-pub use line_index::{LineSpan, index_text, normalize_staged_text};
+pub use line_index::{LineSpan, index_text, normalize_and_index, normalize_staged_text};
