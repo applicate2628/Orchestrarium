@@ -284,6 +284,22 @@ fn native_git_keeps_one_batch_open_for_both_object_widths() {
             .output()
             .unwrap();
         assert!(init.status.success(), "{:?}", init.stderr);
+
+        let size = 64 * 1_048_576 + 1;
+        let fixture = repo.join("large-blob");
+        std::fs::File::create(&fixture)
+            .unwrap()
+            .set_len(size)
+            .unwrap();
+        let hash = Command::new("git")
+            .args(["hash-object", "-w", "--no-filters"])
+            .arg(&fixture)
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(hash.status.success(), "{:?}", hash.stderr);
+        let large_oid = std::str::from_utf8(&hash.stdout).unwrap().trim_end();
+        let stage = std::fs::File::create_new(repo.join("large-object-stage")).unwrap();
         let mut git = Command::new("git")
             .args(["--no-replace-objects", "cat-file", "--batch"])
             .current_dir(&repo)
@@ -296,6 +312,7 @@ fn native_git_keeps_one_batch_open_for_both_object_widths() {
         let mut session = BatchSession::new(input, output, format, Limits::default());
         let a = session.fetch(empty_tree.as_bytes(), Some(ObjectKind::Tree));
         let b = session.fetch(empty_tree.as_bytes(), None);
+        let large = session.fetch_staged(large_oid.as_bytes(), Some(ObjectKind::Blob), stage);
         // This unambiguous full ID cannot refer to a real object in the fixture.
         let missing = session.fetch(&vec![b'1'; digits], None);
         let rejected = session.fetch(empty_tree.as_bytes(), None);
@@ -304,6 +321,10 @@ fn native_git_keeps_one_batch_open_for_both_object_widths() {
         assert!(status.success());
         assert_eq!(a.unwrap().kind(), ObjectKind::Tree);
         assert!(b.unwrap().bytes().is_empty());
+
+        let object = large.unwrap();
+        assert_eq!((object.kind(), object.size()), (ObjectKind::Blob, size));
+        assert_eq!(object.into_stage().metadata().unwrap().len(), size);
         assert_eq!(
             missing,
             Err(BatchRequestError::Response(VerifiedReadError::Framing(
@@ -312,4 +333,60 @@ fn native_git_keeps_one_batch_open_for_both_object_widths() {
         );
         assert_eq!(rejected, Err(BatchRequestError::Poisoned));
     }
+}
+
+#[test]
+fn stage_checks_content_and_frame_even_above_the_buffered_cap() {
+    let id = b"ce013625030ba8dba906f756967f9e9ca394464a";
+    for (payload, delimiter, error) in [
+        (b"hello\n", b'\n', None),
+        (b"wrong\n", b'\n', Some(VerifiedReadError::IdentityMismatch)),
+        (
+            b"hello\n",
+            b'?',
+            Some(VerifiedReadError::Framing(FrameError::RecordDelimiter)),
+        ),
+    ] {
+        let mut raw = response(std::str::from_utf8(id).unwrap(), "blob", payload).into_inner();
+        *raw.last_mut().unwrap() = delimiter;
+        let limits = Limits {
+            blob: 5,
+            ..Limits::default()
+        };
+        let input = std::io::BufReader::with_capacity(3, Cursor::new(raw));
+        let mut session = BatchSession::new(input, std::io::sink(), ObjectFormat::Sha1, limits);
+        let result = session.fetch_staged(id, Some(ObjectKind::Blob), Cursor::new(Vec::new()));
+        if let Some(error) = error {
+            assert_eq!(result.unwrap_err(), BatchRequestError::Response(error));
+            assert_eq!(session.fetch(id, None), Err(BatchRequestError::Poisoned));
+        } else {
+            let object = result.unwrap();
+            assert_eq!((object.kind(), object.size()), (ObjectKind::Blob, 6));
+            assert_eq!(object.into_stage().into_inner(), b"hello\n");
+        }
+    }
+}
+
+#[test]
+fn nonempty_stage_is_rejected_before_touching_the_batch_pipes() {
+    let id = "ce013625030ba8dba906f756967f9e9ca394464a";
+    let mut request = Vec::new();
+    let mut input = response(id, "blob", b"hello\n");
+    let mut session = BatchSession::new(
+        &mut input,
+        &mut request,
+        ObjectFormat::Sha1,
+        Limits::default(),
+    );
+    assert_eq!(
+        session
+            .fetch_staged(id.as_bytes(), None, Cursor::new(vec![0]))
+            .unwrap_err(),
+        BatchRequestError::StageNotEmpty,
+    );
+    assert_eq!(
+        session.fetch(id.as_bytes(), None).unwrap().bytes(),
+        b"hello\n"
+    );
+    assert_eq!(request, format!("{id}\n").as_bytes());
 }

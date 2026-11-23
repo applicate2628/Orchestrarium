@@ -149,6 +149,22 @@ Git to the local file protocol, and run the explicit fixture:
 cargo test --manifest-path native/operations/Cargo.toml --locked --offline --test git_object_identity -- --include-ignored
 ~~~
 
-The test initializes two bare repositories, reuses one Git process for 2
-successful reads and a missing object in each format, and closes and waits
-for the process. It is not a process-tree cancellation or release test.
+The test initializes two bare repositories. Each process answers two small
+reads and one blob larger than 64 MiB, followed by a missing object and a
+refused retry. The fixture then closes and waits for the child. This does
+not qualify process-tree cancellation or release behavior.
+
+### Bounded-memory object staging
+
+The buffered reader retains its compatibility ceilings. For larger input,
+the receiving owner can supply a new private scratch file to the staged
+reader. It streams the declared object bytes from the input buffer into
+that file, using Gitoxide's type-prefixed hash. It returns the stage only
+after exact framing, the final delimiter, matching object identity, and
+a successful flush. An existing nonempty stage is rejected before sending
+a request. Failed staging yields no verified object; the owner must ensure
+exclusive access and dispose of scratch material when discarded.
+
+The staged reader removes the buffered payload ceiling from this receiving
+path only. It does not qualify the matching stage, disk-pressure handling,
+threshold warnings, production cancellation, or complete scanner coverage.

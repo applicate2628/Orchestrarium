@@ -70,7 +70,7 @@ fn read_header(input: &mut impl BufRead, limit: usize) -> Result<Vec<u8>, FrameE
     }
 }
 
-fn length(mut raw: &[u8], cap: usize, max_digits: usize) -> Option<(usize, bool)> {
+fn length(mut raw: &[u8], cap: u64, max_digits: usize) -> Option<(u64, bool)> {
     fn whitespace(b: u8) -> bool {
         matches!(b, b' ' | b'\t'..=b'\r')
     }
@@ -84,7 +84,7 @@ fn length(mut raw: &[u8], cap: usize, max_digits: usize) -> Option<(usize, bool)
     if matches!(raw.first(), Some(b'+' | b'-')) {
         raw = &raw[1..];
     }
-    let (mut value, mut digits, mut above) = (0usize, 0usize, false);
+    let (mut value, mut digits, mut above) = (0u64, 0usize, false);
     let mut needs_digit = true;
     for &b in raw {
         if b.is_ascii_digit() {
@@ -93,7 +93,7 @@ fn length(mut raw: &[u8], cap: usize, max_digits: usize) -> Option<(usize, bool)
             if !above {
                 match value
                     .checked_mul(10)
-                    .and_then(|v| v.checked_add((b - b'0') as usize))
+                    .and_then(|v| v.checked_add(u64::from(b - b'0')))
                 {
                     Some(n) if n <= cap => value = n,
                     _ => above = true,
@@ -114,7 +114,7 @@ fn length(mut raw: &[u8], cap: usize, max_digits: usize) -> Option<(usize, bool)
     Some((value, above))
 }
 
-fn read_exact(input: &mut impl BufRead, dst: &mut [u8]) -> Result<(), FrameError> {
+pub(crate) fn read_exact(input: &mut impl BufRead, dst: &mut [u8]) -> Result<(), FrameError> {
     input.read_exact(dst).map_err(|err| {
         if err.kind() == io::ErrorKind::UnexpectedEof {
             FrameError::ShortRead
@@ -134,6 +134,20 @@ pub fn read_frame(
     expected_type: Option<ObjectKind>,
     limits: &Limits,
 ) -> Result<Frame, FrameError> {
+    let (kind, size) = read_frame_header(input, expected_oid, expected_type, limits, true)?;
+    let mut payload = vec![0; size as usize];
+    read_exact(input, &mut payload)?;
+    read_record_delimiter(input)?;
+    Ok(Frame { kind, payload })
+}
+
+pub(crate) fn read_frame_header(
+    input: &mut impl BufRead,
+    expected_oid: &[u8],
+    expected_type: Option<ObjectKind>,
+    limits: &Limits,
+    buffered: bool,
+) -> Result<(ObjectKind, u64), FrameError> {
     let head = read_header(input, limits.header)?;
     if head.strip_suffix(b" missing") == Some(expected_oid) {
         return Err(FrameError::Missing);
@@ -157,21 +171,23 @@ pub fn read_frame(
     if expected_type.is_some_and(|expected| expected != kind) {
         return Err(FrameError::Identity);
     }
-    let cap = if kind == ObjectKind::Blob {
-        limits.blob
-    } else {
-        limits.record
+    let cap = match (buffered, kind) {
+        (false, _) => u64::MAX,
+        (true, ObjectKind::Blob) => limits.blob as u64,
+        (true, _) => limits.record as u64,
     };
     let (size, above) = length(raw_length, cap, limits.decimal_digits).ok_or(FrameError::Length)?;
     if above {
         return Err(FrameError::TooLarge(kind));
     }
-    let mut payload = vec![0; size];
-    read_exact(input, &mut payload)?;
+    Ok((kind, size))
+}
+
+pub(crate) fn read_record_delimiter(input: &mut impl BufRead) -> Result<(), FrameError> {
     let mut delimiter = [0];
     read_exact(input, &mut delimiter)?;
     if delimiter[0] != b'\n' {
         return Err(FrameError::RecordDelimiter);
     }
-    Ok(Frame { kind, payload })
+    Ok(())
 }
