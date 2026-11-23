@@ -117,7 +117,8 @@ def _machine_local_path_envelope(event: str | None) -> dict:
 
 
 def _no_trash_envelope(event: str | None) -> dict:
-    envelope = {"cwd": "/tmp", "tool_input": {"command": "git worktree add ../wt"}}
+    envelope = {"tool_name": "Bash", "cwd": str(REPO_ROOT),
+                "tool_input": {"command": "git worktree add ../wt"}}
     if event is not None:
         envelope["hook_event_name"] = event
     return envelope

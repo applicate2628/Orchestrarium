@@ -311,8 +311,12 @@ def test_changed_expected_record_refused_before_launch(launcher, tmp_path):
 
 
 
-@pytest.mark.parametrize("args", [["--help"], ["--global", "--dry-run"]])
-def test_preview_executes_real_entry_without_bundle_bytecode(launcher, tmp_path, monkeypatch, args):
+@pytest.mark.parametrize("args, forwarded", [
+    (["--help"], None),
+    (["--clients", "claude", "--global", "--dry-run"],
+     ["--client", "claude", "--global", "--dry-run"]),
+])
+def test_preview_executes_real_entry_without_bundle_bytecode(launcher, tmp_path, monkeypatch, args, forwarded):
     root, exe, _ = bundle(tmp_path, launcher)
     source = PATH.parents[2]
     entry = root / "app/install.py"
@@ -321,7 +325,13 @@ def test_preview_executes_real_entry_without_bundle_bytecode(launcher, tmp_path,
     scripts.mkdir()
     bootstrap = "python_installer_bootstrap.py"
     (scripts / bootstrap).write_bytes((source / "scripts" / bootstrap).read_bytes())
-    (scripts / "install-claude.py").write_text("import sys\nprint(repr(sys.argv[1:]))\n", encoding="utf-8")
+    installation = scripts / "installation"
+    installation.mkdir()
+    for name in ("__init__.py", "clients.py", "sdk_setup.py"):
+        (installation / name).write_bytes((source / "scripts/installation" / name).read_bytes())
+    (scripts / "install-client.py").write_text(
+        "import sys\nfrom installation.clients import CLIENTS\n"
+        "print('DISPATCH:', repr(sys.argv[1:]))\n", encoding="utf-8")
     home = tmp_path / "home"
     home.mkdir()
     actual_python = sys.executable
@@ -337,7 +347,7 @@ def test_preview_executes_real_entry_without_bundle_bytecode(launcher, tmp_path,
         # Exercise the actual installer and CPython isolation with unchanged flags.
         assert python == argv[0] == str(exe)
         result = subprocess.run(
-            [actual_python, *argv[1:]], input="2\n",
+            [actual_python, *argv[1:]], input="",
             env=env, capture_output=True, text=True, timeout=20,
         )
         observed.append(result)
@@ -346,7 +356,11 @@ def test_preview_executes_real_entry_without_bundle_bytecode(launcher, tmp_path,
     monkeypatch.setattr(launcher, "_exec_child", execute)
     before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
     assert launcher.main(args) == 0, observed[0].stderr
-    assert repr(args) in observed[0].stdout
+    if forwarded is None:
+        assert "Orche client selection" in observed[0].stdout
+        assert "DISPATCH:" not in observed[0].stdout
+    else:
+        assert "DISPATCH: " + repr(forwarded) in observed[0].stdout
     after = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
     assert after == before
     assert list(home.iterdir()) == []

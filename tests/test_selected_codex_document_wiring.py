@@ -59,7 +59,10 @@ class SelectedCodexDocumentWiringTests(unittest.TestCase):
         install = self.definition("install")
         hold = self.branch(install, 'not _installer_platform_admitted()')
         self.assertIsInstance(hold.body[-1], ast.Return)
-        self.assertLess(hold.end_lineno, self.one(install, "_target").lineno)
+        targets = calls(install, "_target")
+        self.assertTrue(targets)
+        for target in targets:
+            self.assertLess(hold.end_lineno, target.lineno)
 
     def test_document_preflight_binds_destination_raw_digest_and_two_sources(self):
         prepare = self.definition("_prepare_selected_codex_document")
@@ -71,12 +74,15 @@ class SelectedCodexDocumentWiringTests(unittest.TestCase):
             "hashlib.sha256(before).hexdigest() != digest",
             '(root / "shared" / "AGENTS.shared.md", source / "AGENTS.codex.md")',
             "_capture_selected_source(path, transaction)",
-            "_SelectedReplacement(owner, sources, path, before_node, before, after, digest, parents)",
+            "_SelectedReplacement(owner, sources, path, before_node, before, after, digest, parents, global_policy=global_policy)",
         ):
             self.require(prepare, text)
         digest = self.branch(prepare, "hashlib.sha256(before).hexdigest() != digest")
         self.assertIsInstance(digest.body[0], ast.Raise)
-        self.assertLess(digest.end_lineno, self.one(prepare, "_capture_selected_source").lineno)
+        captures = calls(prepare, "_capture_selected_source")
+        self.assertTrue(captures)
+        for capture_call in captures:
+            self.assertLess(digest.end_lineno, capture_call.lineno)
         capture = self.definition("_capture_selected_source")
         self.require(capture, "_SelectedSource(path, node, transaction._image_file_bytes(path, node))")
 
@@ -91,7 +97,8 @@ class SelectedCodexDocumentWiringTests(unittest.TestCase):
                          {"document_digest": "digest", "span": "span"})
         self.require(prepare, '"AGENTS.md" if scope == "project" else ".codex/AGENTS.md"')
         self.require(prepare, '_ReceiptOutcome(key, "block", before, after, intent="replace", adoption_sha256=digest, adoption_span=span)')
-        self.one(self.definition("_prepare_codex_agents"), "_codex_document_payload")
+        self.one(self.definition("_prepare_codex_agents"), "_codex_instruction_pack")
+        self.one(self.definition("_codex_instruction_pack"), "_codex_document_payload")
         self.require(self.definition("_codex_document_payload"),
                      'shared_text.rstrip() + "\\n\\n" + codex_text.rstrip() + "\\n"')
 

@@ -449,7 +449,7 @@ def test_selected_legacy_peer_materialization_does_not_admit_unsupported_upgrade
     refuse_without_effects('codex')
     errors.clear()
     refuse_without_effects('claude')
-    assert errors == ['E_ACCEPTED_PRIOR_COLLISION: architect']
+    assert errors == ['E_ACCEPTED_PRIOR_COLLISION: accessibility-reviewer']
 
 
 def test_current_ordinary_peer_uses_its_own_complete_ledger_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -51,14 +51,19 @@ def test_installed_command_audit_upgrade_and_preservation(tmp_path):
     hooks.write_text(json.dumps(previous))
     record["configs"][".agents/hooks.json"]["members"].pop(MEMBER)
     retained = tmp_path / "retained-new-payloads"
-    for relative in ("runtime/command_advisory.py", "runtime/shared/hooks/check-no-trash-in-repo.py",
-                     "runtime/shared/scripts/git_push_gate_preflight.py"):
-        source = managed / relative
-        destination = retained / relative
+    historical_files = {
+        ".agents/orchestrarium-antigravity/" + name for name in (
+            "runtime/session_start.py", "runtime/pre_tool_use.py",
+            "runtime/shared/hooks/check-machine-local-path.py",
+            "runtime/shared/scripts/hook_common.py", "skills/orchestrarium-lead/SKILL.md",
+            "rules/orchestrarium.md", "AGENTS.antigravity.md", "AGENTS.shared.md")}
+    for relative in set(record["files"]) - historical_files:
+        source = project / relative
+        destination = retained / source.relative_to(managed)
         destination.parent.mkdir(parents=True, exist_ok=True)
         source.rename(destination)
-        record["files"].pop(source.relative_to(project).as_posix())
-    assert len(record["files"]) == 8
+        record["files"].pop(relative)
+    assert set(record["files"]) == historical_files
     assert set(record["configs"][".agents/hooks.json"]["members"]) == {
         "orchestrarium-session-start", "orchestrarium-machine-local-path"}
     receipt.write_bytes(OWNER.serialize_record(record, "antigravity", "project"))
