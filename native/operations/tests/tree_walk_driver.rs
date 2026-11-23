@@ -14,10 +14,11 @@ use tree_record::{ObjectWidth, TreeRecordError, VerifiedTreePayload};
 use tree_walk::{Entry, Event, Kind, WalkError, walk};
 
 fn unhex(input: &str) -> Vec<u8> {
-    assert!(input.len() % 2 == 0);
-    (0..input.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&input[i..i + 2], 16).unwrap())
+    let (pairs, remainder) = input.as_bytes().as_chunks::<2>();
+    assert!(remainder.is_empty());
+    pairs
+        .iter()
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
         .collect()
 }
 
