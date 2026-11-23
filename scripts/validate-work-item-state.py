@@ -672,6 +672,10 @@ def _read_ledger_image(path, ledger_resource_budget=None, *, source_bytes=None):
             source_bytes = path.read_bytes()  # Already identity-bound immutable capture.
         else:
             owner = load_lifecycle_owner()
+            # Match the budgeted capture's initial presence check. Initial
+            # absence remains distinct from disappearance during acquisition.
+            if budget is None:
+                path.lstat()
             try:
                 snapshot = owner._capture_file_snapshot(
                     path, failure_id="WI-LEDGER-RESOURCE-DRIFT", ledger_resource_budget=budget,
