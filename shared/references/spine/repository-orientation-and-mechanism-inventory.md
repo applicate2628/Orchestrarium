@@ -12,7 +12,7 @@ Read every applicable governing source before side effects: the nearest `AGENTS.
 - `protected`: frozen or otherwise non-mutable surfaces;
 - `evidence`: one or more `file:line` citations from governing documents.
 
-Use the installed Bootstrap format:
+Use the exact record owned by shared **Repository orientation; Mechanism inventory before new paths** in `shared/AGENTS.shared.md`. Codex Bootstrap step 0 in `src.codex/AGENTS.codex.md` applies that already-composed rule and retains its pre-action checkpoint, conflict hold and explicit historical-scope permission:
 
 ```text
 REPOSITORY ORIENTATION: scope=<repo-relative path>; status=<live|mutable|frozen|archived|deprecated|superseded|conflict>; workflow=<repo-relative entry point(s)>; protected=<repo-relative path(s)|none>; evidence=<path:line[,path:line...]>
@@ -22,7 +22,7 @@ Names, file counts, recency, apparent completeness, and directory layout are att
 
 ## Mechanism Inventory
 
-After orientation establishes the authoritative surface, identify the existing owner and propagation path before adding a mechanism. For non-trivial changes, inventory the relevant files, symbols, contracts, events, stores, configuration surfaces, lifecycle rules, and error paths. Extend that owner when applicable. A new owner is justified only when the existing mechanism cannot own the behavior; name the new consistency path and removal or migration relationship explicitly.
+After orientation, trace the affected entry point through the relevant handoffs to the observed result. For each material guarantee, check who owns the decision or state, what the contract requires, and which currently selected code or configuration enforces it. Include relevant failures and cleanup. Verify what is active rather than assuming a design note, helper, or isolated test proves live enforcement. Mark unobserved behavior as unverified; distinguish missing ownership from a broken handoff. Fix or extend the existing owner where practical; justify a new owner by a verified gap. Use existing task or review evidence, not a separate mandatory inventory or gate.
 
 ## Audit-Hook Boundary
 

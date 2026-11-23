@@ -569,20 +569,21 @@ def test_kimi_wrapper_entry_freezes_policy_bound_max_provenance(
     monkeypatch.setattr(owner, "_launch_with_runner", stop_before_provider)
     receipt = tmp_path / "kimi-effort.receipt"
 
-    assert owner.launch(
-        "kimi",
-        [
-            "fixture",
-            "--terminal-receipt",
-            str(receipt),
-            "--task-class",
-            "review",
-            "--role",
-            "qa-engineer",
-            "--kimi-effort",
-            "max",
-        ],
-    ) == 0
+    arguments = [
+        "fixture",
+        "--terminal-receipt",
+        str(receipt),
+        "--task-class",
+        "review",
+        "--role",
+        "qa-engineer",
+        "--kimi-effort",
+        "max",
+    ]
+    assert owner.launch("kimi", arguments) == 1
+    assert captured == []
+    # Synthetic caller agreement exercises this policy branch only; it is not a real grant.
+    assert owner.launch("kimi", [*arguments, "--user-approved-launch"]) == 0
 
     prevalidated, _reserved_run = captured[0]
     assert prevalidated.effort == "max"

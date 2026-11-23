@@ -32,11 +32,19 @@ INFORMATIONAL_REMINDER_HOOK_STEMS = frozenset(
     }
 )
 CWD_SCANNING_HOOK_STEMS = frozenset({"check-scratch-valuables"})
-CANONICAL_TRUST_GUIDANCE = (
-    "After reinstall, start interactive `codex` — not `codex exec` — and choose **Trust all and continue** for all 13 affected entries.",
-    "Do not press Esc and do not choose **`Continue without trusting`**, because all hooks and guards remain installed but inactive.",
-    "`codex exec` silently skips untrusted hook entries instead of showing the trust prompt, so interactive `codex` must run first.",
-    "The trust modal does not time out and the operator must review all 13 entries before making the explicit choice.",
+INSTALL_TRUST_GUIDANCE = (
+    "registration source path, event, matcher-group index, and handler index",
+    "normalized definition hash, which includes the matcher, handler type, and command",
+    "start `codex` interactively and choose **Trust all and continue** for the affected entries",
+    "editing Python source behind an unchanged registered command does not by itself change that identity",
+    "may report `PENDING_MANUAL_TRUST` only for complete identities created or replaced by that transaction",
+    "pre-existing untrusted or modified identities fail closed",
+    "--platform codex --codex-trust-mode require` health command",
+    "`--verify-fires` alone does not prove trust",
+)
+CODEX_TRUST_GUIDANCE = (
+    "Changed Codex hooks may be untrusted or inactive.",
+    "only after the required explicit interactive trust review and supported health receiving",
 )
 BYPASS_TOKENS = (
     "bypass_" + "hook_trust",
@@ -128,7 +136,7 @@ def _owned_python_targets(platform: str) -> tuple[Path, ...]:
     )
 
 
-@pytest.mark.parametrize(("platform", "expected_count"), (("codex", 13), ("claude", 13)))
+@pytest.mark.parametrize(("platform", "expected_count"), (("codex", 12), ("claude", 13)))
 def test_hook_specs_membership_is_owned_by_universal_manifest(
     platform: str, expected_count: int
 ) -> None:
@@ -146,24 +154,22 @@ def test_hook_specs_membership_is_owned_by_universal_manifest(
 def test_hook_specs_follow_manifest_membership_and_fail_closed_on_missing_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    manifest = PRODUCTION_INSTALLER._HOOK_MANIFEST
     monkeypatch.setattr(
-        PRODUCTION_INSTALLER,
-        "_universal_hook_manifest_module",
-        lambda: SimpleNamespace(
-            registered_hook_stems=lambda _platform: frozenset({"mcp-usage-reminder"})
-        ),
+        manifest, "registered_hook_stems", lambda _platform: frozenset({"mcp-usage-reminder"})
     )
     specs = PRODUCTION_INSTALLER._hook_specs("codex", _provider_source_root("codex"))
     assert [marker for marker, *_rest in specs] == ["mcp-usage-reminder"]
 
+    # A known hook without a Codex status must fail closed, even if its metadata exists.
+    monkeypatch.delitem(PRODUCTION_INSTALLER._CODEX_HOOK_STATUS_MESSAGES, "mcp-usage-reminder")
+    with pytest.raises(RuntimeError, match="status-message catalog is missing"):
+        PRODUCTION_INSTALLER._hook_specs("codex", _provider_source_root("codex"))
+    monkeypatch.setitem(PRODUCTION_INSTALLER._CODEX_HOOK_STATUS_MESSAGES, "missing-owner", "Synthetic")
     monkeypatch.setattr(
-        PRODUCTION_INSTALLER,
-        "_universal_hook_manifest_module",
-        lambda: SimpleNamespace(
-            registered_hook_stems=lambda _platform: frozenset({"missing-owner"})
-        ),
+        manifest, "registered_hook_stems", lambda _platform: frozenset({"missing-owner"})
     )
-    with pytest.raises(RuntimeError, match="metadata is missing"):
+    with pytest.raises(ValueError, match="membership did not resolve uniquely"):
         PRODUCTION_INSTALLER._hook_specs("codex", _provider_source_root("codex"))
 
 
@@ -231,7 +237,8 @@ def test_python_production_installer_owns_ordered_hook_transaction() -> None:
     reclaim = source.index('"reclaim"')
     assert preflight < sync < register < verify < reclaim
     assert '"--codex-trust-mode"' in source and '"report"' in source
-    assert "owned_canonical_identities" in source
+    assert source.count("owned_definition_snapshots") == 2
+    assert "touched_definition_identities" in source
     assert "write_codex_inventory" in source
     assert "post-reclaim installed hook verification failed" in source
 
@@ -390,7 +397,7 @@ def test_production_installed_claude_health_uses_manifest_without_repo_root(
     assert source_compat.returncode == 0, source_compat.stdout + source_compat.stderr
 
 
-def test_installer_derives_touched_identities_from_before_after_hooks_json(
+def test_installer_derives_touched_identities_from_owned_hook_definitions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     registration = tmp_path / ".codex" / "hooks.json"
@@ -398,8 +405,19 @@ def test_installer_derives_touched_identities_from_before_after_hooks_json(
     registration.write_text('{"hooks":{}}\n', encoding="utf-8")
     installed_root = tmp_path / ".agents" / "skills" / "lead"
     specs = PRODUCTION_INSTALLER._hook_specs("codex", installed_root)
-    before = {"unchanged-complete-identity", "matcher-old-complete-identity"}
-    after = {"unchanged-complete-identity", "matcher-new-complete-identity"}
+    health = PRODUCTION_INSTALLER._hook_health_module(ROOT)
+    original = ((0, 0, '{"matcher":"shell"}', '{"statusMessage":"old"}'),)
+    modified = ((0, 0, '{"matcher":"shell"}', '{"statusMessage":"new"}'),)
+    before = {
+        "unchanged-complete-identity": original,
+        "matcher-old-complete-identity": original,
+        "same-identity-changed-definition": original,
+    }
+    after = {
+        "unchanged-complete-identity": original,
+        "matcher-new-complete-identity": modified,
+        "same-identity-changed-definition": modified,
+    }
 
     class FakeHealth:
         calls = 0
@@ -418,9 +436,13 @@ def test_installer_derives_touched_identities_from_before_after_hooks_json(
             return target.parent / "codex-hook-inventory.json"
 
         @classmethod
-        def owned_canonical_identities(cls, **_kwargs):
+        def owned_definition_snapshots(cls, **kwargs):
+            assert kwargs["target"] == registration and kwargs["platform"] == "codex"
+            assert set(kwargs["managed_targets"]) == {marker for marker, *_ in specs}
             cls.calls += 1
             return before if cls.calls == 1 else after
+
+        touched_definition_identities = staticmethod(health.touched_definition_identities)
 
         @classmethod
         def write_codex_inventory(cls, **_kwargs):
@@ -455,8 +477,9 @@ def test_installer_derives_touched_identities_from_before_after_hooks_json(
     assert len(health_calls) == 2
     for call, canonical_script in health_calls:
         touched = [call[index + 1] for index, token in enumerate(call) if token == "--touched-identity"]
-        assert touched == ["matcher-new-complete-identity"]
+        assert touched == ["matcher-new-complete-identity", "same-identity-changed-definition"]
         assert canonical_script == ROOT / "scripts" / "check-hook-health.py"
+    assert FakeHealth.calls == 2
     assert FakeHealth.generated
     assert not [call for call in invocations if "--codex-trust-mode" in call]
     retirement_calls = [
@@ -995,27 +1018,28 @@ def test_decision_parity_oracle_requires_one_utf8_json_document() -> None:
 
 
 def test_trust_guidance_contract() -> None:
-    for path in (ROOT / "INSTALL.md", ROOT / "src.codex/AGENTS.codex.md"):
-        _assert_exact_order(path.read_text(encoding="utf-8"), CANONICAL_TRUST_GUIDANCE)
-
     install = (ROOT / "INSTALL.md").read_text(encoding="utf-8")
+    codex = (ROOT / "src.codex/AGENTS.codex.md").read_text(encoding="utf-8")
+    _assert_exact_order(install, INSTALL_TRUST_GUIDANCE)
+    _assert_exact_order(codex, CODEX_TRUST_GUIDANCE)
     assert "#### Codex Python workflow" in install
     assert "python .\\scripts\\install-codex.py --global --dry-run" in install
     assert "python .\\scripts\\install-codex.py --global" in install
     assert "install-codex.ps1" not in install
 
 
-def test_trust_guidance_contract_rejects_same_count_mutations() -> None:
+def test_trust_guidance_contract_rejects_trust_bypass_wording() -> None:
     text = (ROOT / "INSTALL.md").read_text(encoding="utf-8")
+    guidance = next(line for line in INSTALL_TRUST_GUIDANCE if "Trust all and continue" in line)
     mutated = text.replace(
-        CANONICAL_TRUST_GUIDANCE[0],
-        CANONICAL_TRUST_GUIDANCE[0].replace(
+        guidance,
+        guidance.replace(
             "Trust all and continue", "Continue without trusting"
         ),
         1,
     )
     with pytest.raises(AssertionError):
-        _assert_exact_order(mutated, CANONICAL_TRUST_GUIDANCE)
+        _assert_exact_order(mutated, INSTALL_TRUST_GUIDANCE)
 
 
 def test_trust_bypass_classifier_accepts_prohibition_but_rejects_enablement() -> None:

@@ -12,12 +12,10 @@ Use it together with:
 - [../references-codex/README.md](../references-codex/README.md)
 - [../references-claude/README.md](../references-claude/README.md)
 
-Current docs in this branch:
+Current references and maintenance guidance:
 
-- [sdk-integration-project.md](sdk-integration-project.md) for the independent Agents SDK/provider-adapter integration backlog, deletion criteria, authority boundaries and receiving qualification
-
-- [claude-instruction-unification.md](claude-instruction-unification.md) for current-line Claude instruction research, shared-default versus provider-specific ownership, runtime projection alternatives, and the bounded development handoff
-- [routing/sol-6-1-routing-proposal-2026-10-01.md](routing/sol-6-1-routing-proposal-2026-10-01.md) for the approved Sol 6.1 default-family decision, dated public evidence, compatibility scope, and offline verification boundaries
+- For current software development kit (SDK) implementation and qualification, see `docs/sdk-execution.md` in [pull request #19](https://github.com/applicate2628/Orchestrarium/pull/19).
+- [routing/gpt-6-2-production-hotfix-2026-11-17.md](routing/gpt-6-2-production-hotfix-2026-11-17.md) for the current factory Sol/Astra generation refresh and offline verification boundary
 - [agents-mode-reference.md](agents-mode-reference.md) for the shared operator schema
 - [external-worker-design.md](external-worker-design.md) for external execution adapter design notes
 - [new-session-guide.md](new-session-guide.md) for new-session orientation and source-first maintenance rules
@@ -28,8 +26,16 @@ Current docs in this branch:
 - [dependencies.md](dependencies.md) for cross-work-item `Depends-on` edges and the blocked/ready derivation
 - [lessons.md](lessons.md) for the in-repo delivery-lessons registry (capture lessons learned so they survive a work-item's archival)
 - [definition-of-ready-done.md](definition-of-ready-done.md) for the DoR/DoD vocabulary map onto existing admission and close gates
-- [routing/12-lane-routing-matrix-v1-2026-04-18.md](routing/12-lane-routing-matrix-v1-2026-04-18.md)
-- [routing/full-v2-hard-r2-routing-evidence-2026-05-01.md](routing/full-v2-hard-r2-routing-evidence-2026-05-01.md) — release-backed routing evidence behind the shipped priority profiles
+- [provider-receipt-planning.md](provider-receipt-planning.md) for source contracts of receipt planning and exact-current selection
+- [effect-bound-filesystem-owner.md](effect-bound-filesystem-owner.md) for installer transaction boundaries and dated platform evidence
+
+Dated design and evidence, not current implementation plans:
+
+- [sdk-integration-project.md](sdk-integration-project.md) records the historical SDK design, authority boundaries and dated evidence.
+- [claude-instruction-unification.md](claude-instruction-unification.md) — Claude instruction discovery research and original implementation handoff; use the current runtime and install references above for the implemented layout
+- [routing/sol-6-1-routing-proposal-2026-10-01.md](routing/sol-6-1-routing-proposal-2026-10-01.md) — prior Sol 6.1 generation decision and dated evidence
+- [routing/12-lane-routing-matrix-v1-2026-04-18.md](routing/12-lane-routing-matrix-v1-2026-04-18.md) — superseded lane matrix
+- [routing/full-v2-hard-r2-routing-evidence-2026-05-01.md](routing/full-v2-hard-r2-routing-evidence-2026-05-01.md) — historical routing benchmark, not validation of the current model families
 
 ## Terms and Abbreviations
 

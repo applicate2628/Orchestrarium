@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 import runpy
 from types import SimpleNamespace
 import sys
@@ -25,7 +26,7 @@ def test_codex_and_claude_host_wrappers_remain_thin_adjacent_consumers(
 ) -> None:
     calls = []
     monkeypatch.setitem(sys.modules, "provider_prompt", SimpleNamespace(
-        launch=lambda provider, argv: calls.append((provider, argv)) or 17,
+        launch=lambda provider, argv, **kwargs: calls.append((provider, argv, kwargs)) or 17,
     ))
     for provider in ("codex", "claude"):
         python_wrapper = CLAUDE_SCRIPTS / f"invoke-{provider}-prompt.py"
@@ -39,7 +40,7 @@ def test_codex_and_claude_host_wrappers_remain_thin_adjacent_consumers(
         with pytest.raises(SystemExit) as result:
             runpy.run_path(str(python_wrapper), run_name="__main__")
         assert result.value.code == 17
-        assert calls.pop() == (provider, argv)
+        assert calls.pop() == (provider, argv, {"runtime_namespace": python_wrapper.absolute().parent})
         assert "provider_prompt.py" not in shell_wrapper.read_text(encoding="utf-8")
 
 
@@ -459,3 +460,204 @@ def test_canonical_scope_preserves_ordinary_descendant_guard(tmp_path, monkeypat
     linked = _load_owner(canonical / 'scripts/provider_prompt.py', 'linked_canonical_case_guard')
     assert linked.ledger_helper() is None
     assert not marker.exists()
+
+
+@pytest.mark.parametrize("provider,model,effort,allowed,needs", [
+    ("codex", "gpt-6.1-terra", "medium", True, False),
+    ("codex", "gpt-6-astra", "high", True, True),
+    ("codex", "gpt-6-astra", "max", True, True),
+    ("claude", "opus", "max", True, True),
+    ("kimi", "kimi-code/k3", "max", True, True),
+    ("codex", "gpt-6.1-terra", "low", False, False),
+    ("codex", "gpt-6-luna", "medium", False, False),
+    ("codex", "gpt-6.1-terra", "ultra", False, False),
+])
+def test_shared_model_launch_requirements_and_single_assertion(provider, model, effort, allowed, needs):
+    policy = _load_owner(ROOT / "scripts/model_routing/launch_policy.py", "pure_launch_rule")
+    reason, required = policy.launch_requirements(provider, model, effort)
+    assert (reason is None) is allowed
+    assert required is needs
+    assert (policy.qualify_launch(provider, model, effort, user_approved_launch=True) is None) is allowed
+    assert (policy.qualify_launch(provider, model, effort) is None) is (allowed and not needs)
+    if provider == "codex" and model == "gpt-6-astra" and effort == "high":
+        assert policy.qualify_launch(provider, model, effort, user_approved_max=True) is not None
+
+
+@pytest.mark.parametrize("approved", [False, True])
+def test_actual_managed_launch_guard_precedes_receipt_and_keeps_control_local(monkeypatch, approved):
+    owner = _load_owner(ROOT_OWNER, "managed_actual_launch_guard")
+    flags = ["--user-approved-launch"] if approved else []
+    argv = ["fixture", "--terminal-receipt", "synthetic-receipt.json", "--ledger-role", "backend-engineer", *flags,
+            "--", "--model", "gpt-6-astra", "-c", "model_reasoning_effort=high"]
+    messages = []
+    class ReachedReceipt(Exception): pass
+    def reserve(*args): raise ReachedReceipt()
+    monkeypatch.setattr(owner.TerminalReceiptV1, "reserve", reserve)
+    monkeypatch.setattr(owner, "fail", lambda text: messages.append(text) or 1)
+    parsed = owner.parse_control(argv, provider="codex")
+    assert parsed.user_approved_launch is approved
+    assert "--user-approved-launch" not in parsed.provider_flags
+    if approved:
+        with pytest.raises(ReachedReceipt): owner.launch("codex", argv)
+    else:
+        assert owner.launch("codex", argv) == 1
+        assert messages[-1] == "E_MODEL_LAUNCH_POLICY_DENIED: individual-launch-approval-required"
+
+
+def test_roleless_direct_user_path_does_not_load_managed_policy(monkeypatch):
+    owner = _load_owner(ROOT_OWNER, "roleless_direct_launch")
+    monkeypatch.setattr(owner, "_load_model_launch_policy", lambda: pytest.fail("roleless compatibility imported managed policy"))
+    selected = owner.PolicyBoundLaunch(owner.Control(), "fixture", (), "gpt-6-astra", "high", owner.ExternalRoleProvenance("none", "none"), None)
+    owner._qualify_managed_model_launch("codex", selected)
+
+
+def test_policy_companion_stays_beside_logical_file_link(tmp_path):
+    owner_file = tmp_path / "provider_prompt.py"
+    try:
+        owner_file.symlink_to(ROOT_OWNER)
+    except OSError as error:
+        pytest.skip("Host cannot create this owned file-link fixture: " + type(error).__name__)
+    companion = tmp_path / "model_routing/launch_policy.py"
+    companion.parent.mkdir()
+    companion.write_bytes((ROOT / "scripts/model_routing/launch_policy.py").read_bytes())
+    owner = _load_owner(owner_file, "logical_companion_test")
+    policy = owner._load_model_launch_policy()
+    assert Path(policy.__file__) == companion
+    assert policy.qualify_launch("codex", "gpt-6.1-sol", "high") is None
+
+
+def test_kimi_namespace_is_forwarded_at_actual_nonmaintenance_edge(monkeypatch, tmp_path):
+    owner = _load_owner(ROOT_OWNER, "kimi_namespace_forwarding")
+    calls = []
+    monkeypatch.setattr(owner, "launch", lambda provider, argv, **kw: calls.append((provider, argv, kw)) or 19)
+    namespace = tmp_path.absolute()
+    assert owner.kimi_main(["fixture"], runtime_namespace=namespace) == 19
+    assert calls == [("kimi", ["fixture"], {"runtime_namespace": namespace})]
+
+
+@pytest.mark.parametrize("provider,mode", [("codex", "ordinary"), ("claude", "ordinary"),
+    ("codex", "launcher-file-link"), ("claude", "launcher-file-link"),
+    ("codex", "P-file-link"), ("claude", "P-file-link"), ("codex", "directory-link")])
+def test_real_public_launcher_import_reaches_shared_guard_in_selected_namespace(tmp_path, provider, mode):
+    import subprocess
+    manifest = json.loads((ROOT / "shared/provider-prompt-projections.v1.json").read_bytes())
+    installer = _load_owner(ROOT / "scripts/production_installer.py", "launcher_runtime_fixture")
+    def complete_existing_process_runtime(namespace):
+        for source, destination in installer._runtime_file_destinations(ROOT, namespace):
+            if source.is_relative_to(ROOT / "scripts/process_supervision"):
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(source.read_bytes())
+    def fixture_payload(record):
+        payload = (ROOT / record["source"]).read_bytes()
+        if record["source"] == "scripts/provider_prompt.py":
+            # Stub only the actual receipt resource. If the policy regresses,
+            # the public child stops before auth/prompt/provider/process effects.
+            payload += b"\n\ndef _fixture_receipt_stop(*args, **kwargs):\n    raise RuntimeError('OWNED_TEST_RECEIPT_RESOURCE_STOP')\nTerminalReceiptV1.reserve = staticmethod(_fixture_receipt_stop)\n"
+        return payload
+    logical = tmp_path / "logical"
+    actual = tmp_path / "actual"
+    actual.mkdir()
+    if mode == "directory-link":
+        try: logical.symlink_to(actual, target_is_directory=True)
+        except OSError as error: pytest.skip("Owned directory link unavailable: " + type(error).__name__)
+    else: logical.mkdir()
+    for name, record in manifest["files"].items():
+        target = logical / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(fixture_payload(record))
+    complete_existing_process_runtime(logical)
+    wrapper = logical / ("invoke-" + provider + "-prompt.py")
+    if mode in {"launcher-file-link", "P-file-link"}:
+        selected = wrapper if mode == "launcher-file-link" else logical / "provider_prompt.py"
+        backing = tmp_path / "backing"
+        backing.mkdir()
+        # Existing P dependencies remain complete at its existing physical
+        # runtime origin; only the NEW policy companion must stay logical.
+        for name, record in manifest["files"].items():
+            if name == "model_routing/launch_policy.py": continue
+            member = backing / name
+            member.parent.mkdir(parents=True, exist_ok=True)
+            member.write_bytes(fixture_payload(record))
+        complete_existing_process_runtime(backing)
+        original = selected.read_bytes()
+        selected.unlink()
+        try: selected.symlink_to(backing / selected.name)
+        except OSError as error:
+            selected.write_bytes(original)
+            pytest.skip("Owned file link unavailable: " + type(error).__name__)
+    assert not (logical / "resolve-agents-mode.py").exists()
+    receipt = tmp_path / "receipt.json"
+    flags = (["--model", "gpt-6-astra", "-c", "model_reasoning_effort=high"] if provider == "codex"
+             else ["-p", "--output-format", "text", "--model", "opus", "--effort", "max"])
+    result = subprocess.run([sys.executable, "-B", "-X", "utf8", str(wrapper), "fixture",
+        "--terminal-receipt", str(receipt), "--ledger-role", "backend-engineer", "--", *flags],
+        cwd=tmp_path, capture_output=True, text=True, encoding="utf8")
+    assert result.returncode != 0
+    assert "E_MODEL_LAUNCH_POLICY_DENIED: individual-launch-approval-required" in result.stderr
+    assert not receipt.exists()
+
+
+@pytest.mark.parametrize("kind,retarget", [("R", False), ("R", True), ("P", False), ("P", True)])
+def test_policy_route_is_current_before_captured_payload_executes(tmp_path, monkeypatch, kind, retarget):
+    script = tmp_path / ("resolve-agents-mode.py" if kind == "R" else "provider_prompt.py")
+    selected = tmp_path / "model_routing/launch_policy.py"
+    selected.parent.mkdir()
+    good = tmp_path / "policy-good.py"
+    good.write_bytes((ROOT / "scripts/model_routing/launch_policy.py").read_bytes())
+    marker = tmp_path / "alternate-executed.txt"
+    alternate = tmp_path / "policy-alternate.py"
+    alternate.write_text(
+        "from pathlib import Path\nPath(" + repr(str(marker)) + ").write_text('executed')\n"
+        "def launch_requirements(*args, **kwargs): return None, False\n"
+        "def qualify_launch(*args, **kwargs): return None\n", encoding="utf8")
+    try:
+        script.symlink_to(ROOT / "scripts" / script.name)
+        selected.symlink_to(good)
+    except OSError as error:
+        pytest.skip("Owned supported-link fixture unavailable: " + type(error).__name__)
+    owner = _load_owner(script, "policy_preexec_" + kind + str(retarget))
+    original_resolve = Path.resolve
+    state = {"fired": False}
+    def resolve_at_first_acquisition(path, *args, **kwargs):
+        if path == selected and not state["fired"]:
+            state["fired"] = True
+            selected.unlink()
+            selected.symlink_to(alternate)
+        return original_resolve(path, *args, **kwargs)
+    receipt_calls = []
+    def no_receipt(*args, **kwargs):
+        receipt_calls.append(True)
+        pytest.fail("Policy negative crossed receipt boundary")
+    messages = []
+    if kind == "R":
+        description = owner.describe_ordinary_native_role_options(
+            "scientific-software-engineer", "engineering",
+            {"explicitModelControl": True, "explicitReasoningEffortControl": True}, repo_root=ROOT)
+        assert description["status"] == "available"
+        inputs = dict(requested_model="gpt-6-astra", requested_effort="high",
+            caller_rationale="Synthetic selected-route/currentness probe; no actual model launch.",
+            approved_execution_scope={"scope": "owned fixture only"})
+    else:
+        monkeypatch.setattr(owner.TerminalReceiptV1, "reserve", no_receipt)
+        monkeypatch.setattr(owner, "fail", lambda message: messages.append(message) or 1)
+        argv = ["fixture", "--terminal-receipt", str(tmp_path / "unused-receipt.json"),
+            "--ledger-role", "backend-engineer", "--", "--model", "gpt-6-astra",
+            "-c", "model_reasoning_effort=high"]
+    with monkeypatch.context() as seam:
+        if retarget:
+            seam.setattr(Path, "resolve", resolve_at_first_acquisition)
+        result = (owner.resolve_ordinary_native_dispatch(description, **inputs) if kind == "R"
+                  else owner.launch("codex", argv))
+    assert not marker.exists(), "Unqualified alternate module executed before refusal"
+    assert receipt_calls == []
+    assert state["fired"] is retarget
+    if kind == "R":
+        assert result["status"] == "denied"
+        reason = result["configurationDiagnostic"]["reason"]
+        assert reason == ("selected-companion-unavailable" if retarget else "individual-launch-approval-required")
+        if not retarget:
+            assert owner.resolve_ordinary_native_dispatch(description, user_approved_launch=True, **inputs)["status"] == "resolved"
+    else:
+        assert result == 1
+        expected = "E_MODEL_LAUNCH_POLICY_UNAVAILABLE" if retarget else "E_MODEL_LAUNCH_POLICY_DENIED"
+        assert messages and expected in messages[-1]

@@ -86,13 +86,19 @@ class DomainPlanTests(unittest.TestCase):
         self.assertEqual(7, data["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"])
         self.assertFalse(H.install(data, self.entry, "PreToolUse", self.marker,
                                    platform="codex", host_os="posix"))
-        self.assertTrue(H.remove(data, "PreToolUse", self.marker,
-                                 platform="codex", host_os="posix"))
-        self.assertEqual([foreign], data["hooks"]["PreToolUse"][0]["hooks"])
-        exact = {"hooks": {"PreToolUse": [copy.deepcopy(self.entry)]}}
+        before = copy.deepcopy(data)
+        with self.assertRaisesRegex(ValueError, "E_CODEX_HOOK_SLOT_SHIFT"):
+            H.remove(data, "PreToolUse", self.marker,
+                     platform="codex", host_os="posix",
+                     managed_targets={self.marker: {str(self.script)}})
+        self.assertEqual(before, data)
+        foreign_group = {"hooks": [foreign]}
+        exact = {"hooks": {"PreToolUse": [copy.deepcopy(self.entry), foreign_group]}}
         self.assertTrue(H.remove(exact, "PreToolUse", self.marker,
                                  expected_entry=self.entry, platform="codex"))
-        self.assertEqual([], exact["hooks"]["PreToolUse"][0]["hooks"])
+        groups = exact["hooks"]["PreToolUse"]
+        self.assertEqual([], groups[0]["hooks"])
+        self.assertIs(foreign_group, groups[1])
 
     def test_unchanged_install_noop_and_missing_removal(self):
         data = self.seed()
@@ -108,7 +114,7 @@ class DomainPlanTests(unittest.TestCase):
 
     def test_cli_bad_json_empty_remove_and_dry_run_keep_existing_exits(self):
         self.target.write_bytes(b"{")
-        argv = ["helper", "--target", str(self.target), "--platform", "claude", "--remove"]
+        argv = ["helper", "--target", str(self.target), "--platform", "claude", "--remove", "--script-path", str(self.script)]
         with patch.object(sys, "argv", argv), contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit) as failure:
                 H.main()

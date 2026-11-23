@@ -91,30 +91,21 @@ ffmpeg -v error -ss <start> -t <duration> -i "<video>" \
 
 Then read dense frames around each suspicious timestamp.
 
-For one-frame bugs, use the source frame rate (often 60 fps) and sample several repeated transitions, not just the first clean one:
+For one-frame claims, use a native decoded frame sequence for several repeated transitions, not just the first clean one. Keep source presentation timestamps in the inspection log and map the numbered images to the logged selected frames in order. Do not use an `fps` filter or constant-rate output for this proof: either can drop or duplicate frames. Normalized contact sheets are only a locator.
 
 ```bash
-ffmpeg -v error -ss <start> -t 0.55 -i "<video>" \
-  -vf "crop=<w>:<h>:<x>:<y>,fps=60,scale=1200:-1" -q:v 3 dense_%03d.jpg
-
-ffmpeg -v error -framerate 60 -i "dense_%03d.jpg" \
-  -vf "scale=400:-1,tile=6x6:margin=8:padding=4:color=white" \
-  -frames:v 1 dense_sheet.jpg
+ffmpeg -hide_banner -copyts -i "<video>" \
+  -vf "select='between(t,<start>,<end>)',showinfo" \
+  -fps_mode passthrough -start_number 0 native_%04d.png
 ```
 
-Only use the `crop=<w>:<h>:<x>:<y>` dense-sampling form after the hard crop gate passed. If it has not passed, dense-sample the full frame first.
+Use source-timeline seconds for the bounds. Keep the full frame until the hard crop gate passes. A frame window with gaps, insufficient capture rate, repeated capture frames or missing capture telemetry that prevents exclusion of the symptom is `UNVERIFIED` for absence. Separate a capture gap from a truly constant displayed state.
 
 If the bug is intermittent or reported "between frames", inspect dense sheets from at least 3-5 transitions and cover both directions of the UI state change when both directions exist.
 
-### Step 5 — Verify duplicates by file size
+### Step 5 — Separate duplicate pixels from capture coverage
 
-When two adjacent extracted frames have identical file sizes (bytes), they are usually the same source frame decoded twice — useful for confirming a stable state vs a real transition:
-
-```bash
-ls -la dense_*.jpg | awk '{print $5, $9}'
-```
-
-If `dense_05.jpg` and `dense_06.jpg` are both `54231 bytes` and `dense_07.jpg` is `57864 bytes`, the change happened between frame 6 and 7.
+Equal file lengths do not prove equal content. Compare decoded pixels or a checksum over the same decoded pixel representation, then inspect the relevant native frames directly. Pixel equality does not tell whether two capture events sampled the same presentation; use source timing and available capture telemetry for that distinction.
 
 ### Step 6 — Native-resolution verification
 
@@ -130,7 +121,6 @@ These are large (700 KB+) but lossless, and the Read tool handles them fine.
 
 - **Cursor position drift across frames** = mouse trajectory. The cursor is the most reliable timestamp anchor for "when did the user click".
 - **Highlighted button (different background colour)** = hover or pressed state. Distinguish hover (mouse over) from selected (toggle state) by checking adjacent frames — selected persists, hover follows cursor.
-- **Identical file sizes across N frames** = the source content did not change, only the encoder happened to emit a new I-frame.
 - **Scene-change pairs ~100–200 ms apart** = a two-step transition: the first event triggers a layout/style change, the second commits the final state. Bugs often live in the gap between them.
 - **A whole-app size change between two states** (e.g. text appears 2× larger) is usually a DPI / scaling mismatch between two renderers, not a frame-rendering bug.
 
@@ -140,7 +130,7 @@ These are large (700 KB+) but lossless, and the Read tool handles them fine.
 - Do not draw a conclusion from your own frame interpretation without confirming with the user what they actually see as the bug — the user's description of "the bug" almost always names a specific symptom, not the whole visual delta. Verify before coding fixes.
 - Do not `git add .scratch/video-frames/` — that folder must stay local.
 - Do not assume you must capture the video yourself; if the user has already provided one, skip capture and start at Step 1 on their file.
-- Do not assume the user will record one; if the bug is animation/timing-dependent and no video exists, fall through to `$windows-gui-manual-testing` step 3 (Obtain and analyze video evidence) to record one, then return here for analysis.
+- Do not assume the user will record one; if the bug is animation/timing-dependent and no video exists, use the selected host’s existing capture path (on Windows desktop, `$windows-gui-manual-testing` step 3), then return here for analysis.
 
 ## When the user shares only a description, not a video
 

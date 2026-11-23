@@ -1,11 +1,12 @@
 """Lift committed stock Markdown code nodes to original LF string offsets.
 
-The pinned paragraph/heading extractors preserve backticks in source order.
+The bundled paragraph/heading extractors preserve backticks in source order.
 Ordinal backtick correspondence therefore lifts parser-chosen endpoints without
 searching normalized token text or implementing Markdown extraction grammar.
 Image labels transport an exact parent slice; link parsing retains its source.
 """
 from dataclasses import dataclass, field
+import re
 
 from markdown_it import MarkdownIt
 from markdown_it.rules_core import inline as core_inline
@@ -14,7 +15,7 @@ from markdown_it.rules_inline.backticks import backtick
 
 
 class ContextProvenanceError(RuntimeError):
-    """The pinned parser's source-origin contract was not acquired."""
+    """The bundled parser's source-origin contract was not acquired."""
 
 
 def _require(condition: bool, label: str) -> None:
@@ -190,5 +191,66 @@ class _CodeContext:
 
 
 def document_context(source: str) -> tuple[str, list[tuple[int, int]]]:
-    """Return a same-offset projection and committed code spans in LF input."""
-    return _CodeContext(source).run()
+    """Return same-offset visibility and original-character code spans.
+
+    Treat one leading BOM as an envelope. Keep it visible and lift code spans
+    back to the original character offsets.
+    The caller's source bytes are never normalized or rewritten.
+    """
+    if source.startswith("\ufeff"):
+        visible, spans = _document_text_context(source[1:])
+        return "\ufeff" + visible, [(start + 1, stop + 1) for start, stop in spans]
+    return _document_text_context(source)
+
+
+def _document_text_context(source: str) -> tuple[str, list[tuple[int, int]]]:
+    """Lift the bundled parser's LF contract to original CRLF/lone-CR offsets."""
+    if "\r" not in source:
+        return _CodeContext(source).run()
+    normalized = source.replace("\r\n", "\n").replace("\r", "\n")
+    visible, spans = _CodeContext(normalized).run()
+    boundaries = [0]
+    projection = []
+    offset = 0
+    for char in visible:
+        if source.startswith("\r\n", offset):
+            _require(char == "\n", "newline-projection")
+            projection.append("\r\n")
+            offset += 2
+        else:
+            projection.append(char)
+            offset += 1
+        boundaries.append(offset)
+    _require(offset == len(source), "newline-source-identity")
+    return "".join(projection), [(boundaries[start], boundaries[stop]) for start, stop in spans]
+
+def document_h1_starts(source: str, titles: tuple[str, ...]) -> list[tuple[str, int]]:
+    """Locate exact top-level ATX titles using the bundled Markdown grammar.
+
+    Keep this heading parse separate from the established code-origin pass.
+    A leading BOM is an envelope byte; returned starts retain it and indentation.
+    """
+    normalized = source.replace("\r\n", "\n").replace("\r", "\n")
+    if normalized.startswith("\ufeff"):
+        normalized = normalized[1:]
+    tokens = MarkdownIt("commonmark", {"maxNesting": len(source) + 1}).parse(normalized)
+    bounds = [0] + [match.end() for match in re.finditer(r"\r\n|\r|\n", source)]
+    starts = []
+    for index, token in enumerate(tokens):
+        if (token.type != "heading_open" or token.level != 0
+                or token.tag != "h1" or token.markup != "#"):
+            continue
+        _require(index + 1 < len(tokens) and tokens[index + 1].type == "inline",
+                 "heading-inline")
+        title = tokens[index + 1].content
+        if title not in titles:
+            continue
+        _require(token.map is not None and len(token.map) == 2, "heading-line-map")
+        line = token.map[0]
+        _require(0 <= line < len(bounds), "heading-line-range")
+        start = bounds[line]
+        stop = bounds[line + 1] if line + 1 < len(bounds) else len(source)
+        position = source.find("#", start, stop)
+        _require(start <= position < stop, "heading-marker-origin")
+        starts.append((title, position))
+    return starts

@@ -16,10 +16,9 @@ proof under every note. A proven clustering is **6 documents** (adapt the split 
 
 Severity labels: `[КРИТ]` / `[ВАЖНО]` / `[КОСМ]` (red / amber / green). Tone: рекомендательный.
 
-Keep the canonical artifacts as **generators** (code that emits the docx), not hand-edited docx —
-edit the generator and rebuild, never the output file (it is regenerated and edits are lost). Keep
-plain-text working copies of the dissertation/autoreferat (per chapter) and the список литературы
-beside the generators for finding-anchoring and for grep-verifying the build.
+If the chosen workflow generates DOCX, edit its canonical inputs and rebuild rather than
+editing derived output. Do not introduce a generator for a one-off editable document. Keep any
+extracted text as working evidence, not as the source of truth for page or formula findings.
 
 ## Reference toolchain (one proven way — adapt freely)
 
@@ -62,19 +61,17 @@ Each cost a debugging cycle and generalizes:
 
 **Verify the build — do not skip:**
 
-- Extract each output's text (unzip `word/document.xml`, strip tags) and **grep the new markers** —
-  a defect class is closed when its grep count equals the expected count (convergence by
-  class-exhaustion, `verification-discipline.md` §8).
-- Confirm **0 unresolved placeholders** and the expected **editable-formula count** in each
-  formula-bearing document.
+- Check built finding identities and anchors using `verification-discipline.md` §8; a count only
+  helps check artifact completeness.
+- When applicable, confirm no unresolved template/formula placeholders and inspect rendered and
+  editable equations in the selected toolchain. An OLE-object count applies only to an OLE route.
 
 ## Environment notes
 
 Use the libraries the chosen toolchain needs (e.g. Node + a docx lib; Python + a Word-COM bridge +
 MathType on Windows for OLE). Render-check formulas with a PDF rasterizer (`pdftoppm`); extract text
 with a PDF/zip extractor. Keep the pipeline on a persistent disk (not a volatile RAM/temp drive).
-Cyrillic search: Bash `grep`, not PowerShell `Select-String`; `pdftotext` mangles Cyrillic — grep
-Latin tokens/digits only.
+For Unicode extraction and source-anchor checks, use `verification-discipline.md` §8.
 
 Keep all intermediate artifacts — extracted plain-text chapters, the список-литературы dump, `pdftoppm`
 render crops, generated base docx, and any Word-COM export PDF — under a repo-local `.scratch/` working

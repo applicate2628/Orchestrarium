@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Run installer-level regression checks for agents-mode normalization."""
+"""Check project preservation and migration-only global preferences."""
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import shutil
 import stat
@@ -13,7 +12,6 @@ import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 
 STALE_OVERLAY = """\
@@ -100,8 +98,6 @@ INSTALLER_CASES = [
 ]
 
 PRODUCTION_PROVIDER_NAMES = frozenset({"codex", "claude"})
-EXAMPLE_PROVIDER_NAMES: frozenset[str] = frozenset()
-EXPLICIT_ONLY_PROVIDER_NAMES = frozenset({"kimi", "grok"})
 
 
 def validate_production_provider_partition() -> None:
@@ -114,58 +110,6 @@ def validate_production_provider_partition() -> None:
 
 class InstallerRegressionError(Exception):
     """Raised when installer output does not match the agents-mode contract."""
-
-
-def load_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def parse_agents_mode(path: Path) -> dict[str, Any]:
-    scalars: dict[str, str] = {}
-    profiles: dict[str, dict[str, list[str]]] = {}
-    counts: dict[str, int] = {}
-    current_block: str | None = None
-    current_profile: str | None = None
-
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        if not line.startswith(" ") and ":" in line:
-            key, rest = line.split(":", 1)
-            current_block = key.strip()
-            current_profile = None
-            if current_block not in {
-                "externalPriorityProfiles",
-                "externalOpinionCounts",
-            }:
-                scalars[current_block] = strip_comment(rest)
-            continue
-        if current_block == "externalPriorityProfiles":
-            if line.startswith("  ") and not line.startswith("    ") and ":" in line:
-                current_profile = line.split(":", 1)[0].strip()
-                profiles[current_profile] = {}
-                continue
-            if line.startswith("    ") and current_profile and ":" in line:
-                lane, rest = line.split(":", 1)
-                profiles[current_profile][lane.strip()] = parse_provider_list(rest)
-                continue
-        if current_block == "externalOpinionCounts":
-            if line.startswith("  ") and ":" in line:
-                lane, rest = line.split(":", 1)
-                counts[lane.strip()] = int(strip_comment(rest))
-
-    return {"scalars": scalars, "profiles": profiles, "counts": counts}
-
-
-def strip_comment(value: str) -> str:
-    return value.split(" #", 1)[0].strip()
-
-
-def parse_provider_list(value: str) -> list[str]:
-    value = strip_comment(value)
-    if value.startswith("[") and value.endswith("]"):
-        value = value[1:-1]
-    return [provider.strip() for provider in value.split(",") if provider.strip()]
 
 
 def run_installer(root: Path, case: InstallerCase, target_rel: Path) -> None:
@@ -189,13 +133,13 @@ def run_installer(root: Path, case: InstallerCase, target_rel: Path) -> None:
         )
 
 
-def run_python_codex_global_installer(root: Path, userprofile: Path) -> None:
+def run_global_installer(root: Path, case: InstallerCase, userprofile: Path) -> None:
     env = os.environ.copy()
     env["USERPROFILE"] = str(userprofile)
     env["HOME"] = str(userprofile)
     command = [
         sys.executable,
-        str(root / "scripts" / "install-codex.py"),
+        str(root / case.script),
         "--global",
         "--force",
     ]
@@ -208,7 +152,7 @@ def run_python_codex_global_installer(root: Path, userprofile: Path) -> None:
     )
     if result.returncode != 0:
         raise InstallerRegressionError(
-            "codex Python global installer failed:\n"
+            f"{case.name} Python global installer failed:\n"
             f"{result.stdout}\n{result.stderr}"
         )
 
@@ -261,163 +205,71 @@ def validate_codex_native_role_install(project_root: Path, root: Path) -> None:
         raise InstallerRegressionError("codex canonical .agents skills body missing")
 
 
-def validate_overlay(
-    case: InstallerCase,
-    overlay: Path,
-    schema_data: dict[str, Any],
-    *,
-    expected_codex_profile: str = "gpt-6.1-sol-xhigh",
-) -> None:
-    if not overlay.is_file():
-        raise InstallerRegressionError(f"{case.name} did not create {overlay}")
+def assert_overlay_bytes(path: Path, expected: bytes, label: str) -> None:
+    if path.is_symlink() or not path.is_file() or path.read_bytes() != expected:
+        raise InstallerRegressionError(f"{label}: preference bytes or file type changed: {path}")
 
-    text = overlay.read_text(encoding="utf-8")
-    if "externalClaudeApiMode" in text or "claude-secret" in text:
-        raise InstallerRegressionError(f"{case.name} kept retired agents-mode data")
-    parsed = parse_agents_mode(overlay)
-    scalars = parsed["scalars"]
-    profiles = parsed["profiles"]
-    counts = parsed["counts"]
 
-    expected_profiles = schema_data["priorityProfiles"]
-    for profile_name, lanes in expected_profiles.items():
-        if profiles.get(profile_name) != lanes:
-            raise InstallerRegressionError(
-                f"{case.name} shipped profile {profile_name} drifted"
-            )
-
-    expected_counts = {
-        lane: int(value)
-        for lane, value in schema_data["externalOpinionCounts"].items()
-    }
-    if counts != expected_counts:
-        raise InstallerRegressionError(f"{case.name} opinion counts drifted")
-
-    if scalars.get("externalCodexProfile") != expected_codex_profile:
-        raise InstallerRegressionError(
-            f"{case.name} externalCodexProfile drifted "
-            f"(expected {expected_codex_profile})"
-        )
-
-    custom = profiles.get("custom")
-    if custom is None:
-        raise InstallerRegressionError(f"{case.name} did not preserve custom profile")
-    if custom.get("advisory.repo-understanding") != ["codex", "reserve"]:
-        raise InstallerRegressionError(
-            f"{case.name} did not sanitize advisory custom profile"
-        )
-    if custom.get("worker.default-implementation") != ["claude"]:
-        raise InstallerRegressionError(
-            f"{case.name} did not sanitize worker custom profile"
-        )
-
-    for profile_name, lanes in profiles.items():
-        for lane_name, providers in lanes.items():
-            if any(
-                provider in EXAMPLE_PROVIDER_NAMES | EXPLICIT_ONLY_PROVIDER_NAMES
-                for provider in providers
-            ):
-                raise InstallerRegressionError(
-                    f"{case.name} profile {profile_name}/{lane_name} kept non-auto provider"
-                )
-            if "reserve" in providers:
-                if not (lane_name.startswith("advisory.") or lane_name.startswith("review.")):
-                    raise InstallerRegressionError(
-                        f"{case.name} profile {profile_name}/{lane_name} kept worker reserve"
-                    )
-                if providers[-1] != "reserve":
-                    raise InstallerRegressionError(
-                        f"{case.name} profile {profile_name}/{lane_name} reserve is not last"
-                    )
-
-    if case.codex_line:
-        if scalars.get("externalClaudeProfile") != "opus-xhigh":
-            raise InstallerRegressionError(
-                f"{case.name} missing Codex-only externalClaudeProfile"
-            )
-    elif "externalClaudeProfile" in scalars:
-        raise InstallerRegressionError(
-            f"{case.name} exposed Codex-only externalClaudeProfile"
-        )
+def assert_no_overlay(path: Path, label: str) -> None:
+    if any(os.path.lexists(candidate) for candidate in (path, path.with_suffix(""))):
+        raise InstallerRegressionError(f"{label}: installer created a preferences file: {path}")
 
 
 def run_regression(root: Path) -> None:
     validate_production_provider_partition()
-    schema_data = load_json(root / "shared" / "agents-mode.schema.json")
     scratch = root / ".scratch" / "agents-mode-installer-regression" / uuid.uuid4().hex
     scratch.mkdir(parents=True, exist_ok=True)
     validation_error: BaseException | None = None
     try:
         for case in INSTALLER_CASES:
-            project_root = scratch / f"{case.name}-project"
-            project_root.mkdir(parents=True, exist_ok=True)
-            overlay = seed_stale_overlay(project_root, case)
-            run_installer(
-                root,
-                case,
-                Path(".scratch")
-                / "agents-mode-installer-regression"
-                / scratch.name
-                / f"{case.name}-project",
-            )
-            validate_overlay(case, overlay, schema_data)
+            project = scratch / f"{case.name}-project"
+            overlay = seed_stale_overlay(project, case)
+            original = overlay.read_bytes()
             if case.codex_line:
-                validate_codex_native_role_install(project_root, root)
+                original += b"externalCodexProfile: gpt-5.6-sol-max\n"
+                overlay.write_bytes(original)
+            legacy = overlay.with_suffix("")
+            legacy_bytes = b"# legacy project preference\nexternalClaudeApiMode: disabled\n"
+            legacy.write_bytes(legacy_bytes)
+            run_installer(root, case, project.relative_to(root))
+            assert_overlay_bytes(overlay, original, f"{case.name} project")
+            assert_overlay_bytes(legacy, legacy_bytes, f"{case.name} project legacy")
+            if case.codex_line:
+                validate_codex_native_role_install(project, root)
 
-        codex_fresh_project = scratch / "codex-fresh-project"
-        codex_fresh_project.mkdir(parents=True, exist_ok=True)
-        codex_case = next(case for case in INSTALLER_CASES if case.name == "codex")
-        run_installer(
-            root,
-            codex_case,
-            Path(".scratch")
-            / "agents-mode-installer-regression"
-            / scratch.name
-            / "codex-fresh-project",
-        )
-        validate_codex_native_role_install(codex_fresh_project, root)
+            fresh = scratch / f"{case.name}-fresh-project"
+            fresh.mkdir()
+            run_installer(root, case, fresh.relative_to(root))
+            assert_no_overlay(fresh / case.overlay, f"{case.name} fresh project")
+            if case.codex_line:
+                validate_codex_native_role_install(fresh, root)
 
-        codex_explicit_old_project = scratch / "codex-explicit-old-profile-project"
-        codex_explicit_old_project.mkdir(parents=True, exist_ok=True)
-        explicit_old_overlay = codex_explicit_old_project / codex_case.overlay
-        explicit_old_overlay.parent.mkdir(parents=True, exist_ok=True)
-        explicit_old_overlay.write_text(
-            STALE_OVERLAY + "externalCodexProfile: gpt-5.6-sol-max\n",
-            encoding="utf-8",
-        )
-        run_installer(
-            root,
-            codex_case,
-            Path(".scratch")
-            / "agents-mode-installer-regression"
-            / scratch.name
-            / "codex-explicit-old-profile-project",
-        )
-        validate_overlay(
-            codex_case,
-            explicit_old_overlay,
-            schema_data,
-            expected_codex_profile="gpt-5.6-sol-max",
-        )
-        validate_codex_native_role_install(codex_explicit_old_project, root)
+            home = scratch / f"{case.name}-global-home"
+            pack_global = home / f".{case.name}" / ".agents-mode.yaml"
+            pack_global.parent.mkdir(parents=True)
+            # Exercise in-place legacy handling for both provider adapters.
+            pack_legacy = pack_global.with_suffix("")
+            pack_bytes = b"consultantMode: external\r\n# local provider preference\r\n"
+            pack_legacy.write_bytes(pack_bytes)
+            shared = home / ".agents-mode.yaml"
+            shared_before = b"# shared preference\r\nexternalClaudeApiMode: disabled  # intentional\r\nmcpMode: force\r\n"
+            shared_after = b"# shared preference\r\nreserveResolver: disabled  # intentional\r\nmcpMode: force\r\n"
+            shared.write_bytes(shared_before)
+            run_global_installer(root, case, home)
+            assert_overlay_bytes(pack_legacy, pack_bytes, f"{case.name} global legacy")
+            if os.path.lexists(pack_global):
+                raise InstallerRegressionError(f"{case.name} moved its existing legacy preferences")
+            assert_overlay_bytes(shared, shared_after, f"{case.name} shared global")
+            if case.codex_line:
+                validate_codex_native_role_install(home, root)
 
-        codex_global_home = scratch / "codex-python-global-home"
-        codex_global_home.mkdir(parents=True, exist_ok=True)
-        codex_global_case = InstallerCase(
-            name="codex-python-global",
-            script="scripts/install-codex.py",
-            overlay=".codex/.agents-mode.yaml",
-            codex_line=True,
-        )
-        overlay = seed_stale_overlay(codex_global_home, codex_global_case)
-        run_python_codex_global_installer(root, codex_global_home)
-        validate_overlay(codex_global_case, overlay, schema_data)
-        validate_codex_native_role_install(codex_global_home, root)
-
-        codex_global_fresh_home = scratch / "codex-python-global-fresh-home"
-        codex_global_fresh_home.mkdir(parents=True, exist_ok=True)
-        run_python_codex_global_installer(root, codex_global_fresh_home)
-        validate_codex_native_role_install(codex_global_fresh_home, root)
+            fresh_home = scratch / f"{case.name}-fresh-global-home"
+            fresh_home.mkdir()
+            run_global_installer(root, case, fresh_home)
+            assert_no_overlay(fresh_home / f".{case.name}" / ".agents-mode.yaml", f"{case.name} fresh global")
+            assert_no_overlay(fresh_home / ".agents-mode.yaml", f"{case.name} fresh shared global")
+            if case.codex_line:
+                validate_codex_native_role_install(fresh_home, root)
     except BaseException as exc:
         validation_error = exc
         raise

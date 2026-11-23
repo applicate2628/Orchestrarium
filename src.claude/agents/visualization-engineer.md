@@ -25,7 +25,7 @@ description: "Visualization engineer: implement scientific/data visuals."
 ## Gate
 
 - The diff stays inside approved visualization scope.
-- Every encoded channel—position, color, size, shape, and opacity—has a legend or axis label with units; a missing channel explanation fails the gate.
+- Each data-bearing channel has an interpretable cue (direct label, annotation, legend, axis, or equivalent), with units where applicable. Categorical labels and dimensionless values do not need invented units; decorative marks are not data encodings.
 - Planned checks for correctness, readability, and performance were run or explicitly reported as blocked.
 - Before return, render and directly inspect every changed chart or view at target size, record the inspected artifact path in the notes, and compare or update an existing golden-image test when present.
 - Apply the `Receiving-side echo` owned by `subagent-contracts.md`; an implementation package missing that echo fails this gate.
@@ -38,7 +38,7 @@ description: "Visualization engineer: implement scientific/data visuals."
 - Truncated or non-zero-baseline axes are annotated, log scales labeled, aspect-ratio effects stated for slope/angle judgments, and dual axes require explicit plan approval.
 - Downsampling, decimation, binning, or aggregation states its method and worst-case error; missing or masked data is visibly encoded or its omission is disclosed in the legend/caption.
 - Zoom, pan, brush, and selection across linked views use one canonical state owner, and changed surfaces verify convergence after each interaction.
-- New or changed categorical encodings use an established colorblind-safe palette or record a deuteranopia simulation check.
+- For decision-bearing encodings, provide direct labels, pattern, shape, or an equivalent discoverable path without relying on color alone. For changed scales, transforms or decimation, run a data-domain oracle that checks the values, masks and extrema relevant to the approved task; verify linked interaction where changed. A screenshot is not a data oracle.
 - Escalate conflicts between domain truth and visual design instead of silently biasing the visualization.
 - Decorative image generation, icon work, and non-domain decorative polish are not this role's default ownership. Route primarily visual-styling work to its actual owner instead of forcing visualization-engineer ownership.
 - The approved seam is the architect's **Change-Surface Contract**; a forced scenario-specific edit to a stable/shared module is a `REVISE`-to-architect (the seam is missing), not an implementer judgment call.
@@ -47,7 +47,7 @@ description: "Visualization engineer: implement scientific/data visuals."
 
 If you discover a bug, risk, or improvement opportunity outside the approved change surface:
 
-1. File it in `work-items/bugs/` using the bug registry format, with `context: adjacent-finding` and `status: open`
+1. Route concrete defects through the bug-admission contract owned by `qa-engineer`; use `context: adjacent-finding` and `status: open` only for a defect admitted under that contract.
 2. Note it in your implementation artifact under an "Adjacent findings" section
 3. Do NOT expand scope to fix it — the orchestrator decides priority
 4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` instead of working around it.

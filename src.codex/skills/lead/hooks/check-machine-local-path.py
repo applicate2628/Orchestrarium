@@ -109,23 +109,28 @@ def _is_placeholder_or_allowed(segment: str) -> bool:
     return False
 
 
+def _machine_path_spans(text: str):
+    # Every supported absolute path form has at least one separator.
+    if '/' not in text and '\\' not in text:
+        return
+    for pattern in _PATTERNS:
+        for match in pattern.finditer(text):
+            if _is_placeholder_or_allowed(match.group(1)):
+                continue
+            matched = match.group(0)
+            prefix = matched.strip().strip("\"'`(=")
+            start = match.start() + matched.index(prefix)
+            yield start, start + len(prefix)
+
+
 def find_machine_paths(text: str) -> list[str]:
     """Return concrete machine-local path prefixes found in text (deduped)."""
-    hits: list[str] = []
-    for pat in _PATTERNS:
-        for m in pat.finditer(text):
-            segment = m.group(1)
-            if _is_placeholder_or_allowed(segment):
-                continue
-            hits.append(m.group(0).strip().strip("\"'`(=") )
-    # dedup preserving order
-    seen: set[str] = set()
-    out: list[str] = []
-    for h in hits:
-        if h not in seen:
-            seen.add(h)
-            out.append(h)
-    return out
+    return list(dict.fromkeys(text[start:end] for start, end in _machine_path_spans(text)))
+
+
+def find_machine_path_occurrences(text: str) -> tuple[tuple[int, int], ...]:
+    """Return exact character spans for the same classified path prefixes."""
+    return tuple(sorted(set(_machine_path_spans(text))))
 
 
 def _target_path(tool_input: dict) -> str:

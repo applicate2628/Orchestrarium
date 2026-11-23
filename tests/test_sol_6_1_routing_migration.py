@@ -20,20 +20,18 @@ PRIORS = ROOT / 'tests/fixtures/sol-6-1-priors'
 
 def check_no_flags_codex_uses_sol_6_1_xhigh():
     flags, model, effort = provider_prompt.resolved_profile('codex', [])
-    assert (model, effort) == ('gpt-6.1-sol', 'xhigh')
-    assert flags == ['--model', 'gpt-6.1-sol', '-c', 'model_reasoning_effort=xhigh']
+    assert (model, effort) == ('gpt-6.2-sol', 'xhigh')
+    assert flags == ['--model', 'gpt-6.2-sol', '-c', 'model_reasoning_effort=xhigh']
 
 
 def check_live_native_defaults_preserve_efforts_except_scientific():
     policy = json.loads((ROOT/'shared/role-routing-policy.v1.json').read_text())
     for path in sorted((ROOT/'src.codex/agents').glob('*.toml')):
-        prior = tomllib.loads((PRIORS/path.name).read_text())
         current = tomllib.loads(path.read_text())
-        expected_model = 'gpt-6-luna' if path.stem.startswith('mechanical-') else 'gpt-6.1-sol'
-        expected_effort = 'high' if path.stem == 'scientific-software-engineer' else prior['model_reasoning_effort']
-        assert (current['model'],current['model_reasoning_effort']) == (expected_model,expected_effort), path.name
         profile = policy['profiles'][policy['roles'][path.stem]['defaultProfile']]
-        assert (profile['codexModel'],profile['effort']) == (expected_model,expected_effort)
+        expected = (None, None) if path.stem == 'default' else (profile['codexModel'], profile['effort'])
+        assert (current.get('model'), current.get('model_reasoning_effort')) == expected, path.name
+    assert (policy['profiles'][policy['roles']['scientific-software-engineer']['defaultProfile']]['codexModel'], policy['profiles'][policy['roles']['scientific-software-engineer']['defaultProfile']]['effort']) == ('gpt-6.2-sol', 'high')
 
 
 def check_bounded_medium_corridors_preserve_critical_floors():
@@ -67,8 +65,9 @@ def check_customized_prior_fails_closed_without_mutation(tmp_path):
     agents = tmp_path/'agents'; agents.mkdir()
     customized = (PRIORS/'analyst.toml').read_bytes() + b'\n# user customization\n'
     target = agents/'analyst.toml'; target.write_bytes(customized)
-    with unittest.TestCase().assertRaisesRegex(ValueError, 'E_CREATE_ONLY_COLLISION'):
-        installer._preflight_codex_native_roles(ROOT,ROOT/'src.codex/agents',agents,tmp_path/'config.toml')
+    plan = installer._preflight_codex_native_roles(ROOT,ROOT/'src.codex/agents',agents,tmp_path/'config.toml')
+    item = next(item for item in plan.role_files if item.relative_path.name == 'analyst.toml')
+    assert item.payload == customized and item.configured and item.accepted_prior is None
     assert target.read_bytes() == customized
 
 
@@ -96,11 +95,12 @@ class MigrationTests(unittest.TestCase):
             target = Path(directory)/'skills'; target.mkdir()
             with tarfile.open(PRIORS/'canonical-skills.tar.gz') as archive:
                 archive.extractall(target, filter='data')
-            assert installer._tree_sha256(target/'lead', ignore_runtime_cache=True) == '0627712baff8adf6423d8cb766e5effcfa8001196e077eaf5d1b4f17e5d97a85'
+            assert installer._legacy_tree_sha256(target/'lead', ignore_runtime_cache=True) == '0627712baff8adf6423d8cb766e5effcfa8001196e077eaf5d1b4f17e5d97a85'
+            assert installer._tree_sha256(target/'lead', ignore_runtime_cache=True) == 'e00e18b805aad33393cf2849b2f2a6612ac641135b225879b8d4f84240a003bc'
             plan = installer._preflight_canonical_skills(ROOT/'src.codex/skills', target, root=ROOT)
             try:
                 lead = next(s for s in plan.skills if s.name == 'lead')
-                assert lead.accepted_prior == '0627712baff8adf6423d8cb766e5effcfa8001196e077eaf5d1b4f17e5d97a85'
+                assert lead.accepted_prior == 'e00e18b805aad33393cf2849b2f2a6612ac641135b225879b8d4f84240a003bc'
                 projection = installer._stage_claude_transport_projection(ROOT,plan.stage.path/'scripts',target/'lead/scripts')
                 assert projection.accepted_prior_set == '604d7d0b'
             finally:
@@ -125,8 +125,8 @@ class MigrationTests(unittest.TestCase):
                 with expected, installer._InstallTransaction([agents], enabled=True) as transaction:
                     owner = installer._CreateOnlyMutablePath(root, transaction, dry_run=False)
                     installer._install_codex_native_roles(ROOT, ROOT/'src.codex/agents', agents, owner, plan=plan)
-                    for path in agents.glob('*.toml'):
-                        assert path.read_bytes() == (ROOT/'src.codex/agents'/path.name).read_bytes()
+                    for item in plan.role_files:
+                        assert (agents/item.relative_path).read_bytes() == item.payload
                     if commit:
                         transaction.commit()
                 if commit:
@@ -159,18 +159,19 @@ class MigrationTests(unittest.TestCase):
         scope = {'authority':'parent-dispatcher-only','allowedTools':[], 'changeSurface':['accepted bounded contract']}
         for role,task in [('explorer','exploration'),('planner','planning'),('worker','engineering'),('scientific-software-engineer','engineering')]:
             description = resolver.describe_ordinary_native_role_options(role,task,host,repo_root=ROOT)
-            selected = resolver.resolve_ordinary_native_dispatch(description,requested_model='gpt-6.1-sol',requested_effort='medium',caller_rationale='Accepted bounded contract with directly testable oracle.',approved_execution_scope=scope)
+            selected = resolver.resolve_ordinary_native_dispatch(description,requested_model='gpt-6.2-sol',requested_effort='medium',caller_rationale='Accepted bounded contract with directly testable oracle.',approved_execution_scope=scope,
+                preference_deviation_reason='The bounded, deterministic oracle makes Medium sufficient.')
             assert selected['status'] == 'resolved', selected
             assert selected['resolvedProfile'] == 'frontier-medium'
             assert selected['fallback'] == 'none'
         description = resolver.describe_ordinary_native_role_options('scientific-software-engineer','engineering',host,repo_root=ROOT)
-        for model,effort in [('gpt-6.1-sol','max'),('gpt-unknown','high')]:
+        for model,effort in [('gpt-6.2-sol','max'),('gpt-unknown','high')]:
             result = resolver.resolve_ordinary_native_dispatch(description,requested_model=model,requested_effort=effort,caller_rationale='Explicit request.',approved_execution_scope=scope)
             assert result['status'] == 'denied'
             assert result['fallback'] == 'none'
         for role,task in [('security-reviewer','critical-security'),('architecture-reviewer','review'),('worker','recovery')]:
             description = resolver.describe_ordinary_native_role_options(role,task,host,repo_root=ROOT)
-            result = resolver.resolve_ordinary_native_dispatch(description,requested_model='gpt-6.1-sol',requested_effort='medium',caller_rationale='Bounded work cannot lower this floor.',approved_execution_scope=scope)
+            result = resolver.resolve_ordinary_native_dispatch(description,requested_model='gpt-6.2-sol',requested_effort='medium',caller_rationale='Bounded work cannot lower this floor.',approved_execution_scope=scope)
             assert result['status'] == 'denied'
             assert result['fallback'] == 'none'
 
@@ -196,8 +197,8 @@ class MigrationTests(unittest.TestCase):
     def test_external_medium_is_not_admitted_by_operator_schema(self):
         schema = json.loads((ROOT/'shared/agents-mode.schema.json').read_text())
         profile = next(row for row in schema['scalarKeys'] if row['name'] == 'externalCodexProfile')
-        assert 'gpt-6.1-sol-medium' not in profile['allowed']
-        assert profile['default'] == 'gpt-6.1-sol-xhigh'
+        assert 'gpt-6.2-sol-medium' not in profile['allowed']
+        assert profile['default'] == 'gpt-6.2-sol-xhigh'
         # Native bounded medium must stay available behind the role/task selector;
         # security/review/recovery negatives are asserted by the selector test above.
         check_bounded_medium_corridors_preserve_critical_floors()

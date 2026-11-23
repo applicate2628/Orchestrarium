@@ -30,6 +30,7 @@ volatile file can no longer take the parity gate down with it either.)
 from __future__ import annotations
 
 import filecmp
+import ast
 from pathlib import Path
 from typing import NamedTuple
 
@@ -143,6 +144,85 @@ REGISTERED_HOOK_STEMS_BY_PLATFORM = {
         "turn-anchor-reminder",
     }),
 }
+
+HOOK_METADATA = (
+    ("check-bugfix-discipline", "scripts", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch"),
+    ("check-git-push-gate", "scripts", "PreToolUse", "Bash|PowerShell"),
+    ("check-passive-polling-stop", "scripts", "Stop", None),
+    ("check-machine-local-path", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch"),
+    ("check-no-trash-in-repo", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell"),
+    ("check-parallel-mcp-momentum", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell|shell_command|exec_command"),
+    ("check-stale-relation-residue", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch"),
+    ("check-repository-orientation", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell|shell_command|exec_command"),
+    ("check-mcp-momentum", "hooks", "PreToolUse", "Grep|Bash|PowerShell|shell_command|exec_command"),
+    ("mcp-usage-reminder", "scripts", "SessionStart", None),
+    ("check-typed-routing", "hooks", "PreToolUse", "Agent"),
+    ("agents-mode-reminder", "scripts", "SessionStart", None),
+    ("check-scratch-valuables", "scripts", "SessionStart", None),
+    ("turn-anchor-reminder", "scripts", "UserPromptSubmit", None),
+)
+HOOK_DIRECTORY_OVERRIDES = {("claude", "check-mcp-momentum"): "scripts"}
+HOOK_SCRIPT_OVERRIDES = {"check-git-push-gate": "check-git-push-gate-runner.py"}
+
+
+def hook_artifact_target(platform: str, installed_root: Path, marker: str) -> Path | None:
+    return next((path for _, path, _, _ in _catalog_specs(
+        platform, installed_root, {marker}, HOOK_METADATA, HOOK_DIRECTORY_OVERRIDES,
+        HOOK_SCRIPT_OVERRIDES, require_complete=False)), None)
+
+
+def _catalog_specs(platform, root, membership, metadata, directories, scripts, *, require_complete=True):
+    specs = []
+    for stem, directory, event, matcher in metadata:
+        if stem in membership:
+            directory = directories.get((platform, stem), directory)
+            script = scripts.get(stem, f"{stem}.py")
+            if (directory not in {"hooks", "scripts"} or not script.endswith(".py")
+                    or any(c in script for c in "/\\:") or any(ord(c) < 32 for c in script)):
+                raise ValueError("invalid registered hook path")
+            specs.append((stem, root / directory / script, event, matcher))
+    if require_complete and (len(specs) != len(membership) or {stem for stem, *_ in specs} != membership):
+        raise ValueError("registered hook membership did not resolve uniquely")
+    return specs
+
+
+def registered_hook_specs(platform: str, installed_root: Path):
+    return _catalog_specs(platform, installed_root, registered_hook_stems(platform),
+                          HOOK_METADATA, HOOK_DIRECTORY_OVERRIDES, HOOK_SCRIPT_OVERRIDES)
+
+
+def retained_hook_specs(catalog: Path, platform: str, installed_root: Path):
+    """Read the retained package catalog as data, without importing its code."""
+    names = {"REGISTERED_HOOK_STEMS_BY_PLATFORM", "HOOK_METADATA",
+             "HOOK_DIRECTORY_OVERRIDES", "HOOK_SCRIPT_OVERRIDES"}
+    with catalog.open("rb") as stream:
+        source = stream.read(65537)
+    if len(source) > 65536:
+        raise ValueError("retained hook catalog is oversized")
+    values = {}
+    try:
+        for node in ast.parse(source).body:
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                target = node.targets[0]
+                if isinstance(target, ast.Name) and target.id in names:
+                    if target.id in values:
+                        raise ValueError("duplicate retained hook catalog declaration")
+                    values[target.id] = node.value
+        table = values.pop("REGISTERED_HOOK_STEMS_BY_PLATFORM")
+        if not isinstance(table, ast.Dict):
+            raise ValueError("retained membership is not a literal mapping")
+        member, = (value for key, value in zip(table.keys, table.values)
+                   if isinstance(key, ast.Constant) and key.value == platform)
+        if (not isinstance(member, ast.Call) or not isinstance(member.func, ast.Name)
+                or member.func.id != "frozenset" or len(member.args) != 1 or member.keywords):
+            raise ValueError("retained membership is not a literal frozenset")
+        return _catalog_specs(
+            platform, installed_root, frozenset(ast.literal_eval(member.args[0])),
+            *(ast.literal_eval(values[name]) for name in
+              ("HOOK_METADATA", "HOOK_DIRECTORY_OVERRIDES", "HOOK_SCRIPT_OVERRIDES")),
+        )
+    except (AttributeError, KeyError, SyntaxError, TypeError, ValueError) as exc:
+        raise ValueError("invalid retained hook catalog") from exc
 
 MIRROR_SCRIPT_DIRS = ("src.claude/agents/scripts", "src.codex/skills/lead/scripts")
 MIRROR_HOOK_DIRS = ("src.claude/agents/hooks", "src.codex/skills/lead/hooks")

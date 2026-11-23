@@ -79,11 +79,14 @@ def test_installed_validator_scope_excludes_source_only_maintainer_checks() -> N
             assert not any(
                 str(value).startswith(source_only_prefixes) for value in action
             ), declaration
-            assert action[:2] != ("direct", "curated_registry"), declaration
             assert not any(
                 str(value).startswith("src.claude/skills/lead/")
                 for value in action
             ), declaration
+        # Registry validation reads @PACK/CLAUDE.md, not a source-only registry.
+        # Its runtime mutation oracle covers missing/extra/empty provider clauses.
+        registry_actions = [a for a in all_actions if a[:2] == ("direct", "curated_registry")]
+        assert len(registry_actions) == int(module.PROVIDER == "claude"), declaration
     codex = _load_validator_declaration(VALIDATOR_DECLARATIONS[0])
     codex_all_actions = next(actions for scope, actions in codex.ACTIONS if scope == "all")
     assert not any(
@@ -523,7 +526,10 @@ def test_claude_validator_maps_architect_apat_to_each_layout_owner() -> None:
         line for line in validation.stdout.splitlines()
         if "PASS" in line and architect_label in line
     )
-    assert validation.returncode == 0 and len(architect_passes) == 8, (
+    expected_labels = {"AP0-AP5 projection file", "AP0-AP5 projection section marker",
+                       *(f"AP{number} marker" for number in range(6))}
+    labels = {line.split(architect_label, 1)[1] for line in architect_passes}
+    assert validation.returncode == 0 and expected_labels <= labels, (
         f"{FAILURE_IDS[5]}: full Claude source validation did not check the "
         f"universal Architect owner\n{validation.stdout}\n{validation.stderr}"
     )
@@ -537,16 +543,28 @@ def test_claude_validator_maps_architect_apat_to_each_layout_owner() -> None:
             if architect_label in action[-1]
         )
 
-    source_actions = architect_actions("dev_repo")
-    installed_actions = architect_actions("installed")
-    assert len(source_actions) == len(installed_actions) == 8
-    assert {action[1] for action in source_actions} == {
-        "@ROOT/src.codex/skills/architect/SKILL.md"
-    }
-    assert {action[1] for action in installed_actions} == {
-        "@PACK/skills/architect/SKILL.md"
-    }
-    assert not architect_actions("all")
+    # The owner now resolves the same @SKILLS contract for source and installed
+    # layouts. Do not require two copied action lists with hardcoded paths.
+    common_actions = architect_actions("all")
+    assert expected_labels <= {action[-1].split(architect_label, 1)[1] for action in common_actions}
+    assert ("check_file", "@SKILLS/architect/SKILL.md", architect_label + "AP0-AP5 projection file") in common_actions
+    for number in range(6):
+        assert ("check_contains", "@SKILLS/architect/SKILL.md", f'<!-- APAT-SEMANTIC id="AP{number}.',
+                architect_label + f"AP{number} marker") in common_actions
+    assert ("check_contains", "@SKILLS/architect/SKILL.md", "<!-- APAT-BLOCK:ARCHITECT-DISPOSITION:BEGIN -->",
+            architect_label + "AP0-AP5 projection section marker") in common_actions
+    assert {action[1] for action in common_actions} == {"@SKILLS/architect/SKILL.md"}
+    assert not architect_actions("dev_repo")
+    assert not architect_actions("installed")
+    layout = declaration._ENGINE.detect_layout(validator, "claude", ROOT)
+    resolved = declaration._ENGINE.Validator(layout)
+    try:
+        assert resolved.path("@SKILLS/architect/SKILL.md") == (
+            ROOT / "src.codex/skills/architect/SKILL.md"
+        )
+    finally:
+        resolved.close()
+
 
 
 @pytest.mark.parametrize(
@@ -639,7 +657,10 @@ def test_installed_parity_and_validator(
     if provider == "claude":
         claude_architect = target / ".claude/skills/architect"
         universal_architect = target / ".agents/skills/architect"
-        assert claude_architect.is_symlink(), "Claude Architect projection must remain a link"
+        is_directory_link = claude_architect.is_symlink() or (
+            os.name == "nt" and claude_architect.is_junction()
+        )
+        assert is_directory_link, "Claude Architect projection must remain a directory link"
         assert claude_architect.resolve() == universal_architect.resolve()
 
     installed_validator = target / validator

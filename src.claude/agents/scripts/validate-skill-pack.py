@@ -421,12 +421,12 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'Claude addendum stays bounded instead of regrowing into a full blueprint copy'),
  ('check_normalized_sha256',
   '@ROOT/references-claude/subagent-operating-model.md',
-  '0a71aa6143437113672b9cf1c5f9782279007b2936c46fe622a8a837e5dbcb40',
+  'aefb77fe0203fa507a47a7d332076c5fd2c27658772c33e5e3a2630e2a228614',
   'Claude addendum matches the current canonical normalized fingerprint'),
  ('direct', 'role_index_claude', 'role_index_claude'),
  ('check_common_skill_body_pin',
   'analyzing-video-bugs',
-  'cf78ec0176f1726891045a2c2626363377994f34f081f9a9ad0ffbdb60740e91',
+  '7305d3e067fd2ad5f22ef65148d67a6a005a3ab311eba6b4253077bf768dd842',
   '@SKILLS/analyzing-video-bugs/SKILL.md'),
  ('check_common_skill_body_pin',
   'bug-hunting',
@@ -438,7 +438,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   '@SKILLS/explain-simply/SKILL.md'),
  ('check_common_skill_body_pin',
   'github-pr-review-bot',
-  'aea0d0e4529326d6347368ce6d811e7f398a4cb0ee18df8504444e8d4f621935',
+  'dd81c1dfa8524ecc1d4e9f24cf1946b3e86178542c1c318095cd3fa8679b2961',
   '@SKILLS/github-pr-review-bot/SKILL.md'),
  ('check_contains',
    '@SKILLS/github-pr-review-bot/SKILL.md',
@@ -476,29 +476,29 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'manual-repo-transfer',
   'src.codex/skills/manual-repo-transfer/SKILL.md',
   'src.claude/skills/manual-repo-transfer/SKILL.md'),
- ('check_common_skill_body_parity',
+ ('check_common_skill_body_pin',
   'repo-cleanup',
-  'src.codex/skills/repo-cleanup/SKILL.md',
-  'src.claude/skills/repo-cleanup/SKILL.md'),
+  '80d1a331232eb39aafbc1f328831212b1bb4633a0a7efe8aedaec99c04ad4234',
+  '@SKILLS/repo-cleanup/SKILL.md'),
  ('check_common_skill_body_pin',
   'mathtype-book-page',
   '615499de68dc03fccb23954e8ed94662076a9a744a493b71232ebdcce55357be',
   '@SKILLS/mathtype-book-page/SKILL.md'),
  ('check_common_skill_body_pin',
   'vak-dissertation-review',
-  'e259d114a1ea2372d9152a07445aeba82c51493b9caf7b39f3b6b96678e9b261',
+  '0ba50252acb53b2f3b2f7df573864b3f99a10b3969d04ce8107699293e2e7597',
   '@SKILLS/vak-dissertation-review/SKILL.md'),
  ('check_common_skill_body_pin',
   'vcpkg-builder',
-   '72208f4bec6ebf30eb49e99da12cc4e3cef6ef2572bb1583232a5fb1ebe791dc',
+   '25d93aa341555945c9503cf40dcae47bcd62e0f3868567b13616096748bbfa6c',
   '@SKILLS/vcpkg-builder/SKILL.md'),
  ('check_common_skill_body_pin',
   'vcpkg-ports-updater',
-  '17aedafce43a1de5c0917e2a14cba131fcd5dcccca67902ad42852108d90816f',
+  'bd1ca0e83dafd29a4cb2b2486ee2e9058764f396702f7bd45b72dfe719711734',
   '@SKILLS/vcpkg-ports-updater/SKILL.md'),
  ('check_common_skill_body_pin',
   'windows-gui-manual-testing',
-  '7dd186bbeee1fab2eb44e2d4f1c4772ffea87d918605efdcc00a5a8fb3c272b8',
+  '3e5a0dd384fba8f6e6e840d579cdfb64fff1a5ebd136048a2635803d9912a30e',
   '@SKILLS/windows-gui-manual-testing/SKILL.md'),
  ('direct', 'common_pin_completeness', 'common_pin_completeness'),
  ('check_file', '@SKILLS/lead/SKILL.md', 'lead has a curated role-skill file'),
@@ -566,7 +566,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
  ('check_absent',
   'src.claude/commands/agents-init-project.md',
   'allowed: external | auto | internal | disabled',
-  'agents-init-project restricts consultantMode to external/internal/disabled'),
+  'agents-init-project does not introduce consultantMode auto'),
  ('check_absent',
   'src.claude/agents/contracts/external-dispatch.md',
   'allowed: external | auto | internal | disabled',
@@ -649,7 +649,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'review-loop contract carries the A5b fail-closed-aggregation invariant'),
  ('check_contains',
   'src.claude/agents/contracts/subagent-contracts.md',
-  '**Class-completeness trigger (mandatory):** when a reviewer, bot, or test cites one instance of a defect '
+  '**Class-completeness trigger (mandatory):** when evidence identifies one instance of a plausible defect '
   'class',
   'subagent-contracts carry the A8 class-completeness trigger'),
  ('check_contains',
@@ -663,24 +663,16 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'operating-model carries the A3 physical-state reconciliation trigger'),
  ('check_contains',
   'src.claude/commands/agents-init-project.md',
-  'Normalize effective values in memory through the dispatch owner\'s existing per-key read order before '
-  'presenting or trusting them. Use any global fallback as the starting point for project-local review; '
-  'do not rewrite borrowed/global configuration on read. Persist the explicitly selected project '
-  'configuration to the canonical project-local `.yaml` path only within the authorized configuration '
-  'write in Step 7, and do not recreate legacy files.',
-  'agents-init-project normalizes existing agents-mode before reading values'),
+  "Use the installed dispatch owner's effective read order to inspect only `consultantMode` and `mcpMode` in memory. Show their effective values and origins without creating or rewriting any file.",
+  'agents-init-project reads effective preferences without write'),
  ('check_contains',
   'src.claude/commands/agents-init-project.md',
-  'For decision-driving reads, use the dispatch owner\'s per-key precedence (local `.claude/.agents-mode.yaml`, '
-  'local legacy `.claude/.agents-mode`, pack-local global `~/.claude/.agents-mode.yaml`, pack-local global '
-  'legacy `~/.claude/.agents-mode`, shared cross-pack global `~/.agents-mode.yaml`, then built-in defaults) '
-  'and the in-memory normalization in Step 1; inspection grants no write to the source overlay. '
-  'Persist only the explicitly selected authorized project configuration in Step 7.',
-  'agents-init-project requires read-time agents-mode normalization'),
+  'inspection grants no write to the source overlay. Persist only the explicitly selected authorized project configuration in Step 6.',
+  'agents-init-project preserves read versus write boundary'),
  ('check_contains',
   'src.claude/commands/agents-second-opinion.md',
-  'read and normalize `.claude/.agents-mode.yaml`.',
-  'agents-second-opinion normalizes agents-mode before reporting status'),
+  'Do not change configuration files when reporting status.',
+  'agents-second-opinion reports status without mutating agents-mode'),
  ('check_absent',
   'shared/AGENTS.shared.md',
   'Adapter host runtime',
@@ -1079,25 +1071,25 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'agents-mode reference documents power-mode preset'),
  ('check_contains',
   '@ROOT/src.claude/commands/agents-init-project.md',
-  '`power-mode` (hardest-task maximum result)',
-  'Claude init-project exposes power-mode preset'),
+  'If neither mode key changes, leave',
+  'Claude init-project sparse preference writes skip no-op'),
  ('check_contains',
   '@ROOT/src.claude/commands/agents-init-project.md',
-  'review.security: 2',
-  'Claude init-project correctness-first/power-mode presets raise review.security'),
+  'Preserve all unrelated bytes, including unknown or old keys, comments and formatting.',
+  'Claude init-project sparse preference writes preserve unrelated bytes'),
  ('check_contains',
   '@ROOT/src.claude/commands/agents-init-project.md',
-  'review.ui-visual-correctness: 2',
-  'Claude init-project correctness-first/power-mode presets raise review.ui-visual-correctness'),
- ('direct', 'agents_contract', 'agents-mode machine-readable contract matches docs and init preset surfaces'),
+  'Init itself does not launch external providers.',
+  'Claude init-project sparse preference writes do not launch providers'),
+ ('direct', 'agents_contract', 'agents-mode machine-readable contract matches docs and init selection surfaces'),
  ('check_contains',
   '@ROOT/docs/agents-mode-reference.md',
   '## Canonical maintenance',
   'agents-mode reference defines canonical maintenance'),
  ('check_contains',
   '@ROOT/docs/agents-mode-reference.md',
-  'Read-time normalization preserves the effective values of known keys',
-  'agents-mode reference documents read-time normalization semantics'),
+  'normalize the effective values in memory before using them. A read, including a status check, must not create or modify an overlay.',
+  'agents-mode reference requires in-memory normalization without writing on read'),
  ('check_contains',
   '@ROOT/docs/agents-mode-reference.md',
   'Substantive task prompts are file-based by default',
@@ -1346,6 +1338,24 @@ def _is_source_only_maintainer_action(action: tuple[str, ...]) -> bool:
     )
 
 
+_SOURCE_STATE_CONTRACT_ACTIONS = tuple(
+    action for action in _DECLARED_ACTIONS
+    if action[:3] in {
+        ('check_contains', '@ROOT/scripts/agent-run-ledger.py', 'restore_ledger'),
+        ('check_contains', '@ROOT/scripts/agent-run-ledger.sh', 'agent-run-ledger.py'),
+        ('check_contains', '@ROOT/scripts/check-work-items-state.py', 'validate_work_item'),
+        ('check_contains', '@ROOT/scripts/check-work-items-state.py', 'stale running agent'),
+        ('check_contains', '@ROOT/scripts/check-work-items-state.sh', 'check-work-items-state.py'),
+        ('check_contains', '@ROOT/scripts/validate-work-item-state.py', 'PASS gate requires evidence'),
+        ('check_contains', '@ROOT/scripts/validate-work-item-state.py', 'escapes the work item'),
+        ('check_contains', '@ROOT/scripts/validate-work-item-state.py', 'agent-runs.jsonl'),
+        ('check_contains', '@ROOT/scripts/validate-work-item-state.sh', 'validate-work-item-state.py'),
+        ('check_contains', '@ROOT/shared/schemas/agent-runs.schema.json', 'agent-runs.schema.json'),
+        ('check_contains', '@ROOT/shared/schemas/agent-runs.schema.json', '"executionRole"'),
+        ('check_contains', '@ROOT/shared/schemas/agent-runs.schema.json', '"evidence"'),
+    }
+)
+
 _ALL_ACTIONS = (
     _DECLARED_ACTIONS[0:40]
     + _DECLARED_ACTIONS[41:42]
@@ -1403,6 +1413,9 @@ ACTIONS = (
                 "historical Claude Source Lead declares main-conversation ownership",
             ),
         )
+        + _SOURCE_STATE_CONTRACT_ACTIONS
+        + tuple(action for action in _DECLARED_ACTIONS
+                if action[0] == "check_arch_layering_slices")
         + _APAT_DEV_ACTIONS
         + _UI_CONTINUITY_DEV_ACTIONS
         + (
@@ -1413,7 +1426,7 @@ ACTIONS = (
             ),
             (
                 "check_contains", "src.claude/agents/consultant.md",
-                "If local `.claude/.agents-mode.yaml` is missing, read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override. Persist canonical formatting only within an authorized install/configuration write, into the canonical `.yaml` path in the same scope while preserving effective known values and unknown keys and removing retired canonical keys.",
+                "If local `.claude/.agents-mode.yaml` is missing, read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override. Persist canonical formatting only for a separately authorized normalization, into the canonical `.yaml` path in the same scope while preserving effective known values and unknown keys and removing retired canonical keys.",
                 "consultant preserves precedence and authorized-write boundary",
             ),
             (
@@ -1440,12 +1453,22 @@ ACTIONS = (
     ),
     (
         "dev_repo_nonstandalone",
-        _DECLARED_ACTIONS[257:270]
+        ((
+            "check_normalized_sha256",
+            "@ROOT/src.claude/skills/repo-cleanup/SKILL.md",
+            "06fe776be7a9c75ec5491fdf8a54e16c65e2586ab0f04ec972d3501cae55c060",
+            "repo-cleanup historical Claude migration source remains frozen",
+        ),)
+        + _DECLARED_ACTIONS[257:270]
         + _DECLARED_ACTIONS[274:275]
         + _DECLARED_ACTIONS[280:281]
         + _DECLARED_ACTIONS[287:294]
         + _CURRENT_SKILL_ACTIONS,
     ),
+    ("dev_repo_monorepo", tuple(
+        action for action in _DECLARED_ACTIONS
+        if action[0] == "check_agent_run_ledger_contract"
+    )),
     ("installed", _INSTALLED_ACTIONS + _CURRENT_SKILL_ACTIONS),
 )
 

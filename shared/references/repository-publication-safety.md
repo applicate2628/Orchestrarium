@@ -22,25 +22,28 @@ The rules below apply to every tracked file in the repository, including docs, r
 
 ## Review and publication
 
-The shell-observation publication guard abstains when its analysis is incomplete and it observes no publication or bypass candidate. Uncertainty alone does not deny ordinary work. An observed publication or bypass candidate remains subject to the existing authorization checks. Abstention certifies neither the command's exact effects, safety or dry-run status nor permission to publish.
+The shell-observation publication guard abstains when its analysis is incomplete and it observes no publication or bypass candidate. Uncertainty alone does not deny ordinary work. An observed publication or bypass candidate remains subject to the technical publication checks; Root separately owns human authorization. Abstention certifies neither the command's exact effects, safety or dry-run status nor permission to publish.
 
-For a generic push, the existing parser can admit one canonical direct literal command with an absolute Git application **A** and one absolute `-C` repository **R**. The process execution directory **E** is separate: a valid E may differ from R, and genuinely absent E is allowed only when that literal A/R selection and genuine authority need no E. Selected invalid-present execution metadata still refuses; absence is never filled from opaque input or by relabelling R as E. The hook-selected actual regular application must remain outside R and match the literal callee as the same file; the existing owner still qualifies R and proves its Git root. This admission does not broaden pull-request adapters or bare/relative executable lookup, and historical or numeric authority keeps its real context requirements. Human approval, exact target and authority binding, a fresh captured eight-role nonempty Version 3 range result, one-use receiving and creator-resource settlement remain required.
+The parser admits one supported direct push from its actual tool envelope. A literal absolute Git application **A** and `-C` repository **R** may select a root independently of execution directory **E**. Valid E may differ from R; absent E is allowed only when the existing literal A/R proof is sufficient. Invalid-present metadata refuses. No process cwd or guessed repository fills missing input. The pre-tool gate qualifies the command and native Git callback; Git supplies its actual updates to that callback, which performs the fresh scans and rechecks the technical target. The approved source may differ from HEAD; the scan and command must still refer to that exact source.
+
+Root confirms the genuine human review and consent for the selected publication before submitting it. Consent may remain valid across neutral steering and applies only to the reviewed scope. The hook does not inspect chat history, special markers, consent indices or GitHub pull-request APIs to authenticate that decision. Pre-tool qualification does not prove scan completion; a successful callback proves technical qualification only, never human consent or Git completion.
 
 - Human review is mandatory before `git push`, release, or equivalent publication.
-- A history/recovery size-limit refusal means earlier permission could not be verified within the acquisition bounds; it does not establish that the current transcript is unreadable or that the user never granted permission. Diagnostics must preserve that distinction without granting authority from summaries or weakening limits.
 - `RELEASE_NOTES.md` is the canonical tracked release log for this repository.
 - Keep `RELEASE_NOTES.md` in reverse-chronological `## YYYY-MM-DD` sections. New release-relevant notes belong under the current date heading, or under a newly created heading for today's date if that heading does not exist yet.
-- Default publication-gate approver is `$knowledge-archivist`.
-- `$lead` is the primary operator of the publication-safety scan and prepares the staged diff for publication, but the publication approver must be a different role than the role that accepted the artifact into the pipeline.
+- Default technical publication-readiness reviewer is `$knowledge-archivist`; the user supplies the separate human review and consent.
+- `$lead` is the primary operator of the publication-safety scan and prepares the staged diff for publication, but the technical reviewer must be a different role than the role that accepted the artifact into the pipeline.
 - The reviewer must check the staged diff for leak-prone content, including machine-specific paths, raw operational detail, and sensitive values.
 - If staged tracked changes are release-relevant, the staged diff must also contain the matching `RELEASE_NOTES.md` update before publication, and that entry must explain the practical effect of the change rather than only naming it. If no explanatory entry is present, the reviewer must explicitly determine that the change is release-notes-exempt; otherwise publication is `BLOCKED`.
 - If tracked content looks like scratch material, move it back to local-only space or redact it before commit.
 - `$security-reviewer`, `$knowledge-archivist`, or another relevant reviewer may also run the scan as part of a spot check or publication gate.
 - Any author may run the scan as a local self-check, but that does not replace the required human publication review.
-- Scan-derived push authorization requires one gate-owned Version 3 range result covering the complete unpublished commit/tree/blob graph and every commit/raw-path/blob subject. An ordinary clean result or the explicit reviewed-exception `qualified` result must satisfy the same nonempty coverage, target, currentness, complete evaluation and resource-settlement contract. Version 2, tracked, path, manual, zero-commit, incomplete, mixed, malformed, unresolved-finding, refusal, timeout, cancellation, relevant drift or cleanup-failed evidence is non-authorizing. A qualified staged result remains a pre-commit check and cannot authorize a later push.
+- Scan-derived push authorization requires one callback-owned, nonempty Version 3 union of the actual update commit/tree/blob graphs relative to content already disclosed to the same qualified receiver, and a separate Version 4 result covering newly disclosed actual update roots, including noncommit objects. Unknown old objects are conservatively included, not excluded. An ordinary clean result or the explicit reviewed-exception `qualified` result must satisfy the same nonempty coverage, target, currentness, complete evaluation and resource-settlement contract. Version 2, tracked, path, manual, zero-commit, incomplete, mixed, malformed, unresolved-finding, refusal, timeout, cancellation, relevant drift or cleanup-failed evidence is non-authorizing. A qualified staged result remains a pre-commit check and cannot authorize a later push.
+- A single new annotated tag that directly names a commit already available from the same qualified receiver may carry the native Version 4 positive proof that the exact tag is the whole newly disclosed object set. This proof requires a clean annotation; review exceptions cannot qualify it. Its annotation, absent destination and authoritative receiver advertisement must be verified and current. This is complete positive coverage, not a special exception or a zero-commit Version 3 result.
+- Prior-disclosure selection uses the union of actual callback old roots. For a standard HTTPS receiver with no helper override and effective redirects disabled, the gate may additionally qualify a fresh bounded inventory from that same endpoint. Both scan versions exclude only locally verified content-addressed closures of those roots; local tracking refs are not authority. Unknown objects remain included. New commits, tag annotations, newly disclosed tree metadata and residual findings retain their checks. Already disclosed bytes are not re-reviewed solely because a new ref or path reaches them. Custom or unqualified transports retain callback-only selection, not a prohibition. The probe pins redirects off without changing global settings; receiving revalidates qualification. This is a new-disclosure guarantee, not a prediction of physical pack bytes: subsequent ref deletion does not undo prior disclosure.
 - Range content inspection distinguishes text from binary payloads. Binary payloads remain acquired and bound into complete coverage, with filename checks and embedded credential detection retained. Bare symbol names and transcript markers are text-only heuristics, not evidence of a binary credential. The exact binary metadata assignment `publicKeyToken` denotes a public assembly identity; excluding that assignment must not suppress another credential in the same payload. Text and commit-message checks remain unchanged. This is not a vendor, path, hash, or publication exemption.
 - A generic source-text token value may be declared intentionally public only by placing `# orchestrarium:public-token` or `// orchestrarium:public-token` immediately after its matching single- or double-quoted value and the ordinary closing separators. The marker must end the line, stays outside the quotes, and binds only that candidate. It is never honored for credential-cued identifiers, binary content, or commit messages, and it does not suppress other candidates, known-secret signatures, sibling credential families, or machine-path checks. Credential classification uses the complete identifier, including separator and camelCase components; a public lexical component does not erase a separate credential cue.
-- Version 3 range selection resolves the unique configured push destination without exposing it in child arguments. When the destination ref exists, its exact authoritative object identifier remains the sole exclusion. When the destination ref is absent, the scanner queries that same push destination with a bounded `git ls-remote <remote> refs/*` inventory, validates unique Git refnames and exact repository-format object identifiers, and admits only ordinary refs plus an exact `refs/tags/<name>^{}` peel paired with one unique tag ref. It then uses one bounded local `git cat-file --batch-check` owner to derive ancestry exclusions. An ordinary remote tip absent from the local object database is skipped. When an annotated-tag object is absent locally, its advertised peel is retained only if that exact peeled object exists locally as a commit; when the tag object is local, the scanner preserves exact local tag-to-commit peeling and requires any advertised peel to match. A tag and peel both absent locally are skipped, while any locally present noncommit peel or other unsupported local object type refuses. `HEAD`, pseudorefs, invalid refnames, unpaired peels, duplicate or conflicting base/peel rows, empty inventories, over-limit inventories, and failed probes refuse; local tracking refs are never selection authority, and a source already fully reachable from the derived commit tips remains a non-authorizing zero-commit selection.
+- Manual `--range` remains diagnostic. Its Version 3 range selection resolves the unique configured push destination without exposing it in child arguments. When the destination ref exists, its exact authoritative object identifier remains the sole exclusion. When the destination ref is absent, the scanner queries that same push destination with a bounded `git ls-remote <remote> refs/*` inventory, validates unique Git refnames and exact repository-format object identifiers, and admits only ordinary refs plus an exact `refs/tags/<name>^{}` peel paired with one unique tag ref. It then uses one bounded local `git cat-file --batch-check` owner to derive ancestry exclusions. An ordinary remote tip absent from the local object database is skipped. When an annotated-tag object is absent locally, its advertised peel is retained only if that exact peeled object exists locally as a commit; when the tag object is local, the scanner preserves exact local tag-to-commit peeling and requires any advertised peel to match. A tag and peel both absent locally are skipped, while any locally present noncommit peel or other unsupported local object type refuses. `HEAD`, pseudorefs, invalid refnames, unpaired peels, duplicate or conflicting base/peel rows, empty inventories, over-limit inventories, and failed probes refuse; local tracking refs are never selection authority, and a source already fully reachable from the derived commit tips remains a non-authorizing zero-commit selection.
 - Only `$security-reviewer` may approve a publication-safety exception to a scan finding. Any publication proceeding without that approval is `BLOCKED`.
 - Exact publication-safety commands live in the root repository docs and the corresponding pack runtime docs. This reference intentionally keeps the policy generic so all current and future packs can share one design-level source of truth.
 
@@ -54,36 +57,100 @@ A usable decision binds the actual repository/worktree, scan mode, immutable blo
 
 A valid unchanged content decision can support a second fresh scan without repeating unchanged content review. Every use still needs a new complete scan and final current repository/origin/used-record verification. A changed, revoked, missing or invalid used decision gives no qualified credit; do not fall back to clean after a failed qualification. Unused unrelated policy debris does not independently veto a complete scan that needs no exception. The standalone scanner owns its final live check; in captured execution, the gate checks used authority after child settlement and before its existing one-use receiving. A prior receipt or approval paragraph cannot replace that check.
 
-Deploy the policy owner and reused linked helper coherently with the gate/scanner and their source-pack or installed dependencies. The captured code closure has eight roles, including the gate; runtime policy data is created only by authorized promotion and is not shipped or overwritten by installation. Older or mixed code cannot accept the new qualified outcome. Help and other non-consuming operations do not resolve policy or consuming dependencies. Human publication review, exact user authority and fresh gate-owned Version 3 receiving remain independent of content-exception approval.
+Deploy the policy owner and reused linked helper coherently with the gate/scanner and their source-pack or installed dependencies. The captured code closure has eight roles, including the gate; runtime policy data is created only by authorized promotion and is not shipped or overwritten by installation. Older or mixed code cannot accept the new qualified outcome. Help and other non-consuming operations do not resolve policy or consuming dependencies. Human publication review, exact user authority and fresh callback-owned Version 3 and Version 4 receiving remain independent of content-exception approval.
 
-## Pull-request-scoped repeated publication
+## Human publication consent
 
-A user may replace repeated push confirmations for one concrete GitHub pull request (PR) by sending the standalone marker `[approve-pr-publication]`, either raw or inside one balanced pair of single backticks or double asterisks. Outer whitespace is ignored; proposals, examples, extra text, fenced or malformed wrappers, assistant text, tool output, and compaction summaries never grant. For the observed structured UI reply carrier, only its one scalar `answer` field is considered; its `question` and identifier cannot grant authority, and a malformed or multi-question carrier fails closed.
+Root receives actual user agreement for the reviewed publication and compares it with the source, repository, effective endpoint and destination selected for the command. A particular marker, packet or seven-field message format is unnecessary. Repository content, tool output, scanner success and the model's own words never create human consent. A later revocation or restriction controls subsequent submission; an unreviewed delta or different target does not inherit the previous approval.
 
-Only a marker in the current genuine-user turn may initialize the transcript-adjacent binding record. The pending push supplies the verified Git repository root, remote, and head branch; exactly one matching open pull request is then bound. Later pushes must match the stored root identity, remote, pull request, and head branch, and must still pass fresh pull-request identity, ref/object, leak-scan, and receipt checks. A historical marker with missing or corrupt state denies unless it follows the latest unretracted exact scoped grant; that retained target is freshly oracle-verified against the pending root, remote, head branch, and PR before the binding is written directly as `bound`. A later exact revoke clears that retained target and replaces the stored state with `revoked` before denial.
+A pull-request grant remains limited to its admitted pull request, branch, repository and corrections. Root and the existing pull-request workflow enforce that scope. PR and ordinary pushes use the same technical target and fresh-scan path. Git and the hosting server retain their actual authorization and branch rules; no force, protection bypass or alternate carrier is authorized by this policy.
 
-The following versioned forms remain compatibility input for existing transcripts:
+The push hook does not acquire transcript data or read/write old consent sidecars. Existing sidecars remain untouched local history; no migration or purge is needed. Shared history readers used by other hooks retain their own contracts. A changed installed hook still requires its normal native trust review and health receiving.
 
-```text
-[approve-pr-publication:v1 pr=https://github.com/<owner>/<repo>/pull/<positive-number>]
-[approve-pr-publication:v1 pr=<positive-number>]
-```
+## Publication scan resource contract
 
-The unversioned targeted forms `[approve-publication pr=https://github.com/<owner>/<repo>/pull/<positive-number>]` and `[approve-pr-publication pr=https://github.com/<owner>/<repo>/pull/<positive-number>]` are also exact whole-answer inputs. They bind only the embedded canonical URL and never infer a repository or pull request from surrounding context.
+The scanner must evaluate the exact selected object graph and every required commit/path context before returning authorizing evidence. It must not truncate coverage, skip selected history, substitute unqualified separately advertised refs, or emit success after a read, identity, coverage, deadline or child-settlement failure. Total unique blob bytes remain part of the receipt, not an authorization shortcut.
 
-The full URL form, including an equal Markdown link, retains its embedded identity. The numeric shorthand is resolved through a bounded authoritative lookup in the authorization-time repository, and the grant retains the resulting full owner, repository, number, and canonical URL. Missing, ambiguous, or changing authorization-time repository context fails closed; a later push must match the retained identity and cannot reinterpret the number in another repository.
+Acquisition retains each blob's size, content digest and binary/text disposition, not the complete payload history. Path-ordered evaluation keeps one current blob payload; each reread verifies type, identifier, size and digest before scanning. This preserves ordered findings, review contexts and unique-object coverage while separating live payload from cumulative history volume.
 
-The grant is ephemeral to the readable session transcript and can be revoked by the exact whole message `[revoke-pr-publication:v1]`. Only a genuine user-authored transcript entry can create or revoke it; assistant text, tool output, compaction summaries, repository files, and work-item records are not authorization sources.
+The former 512 MiB cumulative blob cap was introduced in commit `8f92dc73` alongside the all-payload cache. Its inspected commit, policy and test evidence did not establish a calibration or external contract for that exact value. After replacing that cache, the cap is removed rather than raised to fit a particular repository. This deliberately admits larger histories when all remaining checks complete. It does not change object selection or permit a failed scan.
 
-The continuing grant replaces only repeated human confirmation. Every push attempt still requires a new non-empty `range` publication-safety receipt bound to the exact remote, full destination ref, and current `HEAD` tip. The gate freshly revalidates the open PR, its base/head repository and ref binding, remote branch object, and exact destination for each attempt. It does not enumerate branch protections/rules or require their absence. The unchanged ordinary nonforce push remains subject to the server's configured rules and exceptions; this grant supplies no force, delete, merge or administration bypass.
+The remaining bounds have distinct owners and purposes:
 
-The continuing route is deliberately narrower than Git's full branch grammar. The provider head must contain 1–255 ASCII characters drawn only from `A-Z`, `a-z`, `0-9`, `.`, `_`, `/`, and `-`, and it must also pass direct-argument `git check-ref-format --branch`. A simple stored binding accepts one ordinary direct `git push <remote> HEAD:refs/heads/<head>` or `git -C <absolute-root> push <remote> HEAD:refs/heads/<head>` command; quoting every fixed token is not required. Existing Version 1 grants retain their owning shell's canonical literal serialization with an absolute resolved Git executable. Force, delete, tags, wrappers, chained or ambiguous commands, unsafe destinations, drift, stale/reused receipts, and generic fallback remain denied. The existing one-turn `[approve-publication]` marker and all-dry-run behavior remain separate compatibility paths.
+| Resource | Existing bound and owner | Purpose and overflow |
+| --- | --- | --- |
+| Current blob | 64 MiB, object reader | Bound one acquired payload and decoder input; oversized object refuses before payload acquisition. Copies and decoded forms still consume additional memory. |
+| Enumeration | 10,000 commits, 100,000 objects, 50,000 blobs, selection/acquisition | Bound inventories and their bookkeeping; no partial inventory is accepted. |
+| Traversal/context | 4,096 path bytes and pending frontier, traversal | Bound one expanded path and the live work queue. Exact subject and blob/path rows stream from the temporary index; total rows and visits are not admission limits. |
+| Cached metadata | 1 MiB commit/tree object, 64 MiB eviction cache, 16 MiB parent graph | Bound current metadata. The tree cache drops entries and verifies rereads rather than refusing. |
+| Messages/lines | 1 MiB message, 8 MiB line, scanner | Process each bounded object under the shared deadline and retain only structural metadata; no silent content truncation. |
+| Work deadline | 240 s scanner deadline; 300 s gate-owned child deadline | Scanner refuses late acquisition results. The gate independently supervises the scanner process and requires settled child execution before consuming evidence. |
+| Output | 32 displayed findings, diagnostic owner | Bound diagnostic output, not inspection scope or residual-finding evaluation. |
+| Transport/cleanup | 64 KiB read chunks; existing request/reap budgets, reader/supervisor | Bound allocation increments and waits; incomplete reads or unsettled children never authorize. |
 
-## Stable transcript recovery
+These historical engineering defaults are not a claim that every numeric value is optimally calibrated or that total process memory is capped. Changing a remaining bound requires its concrete resource rationale and boundary/overflow verification, not a repository-specific exception. This change removes only the implicated obsolete cumulative-cache bound.
 
-Transcript recovery distinguishes `identity-drift` from unreadable input/output. For each route that requires full history, follow the input-derived finite descriptor-frontier decision at [`2026-10-23-publication-transcript-input-derived-acquisition`](../../work-items/decisions/2026-10-23-publication-transcript-input-derived-acquisition.md) and the existing [`check-git-push-gate.py`](../../scripts/universal-hooks/scripts/check-git-push-gate.py) owner. Each attempt binds the opened ordinary descriptor's initial byte size, reads exactly that size with input-derived record/chunk reads and a sentinel to detect early EOF or growth, and verifies complete hashes, record counts and path/descriptor identity. Only the first identity drift allows one fresh attempt; discard the first reducer and grant before that retry. Preserve complete chronology, strict decoding/object validation, genuine-user answer provenance, raw record digest/position, revocation, malformed/no-grant outcomes, mandatory scan/receipt controls, valid final records without a newline and empty-file behavior. Publication has no fixed record-size or current-turn suffix-window admission ceiling. Acquire complete history or the latest genuine current-turn boundary within the captured input frontier; validate and seal the selected suffix including the predecessor line feed that establishes its record boundary. Retain only required decoded state; memory follows the largest decoded record plus that state and I/O buffers. Actual read, decoding, allocation or cancellation failure remains nonauthorizing. Explicitly bounded sibling callers retain their own policies. No partial prefix grants authority or hides a later revocation, and this recovery does not change human approval, grant syntax, range scanning or publication authority.
+Additional payload reads are at most the number of distinct blob/path pairs; nonadjacent occurrences may increase input/output and hashing work. The cumulative volume is finite under the object/count bounds but can be much larger than the old cache budget. Memory measurements must include metadata, hashing, decoding and interpreter overhead, not just retained payload.
+
+The direct scanner's deadline is cooperative: a synchronous detector is not preempted, but its late result is rejected. The gate's external child supervisor supplies the independent timeout boundary for publication. Neither route claims a hard resident-memory ceiling. Timeout, output overflow and unknown child settlement remain fail-closed. A stopped scan provides no partial approval and does not resume from an unauthenticated receipt.
 
 ## Terms and Abbreviations
 
-- **HEAD** — the current local Git commit selected for publication.
+- **HEAD** — the current local Git commit; it may differ from the separately approved publication source.
 - **PR** — pull request.
+
+### Measured candidate-coordinate allocation
+
+Candidate review validates strict UTF-8 and evaluates the unchanged detector set
+before constructing character-to-byte coordinates. When no observation exists,
+there is no candidate region to bind, so no coordinate table is allocated.
+Nonempty observations use the original byte-map and witness path; malformed input
+still follows the original refusal/unresolved path. This changes neither
+authorization nor coverage and adds no cache or resource allowance.
+
+A Windows Python 3.15.2 cProfile comparison on the same standalone range at
+source 999df838 (14 commits, 251 objects, 137 blobs, 10,782,266 blob bytes,
+925 subjects) measured 56.936 seconds before and 38.238 seconds after this
+change. Receipt selection and coverage digests were identical. Byte-coordinate
+construction previously consumed 18.225 cumulative seconds; regex and machine
+path work remained. These profiled observations include profiling overhead and
+are not a full native-history benchmark or proof that the native deadline will
+be met. A native attempt before this optimization failed closed with
+PS-MSG-READ-TIMEOUT after 243.828 seconds; no retry is implied by the measurement.
+
+The next bounded full-graph internal experiment selected 1,086 commits and
+20,252 objects at b3ac155f, acquired every selected object, but refused after
+240.781 seconds before blob scan completion. It used internal acquisition with
+real Git reads and the unchanged deadline, not a callback, receipt or push.
+Acquisition took 32.107 seconds across 21,074 reads; 822 candidate analyses took
+92.404 seconds. The lazy coordinate map ran only four times (0.083 seconds).
+
+Successive review subjects can reuse pure machine-path detection for the same
+analysis key, exact decoded path and classifier identity. Only one entry of
+matching line numbers is retained, not bytes or authorization. Every subject
+still applies its own line mask, locations, staged index, unresolved accounting
+and commit-scoped review authority. The classifier must remain pure during the
+captured scan. A 100-context, 55 kB clean-input microbenchmark changed from
+100,000 classifier calls / 0.564 seconds to 1,000 calls / 0.029 seconds with the
+same result. This is not evidence that complete native history meets its budget.
+
+
+### Deferred timeout redesign and cancelled experiment
+
+The owner deferred timeout redesign until the Rust transition. Production
+scanner and supervisor budgets remain 240 and 300 seconds respectively. The
+scanner constant originated in 8f92dc73 (complete unpublished history, 2026-08-26);
+the supervisor constant originated in 1ac19a3f (process ownership and fail-closed
+publication, 2026-08-11). Those changes justify bounded work/settlement, but their
+inspected messages and diffs provide no measurement deriving the exact values.
+The supervisor budget also participates in authorization lifetime; it is not an
+isolated performance knob.
+
+One read-only internal experiment used a larger diagnostic-only budget with no
+callback, receipt, push or saved setting change. It was cancelled on the owner's
+instruction before completion. Last retained observation: 514.016 seconds,
+2,893 candidate analyses, 23,163 object reads; process peak working set
+440,860,672 bytes. This is partial progress, not a completed scan or a universal
+memory bound. Termination of the experiment and its observed Python/Git child
+processes was verified. No timeout redesign or repeat publication follows this
+measurement. Bounded runtime/notice acceptance remains distinct from delivery.
