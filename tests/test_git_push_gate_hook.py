@@ -4665,9 +4665,11 @@ if __name__ == "__main__":
     unittest.main()
 
 
-def test_captured_scan_budget_keeps_finite_supervision_margin():
+def test_captured_scan_budget_keeps_finite_supervision_margin(monkeypatch):
+    monkeypatch.delenv("ORCHE_PUBLICATION_SCAN_SECONDS", raising=False)
     gate = _load_gate_module(CANONICAL_HOOK, "finite_history_scan_budget")
-    assert gate.SCAN_TIMEOUT_SECONDS == 960.0
-    assert gate.SCAN_TIMEOUT_SECONDS - 900.0 == 60.0
+    assert gate.SCAN_THRESHOLD_SECONDS == 240.0
+    assert gate.SCAN_TIMEOUT_SECONDS == 300.0
+    assert gate.SCAN_TIMEOUT_SECONDS - gate.SCAN_THRESHOLD_SECONDS == 60.0
     assert gate.SCAN_SETTLEMENT_ATTEMPT_SECONDS == 3.0
     assert gate.SCAN_SETTLEMENT_MAX_ENTRIES == 2

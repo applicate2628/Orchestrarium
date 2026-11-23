@@ -818,7 +818,10 @@ def test_stock_consultant_transaction_abort_restores_prior(
     )
     try:
         with pytest.raises(RuntimeError, match="forced consultant rollback"):
-            transaction = installer._InstallTransaction([installed], enabled=True)
+            transaction = installer._InstallTransaction(
+                list(installer._canonical_skill_snapshot_paths(skills_root, plan)),
+                enabled=True,
+            )
             with transaction:
                 owner = installer._CreateOnlyMutablePath(
                     target, transaction, dry_run=False
@@ -1220,7 +1223,8 @@ def test_exact_partial_push_gate_lead_migrates_rolls_back_and_rejects_drift(
     try:
         with pytest.raises(RuntimeError, match="forced Lead rollback"):
             transaction = installer._InstallTransaction(
-                [rollback_lead], enabled=True
+                list(installer._canonical_skill_snapshot_paths(rollback_skills, rollback_plan)),
+                enabled=True,
             )
             with transaction:
                 rollback_owner = installer._CreateOnlyMutablePath(
@@ -1679,7 +1683,10 @@ def test_github_pr_review_bot_prior_transaction_abort_restores_prior(
     )
     try:
         with pytest.raises(RuntimeError, match="forced review skill rollback"):
-            transaction = installer._InstallTransaction([installed], enabled=True)
+            transaction = installer._InstallTransaction(
+                list(installer._canonical_skill_snapshot_paths(skills_root, plan)),
+                enabled=True,
+            )
             with transaction:
                 owner = installer._CreateOnlyMutablePath(
                     target, transaction, dry_run=False
