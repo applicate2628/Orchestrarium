@@ -3620,11 +3620,18 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
 
                             async def reader(argv, **kwargs):
                                 self.assertTrue("--stdin" in argv, "revisions must not be expanded in Git argv")
-                                self.assertEqual(kwargs["input_bytes"], expected)
                                 self.assertLess(len(subprocess.list2cmdline(argv)), 32767)
                                 self.assertIs(kwargs["object_format"], fmt)
                                 calls.append(argv)
                                 store_row = kwargs.get("store_row")
+                                if "--use-bitmap-index" in argv:
+                                    self.assertEqual(kwargs["input_bytes"], "".join(oid + "\n" for oid in exclusions).encode("ascii"))
+                                    self.assertIsNone(kwargs["count_cap"])
+                                    self.assertIsNone(kwargs["byte_cap"])
+                                    for oid in exclusions:
+                                        self.assertTrue(store_row(oid))
+                                    return ()
+                                self.assertEqual(kwargs["input_bytes"], expected)
                                 if "--parents" in argv:
                                     if store_row is None:
                                         return ((tip, ()),)
@@ -3633,6 +3640,8 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
                                     if store_row is None:
                                         return (tip,)
                                     self.assertTrue(store_row(tip))
+                                    if native and exclusions:
+                                        self.assertTrue(store_row(exclusions[0]))
                                 return ()
 
                             destination = "refs/heads/new"
@@ -3668,7 +3677,7 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
                                 else:
                                     result = await module._range_selection(primary)
 
-                            self.assertEqual(len(calls), 2)
+                            self.assertEqual(len(calls), 2 + int(native and bool(exclusions)))
                             self.assertEqual(result.expected_parents, ((tip, ()),))
                             self.assertEqual(result.expected_oids, (tip,))
                             self.assertEqual(result.object_oids, (tip,))
