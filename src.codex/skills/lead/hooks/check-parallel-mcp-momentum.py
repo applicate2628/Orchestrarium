@@ -14,7 +14,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-ACTIVE_MODES = frozenset({"auto", "force"})
 REMINDER = (
     "[parallel and MCP momentum] Root Lead: keep the admitted primary outcome and "
     "next authorized action explicit. Promptly dispatch admitted substantive side "
@@ -23,7 +22,9 @@ REMINDER = (
     "in this turn without waiting for a side result. Fast side completion is fine. "
     "On conflict, preserve the side owner's resume point and hold only dependent "
     "actions. Explicit user stop, pause, cancel, or reprioritization wins; native Goal "
-    "PAUSED remains with its owner. Recheck Ready and refill useful compatible lanes "
+    "PAUSED remains with its owner. "
+    "Apply shared Goal resumption and hold currency before treating an earlier hold as current. Never cancel or block a resumed Goal from stale recovery alone. "
+    "Recheck Ready and refill useful compatible lanes "
     "as they settle. Do not invent work or calls. Discover "
     "fresh task-fitting Model Context Protocol (MCP) tools before manual work "
     "where they improve quality; select exact available tools for each lane. "
@@ -107,8 +108,7 @@ def _is_repository_work_start(
 
 def main() -> int:
     try:
-        global acquire_tool_input, emit_advisory, parse_envelope, read_stdin_utf8, resolve_scalar
-        from agents_mode_runtime import resolve_scalar
+        global acquire_tool_input, emit_advisory, parse_envelope, read_stdin_utf8
         from hook_common import acquire_tool_input, emit_advisory, parse_envelope, read_stdin_utf8
         envelope = parse_envelope(read_stdin_utf8())
         if not isinstance(envelope, dict) or "agent_id" in envelope:
@@ -121,10 +121,6 @@ def main() -> int:
             return 0
         classifier, cwd, root = _repository_context(envelope)
         if root is None:
-            return 0
-        if resolve_scalar("delegationMode", cwd=root) not in ACTIVE_MODES:
-            return 0
-        if resolve_scalar("parallelMode", cwd=root) not in ACTIVE_MODES:
             return 0
         if not _is_repository_work_start(
             envelope,

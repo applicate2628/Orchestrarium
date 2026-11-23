@@ -19,13 +19,13 @@ Show a compact status dashboard for the current project.
    - If present, list each configured policy (key: value).
    - If absent, say: "No project policies configured. Run `/agents-init-project` to set up."
 
-3. **Open bugs.** Check if `work-items/bugs/` exists. Find all `.md` files with `status: open` in their frontmatter. Display count and list (severity, filename, first line of Description). Group by severity (high first). If none, say "No open bugs."
+3. **Current bugs.** Read the configured bug registry (default `work-items/bugs/`) using the lifecycle owner's current-record statuses. Exclude terminal and archived records. Display count and list (severity, filename, first line of Description). Group by severity (high first). If none, say "No current bugs."
 
-4. **Open performance issues.** Check if `work-items/performance/` exists. Find all `.md` files with `status: open` in their frontmatter. Display count and list (severity, filename, metric, budget vs actual). Group by severity (high first). If none, say "No open performance issues."
+4. **Current performance issues.** Filter the same current bug records by their recorded performance Metric evidence. Display count and list (severity, filename, metric, budget vs actual). Group by severity (high first). If none, say "No current performance issues."
 
 5. **Open decisions.** Check if `work-items/decisions/` exists. Each file is a flat `<date>-<slug>.md` with bug-style list-item frontmatter (`- id:`, `- status: proposed | accepted | dropped | superseded | reverted`, `- decided-by:`, `- context:`, `- supersedes:`, `- superseded-by:`). Show every decision whose `- status:` is `proposed` (awaiting acceptance) with its id and `## Decision` first line, plus a one-line count of `accepted`. (`dropped`/`superseded`/`reverted` are terminal/history — do not list them by default.) The decision status enum is INDEPENDENT of the work-item done-predicate — decisions are never "closed" by it. If none, say "No decisions."
 
-6. **Reserved PM admissions.** Scan the three live cross-cutting registries — `work-items/decisions/`, `work-items/epics/`, and `work-items/bugs/` — for artifacts that reserve a `$product-manager` admission or acceptance that has not yet fired, so a scheduled PM call cannot stall unseen. Flag an artifact ONLY when BOTH signals hold:
+6. **Reserved PM admissions.** Scan the three live cross-cutting registries — `work-items/decisions/`, `work-items/epics/`, and the configured bug registry already read in step 3 — for artifacts that reserve a `$product-manager` admission or acceptance that has not yet fired, so a scheduled PM call cannot stall unseen. Flag an artifact ONLY when BOTH signals hold:
    - **(A) PM-admission-owner signal.** On a single line OR two adjacent lines, the body co-locates a `$product-manager` / `product-manager` token with an admission/acceptance action stem from the fixed set `{ admit, admitted, admitting, admission, accept, acceptance, intake, re-intake, pending, call }`. The co-location is what separates a *reserved admission* from a mere role-noun mention — a line that only names `product-manager` as a role, with no admission stem nearby, does NOT qualify.
    - **(B) not-yet-admitted state.** Read the state from the artifact's authoritative frontmatter `status:` field ONLY — the `status:` (or list-item `- status:`) key line in the leading frontmatter block — never a `status:` substring appearing elsewhere in the body (a stale body line that still says "status: proposed" does not count). Per registry: `decisions/*` flags on `status: proposed` (terminal `accepted` / `dropped` / `superseded` / `reverted` are excluded); `epics/*` flags on `status: active` (terminal `closed` excluded); `bugs/*` flags on `status: open` (terminal `fixed` / `resolved` / `closed` / `superseded` excluded).
    Scope: only these three live registries. Exclude `work-items/archive/**` (terminal by location) and `work-items/backlog/` items (already admitted — they are Product Manager output, not a reserved call). This flag is a STRICT SUBSET of the step-5 proposed-decisions list — it surfaces only the Product Manager-owned ones, plus the epic and bug analogues, never all `proposed` decisions. When the flagged count is greater than zero, list the flagged artifacts and then append exactly ONE dispatch-offer line (see Format). The offer is presentation only: the command dispatches nothing and modifies no file. If the operator confirms, the MAIN conversation (not this command) dispatches `subagent_type: product-manager` with the flagged artifact(s) as the admission input; the operator may instead admit directly (the `OR direct human decision` bypass stays intact) or decline. If none match, say "Reserved PM admissions: none".
@@ -39,7 +39,7 @@ Show a compact status dashboard for the current project.
 10. **Skill-pack summary.** Count and display in one line:
    - Number of role files in `.claude/agents/*.md`
    - Number of team templates in `.claude/agents/team-templates/*.json`
-   - Number of skills in `.claude/commands/*.md`
+   - Number of slash commands in `.claude/commands/*.md`
 
 11. **Format.** Display as a compact dashboard:
 
@@ -65,7 +65,7 @@ Backlog: <count or "empty">
 Policies: <configured | not configured>
   <key>: <value> (one per line, if configured)
 
-Open bugs: <count or "none">
+Current bugs: <count or "none">
   [high] <filename> — <description first line>
   [medium] <filename> — <description first line>
 
@@ -94,7 +94,7 @@ Recent plans:
   <filename> — <first heading>
   ...
 
-Pack: <N> roles · <N> templates · <N> skills
+Pack: <N> role files · <N> templates · <N> commands
 ```
 
 ## Rules

@@ -20,7 +20,7 @@ Exactly five roles can be adopted inline instead of dispatched — no fresh cont
 | `/architect` | Quick-fix/fast-lane seam or blast-radius decision | dual — also `subagent_type: architect` |
 | `/planner` | Upgrade a fast-lane inline plan into phased, AC-id'd form | dual — also `subagent_type: planner` |
 
-### Skills (slash commands)
+### Slash commands
 
 | Command | Purpose |
 | --- | --- |
@@ -36,7 +36,7 @@ Exactly five roles can be adopted inline instead of dispatched — no fresh cont
 | `/agents-security` | Security review (security-engineer → security-reviewer) |
 | `/agents-second-opinion` | Get a second opinion via consultant (Codex; preserves routing prefs) |
 | `/agents-implement` | Execute an approved plan phase by phase |
-| `/agents-perf` | Fix a performance issue (perf-engineer → impl → QA → perf-reviewer) |
+| `/agents-perf` | Fix a performance issue (performance-engineer → implementer → QA → performance-reviewer) |
 | `/agents-refactor` | Safe refactoring with blast-radius analysis |
 | `/agents-resume` | Resume an interrupted agent chain from saved state |
 | `/agents-qa-session` | Interactive testing: you direct, QA agent investigates |
@@ -57,12 +57,7 @@ Show the installed team-template JSON inventory with each template's description
 
 ### Roles by team
 
-Group the 33 roles from the role index into their teams:
-
-- **Roadmap & orchestration:** product-manager, lead, consultant, knowledge-archivist
-- **Research & design:** product-analyst, analyst, architect, ux-designer, planner, algorithm-scientist, computational-scientist, security-engineer, performance-engineer, reliability-engineer
-- **Implementation:** backend-engineer, frontend-engineer, qt-ui-engineer, model-view-engineer, data-engineer, platform-engineer, toolchain-engineer, geometry-engineer, graphics-engineer, visualization-engineer, external-worker
-- **Review & verification:** qa-engineer, architecture-reviewer, security-reviewer, performance-reviewer, accessibility-reviewer, ux-reviewer, ui-test-engineer, external-reviewer
+Read the installed `AGENTS.md` role index and list its roles grouped by the teams defined there. Derive the count from the distinct role identities in that index; do not count common skills or repeated mentions as additional roles.
 
 ### Quick examples
 

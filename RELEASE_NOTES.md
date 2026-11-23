@@ -1,6 +1,429 @@
 # Release Notes
 
-This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
+This log records user-facing changes in the Orchestrarium source tree by date.
+A dated entry is not a release tag, publication notice, or confirmation of a
+local installation. For the frozen pre-SDK baseline and draft follow-up, see
+[Which version?](README.md#which-version).
+
+## 2026-11-23
+
+- Reconcile the 2.0 delivery order with the tagged pre-SDK baseline and separate Rust, SDK, and distribution acceptance. Retain independent product outcomes without counting them as release blockers.
+
+- The model resolver now compares eligible models and reasoning efforts using benchmark quality, task time, and one relative cost unit (Sol 6.2 High = 1). The Lead selects and explains the best fit for each task; the default is a fallback. The benchmark figures are not prices, launch permissions, or runtime guarantees.
+
+- On Windows, the installer keeps existing owned files and their access rules when a standalone Lead upgrade only updates bytes and adds ordinary files under existing folders. The same transaction verifies new files and rolls back on failure. Coupled transport replacements retain their existing path.
+
+- Native Git publication checks now subtract verified receiver-reachable object IDs before scanning new content. A formerly shared blob or subtree cannot be reintroduced into the selected payload by the revision-exclusion walk. New content, applicable tree-path metadata, and both coverage stages are still verified; scanning the full history is not part of this check.
+
+- The publication scanner no longer reflags machine-path lines already published in the same tracked file in the verified receiver history. An edited blob does not erase that evidence. New lines, excess duplicates, different tracked paths, commit messages, binary subjects and other detectors retain their existing checks.
+
+## 2026-11-22
+
+- Let the guarded range scan continue while it reports newly verified work. Stalls still fail, and completed scans must still pass the same coverage, identity, and review checks.
+
+- Show a redacted sample of publication findings by subject and category when a guarded push is denied. The summary does not reveal matched text, paths or locations and does not change the verdict.
+
+- The publication scanner verifies the captured review-policy origin once per scan instead of revalidating and hashing the same snapshot for every matching subject. It still checks each subject and revalidates used authority before publication.
+
+- The Lead now verifies the scope of a suspected blocker before pausing work. It checks the actual action and session, uses a read-only verification where possible, and continues independent work without bypassing confirmed restrictions.
+
+- The Git publication hook records an advisory time-threshold warning at most once per callback and writes a best-effort, sanitized report under the user Orche reports directory. The warning never modifies scanner evidence, its verdict, or current protection budgets.
+
+- Publication diagnostics retain the original native scan refusal instead of replacing it with a secondary repository metadata error. Complete scans still require unchanged repository metadata before publication.
+
+- The Windows x64 pre-SDK bundle can carry the Rust publication matcher. The existing scanner uses it to accelerate binary-history and ordinary commit-text matching while keeping the same publication policy and finding decisions. The bundle builder and retainer verify the exact executable and its third-party notices. The matcher does not add provider SDK dependencies or require Rust on the target machine. See [bundle assembly](scripts/distribution/README.md) for package inputs.
+
+- Reuse parsed Git trees by object identity and scan identical short binary fragments once per batch. Every original path, commit owner and occurrence retains its coverage and finding checks.
+
+## 2026-11-21
+
+- Keep exact historical path and commit coverage in a temporary index instead of rejecting a scan when the number of coverage rows grows. Tree cache capacity now causes eviction and verified rereads, not publication refusal; the proof, finding policy and publication gate are unchanged. Clean reviewed text no longer allocates exact byte-coordinate maps for nonexistent path matches. Shared engineering guidance distinguishes workload size, cache capacity, completeness, and eligibility.
+
+- Require material changes and reviews to verify owners, contracts, and active enforcement along the affected execution path, without adding a new workflow gate.
+
+- Expose exact machine-path match positions from the existing classifier so review preparation can represent the same findings as the publication scanner. Detection and required review decisions are unchanged.
+
+- Group repeated unresolved history-file findings before applying the ordinary scanner display limit. Distinct locations stay visible instead of being displaced by the same line in multiple commits. Review still evaluates each commit, and the publication decision is unchanged.
+
+- Label the diagnostic history scan as unreviewed and show aggregate redacted finding classes. Its path-and-blob counts are not the per-commit counts used for scoped review evaluation; publication checks and authority are unchanged.
+
+- Check large commit histories without a cumulative message-size cutoff. The scanner examines each bounded commit or tag and retains only structural metadata. Verify line bounds once per blob while preserving every path-specific check. Stream the same qualified Git revision inputs through the owned reader, avoiding the Windows command-line length limit on wide histories. Scoped Git object reads share the scan deadline rather than imposing a second default timeout. Findings, incomplete checks and publication authority stay distinct.
+
+- Add an opt-in local publication history report that identifies flagged commit messages by commit ID and line without exposing message text. The report binds the result to the checked range, marks truncated output, and does not change or authorize publication.
+
+- Run shared hook upgrade tests without an installed Codex executable. The rollback test now verifies that the simulated post-write health check actually ran before it checks restoration.
+
+- Preserve operator-supplied handler fields, including timeouts, when a shared hook upgrade changes its tool matcher. Joint relocations and mixed relocation/retirement groups now preserve those fields and neighboring registration positions. Permanent removal retains its existing ownership checks.
+
+## 2026-11-20
+
+- Fix uninstall of untouched documents created by a fresh install. After exact removal, the installer expects the document to be absent at its validated location instead of treating its own removal as drift. Edited or unrelated files remain protected, and a late failure still rolls back the removal.
+
+- Extend the shared Responsibility-Driven Engineering rule to prevent defect classes at their owner and verify both supported transitions and safe refusal. No new workflow gate or skill is required. The existing architecture roles now pair an accepted transition with a rejected case and verify protected state. Windows parity checks recognize the supported directory junction while still verifying the exact shared target. Retirement regression tests now distinguish harmless empty-group retention from forbidden movement of another hook.
+
+- Support an explicit, verified predecessor for shared hook upgrades between retained releases. Preview and apply use the same ownership checks; unrelated hooks and native trust remain unchanged. The prior package evidence, hook catalog and hook files must be direct members of the selected release. The installer compares the two releases' own catalogs so retired hooks do not remain active and unrelated native slots are preserved. The same group can retire or move multiple owned handlers together, including when only the matcher changes, without shifting a retained handler.
+
+- Route owned pushes through the native Git publication callback on all platforms. The experimental Windows receiver route is not used because its receipt alone does not satisfy the mandatory publication proofs. The native verification tests now include the complete captured source roles, so both ordinary bootstrap checks run instead of failing during fixture setup.
+
+- For an owned push to one ordinary HTTPS destination with no explicit redirect policy, default that destination to no redirects for this invocation only. The native hook still requires the exact receiver before using verified prior history. Explicit settings and unqualified transports are unchanged; no Git configuration file is edited.
+
+- On Windows, updates that change only the contents of an owned skill tree keep the original files and their inherited access policy. The installer verifies both trees and rolls back interrupted updates; topology changes and writes that would change the Windows Archive attribute use the checked staged publisher instead.
+
+- Add an explicit registration-only update for a retained shared Codex hook bundle. It previews the same proposed registration and inventory before writing, can replace a proven older hook command whose interpreter disappeared, and leaves the rest of each Codex profile and native trust unchanged.
+
+- Remove the contradictory maintainer instruction to test in a live Claude global installation. Installation checks use isolated targets; deployment remains a separate operation.
+
+- Run independent ready work in parallel within authorized capacity and safe isolation. Legacy mode values no longer silence the advisory, and do not authorize extra work.
+
+- Preserve inherited project and global settings during installation. Do not create missing overlays or alter explicit Claude main-agent selection. Handle existing legacy preference compatibility at the owning transaction.
+
+- Require an explicit explanation when selecting an otherwise-admitted alternative to the recommended model or reasoning effort. Record the reason without judging its wording or granting launch authority.
+
+- Make Responsibility-Driven Engineering explicit in the shared rules and existing architecture roles: identify who owns a guarantee and how it is enforced and verified, without introducing a new role or review phase.
+- List optional Ponytail complexity-review skills in a separate registry. The pinned, MIT-licensed skill texts ship as optional source material only; default installation, hooks, execution permissions, and acceptance gates do not change.
+
+- Preserve Windows automatic inheritance when staging an upgrade. When Windows creates an object with the same owner, group and access list but omits the inherited-state flag, the installer asks Windows to recalculate inheritance on the new staged object, then verifies the entire original policy before publication. The native handle prevents propagation to any children. Protected, null, or mismatching access lists are not rewritten by this recovery path.
+
+- Limit installer rollback snapshots to the planned Orchestrarium skill owners, selected members, and receipts. An unrelated plugin in the shared skills directory no longer blocks the update. Codex installs that skip hook registration leave the existing hook configuration and its ownership inventory outside the write transaction.
+
+- Apply verification and reuse explicitly to every profession. Researchers and designers check ready alternatives against the real requirements; implementers adopt the fitting solution or show the gap; existing reviewers challenge unsupported replacements. No extra review phase or copied rule per role.
+
+- Put verification and reuse first in shared rules and the Lead skill. Before changing a working setup or creating code, tools, automation, or monitoring, check the actual behavior and look for a ready solution. Keep the working parts, use existing monitoring where useful, and assign only the uncovered work. No extra review stage or automatic dependency installation is added.
+
+- Stage a permanent pre-SDK bundle before changing a linked global Codex hook file. The shared hook installation binds managed commands to that bundle’s Python and scripts in one registration write, preserves unrelated hooks, and reports the host’s own trust state. On fleets with a shared file, prepare the same local directory on every host before the owning installation publishes the change.
+
+- Include the verified receiver publication implementation in the pre-SDK package. Owned Git subprocesses ignore an interactive pager, retain exact transfer coverage checks, and report the known resource-limit category without exposing scanned values. Existing receipt, hook ownership, and refusal checks stay in force.
+
+- Prevent the installer’s hook checks from writing Python bytecode into the installed package, including direct hook smoke checks and Python-based Codex hook-list probes. The registered commands and host trust policy are unchanged.
+
+## 2026-11-19
+
+- Report a stable transport parity diagnostic when an existing Claude projection matches no accepted whole-package state. The pre-SDK installer still stops before replacing that projection; the diagnostic does not authorize migration or expose peer files.
+
+- Keep Second Opinion toggles separate from installer normalization in both dispatch contracts. A new project override changes only the consultant setting and leaves inherited provider and delegation policy intact.
+
+- Route a demonstrated class of defects to its existing owner, whoever reported the example, and verify neighboring valid cases and required refusals. Preserve independent contracts and retire superseded branches and tests without authorizing wider work. Narrow the specialist rules that unintentionally required extra build stages, comparative data, output tooling, or a particular platform. Preserve native decoded-frame timing when verifying transient display defects and distinguish visual, assistive-technology and numerical evidence.
+
+- Align specialist instructions and native Claude wrappers with the existing QA-owned defect-admission contract. Roles report qualified adjacent findings in-band by default and use the configured registry only when explicitly authorized. The default directory is not a provider-specific requirement.
+
+- Raise the evidence bar in the specialist catalog without changing provider or model selection. Science separates code and solution verification from physical validation; delivery distinguishes settled effects and measured performance from replies and proxy signals; interface roles distinguish synthetic tests from actual device observations. Design, review and planning retain release authority and test scope while making their decision evidence more specific. The generic Review Loop now points Claude to its selected-root command where the native helper is installed.
+
+- Update pack verification to check the documented installation layout and the reviewed current common skill bodies. These checks verify packaging and contract alignment, not that a provider ran a role or that a model's answer improved.
+
+- Agents-mode validation now checks the same runtime documents even when the entire checkout lives in a temporary workspace; repository-local scratch files remain excluded.
+
+- The maintenance guide now directs changes to common skills through their single canonical source. Maintain provider-specific wrappers separately and verify the resulting installed projections; no runtime behavior changed.
+
+- The bundled installer now disables Python bytecode caching in both launch stages. Help, dry runs, and loading the runtime-retention builder no longer leave Python cache files in the source bundle.
+
+- Clarified how to identify a frozen pre-SDK baseline, preview an install without changing the target, and locate the canonical installed skill and hook files. These documentation changes do not switch the SDK track or change installer behavior.
+
+- The scratch recovery hook now compares original file bytes with Git, without clean filters or line-ending conversion. It quotes paths with special characters and enables Git's Windows long-path support, so preserved work is not mistaken for a committed copy merely because conversion makes the contents look alike.
+
+- Recognize the Windows process token's exact eligible default owner when binding its working directory, without moving the directory or changing permissions. Unrelated or deny-only identities and filesystem drift are still rejected.
+
+- Optional bundle assembly now requires a separately qualified standalone CPython standard-library runtime. It rejects third-party package content before output and packages only selected CPython notices. Superseded packaging assets and evidence remain available in the original Git checkpoint, not the current source tree. Final verification rejects unexpected notice content anywhere in the assembled bundle before creating its launch manifest. The existing source installer and provider policies are unchanged.
+
+- The agents-mode reference now distinguishes read-only routing and status checks from authorized configuration writes. Reading legacy overlays leaves their bytes unchanged; explicit configuration changes and reinstall retain their existing normalization rules.
+
+- Align both Claude structural references and their validation with the current native publication and passive-polling contracts. The maintainer check now verifies current reference bytes and user controls without demanding a retired publication marker. Runtime authorization is unchanged.
+
+- Installer cleanup now releases private POSIX transaction snapshots of read-only directories after success or rollback. Only the private snapshot directory is made writable during a removal attempt; its original mode must be restored even if removal fails. A failed mode restoration is reported as incomplete cleanup, not as successful rollback.
+
+- Native publication can qualify creation of a new annotated tag on already disclosed history by verifying the complete new tag object and its message against the exact receiver, without pretending that an empty commit scan authorizes a push. Publication of new history still requires both ordinary scans.
+
+- Claude help now reads its role groups from the installed role index, and the performance and status commands read the configured bug registry instead of a discontinued separate directory. Bug-fix and QA guidance returns dispositions to the lifecycle owner rather than changing or archiving records directly. Role-migration and workflow tests use the retained factory files and current routing owners.
+- Validate the entire Codex skill catalog, including newly added source entries, while retaining its metadata budgets and excluding unrelated third-party skills from installed pack checks. Reconcile the stale fingerprint with the already accepted task-first routing addendum without changing its routing or authorization rules. Codex and Claude second-opinion status now consume layered configuration in memory and do not rewrite local or global settings. Maintainers now record installation and rollback against the exact candidate, obtain an independent first assessment, and address recurring failure classes at their owning verification boundary.
+
+## 2026-11-18
+
+- The shared development workflow now requires GUI-independent functional operations and a replaceable presentation client through the existing common contract. Architecture guidance adds headless and client-replacement acceptance while preserving required approvals, presentation-only behavior and explicitly justified user-requested exceptions.
+
+- The repository front page now introduces Orchestrarium in plain language and separates the current production packs from the unmerged SDK work in PR #19. The current mascot is the approved Little Orche, displayed as a compact logo; the future Orche rebrand is not applied. Existing installation identifiers and runtime behavior are unchanged; the page no longer repeats an outdated model-ranking summary.
+
+- Lead communication now explains the practical issue, options and consequences before asking users for a decision. Routine authorized choices stay with the Lead; technical accuracy and mandatory approvals remain unchanged. The existing shared rule is clarified rather than adding another questionnaire or provider-specific policy.
+
+- Normal and Ultra Codex Leads now share an explicit native-dispatch procedure: select each child by task through the existing resolver, submit the exact model/effort pair, and distinguish requested controls from host evidence. This clarifies that ranking is caller-owned rather than an automatic host hook; missing runtime metadata alone does not freeze substantive review or independent work. No model defaults, permission rules or runtime hooks are changed.
+
+- Removed Low from the active routing effort catalogue, profiles and task metadata. The existing cross-provider launch rejection remains binding; other efforts and historical migration evidence are unchanged.
+
+- Codex model routing now admits only the latest confirmed version in each family: Luna 6, Terra 6.1, Sol 6.2 and Astra 6.2. Older model profiles are removed from active choices rather than retained as launchable compatibility or quota-fallback routes. Existing user configuration is preserved and retired choices are reported explicitly; historical evidence and migration fixtures remain intact. This prevents new tasks from silently returning to obsolete model generations.
+
+## 2026-11-17
+
+- Task-first routing now favors Sol 6.2 for ordinary implementation, Luna Extra high for bounded mechanics and Terra 6.1 High for fitting bounded/repository/visual work. Astra High/Extra high can use genuine task-scoped approval for scientific formulation, complex audit, architecture and security, including covered repeats; Max and separate launch/spending permissions remain protected. Substantive results now require a proportionate nonauthor check, not only critical results, without adding duplicate review loops.
+
+- Production Codex routing advances factory GPT-6.1 Sol and GPT-6 Astra models to their GPT-6.2 versions with unchanged role efforts and launch rules. Existing 6.1 Sol external profile settings migrate to the same effort on 6.2; Terra, Luna, unrelated settings and the main-session model remain untouched.
+
+- Installer file writes now record successful ordinary POSIX permission changes before readback, preserving rollback ownership if that observation fails. Publication recovery keeps both the original publication error and a later bookkeeping error instead of hiding either; existing reservation and fresh-directory publication paths remain unchanged.
+
+- Installer rollback now keeps the original scalar restore failure when closing its descriptor also fails, including recovery details. Move metadata is recorded only after all destination observations succeed, so failed observations leave the rollback journal unchanged. Existing shared-container retention and reservation relocation remain intact.
+
+- Preserve the original copy failure and its existing recovery evidence when a source, fresh target, or metadata descriptor also fails to close. Successful copy ordering and timestamp restoration qualification remain unchanged.
+
+- Restored source-only ledger, state-schema, and architecture-layering checks that were declared but omitted from the Python pack validators. Preserve the byte-pinned migration baseline during Git checkout so Windows newline conversion cannot invalidate its approved digest. Ledger fixture checks run only in the full monorepo, not provider exports or installed packs; existing governance limits and installed validation remain unchanged. Reconciled all 19 architecture role slices with the current shared reference before refreshing its review stamp; both complete source pack validators pass.
+
+## 2026-11-16
+
+- Native publication scans now distinguish new disclosure from history already held by the same receiver. A verified direct HTTPS receiver with redirects disabled can use its fresh ref inventory; custom or ambiguous transports retain conservative callback-only coverage. New content, paths and annotations remain checked, so new branches no longer repeatedly reject previously published history merely because their destination ref is new.
+
+- Publication scanning reuses only exact negative lexical results from the preceding payload within one scan, avoiding repeated regular-expression work across historical file versions. Candidate evidence, per-commit review authority, full graph coverage, machine-path checks and the existing scan deadlines are unchanged.
+
+- Reuse pure machine-path line detection for successive review subjects of the same exact payload and path. A single metadata entry preserves per-subject authorization, line masks, finding locations and unresolved accounting without retaining payload bytes or changing coverage/deadlines.
+
+- Build publication review byte-coordinate maps only when detected candidates require them. Strict UTF-8 validation, all detectors, candidate witnesses and review authorization remain unchanged; clean text no longer allocates a scalar-sized coordinate table.
+
+- Preserve the caller working directory when the interactive root installer dispatches a client. Relocated bundles now install into the caller project rather than their own packaged source tree; absolute installer selection, explicit-target safeguards and global-home selection remain unchanged.
+
+- Select native junctions for local Windows directory projections before creator acquisition, preserving source/target identity and rollback checks. Other namespaces retain symbolic-link admission without fallback or elevation; shared reparse-tag recognition also supports Python 3.11. Projection rollback now validates the exact no-follow object when its owned referent was already reclaimed, without following or deleting a replacement target.
+
+- Scope Windows symbolic-link creation and rollback to a private copy of the existing effective thread token before acquiring creator handles. This enables an already assigned privilege only for the operation, preserves the process token and prior impersonation, and still rejects missing privileges; no system security settings or SDK transition are involved.
+
+- Refresh native role byte bindings after the existing browser/computer feature changes, preserving every role instruction and runtime setting. Source-manifest validation still rejects unrecorded drift; bundled installation can now validate the accepted current factory payload.
+
+- Add distribution-only runtime/notice binding to the existing pre-SDK layout. Local assembly requires matching runtime and notice inventories before output; no SDK transition, model launch or installer policy change is included. Historical recovery evidence is distinct from acceptance of this source revision.
+
+- Publication history acquisition now rejects a result when its final synchronous detector or proof hashing finishes at or beyond the existing shared deadline. This closes a late-result acceptance gap without adding a timeout, changing coverage, or claiming synchronous work can be preempted.
+
+- Complete-history publication scanning retains one revalidated payload instead of the whole blob history. The obsolete 512 MiB cumulative-cache cap is replaced by the existing per-object, inventory, metadata and supervised-time bounds, while all selected objects and path/review contexts must still be checked. Larger histories may now qualify without repository-specific exceptions; repeated reads can cost more work, direct CLI timeout remains cooperative, and no hard resident-memory ceiling is claimed.
+
+- Preserve a closed, redacted scanner refusal identifier in native and tool-facing publication diagnostics so operators can distinguish causes without weakening denial, scan coverage or target checks. Accept both scanner field orders and native line endings; never echo arbitrary scanner output.
+
+- Admit the implemented POSIX transaction backend for ordinary serialized installation and Claude removal, replacing the blanket platform hold without weakening identity, content, filesystem-capability or recovery checks. Receiving now exercises the public entry point rather than substituting admission gates; unknown platforms still refuse before target effects.
+
+- Bind receipted linked-document uninstall selection to the existing scalar owner, including physical storage and complete link-chain witnesses. Preserve the link and surrounding user text; keep public platform admission unchanged.
+
+- Remove receipted Claude document blocks through the existing configuration owner while retaining exact surrounding user bytes. Modified or ambiguous blocks preserve the installation; absent blocks and completed removals repeat safely.
+
+- Add bounded pre-SDK Claude selected-current uninstall through the existing transaction. Fresh control-file ownership comes from successful creator witnesses, not a pathname census; unknown or edited controls preserve their runtime, while unrecorded user data remains untouched. Preview and exact-state selection avoid treating legacy content hashes as historical linked-root authority. Global linked Claude runtime subroots reuse the existing identity-bound owner; preview/apply binds the link chain and physical target, preserves the junction, and refuses retarget drift. Shared Codex removal remains outside this slice.
+
+## 2026-11-15
+
+- Reuse/admission guidance now includes evidenced neighboring owners and implementations. Materially invalidated architectural assumptions return to the existing Architect/review route before dependent execution; age and unchanged continuation create no new gate. This is instruction-level protection, not a claim of host enforcement or historical model compliance.
+
+- Failed installations now distinguish an implicitly created parent directory from installer-owned payload. After owned child operations roll back, a same-identity parent containing external runtime state is explicitly retained rather than blocking unrelated rollback or deleting that state. Changed owned files and substituted parents still fail closed; public POSIX admission is unchanged.
+
+- Codex hook-inventory queries on POSIX now own a private process group, offer stdin EOF for graceful host shutdown, and require complete group and reader settlement before accepting inventory. Cleanup failures retain their primary cause instead of allowing background Git descendants to escape the query lifetime. This does not qualify host-created runtime files or enable public POSIX installation.
+
+- Added opt-in isolated POSIX provider receiving tests for fresh/repeat installs, selected non-Lead upgrades and real hook health. They require caller-owned temporary storage and frozen installer source; native Codex hook-list discovery is a real prerequisite, never replaced by a fake executable or conflated with the no-hooks matrix. Public POSIX installation remains held.
+
+- Selected installer tree upgrades now qualify the actual retained-object owner, including its verified owned-reservation path, rather than requiring an obsolete native-only directory primitive. The probe preserves exact original identities, rejects occupied destinations and settles only proved probe objects after partial outcomes; public POSIX installation remains held pending complete platform qualification.
+
+- Before updating existing POSIX copy files, independently qualify exact restoration of their original timestamps, then permit measured forward timestamp representation. Rollback remains exact, and unchanged full metadata avoids needless setters that could round it. This enables qualified repeat installs while refusing unrestorable or concurrently changed originals before destructive writes.
+
+- Keep actual exclusive-creator identity in copy participants so files created earlier in the same transaction remain eligible for measured timestamps on repeat copies. Moved-in user originals and foreign replacement objects do not inherit this permission. This fixes the later duplicate-copy stage of a fresh POSIX install without relaxing original-file metadata restoration.
+
+- Qualify representable timestamps for genuinely new copied files using an owned same-filesystem probe of the specific requested pair. Independent field changes and repeated observations reject no-op or unstable setters; target identity, contents and binding are checked again before exact measured assignment. Existing originals and rollback timestamps remain exact, and public POSIX admission is unchanged.
+
+- Preserve the verified actual timestamp outcome of a successful copy setter for rollback even when it differs from the requested exact times. Exact assignment still fails, and later drift remains unknown. An assembled POSIX failure test now proves complete target and staging rollback with a preexisting user file; public admission and successful lifecycle qualification remain unchanged.
+
+- Extend owned reservation retention to regular files and initial file migration when native no-replace is unavailable. Migration records retain reservation custody across failed cleanup, distinguish it from original backups, and share checked cleanup across direct and transaction settlement; file rollback preserves the original inode and hardlinks. Public POSIX admission remains held pending whole-installer qualification.
+
+- Bind selected configuration migration moves to their actual source and destination parents. A separate retained-original directory no longer receives the source parent descriptor; its registered ownership and contents are checked before and after the move, preserving drift and cleanup diagnostics.
+
+- Retain original directories through an exclusively created, identity-checked empty reservation when native no-replace is unavailable. Descriptor-relative replacement of that owned slot preserves original identities under caller serialization; ambiguous outcomes and foreign reservations are preserved. New replacement trees can then be constructed against the verified retained original, enabling bounded commit and rollback without copying originals during retention. This does not provide hostile-writer exclusion or remove public POSIX admission holds.
+
+- Preserve held-parent selection on macOS native no-replace publication by using renameatx_np with descriptor-relative names. Missing bound capability no longer silently uses unbound pathname lookup. ABI dispatch and errno regression checks cover this seam; native macOS lifecycle and the public POSIX hold remain separate.
+
+- Roll back sealed replacement images through owned disposal rather than requiring an extra atomic quarantine move. Retry only residual backup cleanup after restoration, preserving the complete restored original when cleanup fails partway. Runtime observations, foreign changes and pending migrations remain protected; POSIX public admission and original-object retention requirements are unchanged.
+
+- Restore fresh-directory construction through the existing effect-bound owner when native no-replace publication is unavailable and relative descriptor operations are supported. Record partial identities for rollback and preserve prepared-image cleanup ownership. Existing-object retention and the public POSIX hold are unchanged; native component tests do not claim full installer qualification.
+
+## 2026-11-14
+
+- Align installer integration fixtures and installation guidance with the existing exact outside-document byte preservation contract. Tests now distinguish LF-rendered managed bodies from retained user CRLF text and supply the native-config plan's real storage binding, so Windows verification checks the current contract without normalizing user content.
+- Clarify platform selection for Windows-resident installer targets: the Windows backend must own the complete transaction rather than substitute individual POSIX operations. Separate native POSIX qualification, repeated installation and uninstall claims so component tests cannot be mistaken for full lifecycle acceptance.
+
+- Preserve primary exceptions by presence across installer copy, scalar, payload, tree-construction and prepared-image cleanup boundaries. False-valued errors no longer become cleanup errors, and exception truthiness cannot interrupt settlement diagnostics. This changes cause selection only, not filesystem effects or platform admission.
+
+- Preserve the original transaction failure during rollback without invoking exception truthiness. Native snapshot component checks now cover file/tree acquisition and restoration, partial staging cleanup and foreign recovery data on Windows and POSIX; POSIX admission remains held pending the rest of the installer lifecycle.
+
+- Add native POSIX tree/journal component checks for completed and partial disposal, foreign data and pending migrations, and unresolved post-effect close failure. Test-only admission is explicit; public transaction and full lifecycle qualification remain pending.
+
+- Reconstruct the transaction owner's bounded POSIX leaf-disposal primitive for caller-serialized cooperating writers. Validate the sealed leaf and held parent, preserve observed foreign data, avoid permission mutation, and retain close failures without hiding the original cause. Existing installer and transaction admission holds remain until full lifecycle qualification; this is not POSIX installation enablement.
+
+- Select fresh-effect transaction tests according to the current platform admission contract: retain Windows lifecycle coverage and verify that non-Windows refusal preserves the prepared image before effects. This prevents unsupported-platform failures from being misreported as inverse regressions; the POSIX backend hold and missing directory-publication capability remain unchanged.
+
+- Clarify the installer filesystem contract for caller-serialized cooperating writers separately from hostile same-user exclusion. Preserve selection, observed-drift refusal and recoverable partial outcomes without requiring a privileged storage redesign for ordinary operation; existing POSIX holds and native acceptance requirements remain unchanged.
+- Qualify rollback of an owned POSIX projection using its captured link identity and raw target, without requiring its referent to remain present. This prevents a removed referent from becoming an unrelated rollback prerequisite while preserving rejection of changed targets; public POSIX installation and disposal qualification holds remain unchanged.
+- Verify selected Claude linked updates restore the original instruction and existing or absent receipt after a failure following receipt replacement.
+- Receive explicit current Claude agent/command upgrades through declared global linked roots using the existing physical file owners and logical receipt owner in one transaction. Preserve unselected content and source/currentness checks; receipt selection remains an explicit current operation, not historical ownership or unattended upgrade/uninstall authority.
+- Keep lifecycle fault-injection test doubles compatible with keyword arguments from their production owners. Forwarding wrappers preserve the complete call, while the controlled failure double accepts owner options without changing its injected failure; drift and rollback assertions remain unchanged.
+- Keep lifecycle tests discoverable through both test runners: pytest no longer reruns the unittest adapter, and unittest includes functions defined at the end of the module. Test assertions and production behavior are unchanged.
+- Restore fresh-install rollback through the existing identity-checked disposal owner instead of requiring a native move merely to retain newly created data. Existing-object replacement and runtime-observation custody retain their original safeguards. This removes a fresh-file recovery failure under an unsupported native move capability; directory atomic-publication refusal and POSIX disposal holds remain unchanged, so this is not complete DrvFS installation support.
+
+## 2026-11-10
+
+- Windows exact-tree updates now capture the existing ordinary members' owner, group and discretionary access-control list (DACL) through identity-bound handles and create their replacements with that policy before writing payloads or publishing the tree. Protected files and directories no longer inherit broader staged-parent access during a selected Lead update. New members inherit their replacement parent; capture, creation or verification failure refuses publication, and rollback retains the original objects. No elevation or live permission rewrite is used. This is bounded owner/group/DACL preservation, not full security-descriptor, scalar-writer, race or crash qualification; platform and live-rollout holds remain independent.
+
+- Consolidate Codex routing, recovery and role resolution inline, combining the ordered route list with its required participants and referring to shared rules already composed in the same instruction document. Per-stage recovery, additive Architect participation in factual decisions, direct-role exceptions, lifecycle ownership and external worker/reviewer capability boundaries remain binding. This saves 3,232 source bytes without a new loader, read dependency or Lead activation; the broader instruction-budget problem and live loading/compaction qualification remain open.
+
+- Consolidate the Codex Bootstrap checkpoints with their existing always-composed shared rule owners, removing repeated instructions without a new procedure load or Lead activation. Pre-action, pre-fix and pre-commit timing, current-session evidence, assumption disclosure, rollback and first-push safeguards remain binding for direct, nested and skill-only work, including recovery of missing obligations before accepting outstanding results. This saves 3,540 source bytes; it does not establish effective client-budget fit, actual instruction loading or compaction behavior.
+
+- Reduce the always-composed Codex instruction payload by moving native route procedures into the existing installed Lead operating-model. The universal kernel keeps permission, tool-scope and no-fallback safeguards and requires applicable current procedures for selection, submission, receiving and native configuration/install diagnosis. Direct and nested callers do not activate Lead; Claude Agent and external-adapter routes keep their own owners. This reconciles the earlier local kernel candidate with current source and closes its receiving/selected-layout gaps. It is a partial structural reduction, not proof that project instructions fit an effective client budget or survive model compaction; user documents, client settings and installer behavior are unchanged.
+
+- Explicit global Codex legacy-skill migration now also retains a selected absolute directory symlink or junction before replacing it with the canonical skill projection. The existing transaction preserves the exact original link object, keeps the legacy root and unrelated data unchanged, and uses identity-bound rollback without walking the linked directory. Concurrent namespace drift may leave preserved recovery requiring inspection; this does not qualify every race or crash outcome. Relative or invalid links and occupied backup locations still refuse. Link classification and backup naming use the same captured raw link image, with identity and currentness checks before mutation. This repairs explicitly selected misdirected compatibility links within the existing same-volume retention contract; the main installation and post-commit compatibility pass remain separate, and live rollout still needs its own current-state and backup checks.
+
+- Add an explicit global modified-Lead replacement selection bound to the exact existing v2 receipt bytes, current authored tree and intended composed source. Operators can reconcile a reviewed local hotfix without deleting or rewriting its old receipt to bypass protection. Normal drift still refuses and reports a nonauthorizing candidate; selected updates reuse currentness checks, the existing paired transaction and source-verified finalizer. Unreceipted adoption, other skills/settings, peer ownership and platform holds remain independent, and source admission does not establish live rollout or client loading.
+
+## 2026-11-09
+
+- Runtime catalog validation now rejects repeated top-level name or description fields in its supported scalar metadata forms instead of silently taking the last value. Ambiguous repository or installed skill metadata no longer produces a false complete catalog verdict. Historical offline estimates and field-like text inside scalar bodies are unchanged; this remains bounded metadata validation, not full YAML or client-loading qualification.
+
+- Runtime catalog validation now refuses missing frontmatter and absent, blank or null descriptions in supported skill-metadata forms, including comment-only values and empty block scalars. The runtime path follows the checked Codex parser contract: omitted or blank names use the containing directory name, whitespace is normalized, and padded frontmatter fences remain valid. This prevents estimator defaults from producing a false complete verdict without rejecting the provider's optional-name form. Historical offline estimates stay unchanged; this is not general YAML validation or proof of actual client loading.
+
+- New Windows installer directory projections use native junctions through the held creator object instead of implicitly requesting privileged symbolic links. Ordinary local installs no longer select the symbolic-link reparse tag that caused WinError 1314. Existing symbolic-link projections remain valid; exact mount-point recognition supports Python 3.11 in projection and snapshot checks. Native failures are not retried with pathname commands or elevated privileges, and unsupported network-share junction targets remain failures. Creator, raw-reparse and target identity checks are retained; this is not full Windows lifecycle or crash-recovery qualification.
+
+- Runtime catalog validation now refuses unreadable or invalid UTF-8 skill metadata in both the repository identity reference and installed catalog. Read-error fallback names and empty descriptions, or decoding replacement characters, can no longer produce a false complete verdict from those failures. Historical offline estimates retain their tolerant reads; this does not prove client identity, actual instruction loading or project-budget acceptance.
+
+- Directory-move capability-probe settlement now preserves an existing primary exception without evaluating its truth value when cleanup also fails. False-valued or truthiness-raising exceptions no longer replace the original cause or interrupt the established typed failure path. Cleanup context and recovery location remain available; no filesystem operations or POSIX/WSL admission rules change. Focused checks use inert paths, not native effects.
+
+- Stop automatic Codex legacy replacement from inferring ownership from an unmarked exact H1 title. Such documents now refuse with E_CODEX_DOCUMENT_LEGACY_OWNERSHIP_REQUIRED, preserving text at the document writer boundary; marked updates and absent/nonmatching documents retain their routes. This intentionally changes automatic legacy migration. Keep the original file and manually review an explicit replacement interval under the existing selection contract, whose supported shapes are narrower than heading recognition. This is not a whole-installer no-effects or recovery qualification.
+
+- Public installer success is reported only after canonical staging cleanup returns successfully. Public cleanup now surfaces errors instead of suppressing them; private cleanup callers retain their previous default. Failures after transaction completion explicitly report applied installation with unresolved postcommit work, not rollback. Commit-requested transaction-exit failures are reported as potentially applied with incomplete settlement; original exception causes and private secondary references are retained without exposing a handled error through a cleanup interrupt traceback; Interrupts preserve their exception and SystemExit code (including zero), while attempting the same static applied-state warning before propagation. A failed warning write stays private secondary evidence and cannot replace the original interruption; warning delivery or nonzero exit is not guaranteed. Strict cleanup remains pathname-based and may be partial; this does not establish crash durability or POSIX/WSL support.
+
+- Windows projection creation now reports a bounded operation identity when setting native reparse data returns failure. The public diagnostic retains safe native error codes through the immediate cleanup wrapper without exposing exception text or paths. This improves future diagnosis only: it does not identify an earlier failed call, grant privileges, change rollback, or qualify installation success.
+
+- Installer preflight now classifies the existing selected-document replacement as a provider-document writer and the project-instruction budget warning as a nonwriter. This removes a source-inventory mismatch that blocked ordinary pack installation while preserving rejection of unknown writers and writes into the canonical Lead tree. Pure source regression checks cover the repaired classifications and both refusal boundaries.
+
+- Workflow regression checks now follow the published shared-rule wording, Root-owned execution ledger and Codex hook-procedure owner instead of obsolete duplicate text. Scoped negative checks retain quick-fix recovery, review baselines, wrapper provenance, nonauthoring review, mandatory hook navigation and qualified runtime-tree ownership. This updates verification only; production policy, routing and installation behavior are unchanged.
+
+- Native routing regression checks now follow the published task-first ordinary route instead of requiring retired fixed named-role dispatch. The checks preserve explicit model/effort selection, current configuration controls, policy membership and observed runtime evidence, with negative cases for lost safeguards in the Codex owner and its references. This repairs stale verification failures without changing dispatch behavior or launching providers.
+
+- Make ordinary artifact disposition trash-first: promptly move confirmed unnecessary, quiescent material to trash without trying deletion first. Trash must be safe for complete manual emptying and hold no required evidence or recovery dependency; permanent deletion remains separately authorized. Current owner, host-denial, lifecycle and read-only cleanup-coordinator safeguards remain in force. The canonical shared cleanup skill changes while the historical Claude migration source remains unchanged. The installer accepts only the exact previous stock canonical cleanup tree for upgrade; edited or structurally different trees still refuse.
+
+- Committed legacy-candidate cleanup now uses the held lifecycle owner for file and directory retirement, keeping retained observations current after each effect. Partial cleanup preserves the committed candidate and exact replay marker; changed source, marker or target material refuses disposal. Source-snapshot diagnostics are now documented. This source correction does not lift the existing POSIX installer holds or qualify native race behavior.
+
+- Existing unversioned flat backlog records with one unambiguous `status: backlog` now remain readable without rewriting their bytes or inventing activation. Audit and the generated view explicitly label this read-only compatibility and bind the source digest, while canonical creation/start and schema-bearing or ambiguous legacy records stay strict. This restores historical visibility without granting new lifecycle authority.
+
+- Require instruction discovery for each additional working directory or repository, including parallel assignments, through the existing repository-orientation owner. Keep deeper rules scoped to their subtree and preserve current handoff economy: reuse unchanged guidance only when actually available to the receiver, and supply missing target rules through the trusted input path. This prevents reliance on another directory's startup context without widening permissions or claiming automatic runtime loading.
+
+- Codex document preparation now refuses a managed BEGIN marker preceded by prose, quotation/list syntax or other content on the same physical line, preserving user text that an inline example could otherwise cause the updater to replace. Normal standalone frames, one document-start byte-order mark and surrounding line endings remain supported. This bounded refusal also covers unmatched inline ticks; it does not establish ownership of standalone markers or change raw END and legacy-heading boundaries.
+
+- Production-entrypoint regression expectations now require the existing early POSIX refusal for global dry runs and the Codex project smoke path, instead of requiring installation success. They check the complete refusal output and an unchanged empty target; the Windows manifest assertions remain intact. This test-contract correction does not enable POSIX installation or establish native lifecycle qualification.
+
+- Runtime catalog validation now binds roots and entries to one complete skills-instructions block. Missing, reversed or repeated delimiter lines fail as malformed evidence, while literal tags in single-line descriptions remain valid. Surrounding text cannot supply catalog entries or create false duplicate-root errors. This closes false-complete observations without claiming client identity, actual instruction loading or project-budget acceptance.
+
+- Catalog runtime evidence now rejects duplicate JSON fields instead of silently accepting the last value, and reports decoder recursion failures as malformed evidence. This prevents ambiguous observations from being accepted as complete while keeping valid unique-field input and existing diagnostic verdicts unchanged; no client launch is required for these checks.
+
+- The shorter-description catalog warning now reports a length difference with content and provenance unverified, rather than asserting that the client removed characters. The existing removed-chars output key remains as a deprecated numeric alias alongside description-length-difference; it is not evidence of removal. Existing status identifiers and verdicts are unchanged. A version-pinned runtime and bound render source are still required to establish the cause; this wording is not installed-runtime or semantic-equivalence acceptance.
+
+- Runtime catalog validation now rejects differing descriptions that are equal in length or longer than the bound local description instead of reporting successful shortening with zero characters removed. Exact matches and the existing shorter-description warning contract remain unchanged; this diagnostic does not establish why the observed content differs or prove semantic equivalence of shorter text.
+
+- Explicit catalog-budget calibration flags now stay in offline estimate mode even when their values equal the defaults, including the legacy high-threshold alias. This prevents an explicitly parameterized estimate from unexpectedly reaching Codex runtime discovery; the no-argument runtime mode remains unchanged.
+
+- Provider ownership records now reject case variants of the reserved receipt filename, matching the existing case-insensitive alias policy. Fresh payload filtering also excludes these variants. This closes a validation gap for Windows-style name aliases without adding ownership authority or changing filesystem operations.
+
+- Preserve original Claude document newline bytes outside the selected managed body and return byte-identical text for an unchanged normalized payload. The preparation wrapper still invokes its writers; this is not a physical no-write guarantee. Preparation now passes exact text; the existing renderer maps its established normalized selection to original offsets, including lone-CR insertion boundaries. This fixes user prefix/suffix normalization without adding ownership authority or physical rollback guarantees.
+
+- Codex legacy updates now recognize complete top-level headings with the existing Markdown parser instead of heading-like substrings in user prose or nested headings. Ordinary generated legacy updates and original outside bytes remain supported; raw ending boundaries and ambiguous genuine-heading ownership are unchanged. This source correction does not qualify historical migration or installed-profile behavior.
+
+- Codex document preparation now refuses a managed BEGIN marker followed by non-whitespace text on the same line, instead of silently replacing that text. Ordinary generated frames, empty or space/tab-only compact frames, line endings and the existing raw END boundary remain unchanged. Compact frames containing text now refuse; no automatic reconciliation or selected-API bypass is implied.
+
+- Refresh the Codex reference-addendum validation pin after the published Goal recovery guidance change. Clean source validation now accepts that canonical guidance while retaining exact normalized-content drift detection; governance and validator behavior are otherwise unchanged.
+
+- Preserve Markdown examples at the start of BOM-prefixed instruction documents. The parser treats exactly one leading byte-order mark as an envelope and restores original code-span offsets, so fenced managed-marker examples are no longer mistaken for replaceable content. Pure parser and in-memory renderer regressions cover LF, CRLF, lone CR, indentation and outside-byte preservation; historical ownership and physical installer qualification remain separate.
+
+- Resume the admitted task under a user-enabled Goal, including a newly created Goal after no-Goal work, after a fulfilled one-off no-Goal, parking or stop-after-current-run request instead of reviving that old hold from recovery notes. Shared guidance, live Lead recovery and both clients' reminders now reconcile current authority, keep real later stops and separate safety/publication/spending approvals, and require evidence before stopping all remaining work. Deterministic source-contract and negative-mutation regressions cover the reported sequence; no live model or native Goal state transition is claimed.
+
+## 2026-11-08
+
+- Extend that negative admission boundary to the remaining selected mutable-path entry points for directory/bootstrap, file migration, projection creation and migrated-file rollback. These private non-Windows routes now refuse before observations or effects, including potential no-ops and dry runs, without creating a new recovery transaction or changing Windows bodies. Full internal-primitive, staging and uninstall coverage remains unqualified.
+
+- Preflight the same disposal requirement before enabled transaction snapshot acquisition and direct writer scopes, preventing those non-Windows private paths from starting work they cannot safely settle. Empty disabled contexts remain no-ops; unwrapped helpers and pre-entry staging are not qualified or protected by this admission boundary.
+
+- Refuse unqualified non-Windows transaction disposal at both node and tree entry points before reads or permission changes, including private callers. Remove the unsafe POSIX name-based deletion branch. Recovery material may remain when earlier private operations already occurred; the public POSIX hold remains unchanged. This is a defensive source mitigation, not a race fix or physical lifecycle qualification.
+
+- Connect fresh-file receipt bootstrap and explicit current-selected Claude instruction and Codex document replacement through the existing transaction and shared receipt finalizer. Exact current bytes, source witnesses and receipt inputs are checked; custom/unselected content and default preservation remain. Receipt-selected Claude batches refuse changed or missing members rather than inferring historical ownership. These source integrations do not qualify linked migration, physical writes, races, rollback, unattended updates, uninstall or release acceptance.
+
+- Existing canonical receipt producers now compare and hash transaction-bound payload bytes: Lead and non-Lead verification share the admitted reader, while managed-member checks retain their composed image. Receipt format, writer behavior and selection boundaries remain unchanged. Qualification is pure/static source only, not historical ownership, directory-chain safety, migration or physical recovery acceptance.
+
+- Codex and Claude document preparation now returns exact before/after outcomes before the existing writers run, sharing the compatible renderer with receipt planning. This source integration preserves default boundaries, normalization and refusal ordering; it does not acquire ownership, publish receipts, enable migration or qualify physical installation and recovery.
+
+- Prepare the common provider-receipt semantic planner using the existing ownership codecs. Per-artifact outcomes keep unrecorded legacy updates separate from conditional creation/adoption and verified-digest changes, preserve unrelated records and exact input fingerprints, and never publish a receipt or claim storage authority. This source-only foundation does not change default installation or complete migration, rollback or uninstall qualification.
+
+- Unsupported no-replace publication of a selected prepared directory now reports a specific atomic-directory capability diagnostic instead of a generic validation failure. Refusal, existing recovery and the POSIX installer hold remain unchanged; this does not qualify DrvFS support or successful rollback.
+
+- Review loops can receive already qualified same-artifact closures and explicit later scout dispositions through the existing ledger authority without rewriting original results or treating unrelated historical diagnostics as a global veto. Main structural type diagnostics remain intact; this source integration neither launches reviewers nor proves fresh project acceptance.
+
+- Lifecycle source-snapshot refusals now identify the controlled validator/schema source, capture stage and first failed invariant, with bounded non-content stat/read context. This brings the diagnostic-only correction to main while preserving all source guards and their evaluation order; it does not identify the historical refusal cause or qualify an actual lifecycle close.
+- Codex document merging now ignores code examples when selecting replacement starts and preserves original user text line endings outside the selected span. This brings the bounded PR corrections to main without widening raw end boundaries or claiming document ownership, migration or physical installation acceptance; the POSIX installer hold remains in effect.
+
+- Deliver the previously reviewed temporary POSIX installer hold to main: Codex and Claude installation and update, including dry-run and force, refuse after argument parsing and before target resolution or staging. Linux, macOS and Windows Subsystem for Linux remain unavailable through this route until the disposal race is repaired; Windows dispatch and help stay unchanged. This is a mitigation, not physical installation acceptance or a change to existing installations.
+
+- Refresh the Codex addendum validation fingerprint after the published context-handoff guidance, so pack validation accepts the current canonical reference while still rejecting changed or missing content. Routing and runtime permissions are unchanged.
+
+- Refresh native-role source manifest digests after the already-published disabled browser/computer feature flags, restoring installation that rejected the changed role files as source drift. Role TOML, instruction bindings and runtime permissions are unchanged; exact source digest admission remains fail-closed.
+
+- Review-loop structural validation now reports malformed enum values and present non-string receipt commands instead of raising TypeError. Historical omitted, empty, whitespace and unknown string commands remain structurally compatible; no closure authority, mutation or installed owner is changed.
+
+## 2026-11-07
+
+- Align the Claude common manual-repo-transfer skill with the existing Codex clone-first and selective-overlay guidance. The full-inventory helper, ownership safeguards and explicit full-recovery option remain unchanged; this restores cross-pack source parity, not installed transfer qualification. Align the Claude PR-review common skill with the existing native publication owner: Root retains human-consent scope while the hook qualifies actual Git updates; no bot, CI or publication action is triggered by this documentation correction.
+
+## 2026-11-06
+
+- Reuse governing instructions during handoff only when they are already present and unchanged in the receiving context. The shared rule requires missing instructions through the trusted input path and restores obligations after compaction without resetting permissions. Existing concrete evidence requirements remain intact. This is source guidance, not proof of runtime loading, token savings or a solution to project-instruction budget limits; external governance transport and installation behavior are unchanged.
+
+- Keep an adopted ready solution as the baseline before nontrivial reimplementation, with safe entry-path evidence or an explicit unresolved hold. Existing receiving now checks whether the chosen route and the next real action still serve the original reuse outcome, including after a user correction; passing tests of custom scaffolding cannot justify the scaffolding or stand in for the ready product. Concrete incompatibility and safety repairs remain allowed without unsafe execution, and no new review stage is introduced.
+
+- Require new compatibility restrictions to be justified by the original admission or real safety requirements before implementation, and recheck them before accepting implementation or QA. Observed sample versions and hashes must not become support boundaries merely because their rejection tests pass; genuine compatibility and operation-integrity requirements remain intact. The existing handoff and QA contracts carry this comparison without another stage or validator.
+
+- Warn during current-version Codex project instruction rendering that client-budget coverage is unverified, and report the rendered UTF-8 size. Operators can see this delivery limitation without a new hardcoded cap or changes to instruction content, user configuration, or installation permissions.
+
+- Report historical Codex skill-catalog size calculations as estimates rather than runtime PASS/FAIL decisions. Large estimates warn without requiring shorter role descriptions; actual observed missing identities and unavailable runtime evidence retain their failure behavior. The optional live-client test requires explicit authorization and opt-in.
+
+- Remove the source installer's exact Markdown parser version-label refusal while retaining its private package-origin checks and document-ownership rules. Bundled versions and license/provenance records still identify the supplied artifacts; any future implementation change requires source-offset and ownership qualification, rather than treating a version label as compatibility evidence. No bundled dependency is upgraded.
+
+## 2026-10-28
+
+- The Codex installer preserves unrelated user native-role files while continuing to validate managed roles.
+
+- Transfer guidance now defaults to a verified clone and only required current local state, with a separate full-recovery option. Root documentation also aligns publication checks, human consent, installer entry points and model selection with their existing owners.
+
+- Decision and approval requests about changes now include a concise, understandable change list with effects, reasons, checks and material risks or choices; detailed diffs remain optional context.
+
+- Ordinary work-item close assesses the accepted outcome and current obligations without treating historical ledger bookkeeping as an automatic veto. Actual history remains intact, and explicit ledger and transfer operations retain their contracts.
+
+- Native publication-entry mismatch refusals can suggest owner-generated callback arguments without granting publication authority; a later attempt still requires full fresh checks.
+
+- Hook ownership now uses the bound selected package and proven legacy identities, preserving foreign and unknown hooks. Health and inventory checks report their actual selected scope and handle supported links and path casing consistently.
+
+- Model selection binds the selected installed script package through its logical and physical paths, retaining identity checks when paths or links change. Model-selection guidance now follows the existing explicit selector contract while preserving user controls and approved factory-only migration.
+
+- A minimal project-local Ruff configuration supports standard local Ruff use and identifies the Python project to supported language tools; it adds no automatic formatting or mandatory lint gate.
+
+- Publication retains genuine human approval bound to the reviewed source, repository and destination across neutral messages. Git pre-push checks the actual updates with a fresh nonempty Version 3 union and a separate Version 4 scan; prior approval does not replace these checks.
+
+- Codex hook-health inventory now recognizes only path aliases witnessed from the bound configuration target, including supported links. Stale inventory can be regenerated by its existing owner; unknown aliases still fail safely.
+
+- Claude installation preserves customized top-level agent and command instruction files and unverified stale namespace entries, reports them as not updated, and continues independent updates. Independently verified historical stock identities can be upgraded without treating modified trees as stock.
+
+- Ordinary model routing supports explicit admissible Luna, Terra and Sol profiles according to task and role, including selecting a stronger profile when needed. Existing settings and the named mechanical corridor remain protected; host controls and individual Astra or Max consent still apply, with no automatic fallback.
+
+## 2026-10-27
+
+- Review loops can now stop a precisely bound admitted round before any fresh attempt starts, without inventing review results or resetting history and round budgets. The existing close operation records the reason and original attempts; partial execution and completed-review acceptance retain their existing checks. Historical records remain readable without new fields, while replay of the new operation requires its matching stop receipt.
+
+- Installer tree identity now hashes a complete versioned member manifest, preventing file bytes from impersonating later entries. Legacy receipts require independent factory structure; supported stock upgrades, no-op and native rollback preserve user changes.
+
+- Ordinary model selection now exposes exact GPT-6.1 Terra profiles without changing fixed role or user defaults. Low and below-family-minimum choices refuse; every Astra or Max attempt requires individual user agreement, including omitted/configured routes. Existing profile identities, mechanical/critical gates and explicit host controls remain preserved.
+
+## 2026-10-26
+
+- Publication hooks recover one proved literal PowerShell Git invocation when a supported host label incorrectly selects Bash parsing. Mixed quoting retains the original command and all publication checks; compound refusals now show only safe parser facts and compiled revision labels for diagnosis.
+
+- Optional review-closure V2 now separates actual source-bound Root semantic receiving from independently acquired machine promises. Unknown JSON/prose gains no schema from its keys or layout; an explicitly commissioned six-field review-loop result is checked by its existing value/state owner, retained source binding and known-aware reader marker. Genuine findings, native currentness, cold replay and minimal durable transfer remain required.
+
+- Publication-query failure normalization now preserves the actual primary exception, cause and owned resources when a timeout or output-limit trigger occurs first. Diagnostic labels no longer decide whether a primary failure may become an ordinary incomplete observation.
+
+- PowerShell literal call-operator invocations now qualify as one direct Git push, including mixed quoting and an explicit tool workdir. Actual executable identity, exact approved source, fresh full-graph scans and current repository binding remain required; genuine compound commands still refuse. Failed metadata queries expose only safe process categories and status codes, preserving denial and cleanup without printing command output or private paths.
+
+- Publication approval stays bound to its exact reviewed pending operation across neutral steering. Original user/scope and later state are requalified; explicit reviewed user scope needs no separate packet/question. Each attempt still requires a new complete graph scan, and derived indexes cannot revive revoked, fulfilled or unresolved authority.
+
+- Clarified scratch retention at the ledger recording step: callers choose the existing typed owner namespace before acquisition and distinguish completed PASS-terminal retention from preserving partial or failed results and later Version 3 close-time retention. Existing verdict, ownership and lifecycle requirements remain unchanged.
+
+- Historical README catalogues preserve the existing input role when receiving never-admitted retirement records. They retain stored incoming/source inventory and exact archived payload/digest checks without starting an unrelated current-consumer sweep; strict retirement and integrity audits still detect later stale citations.
 
 ## 2026-11-18
 

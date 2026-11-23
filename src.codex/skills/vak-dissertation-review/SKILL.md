@@ -23,8 +23,7 @@ reach that part of the work; don't load all of them up front.
 
 ## What you produce
 
-A clustered set of advisory docx review lists (one per dimension-cluster), each carrying severity
-labels and a proof under every note. The reference deliverable set is **6 documents**:
+Return the requested advisory findings with severity labels and proof under every note. For a full review, the reference deliverable set is **6 documents**; use the document-build pipeline only when DOCX output is requested:
 
 1. **Замечания к диссертации** — formulas (render-checked), numbers, figures/tables, structure,
    references, numbering.
@@ -58,10 +57,12 @@ These exist because each was learned by getting it wrong once. Full detail + the
   priority (required for a defense), NOT disqualification; a result owned by others is. Always read
   the dissertation's own список литературы — predecessors are often cited there already.
 - **Adversarial review-loop at the boundary.** Before merging any batch of findings into the
-  documents, run an independent skeptic pass (a second model / agent) that tries to refute each
-  finding and catch overclaim/wrong anchors. Merge only what survives.
-- **Cyrillic search via Bash `grep`, not PowerShell `Select-String`** (Select-String mangles
-  Cyrillic and em-dashes). `pdftotext` also mangles Cyrillic — grep Latin tokens only.
+  documents, use an independent, permission-scoped reviewer (human or separately authorized agent)
+  to refute findings and catch overclaims or wrong anchors. Never transmit private source material
+  or invoke a paid runner just because this workflow calls for independence. Without a permitted
+  independent check, mark findings provisional and say independent readiness remains unverified.
+- **Text and page anchors:** follow Unicode extraction and source-anchor checks in
+  `references/verification-discipline.md`; rendering, not the text layer, controls formula findings.
 
 ## Workflow
 
@@ -72,15 +73,14 @@ These exist because each was learned by getting it wrong once. Full detail + the
 3. **Verify before writing.** Render formulas, run arithmetic, confirm each reference exists, check
    each norm against its current text. Treat agent / external-model output as a hypothesis until you
    verify it.
-4. **Boundary review-loop.** Send each finding batch through an independent adversarial gate; keep
-   only confirmed, correctly-anchored items.
-5. **Assemble** the docx via the generator pipeline (`references/deliverables-and-pipeline.md`):
-   edit the canonical `gen_*.js` generators (never the output `.docx`), rebuild, add table borders,
-   convert MathType placeholders to OLE for the formula-bearing lists, copy finals out.
-6. **Verify the build.** Grep the extracted output text for the new markers (convergence by
-   class-exhaustion: a class is closed when its grep count equals the expected count and stray
-   classes are 0 — not after an arbitrary number of LLM passes). Confirm 0 unresolved `@@` formula
-   placeholders and the expected OLE object counts.
+4. **Boundary review-loop.** Use an available, authorized independent reviewer; leave independently
+   unverified findings provisional and retain the exact source anchors.
+5. **Assemble** the DOCX only when requested, via the generator pipeline (`references/deliverables-and-pipeline.md`):
+   reuse the selected DOCX toolchain and edit its actual source of truth; keep requested equations
+   editable without imposing a specific generator or equation engine.
+6. **Verify any DOCX build.** Inspect the rendered affected pages and requested editable equations.
+   Use the format-appropriate build checks in that reference; factual closure is governed by
+   `references/verification-discipline.md`.
 7. **Reconcile and report.** State what was covered, what stays out of scope (see below), and keep
    the tone advisory. When the current task has `work-items/active/<slug>/`, persist only the
    canonical VAK artifact there and return concise result/provenance for the root

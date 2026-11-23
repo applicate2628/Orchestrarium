@@ -1,29 +1,51 @@
 # Orchestrarium 2.0 product plan
 
-Status: remaining product directions, reconciled on 2026-11-18 against main
-`0486a9993cba4eb10fb19c9f3f4cc5a743c15e52` and the approved PR19 completion
-roadmap. The October design below retains conditional future outcomes, not a
-checklist of prerequisites for SDK completion. This is not an implemented 2.0
-release, a measured improvement, or permission to launch providers or publish.
+Status: reconciled on 2026-11-23 against main `14a4e74a`, the peeled
+pre-SDK tag `3d8ac64b`, and the current pull requests below. The October outcomes
+remain in the register, not as prerequisites for every release. This plan does
+not authorize provider calls, publication, installation, or merges.
 
 ## Current delivery order and completed work
 
-1. Finish and verify the independent pre-SDK release from [PR52](https://github.com/applicate2628/Orchestrarium/pull/52). The final pre-SDK tag must precede SDK merge; the pre-SDK package has no SDK dependency.
-2. Finish the approved multivendor SDK scope in [PR19](https://github.com/applicate2628/Orchestrarium/pull/19).
-   Its `docs/sdk-execution.md` owns the implementation roadmap and current evidence;
-   [PR18](https://github.com/applicate2628/Orchestrarium/pull/18) retains the design,
-   not a competing implementation checklist. Current source/offline results are
-   distinct from native provider acceptance and installation. Do not reopen
-   implemented SDK contracts as research into an absent adapter or Model backend.
-3. Reconcile the delivery dependency contract in [PR17](https://github.com/applicate2628/Orchestrarium/pull/17),
-   then qualify its separately admitted payload and channels. The base installer
-   bundles standard-library CPython only; PR19 qualifies optional official
-   provider environments separately. This is not a second installer or a blanket
-   prerequisite for PR19 implementation.
-4. After SDK acceptance, select one native operation under [PR21](https://github.com/applicate2628/Orchestrarium/pull/21).
-   Preserve its frozen inventories and reconcile subsequent source changes before
-   implementation. Migrate rules and hooks only with covered consumers and
-   incident regressions; an affected failure must not stop independent work.
+1. **Settle pre-SDK follow-ups without reopening the baseline.** The standalone
+   baseline is [tagged](https://github.com/applicate2628/Orchestrarium/tree/baseline-pre-sdk-2026-11-23)
+   after [PR53](https://github.com/applicate2628/Orchestrarium/pull/53); it has
+   no provider SDK dependency. [PR55](https://github.com/applicate2628/Orchestrarium/pull/55)
+   is merged, and the receiver-scope incident was verified on Wave and archived.
+   [PR54](https://github.com/applicate2628/Orchestrarium/pull/54) and
+   [PR56?59](https://github.com/applicate2628/Orchestrarium/pulls) remain open:
+   primary-path principle, recovery, on-demand publication guidance, active-only
+   audit reporting, and Lead acceptance. Reconcile their shared release-note
+   conflicts in integration order. Verify installed receiving where the ticket
+   requires it, then archive only completed tickets. Unattributed runs remain unknown.
+2. **Release the independent Rust scanner slice before SDK.**
+   [PR21](https://github.com/applicate2628/Orchestrarium/pull/21) owns native
+   operations. Reconcile its current head (`26089ea6`) with receiver-aware main.
+   Wave qualified Git receipt and Windows line indexing for both object formats;
+   the isolated matcher probe proves lexical composition, not a candidate release
+   or permission to lower pins. Select one contained execution path. Qualify full
+   findings and receipt parity, small delta over old receiver history and large
+   new disclosure, progress and interruption/resume, resource settlement and
+   actual receiving on the supported installation targets. Defer unrelated migrations.
+3. **Qualify SDK in parallel; release it after Rust.**
+   [PR19](https://github.com/applicate2628/Orchestrarium/pull/19) and its
+   `docs/sdk-execution.md` own implementation and qualification. Reconcile
+   `95d26b9b` with main and qualify offline, package, platform, and failure paths
+   before any separately authorized live qualification of official provider routes.
+   [PR18](https://github.com/applicate2628/Orchestrarium/pull/18) retains design
+   and evidence only. Historical runs do not establish current readiness or activation.
+4. **Qualify distribution separately.** [PR17](https://github.com/applicate2628/Orchestrarium/pull/17)
+   owns PowerShell, POSIX and optional npm acquisition of the same qualified
+   platform payload. Do not add a second installer or bundle provider SDKs.
+   Reconcile the delivery design and qualify each admitted channel. Independent
+   platform evidence does not gate Rust or SDK without a demonstrated dependency.
+5. **Close remaining product outcomes at their owners.** This register keeps
+   the native-role lifecycle, task-specific selection, empirical quality/cost
+   feedback, conditional stopped cross-host continuation and optional preferences
+   (2, 3, 4, 6, 7). Move optional instructions to on-demand guides only after
+   verifying installed entry points. Keep the Orche rebrand and English README
+   and instruction cleanup separate from Rust/SDK qualification; preserve
+   historical names and compatibility where required.
 
 Task-first ranking and scoped Astra authorization (PR43), latest confirmed model
 families only (PR44), and exclusion of Low for every active choice (PR45) are
@@ -39,10 +61,9 @@ preferences (outcome 7) remain independently scoped future outcomes. They do not
 block current SDK delivery without an identified dependency. Rule-volume reduction
 belongs to the successive SDK/Rust transitions, not a new pre-SDK rewrite.
 
-The merged PR31 Windows replacement-security correction is historical. Actual
-Windows installer acceptance remains a pre-SDK item in PR52. Do not conflate
-source review, isolated fixtures, and installed receiving with SDK or
-model-ranking completion.
+The merged PR31 Windows replacement-security correction is historical. Do not
+conflate tagged source, isolated installation checks and actual receiving on
+any target with SDK or model-ranking completion.
 
 ## Goal and boundary
 

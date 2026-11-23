@@ -19,6 +19,7 @@ _PR_SET_CHILD_SUBREAPER = 36
 _PR_GET_CHILD_SUBREAPER = 37
 _GRACEFUL_SETTLEMENT_SECONDS = 0.25
 _DEFAULT_CLOSE_SECONDS = 5.0
+POSIX_PROCESS_GROUP_IDEMPOTENT_BIND_V1 = True
 POSIX_PROCESS_GROUP_MODULE_CONTRACT_V1 = (
     "orchestrarium.posix-process-group.module.v1"
 )
@@ -112,14 +113,15 @@ class PosixProcessGroupOwnerV1:
         return {"start_new_session": True}
 
     def bind_process_group(self, process_group: int) -> None:
-        if self._closure is not None or self._process_group is not None:
-            raise PosixProcessGroupError(
-                "POSIX-PROCESS-GROUP-STATE", "bind"
-            )
         if not isinstance(process_group, int) or isinstance(process_group, bool) or process_group <= 0:
             raise PosixProcessGroupError(
                 "POSIX-PROCESS-GROUP-INVALID", "bind"
             )
+        if self._closure is not None or self._process_group not in (None, process_group):
+            raise PosixProcessGroupError(
+                "POSIX-PROCESS-GROUP-STATE", "bind"
+            )
+        # Reconcile interruption before or after registering this same creator PID.
         self._process_group = process_group
 
     @staticmethod

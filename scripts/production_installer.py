@@ -29,11 +29,73 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from installation.lead_selection import (
+        parse_modified_lead_selection as _parse_modified_lead_selection)
+except ModuleNotFoundError as error:
+    if error.name not in {"installation", "installation.lead_selection"}:
+        raise
+    from scripts.installation.lead_selection import (
+        parse_modified_lead_selection as _parse_modified_lead_selection)
+
+try:
     from installer_markdown import document_context as _markdown_document_context
+    from installer_markdown import document_h1_starts as _markdown_document_h1_starts
 except ModuleNotFoundError as error:
     if error.name != "installer_markdown":
         raise
     from scripts.installer_markdown import document_context as _markdown_document_context
+    from scripts.installer_markdown import document_h1_starts as _markdown_document_h1_starts
+
+try:
+    from installation.document_outcomes import (
+        DocumentResult as _DocumentResult,
+        render_document as _render_document_outcome,
+        render_documents as _render_document_outcomes)
+except ModuleNotFoundError as error:
+    if error.name not in {"installation", "installation.document_outcomes"}:
+        raise
+    from scripts.installation.document_outcomes import (
+        DocumentResult as _DocumentResult,
+        render_document as _render_document_outcome,
+        render_documents as _render_document_outcomes)
+
+try:
+    from installation.ownership import (
+        RECEIPT_NAME as _PROVIDER_RECEIPT_NAME,
+        serialize_fresh_payloads as _serialize_fresh_payloads,
+        serialize_fresh_install as _serialize_fresh_install,
+        fresh_control_paths as _fresh_control_paths)
+except ModuleNotFoundError as error:
+    if error.name not in {"installation", "installation.ownership"}:
+        raise
+    from scripts.installation.ownership import (
+        RECEIPT_NAME as _PROVIDER_RECEIPT_NAME,
+        serialize_fresh_payloads as _serialize_fresh_payloads,
+        serialize_fresh_install as _serialize_fresh_install,
+        fresh_control_paths as _fresh_control_paths)
+
+try:
+    from installation.configuration import render_selected_document as _render_selected_document
+    from installation.instruction_selection import (
+        parse_claude_instruction_grants as _parse_claude_instruction_grants,
+        parse_codex_document_grant as _parse_codex_document_grant,
+        parse_claude_receipt_grant as _parse_claude_receipt_grant,
+        claude_instruction_grants_from_receipt as _claude_instruction_grants_from_receipt)
+    from installation.receipt_plan import (
+        Outcome as _ReceiptOutcome, plan_changes as _plan_receipt_changes,
+        serialize_delta as _serialize_receipt_delta)
+except ModuleNotFoundError as error:
+    if error.name not in {"installation", "installation.configuration", "installation.instruction_selection", "installation.receipt_plan"}:
+        raise
+    from scripts.installation.configuration import render_selected_document as _render_selected_document
+    from scripts.installation.instruction_selection import (
+        parse_claude_instruction_grants as _parse_claude_instruction_grants,
+        parse_codex_document_grant as _parse_codex_document_grant,
+        parse_claude_receipt_grant as _parse_claude_receipt_grant,
+        claude_instruction_grants_from_receipt as _claude_instruction_grants_from_receipt)
+    from scripts.installation.receipt_plan import (
+        Outcome as _ReceiptOutcome, plan_changes as _plan_receipt_changes,
+        serialize_delta as _serialize_receipt_delta)
 
 try:
     from provider_prompt import enroll_kimi_executable, replace_kimi_enrollment
@@ -98,6 +160,7 @@ PosixProcessGroupOwnerV1 = _POSIX_PROCESS_GROUP.PosixProcessGroupOwnerV1
 CODEX_BEGIN = "<!-- BEGIN ORCHESTRARIUM CODEX PACK -->"
 CODEX_END = "<!-- END ORCHESTRARIUM CODEX PACK -->"
 RUNTIME_HELPERS = (
+    "model_routing/launch_policy.py",
     "agent-run-ledger.py",
     "agent-run-ledger.sh",
     "bash_runtime.py",
@@ -123,6 +186,7 @@ RUNTIME_HELPERS = (
 )
 CODEX_RUNTIME_HELPERS = ("check-hook-health.py", "universal_hooks_manifest.py")
 TRANSPORT_PROJECTION_FILES = (
+    "model_routing/launch_policy.py",
     "provider_prompt.py",
     "process_supervision/process_runner.py",
     "invoke-codex-prompt.py",
@@ -365,89 +429,103 @@ STOCK_CONSULTANT_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
     }
 )
 ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
-    "consultant": frozenset({"1beebf6b349048182e254d01f1b2c755199f98f45f60fb21f7990d5f014814e3"}),
-    "architect": frozenset(
-        {"51612976f7fde46e3046222d607435b2fba5ef27ede636a06a80cb86c6fc7f5e"}
-    ),
-    "architecture-reviewer": frozenset(
-        {"19b179fe14a2bb6135e46dd7435265e7483d0bf6d5ec97b55520e39f3cbb1b4d"}
-    ),
-    "external-reviewer": frozenset(
-        {"17234ecc797094a872e3b02844c6c4c369628c1e503ef26fa797ff74872673ed", "4623816c87f9d1b017472011601951eab8bc8e4ceeea2d13911e29a876c853e8"}
-    ),
-    "external-worker": frozenset(
-        {"fa5374735bc396314f283489e189a4d1f82a6716068cf3384c9244a2c3c04097", "ca74db54391a1994c30a2da6d80021261556db9f75ac89ec8878ee1a5c50f32c"}
-    ),
-    "graphics-engineer": frozenset(
-        {"e4b1294c4f2de8e31f0083500c7a7335a2abece08f801bb4e60e715eed3e081d"}
-    ),
-    "github-pr-review-bot": frozenset(
-        {"d1a5bff367e42891951371faa2d66274cb34f0eb7b9c86c214376e75833f6841"}
-    ),
-    "init-project": frozenset(
-        {"905f0866931702acbc064dee39e487b51828e06df9dce99ac9db55d252499f07",
-            "c079a182db6139257be2b7b138c6a4b28aa730747c1988d54132f8b07504dd1c",
-            "21dc5adc3f4ccb8e646546cd0d3ccf979c37d4e4e8dcefcc9620122f500dadb4",
-        }
-    ),
-    "manual-repo-transfer": frozenset(
-        {
-            "45fc1efc9f0558664afb1f386c5fc7ac2692a607fb8c7be6265b2cfc4d10029b",
-            "b73cde79962de55bd2cd52bc35f0b450d26cff78abb21b9a496bf38be686a9f3",
-            "e0d160e3f216d79fe2aa221b6ed8d4d4b63dd06882d4ea69feb46cdccab1afcc",
-            "cdc90d427cc593ee7b7212dd0ddeacbb13dc7474525b493bd8950318bbc3d92f",
-        }
-    ),
-    "second-opinion": frozenset(
-        {"fe989a918e11ff8066a0c8af54f73ba7bbf763719ea3b604ed147b79bec684d6"}
-    ),
-    "toolchain-engineer": frozenset(
-        {"51cf24ae0699a6bb379ee6bbf7b51e2a982cba12aaeab2dc76e57d4b4ccf2a74"}
-    ),
-    "review-loop": frozenset(
-        {"3e7be1c11624a0fb7beae1c286dd09a3abb4c6b1fb70d138c9bfdc77c1d8df8a"}
-    ),
-    "visualization-engineer": frozenset(
-        {"56218f313e0ee24fc973eae8792bac0cddfd17ccab390fffb028d787cd0286f0"}
-    ),
+    "consultant": {
+        '1beebf6b349048182e254d01f1b2c755199f98f45f60fb21f7990d5f014814e3': 'f1ba467f431a38c82b57355d256694bcfede73e4848791a5c19a7d0ef07a0154',
+        '57da94b645283cc695ff8f82a108a6f490f0036a564be76c22f663ba6afa3a38': '4bf409f769e8017af1fb6bdf045ed1afc69b6ef3918feaa283e23b2826e1cdf7',
+        'f1a23b5ceaa93c29cf0c5f9c9eec8c5997a7b4339fcd90abd13798df77e60793': 'ee6efc0264ab7b68aa1d80819353606623f458ec02632ad5a2904408060095e4',
+        '63c358fcb0bc435177359927760d80f04c8133a5e14505115180bd60b600184a': '27be58b964681c09d3260252d49c468540f576aead370ecd784163fca4240e62',
+    },
+    "architect": {"51612976f7fde46e3046222d607435b2fba5ef27ede636a06a80cb86c6fc7f5e": "454bceff6e257da86c5d6f1b6fdd53f877be180cc441a7c4432646cea6f1a44b"},
+    "architecture-reviewer": {"19b179fe14a2bb6135e46dd7435265e7483d0bf6d5ec97b55520e39f3cbb1b4d": "88695a4250ac42e79b5b61b12141769c93eb14f4c4180c938b0803b3e0912876"},
+    "external-reviewer": {
+        '17234ecc797094a872e3b02844c6c4c369628c1e503ef26fa797ff74872673ed': 'c03a9c2b34a8b07812d7e82c42580caebfd7e4cd5c09eeb1889f455f5698e6ed',
+        '4623816c87f9d1b017472011601951eab8bc8e4ceeea2d13911e29a876c853e8': '49ab68961d7a01432d00b77826f92b523e0439f3a56cd70009877b7665e1a3b7',
+        'ec68618f9d3869333c6d84e566dcaf7b61f7d36a11e247e69c14909807086698': 'dbd495e1955a15f19e2e20c8d87f59554cc5ff11d806426f0c9dff9ac80f2e5b',
+        '9bd5a9811b6573a6d6697f627caee4ebe975460de0118e22bd9e8cd7bb76e0c5': 'd4310591384a3fc94cad7a834ed2418fdfc900581f2d671ad99e3c3e1710bfea',
+    },
+    "external-worker": {
+        '77be8a3c22b83d9e7a6570b6a9b7f7e1287c19592fa4a294fe68cbcaafffcc9a': '8e5187a3c5d5dfaf7220b79a7b33799b4151ce0e75df265a691fd00dc097a8f7',
+        'ca74db54391a1994c30a2da6d80021261556db9f75ac89ec8878ee1a5c50f32c': '3d5bc98822356337053b099c1aa81b0e1f913d21e02c249936dc22078ed5c6c9',
+        'fa5374735bc396314f283489e189a4d1f82a6716068cf3384c9244a2c3c04097': '58dde97a53d00d4fca10d9062e2abe4808920cf293e86e967cdbbdb824686e73',
+        '170628e06c5866ddc9d9e4d5aaabbb1422f57ab067ce0085bd99960f34d53c3c': '04529aebe115e1a58745e1b5151e6ab7c5e78ddf4c182c42210fa7c1c0ea9058',
+    },
+    "graphics-engineer": {"e4b1294c4f2de8e31f0083500c7a7335a2abece08f801bb4e60e715eed3e081d": "d7c8d542f3808549750b3981c9192c4dd83867e1eb1b5ab38ffaaacf6e898ba5"},
+    "github-pr-review-bot": {"d1a5bff367e42891951371faa2d66274cb34f0eb7b9c86c214376e75833f6841": "4caf17f6a0b87220b0754c1e9ddcebe01e64e57bc76a139fc4d45b87c1ce1700"},
+    "init-project": {
+        '905f0866931702acbc064dee39e487b51828e06df9dce99ac9db55d252499f07': '10fa991feccb30d815cd238eb6a02b9409ffe54222f04b0df57a127a89db3b7b',
+        'c079a182db6139257be2b7b138c6a4b28aa730747c1988d54132f8b07504dd1c': None,
+        '21dc5adc3f4ccb8e646546cd0d3ccf979c37d4e4e8dcefcc9620122f500dadb4': '05b04ee821e83997b617a6ad052e2da2ee6516a8d01379b45b1de6513913cb81',
+        '4f0a5fdb8af605dc10cb2044f33db3339b410feaf23764cc395f9c3feaaf6353': '7ed43bf3286a8c9f4ff6a69d5b8835f6e1d5d81fa7981352082b88106c2c469d',
+        'cd5bc7386f286393ee8dab782ed603fff7ad61e8c828f34cca102a3a5e2aba9f': '19b4794614f08a2233097f14c7e5b2343ca831e477c8802341fdd601770b6613',
+    },
+    "manual-repo-transfer": {
+        '45fc1efc9f0558664afb1f386c5fc7ac2692a607fb8c7be6265b2cfc4d10029b': None,
+        'b73cde79962de55bd2cd52bc35f0b450d26cff78abb21b9a496bf38be686a9f3': None,
+        'e0d160e3f216d79fe2aa221b6ed8d4d4b63dd06882d4ea69feb46cdccab1afcc': '44b24222acc7152cde916b4afbe63a6577a900ecef61760cf8355fb5874211f6',
+        'cdc90d427cc593ee7b7212dd0ddeacbb13dc7474525b493bd8950318bbc3d92f': None,
+        '03c0c2fd12a8273f8325fb145dc2b8e9e97502e497649fc2d474988a9f95070b': '5131cc4d18265cba6d7abf10225d717e3d8ac2a8b0f683efc803ca610dc95674',
+    },
+    # Exact stock repo-cleanup tree from commit 8bd58995; the fixture carries
+    # the complete historical member witness, not a legacy digest-only grant.
+    "repo-cleanup": {
+        "36ca45866892cab034addd9eb69a849fc1dcd82e473846093bd4e38107736b24": "8f56fb527cb1d92527b1fc1f4976508dbf1115d85a340bdd57322da6e1985e57",
+    },
+    "second-opinion": {
+        'fe989a918e11ff8066a0c8af54f73ba7bbf763719ea3b604ed147b79bec684d6': None,
+        'f9a2114c8baead9ec8a259288ff74e157af60864c9f3d70ba0bcc52154b2b4b6': '7be172e27fac00bd7bfde542d7bd87b9a1dd874caee15b90c06d0b292201fc60',
+        'b82628910567799a6f03962f3ec0289cb47b4607093c074466b1a2656b53f432': 'b8b8d488ce57f60d19afcf2ccf152be16e9f47c096638b06317cb21882238825',
+    },
+    "toolchain-engineer": {"51cf24ae0699a6bb379ee6bbf7b51e2a982cba12aaeab2dc76e57d4b4ccf2a74": "f83bdad4a5a53723d0d4f8d77f6b32577da60d902972910f0543747148b94ad3"},
+    "review-loop": {
+        '3e7be1c11624a0fb7beae1c286dd09a3abb4c6b1fb70d138c9bfdc77c1d8df8a': None,
+        '2d78f499bf7b4bb2e6dafdf0ef875f2d9d39448c28df6f3835bc8153fba02ce0': 'b4074ade6274381b9a89f87a6d01ee251981a7d5dd164f9444ac0e3d56f88167',
+        'd956cf70db42a7c936d21984fe6aeb83748de02c544eec56ca54971629f85f7e': '70392ab319a1ec665a177775ea8bc09def2aebefff868ebd84f70de0edd9f34f',
+    },
+    "visualization-engineer": {"56218f313e0ee24fc973eae8792bac0cddfd17ccab390fffb028d787cd0286f0": "c09eecc45add2ded8571b999883bc7a03d90b82fd95c72a64bf6cf2537fc0230"},
+    'design-panel': {
+        'ac107c9d6c4a3833d0af90756c8b560f7ca4c4dfcc3d14d6a14faae1530f859f': '784d66c963af2a858ac053ec5089bfc58a37c819dce6522804a89e17958c07b4',
+        '685b75f5726dd16dbcf2b5fb3238652b8564242e5b66f0daf2b582267905f67b': '2e026b6dc68007ea972dc6f571ef08a855e4d106b40fa5ca595e9e94e31486ed',
+    },
+    'external-brigade': {
+        '7a931c84bc3b72a85afcee813e9bb4705923301b6644892dcd291ffacb837113': '5286483022342c63f6cc8e5f5bfdb96a693701e141b02ee2dc33c52f7f295ec9',
+    },
 }
-GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
-    {
-        "0627712baff8adf6423d8cb766e5effcfa8001196e077eaf5d1b4f17e5d97a85",
-        "95eadefb2069546027bbaa59497212a42e9177cce80ad729a869f64f93784635",
-        "e09377e4cf15c446e2ff19ab160a09835ac6683d51e54a89585625dc1de935ca",
-        "fd28049deb001bf088b0033e2dcc82ffc372e8257dd8aaf1bc6384d49be328b3",
-        "8088b25e70702f2c77d811bcd0c74e339474a7429a2e997f2df7662c6d75db0f",
-        "fefe8d5ff71dfa8475fea381cdb756848740b7ea0f4a7573d69bff5b5db113cc",
-        "b7d78ee5082cce97e0cb2fcb59ee2e5712617b43212a1c6c3199370797f9aa21",
-        "d0bec9fd61bf3fde6e48ba38cdbc7c021053a4167bbb694c8aa5c03e06283083",
-        "1ffea3eb0fcf6589ac874ab49e508807eb0726dff88473d82b8b22b5baa42bf0",
-        "f03d3b74d68c032ec5c1539ce7936065d5083624b702ec4403fa7e2cc509adc7",
-        "565f305b4498f045e7fb40821e5ba30902ca56b0a532d299a96d6c8a1e595d50",
-        "dd652b00b68a51273470ad4d3924454255d9ab5260da743fa2aa6bf2a7396627",
-        "006161c105d8fcaaa3e9ae891e8b14e42ca170c026445062f983884a9296a3c6",
-        "793045007f143b502991ef71a3273f64aa62757115b2eed033a267c4d44bf79f",
-        "0c8cf87923774de9e345a72e071600d05a19b01e588f5f7acd053a6398e2f81e",
-        "03a7d0587eef6c8997e1f78136510d8ca01c61e9d1d06290fe453e34dafbb435",
-        "bc0e280d4319f71078daae8476015d6d80a9ce15ffe7a05ffc2c2438875bae88",
-        "68619d80e3dc7283aec38399961d7cb2267292f01d9975a61f4b9ac59418d12d",
-        "a4afc1fe35ddb5b0417f3ba8c170dceeeef61e95a7eb0b4e617bd28db271a2ff",
-        "836f24dafcc409be2d120248a19ec34772af03238b7600389961a708315a15b7",
-        "d73912c5e01c693fa8f6c0c3aa071e51f595f3d88e6a81aa7aa8abfa8995bfda",
-        "c3508f94d6830da703a5519fbe28bf7011f2a8850e67b5ed5a49c47465283295",
-        "9b11e845e746adeb81e56243169ade9e48aaf2adc349b40073beb21b5b596c30",
-        "a90c1989a0c136c55af71b68c62fad6a2cc239162a953d45643dfee903795560",
-        "2600ed4cdcdcf64767ad8486225a8bd4687c8ca3618344f7e4bbb709587f30ef",
-        "3ca341a8c4ec35a7cbcd7920d6f5be7c1888b1d143393b544643fb005c97dab4",
-        "3067dcada53a7b090fa9a66594e3b4d3266d98f9ffe322c36c001c077bcfa0c0",
-        "52f2c3d21a5d83bc36fccafe7599ca089006fc4d1b93237ab606dd1e7390422a",
-        "d6cf6e5cd2a1cdb08346d396b60fcd905d36bf2533b96508f942f684b52b0255",
-        "0da7db4510b37eac407ad9577ff171fbaa86985e30a53f341b00f05aeb433975",
-        "1e4bdc38283d81f2901a3b089c13fc9a0d10946605b1900ae15006cd42534dc6",
-        "1f870106837564449117d07d4e51734a0a5afc3a79eb9c2e953916c64eb34afd",
-        "87df0dfbef0bf1ae336ef5b26fa60e3a155e7519d2d7494818ce592a37b52a32",
-    }
-)
+GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256 = {
+    '006161c105d8fcaaa3e9ae891e8b14e42ca170c026445062f983884a9296a3c6': None,
+    '03a7d0587eef6c8997e1f78136510d8ca01c61e9d1d06290fe453e34dafbb435': None,
+    '0627712baff8adf6423d8cb766e5effcfa8001196e077eaf5d1b4f17e5d97a85': 'e00e18b805aad33393cf2849b2f2a6612ac641135b225879b8d4f84240a003bc',
+    '0c8cf87923774de9e345a72e071600d05a19b01e588f5f7acd053a6398e2f81e': None,
+    '0da7db4510b37eac407ad9577ff171fbaa86985e30a53f341b00f05aeb433975': None,
+    '1e4bdc38283d81f2901a3b089c13fc9a0d10946605b1900ae15006cd42534dc6': None,
+    '1f870106837564449117d07d4e51734a0a5afc3a79eb9c2e953916c64eb34afd': None,
+    '1ffea3eb0fcf6589ac874ab49e508807eb0726dff88473d82b8b22b5baa42bf0': None,
+    '2600ed4cdcdcf64767ad8486225a8bd4687c8ca3618344f7e4bbb709587f30ef': None,
+    '3067dcada53a7b090fa9a66594e3b4d3266d98f9ffe322c36c001c077bcfa0c0': None,
+    '3ca341a8c4ec35a7cbcd7920d6f5be7c1888b1d143393b544643fb005c97dab4': None,
+    '52f2c3d21a5d83bc36fccafe7599ca089006fc4d1b93237ab606dd1e7390422a': None,
+    '565f305b4498f045e7fb40821e5ba30902ca56b0a532d299a96d6c8a1e595d50': None,
+    '68619d80e3dc7283aec38399961d7cb2267292f01d9975a61f4b9ac59418d12d': None,
+    '793045007f143b502991ef71a3273f64aa62757115b2eed033a267c4d44bf79f': None,
+    '8088b25e70702f2c77d811bcd0c74e339474a7429a2e997f2df7662c6d75db0f': None,
+    '836f24dafcc409be2d120248a19ec34772af03238b7600389961a708315a15b7': None,
+    '87df0dfbef0bf1ae336ef5b26fa60e3a155e7519d2d7494818ce592a37b52a32': None,
+    '95eadefb2069546027bbaa59497212a42e9177cce80ad729a869f64f93784635': None,
+    '9b11e845e746adeb81e56243169ade9e48aaf2adc349b40073beb21b5b596c30': None,
+    'a4afc1fe35ddb5b0417f3ba8c170dceeeef61e95a7eb0b4e617bd28db271a2ff': None,
+    'a90c1989a0c136c55af71b68c62fad6a2cc239162a953d45643dfee903795560': None,
+    'b7d78ee5082cce97e0cb2fcb59ee2e5712617b43212a1c6c3199370797f9aa21': None,
+    'bc0e280d4319f71078daae8476015d6d80a9ce15ffe7a05ffc2c2438875bae88': None,
+    'c3508f94d6830da703a5519fbe28bf7011f2a8850e67b5ed5a49c47465283295': None,
+    'd0bec9fd61bf3fde6e48ba38cdbc7c021053a4167bbb694c8aa5c03e06283083': None,
+    'd6cf6e5cd2a1cdb08346d396b60fcd905d36bf2533b96508f942f684b52b0255': None,
+    'd73912c5e01c693fa8f6c0c3aa071e51f595f3d88e6a81aa7aa8abfa8995bfda': None,
+    'dd652b00b68a51273470ad4d3924454255d9ab5260da743fa2aa6bf2a7396627': None,
+    'e09377e4cf15c446e2ff19ab160a09835ac6683d51e54a89585625dc1de935ca': None,
+    'f03d3b74d68c032ec5c1539ce7936065d5083624b702ec4403fa7e2cc509adc7': None,
+    'fd28049deb001bf088b0033e2dcc82ffc372e8257dd8aaf1bc6384d49be328b3': None,
+    'fefe8d5ff71dfa8475fea381cdb756848740b7ea0f4a7573d69bff5b5db113cc': None,
+    'fdd2c0638232462cf2257dd5ec3ba2523bea820363cfbece0b1edfa5c0a45247': '665ae82dcabafd0857153a7288e8cccaa27340e56c0874b5e884e154417f0e81',
+}
 RUNTIME_RESOURCES = (
     (
         "shared/external-prompt-governance.md",
@@ -479,6 +557,34 @@ UI_CONTINUITY_CONTRACT_TARGET = Path("contracts") / "ui-transition-continuity.md
 CODEX_HOOK_INVENTORY = "codex-hook-inventory.json"
 CODEX_ROLE_MANIFEST = "orchestrarium-role-manifest.json"
 _STOCK_NATIVE_ROLE_CONTRACT_PRIOR_PAIRS = (
+    # Exact factory contract before removing Low catalogue entries.
+    ((Path("shared") / "role-routing-policy.v1.json", "172b335f9d0ea70021bff88b048d1472709132897989365f4b4ee3e47e5682d1"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "c8164fe1df43369c22e9d2c800ef2e2cb0e775c6a31dc65fc25c06cf77e812dc")),
+    # Exact factory catalogue before normalizing benchmark costs.
+    ((Path("shared") / "role-routing-policy.v1.json", "7b1f5cda232547e3a6f09352908fc9f2781dbeadad55413d8dadb4e40038a929"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "a945c889cb456c2065786a3923b68651a24c627cf64cde5a7c9e921ae9bbd73e"),
+     (Path("scripts") / "resolve-agents-mode.py", "de23c471895c80c43d2fe17e7e2763aeec1ac10f0189b7d66daab2fc763c5e50"),
+     (Path("operating-model.md"), "9f7a310a2efe8d91d13f08094d58c294d9e33a9dde954f914b45e00eaedc773a")),
+    # Exact factory catalogue before benchmark snapshots were included.
+    ((Path("shared") / "role-routing-policy.v1.json", "b5ef5a34460abaad0af499304309be0649094ff596bcc7f5584f199046878dba"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "ab699ed377660521a08bf0e8555f468ca0efcf6458248009002a7f4fdc0314d1"),
+     (Path("scripts") / "resolve-agents-mode.py", "b255b28350e4fb4350425970a304e5a9a0a0723ee88b553174855e78558741ab"),
+     (Path("operating-model.md"), "7c57a353050c1e82b57eea7810efd9045abbfb99a72d2d10ac08b8a117a1714f")),
+    # Exact pre-catalogue factory contract, including the resolver leaf.
+    ((Path("shared") / "role-routing-policy.v1.json", "6d508666d4b1ce7511db799e017ed07c26df341ed6e07bb90c98e742420748d2"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "fefedb3f1d9fe2448414d8f6d454a43d62f3872b5eec48efe4e977c747011a2b"),
+     (Path("scripts") / "resolve-agents-mode.py", "49bb2fd7c7ea954f50eceda161ba9c820dff99ef1dc98cb655d096c94e081228"),
+     (Path("operating-model.md"), "cc770fa6fefb1e5a93179e0135ba5f601c2e3d9da8208225d8a5df94b4173160")),
+    # Exact factory contract before latest-family-only routing.
+    ((Path("shared") / "role-routing-policy.v1.json", "9672319f42039f6e8864de31e00ea4423011f3be679c3180e2161a8611b28259"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "882b96207b5503bb231002301cc15df08107c66a9ccfd189a84b48e6e62d1b0a")),
+    # Exact previous factory contract for the 6.2 task-first ranking.
+    ((Path("shared") / "role-routing-policy.v1.json", "b3551957c35cc724e905522d0b9ce0044fc050fcbeb2fd9e0893835cca083168"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "fbb6a7dbdb41336a8a82d8adfebbd79b762e5472f98267c30500d0e99c3fd03a")),
+    # Exact pre-6.2 factory contract. Keep the Terra ranking pair last: its
+    # position is the existing control-only migration provenance boundary.
+    ((Path("shared") / "role-routing-policy.v1.json", "fafd37b08375e0d261a57edd06613ab15dcaac9075fc031bf2702b173e6f8cf7"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "2ca416fa4fc2aa93c7fe74dc6db62273d72367a901e0ee260fce55377acb6d77")),
     (
         (Path("shared") / "role-routing-policy.v1.json",
          "b6b76525d5e9d054cf8c1a9d89ea038c42ce8b488a1a835873d6d38f6e5b8bd3"),
@@ -497,6 +603,10 @@ _STOCK_NATIVE_ROLE_CONTRACT_PRIOR_PAIRS = (
         (Path("shared") / "orchestrarium-role-manifest.json",
          "1362c1206cb957b879109e33c577047c0d6b7b65860f602d1f51f400a6967d77"),
     ),
+    ((Path("shared") / "role-routing-policy.v1.json", "ab1eae65674ee61f3535a1515683c601c028cb87d656efa140a4ea4b28b356c5"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "d6f523fa1060dfde9274969142ff067eccb442472a16007f8e2590bd064f9fbe")),
+    ((Path("shared") / "role-routing-policy.v1.json", "7a9799398a32f16b67198297af56d168d2777a2c164e0b14440538205e4c6163"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "c457f3eaeb2535344372145f20e66634d8b730abb82b784bf6fa797d69a0ea60")),
 )
 CODEX_LEGACY_LUNA_CONFIG_NAME = "luna_mechanical"
 CODEX_LEGACY_LUNA_ROLE = Path("agents") / "luna-mechanical.toml"
@@ -596,15 +706,26 @@ _CLAUDE_RETIRED_SH = {
 
 
 def _parser(provider: str) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=f"Install the production {provider} pack.")
+    parser = argparse.ArgumentParser(
+        description=f"Install the production {provider} pack.", allow_abbrev=False,
+    )
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--global", "-Global", dest="global_install", action="store_true")
     modes.add_argument("--target", "-Target")
     parser.add_argument("--force", "-Force", action="store_true")
+    parser.add_argument("--uninstall", action="store_true", help="Preview selected-current owned content removal")
+    parser.add_argument("--apply", action="store_true", help="Apply the reviewed uninstall selection")
+    parser.add_argument("--uninstall-selection", metavar="SHA256", help="Exact current selection from uninstall preview")
     parser.add_argument(
         "--replace-unreceipted-lead-sha256",
         metavar="SHA256",
         help="Global Codex/Claude only: adopt one unreceipted Lead tree with this exact observed SHA-256 digest",
+    )
+    parser.add_argument(
+        "--replace-modified-lead", action="append", default=[],
+        metavar="v1:RECEIPT_SHA256:CURRENT_TREE_V2:STAGED_TREE_V2",
+        help="Global Codex/Claude only: explicitly replace one modified v2-receipted Lead; "
+             "bind current receipt bytes, current authored tree and intended staged source",
     )
     parser.add_argument(
         "--replace-unreceipted-skill-sha256",
@@ -614,18 +735,41 @@ def _parser(provider: str) -> argparse.ArgumentParser:
         help="Global Codex/Claude only: adopt one unreceipted non-Lead canonical skill with its exact observed SHA-256 digest",
     )
     parser.add_argument(
+        "--replace-claude-instruction", action="append", default=[], metavar="PATH=SHA256",
+        help="Claude only: replace explicitly reviewed current agents/NAME.md or commands/...md bytes; not historical ownership",
+    )
+    parser.add_argument(
+        "--replace-claude-receipted-instructions", action="append", default=[],
+        metavar="RECEIPT_SHA256",
+        help="Claude only: explicitly replace current source-listed instructions selected by this exact receipt; every selected file must still match its recorded bytes; not historical ownership",
+    )
+    parser.add_argument(
+        "--replace-codex-document", action="append", default=[], metavar="SHA256:START:END",
+        help="Codex only: replace one explicitly selected current document span; offsets are Unicode characters, not bytes",
+    )
+    parser.add_argument(
         "--migrate-legacy-skill",
         action="append",
         default=[],
         metavar="NAME",
         help=(
             "Global Codex only: preserve and project one exact legacy "
-            ".codex/skills/NAME tree"
+            ".codex/skills/NAME tree or absolute directory link"
         ),
     )
     parser.add_argument("--dry-run", "-DryRun", action="store_true")
     parser.add_argument("--allow-unsafe-target", "-AllowUnsafeTarget", action="store_true")
     parser.add_argument("--no-hypothesis-hook", "-NoHypothesisHook", action="store_true")
+    parser.add_argument(
+        "--shared-hook-runtime", action="store_true",
+        help="Global Codex only: register linked hooks against the same retained bundle path on every host",
+    )
+    parser.add_argument(
+        "--hooks-only", action="store_true",
+        help="With --global --shared-hook-runtime: update only the owned hook registrations and inventory",
+    )
+    parser.add_argument("--previous-retained-release", type=Path,
+                        help="With --hooks-only: select the already trusted previous retained bundle")
     kimi_maintenance = parser.add_mutually_exclusive_group()
     kimi_maintenance.add_argument("--enroll-kimi", action="store_true")
     kimi_maintenance.add_argument("--replace-kimi-enrollment", action="store_true")
@@ -758,6 +902,50 @@ class _NativeNodeProof:
 
 
 @dataclass(frozen=True)
+class _WindowsSecurityImage:
+    """Owner/group/DACL policy; the native self-relative buffer is a recipe only."""
+
+    descriptor: bytes = field(compare=False, repr=False)
+    policy: tuple[Any, ...] = field(repr=False)
+
+    @classmethod
+    def from_descriptor(cls, descriptor: bytes) -> "_WindowsSecurityImage":
+        import struct
+        if len(descriptor) < 20:
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: truncated security descriptor")
+        revision, _reserved, control, owner, group, _sacl, dacl = struct.unpack_from(
+            "<BBHLLLL", descriptor)
+        if revision != 1 or not control & 0x8000:
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: nonrelative security descriptor")
+        def member(offset, *, acl=False):
+            if not offset:
+                return None
+            if offset < 20 or offset + 8 > len(descriptor):
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: security member bounds")
+            size = (struct.unpack_from("<H", descriptor, offset + 2)[0] if acl
+                    else 8 + 4 * descriptor[offset + 1])
+            if size < 8 or offset + size > len(descriptor):
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: security member length")
+            return descriptor[offset:offset + size]
+        # Presence distinguishes absent and NULL DACLs. Ordered ACE bytes and
+        # protected/automatic-inheritance flags are policy, unlike buffer offsets.
+        policy = (member(owner), member(group), member(dacl, acl=True),
+                  control & 0x150F)
+        return cls(descriptor, policy)
+
+    @property
+    def replayable_auto_inheritance(self) -> bool:
+        # Only a present, non-null and unprotected DACL can be replayed.
+        dacl, control = self.policy[2:]
+        return dacl is not None and control & 0x1404 == 0x0404
+
+    def needs_inheritance_replay(self, created: "_WindowsSecurityImage") -> bool:
+        return (self.replayable_auto_inheritance
+                and self.policy[:3] == created.policy[:3]
+                and self.policy[3] ^ created.policy[3] == 0x0400)
+
+
+@dataclass(frozen=True)
 class _PhysicalNode:
     kind: str
     python_identity: tuple[int, int, int, int]
@@ -765,6 +953,7 @@ class _PhysicalNode:
     native_proof: _NativeNodeProof | None = None
     reparse_data: bytes | None = None
     evidence_role: str = field(default="sealed", compare=False)
+    security: _WindowsSecurityImage | None = field(default=None, repr=False)
 
 
 class _WindowsBoundNode:
@@ -773,7 +962,104 @@ class _WindowsBoundNode:
     _bindings = None
     _creation_bindings = None
     _security_bindings = None
+    _descriptor_bindings = None
+    _dacl_bindings = None
     _target_bindings = None
+    _privilege_bindings = None
+
+    @classmethod
+    @contextmanager
+    def symlink_privilege(cls, *, required: bool = True):
+        """Use an existing privilege on a private thread token before acquisition.
+
+        FSCTL symlink access is captured when the creator handle is opened.
+        Never adjust the process token or grant a privilege absent from the
+        current effective token. Restore any prior impersonation exactly.
+        """
+        if not required:
+            yield
+            return
+        ctypes, W, kernel, *_rest = cls._api()
+        if cls._privilege_bindings is None:
+            class Luid(ctypes.Structure):
+                _fields_ = [("low", W.DWORD), ("high", W.LONG)]
+
+            class Item(ctypes.Structure):
+                _fields_ = [("luid", Luid), ("attributes", W.DWORD)]
+
+            class Privileges(ctypes.Structure):
+                _fields_ = [("count", W.DWORD), ("items", Item * 1)]
+
+            api = ctypes.WinDLL("advapi32", use_last_error=True)
+            kernel.GetCurrentThread.argtypes = ()
+            kernel.GetCurrentThread.restype = W.HANDLE
+            kernel.GetCurrentProcess.argtypes = ()
+            kernel.GetCurrentProcess.restype = W.HANDLE
+            api.OpenThreadToken.argtypes = (W.HANDLE, W.DWORD, W.BOOL, ctypes.POINTER(W.HANDLE))
+            api.OpenThreadToken.restype = W.BOOL
+            api.OpenProcessToken.argtypes = (W.HANDLE, W.DWORD, ctypes.POINTER(W.HANDLE))
+            api.OpenProcessToken.restype = W.BOOL
+            api.DuplicateTokenEx.argtypes = (W.HANDLE, W.DWORD, ctypes.c_void_p,
+                                             ctypes.c_int, ctypes.c_int, ctypes.POINTER(W.HANDLE))
+            api.DuplicateTokenEx.restype = W.BOOL
+            api.LookupPrivilegeValueW.argtypes = (W.LPCWSTR, W.LPCWSTR, ctypes.POINTER(Luid))
+            api.LookupPrivilegeValueW.restype = W.BOOL
+            api.AdjustTokenPrivileges.argtypes = (W.HANDLE, W.BOOL, ctypes.POINTER(Privileges),
+                                                  W.DWORD, ctypes.c_void_p, ctypes.c_void_p)
+            api.AdjustTokenPrivileges.restype = W.BOOL
+            api.SetThreadToken.argtypes = (ctypes.POINTER(W.HANDLE), W.HANDLE)
+            api.SetThreadToken.restype = W.BOOL
+            cls._privilege_bindings = api, Privileges
+        api, Privileges = cls._privilege_bindings
+        source, private = W.HANDLE(), W.HANDLE()
+        had_thread_token = False
+        attached = False
+        try:
+            # QUERY | DUPLICATE | IMPERSONATE; the latter permits exact restore.
+            if api.OpenThreadToken(kernel.GetCurrentThread(), 0x0E, True, ctypes.byref(source)):
+                had_thread_token = True
+            else:
+                error = ctypes.get_last_error()
+                if error != 1008:  # ERROR_NO_TOKEN is the only process-token route.
+                    raise ctypes.WinError(error)
+                if not api.OpenProcessToken(kernel.GetCurrentProcess(), 0x0A, ctypes.byref(source)):
+                    raise ctypes.WinError(ctypes.get_last_error())
+            # QUERY | ADJUST_PRIVILEGES | IMPERSONATE, SecurityImpersonation,
+            # TokenImpersonation. The source token remains unchanged.
+            if not api.DuplicateTokenEx(source, 0x2C, None, 2, 2, ctypes.byref(private)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            state = Privileges()
+            state.count = 1
+            state.items[0].attributes = 2  # SE_PRIVILEGE_ENABLED, never REMOVED.
+            if not api.LookupPrivilegeValueW(None, "SeCreateSymbolicLinkPrivilege",
+                                              ctypes.byref(state.items[0].luid)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            ctypes.set_last_error(0)
+            success = api.AdjustTokenPrivileges(private, False, ctypes.byref(state), 0, None, None)
+            error = ctypes.get_last_error()
+            if not success or error:  # Includes successful API / NOT_ALL_ASSIGNED.
+                raise ctypes.WinError(error)
+            if not api.SetThreadToken(None, private):
+                raise ctypes.WinError(ctypes.get_last_error())
+            attached = True
+            yield
+        finally:
+            try:
+                if attached and not api.SetThreadToken(None, source if had_thread_token else None):
+                    # Do not run rollback/caller code under an unrestored identity.
+                    # Process death releases the private token and native handles.
+                    try:
+                        os.write(2, b"E_WINDOWS_TOKEN_RESTORE_FAILED: installer stopped; inspect retained transaction state.\n")
+                    finally:
+                        os._exit(70)
+            finally:
+                try:
+                    if private and not kernel.CloseHandle(private):
+                        raise ctypes.WinError(ctypes.get_last_error())
+                finally:
+                    if source and not kernel.CloseHandle(source):
+                        raise ctypes.WinError(ctypes.get_last_error())
+
 
     @classmethod
     def _api(cls):
@@ -831,10 +1117,12 @@ class _WindowsBoundNode:
         import msvcrt
         return cls.proof_from_handle(msvcrt.get_osfhandle(descriptor))
 
-    def __init__(self, path: Path, *, purpose: str = "observe", follow: bool = False):
+    def __init__(self, path: Path, *, purpose: str = "observe", follow: bool = False,
+                 security: bool = False):
         self.path = path
         self.purpose = purpose
         self.follow = follow
+        self.read_security = security
         self.handle = None
         self.descriptor = None
         self.creator_proof = None
@@ -845,11 +1133,16 @@ class _WindowsBoundNode:
         if self.handle is not None or self.descriptor is not None:
             return self
         ctypes, _wintypes, kernel, *_rest = self._api()
-        if self.purpose not in {"observe", "parent", "attributes", "dispose"}:
+        if self.purpose not in {"observe", "parent", "attributes", "dispose", "scalar-writer"}:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing native creator custody")
         access = (0x12019F if self.purpose == "parent" else
                   0x81 | (0x10100 if self.purpose == "dispose" else 0)
                   | (0x100 if self.purpose == "attributes" else 0))
+        if self.purpose == "scalar-writer":
+            # Ordinary byte mutation and READ_CONTROL only: no security mutation rights.
+            access = 0x120083  # SYNCHRONIZE | READ_CONTROL | READ_ATTRIBUTES | READ/WRITE_DATA
+        if self.read_security:
+            access |= 0x20000  # READ_CONTROL; no WRITE_DAC/WRITE_OWNER or privilege.
         share = 7 if self.purpose in {"observe", "parent"} else 1
         flags = 0x2000000 | (0 if self.follow else 0x200000)
         handle = kernel.CreateFileW(str(self.path), access, share, None, 3, flags, None)
@@ -861,7 +1154,8 @@ class _WindowsBoundNode:
     @classmethod
     @contextmanager
     def create(cls, path: Path, *, directory: bool, mode: int = 0o777,
-               parent_reference: "_WindowsBoundNode | None" = None):
+               parent_reference: "_WindowsBoundNode | None" = None,
+               security_image: _WindowsSecurityImage | None = None):
         ctypes, wintypes, kernel, *_rest = cls._api()
         if cls._creation_bindings is None:
             class UnicodeString(ctypes.Structure):
@@ -893,8 +1187,12 @@ class _WindowsBoundNode:
         born = None
         abandoned = False
         release = None
+        security_storage = None
         try:
-            if directory and mode == 0o700:
+            if security_image is not None:
+                security_storage = ctypes.create_string_buffer(security_image.descriptor)
+                security = ctypes.cast(security_storage, wintypes.LPVOID)
+            elif directory and mode == 0o700:
                 if cls._security_bindings is None:
                     advapi = ctypes.WinDLL("advapi32", use_last_error=True)
                     convert = advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW
@@ -917,7 +1215,13 @@ class _WindowsBoundNode:
                 attributes = ObjectAttributes(ctypes.sizeof(ObjectAttributes), parent.live_handle,
                                                ctypes.pointer(unicode), 0x40, security if security.value else None, None)
                 status_block, handle = IoStatus(), wintypes.HANDLE()
-                status = function(ctypes.byref(handle), 0x13019F, ctypes.byref(attributes),
+                access = 0x13019F
+                if security_image is not None and security_image.replayable_auto_inheritance:
+                    # SetSecurityInfo does not propagate to children when the
+                    # held creator handle was opened with MAXIMUM_ALLOWED.
+                    # This is OS-authorized access on the new object only.
+                    access |= 0x02000000 | 0x40000
+                status = function(ctypes.byref(handle), access, ctypes.byref(attributes),
                                   ctypes.byref(status_block), None, 0x80, 7, 2,
                                   0x21 if directory else 0x60, None, 0)
                 if status < 0:
@@ -978,7 +1282,7 @@ class _WindowsBoundNode:
             primary = error
             raise
         finally:
-            if security.value:
+            if release is not None and security.value:
                 if release(security):
                     cleanup = ctypes.WinError(ctypes.get_last_error())
                     previous = primary if isinstance(primary, _InstallFailure) else None
@@ -995,6 +1299,44 @@ class _WindowsBoundNode:
                                           retained_errors=tuple(error for error in (previous, cleanup)
                                               if _copy_setter_operation_errors(error))) from primary
                 security.value = None
+
+    def security_image(self) -> _WindowsSecurityImage:
+        """Read only owner/group/DACL from this held object, never a pathname."""
+        ctypes, wintypes, _kernel, *_rest = self._api()
+        if self._descriptor_bindings is None:
+            advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+            get = advapi.GetKernelObjectSecurity
+            get.argtypes = (wintypes.HANDLE, wintypes.DWORD, ctypes.c_void_p,
+                            wintypes.DWORD, ctypes.POINTER(wintypes.DWORD))
+            get.restype = wintypes.BOOL
+            type(self)._descriptor_bindings = get
+        get = self._descriptor_bindings
+        needed = wintypes.DWORD()
+        if get(self.live_handle, 7, None, 0, ctypes.byref(needed)):
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing security buffer")
+        if ctypes.get_last_error() != 122 or not needed.value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        buffer = ctypes.create_string_buffer(needed.value)
+        if not get(self.live_handle, 7, buffer, len(buffer), ctypes.byref(needed)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return _WindowsSecurityImage.from_descriptor(bytes(buffer.raw[:needed.value]))
+
+    def replay_created_dacl_inheritance(self, expected: _WindowsSecurityImage) -> None:
+        """Reapply the same ACL so NTFS recalculates inheritance on a held new object."""
+        if self.purpose != "creator" or self.born_path != self.path or self.proof != self.creator_proof:
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing DACL creator binding")
+        ctypes, wintypes, _kernel, *_rest = self._api()
+        if self._dacl_bindings is None:
+            api = ctypes.WinDLL("advapi32")
+            setter = api.SetSecurityInfo
+            setter.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
+                               ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
+            setter.restype = wintypes.DWORD
+            type(self)._dacl_bindings = setter
+        dacl = ctypes.create_string_buffer(expected.policy[2])
+        error = self._dacl_bindings(self.live_handle, 1, 4, None, None, dacl, None)
+        if error:
+            raise ctypes.WinError(error)
 
     @property
     def proof(self) -> _NativeNodeProof:
@@ -1021,6 +1363,20 @@ class _WindowsBoundNode:
         if not kernel.GetFileInformationByHandleEx(self.live_handle, 0, ctypes.byref(information), ctypes.sizeof(information)):
             raise ctypes.WinError(ctypes.get_last_error())
         return information
+
+    def ordinary_single_link(self) -> bool:
+        ctypes, wintypes, kernel, *_rest = self._api()
+
+        class StandardInfo(ctypes.Structure):
+            _fields_ = (("allocation", ctypes.c_longlong), ("end", ctypes.c_longlong),
+                        ("links", wintypes.DWORD), ("delete_pending", ctypes.c_ubyte),
+                        ("directory", ctypes.c_ubyte))
+
+        info = StandardInfo()
+        if not kernel.GetFileInformationByHandleEx(
+                self.live_handle, 1, ctypes.byref(info), ctypes.sizeof(info)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return info.links == 1 and not info.delete_pending and not info.directory
 
     def digest(self) -> str:
         ctypes, wintypes, kernel, *_rest = self._api()
@@ -1075,7 +1431,8 @@ class _WindowsBoundNode:
         buffer, returned = ctypes.create_string_buffer(data), wintypes.DWORD()
         if not kernel.DeviceIoControl(self.live_handle, 0x900A4, buffer, len(data), None,
                                       0, ctypes.byref(returned), None):
-            raise ctypes.WinError(ctypes.get_last_error())
+            error = ctypes.WinError(ctypes.get_last_error())
+            raise _InstallFailure("E_NATIVE_PROJECTION_SET_FAILED", "projection-set", error) from error
 
     def logical_target(self, raw: bytes | None = None) -> str:
         """Project the documented CPython SubstituteName view, retaining raw bytes."""
@@ -1096,7 +1453,7 @@ class _WindowsBoundNode:
         return name
 
     @classmethod
-    def target_reparse_data(cls, target: "_WindowsBoundNode", *, junction: bool = False) -> bytes:
+    def target_reparse_data(cls, target: "_WindowsBoundNode", *, junction: bool | None = None) -> bytes:
         """Let the OS name the target; encode the documented reparse metadata layout."""
         import struct
         ctypes, wintypes, kernel, *_rest = cls._api()
@@ -1124,6 +1481,8 @@ class _WindowsBoundNode:
             raise ctypes.WinError(ctypes.get_last_error())
         if length >= len(buffer):
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: native target spelling drift")
+        if junction is None:
+            junction = _windows_projection_uses_junction(buffer.value)
         converted = UnicodeString()
         try:
             status = convert(buffer.value, ctypes.byref(converted), None, None)
@@ -1169,6 +1528,16 @@ class _WindowsBoundNode:
                                       recovery_path=self.path) from primary
             self.handle = None
         return False
+
+
+@dataclass(frozen=True)
+class _FreshFileWitness:
+    """Successful creator provenance only; the existing transaction owns recovery."""
+
+    owner: "_CreateOnlyMutablePath"
+    path: Path
+    node: _PhysicalNode
+    parents: tuple[tuple[Path, tuple[int, int, int, int]], ...]
 
 
 @dataclass(frozen=True)
@@ -1231,6 +1600,7 @@ class _SliceAMigratedFileRecord:
     old_current: _PhysicalNode | None = None
     new_current: _PhysicalNode | None = None
     selection_links: tuple[tuple[Path, _PhysicalNode], ...] = ()
+    reservation_state: dict[Path, _PhysicalNode] | None = None
 
     @property
     def proof_key(self) -> tuple[Any, ...]:
@@ -1509,7 +1879,7 @@ def _installer_failure_text(error: BaseException) -> str:
                     "native-acquisition", "native-security-release", "native-close", "creator-capture", "borrowed-content",
                     "copy-close", "scalar-parent-close", "descriptor-read-reset", "scalar-close", "scalar-acquisition",
                     "file-copy", "file-acquisition", "file-close", "construction", "disposal-close", "snapshot-acquisition",
-                    "residual-creator", "retention-acquisition", "migration-stage", "capability", "prepared"}
+                    "residual-creator", "retention-acquisition", "migration-stage", "capability", "prepared", "projection-set", "security-creation"}
         def safe_context(value):
             return value if type(value) is str and value in contexts else "unavailable"
         filesystem_types = (
@@ -1546,6 +1916,9 @@ def _installer_failure_text(error: BaseException) -> str:
             if value is None:
                 return kind, identity, cause_context, native_errno, native_winerror
             cause_type = type(value)
+            if cause_type is _AtomicTransportProjectionStateError:
+                return ("validation-error", "E_TRANSPORT_PROJECTION_PARITY",
+                        "transport-projection", native_errno, native_winerror)
             if cause_type is _InstallFailure:
                 kind = "installer-failure"
                 try:
@@ -1553,6 +1926,13 @@ def _installer_failure_text(error: BaseException) -> str:
                     if cause_storage is not None:
                         identity = stable(dict.get(cause_storage, "stable_id"))
                         cause_context = safe_context(dict.get(cause_storage, "context"))
+                        # One known operation wrapper only: no arbitrary chain traversal,
+                        # exception string rendering, or user-defined attribute access.
+                        if identity == "E_NATIVE_PROJECTION_SET_FAILED" and cause_context == "projection-set":
+                            native = dict.get(cause_storage, "cause")
+                            if any(type(native) is item for item in filesystem_types):
+                                native_errno = native_code(native, "errno")
+                                native_winerror = native_code(native, "winerror")
                 except BaseException:
                     pass
             else:
@@ -1585,11 +1965,15 @@ def _installer_failure_text(error: BaseException) -> str:
             cause = "identity-check-failed" if identity in {"E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY",
                 "E_ROLLBACK_CREATED_IDENTITY_CHANGED", "E_RUNTIME_SUBROOT_ROLLBACK_UNSAFE"} else "operation-failed"
             original = f"{identity} | context={context} | cause={cause}"
+        elif type(error) is _AtomicTransportProjectionStateError:
+            original = "E_TRANSPORT_PROJECTION_PARITY | context=transport-projection | cause=atomic-projection-state"
         else:
             cause = "filesystem-operation-failed" if isinstance(error, OSError) else (
                 "validation-failed" if isinstance(error, ValueError) else "operation-failed")
             original = "failure-id=unavailable | context=unavailable | cause=" + cause
         additions = []
+        if typed and attributes is not None and identity == "E_ATOMIC_DIRECTORY_PUBLISH_UNSUPPORTED":
+            additions.append("filesystem cannot safely publish a directory without replacing an existing target")
         def render(context):
             try:
                 return _CopySetterDiagnostic.render(context) if type(context) is _CopySetterDiagnostic else "unavailable"
@@ -1672,6 +2056,13 @@ def _installer_failure_text(error: BaseException) -> str:
         return " | ".join((original, *additions))
     except BaseException:
         return original + " | diagnostic=unavailable"
+
+
+class _AtomicTransportProjectionStateError(ValueError):
+    """An existing Claude transport is not an admitted atomic projection."""
+
+    def __init__(self) -> None:
+        super().__init__("E_TRANSPORT_PROJECTION_PARITY: atomic projection state")
 
 
 @dataclass(frozen=True)
@@ -1760,6 +2151,12 @@ class _InstallFailure(RuntimeError):
 
 SLICE_A_FAILURE_IDS = frozenset(
     {
+        "E_ATOMIC_DIRECTORY_PUBLISH_UNSUPPORTED",
+        "E_CODEX_HOOK_SLOT_SHIFT",
+        "E_WINDOWS_SECURITY_CREATION_MISMATCH",
+        "E_SHARED_HOOK_RUNTIME",
+        "E_CODEX_DOCUMENT_LEGACY_OWNERSHIP_REQUIRED",
+        "E_NATIVE_PROJECTION_SET_FAILED",
         "E_CREATE_ONLY_COLLISION",
         "E_CREATE_ONLY_TYPE_COLLISION",
         "E_CREATE_ONLY_PROJECTION_COLLISION",
@@ -1819,6 +2216,7 @@ class _CopyMetadataParticipant:
     restored: _CopyMetadataImage | None = None
     unknown: bool = False
     target_text: str | None = field(default=None, compare=False, repr=False)
+    created_origin: _PhysicalNode | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -1866,6 +2264,26 @@ class _DeclaredPathEffect:
     def location(self) -> Path:
         return self.path if self.current_path is None else self.current_path
 
+    @property
+    def preflight_state(self) -> tuple[tuple[Path, _PhysicalNode], ...]:
+        # Recognize the earlier content/identity acquisition, not fresh authority.
+        # Its caller must still assert the effect's stronger current witnesses.
+        return tuple(sorted((path, replace(node, security=None))
+                            for path, node in self.before.items()))
+
+
+def _require_transaction_disposal_backend() -> None:
+    """Refuse unqualified transaction disposal before reads or effects.
+
+    This platform gate is not a capability or ownership proof. Every caller
+    must still satisfy the existing native object and transaction checks.
+    """
+    if os.name not in {"nt", "posix"}:
+        raise ValueError(
+            "E_EFFECT_BOUND_DISPOSAL_UNQUALIFIED: transaction disposal requires "
+            "a qualified effect-bound backend; preserve retained recovery material"
+        )
+
 
 class _InstallTransaction:
     """Snapshot the coherent install surface and restore it unless committed."""
@@ -1873,7 +2291,8 @@ class _InstallTransaction:
     def __init__(self, paths: list[Path], *, enabled: bool,
                  copy_paths: tuple[Path, ...] = (),
                  link_object_paths: tuple[Path, ...] = (),
-                 readonly_paths: tuple[Path, ...] = ()) -> None:
+                 readonly_paths: tuple[Path, ...] = (),
+                 track_fresh_files: bool = False) -> None:
         self.paths = tuple(
             sorted(
                 {Path(os.path.abspath(path)) for path in paths},
@@ -1894,6 +2313,8 @@ class _InstallTransaction:
         self._temporary: Path | None = None
         self._entries: list[dict[str, object]] = []
         self._slice_a_created: list[_SliceACreatedRecord] = []
+        self._track_fresh_files = track_fresh_files
+        self._fresh_files: list[_FreshFileWitness] = []
         self._slice_a_migrated: list[_SliceAMigratedFileRecord] = []
         self._migration_retention: dict[Path, tuple[Path, tuple[int, int, int, int], _PhysicalNode, _CreateOnlyMutablePath]] = {}
         # A single transaction may span the ordinary global home plus one or
@@ -1926,6 +2347,7 @@ class _InstallTransaction:
 
     @contextmanager
     def direct_operation(self):
+        _require_transaction_disposal_backend()
         if self.enabled or self._direct_operation_depth:
             yield
             return
@@ -2033,10 +2455,10 @@ class _InstallTransaction:
                     if descriptor is not None:
                         raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing actual producer digest")
                     node_data = bound.digest() if bound is not None else _file_sha256(path)
-                elif node_kind == "link":
+                elif node_kind in {"link", "reparse"}:
+                    # The acquired object's stored target is evidence even when
+                    # its referent was removed by an earlier owned inverse.
                     node_data = bound.logical_target() if bound is not None else os.readlink(path)
-                elif node_kind == "reparse":
-                    node_data = str(Path(bound.logical_target()).resolve(strict=True)) if bound is not None else str(path.resolve(strict=True))
             reparse = (bound.reparse_data() if bound is not None and not metadata_only
                        and getattr(metadata, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT else None)
             return _PhysicalNode(node_kind, (metadata.st_dev, metadata.st_ino, metadata.st_mode,
@@ -2138,9 +2560,11 @@ class _InstallTransaction:
                         )
                         and current.native_proof == expected.native_proof)
             if os.name == "nt":
-                with _WindowsBoundNode(path) as bound:
+                with _WindowsBoundNode(path, security=expected.security is not None) as bound:
                     current = _InstallTransaction._capture_node(path, bound_node=bound, metadata_only=True)
                     if not metadata_matches(current):
+                        return False
+                    if expected.security is not None and bound.security_image() != expected.security:
                         return False
                     if expected.kind in {"link", "reparse"}:
                         return _InstallTransaction._capture_node(path, bound_node=bound, data=expected.data) == expected
@@ -2435,6 +2859,19 @@ class _InstallTransaction:
         return dependency
 
     @staticmethod
+    def _copy_close_failure(path, primary, cleanup, *, context="copy-close"):
+        """Add one close failure without dropping the copy's existing evidence."""
+        prior = primary if isinstance(primary, _InstallFailure) else None
+        members = () if prior is None else prior.members
+        return _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", context,
+            primary if primary is not None else cleanup,
+            members=members + (_RollbackFailureMember("backup", -1, str(path),
+                "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
+                cause_exception=cleanup),),
+            recovery_path=None if prior is None else prior.recovery_path,
+            unresolved_paths=() if prior is None else prior.unresolved_paths)
+
+    @staticmethod
     @contextmanager
     def _copy_reference(path: Path, expected: _PhysicalNode, *, writable=False,
                         metadata_only=False):
@@ -2470,10 +2907,7 @@ class _InstallTransaction:
             try:
                 os.close(descriptor)
             except OSError as cleanup:
-                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "copy-close", primary or cleanup,
-                    members=(_RollbackFailureMember("backup", -1, str(path),
-                             "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
-                             cause_exception=cleanup),)) from primary
+                raise _InstallTransaction._copy_close_failure(path, primary, cleanup) from primary
 
     def _acquire_copy_metadata(self, path, metadata, descriptor, bound):
         participant = self._copy_metadata.get(path)
@@ -2482,13 +2916,21 @@ class _InstallTransaction:
         if descriptor is None and bound is None:
             # POSIX observation binds a no-follow descriptor before hashing.
             descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            primary = None
             try:
                 actual = os.fstat(descriptor)
                 if (actual.st_dev, actual.st_ino, actual.st_mode) != (metadata.st_dev, metadata.st_ino, metadata.st_mode):
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: copy metadata acquisition")
                 image = self._read_copy_metadata(actual, descriptor, None)
+            except BaseException as error:
+                primary = error
+                raise
             finally:
-                os.close(descriptor)
+                try:
+                    os.close(descriptor)
+                except OSError as cleanup:
+                    raise _InstallTransaction._copy_close_failure(
+                        path, primary, cleanup, context="copy-metadata-close") from primary
         else:
             image = self._read_copy_metadata(metadata, descriptor, bound)
         participant.before = participant.current = image
@@ -2515,10 +2957,58 @@ class _InstallTransaction:
             if actual.stable() != expected.stable():
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: copy stable metadata drift")
 
+    def _representable_copy_times(self, path: Path, descriptor: int,
+                                  requested: tuple[int, int]) -> tuple[int, int]:
+        """Measure this pair through the same setter on an owned sibling file."""
+        parent = _CreateOnlyMutablePath._identity(path.parent)
+        prepared = {}
+        primary = None
+        def record(member, node):
+            prepared[member] = node
+            self._advance(member, {member: node})
+        try:
+            probe, node = self._prepare_payload_file(path.parent, ".timestamp-", b"", record, fsync="none")
+            with self._copy_reference(probe, node, writable=True) as (fd, bound):
+                if (bound is not None or os.fstat(fd).st_dev != os.fstat(descriptor).st_dev
+                        or _CreateOnlyMutablePath._identity(path.parent) != parent):
+                    raise ValueError("E_MUTABLE_PATH_POSTCONDITION: timestamp probe binding")
+                def sample(pair):
+                    os.utime(fd, ns=pair)
+                    actual = os.fstat(fd)
+                    if self._scalar_descriptor_node(probe, fd, node) != node:
+                        raise ValueError("E_MUTABLE_PATH_POSTCONDITION: timestamp probe drift")
+                    result = (actual.st_atime_ns, actual.st_mtime_ns)
+                    if any(value > limit for value, limit in zip(result, pair)):
+                        raise ValueError("E_MUTABLE_PATH_POSTCONDITION: timestamp probe rounding")
+                    return result
+                first = sample(requested)
+                contrast = tuple(0 if value != 0 else 86_400_000_000_000 for value in first)
+                other = sample(contrast)
+                final = sample(requested)
+                if first != final or any(value == alternate for value, alternate in zip(first, other)):
+                    raise ValueError("E_MUTABLE_PATH_POSTCONDITION: timestamp probe reproducibility")
+                if _CreateOnlyMutablePath._identity(path.parent) != parent:
+                    raise ValueError("E_MUTABLE_PATH_POSTCONDITION: timestamp probe parent drift")
+                return final
+        except BaseException as error:
+            primary = error
+            raise
+        finally:
+            for member, witness in prepared.items():
+                try:
+                    self._dispose_image(member, {member: witness})
+                except BaseException as cleanup:
+                    paths, members, errors = self._settlement_failure(cleanup, "backup", -1, member,
+                        "E_ROLLBACK_BACKUP_CLEANUP_FAILED", (member,), participant="backup")
+                    raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "timestamp-probe",
+                        cleanup if primary is None else primary, members=tuple(members),
+                        recovery_path=member, unresolved_paths=tuple(paths), retained_errors=errors) from primary
+
     def _apply_copy_metadata(self, path: Path, node: _PhysicalNode,
                              desired: _CopyMetadataImage, mode: int, record,
                              participant: _CopyMetadataParticipant | None = None,
-                             *, restored=False) -> _CopyMetadataImage:
+                             *, restored=False, fresh_copy=False,
+                             restoration_verified=False) -> _CopyMetadataImage:
         """Verify time assignment exactly; later atime is a read-variable observation.
 
         Stable metadata and physical/restriction identity remain constrained for
@@ -2530,6 +3020,13 @@ class _InstallTransaction:
             known = self._copy_current.get(path)
             if known is not None and current.stable() != known.stable():
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: copy setter beforeimage drift")
+            if current == desired and stat.S_IMODE(node.python_identity[2]) == mode:
+                self._copy_current[path] = current
+                if participant is not None:
+                    participant.current, participant.unknown = current, False
+                    if restored:
+                        participant.restored = current
+                return current  # Already exact; do not round an unchanged original through a setter.
             operation_ordinal = 0
             def progress(operation, projected, *, identity=None, label,
                          sets_times=False, optional_operation_errnos=()):
@@ -2587,7 +3084,14 @@ class _InstallTransaction:
                 projected_effect = projected.stable() if stable_observation else projected
                 known_effect = (actual_effect == projected_effect if assigned else
                                 actual_effect in (current_effect, projected_effect))
-                if not assignment_known or not known_effect or actual_identity not in (node.python_identity, valid_identity):
+                # A successful setter can produce a verified but unrequested time
+                # image (for example filesystem quantization). Record that outcome
+                # for rollback without accepting it as exact requested assignment.
+                observed_time_only = (sets_times and primary is None and assignment is not None
+                    and replace(assignment, atime_ns=projected.atime_ns, mtime_ns=projected.mtime_ns) == projected
+                    and actual == assignment and actual_identity == valid_identity)
+                if (not observed_time_only and (not assignment_known or not known_effect)
+                        or actual_identity not in (node.python_identity, valid_identity)):
                     if primary is not None:
                         _CopySetterDiagnostic.attach(primary, label, restored, "operation", operation_ordinal,
                             current, projected, node.python_identity, valid_identity, actual, actual_identity, participant=participant)
@@ -2616,6 +3120,24 @@ class _InstallTransaction:
                     if isinstance(primary, OSError) and primary.errno in optional_operation_errnos:
                         return  # Known optional operation error; recording already succeeded.
                     raise primary
+                if (observed_time_only and label == "timestamps" and not restored and bound is None
+                        and participant is not None and actual_effect != projected_effect
+                        and ((fresh_copy and participant.origin is None and participant.before is None)
+                             or (restoration_verified and participant.origin is not None and participant.before is not None
+                                 and self._same_origin(node, participant.origin.python_identity, participant.origin.native_proof)))):
+                    pair = self._representable_copy_times(path, descriptor, (projected.atime_ns, projected.mtime_ns))
+                    represented = replace(projected, atime_ns=pair[0], mtime_ns=pair[1])
+                    if actual == represented:
+                        if (self._scalar_descriptor_node(path, descriptor, node) != node
+                                or not self._image_matches(path, {path: node})):
+                            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: timestamp target drift")
+                        if self._read_copy_metadata(os.fstat(descriptor), descriptor, bound).stable() != actual.stable():
+                            participant.unknown = True
+                            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: timestamp target metadata drift")
+                        # Validation reads can update access time. Repeat the request
+                        # with its measured expectation through the same owner.
+                        progress(operation, represented, label="timestamps-representable", sets_times=True)
+                        return
                 if (actual_effect != projected_effect or actual_identity != valid_identity
                         or (assignment_pair is not None and not assigned)):
                     error = ValueError("E_MUTABLE_PATH_POSTCONDITION: copy metadata readback")
@@ -2805,7 +3327,7 @@ class _InstallTransaction:
                     try:
                         os.close(descriptor)
                     except OSError as cleanup:
-                        raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "scalar-parent-close", primary or cleanup,
+                        raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "scalar-parent-close", cleanup if primary is None else primary,
                             members=(_RollbackFailureMember("backup", -1, str(path),
                                      "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="scalar",
                                      cause_exception=cleanup),)) from primary
@@ -2847,7 +3369,7 @@ class _InstallTransaction:
                 paths, members, retained_errors = _InstallTransaction._settlement_failure(reset, "snapshot", -1, path,
                     "E_ROLLBACK_RESTORE_FAILED", (path,), participant="backup")
                 previous = primary if isinstance(primary, _InstallFailure) else None
-                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "descriptor-read-reset", primary or reset,
+                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "descriptor-read-reset", reset if primary is None else primary,
                     members=(previous.members if previous is not None else ()) + tuple(members),
                     unresolved_paths=(previous.unresolved_paths if previous is not None else ()) + tuple(paths),
                     recovery_path=previous.recovery_path if previous is not None else None,
@@ -2866,6 +3388,13 @@ class _InstallTransaction:
         return _InstallTransaction._capture_node(path, descriptor=descriptor, kind="file",
             data=hashlib.sha256(_InstallTransaction._descriptor_bytes(descriptor, path=path)).hexdigest())
 
+    @staticmethod
+    def _assert_scalar_security(bound: _WindowsBoundNode, expected: _WindowsSecurityImage) -> None:
+        if (not bound.ordinary_single_link() or
+                bound.basic().attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT or
+                bound.security_image() != expected):
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar security or link count")
+
     def _scalar_beforeimage(self, path: Path, before: _PhysicalNode) -> Path:
         for entry in self._entries:
             if entry["kind"] == "file" and self._original.get(entry["path"]) == {path: before}:
@@ -2876,9 +3405,12 @@ class _InstallTransaction:
         self._copy_snapshot(path, backup, {path: before})
         return backup
 
-    def transform_scalar(self, logical: Path, legacy: Path, render, owner: "_CreateOnlyMutablePath") -> None:
+    def transform_scalar(self, logical: Path, legacy: Path | None, render, owner: "_CreateOnlyMutablePath",
+                         *, move_legacy: bool = True,
+                         windows_origin: _PhysicalNode | None = None) -> None:
         """Bind, render and perform one ordinary scalar write in this transaction."""
-        logical, legacy = Path(os.path.abspath(logical)), Path(os.path.abspath(legacy))
+        logical = Path(os.path.abspath(logical))
+        legacy = Path(os.path.abspath(legacy)) if legacy is not None else None
         if os.path.normcase(os.path.commonpath((str(owner.anchor), str(logical)))) != os.path.normcase(str(owner.anchor)):
             raise ValueError("E_MUTABLE_PATH_ESCAPE: scalar selection")
         if owner.linked_authority is not None:
@@ -2887,7 +3419,16 @@ class _InstallTransaction:
             raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED")
         selected = self._bind_scalar_storage(logical)
         storage, before, links, leaf = selected
+        expected_windows_security = windows_origin.security if windows_origin is not None else None
+        if windows_origin is not None and (
+            os.name != "nt" or not self.enabled or legacy is not None
+            or expected_windows_security is None or before != replace(windows_origin, security=None)
+            or storage != logical or leaf != storage
+            or any(node.kind != "directory" for _path, node in links)
+        ):
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: secure scalar requires an existing ordinary Windows target")
         descriptor = None
+        secured = None
         resources = ExitStack()
         primary = None
         appended = False
@@ -2899,7 +3440,7 @@ class _InstallTransaction:
                 paths, members, retained_errors = self._settlement_failure(cleanup, "snapshot", -1, storage,
                     "E_ROLLBACK_RESTORE_FAILED", (storage,), participant="scalar")
                 previous = primary if isinstance(primary, _InstallFailure) else None
-                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "scalar-close", primary or cleanup,
+                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "scalar-close", cleanup if primary is None else primary,
                                       members=(previous.members if previous is not None else ()) + tuple(members),
                                       unresolved_paths=(previous.unresolved_paths if previous is not None else ()) + tuple(paths),
                                       recovery_path=entry["operation_backup"] if appended else None,
@@ -2913,10 +3454,15 @@ class _InstallTransaction:
                 parent_path = parent_path.parent
             parent_node = dict(links)[parent_path]
             parent_reference = self._bind_scalar_parent(parent_path, parent_node, resources)
-            use_legacy = before is None and legacy.is_file()
-            if use_legacy:
+            if before is None and legacy is not None and legacy.is_file():
                 if leaf != storage:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: legacy target pointer is occupied")
+                if not move_legacy:
+                    # Existing provider readers support this filename.
+                    self.transform_scalar(legacy, None, render, owner)
+                    if self._bind_scalar_storage(logical) != selected:
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: legacy selection drift")
+                    return
                 source_selected = self._bind_scalar_storage(legacy)
                 source_storage, source_node, source_links, source_leaf = source_selected
                 source_parent = self._bind_scalar_parent(source_leaf.parent, dict(source_links)[source_leaf.parent], resources)
@@ -2924,6 +3470,8 @@ class _InstallTransaction:
                     self._bind_scalar_parent(source_storage.parent, dict(source_links)[source_storage.parent], resources))
                 legacy_image = self._observe(source_leaf)
                 planned = render(legacy)
+                if not isinstance(planned, bytes):
+                    raise ValueError("E_MUTABLE_PATH_POSTCONDITION: scalar legacy renderer bytes")
                 if self._bind_scalar_storage(legacy) != source_selected or self._bind_scalar_storage(logical) != selected:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar legacy rendering drift")
                 expected_legacy = self._relocate(legacy_image, source_leaf, leaf)
@@ -2949,9 +3497,18 @@ class _InstallTransaction:
                 planned = render(logical)
                 if self._bind_scalar_storage(logical) != selected:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar rendering drift")
+                if planned is None and before is None:
+                    return
             if not isinstance(planned, bytes):
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION: scalar renderer bytes")
             digest = hashlib.sha256(planned).hexdigest()
+            if expected_windows_security is not None:
+                secured = resources.enter_context(_WindowsBoundNode(storage, purpose="scalar-writer", security=True))
+                secured.python_metadata(writable=True)
+                descriptor = secured.descriptor
+                if self._scalar_descriptor_node(storage, descriptor, before) != before:
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: secure scalar origin")
+                self._assert_scalar_security(secured, expected_windows_security)
             if before is not None and before.data == digest:
                 return
             # Missing suffixes belong only to this already-bound scalar selection.
@@ -2959,7 +3516,7 @@ class _InstallTransaction:
                 parent_entry = {"kind": "scalar", "path": logical, "current_path": directory,
                                 "before_node": None, "current_node": None, "origin": None,
                                 "links": links, "operation_backup": None, "consumed": False, "born": True,
-                                "logical_views": ()}
+                                "logical_views": (), "implicit_container": True}
                 def record_directory(path, node):
                     parent_entry["origin"] = parent_entry["current_node"] = node
                     self._advance(path, {path: node})
@@ -2979,6 +3536,8 @@ class _InstallTransaction:
                      "before_node": before, "current_node": before, "origin": before,
                      "links": links, "operation_backup": None, "consumed": False, "born": before is None,
                      "logical_views": (logical,) if leaf == storage else ()}
+            if expected_windows_security is not None:
+                entry["expected_windows_security"] = expected_windows_security
             if before is not None and self.enabled:
                 entry["operation_backup"] = self._scalar_beforeimage(storage, before)
             self._assert_scalar_binding(entry)
@@ -2993,7 +3552,7 @@ class _InstallTransaction:
                     appended = True
                     node = self._capture_node(storage, bound_node=created, kind="file", data=hashlib.sha256(b"").hexdigest())
                     descriptor = created.descriptor
-                else:
+                elif secured is None:
                     descriptor = os.open(storage, flags)
                     resources.callback(close_descriptor)
             else:
@@ -3027,8 +3586,12 @@ class _InstallTransaction:
             def record(path, current):
                 entry["current_node"] = current
                 self._advance(path, {path: current})
+            if secured is not None:
+                self._assert_scalar_security(secured, expected_windows_security)
             self._write_owned_file(storage, descriptor, (planned,), record, digest,
                                    initial_state=before if before is not None else None)
+            if secured is not None:
+                self._assert_scalar_security(secured, expected_windows_security)
             actual = self._scalar_descriptor_node(storage, descriptor, entry["origin"])
             if actual != entry["current_node"]:
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION: scalar descriptor result")
@@ -3057,7 +3620,8 @@ class _InstallTransaction:
                    and not self._same_origin(origin, record.old_identity, record.old_native_proof)
                    for record in self._slice_a_migrated)
 
-    def _settle_scalars(self, blocked: list[Path], *, entries=None) -> tuple[list[Path], list[_RollbackFailureMember], tuple[BaseException, ...]]:
+    def _settle_scalars(self, blocked: list[Path], *, entries=None,
+                        allow_container_retention: bool = False) -> tuple[list[Path], list[_RollbackFailureMember], tuple[BaseException, ...]]:
         unresolved, failures = [], []
         retained_errors = ()
         selected = None if entries is None else {id(entry) for entry in entries}
@@ -3073,6 +3637,26 @@ class _InstallTransaction:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar dependency")
                 if entry["origin"] is None:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: unproved scalar creator retained")
+                if allow_container_retention and entry.get("implicit_container") is True:
+                    # Only the dependency scheduler may settle a shared parent.
+                    # Its creator owns the directory identity, not external children.
+                    if (entry.get("born") is not True or entry["before_node"] is not None
+                            or entry["origin"].kind != "directory"
+                            or entry["current_node"] is None
+                            or not self._same_origin(entry["origin"],
+                                entry["current_node"].python_identity, entry["current_node"].native_proof)):
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: container proof")
+                    self._assert_scalar_binding(entry, check_storage=False)
+                    if not self._point_matches(path, entry["current_node"]):
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: container origin")
+                    if any(path.iterdir()):
+                        self._assert_scalar_binding(entry, check_storage=False)
+                        if not self._point_matches(path, entry["current_node"]):
+                            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: container observation drift")
+                        entry["disposition"] = "retained-external-container"
+                        entry["consumed"] = True
+                        print("  RETAINED_EXTERNAL_CONTAINER: external state preserved after owned rollback")
+                        continue
                 self._assert_scalar_binding(entry)
                 if entry["before_node"] is None:
                     self._dispose_node(path, entry["current_node"])
@@ -3087,7 +3671,28 @@ class _InstallTransaction:
                     payload = backup.read_bytes()
                     if hashlib.sha256(payload).hexdigest() != entry["before_node"].data:
                         raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: scalar inverse input")
+                    security = entry.get("expected_windows_security")
+                    if security is not None:
+                        with _WindowsBoundNode(path, purpose="scalar-writer", security=True) as secured:
+                            secured.python_metadata(writable=True)
+                            descriptor = secured.descriptor
+                            current = self._scalar_descriptor_node(path, descriptor, entry["origin"])
+                            if current != entry["current_node"]:
+                                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: secure scalar inverse descriptor")
+                            self._assert_scalar_security(secured, security)
+                            def record(member, node):
+                                entry["current_node"] = node
+                                self._advance(member, {member: node})
+                            self._write_owned_file(path, descriptor, (payload,), record,
+                                                   entry["before_node"].data, initial_state=current)
+                            self._assert_scalar_security(secured, security)
+                            if self._scalar_descriptor_node(path, descriptor, entry["origin"]) != entry["before_node"]:
+                                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: secure scalar inverse")
+                        self._assert_scalar_binding(entry)
+                        entry["consumed"] = True
+                        continue
                     descriptor = os.open(path, os.O_RDWR | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0))
+                    primary = None
                     try:
                         current = self._scalar_descriptor_node(path, descriptor, entry["origin"])
                         if current != entry["current_node"]:
@@ -3095,8 +3700,31 @@ class _InstallTransaction:
                         self._write_owned_file(path, descriptor, (payload,),
                             lambda member, node: self._advance(member, {member: node}), entry["before_node"].data,
                             initial_state=current)
+                    except BaseException as error:
+                        primary = error
+                        raise
                     finally:
-                        os.close(descriptor)
+                        try:
+                            os.close(descriptor)
+                        except OSError as cleanup:
+                            paths, members, errors = self._settlement_failure(
+                                cleanup, "snapshot", ordinal, path, "E_ROLLBACK_RESTORE_FAILED",
+                                (path,), participant="scalar")
+                            if primary is not None:
+                                prior_paths, prior_members, prior_errors = self._settlement_failure(
+                                    primary, "snapshot", ordinal, path, "E_ROLLBACK_RESTORE_FAILED",
+                                    participant="scalar")
+                                paths = prior_paths + paths
+                                members = prior_members + members
+                                errors = _merge_copy_setter_operation_errors(prior_errors, errors)
+                            prior = primary if isinstance(primary, _InstallFailure) else None
+                            raise _InstallFailure(
+                                "E_ROLLBACK_SETTLEMENT_FAILED", "scalar-close",
+                                primary if primary is not None else cleanup,
+                                members=tuple(members),
+                                recovery_path=None if prior is None else prior.recovery_path,
+                                unresolved_paths=tuple(dict.fromkeys(paths)),
+                                retained_errors=errors) from primary
                     self._assert_scalar_binding(entry)
                 entry["consumed"] = True
             except BaseException as error:
@@ -3127,15 +3755,20 @@ class _InstallTransaction:
         """Move only known physical references; logical historical paths stay fixed."""
         def moved(path):
             return target / path.relative_to(source) if path == source or source in path.parents else path
-        self._copy_current = {moved(path): metadata for path, metadata in self._copy_current.items()}
+        copy_current = {moved(path): metadata for path, metadata in self._copy_current.items()}
         relocated = self._relocate(image, source, target)
+        copy_updates = []
         for selected, participant in self._copy_metadata.items():
             if selected == source or source in selected.parents:
-                participant.current = None
+                copy_updates.append((participant, None))
             if selected in relocated:
                 with self._copy_reference(selected, relocated[selected]) as (descriptor, bound):
                     metadata = self._read_copy_metadata(os.fstat(descriptor), descriptor, bound)
-                self._copy_current[selected] = participant.current = metadata
+                copy_current[selected] = metadata
+                copy_updates.append((participant, metadata))
+        self._copy_current = copy_current
+        for participant, metadata in copy_updates:
+            participant.current = metadata
         for entry in self._entries:
             if entry["kind"] == "scalar":
                 entry["current_path"] = moved(entry["current_path"])
@@ -3179,7 +3812,9 @@ class _InstallTransaction:
                                                                  if record.retention_parent_path is not None else None),
                                           prepared_path=(moved(record.prepared_path)
                                                          if record.prepared_path is not None else None),
-                                          logical_leaf_path=record.logical_leaf_path or record.leaf_path)
+                                          logical_leaf_path=record.logical_leaf_path or record.leaf_path,
+                                          reservation_state=({moved(path): node for path, node in record.reservation_state.items()}
+                                              if record.reservation_state is not None else None))
                                    if (migration is None or record.proof_key != migration.proof_key)
                                    and any(moved(path) != path for path in
                                            (record.leaf_path, record.tombstone_path, record.prepared_path)
@@ -3272,6 +3907,32 @@ class _InstallTransaction:
         self._effects.append(effect)  # Armed before the first destructive operation.
         return effect
 
+    def capture_replacement_security(self, effect: _DeclaredPathEffect) -> None:
+        """Add destination security witnesses before any replacement preparation."""
+        if os.name != "nt":
+            return
+        secured = self._windows_tree_security(effect.location, effect.before)
+        effect.before = secured
+        effect.actual = dict(secured)
+        # Admission adds evidence, not a mutation of the earlier snapshot.
+        # Normal relocation records it when an actual namespace effect occurs.
+
+    def _windows_tree_security(self, root: Path, image: dict[Path, _PhysicalNode]) -> dict[Path, _PhysicalNode]:
+        secured = {}
+        for path, expected in image.items():
+            if expected.kind not in {"file", "directory"}:
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: nonordinary security counterpart")
+            with _WindowsBoundNode(path, security=True) as bound:
+                current = self._capture_node(path, bound_node=bound, metadata_only=True)
+                if (current.kind != expected.kind
+                        or not self._binding_identity_matches(expected.python_identity, current.python_identity)
+                        or current.native_proof != expected.native_proof):
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: security source identity")
+                secured[path] = replace(expected, security=bound.security_image())
+        if not self._image_matches(root, secured):
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: security acquisition drift")
+        return secured
+
     def _assert_effect_endpoint(self, effect: _DeclaredPathEffect, path: Path) -> None:
         destination_owner = effect.retained_owner or effect.owner
         owner = (destination_owner if any(root is not None and (path == root or root in path.parents)
@@ -3357,7 +4018,8 @@ class _InstallTransaction:
                     not self._binding_identity_matches(
                         previous.python_identity, node.python_identity
                     )
-                    or replace(node, python_identity=previous.python_identity) != previous
+                    or replace(node, python_identity=previous.python_identity,
+                               security=previous.security) != previous
                 ):
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: sealed observation drift")
                 current[member] = previous
@@ -3412,12 +4074,21 @@ class _InstallTransaction:
                       if parent_descriptors is not None else
                       operation(-100, os.fsencode(source), -100, os.fsencode(target), 1))
         elif sys.platform == "darwin":
-            operation = getattr(runtime, "renamex_np", None)
-            if operation is None:
-                return False
-            operation.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
-            operation.restype = ctypes.c_int
-            result = operation(os.fsencode(source), os.fsencode(target), 4)
+            if parent_descriptors is not None:
+                operation = getattr(runtime, "renameatx_np", None)
+                if operation is None:
+                    return False  # Held-parent selection must not become pathname selection.
+                operation.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+                operation.restype = ctypes.c_int
+                result = operation(parent_descriptors[0], os.fsencode(source.name),
+                                   parent_descriptors[1], os.fsencode(target.name), 4)
+            else:
+                operation = getattr(runtime, "renamex_np", None)
+                if operation is None:
+                    return False
+                operation.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+                operation.restype = ctypes.c_int
+                result = operation(os.fsencode(source), os.fsencode(target), 4)
         else:
             return False
         if result == 0:
@@ -3438,19 +4109,34 @@ class _InstallTransaction:
             return
         with ExitStack() as resources:
             selected = {"links": migration.selection_links}
-            self._assert_scalar_binding(selected, check_storage=False)
-            parent = self._bind_scalar_parent(migration.parent_path,
-                dict(migration.selection_links)[migration.parent_path], resources)
-            self._assert_scalar_binding(selected, check_storage=False)
+            parents = dict(migration.selection_links)
+            retention = None
+            if target.parent != migration.parent_path:
+                retention = self._migration_retention.get(target.parent)
+                if retention is None or target != migration.tombstone_path:
+                    raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: unregistered migration parent")
+                parents[target.parent] = retention[2]
+            def validate():
+                self._assert_scalar_binding(selected, check_storage=False)
+                if retention is not None:
+                    self.assert_migration_retention(target.parent, retention[3], pending=migration)
+            validate()
+            references = {}
+            for path in (source.parent, target.parent):
+                if path not in references:
+                    if path not in parents:
+                        raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: unselected migration parent")
+                    references[path] = self._bind_scalar_parent(path, parents[path], resources)
+            validate()
             primary = None
             try:
-                yield (parent, parent) if os.name != "nt" else None
+                yield (references[source.parent], references[target.parent]) if os.name != "nt" else None
             except BaseException as error:
                 primary = error
                 raise
             finally:
                 try:
-                    self._assert_scalar_binding(selected, check_storage=False)
+                    validate()
                 except BaseException as drift:
                     if primary is None:
                         raise
@@ -3459,6 +4145,141 @@ class _InstallTransaction:
                     raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "migration", primary,
                         members=tuple(members), unresolved_paths=tuple(paths),
                         retained_errors=errors) from primary
+
+    def _set_reservation(self, state, effect=None, migration=None):
+        if effect is not None:
+            effect.reservation_state = state
+        else:
+            self._slice_a_migrated = [replace(item, reservation_state=state)
+                if item.proof_key == migration.proof_key else item for item in self._slice_a_migrated]
+
+    def _dispose_reservation(self, path, state, *, migration=None):
+        if migration is None:
+            self._dispose_image(path, state)
+        else:
+            if (set(state) != {path} or state[path].kind != "file"
+                    or any(item.proof_key != migration.proof_key for item in self._migration_dependencies(path))
+                    or any(not item.settled and any(self._paths_overlap(path, endpoint)
+                        for endpoint in (item.location, item.retained, item.quarantine, item.prepared_path)
+                        if endpoint is not None) for item in self._effects)):
+                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: reservation dependency")
+            self._dispose_node(path, state[path])
+            self._advance(path, {})
+
+    def _retain_reserved_original(self, source: Path, target: Path,
+                                   before: dict[Path, _PhysicalNode],
+                                   effect: _DeclaredPathEffect | None,
+                                   migration: _SliceAMigratedFileRecord | None = None) -> dict[Path, _PhysicalNode]:
+        """Move an original over our empty typed reservation under caller serialization."""
+        relocated = self._relocate(before, source, target)
+        accounted = False
+        reservation = None
+        def set_state(state):
+            nonlocal reservation
+            reservation = state
+            self._set_reservation(state, effect, migration)
+        def record(path, node):
+            set_state({path: node})
+            self._advance(path, {path: node})
+        with ExitStack() as resources:
+            source_parent = self._capture_node(source.parent, kind="directory")
+            target_parent = self._capture_node(target.parent, kind="directory")
+            source_fd = self._bind_scalar_parent(source.parent, source_parent, resources)
+            target_fd = self._bind_scalar_parent(target.parent, target_parent, resources)
+            try:
+                if before[source].kind == "directory":
+                    self._create_owned_directory(target, record, parent_descriptor=target_fd)
+                else:
+                    descriptor = os.open(target.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                         0o600, dir_fd=target_fd)
+                    primary = None
+                    try:
+                        record(target, self._capture_node(target, descriptor=descriptor, kind="file",
+                                                          data=hashlib.sha256(b"").hexdigest()))
+                    except BaseException as error:
+                        primary = error
+                        raise
+                    finally:
+                        try:
+                            os.close(descriptor)
+                        except OSError as cleanup:
+                            raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "reservation-close",
+                                primary if primary is not None else cleanup, recovery_path=target,
+                                members=(_RollbackFailureMember("backup", -1, str(target),
+                                    "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup),
+                                    participant="reservation", cause_exception=cleanup),)) from primary
+                if effect is not None:
+                    self._assert_effect_endpoint(effect, source)
+                    self._assert_effect_endpoint(effect, target)
+                if (not self._point_matches(source.parent, source_parent)
+                        or not self._point_matches(target.parent, target_parent)
+                        or not self._image_matches(source, before)
+                        or not reservation
+                        or not self._image_matches(target, reservation)):
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained reservation drift")
+                # Never remove the reservation first. Under caller serialization,
+                # this replaces only our verified empty typed slot, not an occupant.
+                os.rename(source.name, target.name, src_dir_fd=source_fd, dst_dir_fd=target_fd)
+                if not self._image_matches(source, {}) or not self._image_matches(target, relocated):
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained reservation outcome")
+                set_state(None)
+                accounted = True
+                self._moved(source, target, before, effect, migration)
+                return relocated
+            except BaseException as primary:
+                if not accounted and self._image_matches(source, {}) and self._image_matches(target, relocated):
+                    set_state(None)
+                    accounted = True
+                    try:
+                        self._moved(source, target, before, effect, migration)
+                    except BaseException as accounting:
+                        raise _InstallFailure(
+                            "E_ROLLBACK_SETTLEMENT_FAILED", "retained-accounting", primary,
+                            recovery_path=target,
+                            members=(_RollbackFailureMember(
+                                "backup", -1, str(target), "E_ROLLBACK_BACKUP_CLEANUP_FAILED",
+                                str(accounting), participant="effect", cause_exception=accounting),)) from primary
+                elif (not accounted and reservation
+                        and self._image_matches(source, before)
+                        and self._image_matches(target, reservation)):
+                    try:
+                        self._dispose_reservation(target, dict(reservation), migration=migration if effect is None else None)
+                        set_state(None)
+                        self._advance(target, {})
+                    except BaseException as cleanup:
+                        raise _InstallFailure(
+                            "E_ROLLBACK_SETTLEMENT_FAILED", "retained-reservation", primary,
+                            recovery_path=target,
+                            members=(_RollbackFailureMember(
+                                "backup", -1, str(target), "E_ROLLBACK_BACKUP_CLEANUP_FAILED",
+                                str(cleanup), participant="effect", cause_exception=cleanup),)) from primary
+                raise
+
+    def _receiving_failure(self, primary: BaseException, secondary: BaseException,
+                           path: Path) -> _InstallFailure:
+        """Retain both failures without replacing the publication's evidence."""
+        paths, members, errors = self._settlement_failure(
+            secondary, "snapshot", -1, path, "E_ROLLBACK_SETTLEMENT_FAILED",
+            (path,), participant="effect")
+        if isinstance(secondary, _InstallFailure):
+            if secondary.members:
+                members.append(_RollbackFailureMember(
+                    "snapshot", -1, str(path), secondary.stable_id, str(secondary.cause),
+                    _copy_setter_detail(secondary),
+                    secondary if _copy_setter_operation_errors(secondary) else None,
+                    "effect", cause_exception=secondary))
+            if secondary.recovery_path is not None:
+                paths.append(secondary.recovery_path)
+        recovery = None
+        if isinstance(primary, _InstallFailure):
+            members = list(primary.members) + members
+            paths = list(primary.unresolved_paths) + paths
+            recovery = primary.recovery_path
+        return _InstallFailure(
+            "E_ROLLBACK_SETTLEMENT_FAILED", "transaction", primary,
+            members=tuple(members), recovery_path=recovery,
+            unresolved_paths=tuple(dict.fromkeys(paths)), retained_errors=errors)
+
 
     def _publish_retained(self, source: Path, target: Path, *,
                           effect: _DeclaredPathEffect | None = None,
@@ -3495,20 +4316,32 @@ class _InstallTransaction:
             try:
                 supported = (self._native_publish_no_replace(source, target, parent_descriptors=parent_descriptors)
                              if parent_descriptors is not None else self._native_publish_no_replace(source, target))
-            except BaseException:
+            except BaseException as primary:
                 try:
-                    metadata = target.lstat()
-                    moved_root = (metadata.st_dev, metadata.st_ino) == before[source].python_identity[:2]
-                    if moved_root and self._image_matches(source, {}):
-                        self._moved(source, target, before, effect, migration)
-                except FileNotFoundError:
-                    pass
+                    try:
+                        metadata = target.lstat()
+                    except FileNotFoundError:
+                        metadata = None
+                    if metadata is not None:
+                        moved_root = (metadata.st_dev, metadata.st_ino) == before[source].python_identity[:2]
+                        if moved_root and self._image_matches(source, {}):
+                            self._moved(source, target, before, effect, migration)
+                except BaseException as receiving:
+                    raise self._receiving_failure(primary, receiving, target) from primary
                 raise
             if supported:
                 self._moved(source, target, before, effect, migration)
                 return self._relocate(before, source, target)
             if (not self._image_matches(source, before)) or not self._image_matches(target, {}):
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: ambiguous publication")
+            if (((effect is not None and source == effect.location and target == effect.retained)
+                     or (effect is None and migration is not None
+                         and source == migration.leaf_path and target == migration.tombstone_path
+                         and before[source].kind == "file"))
+                    and before[source].kind in {"directory", "file"}
+                    and {os.open, os.mkdir, os.stat, os.rename} <= os.supports_dir_fd
+                    and hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW")):
+                return self._retain_reserved_original(source, target, before, effect, migration)
             if ((effect is not None and source == effect.location)
                     or (migration is not None and source == migration.leaf_path)):
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: retained-object atomic capability")
@@ -3520,6 +4353,24 @@ class _InstallTransaction:
                 self._dispose_node(source, before[source])
                 self._moved(source, target, before, effect, migration)
                 return actual
+            if (before[source].kind == "directory" and effect is not None
+                    and source == effect.prepared_path and target == effect.location
+                    and (not effect.before or (not effect.actual and effect.retained_state
+                         and effect.retained in effect.retained_state
+                         and self._image_matches(effect.retained, effect.retained_state)))
+                    and migration is None
+                    and {os.open, os.mkdir, os.stat} <= os.supports_dir_fd
+                    and hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW")
+                    and hasattr(os, "fchmod")):
+                # Fresh creation is caller-serialized, not an atomic tree rename.
+                # Record partial new identities before any later failure; the
+                # public writer still owns prepared-image cleanup in its finally.
+                self._transition_order += 1
+                effect.transition_order = self._transition_order
+                return self._construct_exclusive_tree(source, target, before, effect)
+            if (before[source].kind == "directory" and effect is not None
+                    and source == effect.prepared_path and target == effect.location):
+                raise _InstallFailure("E_ATOMIC_DIRECTORY_PUBLISH_UNSUPPORTED", "transaction")
             if (before[source].kind != "directory" or effect is None
                     or source != effect.retained or not effect.before or effect.actual):
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: unsupported retained type")
@@ -3527,13 +4378,29 @@ class _InstallTransaction:
 
     def _create_owned_directory(self, path: Path, record, *, parent_descriptor: int | None = None,
                                 parent_reference: _WindowsBoundNode | None = None,
-                                mode: int = 0o777, born=None) -> _PhysicalNode:
+                                mode: int = 0o777, born=None,
+                                security_image: _WindowsSecurityImage | None = None,
+                                capture_security: bool = False) -> _PhysicalNode:
         if os.name == "nt":
-            with _WindowsBoundNode.create(path, directory=True, mode=mode, parent_reference=parent_reference) as created:
+            options = {"security_image": security_image} if security_image is not None else {}
+            with _WindowsBoundNode.create(path, directory=True, mode=mode,
+                                          parent_reference=parent_reference, **options) as created:
                 if born is not None:
                     born(path)
                 node = self._capture_node(path, bound_node=created, kind="directory")
                 record(path, node)
+                if capture_security or security_image is not None:
+                    node = replace(node, security=created.security_image())
+                    record(path, node)
+                    if security_image is not None and security_image.needs_inheritance_replay(node.security):
+                        try:
+                            created.replay_created_dacl_inheritance(security_image)
+                        finally:
+                            node = replace(node, security=created.security_image())
+                            record(path, node)
+                    if security_image is not None and node.security != security_image:
+                        raise _InstallFailure("E_WINDOWS_SECURITY_CREATION_MISMATCH", "security-creation",
+                                              ValueError("directory security creation"))
                 return node
         if parent_descriptor is None:
             os.mkdir(path, mode)
@@ -3570,7 +4437,8 @@ class _InstallTransaction:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: source link native identity")
                 data = original.reparse_data()
                 directory = bool(original.basic().attributes & stat.FILE_ATTRIBUTE_DIRECTORY)
-            with _WindowsBoundNode.create(target, directory=directory) as created:
+            with _WindowsBoundNode.symlink_privilege(required=int.from_bytes(data[:4], "little") == 0xA000000C), \
+                    _WindowsBoundNode.create(target, directory=directory) as created:
                 node = self._capture_node(target, bound_node=created,
                                           kind="directory" if directory else "file",
                                           data=None if directory else hashlib.sha256(b"").hexdigest())
@@ -3593,18 +4461,23 @@ class _InstallTransaction:
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: source link copy drift")
 
     def _create_owned_projection(self, source: Path, target: Path, record,
-                                  *, junction: bool = False) -> _PhysicalNode:
+                                  *, junction: bool | None = None) -> _PhysicalNode:
         if os.name != "nt":
             target.symlink_to(source, target_is_directory=True)
             node = self._capture_node(target)
             record(target, node)
             return node
-        with _WindowsBoundNode.create(target, directory=True) as created:
-            node = self._capture_node(target, bound_node=created, kind="directory")
-            record(target, node)
-            with _WindowsBoundNode(source, purpose="observe", follow=True) as original:
-                target_proof = original.proof
-                raw = _WindowsBoundNode.target_reparse_data(original, junction=junction)
+        # Select the representation from the OS-resolved bound target before
+        # acquiring the creator. Local directory projections use mount points;
+        # other namespaces retain symbolic-link semantics and admission.
+        with _WindowsBoundNode(source, purpose="observe", follow=True) as original:
+            target_proof = original.proof
+            raw = _WindowsBoundNode.target_reparse_data(original, junction=junction)
+            with _WindowsBoundNode.symlink_privilege(
+                    required=int.from_bytes(raw[:4], "little") == 0xA000000C), \
+                    _WindowsBoundNode.create(target, directory=True) as created:
+                node = self._capture_node(target, bound_node=created, kind="directory")
+                record(target, node)
                 created.set_reparse_data(raw)
                 node = self._capture_node(target, bound_node=created)
                 if node.native_proof != created.creator_proof or node.reparse_data != raw:
@@ -3622,16 +4495,23 @@ class _InstallTransaction:
 
     def _copy_owned_file(self, source: Path, target: Path, expected: _PhysicalNode,
                          record, *, source_parent: int | None = None,
-                         target_parent: int | None = None) -> None:
+                         target_parent: int | None = None,
+                         security_image: _WindowsSecurityImage | None = None,
+                         capture_security: bool = False) -> None:
         """The shared exclusive file producer records actual creator and partial bytes."""
         descriptors = []
         primary = None
-        def fill(incoming, outgoing):
+        def fill(incoming, outgoing, created_security=None):
+            def receive(path, node):
+                record(path, replace(node, security=created_security)
+                       if created_security is not None else node)
             node = self._write_owned_file(target, outgoing,
-                iter(lambda: os.read(incoming, 1024 * 1024), b""), record, expected.data,
+                iter(lambda: os.read(incoming, 1024 * 1024), b""), receive, expected.data,
                 mode=None if target in self._copy_metadata else stat.S_IMODE(expected.python_identity[2]))
             if target in self._copy_metadata:
                 participant = self._copy_metadata[target]
+                if participant.origin is None and participant.before is None:
+                    participant.created_origin = node
                 participant.unknown = True
                 native = None
                 if os.name == "nt":
@@ -3652,11 +4532,24 @@ class _InstallTransaction:
             if os.name == "nt":
                 if _WindowsBoundNode.proof_from_descriptor(incoming) != expected.native_proof:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: source native identity")
-                with _WindowsBoundNode.create(target, directory=False) as created:
+                options = {"security_image": security_image} if security_image is not None else {}
+                with _WindowsBoundNode.create(target, directory=False, **options) as created:
                     node = self._capture_node(target, bound_node=created, kind="file",
                                               data=hashlib.sha256(b"").hexdigest())
                     record(target, node)
-                    fill(incoming, created.descriptor)
+                    if capture_security or security_image is not None:
+                        node = replace(node, security=created.security_image())
+                        record(target, node)
+                        if security_image is not None and security_image.needs_inheritance_replay(node.security):
+                            try:
+                                created.replay_created_dacl_inheritance(security_image)
+                            finally:
+                                node = replace(node, security=created.security_image())
+                                record(target, node)
+                        if security_image is not None and node.security != security_image:
+                            raise _InstallFailure("E_WINDOWS_SECURITY_CREATION_MISMATCH", "security-creation",
+                                                  ValueError("file security creation"))
+                    fill(incoming, created.descriptor, node.security)
             else:
                 outgoing = (os.open(target.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                                     0o600, dir_fd=target_parent) if target_parent is not None else
@@ -3720,8 +4613,12 @@ class _InstallTransaction:
                 if fsync != "best-effort":
                     raise
         if mode is not None:
+            def record_mode(identity):
+                nonlocal node
+                node = replace(node, python_identity=identity)
+                record(target, node)
             changed = self._chmod_owned(target, node.python_identity, mode, descriptor=descriptor,
-                                        native_proof=node.native_proof)
+                                        native_proof=node.native_proof, on_mode_set=record_mode)
             node = replace(node, python_identity=changed)
             record(target, node)
         if digest.hexdigest() != expected_digest:
@@ -3744,7 +4641,7 @@ class _InstallTransaction:
             try:
                 os.close(descriptor)
             except OSError as cleanup:
-                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "file-close", primary or cleanup,
+                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "file-close", cleanup if primary is None else primary,
                                       members=(_RollbackFailureMember("backup", -1, str(path),
                                                "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
                                                cause_exception=cleanup),),
@@ -3754,7 +4651,7 @@ class _InstallTransaction:
         self, source: Path, target: Path, before: dict[Path, _PhysicalNode],
         effect: _DeclaredPathEffect | None,
         *, stage: bool = False, source_witness: dict[Path, _PhysicalNode] | None = None,
-        sink=None,
+        sink=None, security: dict[Path, _WindowsSecurityImage] | None = None,
     ) -> dict[Path, _PhysicalNode]:
         """Reconstruct ordinary trees through held parents and exclusive nodes."""
         required = {os.open, os.mkdir, os.stat}
@@ -3831,7 +4728,10 @@ class _InstallTransaction:
                 if not self._binding_identity_matches(value.python_identity, identity(metadata)):
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: construction source")
                 if value.kind == "directory":
-                    created_node = self._create_owned_directory(new, record, parent_descriptor=destination_descriptor)
+                    created_node = self._create_owned_directory(
+                        new, record, parent_descriptor=destination_descriptor,
+                        security_image=(security or {}).get(old, value.security),
+                        capture_security=security is not None)
                     source_child = opened_directory(source_descriptor, old.name, old, value)
                     destination_child = opened_directory(destination_descriptor, old.name, new, created_node)
                     construct(old, source_child, new, destination_child)
@@ -3845,7 +4745,9 @@ class _InstallTransaction:
                         descriptors.remove(source_child)
                 elif value.kind == "file":
                     self._copy_owned_file(old, new, value, record,
-                                          source_parent=source_descriptor, target_parent=destination_descriptor)
+                                          source_parent=source_descriptor, target_parent=destination_descriptor,
+                                          security_image=(security or {}).get(old, value.security),
+                                          capture_security=security is not None)
                 else:
                     self._copy_owned_link(old, new, value, record)
         original = None
@@ -3860,7 +4762,10 @@ class _InstallTransaction:
             source_descriptor = opened_directory(source_parent, source.name, source, before[source])
             if effect is not None:
                 effect.owner.destination(target.relative_to(effect.owner.anchor))
-            created_node = self._create_owned_directory(target, record, parent_descriptor=destination_parent)
+            created_node = self._create_owned_directory(
+                target, record, parent_descriptor=destination_parent,
+                security_image=(security or {}).get(source, before[source].security),
+                capture_security=security is not None)
             destination_descriptor = opened_directory(destination_parent, target.name, target, created_node)
             construct(source, source_descriptor, target, destination_descriptor)
             changed = self._chmod_owned(target, actual[target].python_identity, stat.S_IMODE(before[source].python_identity[2]),
@@ -3890,7 +4795,7 @@ class _InstallTransaction:
                      participant="backup", cause_exception=cleanup))
             if failures:
                 raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "construction",
-                                      original or failures[0].cause, members=tuple(failures),
+                                      failures[0].cause if original is None else original, members=tuple(failures),
                                       recovery_path=source.parent) from original
 
     @staticmethod
@@ -3909,7 +4814,8 @@ class _InstallTransaction:
     @staticmethod
     def _chmod_owned(path: Path, before: tuple[int, int, int, int], requested: int,
                      *, descriptor: int | None = None,
-                     native_proof: _NativeNodeProof | None = None) -> tuple[int, int, int, int]:
+                     native_proof: _NativeNodeProof | None = None,
+                     on_mode_set=None) -> tuple[int, int, int, int]:
         """Project this platform's chmod producer result before accepting readback."""
         expected = _InstallTransaction._chmod_identity(before, requested)
         if _CreateOnlyMutablePath._identity(path) != before:
@@ -3937,6 +4843,11 @@ class _InstallTransaction:
             path.chmod(requested)
         else:
             os.fchmod(descriptor, stat.S_IMODE(requested))
+            # Ordinary permission bits have a known successful setter image.
+            # Special bits may be stripped by the OS and still require readback.
+            if on_mode_set is not None and not (
+                    (before[2] | requested) & (stat.S_ISUID | stat.S_ISGID | stat.S_ISVTX)):
+                on_mode_set(expected)
         actual = _CreateOnlyMutablePath._identity(path)
         if actual != expected:
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal permission transition")
@@ -3946,13 +4857,95 @@ class _InstallTransaction:
     def _clear_owned_readonly(path: Path, before: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
         return _InstallTransaction._chmod_owned(path, before, before[2] | stat.S_IWRITE)
 
+    def _dispose_posix_node(self, path: Path, expected: _PhysicalNode) -> None:
+        """Qualify one leaf under caller serialization, not hostile-writer exclusion.
+
+        The caller owns ancestor selection and journal advancement within the
+        supported ordinary serialized-writer lifecycle.
+        Only an owned private snapshot parent may be made writable for a
+        single disposal. No live-tree permissions or foreign state are adopted.
+        """
+        if (not isinstance(expected, _PhysicalNode)
+                or expected.evidence_role != "sealed"
+                or expected.kind not in {"file", "directory", "link"}
+                or expected.reparse_data is not None):
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: POSIX disposal witness")
+        required = {os.stat, os.unlink, os.rmdir}
+        if (os.name != "posix" or not required <= os.supports_dir_fd
+                or not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW")):
+            raise ValueError("E_EFFECT_BOUND_DISPOSAL_UNQUALIFIED: POSIX relative disposal capability")
+        parent_identity = _CreateOnlyMutablePath._identity(path.parent)
+        descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        primary = None
+        try:
+            parent = os.fstat(descriptor)
+            bound_parent = (parent.st_dev, parent.st_ino, parent.st_mode,
+                            getattr(parent, "st_file_attributes", 0))
+            if (not self._binding_identity_matches(parent_identity, bound_parent)
+                    or not self._point_matches(path, expected, check_file_content=True)):
+                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: POSIX disposal currentness")
+            leaf = os.stat(path.name, dir_fd=descriptor, follow_symlinks=False)
+            leaf_identity = (leaf.st_dev, leaf.st_ino, leaf.st_mode,
+                             getattr(leaf, "st_file_attributes", 0))
+            if (not self._binding_identity_matches(expected.python_identity, leaf_identity)
+                    or not self._binding_identity_matches(
+                        parent_identity, _CreateOnlyMutablePath._identity(path.parent))):
+                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: POSIX disposal binding")
+            operation = os.rmdir if expected.kind == "directory" else os.unlink
+            backup_parent = self._backup_root_state.get(path.parent)
+            if backup_parent is None or parent.st_uid != os.geteuid() or parent.st_mode & stat.S_IWUSR:
+                operation(path.name, dir_fd=descriptor)
+            else:
+                if (backup_parent.kind != "directory" or backup_parent.evidence_role != "sealed"
+                        or backup_parent.python_identity != bound_parent):
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: snapshot disposal parent")
+                mode = stat.S_IMODE(parent.st_mode)
+                writable = mode | stat.S_IWUSR
+                try:
+                    self._chmod_owned(path.parent, bound_parent, writable, descriptor=descriptor)
+                    operation(path.name, dir_fd=descriptor)
+                finally:
+                    # Restore the original mode on the same held object, even if
+                    # unlink or the writable transition raised.
+                    if stat.S_IMODE(os.fstat(descriptor).st_mode) != mode:
+                        os.fchmod(descriptor, mode)
+                    if stat.S_IMODE(os.fstat(descriptor).st_mode) != mode:
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: snapshot disposal mode")
+            try:
+                os.stat(path.name, dir_fd=descriptor, follow_symlinks=False)
+            except FileNotFoundError:
+                return
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: POSIX disposal postcondition")
+        except BaseException as error:
+            primary = error
+            raise
+        finally:
+            try:
+                os.close(descriptor)
+            except BaseException as cleanup:
+                cause = cleanup if primary is None else primary
+                previous = primary if isinstance(primary, _InstallFailure) else None
+                paths, members, errors = self._settlement_failure(
+                    cleanup, "backup", -1, path, "E_ROLLBACK_BACKUP_CLEANUP_FAILED",
+                    (path,), participant="backup")
+                raise _InstallFailure(
+                    "E_ROLLBACK_SETTLEMENT_FAILED", "disposal-close", cause,
+                    members=(previous.members if previous is not None else ()) + tuple(members),
+                    unresolved_paths=(previous.unresolved_paths if previous is not None else ()) + tuple(paths),
+                    recovery_path=(previous.recovery_path if previous is not None
+                                   and previous.recovery_path is not None else path),
+                    retained_errors=_merge_copy_setter_operation_errors(
+                        errors, (previous,) if _copy_setter_operation_errors(previous) else ())) from cause
+
     def _dispose_node(self, path: Path, expected: _PhysicalNode) -> None:
+        _require_transaction_disposal_backend()
         if not isinstance(expected, _PhysicalNode):
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: missing physical witness")
         if os.name == "nt":
             if expected.native_proof is None:
                 raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: missing native creator proof")
-            with _WindowsBoundNode(path, purpose="dispose") as bound:
+            with _WindowsBoundNode(path, purpose="dispose",
+                                   security=expected.security is not None) as bound:
                 if bound.proof != expected.native_proof:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal identity")
                 attributes = bound.basic().attributes
@@ -3965,11 +4958,13 @@ class _InstallTransaction:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal bytes")
                 if expected.kind == "link" and bound.logical_target() != expected.data:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal link")
-                if expected.kind == "reparse" and str(Path(bound.logical_target()).resolve(strict=True)) != expected.data:
+                if expected.kind == "reparse" and bound.logical_target() != expected.data:
                     raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal reparse")
                 if attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
                     if expected.reparse_data is None or bound.reparse_data() != expected.reparse_data:
                         raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal reparse metadata")
+                if expected.security is not None and bound.security_image() != expected.security:
+                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal security")
                 bound.mark_disposal()
             # Marking is not disappearance; a new occupant is never adopted.
             try:
@@ -3977,62 +4972,10 @@ class _InstallTransaction:
             except FileNotFoundError:
                 return
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: native disposal pending or replaced")
-        if _CreateOnlyMutablePath._identity(path) != expected.python_identity:
-            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal identity")
-        permission_changed = False
-        if expected.kind == "file" and not expected.python_identity[2] & stat.S_IWRITE:
-            changed = self._clear_owned_readonly(path, expected.python_identity)
-            expected = replace(expected, python_identity=changed)
-            self._advance(path, {path: expected})
-            permission_changed = True
-        relative = {os.stat, os.unlink, os.rmdir} <= os.supports_dir_fd and hasattr(os, "O_DIRECTORY")
-        descriptor = None
-        primary = None
-        try:
-            parent_identity = _CreateOnlyMutablePath._identity(path.parent)
-            if relative:
-                descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
-                parent = os.fstat(descriptor)
-                if not self._binding_identity_matches(
-                    parent_identity,
-                    (parent.st_dev, parent.st_ino, parent.st_mode, getattr(parent, "st_file_attributes", 0)),
-                ):
-                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal parent descriptor")
-            actual = self._capture_node(path, kind=expected.kind, data=expected.data)
-            content_matches = self._image_matches(path, {path: expected})
-            if (not content_matches or not self._binding_identity_matches(
-                    parent_identity, _CreateOnlyMutablePath._identity(path.parent))):
-                if (permission_changed and actual.kind == expected.kind == "file"
-                        and actual.python_identity == expected.python_identity
-                        and actual.native_proof == expected.native_proof
-                        and not content_matches):
-                    raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal permission content drift")
-                raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal final currentness")
-            operation = os.rmdir if expected.kind == "directory" else os.unlink
-            if relative:
-                operation(path.name, dir_fd=descriptor)
-            else:
-                operation(path)
-            try:
-                path.lstat()
-            except FileNotFoundError:
-                return
-            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal postcondition")
-        except BaseException as error:
-            primary = error
-            raise
-        finally:
-            if descriptor is not None:
-                try:
-                    os.close(descriptor)
-                except OSError as cleanup:
-                    raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "disposal-close", primary or cleanup,
-                                          members=(_RollbackFailureMember("backup", -1, str(path),
-                                                   "E_ROLLBACK_BACKUP_CLEANUP_FAILED", str(cleanup), participant="backup",
-                                                   cause_exception=cleanup),),
-                                          recovery_path=path) from primary
+        self._dispose_posix_node(path, expected)
 
     def _dispose_image(self, path: Path, expected: dict[Path, _PhysicalNode]) -> None:
+        _require_transaction_disposal_backend()
         if any(node.evidence_role != "sealed" for node in expected.values()):
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: observed runtime disposal")
         if self._migration_dependencies(path):
@@ -4040,13 +4983,6 @@ class _InstallTransaction:
         if (not self._image_matches(path, expected)):
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal drift")
         current = dict(expected)
-        for member in sorted(current, key=lambda item: len(item.parts)):
-            value = current[member]
-            if os.name != "nt" and value.kind == "directory" and not value.python_identity[2] & stat.S_IWRITE:
-                changed = self._clear_owned_readonly(member, value.python_identity)
-                current[member] = replace(value, python_identity=changed)
-                self._advance(member, {node: entry for node, entry in current.items()
-                                       if node == member or member in node.parents})
         if (not self._image_matches(path, current)):
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal membership drift")
         for member in sorted(current, key=lambda item: len(item.parts), reverse=True):
@@ -4146,34 +5082,41 @@ class _InstallTransaction:
                     self._advance(effect.retained, {})
                 if not commit and not effect.before and effect.actual:
                     preserve = any(node.evidence_role == "runtime-observation" for node in effect.actual.values())
-                    destination = (effect.retained.with_name(effect.retained.name + ".after") if preserve else effect.retained)
-                    if preserve:
-                        effect.quarantine = destination
-                    detached = self._relocate(effect.actual, effect.location, destination)
-                    self._publish_retained(effect.location, destination, effect=effect)
-                    if preserve:
-                        effect.quarantine_state = detached
-                        effect.preserve_runtime_custody = True
-                        effect.actual = {}
-                        self._advance(effect.location, {})
-                        self._advance(destination, detached)
+                    if not preserve:
+                        # Empty-before effects own only newly created nodes. Their
+                        # inverse needs disposal, not retention of a prior object.
+                        self._dispose_image(effect.location, dict(effect.actual))
                         effect.restored_state = {}
                         self.assert_effect_current(effect)
                         effect.settled = True
                         continue
-                    effect.retained_state = detached
-                    self._advance(effect.retained, detached)
-                    if (not self._image_matches(effect.retained, detached)):
-                        if self._image_matches(effect.location, {}):
-                            self._publish_retained(effect.retained, effect.location, source_state=detached)
-                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: creation detach drift")
+                    destination = effect.retained.with_name(effect.retained.name + ".after")
+                    effect.quarantine = destination
+                    detached = self._relocate(effect.actual, effect.location, destination)
+                    self._publish_retained(effect.location, destination, effect=effect)
+                    effect.quarantine_state = detached
+                    effect.preserve_runtime_custody = True
                     effect.actual = {}
-                    effect.retained_state = detached
                     self._advance(effect.location, {})
-                    self._dispose_image(effect.retained, detached)
+                    self._advance(destination, detached)
+                    effect.restored_state = {}
+                    self.assert_effect_current(effect)
+                    effect.settled = True
+                    continue
+                if not commit and effect.restored_state is not None:
+                    # Restoration already completed. Retained cleanup may be
+                    # partial; never replace the restored original with that tail.
+                    if not self._image_matches(effect.location, effect.restored_state):
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: restored image drift")
+                    if effect.retained_state:
+                        self._dispose_image(effect.retained, dict(effect.retained_state))
                     effect.retained_state = None
                     self._advance(effect.retained, {})
-                    effect.restored_state = {}
+                    if effect.quarantine_state and not effect.preserve_runtime_custody:
+                        self._dispose_image(effect.quarantine, dict(effect.quarantine_state))
+                        effect.quarantine_state = None
+                        self._advance(effect.quarantine, {})
+                    self.assert_effect_current(effect)
                     effect.settled = True
                     continue
                 if effect.retained_state is None:
@@ -4192,6 +5135,13 @@ class _InstallTransaction:
                     self._advance(effect.retained, {})
                     effect.settled = True
                     continue
+                if effect.actual and all(node.evidence_role == "sealed" for node in effect.actual.values()):
+                    # The retained beforeimage owns recovery. A sealed replacement
+                    # needs disposal, not an additional atomic quarantine move.
+                    # The image owner checks migration dependencies and journals
+                    # completed members so partial disposal remains recoverable.
+                    self._dispose_image(effect.location, dict(effect.actual))
+                    self._advance(effect.location, {})
                 detached = effect.retained.with_name(effect.retained.name + ".after")
                 effect.quarantine = detached
                 if effect.actual:
@@ -4271,6 +5221,7 @@ class _InstallTransaction:
     def __enter__(self) -> "_InstallTransaction":
         if not self.enabled:
             return self
+        _require_transaction_disposal_backend()
         self.paths = _transaction_snapshot_paths(self.paths, link_object_paths=self._link_object_paths)
         backup_root = None
         def record_root(path, node):
@@ -4306,7 +5257,7 @@ class _InstallTransaction:
                             "target_is_directory": path.is_dir(),
                         }
                     )
-                elif getattr(os.path, "isjunction", lambda _path: False)(path):
+                elif _is_directory_junction(path):
                     self._entries.append(
                         {
                             "path": path,
@@ -4394,7 +5345,7 @@ class _InstallTransaction:
                         and (record.leaf_path == path or path in record.leaf_path.parents))
         if len(records) != len(current) or len({record.leaf_path for record in records}) != len(records):
             return ()
-        empty_digest = hashlib.sha256(b"").hexdigest()
+        empty_digest = _tree_manifest_sha256(())
         for record in records:
             node = current.get(record.leaf_path)
             owner = self._slice_a_owners.get(os.path.normcase(str(record.anchor_path)))
@@ -4636,6 +5587,10 @@ class _InstallTransaction:
                 if (not self._image_matches(member, state)):
                     raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: retained replacement")
             else:
+                reservation = next((record.reservation_state for record in self._slice_a_migrated
+                    if record.tombstone_path == member and record.reservation_state is not None), None)
+                if reservation is not None and not self._image_matches(member, reservation):
+                    raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: migration reservation")
                 owner._assert_regular(member, existing=True)
 
     def _settle_migration_retention(self, *, only_empty: bool = False,
@@ -4783,6 +5738,26 @@ class _InstallTransaction:
                 retained_errors = _merge_copy_setter_operation_errors(retained_errors, child_errors)
         return unresolved, failures, retained_errors
 
+    def _settle_migration_reservation(self, record, owner=None):
+        record = next((item for item in self._slice_a_migrated if item.proof_key == record.proof_key), record)
+        if record.reservation_state is None:
+            return record
+        registered = self._slice_a_owners.get(os.path.normcase(str(record.anchor_path)))
+        if registered is None or (owner is not None and owner is not registered):
+            raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: migration reservation owner")
+        if not self._binding_identity_matches(record.anchor_identity, registered._identity(record.anchor_path)):
+            raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: migration reservation anchor")
+        registered._walk_existing(record.leaf_path)
+        registered._walk_existing(record.tombstone_path)
+        registered._assert_migration_retention_record(record)
+        if (record.started or set(record.reservation_state) != {record.tombstone_path}
+                or not self._image_matches(record.leaf_path, {
+                    record.leaf_path: self._current_role(record, old=True)})):
+            raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: migration reservation source")
+        self._dispose_reservation(record.tombstone_path, record.reservation_state, migration=record)
+        self._set_reservation(None, migration=record)
+        return next(item for item in self._slice_a_migrated if item.proof_key == record.proof_key)
+
     def _settle_migrated(
         self, blocked: list[Path] | None = None,
     ) -> tuple[list[Path], list[_RollbackFailureMember], tuple[BaseException, ...]]:
@@ -4803,6 +5778,7 @@ class _InstallTransaction:
                 )
                 if owner is None:
                     raise RuntimeError("E_ROLLBACK_CREATED_IDENTITY_CHANGED")
+                record = self._settle_migration_reservation(record)
                 if not record.started and not record.tombstone_path.exists() and (self._image_matches(record.leaf_path, {
                         record.leaf_path: self._current_role(record, old=True)})):
                     continue  # An armed migration failed before its first effect.
@@ -4923,7 +5899,7 @@ class _InstallTransaction:
                 retain_backup = True
                 continue
             if kind == "scalar":
-                paths, members, errors = self._settle_scalars(unresolved, entries=(record,))
+                paths, members, errors = self._settle_scalars(unresolved, entries=(record,), allow_container_retention=True)
             elif kind == "created":
                 paths, members, errors = self._settle_created(unresolved, records=(record,))
             elif kind == "retention":
@@ -5009,6 +5985,12 @@ class _InstallTransaction:
             if record.settled:
                 continue
             try:
+                if record.reservation_state is not None:
+                    if not record.started and usable(record.leaf_path,
+                            {record.leaf_path: self._current_role(record, old=True)},
+                            "migration", ordinal, "migration"):
+                        return record.leaf_path, unresolved, failures, retained_errors
+                    continue
                 if not record.started and self._node_metadata_matches(record.tombstone_path, None):
                     continue  # No retained candidate from an unperformed migration.
                 current = self._current_role(record, old=True)
@@ -5060,7 +6042,7 @@ class _InstallTransaction:
                 raise exc._with_recovery_path(recovery_path) from exc
             return False
 
-        original: BaseException = exc or _InstallFailure(
+        original: BaseException = exc if exc is not None else _InstallFailure(
             "E_INSTALL_TRANSACTION_UNCOMMITTED",
             "transaction",
             "enabled transaction exited without commit",
@@ -5276,6 +6258,7 @@ class _CreateOnlyMutablePath:
         self._ensure_directory_path(path.parent)
 
     def _ensure_directory_path(self, parent: Path) -> None:
+        _require_transaction_disposal_backend()
         missing: list[Path] = []
         while not parent.exists():
             missing.append(parent)
@@ -5292,6 +6275,7 @@ class _CreateOnlyMutablePath:
                               admitted_parent: Path, parent_state: _PhysicalNode,
                               dry_run: bool):
         """Create only the admitted missing suffix through original creator rows."""
+        _require_transaction_disposal_backend()
         anchor, admitted_parent = Path(os.path.abspath(anchor)), Path(os.path.abspath(admitted_parent))
         if anchor == admitted_parent or admitted_parent not in anchor.parents:
             raise ValueError("E_MUTABLE_PATH_ESCAPE: anchor parent admission")
@@ -5443,24 +6427,27 @@ class _CreateOnlyMutablePath:
                     self._rollback_identity_changed()
                 self.transaction._dispose_node(record.leaf_path, current)
             elif record.kind == "projection":
+                # The target may already have been reclaimed by an earlier
+                # owned inverse. Prove the exact link object without following
+                # it; never acquire authority over a replacement destination.
+                expected = _PhysicalNode(
+                    "link" if stat.S_ISLNK(record.leaf_identity[2]) else "reparse",
+                    record.leaf_identity, record.projection_data,
+                    record.native_proof, record.reparse_data,
+                )
                 if (
                     record.projection_target is None
                     or not (stat.S_ISLNK(metadata.st_mode) or _is_reparse_metadata(metadata))
-                    or not _projection_resolves_to(
-                        record.leaf_path, record.projection_target
-                    )
+                    or not self.transaction._image_matches(record.leaf_path, {record.leaf_path: expected})
                 ):
                     self._rollback_identity_changed()
-                self.transaction._dispose_node(record.leaf_path,
-                    _PhysicalNode("link" if stat.S_ISLNK(record.leaf_identity[2]) else "reparse",
-                                  record.leaf_identity,
-                                  record.projection_data, record.native_proof, record.reparse_data))
+                self.transaction._dispose_node(record.leaf_path, expected)
             elif record.kind == "directory":
                 if (
                     not stat.S_ISDIR(metadata.st_mode)
                     or stat.S_ISLNK(metadata.st_mode)
                     or _is_reparse_metadata(metadata)
-                    or record.digest != hashlib.sha256(b"").hexdigest()
+                    or record.digest != _tree_manifest_sha256(())
                     or not self.transaction._image_matches(record.leaf_path,
                         {record.leaf_path: _PhysicalNode("directory", record.leaf_identity, None, record.native_proof)})
                 ):
@@ -5491,6 +6478,52 @@ class _CreateOnlyMutablePath:
         except (OSError, ValueError):
             self._rollback_identity_changed()
 
+    def _fresh_file_parents(self, path: Path):
+        """Capture before a fresh writer branch, never from a later census."""
+        transaction = self.transaction
+        if (self.dry_run or not transaction.enabled or not transaction._track_fresh_files
+                or self.linked_authority is not None
+                or any(path in image for image in transaction._original.values())):
+            return None
+        return self._file_parent_identities(path)
+
+    def _file_parent_identities(self, path: Path):
+        self.destination(path.relative_to(self.anchor))
+        if not self.transaction._binding_identity_matches(
+                self._anchor_identity, self._identity(self.anchor)):
+            raise ValueError("E_PROVIDER_RECEIPT_DRIFT: creator anchor")
+        parents = []
+        current = path.parent
+        while True:
+            identity = self._identity(current)
+            if not stat.S_ISDIR(identity[2]):
+                raise ValueError("E_PROVIDER_RECEIPT_DRIFT: creator parent")
+            parents.append((current, identity))
+            if current == self.anchor:
+                return tuple(parents)
+            if current == current.parent or self.anchor not in current.parents:
+                raise ValueError("E_MUTABLE_PATH_ESCAPE: creator parents")
+            current = current.parent
+
+    def _assert_fresh_file(self, witness: _FreshFileWitness) -> bytes:
+        if witness.owner is not self or witness.node.kind != "file":
+            raise ValueError("E_PROVIDER_RECEIPT_DRIFT: creator witness")
+        return self._assert_bound_file(witness.path, witness.node, witness.parents)
+
+    def _assert_bound_file(self, path: Path, node: _PhysicalNode, parents) -> bytes:
+        self.destination(path.relative_to(self.anchor))
+        if any(not self.transaction._binding_identity_matches(identity, self._identity(parent))
+               for parent, identity in parents):
+            raise ValueError("E_PROVIDER_RECEIPT_DRIFT: creator parents")
+        return self.transaction._image_file_bytes(path, node)
+
+    def _record_fresh_file(self, path: Path, node: _PhysicalNode, parents) -> None:
+        if parents is None:
+            return
+        witness = _FreshFileWitness(self, path, node, parents)
+        self._assert_fresh_file(witness)
+        self.transaction._fresh_files.append(witness)
+
     @_InstallTransaction.direct_writer
     def write_file(self, relative: Path, payload: bytes, *, mode: int | None = None,
                    fsync: str = "none") -> Path:
@@ -5499,6 +6532,7 @@ class _CreateOnlyMutablePath:
         if self.dry_run:
             return path
         self._ensure_parent(path)
+        fresh_parents = self._fresh_file_parents(path) if existing is None else None
         with ExitStack() as resources:
             if existing is None:
                 if os.name == "nt":
@@ -5529,6 +6563,7 @@ class _CreateOnlyMutablePath:
                 hashlib.sha256(payload).hexdigest(), initial_state=initial, mode=mode, fsync=fsync)
             if self.transaction._scalar_descriptor_node(path, descriptor, node) != node:
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION: byte completed content")
+        self._record_fresh_file(path, node, fresh_parents)
         return path
 
     def _byte_file_admission(self, relative: Path, payload: bytes, fsync: str):
@@ -5654,7 +6689,12 @@ class _CreateOnlyMutablePath:
         if (not self.transaction._image_matches(path, {} if existing is None else {path: existing})):
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: copy destination currentness")
         self._ensure_parent(path)
+        fresh_parents = self._fresh_file_parents(path) if existing is None else None
+        completed_node = None
+        restoration_verified = False
         def record(member, node):
+            nonlocal completed_node
+            completed_node = node
             self.transaction._advance(member, {member: node})
         with self.transaction._copy_reference(source, expected) as (incoming, source_bound):
             with ExitStack() as resources:
@@ -5668,7 +6708,12 @@ class _CreateOnlyMutablePath:
                     record(path, node)
                 elif existing is None:
                     outgoing = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o666)
-                    resources.callback(os.close, outgoing)
+                    def close_outgoing(_type, primary, _traceback):
+                        try:
+                            os.close(outgoing)
+                        except OSError as cleanup:
+                            raise _InstallTransaction._copy_close_failure(path, primary, cleanup) from primary
+                    resources.push(close_outgoing)
                     target_bound = None
                     node = self.transaction._capture_node(path, descriptor=outgoing, kind="file",
                                                           data=hashlib.sha256(b"").hexdigest())
@@ -5679,6 +6724,18 @@ class _CreateOnlyMutablePath:
                     node = self.transaction._scalar_descriptor_node(path, outgoing, existing)
                     if node != existing:
                         raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: copy bound bytes")
+                if existing is not None and target_bound is None and participant.before is not None:
+                    before = participant.before
+                    pair = (before.atime_ns, before.mtime_ns)
+                    if self.transaction._representable_copy_times(path, outgoing, pair) != pair:
+                        raise ValueError("E_MUTABLE_PATH_POSTCONDITION: original timestamps not restorable")
+                    # This qualification must precede the first byte or metadata write.
+                    self.transaction._assert_copy_metadata(path)
+                    if self.transaction._scalar_descriptor_node(path, outgoing, existing) != existing:
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: copy restore preflight drift")
+                    restoration_verified = True
+                if existing is None:
+                    participant.created_origin = node  # Exclusive creator, never a moved-in original.
                 participant.current = self.transaction._read_copy_metadata(os.fstat(outgoing), outgoing, target_bound)
                 self.transaction._copy_current[path] = participant.current
                 if node.data != expected.data:
@@ -5697,7 +6754,13 @@ class _CreateOnlyMutablePath:
                     raise ValueError("E_MUTABLE_PATH_POSTCONDITION: copy completed bytes")
                 desired = self.transaction._read_copy_metadata(os.fstat(incoming), incoming, source_bound)
             self.transaction._apply_copy_metadata(path, node, desired,
-                stat.S_IMODE(expected.python_identity[2]), record, participant)
+                stat.S_IMODE(expected.python_identity[2]), record, participant,
+                fresh_copy=(participant.origin is None and participant.before is None
+                    and participant.created_origin is not None
+                    and self.transaction._same_origin(node, participant.created_origin.python_identity,
+                                                      participant.created_origin.native_proof)),
+                restoration_verified=restoration_verified)
+        self._record_fresh_file(path, completed_node, fresh_parents)
         return path
 
     @_InstallTransaction.direct_writer
@@ -5711,6 +6774,7 @@ class _CreateOnlyMutablePath:
         if self.dry_run:
             return path
         self._ensure_parent(path)
+        fresh_parents = self._fresh_file_parents(path)
         prepared = {}
         temporary = None
         original = None
@@ -5741,6 +6805,7 @@ class _CreateOnlyMutablePath:
         if _file_sha256(path) != digest:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
         self._record_created(path, "file", digest, acquired_node=node)
+        self._record_fresh_file(path, node, fresh_parents)
         return path
 
     @_InstallTransaction.direct_writer
@@ -5795,7 +6860,7 @@ class _CreateOnlyMutablePath:
             paths, members, retained_errors = self.transaction._settlement_failure(cleanup, "backup", -1, path,
                 "E_ROLLBACK_BACKUP_CLEANUP_FAILED", (path,), participant="backup")
             raise _InstallFailure(
-                "E_ROLLBACK_SETTLEMENT_FAILED", "prepared", original or cleanup,
+                "E_ROLLBACK_SETTLEMENT_FAILED", "prepared", cleanup if original is None else original,
                 members=tuple(members), recovery_path=path, unresolved_paths=tuple(paths), retained_errors=retained_errors,
             ) from original
 
@@ -5818,21 +6883,39 @@ class _CreateOnlyMutablePath:
         self.transaction.assert_effect_current(effect)
         if effect.before:
             before_move = dict(effect.actual)
+            primary = None
             try:
                 self.transaction._publish_retained(path, effect.retained, effect=effect, migration=migration)
+            except BaseException as exc:
+                primary = exc
+                raise
             finally:
-                retained = self.transaction._relocate(before_move, path, effect.retained)
-                if (self.transaction._image_matches(effect.retained, retained)):
-                    self.transaction.retained_replacement(effect, before_move)
+                try:
+                    retained = self.transaction._relocate(before_move, path, effect.retained)
+                    if self.transaction._image_matches(effect.retained, retained):
+                        self.transaction.retained_replacement(effect, before_move)
+                except BaseException as receiving:
+                    if primary is None:
+                        raise
+                    raise self.transaction._receiving_failure(primary, receiving, effect.retained) from primary
         self._final_absence(path)
         published = None
+        primary = None
         try:
             published = self.transaction._publish_retained(prepared, path, effect=effect, migration=migration)
+        except BaseException as exc:
+            primary = exc
+            raise
         finally:
-            if published is not None:
-                self.transaction.published_replacement(effect, published)
-            elif (self.transaction._image_matches(path, effect.proposed)):
-                self.transaction.published_replacement(effect)
+            try:
+                if published is not None:
+                    self.transaction.published_replacement(effect, published)
+                elif self.transaction._image_matches(path, effect.proposed):
+                    self.transaction.published_replacement(effect)
+            except BaseException as receiving:
+                if primary is None:
+                    raise
+                raise self.transaction._receiving_failure(primary, receiving, path) from primary
 
     @_InstallTransaction.direct_writer
     def remove_exact_file(self, relative: Path, expected_digest: str) -> Path:
@@ -5850,7 +6933,8 @@ class _CreateOnlyMutablePath:
                     retained_destination: Path | None = None,
                     preserve_on_commit: bool = False,
                     retained_owner: "_CreateOnlyMutablePath | None" = None,
-                    readonly_dependencies: tuple[_ReadOnlyPathDependency, ...] = ()) -> Path:
+                    readonly_dependencies: tuple[_ReadOnlyPathDependency, ...] = (),
+                    preserve_windows_security: bool = False) -> Path:
         """Retain an exact admitted regular/link/tree image without following links."""
         path = self.destination(relative, allow_leaf_reparse=True)
         root = expected.get(path)
@@ -5866,16 +6950,27 @@ class _CreateOnlyMutablePath:
             retained_destination=retained_destination, preserve_on_commit=preserve_on_commit,
             retained_owner=retained_owner)
         effect.readonly_dependencies = tuple(readonly_dependencies)
+        if preserve_windows_security:
+            self.transaction.capture_replacement_security(effect)
         if effect.before != expected:
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: armed retention source")
         self.transaction.assert_effect_current(effect)
         before_move = dict(effect.actual)
+        primary = None
         try:
             self.transaction._publish_retained(path, effect.retained, effect=effect)
+        except BaseException as exc:
+            primary = exc
+            raise
         finally:
-            retained = self.transaction._relocate(before_move, path, effect.retained)
-            if (self.transaction._image_matches(effect.retained, retained)):
-                self.transaction.retained_replacement(effect, before_move)
+            try:
+                retained = self.transaction._relocate(before_move, path, effect.retained)
+                if self.transaction._image_matches(effect.retained, retained):
+                    self.transaction.retained_replacement(effect, before_move)
+            except BaseException as receiving:
+                if primary is None:
+                    raise
+                raise self.transaction._receiving_failure(primary, receiving, effect.retained) from primary
         return path
 
     def migrate_exact_file(
@@ -5883,6 +6978,7 @@ class _CreateOnlyMutablePath:
         *, retention_parent: Path | None = None, selection=None,
     ) -> Path:
         """Replace one hash-pinned regular file and retain its inode for rollback."""
+        _require_transaction_disposal_backend()
 
         path = self.destination(relative)
         self._assert_regular(path, existing=True)
@@ -6030,9 +7126,14 @@ class _CreateOnlyMutablePath:
 
     def rollback_migrated(self, record: _SliceAMigratedFileRecord, *, replacement_may_be_absent: bool = False) -> None:
         """Restore the original stock role through its retained inode, never a copy."""
+        _require_transaction_disposal_backend()
 
         record = next((current for current in self.transaction._slice_a_migrated
                        if current.proof_key == record.proof_key), record)
+        record = self.transaction._settle_migration_reservation(record, self)
+        if not record.started and self.transaction._image_matches(record.leaf_path, {
+                record.leaf_path: self.transaction._current_role(record, old=True)}) and not record.tombstone_path.exists():
+            return
         effect = None
         try:
             if (
@@ -6094,6 +7195,7 @@ class _CreateOnlyMutablePath:
 
         record = next((current for current in self.transaction._slice_a_migrated
                        if current.proof_key == record.proof_key), record)
+        record = self.transaction._settle_migration_reservation(record, self)
         self.transaction._assert_scalar_binding({"links": record.selection_links}, check_storage=False)
         self._walk_existing(record.leaf_path)
         self._walk_existing(record.tombstone_path)
@@ -6112,6 +7214,83 @@ class _CreateOnlyMutablePath:
         self.transaction._migration_settled(record)
         self.transaction._assert_scalar_binding({"links": record.selection_links}, check_storage=False)
 
+    def _update_windows_tree_contents(self, target: Path, source: Path, before_digest: str,
+                                      after_digest: str, *, ignore_runtime_cache: bool,
+                                      allow_file_additions: bool = False) -> bool:
+        """Preserve historical access policy by keeping the original file objects."""
+        transaction = self.transaction
+        old = dict(_stage_tree_manifest(target, ignore_runtime_cache=ignore_runtime_cache))
+        new = dict(_stage_tree_manifest(source, ignore_runtime_cache=ignore_runtime_cache))
+        added = new.keys() - old.keys()
+        if (old.keys() - new.keys()
+                or (added and not allow_file_additions)
+                or any((old[k] == "directory") != (new[k] == "directory") for k in old)
+                or any(new[k] == "directory" or (Path(k).parent != Path(".")
+                       and old.get(Path(k).parent.as_posix()) != "directory") for k in added)):
+            return False  # Removed, retyped, or new parent objects need the staged tree publisher.
+        if (_tree_manifest_sha256(tuple(old.items())) != before_digest
+                or _tree_manifest_sha256(tuple(new.items())) != after_digest):
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: tree selection drift")
+        snapshot = next((transaction._expected[parent] for parent in (target, *target.parents)
+                         if parent in transaction._expected), {})
+        original = {path: node for path, node in snapshot.items()
+                    if path == target or target in path.parents}
+        if target not in original:
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing tree snapshot")
+        secured = transaction._windows_tree_security(target, original)
+        plan = []
+        introductions = []
+        for member, digest in new.items():
+            path = target / member
+            if member in added:
+                self._final_absence(path)
+                payload = (source / member).read_bytes()
+                if hashlib.sha256(payload).hexdigest() != digest:
+                    raise ValueError("E_MUTABLE_PATH_POSTCONDITION: tree addition payload drift")
+                introductions.append((path, payload))
+                continue
+            if secured[path].data != (None if old[member] == "directory" else old[member]):
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: tree snapshot digest drift")
+            if digest != old[member]:
+                payload = (source / member).read_bytes()
+                if hashlib.sha256(payload).hexdigest() != digest:
+                    raise ValueError("E_MUTABLE_PATH_POSTCONDITION: tree payload drift")
+                with _WindowsBoundNode(path, security=True) as bound:
+                    if bound.proof != secured[path].native_proof:
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: tree member origin")
+                    if not bound.ordinary_single_link():
+                        return False  # Replacement, unlike an in-place write, cannot update an alias.
+                    # An ordinary write can set Archive and invalidate the bound image.
+                    if not bound.basic().attributes & stat.FILE_ATTRIBUTE_ARCHIVE:
+                        return False
+                    transaction._assert_scalar_security(bound, secured[path].security)
+                plan.append((path, payload, digest))
+        for path, payload, digest in plan:
+            transaction.transform_scalar(path, None, lambda _: payload, self, windows_origin=secured[path])
+            secured[path] = replace(secured[path], data=digest)
+        for path, payload in introductions:
+            starting_effect = len(transaction._effects)
+            self.create_file(path.relative_to(self.anchor), payload)
+            created = [effect for effect in transaction._effects[starting_effect:] if effect.path == path]
+            if (len(created) != 1 or created[0].before or created[0].published_state is None
+                    or set(created[0].published_state) != {path}):
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: tree addition lacks creator proof")
+            transaction.assert_effect_current(created[0])
+            secured[path] = created[0].published_state[path]
+        if ignore_runtime_cache and (plan or introductions):
+            # Invalidate only the ordinary bytecode the staged publisher would
+            # drop; retain originals transactionally and leave containers alone.
+            for path, node in tuple(secured.items()):
+                if node.kind == "file" and _is_ordinary_runtime_cache_file(path.relative_to(target), path.lstat()):
+                    self.retain_path(path.relative_to(self.anchor), {path: node},
+                                     preserve_windows_security=True)
+                    del secured[path]
+        if (not transaction._image_matches(target, secured)
+                or _tree_sha256(target, ignore_runtime_cache=ignore_runtime_cache) != after_digest
+                or _tree_sha256(source, ignore_runtime_cache=ignore_runtime_cache) != after_digest):
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: tree content update verification")
+        return True
+
     @_InstallTransaction.direct_writer
     def replace_exact_tree(
         self,
@@ -6120,6 +7299,7 @@ class _CreateOnlyMutablePath:
         source: Path,
         *,
         ignore_runtime_cache: bool = False,
+        allow_file_additions: bool = False,
     ) -> Path:
         """Transaction-owned upgrade for one hash-pinned accepted-prior skill tree."""
         target = self.destination(relative)
@@ -6132,7 +7312,13 @@ class _CreateOnlyMutablePath:
         current_digest = digest(source)
         if current_digest is None:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: invalid source tree")
+        if (os.name == "nt" and self.transaction.enabled
+                and self._update_windows_tree_contents(target, source, expected_digest, current_digest,
+                                                       ignore_runtime_cache=ignore_runtime_cache,
+                                                       allow_file_additions=allow_file_additions)):
+            return target
         effect = self.transaction.arm_replacement(target, None, self)
+        self.transaction.capture_replacement_security(effect)
         effect.ignore_runtime_cache = ignore_runtime_cache
         def record_stage(path, node):
             effect.prepared_path = path
@@ -6226,6 +7412,7 @@ class _CreateOnlyMutablePath:
         return target
 
     def create_projection(self, relative: Path, source: Path) -> Path:
+        _require_transaction_disposal_backend()
         target = self.destination(relative, allow_leaf_reparse=True)
         if target.exists() or target.is_symlink():
             metadata = target.lstat()
@@ -6490,12 +7677,13 @@ class _ProjectionWitness:
 class _TransportPredecessor:
     source_root: Path
     canonical_target: Path
-    receipt: tuple[bytes, tuple[int, int, int, int], str]
+    receipt: tuple[bytes, tuple[int, int, int, int], str, str]
     tree: tuple[tuple[str, str], ...]
     canonical_state: tuple[tuple[Path, _PhysicalNode], ...]
     canonical_members: tuple[_ProjectionWitness, ...]
     old_digests: tuple[tuple[str, str], ...]
     peer_roots: tuple[tuple[Path, tuple[int, int, int, int]], ...]
+    introduced_absences: tuple[_ProjectionWitness, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -6514,18 +7702,27 @@ class _ClaudeTransportProjectionStage:
 
 
 def _transport_predecessor(
-    root: Path, canonical_target: Path, projection_root: Path,
+    root: Path, canonical_target: Path, projection_root: Path, *, factory: Path | None = None,
 ) -> _TransportPredecessor | None:
     """Acquire a scoped old generation through the existing receipt and codec owners."""
     receipt = _read_lead_receipt(canonical_target / _LEAD_RECEIPT_NAME)
     lead = canonical_target / "lead"
-    if receipt is None or _tree_sha256(lead, ignore_runtime_cache=True) != receipt[2]:
+    if receipt is None:
+        return None
+    if _tree_sha256(lead, ignore_runtime_cache=True) != _lead_receipt_identity_v2(receipt, lead, factory=factory):
         return None
     validator = _projection_validator(root)
     manifest_path = lead / "shared" / TRANSPORT_PROJECTION_MANIFEST
-    manifest = validator._load_manifest(manifest_path)
-    canonical_paths = tuple(lead / "scripts" / name for name in TRANSPORT_PROJECTION_FILES) + (manifest_path,)
-    peer_paths = tuple(projection_root / name for name in TRANSPORT_PROJECTION_FILES) + (
+    manifest = validator._load_manifest(manifest_path, allow_prior_transport=True)
+    member_names = tuple(manifest["files"])
+    introduced_absences = ()
+    if member_names == validator.PRIOR_TRANSPORT_FILES_V1:
+        introduced_absences = tuple(_projection_witness(path) for path in (
+            lead / "scripts" / "model_routing/launch_policy.py", projection_root / "model_routing/launch_policy.py"))
+        if any(witness.state != "absent" for witness in introduced_absences):
+            return None
+    canonical_paths = tuple(lead / "scripts" / name for name in member_names) + (manifest_path,)
+    peer_paths = tuple(projection_root / name for name in member_names) + (
         projection_root.parent / "shared" / TRANSPORT_PROJECTION_MANIFEST,
     )
     canonical_members = tuple(_projection_witness(path) for path in canonical_paths)
@@ -6536,7 +7733,7 @@ def _transport_predecessor(
         bound = validator._open_ordinary_file(path, "predecessor member")
         bound.close()
     digests = tuple((name, validator._validate_record(name, manifest["files"][name])[2])
-                    for name in TRANSPORT_PROJECTION_FILES)
+                    for name in member_names)
     digests += ((TRANSPORT_PROJECTION_MANIFEST, _file_sha256(manifest_path)),)
     if any(member.state != "regular" or peer.state != "regular"
            or member.sha256 != digest or peer.sha256 != digest
@@ -6549,7 +7746,7 @@ def _transport_predecessor(
     return _TransportPredecessor(root, canonical_target, receipt,
                                  _stage_tree_manifest(lead, ignore_runtime_cache=True),
                                  state, canonical_members, digests,
-                                 tuple((path, _CreateOnlyMutablePath._identity(path)) for path in roots))
+                                 tuple((path, _CreateOnlyMutablePath._identity(path)) for path in roots), introduced_absences)
 
 
 def _projection_witness(path: Path) -> _ProjectionWitness:
@@ -6689,10 +7886,13 @@ def _stage_claude_transport_projection(
     if states == ("absent",) * len(TRANSPORT_PROJECTION_FILES) and manifest_state == "absent":
         pending_files = files
         manifest_pending = True
-    elif states in {
-        ("absent", "absent", "current", "current", "absent", "absent", "absent", "absent"),
-        ("absent", "absent", "absent", "absent", "absent", "absent", "current", "current"),
-    } and manifest_state == "absent":
+    elif (
+        all(state in {"absent", "current"} for state in states)
+        and frozenset(name for (name, _payload), state in zip(files, states) if state == "current") in {
+            frozenset({"invoke-codex-prompt.py", "invoke-claude-prompt.py"}),
+            frozenset({"external-prompt-governance.md", "external-role-taxonomy.v1.json"}),
+        }
+    ) and manifest_state == "absent":
         pending_files = tuple(
             (name, payload)
             for (name, payload), state in zip(files, states)
@@ -6716,13 +7916,17 @@ def _stage_claude_transport_projection(
             for name, expected in ACCEPTED_CLAUDE_TRANSPORT_PROJECTION_PRIORS.items()
             if observed_prior == expected
         ) if predecessor is None else None
-    elif states == ("accepted-prior", "absent", "current", "current", "absent", "absent", "absent", "absent") and manifest_state == "absent":
+    elif all(
+        state == {"provider_prompt.py": "accepted-prior", "invoke-codex-prompt.py": "current",
+                  "invoke-claude-prompt.py": "current"}.get(name, "absent")
+        for (name, _payload), state in zip(files, states)
+    ) and manifest_state == "absent":
         pending_files = files
         manifest_pending = True
         replace_legacy_singleton = True
         replacement_digest = _file_sha256(projection_root / "provider_prompt.py")
     else:
-        raise ValueError("E_TRANSPORT_PROJECTION_PARITY: atomic projection state")
+        raise _AtomicTransportProjectionStateError()
     return _ClaudeTransportProjectionStage(
         files,
         manifest_payload,
@@ -6752,7 +7956,11 @@ def _apply_claude_transport_projection(
             ):
                 raise ValueError("E_TRANSPORT_PROJECTION_PARITY: peer root drift")
         for item in stage.witnesses:
-            validator._walk_ordinary_components(item.path, "predecessor member")
+            if item.state == "regular":
+                validator._walk_ordinary_components(item.path, "predecessor member")
+        for absent in stage.predecessor.introduced_absences:
+            if absent.path.is_relative_to(projection_root) and _projection_witness(absent.path) != absent:
+                raise ValueError("E_TRANSPORT_PROJECTION_PARITY: introduced member drift")
     current_witnesses = tuple(_projection_witness(item.path) for item in stage.witnesses)
     if current_witnesses != stage.witnesses:
         raise ValueError("E_TRANSPORT_PROJECTION_PARITY: preflight drift")
@@ -6831,7 +8039,7 @@ def _validate_committed_transport_projection(
 
 
 def _stage_tree_manifest(
-    path: Path, *, ignore_runtime_cache: bool = False
+    path: Path, *, ignore_runtime_cache: bool = False, read_file=None
 ) -> tuple[tuple[str, str], ...]:
     """Return a deterministic, no-follow manifest for one staged skill tree."""
 
@@ -6863,7 +8071,8 @@ def _stage_tree_manifest(
                     Path(relative), metadata
                 ):
                     continue
-                manifest.append((relative, _file_sha256(candidate)))
+                payload = candidate.read_bytes() if read_file is None else read_file(candidate)
+                manifest.append((relative, hashlib.sha256(payload).hexdigest()))
             else:
                 raise ValueError(
                     f"E_CANONICAL_LEAD_STAGE_INVALID: type {relative}"
@@ -6978,15 +8187,15 @@ _POST_MATERIALIZATION_WRITER_CALLS = {
     "_reconcile_codex_native_config": ("native-config",),
     "_install_codex_native_roles": ("native-role",),
     "_merge_codex_agents": ("provider-doc",),
+    "_apply_selected_replacement": ("provider-doc",),
     "_merge_claude_docs": ("provider-doc",),
-    "_normalize_agents_mode": ("agents-mode",),
-    "_merge_claude_main_agent_settings": ("claude-main-settings",),
+    "migrate_global_preferences": ("agents-mode",),
     "_reclaim_retired": ("retired-reclaim",),
     "_finalize_canonical_lead_receipt": ("lead-receipt",),
 }
 _POST_MATERIALIZATION_NONWRITER_CALLS = frozenset(
     {
-        "_resolve_claude_delegation_mode",
+        "_warn_codex_project_budget",
         "_discard_canonical_skills_plan",
         "_assert_global_claude_linked_subroot_authority",
     }
@@ -7001,7 +8210,6 @@ _POST_MATERIALIZATION_ARTIFACT_CLASS = {
     "native-role": "native-role",
     "provider-doc": "provider-doc",
     "agents-mode": "agents-mode",
-    "claude-main-settings": "claude-main-settings",
     "retired-reclaim": "retired-reclaim",
     "lead-receipt": "lead-receipt",
 }
@@ -7088,7 +8296,7 @@ def _post_materialization_writer_destinations(
     agents_root: Path,
     canonical_skills_target: Path,
     docs_target: Path,
-    mode_target: Path,
+    mode_target: Path | None,
     registration: Path,
     shared_mode_target: Path | None,
     hooks_enabled: bool,
@@ -7162,10 +8370,10 @@ def _post_materialization_writer_destinations(
     else:
         add("provider-doc", docs_target)
         add("provider-doc", docs_target.parent / "AGENTS.md")
-        add("agents-mode", mode_target)
+        if mode_target is not None:
+            add("agents-mode", mode_target)
         if shared_mode_target is not None:
             add("agents-mode", shared_mode_target)
-        add("claude-main-settings", registration)
         for relative in sorted({**_CLAUDE_RETIRED_PS1, **_CLAUDE_RETIRED_SH}):
             add("retired-reclaim", target / relative)
 
@@ -7227,7 +8435,11 @@ def _sync_tree(
     *,
     excluded_files: frozenset[Path] = frozenset(),
     mutable_owner: _CreateOnlyMutablePath | None = None,
+    instruction_scope: str | None = None,
+    instruction_updates: "_SelectedProviderUpdates | None" = None,
 ) -> None:
+    if instruction_scope not in (None, "agents", "commands"):
+        raise ValueError("invalid Claude instruction scope")
     for item in sorted(source.rglob("*")):
         relative = item.relative_to(source)
         if "__pycache__" in relative.parts or item.suffix.casefold() == ".ps1":
@@ -7236,6 +8448,30 @@ def _sync_tree(
             continue
         destination = target / relative
         if item.is_file():
+            instruction = (instruction_scope is not None
+                           and relative.suffix.casefold() == ".md"
+                           and (instruction_scope == "commands" or len(relative.parts) == 1))
+            if instruction:
+                key = instruction_scope + "/" + relative.as_posix()
+                if instruction_updates is not None and key in instruction_updates.items:
+                    _apply_selected_replacement(
+                        instruction_updates, key, (item,), destination, mutable_owner, dry_run)
+                    continue
+                if mutable_owner is not None and mutable_owner.transaction.enabled:
+                    transaction = mutable_owner.transaction
+                    image = _admitted_mutation_image(transaction, destination)
+                    if not transaction._image_matches(destination, image):
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: instruction currentness")
+                    node = image.get(Path(os.path.abspath(destination)))
+                    if node is not None:
+                        if node.kind != "file" or node.data != _file_sha256(item):
+                            print(f"  Preserved custom instruction; not updated: {destination}")
+                        continue
+                elif destination.exists() or destination.is_symlink():
+                    if (destination.is_symlink() or not destination.is_file()
+                            or _file_sha256(destination) != _file_sha256(item)):
+                        print(f"  Preserved custom instruction; not updated: {destination}")
+                    continue
             _copy_file(item, destination, dry_run, mutable_owner=mutable_owner)
 
 
@@ -7254,6 +8490,34 @@ def _sync_file_destinations(source: Path, target: Path, *,
     return destinations
 
 
+def _canonical_skill_snapshot_paths(
+    target: Path, plan: _CanonicalSkillsPlan,
+) -> tuple[Path, ...]:
+    """Snapshot selected Orchestrarium owners, not their shared container."""
+    paths = {target / "lead"}  # Final manifest is always received from the transaction.
+    selected_members = {skill.name for skill in plan.skills if skill.managed_before is not None}
+    for skill in plan.skills:
+        root = target / skill.name
+        if skill.managed_before is None:
+            paths.add(root)
+            continue
+        before = dict(skill.managed_before)
+        assert skill.selection is not None
+        for relative, value in skill.selection:
+            prior = before.get(relative)
+            if prior != value and not (value is None and prior == "directory"):
+                paths.add(root / relative)
+    if plan.lead_receipt is not None:
+        paths.add(target / _LEAD_RECEIPT_NAME)
+    if plan.nonlead_expected is not None:
+        paths.add(target / _NONLEAD_RECEIPT_NAME)
+        if plan.member_selection is None:
+            # Whole-tree receipt verification consumes its exact captured image.
+            paths.update(target / name for name, digest in plan.nonlead_expected
+                         if isinstance(digest, tuple) and name not in selected_members)
+    return tuple(sorted(paths))
+
+
 def _installer_mutation_paths(
     *,
     provider: str,
@@ -7264,10 +8528,12 @@ def _installer_mutation_paths(
     source_tree: Path,
     target_tree: Path,
     canonical_skills_target: Path,
-    mode_target: Path,
+    mode_target: Path | None,
     registration: Path,
     shared_mode_target: Path | None,
     codex_hook_inventory: Path | None = None,
+    canonical_skill_snapshots: tuple[Path, ...] = (),
+    register_hooks: bool = True,
     claude_commands_target: Path | None = None,
     claude_skills_target: Path | None = None,
     claude_projection_snapshot_paths: tuple[Path, ...] = (),
@@ -7282,8 +8548,7 @@ def _installer_mutation_paths(
     retained_transport_witnesses = {
         Path(os.path.abspath(path)) for path in claude_transport_migration_paths
     }
-    # Accepted-prior e7 canonical skill trees are transaction-restored if upgraded.
-    paths.append(canonical_skills_target)
+    paths.extend(canonical_skill_snapshots)
     if provider == "codex":
         # Slice-A skills and native-role/config records use the create/migration
         # ledger, never snapshot restoration, so accepted-prior inode recovery
@@ -7301,10 +8566,7 @@ def _installer_mutation_paths(
                     target_tree if directory == "agents" else commands_target,
                 )
             )
-        # Canonical skills and projections are Slice-A create-only objects.
-        paths.extend(
-            _claude_stale_namespace_paths(source, commands_target, skills_target)
-        )
+        # Unknown stale instructions are reported and preserved, not mutation paths.
         paths.extend(claude_projection_snapshot_paths)
         paths.append(target / "AGENTS.md")
         helper_target = target_tree / "scripts"
@@ -7347,21 +8609,15 @@ def _installer_mutation_paths(
     if provider == "codex":
         paths.extend(
             tuple(helper_target / helper for helper in CODEX_RUNTIME_HELPERS)
-            + (
-                codex_hook_inventory
-                if codex_hook_inventory is not None
-                else registration.parent / CODEX_HOOK_INVENTORY,
-                target / CODEX_LEGACY_LUNA_ROLE,
-            )
+            + (target / CODEX_LEGACY_LUNA_ROLE,)
         )
-    paths.extend(
-        (
-            docs_target,
-            mode_target,
-            mode_target.with_suffix(""),
-            registration,
-        )
-    )
+        if register_hooks:
+            paths.append(codex_hook_inventory or registration.parent / CODEX_HOOK_INVENTORY)
+    if register_hooks:
+        paths.append(registration)
+    paths.append(docs_target)
+    if mode_target is not None:
+        paths.extend((mode_target, mode_target.with_suffix("")))
     if shared_mode_target is not None:
         paths.extend(
             (
@@ -7387,29 +8643,32 @@ def _installer_mutation_paths(
 
 def _normalize_agents_mode(
     root: Path, template: Path, target: Path, provider: str, dry_run: bool,
-    *, transaction: _InstallTransaction | None = None,
+    *, migration_only: bool = False, move_legacy: bool = True,
+    transaction: _InstallTransaction | None = None,
     mutable_owner: _CreateOnlyMutablePath | None = None,
 ) -> None:
     legacy = target.with_suffix("")
     if dry_run:
-        if legacy.is_file() and not target.exists():
+        if move_legacy and legacy.is_file() and not target.exists():
             print(f"  Migrating legacy .agents-mode to {target}...")
-        print(f"    [dry-run] would normalize {target}")
+        action = "check preference migration for" if migration_only else "normalize"
+        print(f"    [dry-run] would {action} {target}")
         return
     if transaction is None or mutable_owner is None or mutable_owner.transaction is not transaction:
         raise ValueError("E_MUTABLE_PATH_ESCAPE: normalization requires its existing writer context")
     helper = root / "scripts" / "normalize-agents-mode.py"
-    dependencies = (helper, template, template.parent / "agents-mode.schema.json",
+    dependencies = (helper,) if migration_only else (helper, template, template.parent / "agents-mode.schema.json",
                     template.parent.parent / "shared" / "agents-mode.schema.json")
     before = {path: transaction._observe(path) for path in dependencies}
     module = _load_module_from_path("orchestrarium_installer_normalize_agents_mode", helper)
     def render(input_path):
-        result = module.normalize_file(str(template), str(input_path), provider).encode("utf-8")
+        result = (module.migrate_overlay(input_path) if migration_only
+                  else module.normalize_file(str(template), str(input_path), provider).encode("utf-8"))
         if any((not transaction._image_matches(path, state)) for path, state in before.items()):
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: normalization input drift")
         return result
     with transaction.direct_operation():
-        transaction.transform_scalar(target, legacy, render, mutable_owner)
+        transaction.transform_scalar(target, legacy, render, mutable_owner, move_legacy=move_legacy)
 
 
 def _file_sha256(path: Path) -> str:
@@ -7460,7 +8719,6 @@ def _copy_tree(
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing owned preparation")
         transaction = owner.transaction
         destination = effect.prepared_path
-        transaction._dispose_image(destination, effect.prepared_state)
         witness = transaction._observe(source)
         desired = dict(witness)
         if ignore_runtime_cache:
@@ -7471,8 +8729,21 @@ def _copy_tree(
                 if (path.name == "__pycache__" and desired[path].kind == "directory"
                         and not any(member != path and path in member.parents for member in desired)):
                     del desired[path]
+        security = None
+        if os.name == "nt" and effect.before:
+            security = {}
+            for path, node in desired.items():
+                previous = effect.before.get(effect.path / path.relative_to(source))
+                if previous is not None:
+                    if previous.kind != node.kind or previous.security is None:
+                        raise ValueError("E_MUTABLE_PATH_POSTCONDITION: invalid security counterpart")
+                    security[path] = previous.security
+            transaction.assert_effect_current(effect)
+        # Replacement members have their intended final security from birth.
+        # The empty 0700 reservation is not a privacy claim for the final tree.
+        transaction._dispose_image(destination, effect.prepared_state)
         transaction._construct_exclusive_tree(source, destination, desired, effect,
-                                               stage=True, source_witness=witness)
+                                               stage=True, source_witness=witness, security=security)
         return
     if not ignore_runtime_cache:
         shutil.copytree(source, destination, symlinks=True)
@@ -7520,7 +8791,7 @@ def _copy_tree(
                 pass
 
 
-def _tree_sha256(path: Path, *, ignore_runtime_cache: bool = False, read_file=None) -> str | None:
+def _legacy_tree_sha256(path: Path, *, ignore_runtime_cache: bool = False, read_file=None) -> str | None:
     path = Path(os.path.abspath(path))
     try:
         root_metadata = path.lstat()
@@ -7530,7 +8801,7 @@ def _tree_sha256(path: Path, *, ignore_runtime_cache: bool = False, read_file=No
         not stat.S_ISDIR(root_metadata.st_mode)
         or stat.S_ISLNK(root_metadata.st_mode)
         or _is_reparse_metadata(root_metadata)
-        or getattr(os.path, "isjunction", lambda _path: False)(path)
+        or _is_directory_junction(path)
     ):
         return None
     digest = hashlib.sha256()
@@ -7542,7 +8813,7 @@ def _tree_sha256(path: Path, *, ignore_runtime_cache: bool = False, read_file=No
         if (
             stat.S_ISLNK(metadata.st_mode)
             or _is_reparse_metadata(metadata)
-            or getattr(os.path, "isjunction", lambda _path: False)(item)
+            or _is_directory_junction(item)
         ):
             return None
         relative_path = item.relative_to(path)
@@ -7563,8 +8834,78 @@ def _tree_sha256(path: Path, *, ignore_runtime_cache: bool = False, read_file=No
     return digest.hexdigest()
 
 
+def _tree_manifest_sha256(members: tuple[tuple[str, str], ...]) -> str:
+    encoded = json.dumps(["orchestrarium.tree-manifest.sha256.v2", members],
+                         ensure_ascii=True, separators=(",", ":")).encode("ascii")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _tree_sha256(path: Path, *, ignore_runtime_cache: bool = False, read_file=None) -> str | None:
+    """Current unambiguous identity; caller-owned readers remain authoritative."""
+    path = Path(os.path.abspath(path))
+    try:
+        metadata = path.lstat()
+    except OSError:
+        return None
+    if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode) or _is_reparse_metadata(metadata):
+        return None
+    members = _stage_tree_manifest(path, ignore_runtime_cache=ignore_runtime_cache, read_file=read_file)
+    return _tree_manifest_sha256(members)
+
+
+def _legacy_factory_identity_v2(name: str, legacy: str, *, factory: Path | None = None) -> str | None:
+    """Legacy ID is lookup only; proof comes from authenticated factory data."""
+    data = (GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256 if name == "lead"
+            else ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256.get(name, ()))
+    if isinstance(data, dict):
+        strong = data.get(legacy)
+        if isinstance(strong, str):
+            return strong
+    if factory is not None and _legacy_tree_sha256(factory, ignore_runtime_cache=True) == legacy:
+        return _tree_sha256(factory, ignore_runtime_cache=True)
+    return None
+
+
+def _qualify_legacy_tree(name: str, target: Path, legacy: str, *, factory: Path | None = None) -> str:
+    expected = _legacy_factory_identity_v2(name, legacy, factory=factory)
+    if expected is None:
+        raise ValueError("E_LEGACY_TREE_WITNESS_UNAVAILABLE: " + name)
+    if _tree_sha256(target, ignore_runtime_cache=True) != expected:
+        raise ValueError("E_ACCEPTED_PRIOR_COLLISION: " + name)
+    return expected
+
+
+def _lead_receipt_identity_v2(receipt, target: Path, *, factory: Path | None = None) -> str:
+    if receipt[3] == _LEAD_RECEIPT_SCHEMA:
+        return receipt[2]
+    return _qualify_legacy_tree("lead", target, receipt[2], factory=factory)
+
+
+def _adoption_identity_v2(name: str, target: Path, token: str, *, factory: Path | None = None) -> str:
+    if re.fullmatch(r"tree-v2:[0-9a-f]{64}", token):
+        return token[len("tree-v2:"):]
+    if re.fullmatch(r"[0-9a-f]{64}", token):
+        return _qualify_legacy_tree(name, target, token, factory=factory)
+    raise ValueError("E_CANONICAL_SKILL_ADOPTION_MISMATCH")
+
+
+def _windows_projection_uses_junction(native_target: str) -> bool:
+    """Local DOS volumes use mount points; UNC/other namespaces keep symlinks."""
+    import ntpath
+    drive, tail = ntpath.splitdrive(native_target)
+    return bool(re.fullmatch(r"[A-Za-z]:", drive.removeprefix("\\\\?\\"))) and tail.startswith(("\\", "/"))
+
+
+def _is_directory_junction(path: Path) -> bool:
+    """Recognize only mount-point reparses, including on supported Python 3.11."""
+    try:
+        return getattr(path.lstat(), "st_reparse_tag", None) == 0xA0000003
+    except OSError:
+        return False
+
+
 def _projection_resolves_to(path: Path, expected: Path) -> bool:
-    if not (path.is_symlink() or getattr(os.path, "isjunction", lambda _path: False)(path)):
+    if not (path.is_symlink() or _is_directory_junction(path)):
         return False
     try:
         return os.path.samefile(path.resolve(strict=True), expected.resolve(strict=True))
@@ -7608,41 +8949,67 @@ _READ_ONLY_ROLES = frozenset({
     "security-reviewer", "qa-engineer", "mechanical-scout",
 })
 _BOUNDED_WRITE_ROLES = frozenset({"default", "worker", "backend-engineer", "platform-engineer", "knowledge-archivist", "mechanical-worker", "scientific-software-engineer"})
+_TERRA_RANKING_PRIOR_ROLE_SHA256 = frozenset({
+    "03375f98ee2f442d1b236afce90919547f738348dd77cb9ca67c704e21772172",
+    "392be7e7e35a5e76f27c0073c2be0545a1be6aa856753209cb4f8ba95976ce5e",
+    "f3b85eac0023a12de0d529a47766762f5a2ffaeac092c42e9b1b11be6a246c27",
+    "d54979aced93372dd0d20b18f413a472ec5b2f481848609e38045f8ed6a191f0",
+    "82ff6b4e4cbc433175ae36b23216f001cbec427e341d01b2b01709b25d744e02",
+    "5d2aded1f8ec4650b7c7fbd7715699a11b300b9019ff5d97849efa4745734e7d",
+    "574410dbf3e8a7645cb54597be5a6c515974a0ae72d539df12384ff88b1d1022",
+    "6a9ce338b24adc913bf5bb9496acc8d9e539d606c65cf6ebe7e94c06e48a49e2",
+})
 _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
     "qa-engineer": frozenset({
+        "6a9ce338b24adc913bf5bb9496acc8d9e539d606c65cf6ebe7e94c06e48a49e2",
         "3e964408acb6fe3ea1ba8a43158927e83b6d23bb121dd34b6b843863caf4a9fd",
     }),
     "backend-engineer": frozenset({
+        "a6e1e0239ef1c6e25b97f932790d56a134612f704824811d99cbe87e661594ca",  # Exact factory role before 6.2 task-first ranking.
+        "f3b85eac0023a12de0d529a47766762f5a2ffaeac092c42e9b1b11be6a246c27",
         "38d99e26339cb0942eb66d4062e0de33f085c5b39f445cc358ac217b03010589",
     }),
     "explorer": frozenset({
+        "d57e825cc7155a81d75fe5ed205b2e402bd4a637c785d7f097223e6418700f74",  # Exact factory role before 6.2 task-first ranking.
+        "03375f98ee2f442d1b236afce90919547f738348dd77cb9ca67c704e21772172",
         "a98b89ec3c513f8242459adda45808612645ed5f5cb07b9da8839fe66b670e89",
     }),
     "analyst": frozenset({
+        "5d2aded1f8ec4650b7c7fbd7715699a11b300b9019ff5d97849efa4745734e7d",
         "0f26fae798309c1b69f3fe5077196e3e5895211bc661f7575aa683fd01e2225b",
     }),
     "knowledge-archivist": frozenset({
+        "8d148b86cdad5ef415cda74362bb607b700dca3069947bcfb45d5c802233f873",  # Exact factory role before 6.2 task-first ranking.
+        "82ff6b4e4cbc433175ae36b23216f001cbec427e341d01b2b01709b25d744e02",
         "8f69d0f67010b77b71c81b77ad74119300ad245061c4363cbcfd2f1d0fab510c",
     }),
     "scientific-software-engineer": frozenset({
+        "d220652c7a880bcdcdd68a57a2f9cfe267014617a668655fe3a27e418709ed16",  # Exact pre-6.2 factory role (adefe904).
         "b4ee95a146843dd06a4470b380d7d263fb5c149edf9b2204c0944090e0d4ba3b",
     }),
     "planner": frozenset({
+        "574410dbf3e8a7645cb54597be5a6c515974a0ae72d539df12384ff88b1d1022",
         "dcde16fa86661eee94b21618fb6320026185ddb425541b15239b4c7d232c4faa",
     }),
     "algorithm-scientist": frozenset({
+        "a20cde75a7e9d1bef8dbb451658fa5341e5ee0e43ee1f89db453ccd2ec2576dd",  # Exact factory role before 6.2 task-first ranking.
+        "81b79398d9b55495cf32925007635b9f688920c75c32b50e4b092d4ef9bd1893",  # Exact pre-6.2 factory role (adefe904).
         "cd2bbbaf5f4173f07bfe18cea39d90dd0cc341630b77b5dac0d82d9f92b57d7e",
         "1bc7c60b30f1bb360a502ee955e41513a80d3e3f9e222e5a673817a7e421c8bd",
     }),
     "architect": frozenset({
+        "278f9311b982844cd0fdd542cf6f3c6fd0ec790bdd5cdf4d09bede1195828ec4",  # Exact pre-6.2 factory role (adefe904).
         "71f3d9e27019de2e133d8947a33cdb69ab38261824fab36bcb18c7f7f3ff0792",
         "bcdd83abcb3e5d99e0dd0963d622b475ea11d450bb16f1af1bc93855891ff4fb",
     }),
     "architecture-reviewer": frozenset({
+        "8ae8704a3f823b74bd5fbc8590fa43c979dbee66e341f1107bedf873b69a2d03",  # Exact pre-6.2 factory role (adefe904).
         "5e404f6643d8992dd7cd4a40e8a5d3ae4f7f388381907aa230b6b0fa15ac458a",
         "239a91ef35b54cc640372132b51662bcbe0da88dded68ff53d339621689df8c3",
     }),
     "computational-scientist": frozenset({
+        "aa94f35c668d62394bd12a27609ead6dd9e042b2e13a82a4b38d693967e98aac",  # Exact factory role before 6.2 task-first ranking.
+        "7731852f496a050f187b11c265943e5b6bc553820acd7d9359769852eb598aea",  # Exact pre-6.2 factory role (adefe904).
         "4169e5ac3442e542b0249879595b6974b78e0924b377613b5b427a6488171901",
         "7ddcfb3afe6d9032d03d3da6468662a961819ceacf5252caccccfc69744cc9d3",
     }),
@@ -7652,34 +9019,42 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "fd846b4791aea45f743661615d913d2f3cc96ee0b86fdb8abe53871b97e3c07c",
     }),
     "worker": frozenset({
+        "cc520f7c717fa1c9c529c07439967b0d8795b130b12073350504fe5ae7acad2c",  # Exact factory role before 6.2 task-first ranking.
+        "392be7e7e35a5e76f27c0073c2be0545a1be6aa856753209cb4f8ba95976ce5e",
         "952271e679f9215f039e52377a35100fbc9b2fdb343db17f266c38be8a200815",
         "2d950ebfa4e9cc7293ee32cbc71ad3910fa6938a80a339bbbc3434ecc6c4d860",
         "960f0c617b4b5856585fa3f3afac7e0ef9fb99bfc1977b74fe6dd99626b2a57d",
         "1b311bd1a413c660382c57df74bdccc016f9b8a919e039efe21f703f0b09e475",
     }),
     "platform-engineer": frozenset({
+        "0bc8c33d45761495089826145a466ab5ced84a7c52e957e22a378ed17cc5da4b",  # Exact factory role before 6.2 task-first ranking.
+        "d54979aced93372dd0d20b18f413a472ec5b2f481848609e38045f8ed6a191f0",
         "3e4c199ba984cbfba080249ad28c645ffbf78a08daf8519e0aa058e7f92aaa40",
         "2f62aaf20edd4b30838db3e728d6a907e8f6826620d2eede78c02a1cd0b7a214",
         "ceb30fcd546bef82045f7b3c3b48e39f98ae83ebbea17a6c5210c2b46cb2140d",
         "e5d44b7fafc7ec8ab3c69b4086bdda5e5430974334f90fc407b5bb78ace8a4cf",
     }),
     "security-engineer": frozenset({
+        "9cce8eb32f8386dba2cbe88ddefd54ff1ee8695956682f0a93ee8194ebcc6513",  # Exact pre-6.2 factory role (adefe904).
         "6e53fa663da8eed31ab4012354ee9bebf24f16ecb9cdaa517a7f196dcfd1969e",
         "aeb2800e4e498ad7d3a63951608e780eb730ef2bd744ff679fee5c697f5d837a",
         "54117decdfcf9bff576e23d31a1dc6aa2d2f4fd0d498820f9c1244b6742f78f9",
         "ceb53c8db3d77f75beea76a9cc27120d7623a60661cca3dac92b01a35ce06a0c",
     }),
     "security-reviewer": frozenset({
+        "3d5b521ee8c6a230e1327cf4cf815b6c9c98f844de0aa985b4e3a7b4cfe3eb6c",  # Exact pre-6.2 factory role (adefe904).
         "f22614caec4561e5cb0833e6264081b42c46570936fe1d2b62e8534c17ee214d",
         "0f9b75713128885b8db86b32a9ecb3e756b0022add169a89fc10d615745445f1",
     }),
     "mechanical-scout": frozenset({
+        "8ed620f22a35d59df3ef2cf64cad73ef8140452253dde49fc32f527000d2bb2e",  # Exact factory role before 6.2 task-first ranking.
         "4521ff3194ed13831214f94ad228c7aa0eba97b6d40bec56e990b3490fdcc672",
         "1d2d6c4fb6463710f8e6cd1bda1738f8230cd7483b9f342f7f0e500e5ac5bb67",
         "7d9c28aeb4471ea63fe733dde320fec3bfa60dcb11cb85404ff2aed2fc6658b5",
         "d384fa021005f10b4b3faf48818a4963ab314689b986a6fbed25b5ad13e66df1",
     }),
     "mechanical-worker": frozenset({
+        "155462c4f5eb5c035254ae50f61469de954c12439ef6289e6bdf74f04cf0999f",  # Exact factory role before 6.2 task-first ranking.
         "8c126a95d35301bd493e3e2f89e4061781aaf28ca4444a3d4a67b1868c4c7568",
         "ccf7633f55389ce826cd848692277b764a559ee0b7bc81402d5657b908165869",
         "6ab77b24305af7c7b8bf8b8661b2abe1a4fa628974eee9da096419deebea39b8",
@@ -7721,7 +9096,8 @@ def _source_codex_role_manifest_unchecked(
         raise ValueError("E_NATIVE_ROLE_MANIFEST_INVALID: schema or roles")
     if manifest.get("policySha256") != _file_sha256(root / "shared" / "role-routing-policy.v1.json"):
         raise ValueError("E_NATIVE_ROLE_MANIFEST_INVALID: role policy digest drifted")
-    policy_roles = _load_json_object(root / "shared/role-routing-policy.v1.json", "E_NATIVE_ROLE_MANIFEST_INVALID")["roles"]
+    policy = _load_json_object(root / "shared/role-routing-policy.v1.json", "E_NATIVE_ROLE_MANIFEST_INVALID")
+    policy_roles = policy["roles"]
     if set(manifest["roles"]) != set(policy_roles):
         raise ValueError("E_NATIVE_ROLE_MANIFEST_INVALID: role catalogue")
     for name, record in manifest["roles"].items():
@@ -7738,6 +9114,10 @@ def _source_codex_role_manifest_unchecked(
         if record.get("sha256") != _file_sha256(source):
             raise ValueError(f"E_NATIVE_ROLE_MANIFEST_INVALID: role digest {name}")
         parsed = tomllib.loads(source.read_text(encoding="utf-8"))
+        profile = policy["profiles"][policy_roles[name]["defaultProfile"]]
+        expected_tuple = (None, None) if name == "default" else (profile["codexModel"], profile["effort"])
+        if (parsed.get("model"), parsed.get("model_reasoning_effort")) != expected_tuple:
+            raise ValueError(f"E_NATIVE_ROLE_MANIFEST_INVALID: factory profile {name}")
         if manifest["schemaVersion"] == 2 and (
             type(parsed.get("developer_instructions")) is not str
             or record.get("developerInstructionsSha256") != hashlib.sha256(
@@ -8032,8 +9412,33 @@ def _replace_stock_registration_description(
     return "".join(lines).encode("utf-8")
 
 
+def _migrate_native_role_controls(payload: bytes, parsed: dict[str, Any], profile: dict[str, Any]) -> bytes | None:
+    """Replace only parsed root string tokens; leave every other byte intact."""
+    try:
+        text = payload.decode("utf-8")
+        edits = []
+        for key, value in (("model", profile["codexModel"]), ("model_reasoning_effort", profile["effort"])):
+            start = _toml_root_value_start(text, key)
+            if start is None or text[start] not in "\"'":
+                return None
+            end = _skip_toml_string(text, start)
+            if tomllib.loads("value = " + text[start:end])["value"] != parsed[key]:
+                return None
+            edits.append((start, end, json.dumps(value)))
+        for start, end, replacement in sorted(edits, reverse=True):
+            text = text[:start] + replacement + text[end:]
+        expected = dict(parsed)
+        expected.update(model=profile["codexModel"], model_reasoning_effort=profile["effort"])
+        if tomllib.loads(text) != expected:
+            return None
+        return text.encode("utf-8")
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError, ValueError, KeyError, IndexError):
+        return None
+
+
 def _preflight_codex_native_roles(
-    root: Path, source_agents: Path, target_agents: Path, config_path: Path
+    root: Path, source_agents: Path, target_agents: Path, config_path: Path,
+    *, prior_factory_pair: tuple[tuple[Path, str], ...] = (),
 ) -> _CodexNativeRolesPlan:
     """Classify the complete native-role/config change before transaction entry."""
 
@@ -8118,7 +9523,6 @@ def _preflight_codex_native_roles(
         )
     _parse_codex_config(payload)
 
-    known_roles = {f"{name}.toml" for name in manifest["roles"]}
     try:
         target_metadata = target_agents.lstat()
     except FileNotFoundError:
@@ -8131,16 +9535,14 @@ def _preflight_codex_native_roles(
         ):
             raise ValueError("E_CREATE_ONLY_TYPE_COLLISION: agents")
         for entry in sorted(os.scandir(target_agents), key=lambda candidate: candidate.name):
-            if entry.name == CODEX_ROLE_MANIFEST or (
-                entry.name.endswith(".toml")
-                and entry.name not in known_roles
-                and not (legacy_exists and entry.name == CODEX_LEGACY_LUNA_ROLE.name)
-            ):
+            if entry.name == CODEX_ROLE_MANIFEST:
                 raise ValueError(f"E_CREATE_ONLY_COLLISION: agents/{entry.name}")
 
     role_files: list[_NativeRoleFilePlan] = []
     contract_reader = _load_module_from_path(
         "orchestrarium_native_role_contract", root / "scripts/resolve-agents-mode.py")
+    policy = _load_json_object(root / "shared/role-routing-policy.v1.json", "E_NATIVE_ROLE_MANIFEST_INVALID")
+    prior_pair = _STOCK_NATIVE_ROLE_CONTRACT_PRIOR_PAIRS[-1]
     for name, record in sorted(manifest["roles"].items()):
         relative = Path(record["relativePath"])
         source_payload = (source_agents / relative).read_bytes()
@@ -8156,12 +9558,24 @@ def _preflight_codex_native_roles(
         accepted_prior = None
         configured = False
         if installed_digest is not None and installed_digest != source_digest:
-            if installed_digest not in _STOCK_NATIVE_ROLE_MIGRATION_SHA256.get(name, frozenset()):
+            if (installed_digest not in _STOCK_NATIVE_ROLE_MIGRATION_SHA256.get(name, frozenset())
+                or (installed_digest in _TERRA_RANKING_PRIOR_ROLE_SHA256 and prior_factory_pair != prior_pair)):
                 try:
-                    contract_reader.validate_native_role_configuration(installed, name, record, manifest["schemaVersion"])
+                    parsed = contract_reader.validate_native_role_configuration(installed, name, record, manifest["schemaVersion"])
                 except contract_reader.NativeRoleContractError as error:
                     raise ValueError(f"E_CREATE_ONLY_ROLE_CONTRACT: {error.stage}/{error.reason}") from None
-                source_payload, configured = installed, True
+                configured = True
+                source_payload = installed
+                old_name = policy["roles"][name].get("previousFactoryProfile")
+                if prior_factory_pair == prior_pair and old_name:
+                    old = policy["profiles"][old_name]
+                    current = policy["profiles"][policy["roles"][name]["defaultProfile"]]
+                    if (parsed.get("model"), parsed.get("model_reasoning_effort")) == (old["codexModel"], old["effort"]):
+                        migrated = _migrate_native_role_controls(installed, parsed, current)
+                        if migrated is not None:
+                            source_payload, accepted_prior = migrated, installed_digest
+                        else:
+                            print(f"  Native role controls preserved; token positions unresolved: {relative}")
             else:
                 accepted_prior = installed_digest
         role_files.append(
@@ -8207,7 +9621,9 @@ def _install_codex_native_roles(
                 owner.migrate_exact_file(
                     relative, item.accepted_prior, item.payload
                 )
-            print(f"  Native role {'configured bytes preserved' if item.configured else 'create-only verified'}: {item.relative_path}")
+            action = ("configured controls migrated" if item.configured and item.accepted_prior is not None
+                      else "configured bytes preserved" if item.configured else "create-only verified")
+            print(f"  Native role {action}: {item.relative_path}")
         return
     manifest = (
         manifest
@@ -8217,19 +9633,16 @@ def _install_codex_native_roles(
     target_relative = target_agents.relative_to(owner.anchor)
     contract_reader = _load_module_from_path(
         "orchestrarium_native_role_contract", root / "scripts/resolve-agents-mode.py")
-    known_roles = {f"{name}.toml" for name in manifest["roles"]}
     if target_agents.exists() or target_agents.is_symlink():
         owner.destination(target_relative)
         for entry in sorted(os.scandir(target_agents), key=lambda candidate: candidate.name):
-            if entry.name == CODEX_ROLE_MANIFEST or (
-                entry.name.endswith(".toml") and entry.name not in known_roles
-            ):
+            if entry.name in (CODEX_ROLE_MANIFEST, CODEX_LEGACY_LUNA_ROLE.name):
                 raise ValueError(f"E_CREATE_ONLY_COLLISION: {target_relative / entry.name}")
     for name, record in sorted(manifest["roles"].items()):
         relative = Path(record["relativePath"])
         payload = (source_agents / relative).read_bytes()
         target = owner.destination(target_relative / relative)
-        expected_priors = _STOCK_NATIVE_ROLE_MIGRATION_SHA256.get(name, frozenset())
+        expected_priors = _STOCK_NATIVE_ROLE_MIGRATION_SHA256.get(name, frozenset()) - _TERRA_RANKING_PRIOR_ROLE_SHA256
         if expected_priors and (target.exists() or target.is_symlink()):
             owner._assert_regular(target, existing=True)
             installed_digest = _file_sha256(target)
@@ -8279,19 +9692,20 @@ class _CanonicalSkillPlan:
 
 
 _LEAD_RECEIPT_NAME = ".orchestrarium-lead-receipt.v1.json"
-_LEAD_RECEIPT_SCHEMA = "orchestrarium.canonical-lead-install.v1"
+_LEAD_LEGACY_RECEIPT_SCHEMA = "orchestrarium.canonical-lead-install.v1"
+_LEAD_RECEIPT_SCHEMA = "orchestrarium.canonical-lead-install.v2"
 _NONLEAD_RECEIPT_NAME = ".orchestrarium-nonlead-skills-receipt.v1.json"
 _NONLEAD_RECEIPT_SCHEMA = "orchestrarium.canonical-nonlead-skills-install.v1"
 _NONLEAD_MEMBER_RECEIPT_SCHEMA = "orchestrarium.canonical-nonlead-skills-install.v2"
 _NONLEAD_RECEIPT_MAX_BYTES = 65536
 
 
-def _lead_receipt_bytes(digest: str) -> bytes:
-    return (json.dumps({"schema": _LEAD_RECEIPT_SCHEMA, "treeSha256": digest},
+def _lead_receipt_bytes(digest: str, *, schema: str = _LEAD_RECEIPT_SCHEMA) -> bytes:
+    return (json.dumps({"schema": schema, "treeSha256": digest},
                        separators=(",", ":")) + "\n").encode("utf-8")
 
 
-def _read_lead_receipt(path: Path) -> tuple[bytes, tuple[int, int, int, int], str] | None:
+def _read_lead_receipt(path: Path) -> tuple[bytes, tuple[int, int, int, int], str, str] | None:
     try:
         metadata = path.lstat()
     except FileNotFoundError:
@@ -8310,7 +9724,7 @@ def _read_lead_receipt(path: Path) -> tuple[bytes, tuple[int, int, int, int], st
         record = json.loads(payload.decode("utf-8"), object_pairs_hook=unique_pairs)
         if (not isinstance(record, dict)
             or set(record) != {"schema", "treeSha256"}
-            or record["schema"] != _LEAD_RECEIPT_SCHEMA
+            or record["schema"] not in {_LEAD_LEGACY_RECEIPT_SCHEMA, _LEAD_RECEIPT_SCHEMA}
             or not isinstance(record["treeSha256"], str)
             or re.fullmatch(r"[0-9a-f]{64}", record["treeSha256"]) is None
             or payload != (json.dumps(record, separators=(",", ":")) + "\n").encode("utf-8")):
@@ -8324,7 +9738,7 @@ def _read_lead_receipt(path: Path) -> tuple[bytes, tuple[int, int, int, int], st
         metadata.st_dev, metadata.st_ino, metadata.st_mode, metadata.st_size, metadata.st_mtime_ns
     ):
         raise ValueError("E_CANONICAL_LEAD_RECEIPT_INVALID")
-    return payload, identity, record["treeSha256"]
+    return payload, identity, record["treeSha256"], record["schema"]
 
 
 def _nonlead_receipt_bytes(skills: dict[str, Any], *, schema: str | None = None) -> bytes:
@@ -8332,8 +9746,7 @@ def _nonlead_receipt_bytes(skills: dict[str, Any], *, schema: str | None = None)
                       if isinstance(skills[name], dict) else skills[name])
                for name in sorted(skills)}
     if schema is None:
-        schema = (_NONLEAD_MEMBER_RECEIPT_SCHEMA if any(isinstance(value, dict) for value in ordered.values())
-                  else _NONLEAD_RECEIPT_SCHEMA)
+        schema = _NONLEAD_MEMBER_RECEIPT_SCHEMA
     payload = (json.dumps({"schema": schema, "skills": ordered},
                           separators=(",", ":")) + "\n").encode("utf-8")
     if len(payload) > _NONLEAD_RECEIPT_MAX_BYTES:
@@ -8440,7 +9853,7 @@ def _parse_nonlead_grants(values: tuple[str, ...], source_names: frozenset[str])
     for value in values:
         name, sep, digest = value.partition("=")
         if (not sep or name not in source_names or not _safe_nonlead_name(name)
-            or re.fullmatch(r"[0-9a-f]{64}", digest) is None or name in grants):
+            or re.fullmatch(r"(?:tree-v2:)?[0-9a-f]{64}", digest) is None or name in grants):
             raise ValueError("E_CANONICAL_SKILL_ADOPTION_MISMATCH")
         grants[name] = digest
     return grants
@@ -8448,9 +9861,10 @@ def _parse_nonlead_grants(values: tuple[str, ...], source_names: frozenset[str])
 
 @dataclass(frozen=True)
 class _LeadReceiptPlan:
-    observed: tuple[bytes, tuple[int, int, int, int], str] | None
+    observed: tuple[bytes, tuple[int, int, int, int], str, str] | None
     source_digest: str
     source_lead: Path
+    selection: tuple[str, str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -8611,13 +10025,16 @@ def _assert_canonical_member_state(
             continue
         if node.kind == "directory" or path not in changed:
             expected[relative] = "directory" if node.kind == "directory" else node.data
-    actual = dict(_stage_tree_manifest(installed, ignore_runtime_cache=True))
+    read_file = None
+    if transaction is not None and transaction.enabled:
+        read_file = lambda member: transaction._image_file_bytes(member, current_image.get(member))
+    actual = dict(_stage_tree_manifest(installed, ignore_runtime_cache=True, read_file=read_file))
     if actual != expected:
         raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_DRIFT: managed postcondition {skill.name}")
 
 
 def _preflight_directory_move_capabilities(plan: _CanonicalSkillsPlan, target: Path) -> tuple[tuple[Path, tuple[int, int, int, int]], ...]:
-    """Probe required native directory moves before any coupled live effects."""
+    """Probe the selected retention owner before any coupled live effects."""
     parents = { (target / skill.name).parent for skill in plan.skills
                 if skill.accepted_prior is not None and skill.managed_before is None }
     witnesses = []
@@ -8627,21 +10044,27 @@ def _preflight_directory_move_capabilities(plan: _CanonicalSkillsPlan, target: P
         transaction = _InstallTransaction([], enabled=False)
         state = transaction._observe(probe)
         original = None
+        effect = None
+        move_finished = False
         try:
             source = probe / "source"
             destination = probe / "destination"
             source.mkdir()
             source_state = transaction._observe(source)
             state.update(source_state)
-            if not transaction._native_publish_no_replace(source, destination):
-                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: required directory no-replace capability unavailable")
+            owner = _CreateOnlyMutablePath(probe, transaction, dry_run=False)
+            effect = transaction.arm_replacement(source, None, owner,
+                retained_destination=destination, preserve_on_commit=True)
+            transaction._publish_retained(source, destination, effect=effect)
+            move_finished = True
             state = transaction._relocate(source_state, source, destination) | {probe: state[probe]}
             if (not transaction._image_matches(probe, state)):
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION: directory capability probe drift")
             source.mkdir()
-            state.update(transaction._observe(source))
+            source_state = transaction._observe(source)
+            state.update(source_state)
             try:
-                transaction._native_publish_no_replace(source, destination)
+                transaction._publish_retained(source, destination, source_state=source_state)
             except FileExistsError:
                 pass
             else:
@@ -8653,9 +10076,20 @@ def _preflight_directory_move_capabilities(plan: _CanonicalSkillsPlan, target: P
             raise
         finally:
             try:
+                if effect is not None and not move_finished:
+                    # A move can finish before accounting or descriptor close fails.
+                    # Consider only the original witnesses and our recorded slot;
+                    # never adopt an arbitrary current directory census.
+                    candidates = (state | (effect.reservation_state or {}),
+                        transaction._relocate(source_state, source, destination) | {probe: state[probe]})
+                    for candidate in candidates:
+                        if transaction._image_matches(probe, candidate):
+                            state = candidate
+                            break
                 transaction._dispose_image(probe, state)
             except BaseException as cleanup:
-                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "capability", original or cleanup,
+                raise _InstallFailure("E_ROLLBACK_SETTLEMENT_FAILED", "capability",
+                                      cleanup if original is None else original,
                                       recovery_path=probe) from original
         if not _InstallTransaction._binding_identity_matches(
             parent_identity, _CreateOnlyMutablePath._identity(parent)
@@ -8704,6 +10138,32 @@ def _exact_stock_native_role_contract_prior_pair(
                 unresolved_paths=(Path(temporary.name),)) from primary
 
 
+def _describe_modified_lead_candidate(
+    receipt, installed: Path, observed: str, stage: _CanonicalLeadStage,
+) -> None:
+    """Report bounded selection data; this never admits replacement or history."""
+    manifest = _stage_tree_manifest(installed, ignore_runtime_cache=True)
+    if (_tree_manifest_sha256(manifest) != observed
+        or _read_lead_receipt(installed.parent / _LEAD_RECEIPT_NAME) != receipt):
+        raise ValueError("E_CANONICAL_LEAD_RECEIPT_DRIFT: diagnostic observation drift")
+    before, after = dict(manifest), dict(stage.manifest)
+    changes = {
+        "added": sorted(after.keys() - before.keys()),
+        "removed": sorted(before.keys() - after.keys()),
+        "modified": sorted(key for key in before.keys() & after.keys()
+                           if before[key] != after[key]),
+    }
+    summary = {kind: {"count": len(paths), "paths": paths[:20]}
+               for kind, paths in changes.items()}
+    token = "v1:" + ":".join((hashlib.sha256(receipt[0]).hexdigest(),
+                             observed, stage.digest))
+    print("  Modified Lead candidate only, not approval: --replace-modified-lead " + token)
+    print("  Entire authored Lead selection; staged member changes: "
+          + json.dumps(summary, ensure_ascii=True, separators=(",", ":")))
+    print("  Final manifest is this stage minus separately proven retirements; "
+          "other installer ownership and platform checks still apply.")
+
+
 def _preflight_canonical_skills(
     source: Path,
     target: Path,
@@ -8712,12 +10172,19 @@ def _preflight_canonical_skills(
     claude_transport_root: Path | None = None,
     global_install: bool = False,
     replace_unreceipted_lead_sha256: str | None = None,
+    replace_modified_lead: tuple[str, ...] = (),
     replace_unreceipted_skill_sha256: tuple[str, ...] = (),
     claude_transport_optional: bool = False,
     member_selection: tuple[tuple[str, tuple[str, ...]], ...] | None = None,
 ) -> _CanonicalSkillsPlan:
     """Bind the complete affected set before the transaction applies any member."""
 
+    lead_selection = _parse_modified_lead_selection(replace_modified_lead)
+    if lead_selection is not None and (
+        not global_install or replace_unreceipted_lead_sha256 is not None
+        or member_selection is not None
+    ):
+        raise ValueError("E_CANONICAL_LEAD_SELECTION_INVALID: scope or conflicting selection")
     selected_names = None
     if member_selection is not None:
         if (not global_install or not isinstance(member_selection, tuple) or not member_selection
@@ -8745,6 +10212,8 @@ def _preflight_canonical_skills(
         if replace_unreceipted_lead_sha256 is not None and not global_install:
             raise ValueError("E_CANONICAL_LEAD_ADOPTION_MISMATCH")
         receipt = _read_lead_receipt(target / _LEAD_RECEIPT_NAME)
+        if lead_selection is not None and (receipt is None or receipt[3] != _LEAD_RECEIPT_SCHEMA):
+            raise ValueError("E_CANONICAL_LEAD_SELECTION_INVALID: ordinary v2 receipt required")
         if replace_unreceipted_lead_sha256 is not None and receipt is not None:
             raise ValueError("E_CANONICAL_LEAD_ADOPTION_MISMATCH")
         nonlead_names = frozenset(skill.name for skill in skills if skill.name != "lead")
@@ -8778,39 +10247,19 @@ def _preflight_canonical_skills(
                 if exists
                 else None
             )
-            prior = E7_CANONICAL_SKILL_TREE_SHA256.get(skill.name)
-            stock_8521_prior = STOCK_8521_CANONICAL_SKILL_TREE_SHA256.get(
-                skill.name
-            )
-            stock_7872_prior = STOCK_7872_CANONICAL_SKILL_TREE_SHA256.get(
-                skill.name
-            )
-            accepted_priors = frozenset(
-                value
-                for value in (
-                    prior,
-                    stock_8521_prior,
-                    stock_7872_prior,
-                    *(
-                        STOCK_CONSULTANT_ACCEPTED_PRIOR_TREE_SHA256
-                        if skill.name == "consultant"
-                        else ()
-                    ),
-                    *ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256.get(
-                        skill.name, ()
-                    ),
-                    *(
-                        GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
-                        if skill.name == "lead"
-                        else ()
-                    ),
-                )
-                if value is not None
-            )
             if observed is None and exists:
                 raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {skill.name}")
             if skill.name == "lead" and receipt is not None:
-                if observed is None or (observed != current and receipt[2] != observed):
+                expected_receipt = _lead_receipt_identity_v2(receipt, installed, factory=materialized)
+                if lead_selection is not None:
+                    if (observed is None or observed == expected_receipt
+                        or lead_selection != (hashlib.sha256(receipt[0]).hexdigest(),
+                                              observed, stage.digest)):
+                        raise ValueError("E_CANONICAL_LEAD_SELECTION_INVALID: exact modified state required")
+                    _describe_modified_lead_candidate(receipt, installed, observed, stage)
+                elif observed is None or observed != expected_receipt:
+                    if global_install and receipt[3] == _LEAD_RECEIPT_SCHEMA and observed is not None:
+                        _describe_modified_lead_candidate(receipt, installed, observed, stage)
                     raise ValueError("E_CANONICAL_LEAD_RECEIPT_DRIFT")
             nonlead_receipted = False
             nonlead_adopted = False
@@ -8818,6 +10267,8 @@ def _preflight_canonical_skills(
                 if not _safe_nonlead_name(skill.name):
                     raise ValueError("E_CANONICAL_SKILLS_RECEIPT_INVALID: source name")
                 recorded = nonlead_prior_map.get(skill.name)
+                if isinstance(recorded, str):
+                    recorded = _qualify_legacy_tree(skill.name, installed, recorded, factory=materialized)
                 if isinstance(recorded, tuple) or selected_names is not None:
                     if recorded is None or observed is None:
                         raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_DRIFT: {skill.name}")
@@ -8841,9 +10292,52 @@ def _preflight_canonical_skills(
                     if recorded is not None and recorded != observed and observed != current:
                         raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_DRIFT: {skill.name}")
                     nonlead_receipted = recorded is not None and recorded == observed
+            accepted_priors = frozenset()
+            if not (skill.name == "lead" and receipt is not None):
+                prior = E7_CANONICAL_SKILL_TREE_SHA256.get(skill.name)
+                stock_8521_prior = STOCK_8521_CANONICAL_SKILL_TREE_SHA256.get(
+                    skill.name
+                )
+                stock_7872_prior = STOCK_7872_CANONICAL_SKILL_TREE_SHA256.get(
+                    skill.name
+                )
+                accepted_priors = frozenset(
+                    value
+                    for value in (
+                        prior,
+                        stock_8521_prior,
+                        stock_7872_prior,
+                        *(
+                            STOCK_CONSULTANT_ACCEPTED_PRIOR_TREE_SHA256
+                            if skill.name == "consultant"
+                            else ()
+                        ),
+                        *ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256.get(
+                            skill.name, ()
+                        ),
+                        *(
+                            GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
+                            if skill.name == "lead"
+                            else ()
+                        ),
+                    )
+                    if value is not None
+                )
+                legacy_priors = accepted_priors
+                accepted_priors = frozenset(value for legacy in legacy_priors
+                    if (value := _legacy_factory_identity_v2(skill.name, legacy)) is not None)
+                if observed is not None and observed != current and observed not in accepted_priors:
+                    candidate_legacy = _legacy_tree_sha256(installed, ignore_runtime_cache=True)
+                    if candidate_legacy in legacy_priors:
+                        expected = _legacy_factory_identity_v2(skill.name, candidate_legacy, factory=materialized)
+                        if expected is None:
+                            raise ValueError("E_LEGACY_TREE_WITNESS_UNAVAILABLE: " + skill.name)
+                        if expected == observed:
+                            accepted_priors = accepted_priors | {expected}
             accepted_prior_files = (
                 _exact_stock_native_role_contract_prior_pair(installed, stage)
                 if skill.name == "lead"
+                and receipt is None
                 and observed is not None
                 and observed != current
                 else ()
@@ -8858,7 +10352,7 @@ def _preflight_canonical_skills(
                 and receipt is None
             )
             if skill.name == "lead" and replace_unreceipted_lead_sha256 is not None:
-                if not adopting or replace_unreceipted_lead_sha256 != observed:
+                if not adopting or _adoption_identity_v2("lead", installed, replace_unreceipted_lead_sha256, factory=materialized) != observed:
                     raise ValueError("E_CANONICAL_LEAD_ADOPTION_MISMATCH")
             if adopting and replace_unreceipted_lead_sha256 is None:
                 raise ValueError(f"E_CANONICAL_LEAD_ADOPTION_REQUIRED: {observed}")
@@ -8867,7 +10361,7 @@ def _preflight_canonical_skills(
                 and observed not in accepted_priors):
                 if skill.name not in grants:
                     raise ValueError(f"E_CANONICAL_SKILL_ADOPTION_REQUIRED: {skill.name}={observed}")
-                if grants[skill.name] != observed:
+                if _adoption_identity_v2(skill.name, installed, grants[skill.name], factory=materialized) != observed:
                     raise ValueError("E_CANONICAL_SKILL_ADOPTION_MISMATCH")
                 nonlead_adopted = True
                 consumed_grants.add(skill.name)
@@ -8900,7 +10394,7 @@ def _preflight_canonical_skills(
         if claude_transport_root is not None and member_selection is None:
             predecessor = None
             try:
-                predecessor = _transport_predecessor(root, target, claude_transport_root)
+                predecessor = _transport_predecessor(root, target, claude_transport_root, factory=stage.path)
             except (OSError, ValueError) as exc:
                 if not claude_transport_optional:
                     # A valid independently admitted frozen legacy route may lack
@@ -8915,7 +10409,7 @@ def _preflight_canonical_skills(
             # Optional peers lacking complete ownership stay preserved/unclaimed.
 
         nonlead_expected = dict(nonlead_prior_map) if member_selection is not None else {}
-        nonlead_expected.update((skill.name, skill.managed_after if skill.managed_after is not None else skill.source_digest)
+        nonlead_expected.update((skill.name, skill.managed_after if skill.managed_after is not None else _stage_tree_manifest(skill.source, ignore_runtime_cache=True))
                                for skill in planned if skill.name != "lead")
         if global_install:
             _nonlead_receipt_bytes({name: {"members": dict(value)} if isinstance(value, tuple) else value
@@ -8924,7 +10418,7 @@ def _preflight_canonical_skills(
                                    and nonlead_receipt.schema == _NONLEAD_MEMBER_RECEIPT_SCHEMA else None)
         plan = _CanonicalSkillsPlan(
             stage, tuple(planned), transport_stage,
-            _LeadReceiptPlan(receipt, stage.digest, lead_source) if member_selection is None else None,
+            _LeadReceiptPlan(receipt, stage.digest, lead_source, lead_selection) if member_selection is None else None,
             nonlead_receipt,
             tuple(sorted(nonlead_expected.items())) if global_install else None,
             source if global_install else None,
@@ -8936,8 +10430,8 @@ def _preflight_canonical_skills(
         raise
 
 
-def _discard_canonical_skills_plan(plan: _CanonicalSkillsPlan) -> None:
-    shutil.rmtree(plan.stage.path, ignore_errors=True)
+def _discard_canonical_skills_plan(plan: _CanonicalSkillsPlan, *, strict: bool = False) -> None:
+    shutil.rmtree(plan.stage.path, ignore_errors=not strict)
 
 
 def _assert_canonical_skills_plan_current(
@@ -8950,6 +10444,16 @@ def _assert_canonical_skills_plan_current(
 ) -> None:
     """Reject any post-preflight drift before the transaction writes its first path."""
 
+    if plan.lead_receipt is not None and plan.lead_receipt.selection is not None:
+        selection = plan.lead_receipt.selection
+        receipt = plan.lead_receipt.observed
+        leads = tuple(skill for skill in plan.skills if skill.name == "lead")
+        if (receipt is None or receipt[3] != _LEAD_RECEIPT_SCHEMA or len(leads) != 1
+            or leads[0].installed_digest is None or leads[0].installed_digest == receipt[2]
+            or selection != (hashlib.sha256(receipt[0]).hexdigest(),
+                             leads[0].installed_digest, plan.stage.digest)
+            or plan.lead_receipt.source_digest != selection[2]):
+            raise ValueError("E_CANONICAL_LEAD_SELECTION_INVALID: bound plan drift")
     required_parents = {(target / skill.name).parent for skill in plan.skills
                         if skill.accepted_prior is not None and skill.managed_before is None}
     if required_parents != {parent for parent, _identity in plan.directory_move_parents}:
@@ -8979,7 +10483,7 @@ def _assert_canonical_skills_plan_current(
         own_effect = next((effect for effect in transaction._effects
                            if effect.path == installed and predecessor is not None
                            and skill.name == "lead"
-                           and tuple(sorted(effect.before.items())) == predecessor.canonical_state), None) if transaction is not None else None
+                           and effect.preflight_state == predecessor.canonical_state), None) if transaction is not None else None
         if own_effect is not None:
             transaction.assert_effect_current(own_effect)
             lead_effect = own_effect
@@ -8989,7 +10493,7 @@ def _assert_canonical_skills_plan_current(
         receipt_path = target / _LEAD_RECEIPT_NAME
         receipt_effect = None
         if transaction is not None and plan.lead_receipt.observed is not None:
-            payload, identity, _digest = plan.lead_receipt.observed
+            payload, identity, _digest, _schema = plan.lead_receipt.observed
             receipt_effect = next((effect for effect in transaction._effects
                                    if effect.path == receipt_path and len(effect.before) == 1
                                    and receipt_path in effect.before
@@ -9030,7 +10534,7 @@ def _assert_canonical_skills_plan_current(
         if predecessor is not None:
             effect = next((item for item in transaction._effects
                            if item.path == target / "lead"
-                           and tuple(sorted(item.before.items())) == predecessor.canonical_state), None) if transaction is not None else None
+                           and item.preflight_state == predecessor.canonical_state), None) if transaction is not None else None
             if effect is not None:
                 transaction.assert_effect_current(effect)
             if predecessor.canonical_target != target or (effect is None and not
@@ -9144,6 +10648,8 @@ def _apply_canonical_skills_plan(
             lead.accepted_prior,
             lead.source,
             ignore_runtime_cache=lead.ignore_runtime_cache,
+            # A coupled peer transition still consumes the retained tree witness.
+            allow_file_additions=plan.transport_stage is None,
         )
     else:
         owner.create_tree(
@@ -9161,8 +10667,13 @@ def _apply_canonical_skills_plan(
                     continue
                 if plan.member_selection is not None:
                     continue  # Other receipt entries retain their exact authenticated meanings.
-                if _tree_sha256(target / name, ignore_runtime_cache=True) != digest:
-                    raise ValueError(f"E_MUTABLE_PATH_POSTCONDITION: non-Lead {name}")
+                if isinstance(digest, tuple):
+                    if _admitted_tree_manifest(owner.transaction, target / name, ignore_runtime_cache=True) != digest:
+                        raise ValueError(f"E_MUTABLE_PATH_POSTCONDITION: non-Lead {name}")
+                else:
+                    # A legacy unselected entry may only be carried unchanged;
+                    # it never acquires strong member authority by serialization.
+                    raise ValueError("E_LEGACY_TREE_WITNESS_UNAVAILABLE: " + name)
         if _read_nonlead_receipt(target / _NONLEAD_RECEIPT_NAME) != plan.nonlead_receipt:
             raise ValueError("E_CANONICAL_SKILLS_RECEIPT_DRIFT: before receipt effect")
         expected_entries = {name: ({"members": dict(value)} if isinstance(value, tuple) else value)
@@ -9235,6 +10746,7 @@ class _SkillProjectionPlan:
     target_identity: tuple[int, int, int, int] | None = None
     backup_digest: str | None = None
     canonical_skill: _CanonicalSkillPlan | None = None
+    historical_link: _PhysicalNode | None = None
 
 
 _ClaudeSkillProjectionPlan = _SkillProjectionPlan
@@ -9409,6 +10921,7 @@ def _preflight_codex_legacy_skill_projections(
         installed = projection_root / skill.name
         backup_target: Path | None = None
         backup_digest: str | None = None
+        historical_link: _PhysicalNode | None = None
         try:
             metadata = installed.lstat()
         except FileNotFoundError:
@@ -9424,6 +10937,36 @@ def _preflight_codex_legacy_skill_projections(
                     else "collision"
                 )
                 installed_digest = None
+                if (action == "collision" and skill.name in authorized_migrations
+                    and (stat.S_ISLNK(metadata.st_mode) or _is_directory_junction(installed))):
+                    # Admission and backup naming consume the same sealed link
+                    # image. A separate readlink could admit a swapped relative
+                    # link, which would rebind when moved to the backup namespace.
+                    if os.name == "nt":
+                        with _WindowsBoundNode(installed, purpose="observe") as bound:
+                            captured = _InstallTransaction._capture_node(installed, bound_node=bound)
+                            if captured.kind not in {"link", "reparse"} or captured.reparse_data is None:
+                                raise ValueError(f"E_LEGACY_CODEX_SKILL_COLLISION:{skill.name}")
+                            raw_target = bound.logical_target(captured.reparse_data)
+                            if (int.from_bytes(captured.reparse_data[:4], "little") == 0xA000000C
+                                and int.from_bytes(captured.reparse_data[16:20], "little") != 0):
+                                raw_target = None  # Relative or unknown symlink flags cannot move.
+                    else:
+                        captured = _InstallTransaction._capture_node(installed)
+                        raw_target = captured.data
+                    if captured.python_identity != target_identity:
+                        raise ValueError(f"E_LEGACY_CODEX_SKILL_COLLISION:{skill.name}")
+                    if (captured.kind in {"link", "reparse"} and isinstance(raw_target, str)
+                        and Path(raw_target).is_absolute() and Path(raw_target).is_dir()):
+                        historical_link = captured
+                        link_wire = json.dumps(
+                            [historical_link.kind, raw_target,
+                             historical_link.reparse_data.hex() if historical_link.reparse_data else None],
+                            ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+                        link_digest = hashlib.sha256(link_wire).hexdigest()
+                        backup_target = backup_root / skill.name / ("link-v1-" + link_digest)
+                        if not os.path.lexists(backup_target):
+                            action = "migrate-link"
             elif stat.S_ISDIR(metadata.st_mode):
                 installed_digest = _tree_sha256(
                     installed, ignore_runtime_cache=skill.ignore_runtime_cache
@@ -9434,9 +10977,10 @@ def _preflight_codex_legacy_skill_projections(
                     action = "collision"
                 else:
                     action = "migrate"
-                    backup_target = (
-                        backup_root / skill.name / installed_digest
-                    )
+                    legacy_name = _legacy_tree_sha256(installed, ignore_runtime_cache=skill.ignore_runtime_cache)
+                    legacy_backup = backup_root / skill.name / legacy_name
+                    backup_target = (legacy_backup if legacy_backup.exists() or legacy_backup.is_symlink()
+                                     else backup_root / skill.name / ("tree-v2-" + installed_digest))
                     if backup_target.exists() or backup_target.is_symlink():
                         backup_metadata = backup_target.lstat()
                         backup_digest = _tree_sha256(
@@ -9463,6 +11007,7 @@ def _preflight_codex_legacy_skill_projections(
                 backup_target,
                 target_identity,
                 backup_digest,
+                historical_link=historical_link,
             )
         )
     return tuple(plans), root_identity
@@ -9520,6 +11065,9 @@ def _assert_codex_legacy_skill_projection_plan_current(
         installed = projection_root / item.name
         if item.action == "create":
             current = not (installed.exists() or installed.is_symlink())
+        elif item.action == "migrate-link":
+            current = (_InstallTransaction._observe(installed)
+                       == {installed: item.historical_link})
         elif item.action == "current":
             current = (
                 _CreateOnlyMutablePath._identity(installed)
@@ -9542,6 +11090,10 @@ def _assert_codex_legacy_skill_projection_plan_current(
             raise ValueError(
                 f"E_LEGACY_CODEX_SKILL_COLLISION:{item.name}"
             )
+        if item.action == "migrate-link":
+            if item.backup_target is None or os.path.lexists(item.backup_target):
+                raise ValueError(f"E_LEGACY_CODEX_SKILL_COLLISION:{item.name}")
+            continue
         if item.backup_target is not None:
             observed_backup = (backup_digest_reader(item.backup_target, canonical.ignore_runtime_cache)
                 if backup_digest_reader is not None and item.action == "migrate" else (
@@ -9598,6 +11150,25 @@ def _apply_codex_legacy_skill_projection_plan(
             projection_owner.create_projection(relative, item.canonical_target)
             continue
         if item.action == "current":
+            continue
+        if item.action == "migrate-link":
+            assert item.historical_link is not None and item.backup_target is not None
+            target = projection_root / item.name
+            backup = home_owner.destination(item.backup_target.relative_to(home_owner.anchor))
+            if projection_owner.dry_run:
+                print(f"  [dry-run] would preserve legacy Codex link {target} -> {backup}")
+                continue
+            admitted = _admitted_mutation_image(transaction, target)
+            if admitted != {target: item.historical_link}:
+                raise ValueError(f"E_LEGACY_CODEX_SKILL_COLLISION:{item.name}")
+            home_owner._ensure_parent(backup)
+            home_owner._final_absence(backup)
+            projection_owner.retain_path(relative, admitted,
+                retained_destination=backup, preserve_on_commit=True, retained_owner=home_owner)
+            if not transaction._image_matches(backup, {backup: item.historical_link}):
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: retained legacy link")
+            projection_owner.create_projection(relative, item.canonical_target)
+            print(f"  Preserved legacy Codex link object: {backup}")
             continue
         assert item.action == "migrate"
         assert item.historical_digest is not None
@@ -9890,32 +11461,29 @@ def _admitted_mutation_image(transaction: _InstallTransaction, path: Path) -> di
     raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing admitted mutation image")
 
 
+def _admitted_tree_manifest(
+    transaction: _InstallTransaction, path: Path, *, ignore_runtime_cache: bool = False,
+) -> tuple[tuple[str, str], ...]:
+    """Bind included payload reads; traversal policy is not complete tree custody."""
+    storage_path = Path(os.path.abspath(path))
+    read_file = None
+    if transaction.enabled:
+        image = _admitted_mutation_image(transaction, storage_path)
+        read_file = lambda member: transaction._image_file_bytes(member, image.get(member))
+    return _stage_tree_manifest(
+        storage_path, ignore_runtime_cache=ignore_runtime_cache, read_file=read_file)
+
+
 def _reclaim_claude_namespace(
     source: Path, commands_target: Path, skills_target: Path, dry_run: bool, *,
     commands_owner: _CreateOnlyMutablePath | None = None,
     skills_owner: _CreateOnlyMutablePath | None = None,
 ) -> None:
-    for installed in _claude_stale_namespace_paths(
-        source, commands_target, skills_target
-    ):
+    for installed in _claude_stale_namespace_paths(source, commands_target, skills_target):
         root = commands_target if installed.is_relative_to(commands_target) else skills_target
-        relative = installed.relative_to(root).as_posix()
         namespace = "commands" if root == commands_target else "skills"
-        if dry_run:
-            print(
-                "    [dry-run] would reclaim stale pack namespace: "
-                f"{namespace}/{relative}"
-            )
-            continue
-        owner = commands_owner if root == commands_target else skills_owner
-        if owner is not None and owner.transaction.enabled:
-            owner.retain_path(installed.relative_to(owner.anchor),
-                              _admitted_mutation_image(owner.transaction, installed))
-        elif installed.is_symlink() or installed.is_file():
-            installed.unlink()
-        else:
-            shutil.rmtree(installed)
-        print(f"  Reclaimed stale pack item: {namespace}/{relative}")
+        print(f"  Preserved unowned stale instruction; not removed: {namespace}/{installed.relative_to(root).as_posix()}")
+
 
 
 def _owned_byte_context(target: Path, owner: _CreateOnlyMutablePath):
@@ -9940,9 +11508,14 @@ def _owned_byte_context(target: Path, owner: _CreateOnlyMutablePath):
     return storage, node, selected_owner
 
 
-def _read_owned_text(target: Path, owner: _CreateOnlyMutablePath | None) -> str | None:
+def _read_owned_text(target: Path, owner: _CreateOnlyMutablePath | None, *,
+                     preserve_newlines: bool = False) -> str | None:
+    newline = "" if preserve_newlines else None
     if owner is None or not owner.transaction.enabled:
-        return target.read_text(encoding="utf-8") if target.is_file() else None
+        if not target.is_file():
+            return None
+        with target.open("r", encoding="utf-8", newline=newline) as stream:
+            return stream.read()
     storage, node, _selected_owner = _owned_byte_context(target, owner)
     if node is None:
         return None
@@ -9950,7 +11523,7 @@ def _read_owned_text(target: Path, owner: _CreateOnlyMutablePath | None) -> str 
         payload = owner.transaction._descriptor_bytes(descriptor, path=storage)
         if hashlib.sha256(payload).hexdigest() != node.data:
             raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: producer input bytes")
-    with io.TextIOWrapper(io.BytesIO(payload), encoding="utf-8") as stream:
+    with io.TextIOWrapper(io.BytesIO(payload), encoding="utf-8", newline=newline) as stream:
         return stream.read()
 
 
@@ -9964,37 +11537,83 @@ def _write_owned_text(target: Path, content: str, owner: _CreateOnlyMutablePath 
                               mode=None, fsync="none")
 
 
-def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *,
-                       mutable_owner: _CreateOnlyMutablePath | None = None) -> None:
-    pack = (
-        CODEX_BEGIN
-        + "\n"
-        + (root / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8").rstrip()
-        + "\n\n"
-        + (source / "AGENTS.codex.md").read_text(encoding="utf-8").rstrip()
-        + "\n"
-        + CODEX_END
-        + "\n"
-    )
-    existing = _read_owned_text(target, mutable_owner)
+def _render_codex_document(existing: str | None, pack: str) -> str:
+    """Render proposed Codex text using the existing compatible boundaries."""
     if existing is not None:
-        if CODEX_BEGIN in existing and CODEX_END in existing:
-            start = existing.index(CODEX_BEGIN)
-            end = existing.index(CODEX_END, start) + len(CODEX_END)
+        # Select starts outside code, but retain the old raw ending boundary:
+        # filtering an END or policy heading could expand the replaced extent.
+        # Receipt ownership remains a separate lifecycle gate.
+        visible, _ = _markdown_document_context(existing)
+        if CODEX_BEGIN in visible:
+            start = visible.index(CODEX_BEGIN)
+            line_start = max(existing.rfind("\r", 0, start), existing.rfind("\n", 0, start)) + 1
+            prefix = existing[line_start:start]
+            if line_start == 0 and prefix.startswith("\ufeff"):
+                prefix = prefix[1:]
+            if prefix.strip(" \t"):
+                raise ValueError("E_CODEX_DOCUMENT_AMBIGUOUS: text before managed begin marker")
+            end = existing.find(CODEX_END, start)
+            if end < 0:
+                raise ValueError("E_CODEX_DOCUMENT_AMBIGUOUS: missing managed end marker")
+            marker_stop = start + len(CODEX_BEGIN)
+            line_stop = min((position for newline in ("\r", "\n")
+                             if (position := existing.find(newline, marker_stop)) >= 0),
+                            default=len(existing))
+            if existing[marker_stop:min(line_stop, end)].strip(" \t"):
+                raise ValueError("E_CODEX_DOCUMENT_AMBIGUOUS: text after managed begin marker")
+            end += len(CODEX_END)
             content = existing[:start] + pack.rstrip("\n") + existing[end:]
-        elif "# Shared Governance" in existing or "# Codex Platform Rules" in existing:
-            starts = [
-                position
-                for marker in ("# Shared Governance", "# Codex Platform Rules", "# Default Delegation Rule")
-                if (position := existing.find(marker)) >= 0
-            ]
-            start = min(starts)
-            policy = existing.find("## Project policies", start)
-            content = existing[:start] + pack + (existing[policy:] if policy >= 0 else "")
+        elif CODEX_END in visible:
+            raise ValueError("E_CODEX_DOCUMENT_AMBIGUOUS: missing active managed begin marker")
         else:
-            content = pack + "\n" + existing
+            headings = _markdown_document_h1_starts(existing, (
+                "Shared Governance", "Codex Platform Rules", "Default Delegation Rule"))
+            if any(title in ("Shared Governance", "Codex Platform Rules")
+                   for title, _position in headings):
+                raise _InstallFailure("E_CODEX_DOCUMENT_LEGACY_OWNERSHIP_REQUIRED", "prepared")
+            else:
+                content = pack + "\n" + existing
     else:
         content = pack
+    return content
+
+
+def _codex_document_payload(shared_text: str, codex_text: str) -> str:
+    return shared_text.rstrip() + "\n\n" + codex_text.rstrip() + "\n"
+
+
+def _prepare_codex_agents(root: Path, source: Path, target: Path, *,
+                         mutable_owner: _CreateOnlyMutablePath | None = None,
+                         project_scope: bool = False) -> _DocumentResult:
+    """Read exact inputs and propose Codex text without writing or claiming ownership."""
+    pack = (CODEX_BEGIN + "\n" + _codex_document_payload(
+        (root / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8"),
+        (source / "AGENTS.codex.md").read_text(encoding="utf-8")) + CODEX_END + "\n")
+    existing = _read_owned_text(target, mutable_owner, preserve_newlines=True)
+    scope = "project" if project_scope else "global"
+    logical_path = "AGENTS.md" if project_scope else ".codex/AGENTS.md"
+    before = None if existing is None else existing.encode("utf-8")
+    result, = _render_document_outcomes(
+        "codex", scope, {logical_path: before},
+        lambda _kind, text: _render_codex_document(text, pack))
+    return result
+
+
+def _warn_codex_project_budget(content: str) -> None:
+    print(f"  WARNING: standalone project instruction budget may be exceeded "
+          f"(rendered document: {len(content.encode('utf-8'))} UTF-8 bytes). "
+          "The effective client budget and other project instructions are not verified; "
+          "some rules may not be loaded.")
+
+
+def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool, *,
+                       mutable_owner: _CreateOnlyMutablePath | None = None,
+                       project_scope: bool = False) -> None:
+    proposed = _prepare_codex_agents(
+        root, source, target, mutable_owner=mutable_owner, project_scope=project_scope)
+    content = proposed.after.decode("utf-8")
+    if project_scope:
+        _warn_codex_project_budget(content)
     if dry_run:
         print(f"    [dry-run] would merge {target}")
     else:
@@ -10008,7 +11627,7 @@ _CLAUDE_DOC_MARKER_PREFIXES = tuple(
 
 
 def _claude_document_context(text: str) -> tuple[str, list[tuple[int, int]]]:
-    """Delegate code status and original-offset transport to the pinned parser."""
+    """Delegate code status and original-offset transport to the bundled parser."""
     return _markdown_document_context(text)
 
 
@@ -10026,6 +11645,23 @@ def _render_claude_document(existing: str | None, payload: str, *, claude: bool)
     if existing is None:
         return owned
 
+    # Use the established normalized selection view, then splice original slices.
+    # This transports offsets only; it establishes no additional ownership.
+    original = existing
+    offsets = [0]
+    index = 0
+    while index < len(original):
+        index += 2 if original.startswith("\r\n", index) else 1
+        offsets.append(index)
+    existing = original.replace("\r\n", "\n").replace("\r", "\n")
+
+    def splice(start: int, stop: int, replacement: str) -> str:
+        prefix = original[:offsets[start]]
+        # Prevent a preserved lone CR from absorbing an inserted blank line.
+        if prefix.endswith("\r") and replacement.startswith("\n"):
+            replacement = "\r" + replacement
+        return prefix + replacement + original[offsets[stop]:]
+
     visible, code = _claude_document_context(existing)
     anchors = list(re.finditer(r"(?m)^@AGENTS\.md$", visible)) if claude else []
 
@@ -10040,7 +11676,9 @@ def _render_claude_document(existing: str | None, payload: str, *, claude: bool)
                     or match.start() >= markers[1].start() + len(end) for match in anchors))):
             raise ValueError(f"E_CLAUDE_DOC_MARKERS_INVALID: {name}")
         start = markers[0].start() + len(begin)
-        return existing[:start] + payload + existing[markers[1].start():]
+        if existing[start:markers[1].start()] == payload:
+            return original
+        return splice(start, markers[1].start(), payload)
 
     signatures = r"(?m)^(?:# Claude Code Pack|# Claudestrator)$" if claude else r"(?m)^# Shared Governance$"
     active_signatures = {match.start() for match in re.finditer(signatures, visible)}
@@ -10059,26 +11697,46 @@ def _render_claude_document(existing: str | None, payload: str, *, claude: bool)
                 or match.start() >= matches[0].start() + len(payload) for match in anchors))):
             raise ValueError(f"E_CLAUDE_DOC_LEGACY_AMBIGUOUS: {name}")
         start = matches[0].start()
-        return existing[:start] + begin + payload + end + existing[start + len(payload):]
+        return splice(start, start + len(payload), begin + payload + end)
     if anchors:
         offset = anchors[0].start()
-        return existing[:offset] + begin + payload + end + existing[offset:]
-    return owned + "\n" + existing
+        return splice(offset, offset, begin + payload + end)
+    return owned + "\n" + original
 
 
-def _merge_claude_docs(root: Path, source: Path, target: Path, dry_run: bool, *,
-                       mutable_owner: _CreateOnlyMutablePath | None = None) -> None:
+def _prepare_claude_docs(root: Path, source: Path, target: Path, *,
+                         mutable_owner: _CreateOnlyMutablePath | None = None,
+                         project_scope: bool = False) -> tuple[_DocumentResult, _DocumentResult]:
     claude_source = (source / "CLAUDE.md").read_text(encoding="utf-8")
     anchor = "@AGENTS.md\n"
     if not claude_source.startswith(anchor):
         raise ValueError("E_CLAUDE_DOC_SOURCE_SHAPE: CLAUDE.md")
     shared = (root / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8")
     agents_target = target.parent / "AGENTS.md"
-    # Classify both documents before publishing either, including on dry-run.
-    content = _render_claude_document(_read_owned_text(target, mutable_owner),
-                                     claude_source[len(anchor):], claude=True)
-    shared_content = _render_claude_document(_read_owned_text(agents_target, mutable_owner),
-                                            shared, claude=False)
+    scope = "project" if project_scope else "global"
+    # Keep the first render before the second read, and both before any write.
+    existing = _read_owned_text(target, mutable_owner, preserve_newlines=True)
+    claude_result = _render_document_outcome(
+        "claude", scope, ".claude/CLAUDE.md",
+        None if existing is None else existing.encode("utf-8"),
+        lambda _kind, text: _render_claude_document(
+            text, claude_source[len(anchor):], claude=True))
+    existing = _read_owned_text(agents_target, mutable_owner, preserve_newlines=True)
+    shared_result = _render_document_outcome(
+        "claude", scope, ".claude/AGENTS.md",
+        None if existing is None else existing.encode("utf-8"),
+        lambda _kind, text: _render_claude_document(text, shared, claude=False))
+    return claude_result, shared_result
+
+
+def _merge_claude_docs(root: Path, source: Path, target: Path, dry_run: bool, *,
+                       mutable_owner: _CreateOnlyMutablePath | None = None,
+                       project_scope: bool = False) -> None:
+    proposed, shared_proposed = _prepare_claude_docs(
+        root, source, target, mutable_owner=mutable_owner, project_scope=project_scope)
+    agents_target = target.parent / "AGENTS.md"
+    content = proposed.after.decode("utf-8")
+    shared_content = shared_proposed.after.decode("utf-8")
     if dry_run:
         print(f"    [dry-run] would merge {target} and {agents_target}")
     else:
@@ -10105,25 +11763,6 @@ def _load_claude_settings(settings_path: Path, *,
     return data
 
 
-def _merge_claude_main_agent(
-    settings: dict[str, Any], delegation_mode: str | None
-) -> tuple[str, bool]:
-    """Apply the sole persistent Lead-default policy to a decoded settings object."""
-    if "agent" in settings and isinstance(settings["agent"], (dict, list)):
-        raise ValueError("Claude settings agent must be a scalar")
-    mode = delegation_mode.casefold() if isinstance(delegation_mode, str) else ""
-    if mode == "force":
-        if "agent" not in settings:
-            settings["agent"] = "lead"
-            return "lead-default-written", True
-        if settings["agent"] == "lead":
-            return "lead-already-selected", False
-        return "preserved-nonlead-agent", False
-    if mode in {"auto", "manual"}:
-        return "mode-preserved", False
-    return "mode-unresolved", False
-
-
 def _load_module_from_path(module_name: str, path: Path):
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
@@ -10132,56 +11771,6 @@ def _load_module_from_path(module_name: str, path: Path):
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
-
-
-def _resolve_claude_delegation_mode(
-    root: Path, project_root: Path, home: Path | None
-) -> str:
-    """Use the existing agents-mode resolver; a resolution failure is non-mutating."""
-    if home is None:
-        return "unresolved"
-    try:
-        resolver = _load_module_from_path(
-            "orchestrarium_resolve_agents_mode",
-            root / "scripts" / "resolve-agents-mode.py",
-        )
-        resolved = resolver.resolve("claude", project_root, home, root)
-        mode = resolved["values"].get("delegationMode")
-    except (KeyError, OSError, RuntimeError, ValueError):
-        return "unresolved"
-    return mode.casefold() if isinstance(mode, str) else "unresolved"
-
-
-def _merge_claude_main_agent_settings(
-    root: Path,
-    settings_path: Path,
-    delegation_mode: str,
-    dry_run: bool,
-    *, mutable_owner: _CreateOnlyMutablePath | None = None,
-) -> str:
-    settings = _load_claude_settings(settings_path, mutable_owner=mutable_owner)
-    outcome, changed = _merge_claude_main_agent(settings, delegation_mode)
-    if outcome == "preserved-nonlead-agent":
-        print("WARN: Claude main agent preserved; force lead binding not installed")
-    elif outcome == "mode-unresolved":
-        print("WARN: Claude main-agent binding skipped; delegationMode unresolved")
-    if not changed:
-        return outcome
-    if dry_run:
-        print(f"    [dry-run] would set Claude settings agent to lead ({settings_path})")
-        return outcome
-    hook_installer = _load_module_from_path(
-        "orchestrarium_install_hypothesis_hook",
-        root / "scripts" / "install-hypothesis-hook.py",
-    )
-    if mutable_owner is not None and mutable_owner.transaction.enabled:
-        storage, _node, selected_owner = _owned_byte_context(settings_path, mutable_owner)
-        selected_owner.replace_file_atomic(storage.relative_to(selected_owner.anchor),
-            hook_installer.encode_hook_config(settings), mode=None, fsync="best-effort",
-            temporary_prefix=".install-hypothesis-hook.")
-    else:
-        hook_installer.write_atomic(settings_path, settings)
-    return outcome
 
 
 def _installer_child_environment() -> dict[str, str]:
@@ -10571,23 +12160,6 @@ def _run_hook_health_bounded(
                 pass
 
 
-_HOOK_METADATA = (
-    ("check-bugfix-discipline", "scripts", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch"),
-    ("check-git-push-gate", "scripts", "PreToolUse", "Bash|PowerShell"),
-    ("check-passive-polling-stop", "scripts", "Stop", None),
-    ("check-machine-local-path", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch"),
-    ("check-no-trash-in-repo", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell"),
-    ("check-parallel-mcp-momentum", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell|shell_command|exec_command"),
-    ("check-stale-relation-residue", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch"),
-    ("check-repository-orientation", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell|shell_command|exec_command"),
-    ("check-mcp-momentum", "hooks", "PreToolUse", "Grep|Bash|PowerShell|shell_command|exec_command"),
-    ("mcp-usage-reminder", "scripts", "SessionStart", None),
-    ("check-typed-routing", "hooks", "PreToolUse", "Agent"),
-    ("agents-mode-reminder", "scripts", "SessionStart", None),
-    ("check-scratch-valuables", "scripts", "SessionStart", None),
-    ("turn-anchor-reminder", "scripts", "UserPromptSubmit", None),
-)
-
 _CODEX_HOOK_STATUS_MESSAGES = {
     "agents-mode-reminder": "Load delegation mode",
     "check-bugfix-discipline": "Check fix discipline",
@@ -10603,15 +12175,6 @@ _CODEX_HOOK_STATUS_MESSAGES = {
     "turn-anchor-reminder": "Anchor active work",
 }
 
-_HOOK_DIRECTORY_OVERRIDES = {
-    ("claude", "check-mcp-momentum"): "scripts",
-}
-
-_HOOK_SCRIPT_OVERRIDES = {
-    "check-git-push-gate": "check-git-push-gate-runner.py",
-}
-
-
 def _universal_hook_manifest_module():
     path = Path(__file__).with_name("universal_hooks_manifest.py")
     spec = importlib.util.spec_from_file_location("orchestrarium_universal_hook_manifest", path)
@@ -10623,14 +12186,13 @@ def _universal_hook_manifest_module():
     return module
 
 
+_HOOK_MANIFEST = _universal_hook_manifest_module()
+_HOOK_METADATA = _HOOK_MANIFEST.HOOK_METADATA
+_HOOK_SCRIPT_OVERRIDES = _HOOK_MANIFEST.HOOK_SCRIPT_OVERRIDES
+
+
 def _hook_specs(provider: str, installed_root: Path):
-    scripts = installed_root / "scripts"
-    hooks = installed_root / "hooks"
-    membership = _universal_hook_manifest_module().registered_hook_stems(provider)
-    metadata = {stem: (directory, event, matcher) for stem, directory, event, matcher in _HOOK_METADATA}
-    missing = sorted(membership.difference(metadata))
-    if missing:
-        raise RuntimeError("registered hook metadata is missing for: " + ", ".join(missing))
+    membership = _HOOK_MANIFEST.registered_hook_stems(provider)
     missing_statuses = (
         sorted(membership.difference(_CODEX_HOOK_STATUS_MESSAGES))
         if provider == "codex"
@@ -10641,21 +12203,59 @@ def _hook_specs(provider: str, installed_root: Path):
             "Codex hook status-message catalog is missing: "
             + ", ".join(missing_statuses)
         )
-    roots = {"scripts": scripts, "hooks": hooks}
-    specs = [
-        (
-            stem,
-            roots[_HOOK_DIRECTORY_OVERRIDES.get((provider, stem), directory)]
-            / _HOOK_SCRIPT_OVERRIDES.get(stem, f"{stem}.py"),
-            event,
-            matcher,
-        )
-        for stem, directory, event, matcher in _HOOK_METADATA
-        if stem in membership
-    ]
-    if len(specs) != len(membership):
-        raise RuntimeError("registered hook membership did not resolve uniquely")
-    return specs
+    return _HOOK_MANIFEST.registered_hook_specs(provider, installed_root)
+
+
+def _verified_legacy_hook_targets(provider: str, installed_root: Path, markers: set[str], *,
+                                  legacy_provider_root: Path | None = None, witnesses=None):
+    """Admit only exact hash-pinned retired leaves under the selected package."""
+    powershell = _CODEX_RETIRED_PS1 if provider == "codex" else _CLAUDE_RETIRED_PS1
+    shells = _CODEX_RETIRED_SH if provider == "codex" else _CLAUDE_RETIRED_SH
+    prefix = ("skills", "lead") if provider == "codex" else ("agents",)
+    result = {marker: set() for marker in markers}
+    for name, digest in (*powershell.items(), *shells.items()):
+        relative = Path(name)
+        parts = relative.parts
+        if parts[:len(prefix)] == prefix:
+            relative = Path(*parts[len(prefix):])
+        if len(relative.parts) != 2 or relative.parts[0] not in ("scripts", "hooks"):
+            continue
+        marker = relative.stem
+        if marker not in result:
+            continue
+        roots = [installed_root]
+        if provider == "codex" and parts[:len(prefix)] == prefix and legacy_provider_root is not None:
+            roots.append(legacy_provider_root / "skills/lead")
+        for root in roots:
+            candidate = root / relative
+            try:
+                before = candidate.lstat()
+                if not stat.S_ISREG(before.st_mode) or stat.S_ISLNK(before.st_mode) or getattr(before, "st_file_attributes", 0) & 0x400:
+                    continue
+                descriptor = os.open(candidate, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0))
+                with os.fdopen(descriptor, "rb") as stream:
+                    opened = os.fstat(stream.fileno())
+                    payload = stream.read()
+                after = candidate.lstat()
+                identity = lambda value: (value.st_dev, value.st_ino, value.st_mode, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+                if identity(before) == identity(opened) == identity(after) and hashlib.sha256(payload).hexdigest() == digest:
+                    result[marker].add(str(candidate))
+                    if witnesses is not None:
+                        witnesses[str(candidate)] = (identity(after), digest)
+            except OSError:
+                continue
+    return result
+
+
+def _recheck_legacy_hook_targets(provider: str, installed_root: Path, marker: str,
+                                 expected: dict, legacy_provider_root: Path | None) -> None:
+    if not expected:
+        return
+    current = {}
+    _verified_legacy_hook_targets(provider, installed_root, {marker},
+                                  legacy_provider_root=legacy_provider_root, witnesses=current)
+    if any(current.get(path) != witness for path, witness in expected.items()):
+        raise ValueError("verified legacy hook artifact changed")
 
 
 def _hook_health_module(root: Path):
@@ -10746,7 +12346,7 @@ def _install_codex_legacy_skill_compatibility(
     mutation_paths = [
         path
         for item in plan
-        if item.action in {"create", "migrate"}
+        if item.action in {"create", "migrate", "migrate-link"}
         for path in (
             projection_root / item.name,
             *(
@@ -10757,6 +12357,8 @@ def _install_codex_legacy_skill_compatibility(
         )
     ]
     transaction = _InstallTransaction(mutation_paths, enabled=not dry_run,
+        link_object_paths=tuple(projection_root / item.name for item in plan
+                                if item.action == "migrate-link"),
         readonly_paths=tuple(item.backup_target for item in plan
                              if item.action == "migrate" and item.backup_target is not None))
     collisions: tuple[str, ...] = ()
@@ -10830,8 +12432,10 @@ def _publish_hook_data(helper, registration: Path, data: dict[str, Any],
 
 def _transform_hook_registration(helper, registration: Path, owner: _CreateOnlyMutablePath,
                                  marker: str, event: str, platform: str, host: str, *,
-                                 entry=None, expected_entry=None) -> None:
-    data = helper.load_existing(_HookConfigInput(registration, _read_owned_text(registration, owner)))
+                                 entry=None, expected_entry=None, managed_targets=None,
+                                 staged_data: dict[str, Any] | None = None) -> None:
+    data = (staged_data if staged_data is not None else
+            helper.load_existing(_HookConfigInput(registration, _read_owned_text(registration, owner))))
     removal = entry is None
     if removal:
         changed = helper.remove(data, event, marker, expected_entry=expected_entry,
@@ -10842,12 +12446,74 @@ def _transform_hook_registration(helper, registration: Path, owner: _CreateOnlyM
                 entries, marker, platform, host):
             print(f"  Preserving unmatched {marker} registration identities")
     else:
-        changed = helper.install(data, entry, event, marker, platform=platform, host_os=host)
+        changed = helper.install(data, entry, event, marker, platform=platform, host_os=host,
+                                 managed_targets=managed_targets)
     if not changed:
         print(f"  {marker} hook already present in {registration} (no-op)")
         return
-    _publish_hook_data(helper, registration, data, owner, remove=removal)
-    print(f"  {marker} hook {'removed' if removal else 'installed/updated'} in {registration}")
+    if staged_data is None:
+        _publish_hook_data(helper, registration, data, owner, remove=removal)
+        print(f"  {marker} hook {'removed' if removal else 'installed/updated'} in {registration}")
+    else:
+        print(f"  Planned {marker} hook {'removal' if removal else 'update'}")
+
+
+def _find_portable_codex_inventory(root: Path, registration: Path) -> Path | None:
+    """Recognize the installer's shared mode without adopting paths from JSON."""
+    if not registration.is_file():
+        return None
+    health = _hook_health_module(root)
+    resolved, links, _target = health._resolve_hooks_target(
+        registration, allow_missing_ordinary=False
+    )
+    if not links:
+        return None
+    inventory = resolved.parent / health.INVENTORY_NAME
+    try:
+        inventory.lstat()
+    except FileNotFoundError:
+        return None
+    try:
+        authority = health._inventory_authority(registration, inventory, for_write=False)
+        data = health._load(authority.inventory)
+        health._recheck_inventory_authority(authority, for_write=False)
+        version = data.get("schemaVersion")
+        if version == 1:
+            return None
+        if version == 2 and data.get("sourceBinding") == health._PORTABLE_INVENTORY_SOURCE:
+            return inventory
+    except (OSError, ValueError) as exc:
+        raise ValueError("E_SHARED_HOOK_RUNTIME: unreadable linked hook inventory") from exc
+    raise ValueError("E_SHARED_HOOK_RUNTIME: unrecognized linked hook inventory")
+
+
+def _retained_codex_hook_root(root: Path, registration: Path) -> Path:
+    """Select one retained release, not any interpreter found on PATH."""
+    health = _hook_health_module(root)
+    _resolved, links, _target = health._resolve_hooks_target(
+        registration, allow_missing_ordinary=False
+    )
+    if not links:
+        raise ValueError("E_SHARED_HOOK_RUNTIME: a linked hooks.json is required")
+    package = root.parent
+    launcher_file = package / "launch.py"
+    if (not launcher_file.is_file() or not (package / "bundle.json").is_file()
+            or _contains_reparse(package) or _contains_reparse(launcher_file)):
+        raise ValueError("E_SHARED_HOOK_RUNTIME: select the retained local bundle")
+    launcher = _load_module_from_path(
+        "orchestrarium_retained_hook_launcher", launcher_file
+    )
+    python, entry = launcher.resolve_launch(package, Path(sys.executable))
+    if entry != root / "install.py":
+        raise ValueError("E_SHARED_HOOK_RUNTIME: install from the retained bundle launcher")
+    lead = root / "src.codex" / "skills" / "lead"
+    host = "windows" if os.name == "nt" else "posix"
+    helper = _load_module_from_path(
+        "orchestrarium_install_hypothesis_hook", root / "scripts" / "install-hypothesis-hook.py"
+    )
+    for _marker, script, _event, _matcher in _hook_specs("codex", lead):
+        helper.resolve_hook_target(str(script), host, "codex", python_executable=str(python))
+    return lead
 
 
 def _install_hooks(
@@ -10859,23 +12525,39 @@ def _install_hooks(
     inventory_path: Path | None = None,
     *, transaction: _InstallTransaction | None = None,
     mutable_owner: _CreateOnlyMutablePath | None = None,
+    prior_installed_root: Path | None = None,
+    hooks_only_recheck=None,
+    prior_specs=None,
+    scoped_transitions=(),
+    preview: bool = False,
 ) -> None:
     installer = root / "scripts" / "install-hypothesis-hook.py"
     host = "windows" if os.name == "nt" else "posix"
+    selected_specs = list(_hook_specs(provider, installed_root))
+    portable_inventory = prior_installed_root is not None
+    if portable_inventory and (provider != "codex" or mode != "global"):
+        raise ValueError("E_SHARED_HOOK_RUNTIME: global Codex only")
+    hooks_only = hooks_only_recheck is not None
+    if (preview or hooks_only) and (not portable_inventory or (preview and not hooks_only)):
+        raise ValueError("E_SHARED_HOOK_RUNTIME: explicit shared hook operation required")
+    installed_checker_root = prior_installed_root or installed_root
     owned = transaction is not None and transaction.enabled
+    if portable_inventory and not (owned or preview):
+        raise ValueError("E_SHARED_HOOK_RUNTIME: retained hooks require a transaction")
     if owned and (mutable_owner is None or mutable_owner.transaction is not transaction):
         raise ValueError("E_MUTABLE_PATH_ESCAPE: hooks require their admitted writer")
     helper = (_load_module_from_path("orchestrarium_install_hypothesis_hook", installer)
-              if owned else None)
-    namespace_owner = _hook_health_module(root) if owned else None
+              if owned or preview else None)
+    namespace_owner = _hook_health_module(root) if owned or preview else None
     namespace = (namespace_owner._resolve_hooks_target(registration, allow_missing_ordinary=True)
-                 if owned else None)
+                 if owned or preview else None)
     def require_namespace():
-        if owned:
+        if owned or preview:
             current = namespace_owner._resolve_hooks_target(registration, allow_missing_ordinary=True)
             if current[:2] != namespace[:2]:
                 raise ValueError("E_HOOK_INVENTORY_TARGET_INVALID: registration namespace changed")
-            _owned_byte_context(registration, mutable_owner)
+            if owned:
+                _owned_byte_context(registration, mutable_owner)
     base = [
         str(installer),
         "--target",
@@ -10902,22 +12584,55 @@ def _install_hooks(
     )
     if preflight.returncode:
         raise RuntimeError("hook transaction preflight failed")
-    for _marker, script, _event, _matcher in _hook_specs(provider, installed_root):
+    for _marker, script, _event, _matcher in selected_specs:
         proc = _run([*base, "--script-path", str(script), "--validate-only"], root)
         if proc.returncode:
             raise RuntimeError(f"hook target preflight failed for {script}")
-    _checkpoint(root, installer, registration, provider, mode, "sync")
-    retired_specs = [(marker, event, []) for marker, event in RETIRED_HOOK_SPECS]
-    if provider == "codex":
+    if not preview:
+        _checkpoint(root, installer, registration, provider, mode, "sync")
+    staged_data = None
+    if portable_inventory:
+        require_namespace()
+        initial_text = _read_owned_text(registration, mutable_owner)
+        staged_data = helper.load_existing(_HookConfigInput(registration, initial_text))
+        initial_shape = helper.encode_hook_config(staged_data)
+    # A scoped operation proves only the inventory's complete current set.
+    # It does not enroll or retire legacy commands outside that proof.
+    retired_specs = [] if hooks_only else [(marker, event, []) for marker, event in RETIRED_HOOK_SPECS]
+    if provider == "codex" and not hooks_only:
         marker, directory, event, matcher = next(
             spec for spec in _HOOK_METADATA if spec[0] == "check-mcp-momentum"
         )
         retired_specs.append((
             marker,
             event,
-            ["--script-path", str(installed_root / directory / f"{marker}.py"), "--tool-matcher", matcher],
+            ["--script-path", str(installed_checker_root / directory / f"{marker}.py"), "--tool-matcher", matcher],
         ))
     health_module = _hook_health_module(root) if provider == "codex" else None
+    managed_targets = {marker: {str(script)} for marker, script, _event, _matcher in selected_specs}
+    legacy_witnesses = {}
+    legacy_root = registration.parent if provider == "codex" else None
+    legacy_targets = {} if hooks_only else _verified_legacy_hook_targets(
+        provider, installed_checker_root, set(managed_targets), legacy_provider_root=legacy_root,
+        witnesses=legacy_witnesses,
+    )
+
+    def recheck_legacy(marker):
+        if hooks_only:
+            return
+        expected = {path: legacy_witnesses[path] for path in legacy_targets.get(marker, ())}
+        _recheck_legacy_hook_targets(provider, installed_checker_root, marker, expected, legacy_root)
+    for marker, paths in legacy_targets.items():
+        managed_targets[marker].update(paths)
+    predecessor_witnesses = {}
+    if portable_inventory:
+        prior_targets, predecessor_witnesses = health_module._selected_hook_targets(
+            prior_specs if prior_specs is not None else _hook_specs("codex", prior_installed_root)
+        )
+        for marker, targets in prior_targets.items():
+            if hooks_only or marker in managed_targets:
+                managed_targets.setdefault(marker, set()).update(targets)
+
     before_definitions = (
         health_module.owned_definition_snapshots(
             target=registration,
@@ -10926,10 +12641,49 @@ def _install_hooks(
             repo_root=root,
             stems=health_module._manifest_stems(root, "codex")
             | {marker for marker, _event, _arguments in retired_specs},
+            managed_targets=managed_targets,
         )
-        if health_module is not None and registration.is_file()
+        if health_module is not None and not preview and registration.is_file()
         else {}
     )
+    def install_selected(spec):
+        marker, script, event, matcher = spec
+        recheck_legacy(marker)
+        if portable_inventory:
+            health_module._recheck_selected_hook_targets(predecessor_witnesses, marker)
+        try:
+            require_namespace()
+            hook_target = helper.resolve_hook_target(str(script), host, provider)
+            entry = (helper.build_codex_entry(hook_target, host, event, matcher,
+                                             _CODEX_HOOK_STATUS_MESSAGES[marker])
+                     if provider == "codex" else helper.build_claude_entry(hook_target, event, matcher))
+            _transform_hook_registration(helper, registration, mutable_owner, marker, event,
+                                         provider, host, entry=entry, managed_targets=managed_targets,
+                                         staged_data=staged_data)
+            recheck_legacy(marker)
+            if portable_inventory:
+                health_module._recheck_selected_hook_targets(predecessor_witnesses, marker)
+        except helper.CodexHookSlotShift as exc:
+            raise _InstallFailure(exc.stable_id, "migration", exc) from exc
+        except (OSError, ValueError, SystemExit) as exc:
+            raise RuntimeError(f"hook registration failed for {marker}") from exc
+
+    selected_by_marker = {spec[0]: spec for spec in selected_specs}
+    relocated = set()
+    for marker, event, expected_entry in scoped_transitions:
+        successor = selected_by_marker.get(marker)
+        if successor is not None and successor[2] == event:
+            # The update owner carries handler metadata to the new matcher.
+            install_selected(successor)
+            relocated.add(marker)
+            continue
+        require_namespace()
+        try:
+            if not helper.remove(staged_data, event, marker, expected_entry=expected_entry,
+                                 platform=provider, host_os=host):
+                raise ValueError("E_SHARED_HOOK_RUNTIME: predecessor hook could not be retired exactly")
+        except helper.CodexHookSlotShift as exc:
+            raise _InstallFailure(exc.stable_id, "migration", exc) from exc
     for marker, event, identity_arguments in retired_specs:
         if owned:
             try:
@@ -10940,7 +12694,9 @@ def _install_hooks(
                                                              require_script=False)
                     expected_entry = helper.build_codex_entry(hook_target, host, event, identity_arguments[3])
                 _transform_hook_registration(helper, registration, mutable_owner, marker, event,
-                    provider, host, expected_entry=expected_entry)
+                    provider, host, expected_entry=expected_entry, staged_data=staged_data)
+            except helper.CodexHookSlotShift as exc:
+                raise _InstallFailure(exc.stable_id, "migration", exc) from exc
             except (OSError, ValueError, SystemExit) as exc:
                 raise RuntimeError(f"obsolete hook removal failed for {marker}") from exc
             continue
@@ -10960,7 +12716,7 @@ def _install_hooks(
             raise RuntimeError(f"obsolete hook removal failed for {marker}")
     codex_command = (
         health_module.resolve_codex_command(os.environ.get("CODEX_BIN"))
-        if health_module is not None
+        if health_module is not None and not preview
         else None
     )
     if inventory_path is None:
@@ -10969,24 +12725,15 @@ def _install_hooks(
             if health_module is not None
             else registration.parent / CODEX_HOOK_INVENTORY
         )
-    if health_module is not None:
-        manifest_stems = health_module._manifest_stems(root, "codex")
-        spec_stems = {marker for marker, *_rest in _hook_specs(provider, installed_root)}
-        if manifest_stems != spec_stems:
-            raise RuntimeError("Codex hook specifications drifted from universal manifest")
-    for marker, script, event, matcher in _hook_specs(provider, installed_root):
-        if owned:
-            try:
-                require_namespace()
-                hook_target = helper.resolve_hook_target(str(script), host, provider)
-                entry = (helper.build_codex_entry(hook_target, host, event, matcher,
-                                                 _CODEX_HOOK_STATUS_MESSAGES[marker])
-                         if provider == "codex" else helper.build_claude_entry(hook_target, event, matcher))
-                _transform_hook_registration(helper, registration, mutable_owner, marker, event,
-                                             provider, host, entry=entry)
-            except (OSError, ValueError, SystemExit) as exc:
-                raise RuntimeError(f"hook registration failed for {marker}") from exc
+    for marker, script, event, matcher in selected_specs:
+        if marker in relocated:
             continue
+        if owned or preview:
+            install_selected((marker, script, event, matcher))
+            continue
+        recheck_legacy(marker)
+        if portable_inventory:
+            health_module._recheck_selected_hook_targets(predecessor_witnesses, marker)
         arguments = [*base, "--script-marker", marker, "--script-path", str(script)]
         if event != "PreToolUse":
             arguments.extend(["--hook-event", event])
@@ -10997,6 +12744,21 @@ def _install_hooks(
         proc = _run(arguments, root)
         if proc.returncode:
             raise RuntimeError(f"hook registration failed for {marker}")
+    planned_inventory = None
+    if staged_data is not None:
+        require_namespace()
+        health_module._recheck_selected_hook_targets(predecessor_witnesses)
+        if _read_owned_text(registration, mutable_owner) != initial_text:
+            raise ValueError("E_SHARED_HOOK_RUNTIME: registration changed during planning")
+        if hooks_only:
+            authority = hooks_only_recheck()
+            planned_inventory = health_module._render_codex_inventory(
+                staged_data, authority=authority, specs=selected_specs, host_os=host, portable=True,
+            )
+            if preview:
+                return
+        if helper.encode_hook_config(staged_data) != initial_shape:
+            _publish_hook_data(helper, registration, staged_data, mutable_owner, remove=False)
     _checkpoint(root, installer, registration, provider, mode, "register")
     require_namespace()
     touched_identities = (
@@ -11007,6 +12769,7 @@ def _install_hooks(
                 platform=provider,
                 host_os=host,
                 repo_root=root,
+                    managed_targets=managed_targets,
             ),
         )
         if health_module is not None
@@ -11017,14 +12780,18 @@ def _install_hooks(
             try:
                 require_namespace()
                 plan = health_module.plan_codex_inventory(
-                    target=registration, specs=_hook_specs(provider, installed_root),
-                    inventory_path=inventory_path, host_os=host)
+                    target=registration, specs=selected_specs,
+                    inventory_path=inventory_path, host_os=host, portable=portable_inventory)
+                if planned_inventory is not None and plan.content != planned_inventory:
+                    raise ValueError("inventory no longer matches the qualified staged registration")
                 health_module._recheck_inventory_authority(plan.authority, for_write=True)
-                storage, _node, inventory_owner = _owned_byte_context(plan.authority.inventory, mutable_owner)
+                storage, node, inventory_owner = _owned_byte_context(plan.authority.inventory, mutable_owner)
                 if storage != plan.authority.inventory:
                     raise ValueError("inventory storage must be ordinary")
-                inventory_owner.replace_file_atomic(storage.relative_to(inventory_owner.anchor), plan.content,
-                    mode=None, fsync="required", temporary_prefix=f".{storage.name}.")
+                if (not portable_inventory or node is None
+                        or node.data != hashlib.sha256(plan.content).hexdigest()):
+                    inventory_owner.replace_file_atomic(storage.relative_to(inventory_owner.anchor), plan.content,
+                        mode=None, fsync="required", temporary_prefix=f".{storage.name}.")
                 written = health_module._inventory_authority(
                     plan.authority.target, plan.authority.inventory, for_write=False)
                 health_module._require_same_hook_target_authority(plan.authority, written)
@@ -11035,7 +12802,7 @@ def _install_hooks(
                     "E_HOOK_INVENTORY_TARGET_INVALID", "inventory", str(exc)) from exc
         else:
             health_module.write_codex_inventory(
-                target=registration, specs=_hook_specs(provider, installed_root),
+                target=registration, specs=selected_specs,
                 inventory_path=inventory_path, host_os=host)
     health_arguments = [
         str(root / "scripts" / "check-hook-health.py"),
@@ -11047,7 +12814,12 @@ def _install_hooks(
         host,
         "--repo-root",
         str(root),
+        "--installed-root",
+        str(installed_root),
     ]
+    selected_hook_args = [item for marker, _script, _event, _matcher in selected_specs
+                          for item in ("--selected-hook", marker)]
+    health_arguments.extend(selected_hook_args)
     if provider == "codex":
         assert codex_command is not None
         health_arguments.extend(
@@ -11076,15 +12848,19 @@ def _install_hooks(
     _checkpoint(root, installer, registration, provider, mode, "verify")
     _checkpoint(root, installer, registration, provider, mode, "reclaim")
     if provider == "codex":
+        installed_checker = (root / "scripts" if hooks_only else installed_checker_root / "scripts")
         installed_health = _run_hook_health_bounded(
             [
-                str(installed_root / "scripts" / "check-hook-health.py"),
+                str(installed_checker / "check-hook-health.py"),
                 "--target",
                 str(registration),
                 "--platform",
                 "codex",
                 "--host-os",
                 host,
+                "--installed-root",
+                str(installed_root),
+                *(["--repo-root", str(root)] if hooks_only else []),
                 "--inventory",
                 str(inventory_path),
                 "--codex-trust-mode",
@@ -11095,6 +12871,7 @@ def _install_hooks(
                 str(registration.parent.resolve()),
                 "--query-cwd",
                 str(root.resolve()),
+                *selected_hook_args,
                 *[
                     item
                     for identity in sorted(touched_identities)
@@ -11136,6 +12913,24 @@ def _checkpoint(
         raise RuntimeError(f"hook transaction checkpoint failed at {stage}")
 
 
+def _canonical_lead_expected_manifest(
+    manifest: tuple[tuple[str, str], ...],
+    lead: Path,
+    reclaimed: tuple[tuple[Path, str], ...] = (),
+) -> tuple[tuple[str, str], ...]:
+    """Project the admitted stage minus its exact proven reclamations, without I/O."""
+    expected = dict(manifest)
+    for removed, digest in reclaimed:
+        try:
+            relative = removed.relative_to(lead).as_posix()
+        except ValueError:
+            continue
+        if expected.get(relative) != digest:
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: unbound Lead reclamation")
+        del expected[relative]
+    return tuple(sorted(expected.items()))
+
+
 def _finalize_canonical_lead_receipt(
     plan: _CanonicalSkillsPlan,
     target: Path,
@@ -11146,21 +12941,17 @@ def _finalize_canonical_lead_receipt(
     if owner.dry_run:
         return
     lead = target / "lead"
-    expected = dict(plan.stage.manifest)
-    for removed, digest in reclaimed:
-        try:
-            relative = removed.relative_to(lead).as_posix()
-        except ValueError:
-            continue
-        if expected.get(relative) != digest:
-            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: unbound Lead reclamation")
-        del expected[relative]
-    if _stage_tree_manifest(lead, ignore_runtime_cache=True) != tuple(sorted(expected.items())):
+    expected = _canonical_lead_expected_manifest(plan.stage.manifest, lead, reclaimed)
+    actual = _admitted_tree_manifest(
+        owner.transaction, lead, ignore_runtime_cache=True)
+    if actual != expected:
         raise ValueError("E_MUTABLE_PATH_POSTCONDITION: final Lead manifest")
     if plan.lead_receipt is not None:
-        digest = _tree_sha256(lead, ignore_runtime_cache=True)
-        if digest is None:
-            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: final Lead digest")
+        # Hash exactly the compared manifest, never a second pathname census.
+        digest = _tree_manifest_sha256(actual)
+        if plan.lead_receipt.selection is not None:
+            print(f"  Selected Lead manifests: staged-tree-v2={plan.stage.digest}; "
+                  f"final-tree-v2={digest}")
         payload = _lead_receipt_bytes(digest)
         current_receipt = _read_lead_receipt(target / _LEAD_RECEIPT_NAME)
         if current_receipt is not None and current_receipt[0] == payload:
@@ -11270,13 +13061,665 @@ def _verify_files(
     return missing
 
 
+def _fresh_provider_receipt_candidate(target: Path) -> Path | None:
+    """Existing receipts of every type remain on the unchanged legacy route."""
+    candidate = target / _PROVIDER_RECEIPT_NAME
+    try:
+        candidate.lstat()
+    except FileNotFoundError:
+        return candidate
+    except OSError:
+        return None  # Unknown is not an admitted absence.
+    return None
+
+
+def _fresh_provider_receipt_files(
+    provider: str, scope: str, receipt: Path, owner: _CreateOnlyMutablePath,
+    *, include_controls: bool = False,
+) -> dict[str, _FreshFileWitness]:
+    transaction = owner.transaction
+    transient = {path for path in (transaction._temporary, *transaction._migration_retention)
+                 if path is not None}
+    for effect in transaction._effects:
+        transient.update(path for path in (effect.retained, effect.prepared_path, effect.quarantine)
+                         if path is not None)
+    candidates = {}
+    for witness in tuple(transaction._fresh_files):
+        path = witness.path
+        if (witness.owner is not owner or path == receipt or not path.is_relative_to(owner.anchor)
+                or any(path == root or root in path.parents for root in transient)
+                or any(path in image for image in transaction._original.values())):
+            continue
+        key = path.relative_to(owner.anchor).as_posix()
+        candidates.setdefault(key, []).append(witness)
+    # Multiple creation episodes are not silently folded into one ownership claim.
+    selected = {key: rows[0] for key, rows in candidates.items() if len(rows) == 1}
+    payload = _serialize_fresh_payloads(
+        {key: witness.node.data for key, witness in selected.items()}, provider, scope)
+    files = {} if payload is None else json.loads(payload)["files"]
+    if include_controls:
+        for key in selected.keys() & _fresh_control_paths(provider, scope):
+            witness = selected[key]
+            # A subsequent write is not the original creator's afterimage.
+            # Preserve it unclaimed rather than infer ownership from its name.
+            if transaction._image_matches(witness.path, {witness.path: witness.node}):
+                files[key] = witness.node.data
+    return {key: selected[key] for key in files}
+
+
+def _record_fresh_provider_receipt(
+    provider: str, scope: str, receipt: Path | None, owner: _CreateOnlyMutablePath,
+) -> None:
+    """Bootstrap only successful fresh payload files in the current transaction."""
+    transaction = owner.transaction
+    if receipt is None or owner.dry_run or not transaction.enabled:
+        return
+    receipt = Path(os.path.abspath(receipt))
+    if (not any(receipt == root or root in receipt.parents for root in transaction._original)
+            or any(receipt in image for image in transaction._original.values())):
+        return
+    selected = _fresh_provider_receipt_files(
+        provider, scope, receipt, owner, include_controls=True)
+    control_paths = _fresh_control_paths(provider, scope)
+    payload = _serialize_fresh_install(
+        {key: witness.node.data for key, witness in selected.items() if key not in control_paths},
+        {key: witness.node.data for key, witness in selected.items() if key in control_paths},
+        provider, scope)
+    if payload is None:
+        return
+    for witness in selected.values():
+        owner._assert_fresh_file(witness)
+    # A receipt that appeared after admission remains foreign and is not adopted.
+    if not transaction._image_matches(receipt, {}):
+        return
+    start = len(transaction._fresh_files)
+    owner.create_file(receipt.relative_to(owner.anchor), payload)
+    created = [witness for witness in transaction._fresh_files[start:]
+               if witness.owner is owner and witness.path == receipt]
+    if len(created) != 1:
+        raise ValueError("E_PROVIDER_RECEIPT_DRIFT: receipt creation not received")
+    for witness in selected.values():
+        owner._assert_fresh_file(witness)
+    if owner._assert_fresh_file(created[0]) != payload:
+        raise ValueError("E_PROVIDER_RECEIPT_DRIFT: receipt readback")
+
+
+@dataclass(frozen=True)
+class _SelectedSource:
+    path: Path
+    node: _PhysicalNode
+    raw: bytes
+
+
+@dataclass(frozen=True)
+class _SelectedReplacement:
+    owner: _CreateOnlyMutablePath
+    sources: tuple[_SelectedSource, ...]
+    path: Path
+    before_node: _PhysicalNode
+    before: bytes
+    after: bytes
+    digest: str
+    parents: tuple[tuple[Path, tuple[int, int, int, int]], ...]
+
+
+@dataclass(frozen=True)
+class _SelectedProviderUpdates:
+    provider: str
+    owner: _CreateOnlyMutablePath
+    scope: str
+    receipt: Path
+    receipt_node: _PhysicalNode | None
+    receipt_before: bytes | None
+    receipt_parents: tuple[tuple[Path, tuple[int, int, int, int]], ...]
+    receipt_parent_preimage: tuple[tuple[Path, _PhysicalNode | None], ...]
+    items: dict[str, _SelectedReplacement]
+    outcomes: tuple[_ReceiptOutcome, ...]
+    payload: bytes
+    received: dict[str, _PhysicalNode] = field(default_factory=dict)
+
+
+def _selected_error(provider: str, reason: str, *, invalid: bool = False) -> ValueError:
+    subject = "CLAUDE_INSTRUCTION" if provider == "claude" else "CODEX_DOCUMENT"
+    category = "INVALID" if invalid else "DRIFT"
+    return ValueError(f"E_{subject}_SELECTION_{category}: {reason}")
+
+
+def _claude_instruction_source_names(source: Path) -> frozenset[str]:
+    return frozenset(scope + "/" + item.relative_to(source / scope).as_posix()
+        for scope in ("agents", "commands")
+        for item in (source / scope).rglob("*")
+        if item.is_file() and item.suffix.casefold() == ".md"
+        and "__pycache__" not in item.relative_to(source / scope).parts
+        and (scope == "commands" or len(item.relative_to(source / scope).parts) == 1))
+
+
+def _capture_selected_source(path: Path, transaction: _InstallTransaction) -> _SelectedSource:
+    path = Path(os.path.abspath(path))
+    node = transaction._capture_node(path)
+    return _SelectedSource(path, node, transaction._image_file_bytes(path, node))
+
+
+def _selected_receipt_parent_preimage(receipt: Path, transaction: _InstallTransaction):
+    # Reuse known snapshot evidence; acquire only outside parents at preflight.
+    # An absent leaf image says nothing about its parents.
+    covered = tuple(transaction._original)
+    parents = dict(transaction._capture_readonly_parents(receipt, covered))
+    for parent in receipt.parents:
+        originals = [image.get(parent) for root, image in transaction._original.items()
+                     if parent == root or root in parent.parents]
+        if originals:
+            if any(node != originals[0] for node in originals[1:]):
+                raise ValueError("E_PROVIDER_RECEIPT_DRIFT: parent evidence conflict")
+            parents[parent] = originals[0]
+    return tuple(sorted(parents.items(), key=lambda row: len(row[0].parts)))
+
+
+def _prepare_selected_provider_updates(
+    provider: str, scope: str, receipt: Path, owner: _CreateOnlyMutablePath,
+    items: dict[str, _SelectedReplacement], outcomes: tuple[_ReceiptOutcome, ...],
+) -> _SelectedProviderUpdates:
+    transaction = owner.transaction
+    receipt = owner.destination(receipt.relative_to(owner.anchor))
+    receipt_node = _admitted_mutation_image(transaction, receipt).get(receipt)
+    receipt_before = (None if receipt_node is None
+                      else transaction._image_file_bytes(receipt, receipt_node))
+    if receipt_node is None:
+        # Parent-only evidence, not a read-only registration for a mutable leaf.
+        receipt_parent_preimage = _selected_receipt_parent_preimage(receipt, transaction)
+        transaction._assert_readonly_parents(receipt_parent_preimage)
+        receipt_parents = ()
+    else:
+        receipt_parents = owner._file_parent_identities(receipt)
+        receipt_parent_preimage = ()
+    plan = _plan_receipt_changes(receipt_before, provider, scope, outcomes, _markdown_document_context)
+    if any(item.route != "selected-replacement-proposal" for item in plan.artifacts):
+        raise _selected_error(provider, "receipt plan", invalid=True)
+    payload = _serialize_receipt_delta(receipt_before, plan)
+    return _SelectedProviderUpdates(provider, owner, scope, receipt, receipt_node, receipt_before,
+                                    receipt_parents, receipt_parent_preimage, items, outcomes, payload)
+
+
+def _prepare_selected_claude_instructions(
+    grants: dict[str, str], source: Path, target: Path, scope: str,
+    owner: _CreateOnlyMutablePath,
+    *, instruction_owners: dict[str, _CreateOnlyMutablePath] | None = None,
+) -> _SelectedProviderUpdates | None:
+    if not grants:
+        return None
+    transaction, items, outcomes = owner.transaction, {}, []
+    for key, digest in grants.items():
+        subroot, relative = key.split("/", 1)
+        physical_owner = (instruction_owners or {}).get(subroot, owner)
+        if physical_owner.transaction is not transaction:
+            raise _selected_error("claude", "transaction owner", invalid=True)
+        authority = physical_owner.linked_authority
+        if authority is not None:
+            if (scope != "global" or authority.logical_root != target / subroot
+                    or authority.resolved_root != physical_owner.anchor):
+                raise _selected_error("claude", "linked owner", invalid=True)
+            path = physical_owner.destination(Path(relative))
+        else:
+            path = physical_owner.destination((target / key).relative_to(physical_owner.anchor))
+        before_node = _admitted_mutation_image(transaction, path).get(path)
+        parents = physical_owner._file_parent_identities(path)
+        before = physical_owner._assert_bound_file(path, before_node, parents)
+        if hashlib.sha256(before).hexdigest() != digest:
+            raise ValueError("E_CLAUDE_INSTRUCTION_SELECTION_DRIFT: " + key)
+        selected_source = _capture_selected_source(source / key, transaction)
+        after = selected_source.raw
+        items[key] = _SelectedReplacement(
+            physical_owner, (selected_source,), path, before_node, before, after, digest, parents)
+        outcomes.append(_ReceiptOutcome(".claude/" + key, "file", before, after,
+                                        intent="replace", adoption_sha256=digest))
+    return _prepare_selected_provider_updates(
+        "claude", scope, target / _PROVIDER_RECEIPT_NAME, owner, items, tuple(outcomes))
+
+
+def _prepare_receipted_claude_instructions(
+    receipt_digest: str, source: Path, target: Path, scope: str,
+    owner: _CreateOnlyMutablePath, linked_subroots: tuple[str, ...],
+    *, instruction_owners: dict[str, _CreateOnlyMutablePath] | None = None,
+) -> _SelectedProviderUpdates:
+    # The explicit option authorizes this current batch, not the receipt's
+    # authorship or historical storage. Reuse the exact-current owner below.
+    receipt = owner.destination((target / _PROVIDER_RECEIPT_NAME).relative_to(owner.anchor))
+    transaction = owner.transaction
+    node = _admitted_mutation_image(transaction, receipt).get(receipt)
+    parents = owner._file_parent_identities(receipt)
+    before = owner._assert_bound_file(receipt, node, parents)
+    grants = _claude_instruction_grants_from_receipt(
+        before, receipt_digest, scope, _claude_instruction_source_names(source))
+    if any(key.split("/")[0] in linked_subroots
+           and key.split("/")[0] not in (instruction_owners or {}) for key in grants):
+        raise ValueError("E_CLAUDE_RECEIPT_SELECTION_INVALID: missing physical owner")
+    # Every selected current file must match before any content write; a stale,
+    # missing or nonordinary member refuses the entire explicit batch.
+    batch = _prepare_selected_claude_instructions(
+        grants, source, target, scope, owner, instruction_owners=instruction_owners)
+    if (batch is None or batch.receipt != receipt or batch.receipt_node != node
+            or batch.receipt_before != before or batch.receipt_parents != parents):
+        raise ValueError("E_CLAUDE_RECEIPT_SELECTION_DRIFT: receipt binding")
+    if owner._assert_bound_file(receipt, node, parents) != before:
+        raise ValueError("E_CLAUDE_RECEIPT_SELECTION_DRIFT: receipt preimage")
+    return batch
+
+
+def _prepare_selected_codex_document(
+    grant: tuple[str, tuple[int, int]], root: Path, source: Path, target: Path,
+    document: Path, scope: str, owner: _CreateOnlyMutablePath,
+) -> _SelectedProviderUpdates:
+    digest, span = grant
+    transaction = owner.transaction
+    path = owner.destination(document.relative_to(owner.anchor))
+    before_node = _admitted_mutation_image(transaction, path).get(path)
+    parents = owner._file_parent_identities(path)
+    before = owner._assert_bound_file(path, before_node, parents)
+    if hashlib.sha256(before).hexdigest() != digest:
+        raise _selected_error("codex", "preimage")
+    sources = tuple(_capture_selected_source(path, transaction) for path in (
+        root / "shared" / "AGENTS.shared.md", source / "AGENTS.codex.md"))
+    # Match the existing source read_text view; witnesses retain exact raw bytes.
+    texts = tuple(item.raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+                  for item in sources)
+    payload = _codex_document_payload(*texts)
+    after = _render_selected_document(
+        before.decode("utf-8"), "codex", payload, _markdown_document_context,
+        document_digest=digest, span=span).encode("utf-8")
+    key = "AGENTS.md" if scope == "project" else ".codex/AGENTS.md"
+    selected = _SelectedReplacement(owner, sources, path, before_node, before, after, digest, parents)
+    outcome = _ReceiptOutcome(key, "block", before, after, intent="replace",
+                              adoption_sha256=digest, adoption_span=span)
+    return _prepare_selected_provider_updates(
+        "codex", scope, target / _PROVIDER_RECEIPT_NAME, owner, {key: selected}, (outcome,))
+
+
+def _assert_selected_sources(selected: _SelectedReplacement, owner: _CreateOnlyMutablePath,
+                             provider: str) -> None:
+    for source in selected.sources:
+        if owner.transaction._image_file_bytes(source.path, source.node) != source.raw:
+            raise _selected_error(provider, "source")
+
+
+def _assert_selected_replacement(
+    selected: _SelectedReplacement, owner: _CreateOnlyMutablePath, node: _PhysicalNode,
+    provider: str,
+) -> None:
+    _assert_selected_sources(selected, owner, provider)
+    if owner._assert_bound_file(selected.path, node, selected.parents) != selected.after:
+        raise _selected_error(provider, "outcome")
+
+
+def _apply_selected_replacement(
+    batch: _SelectedProviderUpdates, key: str, source_paths: tuple[Path, ...], path: Path,
+    owner: _CreateOnlyMutablePath | None, dry_run: bool,
+) -> None:
+    selected = batch.items[key]
+    if (owner is not selected.owner or owner.transaction is not batch.owner.transaction
+            or (batch.provider != "claude" and owner.linked_authority is not None)
+            or tuple(Path(os.path.abspath(source)) for source in source_paths)
+                != tuple(source.path for source in selected.sources)
+            or Path(os.path.abspath(path)) != selected.path or key in batch.received):
+        raise _selected_error(batch.provider, "route")
+    transaction = owner.transaction
+    _assert_selected_sources(selected, owner, batch.provider)
+    if owner._assert_bound_file(selected.path, selected.before_node, selected.parents) != selected.before:
+        raise _selected_error(batch.provider, "preimage")
+    if dry_run:
+        kind = "instruction" if batch.provider == "claude" else "document"
+        print(f"  [dry-run] selected {kind} replacement: {key}")
+        return
+    if selected.before != selected.after:
+        owner.replace_exact_file(selected.path.relative_to(owner.anchor), selected.digest, selected.after)
+    node = _admitted_mutation_image(transaction, selected.path).get(selected.path)
+    _assert_selected_replacement(selected, owner, node, batch.provider)
+    batch.received[key] = node
+
+
+def _record_selected_provider_receipt(batch: _SelectedProviderUpdates) -> None:
+    owner, transaction = batch.owner, batch.owner.transaction
+    if owner.dry_run:
+        return
+    if not transaction.enabled or set(batch.received) != set(batch.items):
+        raise _selected_error(batch.provider, "incomplete outcomes")
+    for key, selected in batch.items.items():
+        _assert_selected_replacement(selected, selected.owner, batch.received[key], batch.provider)
+    fresh = _fresh_provider_receipt_files(batch.provider, batch.scope, batch.receipt, owner)
+    selected_keys = {item.path for item in batch.outcomes}
+    fresh = {key: value for key, value in fresh.items() if key not in selected_keys}
+    outcomes = batch.outcomes + tuple(
+        _ReceiptOutcome(key, "file", None, owner._assert_fresh_file(witness), intent="create")
+        for key, witness in fresh.items())
+    if fresh:
+        plan = _plan_receipt_changes(batch.receipt_before, batch.provider, batch.scope,
+                                     outcomes, _markdown_document_context)
+        expected_routes = {item.path: ("selected-replacement-proposal" if item.intent == "replace"
+                                      else "creation-proposal") for item in outcomes}
+        if {item.path: item.route for item in plan.artifacts} != expected_routes:
+            raise _selected_error(batch.provider, "receipt outcome conflict", invalid=True)
+        payload = _serialize_receipt_delta(batch.receipt_before, plan)
+    else:
+        payload = batch.payload
+    owner.destination(batch.receipt.relative_to(owner.anchor))
+    if batch.receipt_node is None:
+        transaction._assert_readonly_parents(batch.receipt_parent_preimage)
+        if not transaction._image_matches(batch.receipt, {}):
+            raise ValueError("E_PROVIDER_RECEIPT_DRIFT: selected receipt absence")
+        start = len(transaction._fresh_files)
+        owner.create_file(batch.receipt.relative_to(owner.anchor), payload)
+        created = [witness for witness in transaction._fresh_files[start:]
+                   if witness.owner is owner and witness.path == batch.receipt]
+        if len(created) != 1:
+            raise ValueError("E_PROVIDER_RECEIPT_DRIFT: selected receipt creation")
+        transaction._assert_readonly_parents(batch.receipt_parent_preimage)
+        if owner._assert_fresh_file(created[0]) != payload:
+            raise ValueError("E_PROVIDER_RECEIPT_DRIFT: selected receipt creation readback")
+    else:
+        if owner._assert_bound_file(batch.receipt, batch.receipt_node,
+                                    batch.receipt_parents) != batch.receipt_before:
+            raise ValueError("E_PROVIDER_RECEIPT_DRIFT: selected receipt preimage")
+        if payload != batch.receipt_before:
+            owner.replace_exact_file(batch.receipt.relative_to(owner.anchor),
+                                     hashlib.sha256(batch.receipt_before).hexdigest(), payload)
+        receipt_after = _admitted_mutation_image(transaction, batch.receipt).get(batch.receipt)
+    for key, selected in batch.items.items():
+        _assert_selected_replacement(selected, selected.owner, batch.received[key], batch.provider)
+    for witness in fresh.values():
+        owner._assert_fresh_file(witness)
+    if batch.receipt_node is None:
+        transaction._assert_readonly_parents(batch.receipt_parent_preimage)
+        actual = owner._assert_fresh_file(created[0])
+    else:
+        actual = owner._assert_bound_file(batch.receipt, receipt_after, batch.receipt_parents)
+    if actual != payload:
+        raise ValueError("E_PROVIDER_RECEIPT_DRIFT: selected receipt readback")
+
+def _finish_install_result(provider, target, dry_run, applied, primary, cleanup_error) -> int:
+    """Receive terminal status after cleanup; no storage or rollback operation."""
+    # Unhandled/interrupt outcomes retain their type, original explicit cause,
+    # and private secondary references. Never chain a handled sensitive error.
+    handled = (OSError, RuntimeError, ValueError)
+    raised = (primary if primary is not None and not isinstance(primary, handled)
+              else cleanup_error if cleanup_error is not None and not isinstance(cleanup_error, handled)
+              else None)
+    postcommit_notice = None
+    if primary is not None or cleanup_error is not None:
+        if applied == "commit-requested":
+            postcommit_notice = (
+                "FAIL: E_INSTALL_POSTCOMMIT_UNRESOLVED: transaction commit requested; "
+                "commit settlement incomplete. Installation may be applied. Do not retry blindly.")
+        elif applied:
+            postcommit_notice = (
+                "FAIL: E_INSTALL_POSTCOMMIT_UNRESOLVED: installation applied; "
+                "postcommit compatibility or staging settlement failed. Do not retry blindly.")
+    if raised is not None:
+        reporting_error = None
+        if postcommit_notice is not None:
+            try:
+                print(postcommit_notice, file=sys.stderr)
+            except BaseException as exc:
+                reporting_error = exc
+        storage = _passive_owner_storage(BaseException, raised)
+        if storage is not None:
+            dict.__setitem__(storage, "_installer_terminal_errors",
+                             tuple(error for error in (primary, cleanup_error, reporting_error)
+                                   if error is not None and error is not raised))
+        # Do not synthesize a traceback chain that could disclose handled text.
+        BaseException.__suppress_context__.__set__(raised, True)
+        raise raised
+    if primary is not None or cleanup_error is not None:
+        if postcommit_notice is not None:
+            print(postcommit_notice, file=sys.stderr)
+        if primary is not None:
+            print(f"FAIL: {_installer_failure_text(primary)}", file=sys.stderr)
+        if cleanup_error is not None:
+            print(f"FAIL: staging cleanup: {_installer_failure_text(cleanup_error)}", file=sys.stderr)
+        return 1
+    if dry_run:
+        print("RESULT: DRY-RUN complete (no files modified).")
+    else:
+        print(f"RESULT: OK - {provider.capitalize()} pack installed to {target}")
+    return 0
+
+
+def _previous_retained_hook_root(root: Path, package: Path) -> tuple[Path, Path, list]:
+    """Resolve the operator-selected predecessor without running its code."""
+    if not package.is_absolute() or _contains_reparse(package):
+        raise ValueError("previous release must be a direct absolute package path")
+    package = package.resolve(strict=True)
+    for member in ("bundle.json", "runtime-evidence.json", "app/install.py"):
+        if _contains_reparse(package / member):
+            raise ValueError("previous release has redirected package evidence")
+    launcher = _load_module_from_path(
+        "orchestrarium_retained_hook_launcher", root.parent / "launch.py"
+    )
+    data = launcher._manifest(package)
+    python_slot = "python/python.exe" if os.name == "nt" else "python/bin/python3"
+    if data["python"] != python_slot:
+        raise ValueError("previous release interpreter slot is not canonical")
+    installer = launcher._member(package, data["entry"])
+    lead = installer.parent / "src.codex" / "skills" / "lead"
+    if _contains_reparse(lead):
+        raise ValueError("previous release has redirected managed paths")
+    # A missing predecessor interpreter does not change the old command's identity.
+    catalog = installer.parent / "scripts" / "universal_hooks_manifest.py"
+    if _contains_reparse(catalog):
+        raise ValueError("previous release has a redirected hook catalog")
+    catalog = launcher._member(package, "app/scripts/universal_hooks_manifest.py")
+    return lead, package / python_slot, _HOOK_MANIFEST.retained_hook_specs(catalog, "codex", lead)
+
+def _apply_shared_hooks_only(root: Path, target: Path, *, dry_run: bool,
+                             previous_release: Path | None = None) -> None:
+    health = _hook_health_module(root)
+    host = "windows" if os.name == "nt" else "posix"
+    registration = target / "hooks.json"
+    retained = _retained_codex_hook_root(root, registration)
+    inventory = health._codex_inventory_sidecar(registration)
+    authority = health._inventory_authority(registration, inventory, for_write=False)
+    before = {
+        path: _InstallTransaction._capture_node(path)
+        for path in (authority.resolved_target, authority.inventory)
+    }
+
+    skills = target.parent / ".agents" / "skills"
+    receipt = None
+    link = None
+    expected, identities = health._load_codex_inventory(
+        inventory, target=registration, host_os=host, authority=authority,
+    )
+    previous_python = None
+    previous_specs = None
+    if _find_portable_codex_inventory(root, registration) is not None:
+        predecessor = retained
+        owned_scripts = {
+            health._command_identity([str(script)], host)
+            for _stem, script, _event, _matcher in _hook_specs("codex", retained)
+        }
+        registered_commands = [json.loads(identity)["command"].split("\0") for identity in identities]
+        registered_scripts = {argv[1] for argv in registered_commands if len(argv) == 2}
+        if registered_scripts != owned_scripts and previous_release is not None:
+            try:
+                predecessor, previous_python, previous_specs = _previous_retained_hook_root(root, previous_release)
+            except (OSError, ValueError) as exc:
+                raise _InstallFailure("E_SHARED_HOOK_RUNTIME", "previous-release", exc) from exc
+    else:
+        logical = skills.parent
+        link = _linked_runtime_subroots_module(root).LinkedRuntimeSubrootAuthority.bind(
+            logical, scope="global", trusted_global_roots=(logical,),
+        )
+        if link is not None:
+            skills = link.resolved_root / "skills"
+        predecessor = skills / "lead"
+        receipt = _read_lead_receipt(skills / _LEAD_RECEIPT_NAME)
+        if receipt is None:
+            raise ValueError("E_SHARED_HOOK_RUNTIME: missing canonical predecessor receipt")
+
+    specs = previous_specs if previous_specs is not None else _hook_specs("codex", predecessor)
+    if previous_python is not None and any(_contains_reparse(script) for _, script, _, _ in specs):
+        raise _InstallFailure("E_SHARED_HOOK_RUNTIME", "previous-release",
+                              ValueError("previous release has redirected hook files"))
+    targets, witnesses = health._selected_hook_targets(specs)
+    if set(witnesses) != set(targets):
+        raise ValueError("E_SHARED_HOOK_RUNTIME: predecessor hook files are missing")
+    if previous_python is not None and any(chain or resolved != script
+                                         for script, (resolved, chain, _node) in witnesses.values()):
+        raise _InstallFailure("E_SHARED_HOOK_RUNTIME", "previous-release",
+                              ValueError("previous release hook witness is not a direct package file"))
+    data = health._load(authority.resolved_target)
+    rows = list(health._iter_owned_hooks(data, expected, "codex", host, targets))
+    observed = {
+        health.canonical_identity(event, argv, host, matcher=matcher,
+                                  source_path=authority.resolved_target)
+        for event, _stem, argv, matcher in rows
+    }
+    expected_shapes = {stem: (health._event_identity(event), matcher)
+                       for stem, _script, event, matcher in specs}
+    observed_shapes = {stem: (health._event_identity(event), matcher)
+                       for event, stem, _argv, matcher in rows}
+    # Exact stock direct command only; a sidecar cannot grant authority to
+    # remove operator-chosen arguments or interpreter flags.
+    if any(len(argv) != 2 or not Path(argv[0]).is_absolute()
+           for _event, _stem, argv, _matcher in rows):
+        raise _InstallFailure("E_SHARED_HOOK_RUNTIME", "inventory",
+                              ValueError("non-stock predecessor invocation"))
+    # Require inventory, package and actual registration to agree without
+    # resolving/running the old executable; replacing that path is the repair.
+    if (observed != identities or len(rows) != len(expected) or expected != set(targets)
+            or observed_shapes != expected_shapes
+            or (previous_python is not None and any(
+                health._command_identity([argv[0]], host) != health._command_identity([str(previous_python)], host)
+                for _event, _stem, argv, _matcher in rows))):
+        raise ValueError("E_SHARED_HOOK_RUNTIME: predecessor registrations do not match their inventory")
+    def recheck():
+        if previous_python is not None and _previous_retained_hook_root(root, previous_release) != (predecessor, previous_python, specs):
+            raise ValueError("E_SHARED_HOOK_RUNTIME: previous package changed during planning")
+        if link is not None:
+            link.assert_current()
+        if receipt is not None and (
+            _read_lead_receipt(skills / _LEAD_RECEIPT_NAME) != receipt
+            or _tree_sha256(predecessor, ignore_runtime_cache=True)
+            != _lead_receipt_identity_v2(receipt, predecessor)
+        ):
+            raise ValueError("E_SHARED_HOOK_RUNTIME: predecessor Lead receipt drift")
+        health._recheck_selected_hook_targets(witnesses)
+        health._recheck_inventory_authority(authority, for_write=False)
+        if any(not _InstallTransaction._point_matches(path, node, check_file_content=True)
+               for path, node in before.items()):
+            raise ValueError("E_SHARED_HOOK_RUNTIME: predecessor registration or inventory changed")
+        return authority
+
+    recheck()
+    helper = _load_module_from_path(
+        "orchestrarium_install_hypothesis_hook", root / "scripts" / "install-hypothesis-hook.py"
+    )
+    desired_groups = {
+        stem: (event, helper._with_event_matcher({}, event, matcher).get("matcher"))
+        for stem, _script, event, matcher in _hook_specs("codex", retained)
+    }
+    transitions = [
+        (record.marker, event, {"matcher": group.get("matcher"), "hooks": [handler]})
+        for event, _, _, group, handler, record in health._owned_records(data, expected, "codex", host, targets)
+        if desired_groups.get(record.marker) != (event, group.get("matcher"))
+    ]
+    # Move and retire from each group's end so another selected transition
+    # is never mistaken for a survivor. Unchanged handlers keep their slots.
+    transitions.reverse()
+    kwargs = {"prior_installed_root": predecessor, "hooks_only_recheck": recheck,
+              "prior_specs": specs, "scoped_transitions": transitions}
+    if dry_run:
+        _install_hooks(root, "codex", registration, retained, "global", inventory,
+                       preview=True, **kwargs)
+        return
+
+    pointer = (registration,) if registration.is_symlink() else ()
+    paths = [*pointer, authority.resolved_target, authority.inventory]
+    transaction = _InstallTransaction(paths, enabled=True, link_object_paths=pointer)
+    with transaction:
+        owner = _CreateOnlyMutablePath(target.parent, transaction, dry_run=False)
+        _install_hooks(root, "codex", registration, retained, "global", inventory,
+                       transaction=transaction, mutable_owner=owner, **kwargs)
+        transaction.commit()
+
+
+def _installer_platform_admitted() -> bool:
+    """Admit implemented platform backends; native operation checks remain mandatory."""
+    return os.name in {"nt", "posix"}
+
+
 def install(provider: str, argv: list[str] | None = None) -> int:
     args = _parser(provider).parse_args(argv)
+    register_hooks = (
+        not args.no_hypothesis_hook
+        and not os.environ.get("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK")
+    )
+    if args.hooks_only:
+        compatible = {"global_install", "shared_hook_runtime", "hooks_only", "dry_run", "previous_retained_release"}
+        if not args.shared_hook_runtime or any(
+            value for key, value in vars(args).items() if key not in compatible
+        ):
+            print("FAIL: E_SHARED_HOOK_RUNTIME: hooks-only must be a separate shared operation", file=sys.stderr)
+            return 1
+    if args.previous_retained_release is not None and not args.hooks_only:
+        print("FAIL: E_SHARED_HOOK_RUNTIME: previous release requires hooks-only", file=sys.stderr)
+        return 1
+    if args.shared_hook_runtime and (
+        provider != "codex" or not args.global_install or args.uninstall
+        or not register_hooks
+    ):
+        print("FAIL: E_SHARED_HOOK_RUNTIME: retained linked hooks require global Codex registration", file=sys.stderr)
+        return 1
+    # Even dry-run builds and disposes staging before entering the transaction.
+    # Refuse unsupported hosts before target resolution and all plan creation.
+    if not _installer_platform_admitted():
+        print(
+            "FAIL: E_INSTALLER_PLATFORM_UNSUPPORTED: this host has no qualified installer backend. "
+            "No target or staging operations were started.",
+            file=sys.stderr,
+        )
+        return 1
+    if args.uninstall_selection is not None and not args.uninstall:
+        print("FAIL: --uninstall-selection requires --uninstall", file=sys.stderr)
+        return 1
+    if args.uninstall and any(value for name, value in vars(args).items()
+                              if name.startswith(("replace_", "migrate_", "enroll_"))):
+        print("FAIL: uninstall and update selections are separate operations", file=sys.stderr)
+        return 1
+    if args.apply and not args.uninstall:
+        print("FAIL: --apply requires --uninstall", file=sys.stderr)
+        return 1
+    if args.uninstall and provider != "claude":
+        print("FAIL: selected-current uninstall is qualified only for Claude; shared Codex runtime preserved", file=sys.stderr)
+        return 1
+    if args.uninstall:
+        root = Path(__file__).resolve().parents[1]
+        try:
+            operation = _load_module_from_path("orche_presdk_uninstall", root / "scripts/installation/uninstall.py")
+            return operation.run(sys.modules[__name__], root, provider, args)
+        except Exception as exc:
+            print("FAIL: uninstall preserved unverified state: " + _installer_failure_text(exc), file=sys.stderr)
+            return 1
+    if args.replace_claude_instruction and provider != "claude":
+        print("FAIL: E_CLAUDE_INSTRUCTION_SELECTION_INVALID: Claude only", file=sys.stderr)
+        return 1
+    if args.replace_claude_receipted_instructions and (
+        provider != "claude" or args.replace_claude_instruction
+    ):
+        print("FAIL: E_CLAUDE_RECEIPT_SELECTION_INVALID: Claude only; choose receipt or individual selections", file=sys.stderr)
+        return 1
+    if args.replace_codex_document and provider != "codex":
+        print("FAIL: E_CODEX_DOCUMENT_SELECTION_INVALID: Codex only", file=sys.stderr)
+        return 1
     if args.replace_unreceipted_skill_sha256 and not args.global_install:
         print("FAIL: E_CANONICAL_SKILL_ADOPTION_MISMATCH", file=sys.stderr)
         return 1
     if args.replace_unreceipted_lead_sha256 is not None and not args.global_install:
         print("FAIL: E_CANONICAL_LEAD_ADOPTION_MISMATCH", file=sys.stderr)
+        return 1
+    if args.replace_modified_lead and (
+        not args.global_install or args.replace_unreceipted_lead_sha256 is not None
+    ):
+        print("FAIL: E_CANONICAL_LEAD_SELECTION_INVALID: global only; choose one Lead selection",
+              file=sys.stderr)
         return 1
     if args.migrate_legacy_skill and (
         provider != "codex" or not args.global_install
@@ -11294,10 +13737,30 @@ def install(provider: str, argv: list[str] | None = None) -> int:
         return 1
     script = Path(__file__)
     root = _repo_root(script)
+    if args.hooks_only:
+        try:
+            _mode, target, _project = _target(provider, args)
+            _apply_shared_hooks_only(root, target, dry_run=args.dry_run,
+                                     previous_release=args.previous_retained_release)
+        except (OSError, RuntimeError, ValueError) as exc:
+            print("FAIL: " + _installer_failure_text(exc), file=sys.stderr)
+            return 1
+        print("RESULT: DRY-RUN complete (no files modified)." if args.dry_run
+              else "RESULT: OK - Codex shared registrations updated")
+        return 0
     canonical_plan: _CanonicalSkillsPlan | None = None
+    primary = cleanup_error = None
+    applied = False
+    transaction = None
+    target = None
     source = root / f"src.{provider}"
     try:
         mode, target, project = _target(provider, args)
+        document_grant = _parse_codex_document_grant(tuple(args.replace_codex_document))
+        receipt_grant = _parse_claude_receipt_grant(tuple(args.replace_claude_receipted_instructions))
+        instruction_grants = (_parse_claude_instruction_grants(
+            tuple(args.replace_claude_instruction), _claude_instruction_source_names(source))
+            if args.replace_claude_instruction else {})
         if (
             args.enroll_kimi or args.replace_kimi_enrollment
         ) and (provider != "codex" or mode != "global"):
@@ -11330,10 +13793,31 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             docs_target = target / "AGENTS.md" if mode == "global" else project / "AGENTS.md"
             installed_hook_root = skills_target / "lead"
             registration = target / "hooks.json"
+            prior_installed_hook_root = installed_hook_root if args.shared_hook_runtime else None
+            shared_inventory = None
+            if mode == "global" and register_hooks:
+                try:
+                    shared_inventory = _find_portable_codex_inventory(root, registration)
+                except ValueError as exc:
+                    raise _InstallFailure("E_SHARED_HOOK_RUNTIME", "inventory", exc) from exc
+            if shared_inventory is not None and not args.shared_hook_runtime:
+                raise ValueError(
+                    "E_SHARED_HOOK_RUNTIME: reuse the retained shared-hook installation"
+                )
+            if args.shared_hook_runtime:
+                installed_hook_root = _retained_codex_hook_root(root, registration)
+                if shared_inventory is not None:
+                    try:
+                        _hook_health_module(root).verify_config(
+                            target=registration, platform="codex",
+                            host_os="windows" if os.name == "nt" else "posix",
+                            repo_root=root, installed_root=installed_hook_root,
+                            inventory_path=shared_inventory, verify_fires=False,
+                        )
+                    except (OSError, ValueError) as exc:
+                        raise ValueError("E_SHARED_HOOK_RUNTIME: existing hooks do not match this retained bundle") from exc
             source_tree = source / "skills"
             target_tree = skills_target
-            mode_target = agents_root / ".agents-mode.yaml"
-            normalize_provider = "codex"
             codex_agents_authority = _linked_runtime_subroots_module(root).LinkedRuntimeSubrootAuthority.bind(
                 target / "agents",
                 scope=mode,
@@ -11365,8 +13849,9 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             registration = target / "settings.json"
             source_tree = source
             target_tree = claude_agents_root
-            mode_target = target / ".agents-mode.yaml"
-            normalize_provider = "shared"
+        # Preference layers are not installed defaults.
+        mode_target = target / ".agents-mode.yaml" if mode == "global" else None
+        normalize_provider = "codex" if provider == "codex" else "shared"
         home = _resolve_global_home() if mode == "global" else None
         shared_mode_target: Path | None = None
         if mode == "global":
@@ -11386,11 +13871,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             # not something a pack sync is allowed to repair after mutation.
             _load_claude_settings(registration)
 
-        hooks_enabled = (
-            not args.no_hypothesis_hook
-            and not args.dry_run
-            and not os.environ.get("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK")
-        )
+        hooks_enabled = register_hooks and not args.dry_run
         canonical_lead = canonical_skills_target / "lead"
         codex_post_tree_runtime: tuple[tuple[Path, Path], ...] = ()
         codex_role_manifest: dict[str, Any] | None = None
@@ -11448,6 +13929,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 claude_transport_root=target_tree / "scripts",
                 global_install=mode == "global",
                 replace_unreceipted_lead_sha256=args.replace_unreceipted_lead_sha256,
+                replace_modified_lead=tuple(args.replace_modified_lead),
                 replace_unreceipted_skill_sha256=tuple(args.replace_unreceipted_skill_sha256),
             )
             claude_skill_projection_plan = _preflight_claude_skill_projections(
@@ -11489,6 +13971,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 root=root,
                 global_install=mode == "global",
                 replace_unreceipted_lead_sha256=args.replace_unreceipted_lead_sha256,
+                replace_modified_lead=tuple(args.replace_modified_lead),
                 replace_unreceipted_skill_sha256=tuple(args.replace_unreceipted_skill_sha256),
                 claude_transport_root=owned_peer_transport_root,
                 claude_transport_optional=True,
@@ -11505,13 +13988,30 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 )
             )
             assert codex_agents_target is not None
+            prior_factory_pair: tuple[tuple[Path, str], ...] = ()
+            lead_plan = next((item for item in canonical_plan.skills if item.name == "lead"), None)
+            candidate_pair = _STOCK_NATIVE_ROLE_CONTRACT_PRIOR_PAIRS[-1]
+            if lead_plan is not None and lead_plan.installed_digest is not None:
+                before = _tree_sha256(canonical_lead, ignore_runtime_cache=True)
+                if before == lead_plan.installed_digest:
+                    observed = []
+                    for relative, expected in candidate_pair:
+                        payload = _preflight_native_regular_file(canonical_lead / relative, relative)
+                        observed.append(payload is not None and hashlib.sha256(payload).hexdigest() == expected)
+                    if all(observed) and _tree_sha256(canonical_lead, ignore_runtime_cache=True) == before:
+                        prior_factory_pair = candidate_pair
             codex_native_role_plan = _preflight_codex_native_roles(
                 root,
                 source / "agents",
                 codex_agents_target,
                 target / "config.toml",
+                prior_factory_pair=prior_factory_pair,
             )
         assert canonical_plan is not None
+        if args.dry_run and args.replace_modified_lead:
+            print("  [dry-run] explicit modified Lead full-tree selection: "
+                  + args.replace_modified_lead[0]
+                  + "; final manifest excludes only separately proven retirements")
         if args.dry_run and args.replace_unreceipted_lead_sha256 is not None:
             print("  [dry-run] unreceipted Lead prior "
                   f"{args.replace_unreceipted_lead_sha256}: 2 replacements")
@@ -11532,6 +14032,8 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             registration=registration,
             shared_mode_target=shared_mode_target,
             codex_hook_inventory=codex_hook_inventory,
+            canonical_skill_snapshots=_canonical_skill_snapshot_paths(canonical_skills_target, canonical_plan),
+            register_hooks=register_hooks,
             claude_commands_target=claude_commands_target,
             claude_skills_target=claude_skills_projection_target,
             claude_projection_snapshot_paths=tuple(
@@ -11564,7 +14066,9 @@ def install(provider: str, argv: list[str] | None = None) -> int:
         # Byte producers write ordinary resolved storage; keep a selected leaf
         # link's existing write-through snapshot and never snapshot an alias as
         # though its logically named ordinary file were independent storage.
-        byte_targets = [registration, docs_target]
+        byte_targets = [docs_target]
+        if register_hooks:
+            byte_targets.append(registration)
         if provider == "claude":
             byte_targets.append(docs_target.parent / "AGENTS.md")
         byte_pointer_objects = tuple(logical for logical in byte_targets if logical.is_symlink())
@@ -11575,9 +14079,6 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 if not logical.is_symlink():
                     transaction_paths = [path for path in transaction_paths if path != logical]
                 transaction_paths.append(storage)
-        namespace_removals = (_claude_stale_namespace_paths(
-            source, claude_commands_target, claude_skills_projection_target)
-            if provider == "claude" else ())
         copy_paths = {
             canonical_agents_root / UI_CONTINUITY_CONTRACT_TARGET,
             agents_root / UI_CONTINUITY_CONTRACT_TARGET,
@@ -11597,11 +14098,19 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 source / "agents", target_tree, excluded_files=claude_sync_excluded))
             copy_paths.update(_sync_file_destinations(source / "commands", claude_commands_target))
             copy_paths.update(destination for _source, destination in claude_runtime_destinations)
+        selected_requested = (bool(instruction_grants) or document_grant is not None
+                              or receipt_grant is not None)
+        fresh_receipt = None if args.dry_run else _fresh_provider_receipt_candidate(target)
+        if selected_requested:
+            transaction_paths.append(target / _PROVIDER_RECEIPT_NAME)
+        elif fresh_receipt is not None:
+            transaction_paths.append(fresh_receipt)
         transaction = _InstallTransaction(
             transaction_paths,
             enabled=not args.dry_run,
             copy_paths=tuple(sorted(copy_paths)),
-            link_object_paths=namespace_removals + byte_pointer_objects,
+            link_object_paths=byte_pointer_objects,
+            track_fresh_files=fresh_receipt is not None or selected_requested,
         )
         for authority in claude_link_authorities:
             _assert_global_claude_linked_subroot_authority(root, authority)
@@ -11691,6 +14200,34 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     dry_run=args.dry_run,
                     linked_authority=codex_agents_authority,
                 )
+            instruction_updates = _prepare_selected_claude_instructions(
+                instruction_grants, source, target, "global" if mode == "global" else "project",
+                create_only,
+                instruction_owners={"agents": claude_agents_owner, "commands": claude_commands_owner}
+                    if provider == "claude" else None,
+            )
+            if receipt_grant is not None:
+                instruction_updates = _prepare_receipted_claude_instructions(
+                    receipt_grant, source, target, "global" if mode == "global" else "project",
+                    create_only, tuple(authority.name for authority in claude_link_authorities),
+                    instruction_owners={"agents": claude_agents_owner, "commands": claude_commands_owner})
+            selected_updates = (
+                _prepare_selected_codex_document(
+                    document_grant, root, source, target, docs_target,
+                    "global" if mode == "global" else "project", create_only)
+                if document_grant is not None else instruction_updates)
+            def migrate_global_preferences() -> None:
+                for path, profile, move_legacy in (
+                    (mode_target, normalize_provider, False),
+                    (shared_mode_target, "shared", True),
+                ):
+                    if path is not None:
+                        _normalize_agents_mode(
+                            root, root / "shared" / "agents-mode.defaults.yaml",
+                            path, profile, args.dry_run, migration_only=True,
+                            move_legacy=move_legacy, transaction=transaction, mutable_owner=create_only,
+                        )
+
             # Canonical roles resolve the neutral contract through .agents.
             # Publish that leaf before the canonical skills tree, while the
             # transaction still owns both canonical and provider destinations.
@@ -11698,23 +14235,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 root, canonical_agents_root, args.dry_run, mutable_owner=canonical_skills_owner
             )
             if provider == "codex":
-                _normalize_agents_mode(
-                    root,
-                    root / "shared" / "agents-mode.defaults.yaml",
-                    mode_target,
-                    normalize_provider,
-                    args.dry_run,
-                    transaction=transaction, mutable_owner=create_only,
-                )
-                if shared_mode_target is not None:
-                    _normalize_agents_mode(
-                        root,
-                        root / "shared" / "agents-mode.defaults.yaml",
-                        shared_mode_target,
-                        "shared",
-                        args.dry_run,
-                        transaction=transaction, mutable_owner=create_only,
-                    )
+                migrate_global_preferences()
                 assert canonical_plan is not None
                 _apply_canonical_skills_plan(
                     canonical_plan,
@@ -11737,11 +14258,14 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     args.dry_run,
                     excluded_files=claude_sync_excluded,
                     mutable_owner=claude_agents_owner,
+                    instruction_scope="agents",
+                    instruction_updates=instruction_updates,
                 )
                 for authority in claude_link_authorities:
                     _assert_global_claude_linked_subroot_authority(root, authority)
                 _sync_tree(source / "commands", claude_commands_target, args.dry_run,
-                           mutable_owner=claude_commands_owner)
+                           mutable_owner=claude_commands_owner, instruction_scope="commands",
+                           instruction_updates=instruction_updates)
                 for authority in claude_link_authorities:
                     _assert_global_claude_linked_subroot_authority(root, authority)
                 _reclaim_claude_namespace(
@@ -11816,6 +14340,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                         mode,
                         codex_hook_inventory,
                         transaction=transaction, mutable_owner=create_only,
+                        prior_installed_root=prior_installed_hook_root,
                     )
                 _reconcile_codex_native_config(
                     target / "config.toml",
@@ -11834,40 +14359,22 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     manifest=codex_role_manifest,
                     plan=codex_native_role_plan,
                 )
-                _merge_codex_agents(root, source, docs_target, args.dry_run, mutable_owner=create_only)
+                if document_grant is not None:
+                    key = "AGENTS.md" if mode != "global" else ".codex/AGENTS.md"
+                    if mode != "global":
+                        _warn_codex_project_budget(selected_updates.items[key].after.decode("utf-8"))
+                    _apply_selected_replacement(
+                        selected_updates, key,
+                        (root / "shared" / "AGENTS.shared.md", source / "AGENTS.codex.md"),
+                        docs_target, create_only, args.dry_run)
+                else:
+                    _merge_codex_agents(root, source, docs_target, args.dry_run, mutable_owner=create_only,
+                                        project_scope=mode != "global")
             else:
-                _merge_claude_docs(root, source, docs_target, args.dry_run, mutable_owner=create_only)
+                _merge_claude_docs(root, source, docs_target, args.dry_run,
+                                   mutable_owner=create_only, project_scope=mode != "global")
             if provider != "codex":
-                _normalize_agents_mode(
-                    root,
-                    root / "shared" / "agents-mode.defaults.yaml",
-                    mode_target,
-                    normalize_provider,
-                    args.dry_run,
-                    transaction=transaction, mutable_owner=create_only,
-                )
-                if shared_mode_target is not None:
-                    _normalize_agents_mode(
-                        root,
-                        root / "shared" / "agents-mode.defaults.yaml",
-                        shared_mode_target,
-                        "shared",
-                        args.dry_run,
-                        transaction=transaction, mutable_owner=create_only,
-                    )
-
-            if provider == "claude":
-                mode_project = project if project is not None else target.parent / ".orchestrarium-global-install"
-                effective_delegation_mode = _resolve_claude_delegation_mode(
-                    root, mode_project, home if home is not None else mode_project
-                )
-                _merge_claude_main_agent_settings(
-                    root,
-                    registration,
-                    effective_delegation_mode,
-                    args.dry_run,
-                    mutable_owner=create_only,
-                )
+                migrate_global_preferences()
 
             if hooks_enabled and provider != "codex":
                 _install_hooks(
@@ -11940,11 +14447,11 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                             f"{len(missing_runtime)} missing: "
                             + ", ".join(str(path) for path in missing_runtime[:16]),
                         )
-                if not mode_target.is_file() or not docs_target.is_file():
+                if not docs_target.is_file():
                     raise _InstallFailure(
                         "E_INSTALL_VERIFY_CONTROL_FILES_MISSING",
                         "verify",
-                        "documentation or agents-mode output missing",
+                        "documentation output missing",
                     )
                 if args.replace_kimi_enrollment:
                     assert home is not None
@@ -11986,21 +14493,28 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             _finalize_canonical_lead_receipt(
                 canonical_plan, canonical_skills_target, canonical_skills_owner, reclaimed
             )
+            if selected_updates is not None:
+                _record_selected_provider_receipt(selected_updates)
+            else:
+                _record_fresh_provider_receipt(
+                    provider, "global" if mode == "global" else "project", fresh_receipt, create_only
+                )
             transaction.commit()
+        applied = not args.dry_run
         if provider == "codex" and mode == "global":
             assert home is not None
             assert canonical_plan is not None
             _install_codex_legacy_skill_compatibility(
                 root, home, target, canonical_plan, canonical_skills_target,
                 legacy_codex_skill_migrations, dry_run=args.dry_run)
-        if args.dry_run:
-            print("RESULT: DRY-RUN complete (no files modified).")
-            return 0
-        print(f"RESULT: OK - {provider.capitalize()} pack installed to {target}")
-        return 0
-    except (OSError, RuntimeError, ValueError) as exc:
-        print(f"FAIL: {_installer_failure_text(exc)}", file=sys.stderr)
-        return 1
+    except BaseException as exc:
+        primary = exc
+        if not applied and not args.dry_run and transaction is not None and transaction.committed:
+            applied = "commit-requested"
     finally:
         if canonical_plan is not None:
-            _discard_canonical_skills_plan(canonical_plan)
+            try:
+                _discard_canonical_skills_plan(canonical_plan, strict=True)
+            except BaseException as exc:
+                cleanup_error = exc
+    return _finish_install_result(provider, target, args.dry_run, applied, primary, cleanup_error)

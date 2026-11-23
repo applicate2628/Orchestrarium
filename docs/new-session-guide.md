@@ -42,7 +42,7 @@ Use this guide at the start of a new Orchestrarium maintenance session. Its purp
 | Claude common-skill projections | Claude installed skill projections consume the canonical skill tree through the production installer; historical Source comparison trees stay protected unless compatibility migration is explicitly admitted. |
 | Provider-specific addenda | `references-codex/`, `references-claude/` |
 | Agents-mode schema and defaults | `shared/agents-mode.schema.json`, `shared/agents-mode.presets.json`, `shared/agents-mode.defaults.yaml` |
-| Installers | root `install.*`, `scripts/install-*.{sh,ps1}` |
+| Installers | Python entry points `install.py`, `scripts/install-codex.py`, and `scripts/install-claude.py`; matching `.sh` files are thin POSIX launchers. |
 | Release log | `RELEASE_NOTES.md` |
 
 ## Runtime Map
@@ -63,18 +63,22 @@ Inside this monorepo, a missing project-local `.agents/` tree is not a misconfig
 | Symptom | Correct first move |
 |---|---|
 | Codex skill label, trigger, or default prompt is wrong | Edit `src.codex/skills/<skill>/SKILL.md` and/or `agents/openai.yaml`; then sync `$HOME/.agents/skills/<skill>/` only if immediate behavior is needed. |
-| Common skill behavior is wrong across providers | Update the common skill source in each affected provider tree; update shared docs/indexes when the public contract changes. Do not mechanically copy without validating provider semantics. |
+| Common skill behavior is wrong across providers | Edit the canonical body once in `src.codex/skills/<skill>/SKILL.md`. Change a provider wrapper or addendum only for provider-specific behavior, and verify each affected installed projection. Update shared docs/indexes when the public contract changes. |
 | Claude behavior relies on `Agent` or slash-command mechanics | Keep that change in `src.claude/`; do not rewrite it for Codex unless there is a Codex-native owner. |
 | Codex behavior lacks a direct Agent tool | Check available Codex subagent or MCP tooling in the current runtime; if unavailable, record the gap honestly instead of pretending the Claude mechanism exists. |
 | Installed runtime has stale behavior | Verify the live installed file, patch source first, then reinstall or explicitly sync the installed file as a temporary live-runtime update. |
 | Editing a script/hook shared by `scripts/universal-hooks/`, `src.claude/agents/`, and `src.codex/skills/lead/` | Edit ONLY the copy under `scripts/universal-hooks/{scripts,hooks}/` — it is the stated canon (`tests/test_universal_hook_surfaces.py:10-11`), never a mirror. Then run `python scripts/sync-universal-hooks.py --sync` to propagate, and `--check` before reporting a result — do not rely on remembering "the other two trees"; that manual-memory step is exactly what produced a false-green test run in a prior session (`work-items/bugs/2026-07-26-mirror-parity-is-detected-but-never-propagated.md`). |
 | Shared governance changes | Update `shared/AGENTS.shared.md`, affected `shared/references/`, provider addenda, validator fingerprints if required, and `RELEASE_NOTES.md`. |
-| Context compaction loses active work | Restore active task, next unchecked step and open evidence gates from accepted recovery; continue subject to user/persisted holds and, for an enrolled native Goal, the shared same-task/native-binding authority rule. Ordinary or unenrolled/no-Goal tasks retain their existing workflow. |
+| Context compaction loses active work | Restore active task, next unchecked step and open evidence gates; reconcile current authority under shared **Goal resumption and hold currency**, rather than reviving fulfilled one-off parking/no-Goal requests from recovery. Ordinary or unenrolled/no-Goal tasks retain their existing workflow. |
 | User says to stop closeout and work | Treat it as a continue-working correction, not a request for acknowledgement. Take the next concrete action in the active task immediately unless a real blocker prevents action. |
 
 ## Validation
 
 Run the smallest useful check first, then the affected pack checks.
+
+- When a failure recurs, use the existing bug-hunting and review-loop owners to find which invariant or verification step let the class recur. Add the smallest regression check at that boundary instead of another workflow.
+- For independent verification, give the reviewer the frozen input and acceptance criteria before sharing the author's conclusion. Reconcile findings and conclusions against that same input afterward.
+- Release installation and rollback evidence names the exact source commit, platform, installed target and result of each scenario. A changed candidate, a dry run or a neighboring platform does not inherit that acceptance.
 
 | Change surface | Checks |
 |---|---|

@@ -18,7 +18,7 @@ Run a repository-wide impact review triggered by recent changes. The changed fil
 ## Scope decision
 
 1. Check `$ARGUMENTS`.
-- If a PR URL, PR number, branch, commit range, or diff target is given, use that scope.
+- If a PR URL, PR number, branch, commit range, or diff target is given, use that scope. Resolve and record the exact compared base and head (or a frozen working-tree diff identity). Before returning the verdict, recheck a moving target when available and disclose when currentness could not be rechecked; never imply that evidence for one revision certifies a later revision. Review only the affected delta when existing evidence remains current.
 - Otherwise inspect current unstaged and staged changes with `git diff` and `git diff --cached`.
 - If no changes are present, stop and tell the user there is nothing to review.
 2. If the user mentions a bug, review thread, accepted plan, or expected fix list, use that as the completion baseline.

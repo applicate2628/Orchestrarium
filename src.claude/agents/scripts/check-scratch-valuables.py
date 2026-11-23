@@ -510,7 +510,7 @@ def _hash_object_batch(git_root: Path, paths: list[Path], timeout_seconds: float
     if not paths:
         return {}
     proc = _run_git_stdin_batch(
-        git_root, ["hash-object", "--stdin-paths"], [str(p) for p in paths], timeout_seconds
+        git_root, ["-c", "core.longpaths=true", "hash-object", "--no-filters", "--stdin-paths"], [json.dumps(str(p), ensure_ascii=False) for p in paths], timeout_seconds
     )
     if proc is None or proc.returncode != 0:
         return None

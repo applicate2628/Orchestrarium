@@ -27,7 +27,7 @@ description: "Qt QAbstractItemModel, proxies, delegates, views: dataChanged, sor
 - The diff stays inside approved Qt model or view scope.
 - QAbstractItemModel behavior, proxy behavior, selection behavior, persistent indexes, lazy loading, and sorting or filtering remain correct.
 - Planned tests and checks were run or explicitly reported as blocked.
-- Any changed `QAbstractItemModel` subclass or proxy runs under `QAbstractItemModelTester` in failure-report mode in a test, or reports that check blocked with the reason.
+- Any changed `QAbstractItemModel` subclass or proxy runs under `QAbstractItemModelTester` in failure-report mode in a test, or reports that check blocked with the reason. The tester does not establish destructive mutation semantics: for a changed structural or lazy-loading path, exercise the applicable mutation and assert source/proxy mapping, persistent indexes and selection by stable identity after settlement. If the change can invalidate an asynchronous fetch, also deliver an old result after invalidation and check it cannot repopulate the new state.
 - Apply the `Receiving-side echo` owned by `subagent-contracts.md`; an implementation package missing that echo fails this gate.
 
 ## Working rules
@@ -47,7 +47,7 @@ description: "Qt QAbstractItemModel, proxies, delegates, views: dataChanged, sor
 
 When implementation reveals bugs, risks, or improvement opportunities outside the approved change surface:
 
-1. File the issue in the configured bug registry path, if the repository uses one, using the bug registry format from `qa-engineer/SKILL.md`, with `context: adjacent-finding` and `status: open`.
+1. Route concrete defects through the bug-admission contract owned by `qa-engineer`; use `context: adjacent-finding` and `status: open` only for a defect admitted under that contract.
 2. Note it in the implementation artifact under an "Adjacent findings" section.
 3. Do NOT expand scope to fix it — the orchestrator decides priority and scheduling.
 4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` instead of working around it.

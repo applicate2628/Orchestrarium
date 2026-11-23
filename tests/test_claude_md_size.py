@@ -34,8 +34,8 @@ EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
         "1f2ab534399851a99b5f39caadec703b8ddf5118c73ea60bd27a3023c0a5209d",
     ),
     "hook-behavior-contracts": (
-        19_387,
-        "49304999e8668edbf3d697ec6a66c01faea27cb46905e02136e4efa434a55c37",
+        15025,
+        "2abd7e25beaeab7fc415969894dab386ea6718fd518e763e70931cf2e61304b2",
     ),
     # Payload pins force deliberate review of current hook behavior, placement,
     # and installer truth before a canonical-reference edit can pass.
@@ -44,8 +44,8 @@ EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
         "0398b801e77a3bcdd96d22818272e57d61446ffeeac526fc15612a42f519a5d1",
     ),
     "installer-removal-json-path": (
-        5_254,
-        "1810bf29901fcf68b0efabc55aacafbd9b5f49aed5da325afb8b79cd7bce27fa",
+        5_278,
+        "79ca6e2c768e36609f01be3f2178f5b0672311b6d440b351e68d7f0749732ec3",
     ),
 }
 
@@ -90,7 +90,8 @@ EXPECTED_CLAUDE_MANIFEST: dict[str, tuple[str | re.Pattern[str], ...]] = {
         "Stop hooks do not replace the main conversation's current-turn status checks or work-item close/archive ownership",
         "Passive verdicts and the leaf/re-entry skips remain unchanged",
         "[skip-bugfix-discipline]",
-        "[approve-publication]",
+        "Root receives genuine publication review and consent for the actual source, repository and destination.",
+        "it does not reconstruct consent from chat history or require an approval marker.",
         "MCP control.",
         "discovery reminders are advisory in `auto` and subagent contexts.",
         "Root `force` still requires runtime discovery, the relevant tool schema, fitting MCP use",

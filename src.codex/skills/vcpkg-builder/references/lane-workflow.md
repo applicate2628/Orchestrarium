@@ -2,20 +2,20 @@
 
 ## Command profiles
 
-Select exactly one profile from the accepted plan:
+Select exactly one profile from the accepted command contract:
 
 - Targeted base: the repository-defined single-port wrapper with one exact port/triplet selection.
-- Targeted release: the repository-defined release selection, only after its base prerequisite passes when the plan requires that ordering.
+- Targeted release: the repository-defined release selection, only after its base prerequisite passes when the command contract requires that ordering.
 - Aggregate: one explicitly named repository wrapper and arguments; never substitute an aggregate for targeted validation or vice versa.
 - Diagnostic/read-only: no build command; inspect only the admitted logs and Model Context Protocol (MCP) surfaces.
 
-There is no universal full-lane-first rule. The user and accepted plan own whether the next gate is targeted or aggregate. A failure stops the admitted invocation sequence unless the plan already authorizes the next command under an explicit condition.
+There is no universal full-lane-first rule. The accepted command contract records whether the next gate is targeted or aggregate. A failure stops the admitted invocation sequence; it never authorizes a retry or a substitute command.
 
 ## Root policy
 
 - Find the repository's canonical selector, environment overrides, and root-order documentation before probing candidates; never invent a drive, mount, home-directory, or checkout fallback.
 - Classify each resolved path by lifecycle: transient build, package staging, durable install/cache, aggregate, routing sentinel, scratch evidence, or external vcpkg checkout.
-- Apply protected/prohibited paths from the current repository contract and accepted plan. Do not copy machine-specific paths from a previous repository, user profile, drive layout, WSL distribution, or session.
+- Apply protected/prohibited paths from the current repository contract and accepted command contract. Do not copy machine-specific paths from a previous repository, user profile, drive layout, WSL distribution, or session.
 - Verify repository-defined external-root guards before and after any wrapper that can touch the checkout. A wrapper-owned pull requires explicit user authorization; a separate pull is a separate command and needs its own admission.
 
 ## Runtime evidence
@@ -26,7 +26,7 @@ For every build record:
 - Coordinated Universal Time (UTC) start/end and pre-run cutoff;
 - selected buildtrees, packages, install, cache, and scratch roots;
 - relevant source/artifact hashes and current MCP facts;
-- wrapper exit and the port/triplet terminal result;
+- wrapper exit and the port/triplet terminal result; for build-dependent claims, record the resolved overlay, selected features and triplet, observed ABI identity when available, and whether the artifact came from fresh compilation, binary-cache reuse, already-installed/no-op, or an unverified origin;
 - requested generated-build evidence such as Ninja rules, response files, compiler commands, effective flags, patch order, or installed markers;
 - absence/presence checks bounded to current-run files and timestamps;
 - post-run process query proving descendants are reaped;
@@ -46,7 +46,7 @@ For a release gate, confirm the optimization invariant declared by the repositor
 | Target build | The named port/triplet reached configure/compile/link with current-run evidence | `PASS` or `REVISE` only for the proved build criteria |
 | Install/package receiver | Current artifacts were installed and inspected by the requested oracle | Eligible for the admitted runtime verdict |
 
-An already-installed exit-zero path is a no-op, not receiving-side proof of a new source/toolchain fix. Preserve the durable install family, and request a separately admitted fresh-build mechanism rather than deleting shared state implicitly.
+An already-installed exit-zero path is a no-op, not receiving-side proof of a new source/toolchain fix. For a receiving-boundary claim, use the admitted compile/link or runtime consumer when required; a successful consumer does not on its own prove fresh compilation. Preserve the durable install family, and request a separately admitted fresh-build mechanism rather than deleting shared state implicitly.
 
 Triplet names do not universally own storage identity. Repositories may strip release or feature suffixes for a shared durable install family while retaining full variant names for buildtrees and packages. Read the repository's resolver output and record every resolved identity explicitly.
 
@@ -59,7 +59,7 @@ Stop without retry, cleanup, or command substitution when:
 - a protected surface would overlap another active build;
 - the wrapper or requested port/triplet fails;
 - a required runtime oracle is absent even though the build exits zero;
-- source, plan, artifact, or external-root state drifts;
+- source, command contract, artifact, or external-root state drifts;
 - a new failure class invalidates the accepted diagnosis;
 - a child remains running or process ownership cannot be established.
 
@@ -67,6 +67,7 @@ Preserve the exact failing tree and logs. Return control to the root lead for di
 
 ## Terms and Abbreviations
 
+- `ABI`: Application Binary Interface; the vcpkg build identity tracks inputs for binary-cache equivalence.
 - `argv`: argument vector, the ordered command arguments passed to a wrapper.
 - `MCP`: Model Context Protocol, the tool and resource integration protocol.
 - `runtime oracle`: the admitted observation that proves the requested receiving-side behavior.

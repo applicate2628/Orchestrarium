@@ -28,6 +28,7 @@ description: "Ordered phases, acceptance criteria, rollback notes."
 - Each phase is small enough to implement and review independently.
 - File scope, allowed change surface, nearby smoke coverage, exact executable verification commands, expected fresh-output evidence, and acceptance criteria are explicit for every phase. `run tests` without a named repo-standard entry point is `REVISE`.
 - Parallel phases are used only where contracts and write boundaries are already fixed.
+- Before accepting a nontrivial parallel plan, trace its named phases from prerequisite to consumer: reject a dependency cycle, a shared write surface assigned concurrently, or a rollback that would strand a downstream consumer. Use an existing local check when available; this is part of the plan self-check, not a new gate.
 - A plan with two or more parallel or differently-owned implementation phases includes a named integration phase with its owner and end-to-end verification across the split scopes, or a one-line justification for its absence.
 - The plan contains no implementation code.
 - End with one explicit gate decision: `PASS`, `REVISE`, or `BLOCKED`.

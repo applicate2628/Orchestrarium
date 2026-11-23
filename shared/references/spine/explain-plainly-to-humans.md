@@ -2,19 +2,15 @@
 
 ## Fundamental rule
 
-In every status, explanation, or decision presented to the user, lead with plain language — what is happening and what to do, in clear words a non-internal reader follows. Do not present a bare dump of internal terms, identifiers, or jargon as the message.
+Apply the shared **Plain-language and terminology discipline** to statuses, explanations and decisions. Start with the useful answer or outcome in words the reader understands, without assuming specialist knowledge or talking down to them. Keep facts, uncertainty and material risks accurate.
 
 ## Operational test
 
-Before sending a status or explanation to the user, answer these checks:
+Before asking the user to decide, check whether the choice is routine and already within your authority. If so, make it and continue. Otherwise give the necessary context: what happened, where the issue comes from, why their decision is needed, the practical options and consequences, and how the chosen action would work. Recommend an option when useful, then ask one clear question. Required approvals remain required.
 
-1. Does it lead with the meaning — what happened, what to decide — in plain words, not with PR numbers, `file:line`, function names, status codes, commit hashes, or daemon names?
-2. Is every technical term either avoided or glossed in one phrase the first time it appears (e.g. "supervisor — the program that keeps all the servers running")?
-3. When a decision is needed, is there a clear "what to do" with numbered choices?
-4. Is the dense technical detail kept where it belongs (commit messages, PR/issue bodies, code) rather than dumped into the human-facing message?
-5. Does it describe a *change* by its meaning — what concept, owner, invariant, contract, or abstraction changed and why — rather than a symbol-level before/after diff or a sprinkle of identifiers? Name what the change accomplishes at the concept level, not the literal tokens it touched. The aim is sharper substance, not more words.
+Use only the detail this decision needs; this is not a fixed questionnaire. Explain unfamiliar terms briefly on first use. Number options when it helps comparison. Keep exact identifiers or a full diff as supporting detail, rather than making the user decode them to understand the question. Provide technical depth when requested.
 
-If the message is a list of identifiers with no plain-language framing, rewrite it before sending.
+For example, instead of asking only whether to replace a mismatched manifest, explain that the installed file list no longer matches the files, what the proposed repair changes or preserves, and any remaining risk. If the repair is already authorized and routine, perform it rather than asking again. If a user choice or approval is required, make that choice understandable before asking.
 
 ## Why it matters
 
@@ -24,7 +20,7 @@ The user steers the work as the operator; they are not tracking the internal voc
 
 Applies to all human-facing output: chat status, explanations, decision prompts, progress reports. It does NOT apply to commit messages, PR/issue bodies, code comments, or other technical artifacts, where precise terminology is correct and expected. When the user explicitly asks for technical depth, give it — but still frame it in plain language first.
 
-This rule wins over terseness modes (e.g. a "caveman" brevity mode): brevity drops filler, it does not license a jargon dump. Clarity for the human is non-negotiable. It composes with the spine's `Plain-language and terminology discipline` (which requires expanding terms on first use): terminology-discipline says *define the term*; this rule says *lead with the meaning and the decision, not the identifiers*. The two rules hold together and neither cancels the other — still expand every domain term, role/provider/model name, and acronym on first use, AND describe the change by its meaning rather than its raw symbols. The "describe by meaning" point is about sharper substance, never about giving fewer explanations or skipping a gloss.
+Brevity removes filler, not the context needed to understand a decision. The shared spine remains the single binding owner; this card supplies practical interpretation, not another approval gate or mandatory output template. Existing safety, consent and host requirements remain unchanged.
 
 ## Terms and Abbreviations
 

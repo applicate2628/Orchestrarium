@@ -6,9 +6,9 @@
 
 **Current production note:** Shipped production `externalProvider: auto` routing remains limited to the Codex/Claude pair. Kimi Code is an explicit-only Windows route through the canonical fixed `kimi-code/k3` file-prompt wrapper for policy-admitted read-only work or engineering whose task eligibility and assigned profession map to `external-worker`. Omitting the capability file keeps tools, Model Context Protocol servers and subagents empty with permission `reject`; a validated selected file can supply admitted read tools/servers or caller-scoped worker tools under the existing mutation class and role mapping, not authority or a sandbox. Normal launch does not require executable enrollment, remains independently verified and nonauthorizing, and does not attest the actual server-side model. Grok remains unavailable in 1.x. Neither participates in shipped production profiles.
 
-## Problem
+## Original problem
 
-The current role architecture has no universal implementer or reviewer that works through an external CLI provider. Every implementation task requires selecting a domain-specific specialist (backend-engineer, frontend-engineer, etc.), even when the task is simple/mechanical or the external CLI is better suited. There is no "economy mode" toggle to prefer external dispatch for cost or workflow reasons.
+Before this design, the role architecture had no universal implementer or reviewer that works through an external CLI provider. Every implementation task requires selecting a domain-specific specialist (backend-engineer, frontend-engineer, etc.), even when the task is simple/mechanical or the external CLI is better suited. There is no "economy mode" toggle to prefer external dispatch for cost or workflow reasons.
 
 ## Decision
 
@@ -18,7 +18,7 @@ Introduce two new roles and a shared dispatch module:
 - `$external-reviewer` — universal reviewer/QA via external CLI
 - `external-dispatch.md` — shared CLI dispatch protocol (DRY, used by consultant + both new roles)
 
-## New roles
+## Adapter roles
 
 ### `$external-worker`
 
@@ -65,14 +65,14 @@ Introduce two new roles and a shared dispatch module:
 
 Full value-by-value operator semantics now live in [`agents-mode-reference.md`](agents-mode-reference.md). Keep this design spec at the decision level and let the dedicated reference own the complete `value | meaning` tables.
 
-1. **Config file location**
+1. **Project configuration location**
 
    | Platform | Path |
    |----------|------|
    | Claude Code | `.claude/.agents-mode.yaml` |
    | Codex | `.agents/.agents-mode.yaml` |
 
-2. **Extended config format**
+2. **Illustrative configuration (not installer defaults)**
 
    ```
    consultantMode: external
@@ -122,17 +122,17 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
    - `mcpMode` — `auto` vs `force` MCP routing policy
    - `preferExternalWorker` — external-worker as default on eligible worker-side lanes
    - `preferExternalReviewer` — external-reviewer as default on `review` + `QA` stages
-   - `externalProvider` — shipped production provider universe `auto`, `claude`, or `codex` for provider-backed consultant / adapter selection
+   - `externalProvider` — `auto` resolves only to Codex and Claude. See the operator reference and the production note above for explicit routes and unavailable values.
    - `externalPriorityProfile` — active named provider-order profile used only when `externalProvider: auto`
    - `reserveResolver` — concrete read-only resolver for symbolic `reserve`: `disabled`, `claude-sonnet`, `claude-wrapper`, or `wrapper:<command>`
    - `externalPriorityProfiles` — per-profile lane matrix with ordered provider lists; the shipped production profile set stays on Codex plus Claude provider families, with `reserve` only as the supplemental advisory/review candidate
    - `externalOpinionCounts` — per-lane number of distinct external opinions required under `externalProvider: auto`; not a global cap on helper multiplicity
    - `externalModelMode` — shared production model policy: `runtime-default` leaves the resolved provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native model/profile and allows one named same-provider fallback on retryable provider exhaustion
-   - `externalCodexProfile` — shared Codex-specific profile override: `default` inherits `externalModelMode`; `gpt-6.1-sol-xhigh` (shipped default) and `gpt-6.1-sol-max` request the named GPT-6.1 Sol effort; `gpt-5.6-terra` keeps the balanced Codex model at `high`; explicit `gpt-6-sol-high`, `gpt-6-sol-xhigh`, `gpt-6-sol-max`, `gpt-5.6-sol-xhigh`, and `gpt-5.6-sol-max` values retain their named model and effort through 1.x
+   - The current external Codex profiles are `default`, `gpt-6.2-sol-high`, `gpt-6.2-sol-xhigh` and `gpt-6.2-sol-max`. The shipped default is `gpt-6.2-sol-xhigh`; `default` uses `externalModelMode` with an explicitly observed, currently admitted runtime model/effort. Named Sol profiles request GPT-6.2 Sol at their stated effort. Max remains approval-gated. Retired profiles are not launchable and are not silently rewritten or used as quota fallbacks.
    - `reserve` — symbolic supplemental candidate that may appear only in advisory/review profile orders; it is not a scalar provider key, not a primary `claude` retry, and not available to worker-side implementation/editing lanes
    - `externalClaudeProfile` — Codex-line only optional Claude CLI execution profile: `sonnet-high`, `opus-xhigh` (shipped default), `opus-max` (max-depth escalation), or `fable-xhigh` (current flagship-family best-effort tier; the `fable` flagship alias as of 2026-07)
    - Each toggle is independent
-   - Default full shape on first creation: `delegationMode: auto`, `parallelMode: auto`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`, `externalPriorityProfile: balanced`, `reserveResolver: claude-sonnet`, shipped `externalPriorityProfiles` on the Codex/Claude pair plus advisory/review-only `reserve`, and `externalOpinionCounts` defaulting every documented lane to `1`; provider-specific workdir keys default to `neutral`; the shared model policy defaults to `externalModelMode: runtime-default`; the Codex profile override defaults to `externalCodexProfile: default`; Codex also writes `externalClaudeProfile: opus-xhigh`
+   - First-creation defaults come from the [operator schema and presets](agents-mode-reference.md); the values in this example are illustrative overrides.
 
 3. **Dispatch protocol (platform-dependent)**
 
@@ -156,8 +156,8 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
 4. **Common rules**
    - CLI availability check before dispatch (`which codex` / `where codex` on Claude Code, `claude` / `claude.exe` on Codex)
    - Under `externalModelMode: runtime-default`, keep the selected provider on its runtime default model/profile.
-   - Under `externalModelMode: pinned-top-pro`, hard tasks start on the strongest documented production provider-native path: Codex model `gpt-6.1-sol` with `model_reasoning_effort = "xhigh"` supplied through a supported config/profile path, or `opus-max` / `--model opus --effort max` on Claude CLI. Example-provider model behavior stays provider-local and is intentionally outside this production design spec.
-   - Under `externalCodexProfile: default`, Codex inherits `externalModelMode`; `gpt-6.1-sol-xhigh` and `gpt-6.1-sol-max` request the named GPT-6.1 Sol effort; `gpt-5.6-terra` keeps the balanced Codex model at `high`; explicit `gpt-6-sol-high`, `gpt-6-sol-xhigh`, `gpt-6-sol-max`, `gpt-5.6-sol-xhigh`, and `gpt-5.6-sol-max` values retain their named model and effort through 1.x.
+   - Under `externalModelMode: pinned-top-pro`, hard tasks start on the strongest documented production provider-native path: Codex model `gpt-6.2-sol` with `model_reasoning_effort = "xhigh"` supplied through a supported config/profile path, or `opus-max` / `--model opus --effort max` on Claude CLI. Example-provider model behavior stays provider-local and is intentionally outside this production design spec.
+   - The current external Codex profiles are `default`, `gpt-6.2-sol-high`, `gpt-6.2-sol-xhigh` and `gpt-6.2-sol-max`. The shipped default is `gpt-6.2-sol-xhigh`; `default` uses `externalModelMode` with an explicitly observed, currently admitted runtime model/effort. Named Sol profiles request GPT-6.2 Sol at their stated effort. Max remains approval-gated. Retired profiles are not launchable and are not silently rewritten or used as quota fallbacks.
    - On advisory and review lanes, `reserve` is the supplemental symbolic profile candidate after primary candidates such as `claude` and `codex`. `reserveResolver` binds it to an approved read-only transport such as the installed secret-backed Claude wrapper, a smaller production model, or another local read-only source, but the execution record must name the actual resolved path. `reserve` is independent of primary `claude`; it is not a retry path for primary Claude and is unavailable for worker-side implementation, code-generation, file-editing, installer, publication, or write-producing repository-hygiene routes.
    - `externalPriorityProfile` selects the named provider-order map only when `externalProvider: auto`; unknown profile names fail closed instead of silently falling back.
    - `externalOpinionCounts` controls how many distinct external opinions a lane must collect under `auto`. Missing counts mean `1`; shortfalls keep the lane `BLOCKED`.
@@ -210,8 +210,8 @@ The orchestrator (the main conversation, as Lead) **prefers** external roles by 
 - `externalOpinionCounts` — raise specific lanes above `1` when the orchestrator should collect multiple independent external opinions
 - `parallelMode` is the general fan-out rule for any helper lane; `externalOpinionCounts` and brigade semantics remain the external-specific overlay on top
 - `externalModelMode: runtime-default | pinned-top-pro` — shared production model policy; `runtime-default` keeps provider runtime selection, while `pinned-top-pro` asks each production provider for its strongest documented native path with one named same-provider fallback on retryable provider exhaustion
-- `externalCodexProfile: default | gpt-6.1-sol-high | gpt-6.1-sol-xhigh | gpt-6.1-sol-max | gpt-6-sol-high | gpt-6-sol-xhigh | gpt-6-sol-max | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-terra` — shared Codex-specific profile override.
-  `default` inherits `externalModelMode`; `gpt-6.1-sol-xhigh` (shipped default) and `gpt-6.1-sol-max` request the named GPT-6.1 Sol effort; explicit `gpt-6-sol-high`, `gpt-6-sol-xhigh`, `gpt-6-sol-max`, `gpt-5.6-sol-xhigh`, and `gpt-5.6-sol-max` values retain their named model and effort through 1.x; `gpt-5.6-terra` remains the balanced mid-tier reasoning lane at `high`
+- `externalCodexProfile: default | gpt-6.2-sol-high | gpt-6.2-sol-xhigh | gpt-6.2-sol-max` — shared Codex-specific profile override.
+  Only the latest confirmed version of each admitted Codex family is selectable: GPT-6 Luna, GPT-6.1 Terra, GPT-6.2 Sol and GPT-6.2 Astra. Existing user configuration is preserved, but a retired choice is not executable and must be replaced by an explicitly selected current profile; no silent fallback is allowed.
 - `reserve` in `externalPriorityProfiles` — advisory/review-only supplemental candidate bound by `reserveResolver`; it is independent of primary `claude`, not a scalar provider key, and not available to worker or mutating routes
 - `externalClaudeProfile: sonnet-high | opus-xhigh | opus-max | fable-xhigh` — Codex-line only.
   When Codex dispatches to Claude CLI, prefer the matching model/effort profile instead of the provider default or the broader shared model policy; `fable-xhigh` maps to `--model fable --effort xhigh` (the current flagship-family best-effort tier; the `fable` flagship alias as of 2026-07, recorded from the installed model list rather than a verified capability ranking)
@@ -243,7 +243,7 @@ Always available in both directions, regardless of toggle state.
 
 Normal routing fallback to domain specialist. Not an error — standard routing behavior.
 
-## Affected files
+## Original implementation scope
 
 | File | Change |
 |------|--------|

@@ -1,6 +1,6 @@
-# Claude instruction support: current-line research and implementation plan
+# Claude instruction support: dated research and original implementation handoff
 
-Status: documentation-only handoff for the current production line, separate from the 2.0 redesign. No runtime, installer, settings, provider launch or installed target is changed by this document.
+Status: dated research and original 1.x implementation handoff, separate from the 2.0 redesign. The preservation-aware rendering owner and generated projection are already present in this branch. Use [the install contract](../INSTALL.md) and [the runtime layout reference](provider-runtime-layouts.md) for current behavior. The dated host observations and optional native-mode qualification below do not establish current host behavior.
 
 ## Decision
 
@@ -8,7 +8,7 @@ The target is **one authored provider-neutral rule set, with provider-specific i
 
 For the current production line, retain the Claude `CLAUDE.md` -> `@AGENTS.md` composition and the generated Codex composition. This recommendation follows the loading/authority comparison below, not a requirement to preserve today's layout for its own sake. One semantic source does not require one physical file across runtimes. Native Claude discovery is useful new capability, but does not itself safely separate Codex-specific policy from a common root document.
 
-The bounded development follow-up should reuse pull request (PR) #15's managed-document preservation work, formalize the source-to-runtime projections in the existing runtime-layout reference, and extend existing composition tests. No meaningful loader or semantic guard has been shown removable solely because native discovery exists. A single neutral root file remains an evaluated alternative requiring a separate cross-provider composition contract, not a promised automatic migration or new Orchestrarium setting.
+The original bounded development follow-up called for reusing pull request (PR) #15's managed-document preservation work, formalizing the source-to-runtime projections in the existing runtime-layout reference, and extending composition tests. No meaningful loader or semantic guard has been shown removable solely because native discovery exists. A single neutral root file remains an evaluated alternative requiring a separate cross-provider composition contract, not a promised automatic migration or new Orchestrarium setting.
 
 ## Evidence and confidence
 
@@ -76,7 +76,7 @@ The proposed seam is document composition inside the existing installer: `_merge
 
 ### Preservation and rollback boundary
 
-The baseline merger can truncate text after a recognized entry marker (`scripts/production_installer.py:9739-9744`), despite `INSTALL.md` promising preservation. PR #15 addresses that producer boundary; native discovery does not fix it. Future development must preserve user-owned prefix, suffix and import content/order under the existing documented line-feed (LF) normalization, leave unrelated settings bytes unchanged, classify both managed documents before either write, and refuse ambiguous ownership without effects. Never delete or rename user-authored `CLAUDE.md`/`AGENTS.md`, synthesize ownership from filenames, or silently switch the global mode. Reuse the installer's existing transaction/recovery owner for rollback; retain exact original-byte beforeimages and restore only owned changes. Successful rendering is not a byte-identical preservation claim for carriage-return/line-feed (CRLF) input; do not expand PR #15 into a separate text-format refactor. Unknown/customized files stay preserved for explicit resolution.
+The recorded baseline merger could truncate text after a recognized entry marker (`scripts/production_installer.py:9739-9744`), despite `INSTALL.md` promising preservation. PR #15 addresses that producer boundary; native discovery does not fix it. Future development must preserve user-owned prefix, suffix and import content/order under the existing documented line-feed (LF) normalization, leave unrelated settings bytes unchanged, classify both managed documents before either write, and refuse ambiguous ownership without effects. Never delete or rename user-authored `CLAUDE.md`/`AGENTS.md`, synthesize ownership from filenames, or silently switch the global mode. Reuse the installer's existing transaction/recovery owner for rollback; retain exact original-byte beforeimages and restore only owned changes. Successful rendering is not a byte-identical preservation claim for carriage-return/line-feed (CRLF) input; do not expand PR #15 into a separate text-format refactor. Unknown/customized files stay preserved for explicit resolution.
 
 ## Validation and acceptance
 

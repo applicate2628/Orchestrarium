@@ -27,7 +27,9 @@ REMINDER = (
     "in this turn without waiting for a side result. Fast side completion is fine. "
     "On conflict, preserve the side owner's resume point and hold only dependent "
     "actions. Explicit user stop, pause, cancel, or reprioritization wins; native Goal "
-    "PAUSED remains with its owner. Recheck Ready and refill useful compatible lanes "
+    "PAUSED remains with its owner. "
+    "Apply shared Goal resumption and hold currency before treating an earlier hold as current. Never cancel or block a resumed Goal from stale recovery alone. "
+    "Recheck Ready and refill useful compatible lanes "
     "as they settle. Do not invent work or calls. Discover "
     "fresh task-fitting Model Context Protocol (MCP) tools before manual work "
     "where they improve quality; select exact available tools for each lane. "
@@ -315,13 +317,13 @@ def test_eligible_work_start_remains_available_after_boundary_events(
         None,
     ),
 )
-def test_manual_unknown_or_missing_modes_are_silent(
+def test_legacy_or_missing_modes_do_not_suppress_the_advisory(
     tmp_path: Path, config: str | None
 ) -> None:
     result = _run(tmp_path, config, envelope=_envelope())
 
     assert result.returncode == 0
-    assert result.stdout == ""
+    assert json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
     assert result.stderr == ""
 
 

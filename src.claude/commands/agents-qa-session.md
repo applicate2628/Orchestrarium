@@ -35,7 +35,7 @@ The user does not need to type `/agents-qa-session` for this flow to fire. Apply
       - Identifies testable scenarios based on the hint
       - Runs existing tests if available
       - Writes new test cases for suspicious areas
-      - Creates bug files in `work-items/bugs/` for confirmed defects
+      - Reports confirmed defects in-band under the QA bug-admission contract; registry files require an explicit scoped grant and a configured path
       - Reports findings
 
    c. **Present findings.** Show the user:
