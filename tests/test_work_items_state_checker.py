@@ -67,7 +67,7 @@ def load_validator_module():
     return module
 
 
-def test_false_event_validity_cannot_settle_revise_or_register_terminal():
+def test_caller_event_validity_cannot_authorize_unbound_closure():
     validator = load_validator_module()
     revise = {
         "schemaVersion": 2, "runId": "revise-001", "role": "qa-engineer",
@@ -80,11 +80,17 @@ def test_false_event_validity_cannot_settle_revise_or_register_terminal():
     }
     launch = {"schemaVersion": 2, "runId": "launch-001", "eventKind": "launch"}
     errors: list[str] = []
+    closed_relations = {"revise-001": "stale-closer"}
     open_revise, open_launches = validator.validate_closure(
-        [launch, revise, closer], errors, event_validity=[True, True, False]
+        [launch, revise, closer], errors, event_validity=[True, True, False],
+        closed_relations_out=closed_relations,
     )
-    assert [event["runId"] for event in open_revise] == ["revise-001"]
-    assert [event["runId"] for event in open_launches] == ["launch-001"]
+    # Caller flags can narrow an owned view, but raw rows have no issued context.
+    # Empty refused outputs do not certify settlement or preserve prior credit.
+    assert errors == ["WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: "
+                      "launch-bound current authority requires an issued context"]
+    assert (open_revise, open_launches) == ([], [])
+    assert closed_relations == {}
 
 
 def test_invalid_launch_does_not_enter_authority_reduction():
@@ -95,12 +101,17 @@ def test_invalid_launch_does_not_enter_authority_reduction():
         "launchRunId": "launch-001", "status": "completed", "gate": "PASS",
     }
     errors: list[str] = []
+    closed_relations = {"revise-001": "stale-closer"}
 
-    _open_revise, open_launches = validator.validate_closure(
-        [launch, terminal], errors, event_validity=[False, True]
+    open_revise, open_launches = validator.validate_closure(
+        [launch, terminal], errors, event_validity=[False, True],
+        closed_relations_out=closed_relations,
     )
 
-    assert open_launches == []
+    assert errors == ["WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: "
+                      "launch-bound current authority requires an issued context"]
+    assert (open_revise, open_launches) == ([], [])
+    assert closed_relations == {}
 
 
 def valid_status() -> str:
@@ -291,6 +302,7 @@ def _goal_fixture(tmp_path: Path, *, criterion_ids=("alpha", "omega", "useful"),
     return checker, owner, roots, goal, write_goal, close_member
 
 
+@unittest.skipUnless(os.name == "nt", "requires Windows native creator-bound flat close")
 class TestLegacyFlatGoalConsumer(unittest.TestCase):
     def setUp(self):
         # Ordinary import reuses the one real producer module/class already
@@ -434,8 +446,8 @@ class TestLegacyFlatGoalConsumer(unittest.TestCase):
         original_observe = self.owner.observe_work_item_terminal
         original_verify = self.owner.WorkItemTerminalObservation.verify
         held = []
-        def observe(root, reference):
-            value = original_observe(root, reference)
+        def observe(root, reference, **kwargs):
+            value = original_observe(root, reference, **kwargs)
             if reference == f"work-item:{self.flat.slug}": held.append(value)
             return value
         calls = []
