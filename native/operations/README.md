@@ -1,8 +1,10 @@
 # Native operations receiving components
 
-The Rust plan owns these source-only receiving components. There is no
-dispatcher, new Cargo package, installation, or activation in this slice.
-The pre-SDK publication matcher remains separate and unchanged.
+The Rust plan owns these source-only receiving components in the
+`orche-native-operations` Cargo package. There is no operation dispatcher,
+installation, or activation in this slice. The pre-SDK publication matcher
+keeps its separate runtime owner and wire protocol; its lexical engine is
+extracted into the library in `native/publication-match/src/lib.rs`.
 
 ## Publication tree walk
 
