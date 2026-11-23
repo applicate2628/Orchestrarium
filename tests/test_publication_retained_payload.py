@@ -6,10 +6,17 @@ import collections
 import hashlib
 import importlib.util
 from pathlib import Path
+import subprocess
 import sys
+import time
 import tracemalloc
 import unittest
+
+import pytest
 from unittest import mock
+
+pytestmark = pytest.mark.usefixtures("isolated_standalone_review_modules")
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
@@ -97,6 +104,24 @@ def acquire(selection, reader, review=None):
 
 
 class RetainedPayloadTests(unittest.TestCase):
+    def test_origin_check_reused_only_inside_one_captured_evaluation(self):
+        from types import SimpleNamespace
+
+        for outside in (True, False):
+            with self.subTest(outside=outside):
+                decoded = SimpleNamespace(snapshot={"status": "captured"}, snapshot_id="fixture",
+                                          usable_records=())
+                captured = {"status": "captured", "repository": {"fixture": outside}, "diagnostic": "none"}
+                check = mock.Mock(side_effect=lambda _snapshot, repo: repo["fixture"])
+                policy = SimpleNamespace(decode_policy_snapshot=lambda _: decoded,
+                                         origin_is_outside_repository=check)
+                scan = scanner.ReviewEvaluation(policy_module=policy, policy_read=decoded,
+                                                repository_observation=captured, execution="gate-captured-v1")
+                captured["repository"]["fixture"] = not outside
+                for _ in range(3):
+                    self.assertIsNone(scan._authority(b"", {}, {}, {}))
+                check.assert_called_once_with(decoded.snapshot, {"fixture": outside})
+
     def test_machine_path_detection_reused_but_subject_findings_remain_independent(self):
         from types import SimpleNamespace
         evaluation = scanner.ReviewEvaluation.__new__(scanner.ReviewEvaluation)
@@ -104,7 +129,7 @@ class RetainedPayloadTests(unittest.TestCase):
         evaluation.read = SimpleNamespace(usable_records=(object(),))
         evaluation.repository_observation = {"status": "captured", "repository": {}, "diagnostic": "none"}
         evaluation.unresolved = 0
-        evaluation._analysis = {}
+        evaluation._analysis = None
         evaluation._machine_path_analysis = None
         evaluation._clean_line_analysis = scanner._CleanLineAnalysis()
         finder = mock.Mock(side_effect=lambda line: "marked" in line)
@@ -233,7 +258,7 @@ class RetainedPayloadTests(unittest.TestCase):
                     self.assertEqual(context["git_mode"], "100644")
                 expected_subjects = tuple(sorted((commit_id, path, value)
                                                  for path, value in pairs))
-                self.assertEqual(history.subjects, expected_subjects)
+                self.assertEqual(len(history.subjects), len(expected_subjects))
                 self.assertEqual(history.subject_set,
                                  scanner._subject_set_digest(expected_subjects))
                 self.assertEqual(history.text_blobs, 3)
@@ -275,6 +300,74 @@ class RetainedPayloadTests(unittest.TestCase):
                     else:
                         self.assertIsInstance(result, scanner.Refusal)
                         self.assertEqual(result.failure_id, "PS-MSG-READ-TIMEOUT")
+
+    def test_total_history_subjects_are_not_a_retained_row_budget(self):
+        selection, objects, _ = fixture(repeated=True)
+        with mock.patch.object(scanner, "_MAX_SUBJECTS", 2, create=True):
+            result = acquire(selection, Reader(objects))
+        self.assertNotIsInstance(result, scanner.Refusal)
+        history, coverage, findings = result
+        root = selection.roots[0]
+        expected = tuple(sorted(
+            (root, item.name, item.oid)
+            for item in scanner._parse_tree(objects[root][1], selection.object_format)
+        ))
+        self.assertEqual(len(history.subjects), len(expected))
+        self.assertEqual(history.subject_set, scanner._subject_set_digest(expected))
+        self.assertEqual(coverage.scanned_count, len(selection.object_oids))
+        self.assertFalse(findings)
+
+    def test_multiple_commit_owners_preserve_binary_path_order_and_identity(self):
+        selection, objects, _ = fixture()
+        blob = selection.object_oids[-1]
+        paths = (b'a', b'x-\x7f', b'x-\xff')
+        # Embed normalized Git tree rows directly; Windows need not create
+        # filenames whose raw Git path bytes cannot be represented locally.
+        raw_tree = b''.join(b'100644 '+name+b'\0'+bytes.fromhex(blob) for name in paths)
+        tree = oid('tree', raw_tree)
+        objects = {blob: objects[blob], tree: ('tree', raw_tree)}
+        commits = []
+        for i in range(17):
+            raw = (f'tree {tree}\nauthor Fixture <fixture@example.test> 1 +0000\n'
+                   f'committer Fixture <fixture@example.test> 1 +0000\n\nChange {i}\n').encode()
+            commit = oid('commit', raw)
+            objects[commit] = ('commit', raw)
+            commits.append(commit)
+        chosen = scanner.NativePushSelection(
+            None, tuple(commits), (*commits, tree, blob), scanner._SHA1_OBJECT_FORMAT,
+            tuple(commits),
+        )
+        with mock.patch.object(scanner, "_parse_tree", wraps=scanner._parse_tree) as parse:
+            history, coverage, findings = acquire(chosen, Reader(objects))
+        self.assertEqual(parse.call_count, 1)
+        subjects = tuple(sorted((owner, path, blob) for owner in commits for path in paths))
+        self.assertEqual(len(history.subjects), len(subjects))
+        self.assertEqual(history.subject_set, scanner._subject_set_digest(subjects))
+        self.assertEqual(history.path_set, scanner._path_set_digest((blob, path) for path in paths))
+        self.assertEqual(coverage.scanned_count, len(chosen.object_oids))
+        self.assertFalse(findings)
+
+    def test_tree_cache_capacity_controls_retention_not_coverage(self):
+        selection, objects, _ = fixture(repeated=True)
+        expected, _, _ = acquire(selection, Reader(objects))
+        reader = Reader(objects)
+        with mock.patch.object(scanner, "_TREE_CACHE_BYTES", 1):
+            result = acquire(selection, reader)
+        self.assertNotIsInstance(result, scanner.Refusal)
+        history, coverage, findings = result
+        self.assertEqual(history.subject_set, expected.subject_set)
+        self.assertEqual(history.path_set, expected.path_set)
+        self.assertEqual(coverage.scanned_count, len(selection.object_oids))
+        self.assertEqual(reader.calls[selection.roots[0]], 2)
+        self.assertFalse(findings)
+
+    def test_storage_error_cannot_produce_coverage(self):
+        selection, objects, _ = fixture()
+        with mock.patch.object(scanner._HistoryIndex, "seal",
+                               side_effect=scanner.sqlite3.OperationalError("fixture")):
+            result = acquire(selection, Reader(objects))
+        self.assertIsInstance(result, scanner.Refusal)
+        self.assertEqual(result.reason, "coverage-storage")
 
     def test_blob_count_boundary_remains_enforced(self):
         selection, objects, _ = fixture()
@@ -323,6 +416,119 @@ class RetainedPayloadTests(unittest.TestCase):
         self.assertEqual(result[0].binary_blobs, count)
         self.assertEqual(result[1].scanned_count, count + 1)
         self.assertEqual(reader.reads, count * 2 + 1)
+
+
+def test_interrupted_history_retries_from_fresh_reader_and_proof(tmp_path, monkeypatch):
+    """An interrupted scan contributes no evidence to a complete, current retry."""
+    monkeypatch.chdir(tmp_path)
+
+    def git(*args, data=None):
+        return subprocess.run(
+            ("git", *args), input=data, capture_output=True, check=True, timeout=15,
+        ).stdout.strip()
+
+    git("init", "--quiet", "--template=", "--object-format=sha1")
+    chosen, objects, blobs = fixture(count=2)
+    tree = chosen.roots[0]
+    commit_raw = (
+        f"tree {tree}\nauthor Fixture <fixture@example.test> 1 +0000\n"
+        "committer Fixture <fixture@example.test> 1 +0000\n\nFixture commit\n"
+    ).encode("ascii")
+    commit = oid("commit", commit_raw)
+    objects[commit] = ("commit", commit_raw)
+    for object_id, (kind, raw) in objects.items():
+        assert git("hash-object", "-w", "-t", kind, "--stdin", data=raw) == object_id.encode()
+
+    git("update-ref", "HEAD", commit)
+    selection = scanner.RangeSelection(
+        "origin", "refs/heads/main", "HEAD", commit, (commit,), (commit, tree, *blobs),
+    )
+    binary_scan = scanner._binary_content_hits
+    scanned_paths = []
+
+    def record_binary_scan(raw, path, find_paths, **options):
+        findings = binary_scan(raw, path, find_paths, **options)
+        scanned_paths.append(path)
+        return findings
+
+    monkeypatch.setattr(scanner, "_binary_content_hits", record_binary_scan)
+
+    async def exercise():
+        blocked = asyncio.Event()
+        proceed = asyncio.Event()
+
+        class ReaderWithBarrier(scanner._AsyncGitObjectReader):
+            def __init__(self, *, interrupt=False):
+                super().__init__()
+                self.interrupt = interrupt
+                self.requests = []
+
+            async def read(self, value, expected_type=None, *, scan_deadline):
+                self.requests.append(value)
+                if self.interrupt and value == blobs[1] and self.requests.count(value) == 2:
+                    blocked.set()
+                    await proceed.wait()
+                return await super().read(value, expected_type, scan_deadline=scan_deadline)
+
+        async def scan(reader):
+            return await scanner._scan_selected_history_async(
+                selection, lambda _line: [], wall_deadline=time.monotonic() + 30,
+                reader_factory=lambda: reader,
+            )
+
+        first = ReaderWithBarrier(interrupt=True)
+        task = asyncio.create_task(scan(first))
+        try:
+            await asyncio.wait_for(blocked.wait(), 10)
+            assert scanned_paths == ["file0"]
+            task.cancel()
+            interrupted = await task
+        finally:
+            if not task.done():
+                task.cancel()
+            proceed.set()
+            await asyncio.gather(task, return_exceptions=True)
+        assert interrupted.kind == "refusal"
+        assert interrupted.refusal.reason == "cancelled"
+        assert interrupted.history is interrupted.coverage is None
+        assert interrupted.reap_certificate.complete
+        assert first.state is scanner.ReaderState.REAPED
+        assert first.process.returncode is not None
+        stdout, stderr, status = scanner._format_outcome(interrupted)
+        assert (stdout, status) == ("", 2)
+        assert "receipt" not in stderr
+
+        scanned_paths.clear()
+        retry_reader = ReaderWithBarrier()
+        retry = await scan(retry_reader)
+        assert retry.kind == "clean"
+        assert retry.reap_certificate.complete
+        assert retry.reap_certificate.session_id != interrupted.reap_certificate.session_id
+        assert scanned_paths == ["file0", "file1"]
+        assert retry_reader.requests == [commit, tree, *blobs, *blobs]
+        assert retry.coverage.scanned_message_oids == (commit,)
+        clean_receipt = scanner._format_outcome(retry)
+        assert clean_receipt[2] == 0 and "receipt=v3" in clean_receipt[0]
+
+        oracle_reader = ReaderWithBarrier()
+        oracle = await scan(oracle_reader)
+        assert oracle.kind == "clean"
+        assert retry.history == oracle.history
+        assert retry.coverage == oracle.coverage
+        assert clean_receipt == scanner._format_outcome(oracle)
+
+        new_tip = git("hash-object", "-w", "-t", "commit", "--stdin",
+                      data=commit_raw.replace(b"Fixture commit", b"New fixture commit")).decode()
+        git("update-ref", "HEAD", new_tip, commit)
+        drift_reader = ReaderWithBarrier()
+        drift = await scan(drift_reader)
+        assert drift.kind == "refusal"
+        assert drift.refusal.failure_id == "PS-MSG-TIP-CHANGED"
+        assert drift.history is drift.coverage is None
+        assert drift_reader.requests == retry_reader.requests
+        assert scanner._format_outcome(drift)[0] == ""
+
+    asyncio.run(exercise())
 
 
 if __name__ == "__main__":

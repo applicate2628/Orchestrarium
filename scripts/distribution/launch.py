@@ -11,8 +11,81 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import platform
+import re
+import stat
 import subprocess
 import sys
+
+
+PUBLICATION_MATCHER_TARGET = 'windows-x64'
+PUBLICATION_MATCHER_PATH = 'native/orche-publication-match.exe'
+PUBLICATION_MATCHER_NOTICES = 'native/THIRD-PARTY-NOTICES.txt'
+_MANIFEST_V3_FIELDS = {'schemaVersion', 'product', 'release', 'target', 'python', 'entry',
+                       'runtimeProfile', 'runtimeEvidence', 'runtimeEvidenceSha256'}
+
+
+def _publication_matcher_record(target: str, digest: object) -> dict:
+    if (target != PUBLICATION_MATCHER_TARGET or type(digest) is not str
+            or re.fullmatch(r'[0-9a-f]{64}', digest) is None):
+        raise ValueError('Publication matcher requires a Windows x64 target and qualified SHA-256')
+    return {'path': PUBLICATION_MATCHER_PATH, 'sha256': digest}
+
+
+def _ordinary_native_member(path: Path):
+    # The release directory owner excludes competing writers. Observe ordinary
+    # paths directly rather than following a static link/reparse substitution.
+    for directory in path.parents:
+        info = directory.lstat()
+        if (not stat.S_ISDIR(info.st_mode)
+                or getattr(info, 'st_file_attributes', 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+            raise ValueError('Publication matcher parent is not an ordinary directory')
+    info = path.lstat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+            or getattr(info, 'st_file_attributes', 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+        raise ValueError('Publication matcher is not a direct ordinary file')
+    return info
+
+
+def verify_publication_matcher_notices(path: Path, digest: str) -> Path:
+    info = _ordinary_native_member(path)
+    with path.open('rb') as stream:
+        if not info.st_size or hashlib.file_digest(stream, 'sha256').hexdigest() != digest:
+            raise ValueError('Publication matcher notices differ from the qualified SHA-256')
+    return path
+
+
+def verify_publication_matcher(path: Path, digest: str) -> Path:
+    info = _ordinary_native_member(path)
+    with path.open('rb') as stream:
+        dos = stream.read(64)
+        if len(dos) != 64 or dos[:2] != b'MZ':
+            raise ValueError('Publication matcher is not a Windows x64 executable image')
+        pe = int.from_bytes(dos[60:64], 'little')
+        if pe < len(dos) or pe + 26 > info.st_size:
+            raise ValueError('Publication matcher has an invalid executable header')
+        stream.seek(pe)
+        image = stream.read(26)
+        characteristics = int.from_bytes(image[22:24], 'little')
+        if (len(image) != 26 or image[:4] != b'PE\0\0'
+                or int.from_bytes(image[4:6], 'little') != 0x8664
+                or int.from_bytes(image[20:22], 'little') < 2
+                or characteristics & 0x2002 != 0x0002
+                or int.from_bytes(image[24:26], 'little') != 0x20B):
+            raise ValueError('Publication matcher is not a Windows x64 executable image')
+        stream.seek(0)
+        if hashlib.file_digest(stream, 'sha256').hexdigest() != digest:
+            raise ValueError('Publication matcher differs from the qualified SHA-256')
+    return path
+
+
+def publication_matcher(root: Path, data: dict) -> Path | None:
+    record = data.get('publicationMatcher')
+    if record is None:
+        return None
+    matcher = verify_publication_matcher(root / PUBLICATION_MATCHER_PATH, record['sha256'])
+    verify_publication_matcher_notices(root / PUBLICATION_MATCHER_NOTICES,
+                                       data['publicationMatcherNoticesSha256'])
+    return matcher
 
 
 def current_target() -> str:
@@ -50,13 +123,23 @@ def _manifest(root: Path) -> dict:
             result[key] = value
         return result
     data = json.loads(raw, object_pairs_hook=unique)
-    if (type(data) is not dict or set(data) != {'schemaVersion', 'product', 'release', 'target', 'python', 'entry', 'runtimeProfile', 'runtimeEvidence', 'runtimeEvidenceSha256'}
-        or type(data['schemaVersion']) is not int or data['schemaVersion'] != 3 or data['runtimeProfile'] != 'cpython-stdlib-only'
+    version = data.get('schemaVersion') if type(data) is dict else None
+    if (type(version) is not int or version not in (3, 4)
+        or set(data) != (_MANIFEST_V3_FIELDS | {'publicationMatcher', 'publicationMatcherNoticesSha256'} if version == 4 else _MANIFEST_V3_FIELDS)
+        or data['runtimeProfile'] != 'cpython-stdlib-only'
         or data['product'] != 'Orche' or type(data['release']) is not str or not data['release'].strip()
         or data['runtimeEvidence'] != 'runtime-evidence.json'
         or type(data['runtimeEvidenceSha256']) is not str
         or data['target'] != current_target() or data['entry'] != 'app/install.py'):
         raise ValueError('Unsupported or mismatched bundle manifest')
+    if version == 4:
+        record = data['publicationMatcher']
+        if (type(record) is not dict
+                or record != _publication_matcher_record(data['target'], record.get('sha256'))):
+            raise ValueError('Invalid publication matcher record')
+        notice_digest = data['publicationMatcherNoticesSha256']
+        if type(notice_digest) is not str or re.fullmatch(r'[0-9a-f]{64}', notice_digest) is None:
+            raise ValueError('Invalid publication matcher notices record')
     evidence = _member(root, data['runtimeEvidence']).read_bytes()
     if hashlib.sha256(evidence).hexdigest() != data['runtimeEvidenceSha256']:
         raise ValueError('Runtime evidence bytes differ from the bundle manifest')
@@ -66,6 +149,7 @@ def _manifest(root: Path) -> dict:
 def resolve_launch(root: Path, executable: Path) -> tuple[Path, Path]:
     root = root.resolve(strict=True)
     data = _manifest(root)
+    publication_matcher(root, data)
     python = _member(root, data['python'])
     entry = _member(root, data['entry'])
     if not os.path.samefile(python, executable):
@@ -81,14 +165,29 @@ def retain_bundle(root: Path, destination: Path) -> tuple[Path, Path]:
     """
     if not destination.is_absolute():
         raise ValueError('Retention requires an absolute destination')
+    root = root.resolve(strict=True)
     data = _manifest(root)
+    helper = publication_matcher(root, data)
+    helper_options = ({'publication_matcher': helper,
+                       'publication_matcher_sha256': data['publicationMatcher']['sha256'],
+                       'publication_matcher_notices': root / PUBLICATION_MATCHER_NOTICES,
+                       'publication_matcher_notices_sha256': data['publicationMatcherNoticesSha256']}
+                      if helper is not None else {})
     builder_path = _member(root, 'app/scripts/distribution/build.py')
     spec = importlib.util.spec_from_file_location('orche_bundle_build', builder_path)
     builder = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(builder)
     destination = builder.build(root / 'app', root / 'python', destination,
                                 target=data['target'], release=data['release'],
-                                runtime_evidence=_member(root, data['runtimeEvidence'])).resolve(strict=True)
+                                runtime_evidence=_member(root, data['runtimeEvidence']),
+                                **helper_options).resolve(strict=True)
+    # Re-read the retained manifest and selected native member before handing
+    # the output to either a retain-only caller or the retained launch.
+    retained = _manifest(destination)
+    if any(retained.get(field) != data.get(field)
+           for field in ('publicationMatcher', 'publicationMatcherNoticesSha256')):
+        raise ValueError('Retained publication matcher or notices differ from the original')
+    publication_matcher(destination, retained)
     return _member(destination, data['python']), _member(destination, 'launch.py')
 
 

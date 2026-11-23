@@ -560,6 +560,21 @@ _STOCK_NATIVE_ROLE_CONTRACT_PRIOR_PAIRS = (
     # Exact factory contract before removing Low catalogue entries.
     ((Path("shared") / "role-routing-policy.v1.json", "172b335f9d0ea70021bff88b048d1472709132897989365f4b4ee3e47e5682d1"),
      (Path("shared") / "orchestrarium-role-manifest.json", "c8164fe1df43369c22e9d2c800ef2e2cb0e775c6a31dc65fc25c06cf77e812dc")),
+    # Exact factory catalogue before normalizing benchmark costs.
+    ((Path("shared") / "role-routing-policy.v1.json", "7b1f5cda232547e3a6f09352908fc9f2781dbeadad55413d8dadb4e40038a929"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "a945c889cb456c2065786a3923b68651a24c627cf64cde5a7c9e921ae9bbd73e"),
+     (Path("scripts") / "resolve-agents-mode.py", "de23c471895c80c43d2fe17e7e2763aeec1ac10f0189b7d66daab2fc763c5e50"),
+     (Path("operating-model.md"), "9f7a310a2efe8d91d13f08094d58c294d9e33a9dde954f914b45e00eaedc773a")),
+    # Exact factory catalogue before benchmark snapshots were included.
+    ((Path("shared") / "role-routing-policy.v1.json", "b5ef5a34460abaad0af499304309be0649094ff596bcc7f5584f199046878dba"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "ab699ed377660521a08bf0e8555f468ca0efcf6458248009002a7f4fdc0314d1"),
+     (Path("scripts") / "resolve-agents-mode.py", "b255b28350e4fb4350425970a304e5a9a0a0723ee88b553174855e78558741ab"),
+     (Path("operating-model.md"), "7c57a353050c1e82b57eea7810efd9045abbfb99a72d2d10ac08b8a117a1714f")),
+    # Exact pre-catalogue factory contract, including the resolver leaf.
+    ((Path("shared") / "role-routing-policy.v1.json", "6d508666d4b1ce7511db799e017ed07c26df341ed6e07bb90c98e742420748d2"),
+     (Path("shared") / "orchestrarium-role-manifest.json", "fefedb3f1d9fe2448414d8f6d454a43d62f3872b5eec48efe4e977c747011a2b"),
+     (Path("scripts") / "resolve-agents-mode.py", "49bb2fd7c7ea954f50eceda161ba9c820dff99ef1dc98cb655d096c94e081228"),
+     (Path("operating-model.md"), "cc770fa6fefb1e5a93179e0135ba5f601c2e3d9da8208225d8a5df94b4173160")),
     # Exact factory contract before latest-family-only routing.
     ((Path("shared") / "role-routing-policy.v1.json", "9672319f42039f6e8864de31e00ea4423011f3be679c3180e2161a8611b28259"),
      (Path("shared") / "orchestrarium-role-manifest.json", "882b96207b5503bb231002301cc15df08107c66a9ccfd189a84b48e6e62d1b0a")),
@@ -7200,13 +7215,19 @@ class _CreateOnlyMutablePath:
         self.transaction._assert_scalar_binding({"links": record.selection_links}, check_storage=False)
 
     def _update_windows_tree_contents(self, target: Path, source: Path, before_digest: str,
-                                      after_digest: str, *, ignore_runtime_cache: bool) -> bool:
+                                      after_digest: str, *, ignore_runtime_cache: bool,
+                                      allow_file_additions: bool = False) -> bool:
         """Preserve historical access policy by keeping the original file objects."""
         transaction = self.transaction
         old = dict(_stage_tree_manifest(target, ignore_runtime_cache=ignore_runtime_cache))
         new = dict(_stage_tree_manifest(source, ignore_runtime_cache=ignore_runtime_cache))
-        if old.keys() != new.keys() or any((old[k] == "directory") != (new[k] == "directory") for k in old):
-            return False  # Topology changes retain the strict staged tree publisher.
+        added = new.keys() - old.keys()
+        if (old.keys() - new.keys()
+                or (added and not allow_file_additions)
+                or any((old[k] == "directory") != (new[k] == "directory") for k in old)
+                or any(new[k] == "directory" or (Path(k).parent != Path(".")
+                       and old.get(Path(k).parent.as_posix()) != "directory") for k in added)):
+            return False  # Removed, retyped, or new parent objects need the staged tree publisher.
         if (_tree_manifest_sha256(tuple(old.items())) != before_digest
                 or _tree_manifest_sha256(tuple(new.items())) != after_digest):
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: tree selection drift")
@@ -7218,8 +7239,16 @@ class _CreateOnlyMutablePath:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing tree snapshot")
         secured = transaction._windows_tree_security(target, original)
         plan = []
+        introductions = []
         for member, digest in new.items():
             path = target / member
+            if member in added:
+                self._final_absence(path)
+                payload = (source / member).read_bytes()
+                if hashlib.sha256(payload).hexdigest() != digest:
+                    raise ValueError("E_MUTABLE_PATH_POSTCONDITION: tree addition payload drift")
+                introductions.append((path, payload))
+                continue
             if secured[path].data != (None if old[member] == "directory" else old[member]):
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION: tree snapshot digest drift")
             if digest != old[member]:
@@ -7239,7 +7268,16 @@ class _CreateOnlyMutablePath:
         for path, payload, digest in plan:
             transaction.transform_scalar(path, None, lambda _: payload, self, windows_origin=secured[path])
             secured[path] = replace(secured[path], data=digest)
-        if ignore_runtime_cache and plan:
+        for path, payload in introductions:
+            starting_effect = len(transaction._effects)
+            self.create_file(path.relative_to(self.anchor), payload)
+            created = [effect for effect in transaction._effects[starting_effect:] if effect.path == path]
+            if (len(created) != 1 or created[0].before or created[0].published_state is None
+                    or set(created[0].published_state) != {path}):
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION: tree addition lacks creator proof")
+            transaction.assert_effect_current(created[0])
+            secured[path] = created[0].published_state[path]
+        if ignore_runtime_cache and (plan or introductions):
             # Invalidate only the ordinary bytecode the staged publisher would
             # drop; retain originals transactionally and leave containers alone.
             for path, node in tuple(secured.items()):
@@ -7261,6 +7299,7 @@ class _CreateOnlyMutablePath:
         source: Path,
         *,
         ignore_runtime_cache: bool = False,
+        allow_file_additions: bool = False,
     ) -> Path:
         """Transaction-owned upgrade for one hash-pinned accepted-prior skill tree."""
         target = self.destination(relative)
@@ -7275,7 +7314,8 @@ class _CreateOnlyMutablePath:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: invalid source tree")
         if (os.name == "nt" and self.transaction.enabled
                 and self._update_windows_tree_contents(target, source, expected_digest, current_digest,
-                                                       ignore_runtime_cache=ignore_runtime_cache)):
+                                                       ignore_runtime_cache=ignore_runtime_cache,
+                                                       allow_file_additions=allow_file_additions)):
             return target
         effect = self.transaction.arm_replacement(target, None, self)
         self.transaction.capture_replacement_security(effect)
@@ -10608,6 +10648,8 @@ def _apply_canonical_skills_plan(
             lead.accepted_prior,
             lead.source,
             ignore_runtime_cache=lead.ignore_runtime_cache,
+            # A coupled peer transition still consumes the retained tree witness.
+            allow_file_additions=plan.transport_stage is None,
         )
     else:
         owner.create_tree(

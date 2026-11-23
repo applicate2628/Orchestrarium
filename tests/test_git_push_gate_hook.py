@@ -1315,6 +1315,9 @@ class TestPublicationSafetyTrustedScanR2(unittest.TestCase):
             (scripts / "publication_review_policy.py").write_bytes(
                 CANONICAL_HOOK.with_name("publication_review_policy.py").read_bytes()
             )
+            (scripts / "publication_match_wire.py").write_bytes(
+                CANONICAL_HOOK.with_name("publication_match_wire.py").read_bytes()
+            )
             (scripts / "linked_runtime_subroots.py").write_bytes(
                 (REPO_ROOT / "scripts" / "linked_runtime_subroots.py").read_bytes()
             )
@@ -1325,6 +1328,81 @@ class TestPublicationSafetyTrustedScanR2(unittest.TestCase):
                     module._capture_source_closure()
             finally:
                 module.__file__ = original_file
+
+    def test_authoritative_child_warns_once_without_stopping_work(self) -> None:
+        module = self._module("child_warning")
+        binding = module.PushScanBinding("generic", "origin", "refs/heads/main", "1" * 40, "1" * 40)
+        with temporary_repository_workdir() as repository_workdir:
+            pending = self._pending(module, binding, (
+                sys.executable, "-c", "import time; time.sleep(0.3); print('finished')",
+            ))
+            warning = io.StringIO()
+            with mock.patch.object(module, "SCAN_THRESHOLD_SECONDS", 0.05, create=True), \
+                 mock.patch.object(module, "_start_scan_threshold_report", create=True) as start, \
+                 mock.patch.object(sys, "stderr", warning):
+                start.return_value.done.return_value = True
+                start.return_value.result.return_value = None
+                _invocation, rows = module._run_snapshot_child(pending, b"", repository_workdir)
+            self.assertTrue(rows[0].bounded_completion)
+            self.assertTrue(rows[0].settlement.complete)
+            self.assertIn(b"finished", rows[0].stdout)
+            start.assert_called_once()
+            self.assertEqual(warning.getvalue().count("PGG-SCAN-THRESHOLD"), 1)
+            self.assertIn("report not saved", warning.getvalue())
+
+
+    def test_native_callback_does_not_wait_for_pending_threshold_report(self) -> None:
+        module = self._module("native_pending_report")
+        pending = mock.Mock()
+        pending.done.return_value = False
+        pending.result.side_effect = AssertionError("pending writer must not be awaited")
+        warning = io.StringIO()
+
+        def run(_arguments):
+            module._scan_threshold_scope.get().observe(1.0)
+            return 2
+
+        with mock.patch.object(module, "SCAN_THRESHOLD_SECONDS", 0.05), \
+             mock.patch.object(module, "_start_scan_threshold_report", return_value=pending) as start, \
+             mock.patch.object(module, "_run_native_pre_push", side_effect=run), \
+             mock.patch.object(sys, "stderr", warning):
+            self.assertEqual(module._native_pre_push_main([]), 2)
+
+        start.assert_called_once()
+        pending.result.assert_not_called()
+        self.assertEqual(warning.getvalue().count("PGG-SCAN-THRESHOLD"), 1)
+        self.assertIn("report not confirmed", warning.getvalue())
+        self.assertNotIn("report not saved", warning.getvalue())
+
+
+    def test_native_callback_shares_one_real_report_across_scanner_children(self) -> None:
+        module = self._module("native_report")
+        binding = module.PushScanBinding("generic", "origin", "refs/heads/main", "1" * 40, "1" * 40)
+        warning = io.StringIO()
+        with temporary_repository_workdir() as repository_workdir:
+            home = Path(repository_workdir)
+
+            def two_children(_arguments):
+                for marker in ("range-complete", "native-complete"):
+                    pending = self._pending(module, binding, (
+                        sys.executable, "-c", f"import time; time.sleep(0.5); print({marker!r})",
+                    ))
+                    _, rows = module._run_snapshot_child(pending, b"", repository_workdir)
+                    self.assertTrue(rows[0].bounded_completion)
+                    self.assertTrue(rows[0].settlement.complete)
+                    self.assertEqual(rows[0].stdout.strip(), marker.encode("ascii"))
+                    self.assertEqual(rows[0].stderr, b"")
+                return 0
+
+            with mock.patch.object(module, "SCAN_THRESHOLD_SECONDS", 0.05), \
+                 mock.patch.object(module, "_run_native_pre_push", side_effect=two_children), \
+                 mock.patch.object(Path, "home", return_value=home), \
+                 mock.patch.object(sys, "stderr", warning):
+                self.assertEqual(module._native_pre_push_main([]), 0)
+            reports = list((home / ".orche" / "reports").glob("*.json"))
+            self.assertEqual(len(reports), 1)
+            self.assertEqual(warning.getvalue().count("PGG-SCAN-THRESHOLD"), 1)
+            self.assertIn(str(reports[0]), warning.getvalue())
 
     def test_authoritative_child_timeout_and_output_overflow_reap_workers(self) -> None:
         module = self._module("child_bounds")
@@ -1385,6 +1463,8 @@ class TestPublicationComponentRoot(unittest.TestCase):
                 ("scripts/process_supervision/windows_job.py", REPO_ROOT / "scripts/process_supervision/windows_job.py"),
                 ("scripts/publication_review_policy.py", CANONICAL_HOOK.with_name("publication_review_policy.py")),
                 ("scripts/linked_runtime_subroots.py", REPO_ROOT / "scripts/linked_runtime_subroots.py"),
+                ("scripts/transfer_binding.py", CANONICAL_HOOK.with_name("transfer_binding.py")),
+                ("scripts/publication_match_wire.py", CANONICAL_HOOK.with_name("publication_match_wire.py")),
             )
             for relative, source in sources:
                 target = physical / relative
@@ -1696,6 +1776,8 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
             "posix_helper": b"",
             "windows_job": b"WINDOWS_JOB_SENTINEL = True\n",
             "linked_runtime_subroots": b"LINKED_SUBROOT_SENTINEL = True\n",
+            "receiver_scope": CANONICAL_HOOK.with_name("transfer_binding.py").read_bytes(),
+            "matcher_wire": b"MATCHER_WIRE_SENTINEL = True\n",
             "publication_review_policy": (
                 b"POLICY_MODULE_CONTRACT_ID = 'orchestrarium.publication-review-policy.module.v1'\n"
                 b"POLICY_MODULE_KEY = '_orchestrarium_publication_review_policy_v1'\n"
@@ -1707,6 +1789,7 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
                 b"assert __injected_windows_job_module__.__name__ == "
                 b"'_orchestrarium_windows_job_v1'\n"
                 b"assert __injected_windows_job_module__.WINDOWS_JOB_SENTINEL\n"
+                b"assert __injected_matcher_wire__['MATCHER_WIRE_SENTINEL']\n"
                 b"assert __injected_review_policy_module__ is "
                 b"sys.modules['_orchestrarium_publication_review_policy_v1']\n"
                 b"assert __injected_review_policy_module__.POLICY_MODULE_CONTRACT_ID == "
@@ -2021,6 +2104,8 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
                 "publication_review_policy.py"
             ),
             "linked_runtime_subroots": REPO_ROOT / "scripts" / "linked_runtime_subroots.py",
+            "receiver_scope": CANONICAL_HOOK.with_name("transfer_binding.py"),
+            "matcher_wire": CANONICAL_HOOK.with_name("publication_match_wire.py"),
         }
         sources = {role: path.read_bytes() for role, path in source_paths.items()}
         original_file = module.__file__
@@ -2891,6 +2976,8 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
                 "publication_review_policy.py"
             ),
             "linked_runtime_subroots": REPO_ROOT / "scripts" / "linked_runtime_subroots.py",
+            "receiver_scope": CANONICAL_HOOK.with_name("transfer_binding.py"),
+            "matcher_wire": CANONICAL_HOOK.with_name("publication_match_wire.py"),
         }
         sources = {role: path.read_bytes() for role, path in source_paths.items()}
         original_file = module.__file__
@@ -3273,7 +3360,7 @@ class TestPublicationReviewedExceptionGateR2(unittest.TestCase):
             + f"applied=1, applied-set={applied_set}, unresolved=0, evaluation=complete)\n"
         )
 
-    def test_four_declared_layouts_select_exact_roots_and_eight_roles(self) -> None:
+    def test_four_declared_layouts_select_exact_roots_and_receiver_scope(self) -> None:
         module = self._module()
         expected = (
             (
@@ -3289,6 +3376,8 @@ class TestPublicationReviewedExceptionGateR2(unittest.TestCase):
                     ("scanner", "universal-hooks/scripts/check-publication-safety.py"),
                     ("publication_review_policy", "universal-hooks/scripts/publication_review_policy.py"),
                     ("linked_runtime_subroots", "linked_runtime_subroots.py"),
+                    ("receiver_scope", "universal-hooks/scripts/transfer_binding.py"),
+                    ("matcher_wire", "universal-hooks/scripts/publication_match_wire.py"),
                 ),
             ),
             (
@@ -3304,6 +3393,8 @@ class TestPublicationReviewedExceptionGateR2(unittest.TestCase):
                     ("scanner", "src.codex/skills/lead/scripts/check-publication-safety.py"),
                     ("publication_review_policy", "src.codex/skills/lead/scripts/publication_review_policy.py"),
                     ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
+                    ("receiver_scope", "src.codex/skills/lead/scripts/transfer_binding.py"),
+                    ("matcher_wire", "src.codex/skills/lead/scripts/publication_match_wire.py"),
                 ),
             ),
             (
@@ -3319,6 +3410,8 @@ class TestPublicationReviewedExceptionGateR2(unittest.TestCase):
                     ("scanner", "src.claude/agents/scripts/check-publication-safety.py"),
                     ("publication_review_policy", "src.claude/agents/scripts/publication_review_policy.py"),
                     ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
+                    ("receiver_scope", "src.claude/agents/scripts/transfer_binding.py"),
+                    ("matcher_wire", "src.claude/agents/scripts/publication_match_wire.py"),
                 ),
             ),
             (
@@ -3334,6 +3427,8 @@ class TestPublicationReviewedExceptionGateR2(unittest.TestCase):
                     ("scanner", "scripts/check-publication-safety.py"),
                     ("publication_review_policy", "scripts/publication_review_policy.py"),
                     ("linked_runtime_subroots", "scripts/linked_runtime_subroots.py"),
+                    ("receiver_scope", "scripts/transfer_binding.py"),
+                    ("matcher_wire", "scripts/publication_match_wire.py"),
                 ),
             ),
         )

@@ -5,7 +5,45 @@ A dated entry is not a release tag, publication notice, or confirmation of a
 local installation. For the frozen pre-SDK baseline and draft follow-up, see
 [Which version?](README.md#which-version).
 
+## 2026-11-23
+
+- The model resolver now compares eligible models and reasoning efforts using benchmark quality, task time, and one relative cost unit (Sol 6.2 High = 1). The Lead selects and explains the best fit for each task; the default is a fallback. The benchmark figures are not prices, launch permissions, or runtime guarantees.
+
+- On Windows, the installer keeps existing owned files and their access rules when a standalone Lead upgrade only updates bytes and adds ordinary files under existing folders. The same transaction verifies new files and rolls back on failure. Coupled transport replacements retain their existing path.
+
+## 2026-11-22
+
+- Let the guarded range scan continue while it reports newly verified work. Stalls still fail, and completed scans must still pass the same coverage, identity, and review checks.
+
+- Show a redacted sample of publication findings by subject and category when a guarded push is denied. The summary does not reveal matched text, paths or locations and does not change the verdict.
+
+- The publication scanner verifies the captured review-policy origin once per scan instead of revalidating and hashing the same snapshot for every matching subject. It still checks each subject and revalidates used authority before publication.
+
+- The Lead now verifies the scope of a suspected blocker before pausing work. It checks the actual action and session, uses a read-only verification where possible, and continues independent work without bypassing confirmed restrictions.
+
+- The Git publication hook records an advisory time-threshold warning at most once per callback and writes a best-effort, sanitized report under the user Orche reports directory. The warning never modifies scanner evidence, its verdict, or current protection budgets.
+
+- Publication diagnostics retain the original native scan refusal instead of replacing it with a secondary repository metadata error. Complete scans still require unchanged repository metadata before publication.
+
+- The Windows x64 pre-SDK bundle can carry the Rust publication matcher. The existing scanner uses it to accelerate binary-history and ordinary commit-text matching while keeping the same publication policy and finding decisions. The bundle builder and retainer verify the exact executable and its third-party notices. The matcher does not add provider SDK dependencies or require Rust on the target machine. See [bundle assembly](scripts/distribution/README.md) for package inputs.
+
+- Reuse parsed Git trees by object identity and scan identical short binary fragments once per batch. Every original path, commit owner and occurrence retains its coverage and finding checks.
+
 ## 2026-11-21
+
+- Keep exact historical path and commit coverage in a temporary index instead of rejecting a scan when the number of coverage rows grows. Tree cache capacity now causes eviction and verified rereads, not publication refusal; the proof, finding policy and publication gate are unchanged. Clean reviewed text no longer allocates exact byte-coordinate maps for nonexistent path matches. Shared engineering guidance distinguishes workload size, cache capacity, completeness, and eligibility.
+
+- Require material changes and reviews to verify owners, contracts, and active enforcement along the affected execution path, without adding a new workflow gate.
+
+- Expose exact machine-path match positions from the existing classifier so review preparation can represent the same findings as the publication scanner. Detection and required review decisions are unchanged.
+
+- Group repeated unresolved history-file findings before applying the ordinary scanner display limit. Distinct locations stay visible instead of being displaced by the same line in multiple commits. Review still evaluates each commit, and the publication decision is unchanged.
+
+- Label the diagnostic history scan as unreviewed and show aggregate redacted finding classes. Its path-and-blob counts are not the per-commit counts used for scoped review evaluation; publication checks and authority are unchanged.
+
+- Check large commit histories without a cumulative message-size cutoff. The scanner examines each bounded commit or tag and retains only structural metadata. Verify line bounds once per blob while preserving every path-specific check. Stream the same qualified Git revision inputs through the owned reader, avoiding the Windows command-line length limit on wide histories. Scoped Git object reads share the scan deadline rather than imposing a second default timeout. Findings, incomplete checks and publication authority stay distinct.
+
+- Add an opt-in local publication history report that identifies flagged commit messages by commit ID and line without exposing message text. The report binds the result to the checked range, marks truncated output, and does not change or authorize publication.
 
 - Run shared hook upgrade tests without an installed Codex executable. The rollback test now verifies that the simulated post-write health check actually ran before it checks restoration.
 

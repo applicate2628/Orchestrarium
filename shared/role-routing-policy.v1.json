@@ -1,5 +1,144 @@
 {
   "schemaVersion": 1,
+  "modelReference": {
+    "benchmarkSnapshot": {
+      "publisher": "Artificial Analysis",
+      "methodology": "Intelligence Index v5.0.1",
+      "observedDate": "2026-11-22",
+      "models": {
+        "codex": {
+          "gpt-6.2-astra": {
+            "sourceUrl": "https://artificialanalysis.ai/models/comparisons/gpt-6-2-astra-vs-gpt-6-2-sol",
+            "efforts": {
+              "medium": {
+                "intelligenceIndex": 57,
+                "costUsdPerTask": 1.62,
+                "minutesPerTask": 5.0
+              },
+              "high": {
+                "intelligenceIndex": 60,
+                "costUsdPerTask": 2.07,
+                "minutesPerTask": 6.7
+              },
+              "xhigh": {
+                "intelligenceIndex": 62,
+                "costUsdPerTask": 2.52,
+                "minutesPerTask": 8.1
+              },
+              "max": {
+                "intelligenceIndex": 62,
+                "costUsdPerTask": 4.0,
+                "minutesPerTask": 14.9
+              }
+            }
+          },
+          "gpt-6.2-sol": {
+            "sourceUrl": "https://artificialanalysis.ai/models/comparisons/gpt-6-2-sol-vs-gpt-6-luna",
+            "efforts": {
+              "medium": {
+                "intelligenceIndex": 53,
+                "costUsdPerTask": 0.41,
+                "minutesPerTask": 3.6
+              },
+              "high": {
+                "intelligenceIndex": 55,
+                "costUsdPerTask": 0.56,
+                "minutesPerTask": 5.2
+              },
+              "xhigh": {
+                "intelligenceIndex": 56,
+                "costUsdPerTask": 0.65,
+                "minutesPerTask": 6.2
+              },
+              "max": {
+                "intelligenceIndex": 57,
+                "costUsdPerTask": 1.01,
+                "minutesPerTask": 10.1
+              }
+            }
+          },
+          "gpt-6.1-terra": {
+            "sourceUrl": "https://artificialanalysis.ai/models/comparisons/gpt-6-2-astra-vs-gpt-6-1-terra",
+            "efforts": {
+              "medium": {
+                "intelligenceIndex": 38,
+                "costUsdPerTask": 0.17,
+                "minutesPerTask": 2.9
+              },
+              "high": {
+                "intelligenceIndex": 42,
+                "costUsdPerTask": 0.26,
+                "minutesPerTask": 4.3
+              },
+              "xhigh": {
+                "intelligenceIndex": 45,
+                "costUsdPerTask": 0.4,
+                "minutesPerTask": 6.8
+              },
+              "max": {
+                "intelligenceIndex": 51,
+                "costUsdPerTask": 0.96,
+                "minutesPerTask": 15.1
+              }
+            }
+          },
+          "gpt-6-luna": {
+            "sourceUrl": "https://artificialanalysis.ai/models/comparisons/gpt-6-2-sol-vs-gpt-6-luna",
+            "efforts": {
+              "medium": {
+                "intelligenceIndex": 18,
+                "costUsdPerTask": 0.0422,
+                "minutesPerTask": 3.5
+              },
+              "high": {
+                "intelligenceIndex": 21,
+                "costUsdPerTask": 0.0729,
+                "minutesPerTask": 5.7
+              },
+              "xhigh": {
+                "intelligenceIndex": 23,
+                "costUsdPerTask": 0.1,
+                "minutesPerTask": 7.2
+              },
+              "max": {
+                "intelligenceIndex": 28,
+                "costUsdPerTask": 0.15,
+                "minutesPerTask": 11.8
+              }
+            }
+          }
+        }
+      },
+      "costBaseline": {
+        "provider": "codex",
+        "model": "gpt-6.2-sol",
+        "effort": "high"
+      }
+    },
+    "capabilitySources": {
+      "codex": "https://developers.openai.com/api/docs/guides/model-selection"
+    },
+    "models": {
+      "codex": {
+        "gpt-6.2-astra": {
+          "strength": "Top capability in this policy for difficult science, engineering and critical review.",
+          "tradeoff": "Higher token rates; reserve for tasks where a reasoning error or missed finding is expensive."
+        },
+        "gpt-6.2-sol": {
+          "strength": "Strong general coding, multi-step work and most engineering reviews.",
+          "tradeoff": "For difficult scientific formulation or fragile evidence, prefer the stronger qualified candidate."
+        },
+        "gpt-6.1-terra": {
+          "strength": "Fast visual and computer-use work, repository comprehension and bounded fixes.",
+          "tradeoff": "Use an independent check for subtle scientific judgments and broad design changes."
+        },
+        "gpt-6-luna": {
+          "strength": "Efficient for high-volume, bounded work with clear acceptance checks.",
+          "tradeoff": "Not a substitute for critical review, ambiguous design or final acceptance."
+        }
+      }
+    }
+  },
   "modelTierOrder": [
     "mechanical",
     "balanced",

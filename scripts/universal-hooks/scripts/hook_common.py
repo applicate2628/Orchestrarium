@@ -10,7 +10,12 @@ import stat
 import sys
 from pathlib import Path
 from contextlib import contextmanager
-from typing import Callable, NamedTuple
+from typing import Callable, Iterable, NamedTuple
+from collections import namedtuple
+from concurrent.futures import Future
+import tempfile
+import threading
+import uuid
 
 # Harness-injected spans that ride inside user-role transcript entries but are
 # NOT typed by the human (system reminders, async task notifications, captured
@@ -28,6 +33,103 @@ _INJECTED_SPAN_RE = re.compile(
 NO_OBSERVED_FAILURE = "NO_OBSERVED_FAILURE"
 EXPLICIT_FAILURE = "EXPLICIT_FAILURE"
 AMBIGUOUS_STATUS = "AMBIGUOUS_STATUS"
+
+
+
+_WARNING_STAGES = frozenset({
+    "selection", "coverage", "scan", "verification", "report", "publication",
+    "acquisition", "matching", "snapshot",
+})
+_WARNING_UNITS = frozenset({
+    "seconds", "milliseconds", "bytes", "commits", "objects", "blobs", "paths",
+    "subjects", "refs", "findings", "lines",
+})
+
+
+class ThresholdWarning(namedtuple("_ThresholdWarning", "stage unit threshold observed completed")):
+    """A content-free threshold crossing. Strings are controlled labels only."""
+
+    __slots__ = ()
+
+    def __new__(cls, stage: str, unit: str, threshold: int, observed: int, completed: int):
+        if (type(stage) is not str or stage not in _WARNING_STAGES
+                or type(unit) is not str or unit not in _WARNING_UNITS
+                or any(type(n) is not int or not 0 <= n <= (1 << 63) - 1
+                       for n in (threshold, observed, completed))
+                or observed < threshold):
+            raise ValueError("Invalid threshold warning")
+        return super().__new__(cls, stage, unit, threshold, observed, completed)
+
+
+def _write_threshold_warning_report(home: Path, rows: tuple[ThresholdWarning, ...]) -> Path:
+    """Write a complete report atomically, without replacing an earlier file."""
+    directory = home.resolve(strict=True)
+    for component in (".orche", "reports"):
+        directory = directory / component
+        directory.mkdir(mode=0o700, exist_ok=True)
+        info = directory.lstat()
+        if (not stat.S_ISDIR(info.st_mode)
+                or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+            raise OSError("Report directory is not an ordinary directory")
+    payload = {
+        "version": 1,
+        "kind": "threshold-warnings",
+        "warnings": [row._asdict() for row in rows],
+    }
+    fd, name = tempfile.mkstemp(prefix=".threshold-", suffix=".tmp", dir=directory)
+    temporary = Path(name)
+    destination = directory / f"threshold-{uuid.uuid4().hex}.json"
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as file:
+            json.dump(payload, file, separators=(",", ":"))
+            file.write("\n")
+            file.flush()
+            os.fsync(file.fileno())
+        os.link(temporary, destination)
+    finally:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+    return destination
+
+
+def start_threshold_warning_report(
+    warnings: Iterable[ThresholdWarning], *, user_home: Path | None = None,
+) -> Future[Path | None]:
+    """Start one best-effort report per call; never wait for filesystem work.
+
+    The caller owns invocation deduplication and must check done() before
+    reading the future. None means no saved report; no verdict depends on it.
+    """
+    result: Future[Path | None] = Future()
+    rows: dict[tuple[str, str, int], ThresholdWarning] = {}
+    for row in warnings:
+        if type(row) is not ThresholdWarning:
+            raise ValueError("Expected a typed threshold warning")
+        # Tuple helper methods can construct instances without __new__.
+        validated = ThresholdWarning(*row)
+        rows.setdefault((validated.stage, validated.unit, validated.threshold), validated)
+    if not rows:
+        result.set_result(None)
+        return result
+
+    def write() -> None:
+        if not result.set_running_or_notify_cancel():
+            return
+        try:
+            saved = _write_threshold_warning_report(
+                Path.home() if user_home is None else user_home, tuple(rows.values()),
+            )
+        except (OSError, RuntimeError, ValueError):
+            saved = None
+        result.set_result(saved)
+
+    try:
+        threading.Thread(target=write, name="orche-threshold-report", daemon=True).start()
+    except RuntimeError:
+        result.set_result(None)
+    return result
 
 
 class CorrelatedToolResult(NamedTuple):

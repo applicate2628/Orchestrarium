@@ -318,6 +318,8 @@ def test_v3_precedes_native_transfer_and_rechecks_target(native_repository, monk
             assert code == 2
             expected = {"commit-secret": "PGG-SCAN-FINDING", "fake-v4": "PGG-RANGE-RECEIPT-VERSION", "scanner-failure": "PGG-SCAN-EXECUTION"}.get(scenario, "PGG-TARGET-CURRENTNESS")
             assert expected in errors.getvalue()
+            if scenario == "commit-secret":
+                assert "Scanner finding sample: history-blob other=1." in errors.getvalue()
             assert output.getvalue() == ""
             assert len(seen) == (0 if scenario in {"commit-secret", "scanner-failure"} else 1)
     refs = subprocess.check_output(["git", "--git-dir", str(remote), "for-each-ref", "--format=%(refname)"], timeout=20)
@@ -457,7 +459,7 @@ def synthetic_review_payload(owner):
     bodies = {
         "gate": b"gate", "hook_common": b"", "classifier": b"def find_machine_paths(value): return []\n",
         "posix_helper": b"", "windows_job": b"", "scanner": scanner_source,
-        "publication_review_policy": policy_source, "linked_runtime_subroots": b"", "receiver_scope": b"",
+        "publication_review_policy": policy_source, "linked_runtime_subroots": b"", "receiver_scope": b"", "matcher_wire": b"",
     }
     interpreter = owner._interpreter_identity()
     root = owner.PathComponentIdentity(".", "directory", (1,))
@@ -526,7 +528,7 @@ def test_native_mode_captures_repository_even_without_exception_records():
         capture.assert_called_once()
 
 
-def _run_owned_git_job(argv, cwd):
+def _run_owned_git_job(argv, cwd, *, timeout=60):
     """Exercise the real transfer inside the existing creator-owned Job."""
     helper_path = CANONICAL_HOOK.parents[2] / "process_supervision" / "windows_job.py"
     specification = importlib.util.spec_from_file_location("_native_gate_test_job", helper_path)
@@ -560,7 +562,7 @@ def _run_owned_git_job(argv, cwd):
             worker = threading.Thread(target=drain, args=(stream, key))
             worker.start()
             workers.append(worker)
-        returncode = process.wait(time.monotonic() + 60)
+        returncode = process.wait(time.monotonic() + timeout)
         closure = process.settle(time.monotonic() + 5)
         for worker in workers:
             worker.join(timeout=5)
@@ -737,6 +739,7 @@ def test_actual_tag_only_push_retains_independent_v4_annotation_detection(native
     code, stdout, stderr, settlement = _run_owned_git_job(argv, native_repository)
     assert settlement.complete
     assert code != 0 and b"PGG-SCAN-FINDING" in stderr
+    assert b"Scanner finding sample: tag-object other=1." in stderr
     assert marker.encode() not in stdout + stderr
     assert subprocess.check_output(["git", "--git-dir", str(remote), "for-each-ref"], timeout=20) == b""
 
@@ -944,15 +947,26 @@ def test_named_remote_keeps_private_endpoint_inside_captured_stdin(native_reposi
     canary = "SYNTHETIC_ENDPOINT_CANARY"
     endpoint = "https://synthetic-user:" + canary + "@example.invalid/synthetic.git"
     subprocess.run(["git", "-C", str(native_repository), "remote", "add", "origin", endpoint], check=True, timeout=20)
+    (native_repository / "public-progress.txt").write_bytes(b"synthetic harmless content\n")
+    subprocess.run(["git", "-C", str(native_repository), "add", "public-progress.txt"], check=True, timeout=20)
+    subprocess.run(["git", "-C", str(native_repository), "-c", "user.name=Synthetic",
+                    "-c", "user.email=synthetic@example.invalid",
+                    "commit", "-qm", "add public progress fixture"], check=True, timeout=20)
     commit = subprocess.check_output(["git", "-C", str(native_repository), "rev-parse", "HEAD"], timeout=20).strip()
     wire = b"HEAD " + commit + b" refs/heads/main " + b"0" * 40 + b"\n"
     original = owner._run_snapshot_child
     received_payloads = []
+    progress_counts = []
+    phases = []
     def child(pending, payload, *args):
         assert all(canary not in value for value in pending.exact_argv)
         assert json.loads(payload)["nativePush"]["endpoint"] == endpoint
         received_payloads.append(payload)
-        return original(pending, payload, *args)
+        launched, records = original(pending, payload, *args)
+        assert len(records) == 1
+        progress_counts.append(records[0].verified_acquired_objects)
+        phases.append(records[0].verified_scan_phases)
+        return launched, records
     output, errors = io.StringIO(), io.StringIO()
     with mock.patch.object(owner, "_run_snapshot_child", side_effect=child), \
          mock.patch.object(sys, "stdin", SimpleNamespace(buffer=io.BytesIO(wire))), \
@@ -960,6 +974,10 @@ def test_named_remote_keeps_private_endpoint_inside_captured_stdin(native_reposi
         result = owner._native_pre_push_main(["origin", endpoint])
     assert result == 0, errors.getvalue()
     assert len(received_payloads) == 2
+    assert all(count > 0 for count in progress_counts)
+    assert tuple(name for name, _ in phases[0])[-3:] == ("acquired", "traversed", "classified")
+    assert tuple(name for name, _ in phases[1]) == ("commits", "objects", "acquired", "traversed", "classified")
+    assert phases[1][-1] == ("classified", 1)
     lines = output.getvalue().splitlines()
     v3 = owner.parse_publication_safety_observation(lines[0])
     v4 = owner.parse_publication_safety_observation(lines[1])
@@ -1076,3 +1094,155 @@ def test_native_callback_reuses_new_graph_tag_scan_without_skipping_closure_chec
         assert output.out == "" and "PGG-SCAN-IDENTITY-DRIFT" in output.err
     else:
         assert output.out == "V3\nV4\n" and output.err == ""
+
+
+def test_owned_scan_progress_is_attempt_bound_and_leaves_real_stderr_unchanged():
+    gate = module()
+    token = "a" * 32
+    progress = gate._ScanProgressFrames(token)
+
+    def frame(attempt, count):
+        return b"\x1eORCHE-SCAN-PROGRESS-V1 " + attempt.encode("ascii") + b" " + count + b"\n"
+
+    marker = frame(token, b"17")
+    assert progress.feed(b"ordinary message\n" + marker[:15]) == b"ordinary message\n"
+    assert progress.completed == 0
+    assert progress.feed(marker[15:]) == b""
+    assert progress.completed == 17
+    assert progress.feed(frame(token, b"17") + frame(token, b"2")) == b""
+    assert progress.completed == 17
+    foreign = frame("b" * 32, b"42")
+    malformed = frame(token, b"1" * 180)
+    assert progress.feed(foreign + malformed) == foreign + malformed
+    assert progress.completed == 17
+    assert progress.feed(frame(token, b"42")) == b""
+    assert progress.completed == 42
+    third = frame(token, b"44")
+    assert progress.feed(b"ordinary-without-LF" + third[:5]) == b"ordinary-without-LF"
+    assert progress.feed(third[5:]) == b""
+    assert progress.completed == 44
+    final = frame(token, b"99")[:-1]
+    assert progress.feed(final) == b""
+    assert progress.finish() == final
+    assert progress.completed == 44
+
+
+
+@pytest.mark.skipif(os.name != "nt", reason="This target receiving verifies the Windows creator-owned Job")
+def test_actual_first_publication_crosses_old_commit_count(native_repository, monkeypatch):
+    owner = module()
+    home = native_repository / "synthetic-user"
+    home.mkdir()
+    monkeypatch.setenv("USERPROFILE", str(home))
+    executable = str(pathlib.Path(shutil.which("git")).resolve(strict=True))
+
+    def git(*arguments, **options):
+        return subprocess.run([executable, "-C", str(native_repository), *arguments],
+                              check=True, capture_output=True, timeout=30, **options).stdout
+
+    remote = native_repository / "first-receiver.git"
+    git("init", "-q", "--bare", str(remote))
+    git("remote", "add", "origin", str(remote))
+    git("config", "protocol.allow", "never")
+    git("config", "protocol.file.allow", "always")
+    stream = bytearray()
+    for number in range(1, 10_002):
+        stream.extend((f"commit refs/heads/large-first\nmark :{number}\n"
+                       f"committer Synthetic <author@example.invalid> {1_700_000_000 + number} +0000\n"
+                       "data 15\nsynthetic input\n").encode("ascii"))
+        if number > 1:
+            stream.extend(f"from :{number - 1}\n".encode("ascii"))
+        stream.extend(b"\n")
+    git("fast-import", "--quiet", input=stream)
+    tip = git("rev-parse", "refs/heads/large-first").strip()
+    argv = (executable, "-C", str(native_repository), *owner.native_git_config_arguments(),
+            "push", "--porcelain", "origin", "refs/heads/large-first:refs/heads/received")
+    envelope = {"tool_name": "Bash", "cwd": str(native_repository), "tool_input": {"command": shlex.join(argv)}}
+    runner = CANONICAL_HOOK.with_name("check-git-push-gate-runner.py")
+    preflight = subprocess.run([sys.executable, "-B", str(runner)], input=json.dumps(envelope).encode(),
+                               capture_output=True, cwd=native_repository, timeout=30)
+    assert (preflight.returncode, preflight.stdout, preflight.stderr) == (0, b"", b"")
+    code, stdout, stderr, closure = _run_owned_git_job(argv, native_repository, timeout=120)
+    assert closure.complete and code == 0, (stdout + stderr).decode("utf-8", "replace")
+    receipts = [json.loads(line) for line in stdout.splitlines() if line.startswith(b"{")]
+    assert len(receipts) == 1
+    assert receipts[0]["version"] == 4 and receipts[0]["status"] == "clean"
+    assert receipts[0]["commits"] == 10_001
+    assert git("--git-dir", str(remote), "for-each-ref", "--format=%(refname) %(objectname)") == (
+        b"refs/heads/received " + tip + b"\n"
+    )
+
+
+
+def test_scan_progress_does_not_advance_on_an_obsolete_or_unknown_phase():
+    gate = module()
+    attempt = "a" * 32
+    progress = gate._ScanProgressFrames(attempt)
+
+    def frame(phase, count):
+        return b"\x1eORCHE-SCAN-PROGRESS-V1 " + attempt.encode("ascii") + b" " + phase + b" " + count + b"\n"
+
+    for phase, count in ((b"commits", b"9"), (b"objects", b"12"), (b"acquired", b"12"), (b"traversed", b"8"), (b"classified", b"3")):
+        assert progress.feed(frame(phase, count)) == b""
+    assert progress.completed == 12
+    accepted = progress.phase_counts
+    assert accepted == (("commits", 9), ("objects", 12), ("acquired", 12), ("traversed", 8), ("classified", 3))
+    assert progress.feed(frame(b"commits", b"10") + frame(b"classified", b"2")) == b""
+    assert progress.phase_counts == accepted
+    unknown = frame(b"log", b"99")
+    assert progress.feed(unknown) == unknown
+    assert progress.phase_counts == accepted
+
+
+
+@pytest.mark.parametrize("mode", ["advancing", "replayed", "late"])
+def test_native_outer_watchdog_uses_only_advancing_owned_work(tmp_path, mode):
+    from contextlib import nullcontext
+
+    gate = module()
+    token = "c" * 32
+    payload = b""
+    captured = gate.CapturedReviewPayload(
+        gate.CapturedReviewModules(object(), object(), ()), {}, "e" * 64,
+        {"status": "not-requested", "repository": None, "diagnostic": "not-needed"},
+        None, True, payload, hashlib.sha256(payload).hexdigest(),
+    )
+    binding = gate.NativePushScanBinding(
+        "sha1", "sha256:" + "d" * 64, "e" * 64, "f" * 64, "1" * 64,
+    )
+    emitter = """
+import sys, time
+token = sys.argv[2]
+if sys.argv[1] == 'late':
+    time.sleep(.20)
+    raise SystemExit(0)
+for unit in range(1, 8):
+    counter = unit if sys.argv[1] == 'advancing' else 1
+    sys.stderr.buffer.write((chr(30) + 'ORCHE-SCAN-PROGRESS-V1 ' + token
+                             + ' acquired ' + str(counter) + chr(10)).encode('ascii'))
+    sys.stderr.buffer.flush()
+    time.sleep(.22)
+"""
+    argv = (sys.executable, "-B", "-c", emitter, mode, token,
+            "--gate-progress-attempt", token, "--native-push")
+    pending = gate.PendingScanInvocation(
+        "synthetic-native-watchdog", token, binding, None, gate._interpreter_identity(), argv,
+        object(), captured, authorization_deadline=time.monotonic() + .85,
+    )
+    # This fixture tests owned execution, not receiving or publication authority.
+    delayed_observation = (
+        mock.patch.object(gate._ScanThresholdNotice, "observe", side_effect=lambda _: time.sleep(.45))
+        if mode == "late" else nullcontext()
+    )
+    with mock.patch.object(gate, "SCAN_TIMEOUT_SECONDS", .10 if mode == "late" else .85), delayed_observation:
+        _, records = gate._run_snapshot_child(pending, payload, str(tmp_path))
+    assert len(records) == 1 and records[0].settlement.complete
+    assert records[0].bounded_completion is (mode == "advancing")
+    assert records[0].verified_acquired_objects == {"advancing": 7, "replayed": 1, "late": 0}[mode]
+    assert records[0].stderr == b""
+    assert pending.consumption_id is None
+    if mode == "advancing":
+        assert time.monotonic() > pending.authorization_deadline
+        assert pending._consumption_deadline() > time.monotonic()
+    else:
+        assert pending._consumption_deadline() == pending.authorization_deadline
