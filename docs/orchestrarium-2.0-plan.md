@@ -65,6 +65,25 @@ The merged PR31 Windows replacement-security correction is historical. Do not
 conflate tagged source, isolated installation checks and actual receiving on
 any target with SDK or model-ranking completion.
 
+## Open ticket closeout
+
+This is an index into the existing shared bug inbox, not a second tracker.
+The ticket owns its detailed evidence and disposition. Reconcile that record
+before work; archive it only after verifying its actual closure conditions.
+
+| Ticket | Owner / next action | Closure evidence |
+| --- | --- | --- |
+| 2026-11-21 publication commit-message diagnostics | Native scanner, PR21; tagged diagnostics are historical completion of the original symptom, not the later scalability follow-up. | Current installed proof for the full agreed large-history, interruption/resume and receipt scope. |
+| 2026-11-21 machine-path review | Lead/publication workflow, PR57; previously accepted content remains subject to the existing receiver and review scope. | Merge and verify the on-demand guidance at the intended Lead installation. Keep broader decision reuse separate. |
+| 2026-11-23 active-only audit summary | Work-item checker, PR58. | Verify installed failure summaries in both modes with unchanged counts and exit status. Do not infer the six historical run outcomes. |
+| 2026-11-21 R7 private output capture | Windows private-object owner with NablaMesh capture consumer. | Verify the supported capture and failure/cleanup contract; exact receiving and a new diagnostic run require their own authority. |
+| 2026-11-21 Windows Job first settlement failure | ProcessRunner / Windows Job owner. | Demonstrate that the actual first failure survives finalization and is distinct from the child result; do not infer a cause for an unattributed run. |
+| 2026-11-21 Windows Job handle preparation | Windows Job request/receipt owner. | Qualify exact request admission and an authoritative pre-create result with no child start; preserve ambiguous historical outcomes. |
+| 2026-11-14 Windows Job close-on-pending | Existing capture/application owner; Global Lead helper is a matching source surface, not confirmed incident ownership. | Resolve ownership, verify pending versus settled outcomes and cleanup on the affected path, or document the verified external disposition. |
+| 2026-11-04 standalone Codex instruction budget | Instruction installer and governance owners; deferred until after Rust/SDK. | Verify standalone installed loading and behavior without relying on a global install or raising limits. |
+
+The already archived receiver-reachability defect (PR55) stays closed.
+
 ## Goal and boundary
 
 Deliver better task-specific orchestration: choose sufficient admitted model/effort

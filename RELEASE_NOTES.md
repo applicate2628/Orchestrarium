@@ -7,7 +7,7 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-23
 
-- Reconcile the 2.0 delivery order with the tagged pre-SDK baseline and separate Rust, SDK, and distribution acceptance. Retain independent product outcomes without counting them as release blockers.
+- Reconcile the 2.0 delivery order with the tagged pre-SDK baseline and separate Rust, SDK, and distribution acceptance. Retain independent product outcomes without counting them as release blockers. Index open tickets by owner and verified archive criteria.
 
 - The model resolver now compares eligible models and reasoning efforts using benchmark quality, task time, and one relative cost unit (Sol 6.2 High = 1). The Lead selects and explains the best fit for each task; the default is a fallback. The benchmark figures are not prices, launch permissions, or runtime guarantees.
 
