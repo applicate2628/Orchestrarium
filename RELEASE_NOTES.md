@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-24
 
+- Clarify the existing provider-output boundary: complete private command-line transport is acquired before choosing the public result, and the chosen text and final receipt are scanned before delivery. Published Software Development Kit (SDK) observations retain their separate checks. Supported authentication modes grant no execution authority or proof that arbitrary unknown secrets are absent.
+
 - Resolve hook-health package binding from the explicit documented settings path without requiring a home-directory environment. Isolated provider trust probes retain the same package-name and path relationship checks on Windows.
 
 - Finalize repeated provider installs from the existing verified member images, including unchanged managed files outside the selected mutation paths. Switching Codex instructions between global-backed and standalone forms preserves foreign files and retains byte and identity drift checks.

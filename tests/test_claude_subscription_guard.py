@@ -1,4 +1,4 @@
-"""Commercial-auth fail-closed tests for the Python Claude prompt owner."""
+"""Synthetic local-output and auth-refusal tests for the Claude prompt owner."""
 from __future__ import annotations
 
 import json
@@ -64,14 +64,10 @@ def _run(
     env = {
         key: value
         for key, value in os.environ.items()
-        if key
-        not in {
-            "ANTHROPIC_API_KEY",
-            "ANTHROPIC_AUTH_TOKEN",
-            "CLAUDE_CODE_USE_BEDROCK",
-            "CLAUDE_CODE_USE_VERTEX",
-            "ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE",
-        }
+        if not key.upper().startswith(
+            ("ANTHROPIC_", "CLAUDE_", "AWS_", "GOOGLE_", "CLOUDSDK_", "GCLOUD_")
+        )
+        and key.upper() not in {"ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE", "CLOUD_ML_REGION"}
     }
     env.update(
         {
@@ -125,31 +121,80 @@ def test_subscription_refusal_recommends_only_admitted_credentials(
         assert rejected_mode not in result.stderr
 
 
+@requires_windows_process_runner
 @pytest.mark.parametrize(
-    ("signal", "expected_returncode"),
+    "signal",
     (
-        pytest.param(
-            {"ANTHROPIC_" + "API_KEY": "synthetic"},
-            0,
-            marks=requires_windows_process_runner,
-        ),
-        pytest.param(
-            {"ANTHROPIC_" + "AUTH_TOKEN": "synthetic"},
-            0,
-            marks=requires_windows_process_runner,
-        ),
-        ({"CLAUDE_CODE_USE_BEDROCK": "1"}, 1),
-        ({"CLAUDE_CODE_USE_VERTEX": "true"}, 1),
-        ({"ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE": "1"}, 1),
+        {"ANTHROPIC_" + "API_KEY": "synthetic"},
+        {"ANTHROPIC_" + "AUTH_TOKEN": "synthetic"},
+        {"CLAUDE_CODE_USE_BEDROCK": "1"},
+        {"CLAUDE_CODE_USE_VERTEX": "true"},
+        {"ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE": "1"},
     ),
 )
-def test_only_exact_environment_credentials_authorize_nonopaque_launch(
-    tmp_path: Path, signal: dict[str, str], expected_returncode: int
+def test_supported_auth_modes_return_nonauthorizing_local_output(
+    tmp_path: Path, signal: dict[str, str]
 ) -> None:
+    # The selected command is always the local fake; a mode flag grants no quota.
     result = _run(tmp_path, signal)
-    assert result.returncode == expected_returncode, result.stderr
-    if expected_returncode:
-        assert "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE" in result.stderr
+    _assert_completed_local_result(tmp_path, result)
+
+
+def _assert_completed_local_result(tmp_path: Path, result: subprocess.CompletedProcess[str]) -> None:
+    assert result.returncode == 0, result.stderr
+    prefix = "ORCHESTRARIUM_PROVIDER_RESULT_V2="
+    assert result.stdout.startswith(prefix)
+    payload = json.loads(result.stdout[len(prefix):])
+    assert payload["resultText"].replace("\r\n", "\n") == "GATE: PASS\n"
+    assert payload["token"] == "COMPLETE:EXTERNAL_NONAUTHORIZING"
+    assert payload["primaryOutcome"]["token"] == "COMPLETE:PASS"
+    assert payload["authorizing"] is False
+    assert payload["closesRunIds"] == []
+    assert payload["independentVerificationRequired"] is True
+    assert payload["cleanupStatus"] == "complete"
+    assert payload["cleanupIssueCount"] == 0
+    assert payload["captureRecoveryRetained"] is False
+    assert (tmp_path / "terminal.receipt").read_text(encoding="utf-8") == result.stdout
+    assert list((tmp_path / "artifacts").iterdir()) == []
+
+
+@requires_windows_process_runner
+@pytest.mark.parametrize(
+    "signal",
+    (
+        {"CLAUDE_CODE_USE_BEDROCK": "1"},
+        {"CLAUDE_CODE_USE_VERTEX": "true"},
+        {"ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE": "1"},
+    ),
+)
+@pytest.mark.parametrize("stream", ("stdout", "stderr"))
+def test_supported_modes_keep_credential_canaries_out_of_public_output(
+    tmp_path: Path, signal: dict[str, str], stream: str
+) -> None:
+    canary = "unlisted-synthetic-credential"
+    child = (
+        "import sys\n"
+        "sys.stdin.buffer.read()\n"
+        f"sys.{stream}.write('api_key={canary}\\n')\n"
+        "print('GATE: PASS')\n"
+    )
+    result = _run(tmp_path, signal, child_source=child)
+    receipt = (tmp_path / "terminal.receipt").read_text(encoding="utf-8")
+    assert canary not in result.stdout + result.stderr + receipt
+    assert receipt == result.stdout
+    payload = json.loads(result.stdout.split("=", 1)[1])
+    if stream == "stdout":
+        assert result.returncode == 1, result.stderr
+        assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+        assert payload["resultText"] == ""
+    else:
+        # Settled stderr is private transport, never the selected public result.
+        _assert_completed_local_result(tmp_path, result)
+    assert payload["authorizing"] is False
+    assert payload["closesRunIds"] == []
+    assert payload["cleanupStatus"] == "complete"
+    assert payload["captureRecoveryRetained"] is False
+    assert list((tmp_path / "artifacts").iterdir()) == []
 
 
 def test_api_key_helper_is_refused_without_running_helper_or_leaking_child_output(
@@ -228,7 +273,8 @@ def test_project_api_key_helper_claim_does_not_authorize_automated_launch(
     assert not (tmp_path / "artifacts").exists()
 
 
-def test_vertex_auth_refusal_precedes_large_prompt_capture(tmp_path: Path) -> None:
+@requires_windows_process_runner
+def test_vertex_local_output_reclaims_large_prompt_capture(tmp_path: Path) -> None:
     child = (
         "import sys\n"
         "payload=sys.stdin.buffer.read()\n"
@@ -244,6 +290,4 @@ def test_vertex_auth_refusal_precedes_large_prompt_capture(tmp_path: Path) -> No
             child_source=child,
             prompt_bytes=b"x" * (15 * 1024 * 1024),
         )
-        assert result.returncode == 1, result.stderr
-        assert "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE" in result.stderr
-        assert not (tmp_path / str(index) / "artifacts").exists()
+        _assert_completed_local_result(tmp_path / str(index), result)
