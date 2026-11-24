@@ -15324,12 +15324,17 @@ def _retain_historical_pass_custody(
         # Parse the exact captured image under its derived acquisition budget.
         # Final H1 admission must see the selected custody bytes: the original
         # artifact may already be missing, which is what this operation repairs.
-        demand = validator.inspect_ledger_resource_demand(
-            captured.path, ledger_resource_budget, source_bytes=raw)
-        parse_budget = validator.resolve_ledger_resource_budget(
-            ledger_resource_budget.max_events if ledger_resource_budget is not None else None,
-            ledger_resource_budget.max_ledger_bytes if ledger_resource_budget is not None else None,
-            demand=demand)
+        try:
+            demand = validator.inspect_ledger_resource_demand(
+                captured.path, ledger_resource_budget, source_bytes=raw)
+            parse_budget = validator.resolve_ledger_resource_budget(
+                ledger_resource_budget.max_events if ledger_resource_budget is not None else None,
+                ledger_resource_budget.max_ledger_bytes if ledger_resource_budget is not None else None,
+                demand=demand)
+        except ValueError as exc:
+            message = str(exc)
+            failure_id = message.split(":", 1)[0] if message.startswith("WI-LEDGER-RESOURCE-") else "WI-LEDGER-UNSETTLED"
+            raise LifecycleError(failure_id, message) from exc
         errors: list[str] = []
         metadata: list[dict[str, object]] = []
         events = validator.load_jsonl(captured.path, errors, metadata, raw, ledger_resource_budget=parse_budget)

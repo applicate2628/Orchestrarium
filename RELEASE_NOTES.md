@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-24
 
+- Preserve typed lifecycle refusals when historical PASS custody exceeds an explicit ledger limit. Candidate admission still uses one captured ledger image and refuses same-byte replacement of that image before publication.
+
 - Linux publication scans now serialize content readers, prior-disclosure evidence and matcher process owners. They retain deadline and complete-reaping checks, reuse readers between ordinary reads, and preserve existing Windows process batching.
 
 - Settle partial-migration pending receipts through the existing exact native write owner. Promotion and retirement now publish their actual effects to the held transaction, preserve foreign replacements even when bytes match, and retain the original failure if cleanup also fails. Create-only publication and final directory durability checks remain required.
