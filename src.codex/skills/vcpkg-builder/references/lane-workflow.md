@@ -9,7 +9,7 @@ Select exactly one profile from the accepted command contract:
 - Aggregate: one explicitly named repository wrapper and arguments; never substitute an aggregate for targeted validation or vice versa.
 - Diagnostic/read-only: no build command; inspect only the admitted logs and Model Context Protocol (MCP) surfaces.
 
-There is no universal full-lane-first rule. The accepted command contract records whether the next gate is targeted or aggregate. A failure stops the admitted invocation sequence; it never authorizes a retry or a substitute command.
+There is no universal full-lane-first rule. The accepted command contract records whether the next gate is targeted or aggregate. A failure pauses that invocation; after correction, recheck and resume only within current authorization.
 
 ## Root policy
 
@@ -52,7 +52,7 @@ Triplet names do not universally own storage identity. Repositories may strip re
 
 ## Stop rules
 
-Stop without retry, cleanup, or command substitution when:
+Stop this invocation without blind retry or cleanup when:
 
 - a preflight criterion fails;
 - the selector resolves an unexpected root;

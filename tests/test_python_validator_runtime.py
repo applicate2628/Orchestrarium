@@ -1625,7 +1625,7 @@ def test_current_provider_currency_pins_accept_source_and_reject_protected_drift
 
     assert check(data).errors == 0
     clause = (b"found-by: windows-gui-manual-testing" if surface == "gui-body"
-              else b"A genuine host-policy refusal stops that operation"
+              else b"Apply shared recovery rules; do not bypass an active host denial."
               if surface == "post-spawn-cleanup-body"
               else b"persistence limited to authorized install/configuration writes")
     assert clause in data
