@@ -2,10 +2,34 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
+import runpy
 import sys
-from unittest import mock
+from unittest import mock, skipUnless
 
 import test_publication_native_effects as native
+
+
+@contextmanager
+def serial_process_owners(module):
+    """Make a forbidden nested Linux acquisition fail before its blocking lock."""
+    if not sys.platform.startswith("linux"):
+        yield
+        return
+    acquire = module.PosixProcessGroupOwnerV1.acquire
+    lock = acquire.__func__.__globals__["_LINUX_SUBREAPER_LOCK"]
+    nested = []
+
+    def guarded_acquire():
+        if lock.locked():
+            nested.append("owned process requested while another owner is active")
+            raise RuntimeError(nested[-1])
+        return acquire()
+
+    with mock.patch.object(module.PosixProcessGroupOwnerV1, "acquire", guarded_acquire):
+        yield
+    assert not nested, nested
+    assert not lock.locked(), "scan retained its Linux process owner"
 
 
 class TestPriorDisclosure(native.TestNativePublicationEffects):
@@ -120,7 +144,9 @@ class TestPriorDisclosure(native.TestNativePublicationEffects):
             tip = self.git("commit-tree", tree, "-p", published, raw=b"synthetic transition\n").strip().decode()
             payload = self.payload([(tip.encode(), tip, b"refs/heads/main", published)])
             finder = self.module._path_finder(native.SOURCE)
-            with self.in_root(), mock.patch.object(self.module, "__injected_native_push__", payload, create=True):
+            with serial_process_owners(self.module), self.in_root(), mock.patch.object(
+                self.module, "__injected_native_push__", payload, create=True,
+            ):
                 return (
                     self.module._scan_native_push(payload, finder),
                     self.module._scan_range("origin", "refs/heads/main", finder, source_revision=tip),
@@ -150,6 +176,140 @@ class TestPriorDisclosure(native.TestNativePublicationEffects):
         for outcome in scan_edit(old, moved=True):
             self.assertEqual(outcome.kind, "findings")
             self.assertTrue(any(row.detector_class == "machine-path" for row in outcome.findings))
+
+    def test_retained_matcher_serializes_with_reader_and_prior_disclosure(self):
+        peer = self.root.parent / "synthetic-matcher.py"
+        peer.write_text(
+            "import json, re, sys\n"
+            "rules = [(row['binary'], re.compile(row['regex'])) "
+            "for row in json.loads(sys.stdin.buffer.readline())]\n"
+            "sys.stdout.write('orche-match-spans-v1\\n'); sys.stdout.flush()\n"
+            "for frame in sys.stdin.buffer:\n"
+            "    result = []\n"
+            "    for row in json.loads(frame):\n"
+            "        text = row['text']; hits = []\n"
+            "        for index, (binary, pattern) in enumerate(rules):\n"
+            "            if row['binary'] and not binary: continue\n"
+            "            for match in pattern.finditer(text):\n"
+            "                spans = [None if start < 0 else "
+            "[len(text[:start].encode('utf-8')), len(text[:end].encode('utf-8'))] "
+            "for start, end in match.regs]\n"
+            "                hits.append([index, spans])\n"
+            "        result.append(hits)\n"
+            "    sys.stdout.write(json.dumps(result) + '\\n'); sys.stdout.flush()\n",
+            encoding="utf-8",
+        )
+        wire = runpy.run_path(str(native.SOURCE.parent / "publication_match_wire.py"))
+        wire["retained_matcher"] = lambda _python: peer
+        create = self.module._create_owned_async_process
+
+        async def create_peer(argv, **kwargs):
+            if tuple(argv) == (str(peer),):
+                argv = (sys.executable, "-B", str(peer))
+            return await create(argv, **kwargs)
+
+        with mock.patch.object(self.module, "__injected_matcher_wire__", wire, create=True), \
+                mock.patch.object(self.module, "_create_owned_async_process", create_peer):
+            self.test_edited_blob_distinguishes_inherited_and_new_machine_paths()
+
+    def _edited_prior_path_with_later_blobs(self):
+        old = "retained=" + chr(68) + chr(58) + "/dev/synthetic-published/\n"
+        path = self.root / "a-retained.txt"
+        path.write_text(old + "status=old\n", encoding="utf-8")
+        self.git("add", path.name)
+        self.git("commit", "-qm", "synthetic published path")
+        published = self.git("rev-parse", "HEAD").strip().decode()
+        self.git("push", "-q", "origin", "HEAD:refs/heads/main")
+        path.write_text(old + "status=updated\n", encoding="utf-8")
+        for index in range(8):
+            (self.root / f"b-{index}.txt").write_text(f"public value {index}\n", encoding="utf-8")
+        self.git("add", ".")
+        self.git("commit", "-qm", "synthetic edited path and public blobs")
+        tip = self.git("rev-parse", "HEAD").strip().decode()
+        return self.payload([(tip.encode(), tip, b"refs/heads/main", published)])
+
+    def test_reader_reopens_lazily_after_prior_disclosure_proof(self):
+        payload = self._edited_prior_path_with_later_blobs()
+        readers = []
+
+        def reader_factory():
+            reader = self.module._AsyncGitObjectReader()
+            readers.append(reader)
+            return reader
+
+        with serial_process_owners(self.module), self.in_root():
+            outcome = asyncio.run(self.module._scan_native_push_async(
+                payload, self.module._path_finder(native.SOURCE), reader_factory=reader_factory,
+            ))
+        self.assertEqual(outcome.kind, "clean", outcome.refusal)
+        self.assertEqual(len(readers), 2 if sys.platform.startswith("linux") else 1,
+                         "ordinary later blobs must reuse the reopened reader")
+        self.assertTrue(all(reader.reap_certificate.complete for reader in readers))
+
+    @skipUnless(sys.platform.startswith("linux"), "serialized Linux subreaper ownership")
+    def test_prior_disclosure_requires_every_reader_reap_certificate(self):
+        payload = self._edited_prior_path_with_later_blobs()
+        module = self.module
+        run_git = module._run_range_git
+        for failed_reader in (1, 2):
+            with self.subTest(failed_reader=failed_reader):
+                readers = []
+                proofs = []
+
+                def reader_factory():
+                    reader = module._AsyncGitObjectReader()
+                    readers.append(reader)
+                    if len(readers) == failed_reader:
+                        finalize = reader.finalize
+                        calls = 0
+
+                        async def refuse_once():
+                            nonlocal calls
+                            result = await finalize()
+                            calls += 1
+                            if calls == 1 and result is None:
+                                return module._refusal("PS-MSG-REAP", "synthetic-uncertified-reader")
+                            return result
+
+                        reader.finalize = refuse_once
+                    return reader
+
+                def observe_proof(args, **kwargs):
+                    if "log" in args and "--raw" in args:
+                        proofs.append(tuple(args))
+                    return run_git(args, **kwargs)
+
+                with serial_process_owners(module), self.in_root(), \
+                        mock.patch.object(module, "_run_range_git", observe_proof):
+                    outcome = asyncio.run(module._scan_native_push_async(
+                        payload, module._path_finder(native.SOURCE), reader_factory=reader_factory,
+                    ))
+                self.assertEqual(outcome.kind, "refusal")
+                self.assertEqual(outcome.refusal.failure_id, "PS-MSG-REAP")
+                self.assertEqual(len(readers), failed_reader)
+                self.assertEqual(bool(proofs), failed_reader == 2)
+                self.assertTrue(all(reader.reap_certificate.complete for reader in readers))
+
+    @skipUnless(sys.platform.startswith("linux"), "serialized Linux subreaper ownership")
+    def test_failed_successor_spawn_preserves_spawn_refusal(self):
+        payload = self._edited_prior_path_with_later_blobs()
+        readers = []
+
+        def reader_factory():
+            arguments = {} if not readers else {"argv": (str(self.root / "absent-git"),)}
+            reader = self.module._AsyncGitObjectReader(**arguments)
+            readers.append(reader)
+            return reader
+
+        with serial_process_owners(self.module), self.in_root():
+            outcome = asyncio.run(self.module._scan_native_push_async(
+                payload, self.module._path_finder(native.SOURCE), reader_factory=reader_factory,
+            ))
+        self.assertEqual(outcome.kind, "refusal")
+        self.assertEqual(outcome.refusal.failure_id, "PS-MSG-SPAWN")
+        self.assertEqual(len(readers), 2)
+        self.assertTrue(readers[0].reap_certificate.complete)
+        self.assertIs(readers[1].state, self.module.ReaderState.SPAWN_FAILED)
 
     def test_older_published_machine_path_is_not_new_disclosure(self):
         file = self.root / "history.txt"

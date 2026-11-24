@@ -5,6 +5,10 @@ A dated entry is not a release tag, publication notice, or confirmation of a
 local installation. For the frozen pre-SDK baseline and draft follow-up, see
 [Which version?](README.md#which-version).
 
+## 2026-11-24
+
+- Linux publication scans now serialize content readers, prior-disclosure evidence and matcher process owners. They retain deadline and complete-reaping checks, reuse readers between ordinary reads, and preserve existing Windows process batching.
+
 ## 2026-11-23
 
 - Repeated cancellation of a publication scan retains its object-reader finalizer and selection cleanup until the owned child and input have settled. On systems supporting the Portable Operating System Interface (POSIX), process-owner acquisition, process creation and failed-start cleanup also retain their eventual results, so cancellation cannot abandon a newly created child or the Linux child-reaper lock during the handoff. Existing cleanup deadlines, failure results and reap certificates remain enforced.
