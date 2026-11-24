@@ -9,6 +9,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 - Linux publication scans now serialize content readers, prior-disclosure evidence and matcher process owners. They retain deadline and complete-reaping checks, reuse readers between ordinary reads, and preserve existing Windows process batching.
 
+- On POSIX (Portable Operating System Interface) systems such as Linux, recheck a private rollback snapshot's exact child identity and bytes after an allowed parent-permission change and before disposal. A changed child remains preserved; the original source and the parent's original mode retain their existing protection.
+
 ## 2026-11-23
 
 - Prioritize the smallest working end-to-end result. During planning and review, the Lead defers speculative safeguards and unrelated work to the existing plan unless needed for that result. Existing safety and approval requirements are unchanged; no new workflow gate is introduced. Contract tests check the QA roles' referral and still check that both owning contracts state the classification rule.
@@ -30,6 +32,12 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 - Claude removal now rechecks all selected control files through the final ownership-record write, including files absent at preview. A control created or replaced during removal stops completion and restores the owned payload and receipt while preserving the new user content, so a newly added hook is not left pointing at a removed handler.
 
 - Clarify the Kimi provider comment in the configuration defaults to match the existing explicit read and scoped-worker routes. Tool access still depends on the validated capability file and policy; no setting, routing rule or execution permission changes.
+
+- Historical upgrade checks distinguish legacy lookup digests from structural Version 2 witnesses, verify unchanged targets when historical material lacks a witness, and exercise supported upgrade, no-op and rollback behavior using authenticated factory data. Receipt and explicit-adoption checks use their current versioned formats. Archive fixtures pin Git newline settings per command so host checkout defaults cannot change historical payload bytes.
+
+- Coupled Lead and provider-transport upgrades recognize completed content writes by the same installation transaction. The check binds the captured predecessor, original file identities, current owned state and planned contents, so Windows updates can preserve their existing files without treating their own changes as foreign drift.
+
+- Removing an unchanged retired file after a Windows tree replacement retains the transaction's complete security and identity witnesses. Cleanup and rollback no longer discard that evidence by reopening the file with a weaker observation.
 
 - The model resolver now compares eligible models and reasoning efforts using benchmark quality, task time, and one relative cost unit (Sol 6.2 High = 1). The Lead selects and explains the best fit for each task; the default is a fallback. The benchmark figures are not prices, launch permissions, or runtime guarantees.
 
