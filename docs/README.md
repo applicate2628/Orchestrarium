@@ -15,6 +15,7 @@ Use it together with:
 Current references and maintenance guidance:
 
 - [distribution-runtime-project.md](distribution-runtime-project.md) indexes the planned installer delivery channels and the separate Rust and software development kit (SDK) release owners.
+- For current software development kit (SDK) implementation and qualification, see `docs/sdk-execution.md` in [pull request #19](https://github.com/applicate2628/Orchestrarium/pull/19).
 - [routing/gpt-6-2-production-hotfix-2026-11-17.md](routing/gpt-6-2-production-hotfix-2026-11-17.md) for the current factory Sol/Astra generation refresh and offline verification boundary
 - [agents-mode-reference.md](agents-mode-reference.md) for the shared operator schema
 - [external-worker-design.md](external-worker-design.md) for external execution adapter design notes
@@ -31,6 +32,7 @@ Current references and maintenance guidance:
 
 Dated design and evidence, not current implementation plans:
 
+- [sdk-integration-project.md](sdk-integration-project.md) records the historical SDK design, authority boundaries and dated evidence.
 - [claude-instruction-unification.md](claude-instruction-unification.md) — Claude instruction discovery research and original implementation handoff; use the current runtime and install references above for the implemented layout
 - [routing/sol-6-1-routing-proposal-2026-10-01.md](routing/sol-6-1-routing-proposal-2026-10-01.md) — prior Sol 6.1 generation decision and dated evidence
 - [routing/12-lane-routing-matrix-v1-2026-04-18.md](routing/12-lane-routing-matrix-v1-2026-04-18.md) — superseded lane matrix
