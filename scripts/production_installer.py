@@ -4915,6 +4915,8 @@ class _InstallTransaction:
                 writable = mode | stat.S_IWUSR
                 try:
                     self._chmod_owned(path.parent, bound_parent, writable, descriptor=descriptor)
+                    if not self._point_matches(path, expected, check_file_content=True):
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal permission content drift")
                     operation(path.name, dir_fd=descriptor)
                 finally:
                     # Restore the original mode on the same held object, even if
@@ -6938,7 +6940,7 @@ class _CreateOnlyMutablePath:
             raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {relative}")
         if self.dry_run:
             return path
-        return self.retain_path(relative, self.transaction._observe(path))
+        return self.retain_path(relative, _admitted_mutation_image(self.transaction, path))
 
     @_InstallTransaction.direct_writer
     def retain_path(self, relative: Path, expected: dict[Path, _PhysicalNode], *,
@@ -10446,6 +10448,41 @@ def _discard_canonical_skills_plan(plan: _CanonicalSkillsPlan, *, strict: bool =
     shutil.rmtree(plan.stage.path, ignore_errors=not strict)
 
 
+def _same_transaction_lead_update(
+    plan: _CanonicalSkillsPlan, target: Path, transaction: _InstallTransaction | None,
+) -> bool:
+    """Recognize a completed content update through its original and current owner images."""
+    predecessor = plan.transport_stage.predecessor if plan.transport_stage is not None else None
+    if (transaction is None or not transaction.enabled or predecessor is None
+            or predecessor.canonical_target != target):
+        return False
+    lead = target / "lead"
+    original = next(({path: node for path, node in image.items()
+                      if path == lead or lead in path.parents}
+                     for root, image in transaction._original.items()
+                     if root == lead or root in lead.parents), None)
+    if (original is None or tuple(sorted(original.items())) != predecessor.canonical_state
+            or not any(entry["kind"] == "scalar" and lead in entry["current_path"].parents
+                       and not entry["consumed"] for entry in transaction._entries)):
+        return False
+    current = _admitted_mutation_image(transaction, lead)
+    if not transaction._image_matches(lead, current):
+        raise ValueError("E_TRANSPORT_PROJECTION_PARITY: owned Lead content drift")
+    reclaimed = []
+    for effect in transaction._effects:
+        if (lead not in effect.path.parents or effect.location != effect.path
+                or effect.proposed or effect.actual or effect.retained_state is None):
+            continue
+        node = effect.before.get(effect.path)
+        if node is not None and node.kind == "file":
+            transaction.assert_effect_current(effect)
+            if _is_ordinary_runtime_cache_file(effect.path.relative_to(lead), effect.retained.lstat()):
+                continue
+            reclaimed.append((effect.path, node.data))
+    expected = _canonical_lead_expected_manifest(plan.stage.manifest, lead, tuple(reclaimed))
+    return _admitted_tree_manifest(transaction, lead, ignore_runtime_cache=True) == expected
+
+
 def _assert_canonical_skills_plan_current(
     plan: _CanonicalSkillsPlan,
     target: Path,
@@ -10499,7 +10536,10 @@ def _assert_canonical_skills_plan_current(
         if own_effect is not None:
             transaction.assert_effect_current(own_effect)
             lead_effect = own_effect
-        if current != skill.source_digest or (observed != skill.installed_digest and own_effect is None):
+        own_content_update = (skill.name == "lead" and own_effect is None
+                              and _same_transaction_lead_update(plan, target, transaction))
+        if (current != skill.source_digest
+                or (observed != skill.installed_digest and own_effect is None and not own_content_update)):
             raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: preflight drift {skill.name}")
     if plan.lead_receipt is not None:
         receipt_path = target / _LEAD_RECEIPT_NAME
@@ -10549,8 +10589,9 @@ def _assert_canonical_skills_plan_current(
                            and item.preflight_state == predecessor.canonical_state), None) if transaction is not None else None
             if effect is not None:
                 transaction.assert_effect_current(effect)
-            if predecessor.canonical_target != target or (effect is None and not
-                    _InstallTransaction._image_matches(target / "lead", dict(predecessor.canonical_state))):
+            if predecessor.canonical_target != target or (effect is None and not (
+                    _InstallTransaction._image_matches(target / "lead", dict(predecessor.canonical_state))
+                    or _same_transaction_lead_update(plan, target, transaction))):
                 raise ValueError("E_TRANSPORT_PROJECTION_PARITY: predecessor root or tree drift")
 
 
@@ -10646,29 +10687,30 @@ def _apply_canonical_skills_plan(
         owner.transaction.assert_effect_current(already_published)
         if already_published.proposed_manifest != plan.stage.manifest:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: declared Lead publication")
-    elif lead.accepted_prior_files:
-        for relative, expected_digest in lead.accepted_prior_files:
-            owner.migrate_exact_file(
-                target_relative / "lead" / relative,
-                expected_digest,
-                (lead.source / relative).read_bytes(),
-                retention_parent=target_relative.parent,
+    elif not _same_transaction_lead_update(plan, target, owner.transaction):
+        if lead.accepted_prior_files:
+            for relative, expected_digest in lead.accepted_prior_files:
+                owner.migrate_exact_file(
+                    target_relative / "lead" / relative,
+                    expected_digest,
+                    (lead.source / relative).read_bytes(),
+                    retention_parent=target_relative.parent,
+                )
+        elif lead.accepted_prior is not None:
+            owner.replace_exact_tree(
+                target_relative / "lead",
+                lead.accepted_prior,
+                lead.source,
+                ignore_runtime_cache=lead.ignore_runtime_cache,
+                # A coupled peer transition still consumes the retained tree witness.
+                allow_file_additions=plan.transport_stage is None,
             )
-    elif lead.accepted_prior is not None:
-        owner.replace_exact_tree(
-            target_relative / "lead",
-            lead.accepted_prior,
-            lead.source,
-            ignore_runtime_cache=lead.ignore_runtime_cache,
-            # A coupled peer transition still consumes the retained tree witness.
-            allow_file_additions=plan.transport_stage is None,
-        )
-    else:
-        owner.create_tree(
-            target_relative / "lead",
-            lead.source,
-            ignore_runtime_cache=lead.ignore_runtime_cache,
-        )
+        else:
+            owner.create_tree(
+                target_relative / "lead",
+                lead.source,
+                ignore_runtime_cache=lead.ignore_runtime_cache,
+            )
 
     if plan.nonlead_expected is not None:
         if not owner.dry_run:
