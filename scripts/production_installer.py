@@ -15904,7 +15904,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                         offline_policy=args.kimi_offline_policy,
                     )
             reclaimed = _reclaim_retired(
-                target if provider == "claude" else agents_root,
+                target if provider == "claude" else canonical_agents_root,
                 (
                     {**_CLAUDE_RETIRED_PS1, **_CLAUDE_RETIRED_SH}
                     if provider == "claude"

@@ -2658,8 +2658,19 @@ def test_receipted_upgrade_retirement_preserves_targets_receipt_and_rollback(
     assert hashlib.sha256(stock).hexdigest() == installer._CODEX_RETIRED_PS1[
         "skills/lead/hooks/check-mcp-momentum.py"
     ]
-    retired.write_bytes(stock)
-    receipt.write_bytes(installer._lead_receipt_bytes(installer._tree_sha256(lead, ignore_runtime_cache=True)))
+    def seed_retired_stock():
+        retired.write_bytes(stock)
+        receipt.write_bytes(installer._lead_receipt_bytes(installer._tree_sha256(lead, ignore_runtime_cache=True)))
+        # The synthetic predecessor's outer receipt must bind its seeded Lead
+        # receipt. Refresh only that existing witness, without claiming extras.
+        codec = installer._provider_ownership_module(ROOT)
+        provider_receipt = home / ".codex" / installer._PROVIDER_RECEIPT_NAME
+        record = codec.decode_record(provider_receipt.read_bytes(), "codex", "global")
+        relative = receipt.relative_to(home).as_posix()
+        assert relative in record["files"]
+        record["files"][relative] = hashlib.sha256(receipt.read_bytes()).hexdigest()
+        provider_receipt.write_bytes(codec.serialize_record(record, "codex", "global"))
+    seed_retired_stock()
     registration = home / ".codex" / "hooks.json"
     config = json.loads(registration.read_bytes())
     # Model a valid registered command even when the retained interpreter path
@@ -2669,7 +2680,8 @@ def test_receipted_upgrade_retirement_preserves_targets_receipt_and_rollback(
     retained = {"type": "command", "command": command + " --retained-custom"}
     mixed = {
         "matcher": "Grep|Bash|PowerShell|shell_command|exec_command", "description": "retained-mixed",
-        "hooks": [{"type": "command", "command": command}, retained],
+        # Retiring the trailing managed handler preserves the custom trust slot.
+        "hooks": [retained, {"type": "command", "command": command}],
     }
     unrelated_target = home / "unrelated.py"
     unrelated_target.write_bytes(b"print('unrelated')\n")
@@ -2713,16 +2725,17 @@ def test_receipted_upgrade_retirement_preserves_targets_receipt_and_rollback(
     assert json.loads(receipt.read_bytes())["treeSha256"] == installer._tree_sha256(lead, ignore_runtime_cache=True)
     assert unrelated in json.loads(registration.read_bytes())["hooks"]["PreToolUse"]
 
-    retired.write_bytes(stock)
-    receipt.write_bytes(installer._lead_receipt_bytes(installer._tree_sha256(lead, ignore_runtime_cache=True)))
+    seed_retired_stock()
     before = _no_follow_inventory(home)
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("HOME", str(home))
+    reclaimed = []
     def fail_after_reclaim(*_args, **_kwargs):
-        assert not retired.exists(), "rollback control must run after actual reclamation"
+        reclaimed.append(not retired.exists())
         raise RuntimeError("injected post-reclaim receipt finalization")
     monkeypatch.setattr(installer, "_finalize_canonical_lead_receipt", fail_after_reclaim)
     assert installer.install("codex", ["--global", "--force"]) == 1
+    assert reclaimed == [True], "rollback control must run after actual reclamation"
     assert _no_follow_inventory(home) == before
 
 

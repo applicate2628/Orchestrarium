@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-24
 
+- Reclaim exact, unreferenced retired Codex hooks from the already verified canonical runtime root during global upgrades. Custom bytes, still-referenced hooks and unselected configuration handlers retain their existing protection; rollback restores the original receipt and file image.
+
 - Preserve Codex ownership receipts when global canonical or native-role storage uses an already admitted directory link. Map verified physical members back to logical receipt names, reject overlap among selected payload roots, and preserve unrelated vendor neighbors without acquiring additional storage authority.
 
 - Admit an explicitly selected hook-file localization and its local inventory into the normal installation transaction, including the original link object. Preview leaves the registration, inventory and receipt unchanged; shared-source drift and same-byte inventory replacement remain refused, and rollback preserves the prior inventory identity.
