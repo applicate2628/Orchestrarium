@@ -1154,6 +1154,44 @@ print('FRESH_PUBLIC_READERS_OK')
                     self.assertEqual(self.canonical_images(), before)
                     self.assertFalse(m._transition_intent_path(self.root, "flat-terminal-001").exists())
 
+    @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
+    def test_derivation_failure_restores_owned_directory_proofs_and_cleans_up(self):
+        from unittest.mock import patch
+        evidence, _arguments = self.legacy_request()
+        before = self.canonical_images()
+        identities = {name: m._lifecycle_file_identity((self.root / name).lstat()) for name in before}
+        stage = self.root / ".scratch/work-items"
+        archive = self.root / "work-items/archive"
+        self.assertFalse(stage.exists())
+        self.assertFalse(archive.exists())
+        derive = m._PendingLegacyCompletionPlan._derive_relocation_progress
+        primary = m.LifecycleError("WI-TEST-PROGRESS", "actual progress derivation fault")
+        observer = m.LifecycleDiagnosticObserver()
+        fired = []
+        def fail_derivation(plan, candidate, movement, binding, field, **kwargs):
+            if movement.directory and not fired:
+                self.assertFalse(movement.source.exists())
+                self.assertTrue(movement.destination.exists())
+                fired.append(True)
+                raise primary
+            return derive(plan, candidate, movement, binding, field, **kwargs)
+        with patch.object(m._PendingLegacyCompletionPlan, "_derive_relocation_progress", fail_derivation):
+            with self.assertRaises(m.LifecycleError) as caught:
+                m.close_item(self.root, self.slug, self.closure, self.instant,
+                    legacy_evidence_data=evidence, apply=True, diagnostic_observer=observer)
+        self.assertIs(caught.exception, primary)
+        self.assertEqual(fired, [True])
+        self.assertEqual(self.canonical_images(), before)
+        self.assertEqual({name: m._lifecycle_file_identity((self.root / name).lstat()) for name in before}, identities)
+        self.assertFalse(m._transition_intent_path(self.root, "flat-terminal-001").exists())
+        self.assertFalse(stage.exists())
+        self.assertFalse(archive.exists())
+        self.assertIsNotNone(observer.snapshot)
+        self.assertEqual(observer.snapshot.primaryFailureId, "WI-TEST-PROGRESS")
+        self.assertEqual(observer.snapshot.topLevelKind, "typed-primary")
+        self.assertEqual(observer.snapshot.rollback, "completed")
+        self.assertEqual(observer.snapshot.cleanupFailures, ())
+
     def test_shared_relocation_real_save_fsync_retain_and_unavailable_recovery(self):
         from unittest.mock import patch
         evidence, _arguments = self.legacy_request()

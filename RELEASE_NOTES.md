@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-24
 
+- Restore owned directory proof trees from their admitted snapshots when a native relocation is compensated. A failure before legacy progress publication now restores the original files and completes cleanup without leaving a stale archive-parent proof or pending intent; unrelated owned directory trees keep their existing native identity checks.
+
 - Codex and Claude installation previews no longer create temporary move-probe directories inside the shared installed skills tree. Dry-run still checks planned contents and receipts using private staging; real updates still require the target filesystem's move-capability evidence before applying changes.
 
 - Linux publication scans now serialize content readers, prior-disclosure evidence and matcher process owners. They retain deadline and complete-reaping checks, reuse readers between ordinary reads, and preserve existing Windows process batching.
