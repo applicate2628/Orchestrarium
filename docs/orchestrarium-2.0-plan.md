@@ -1,0 +1,644 @@
+# Orchestrarium 2.0 product plan
+
+Status: November 24 checkpoint after the eight audited branch publications.
+The earlier audit used main `14a4e74a` and the peeled pre-SDK tag `3d8ac64b`;
+the source bindings and remaining qualification are recorded below. The integrated
+SDK source is published; its pending-close correction is a separate local
+candidate. The October outcomes remain in the register, not as prerequisites for
+every release. This plan does not authorize provider calls, publication,
+installation, or merges.
+
+## Contents
+
+- [Current delivery order and completed work](#current-delivery-order-and-completed-work)
+- [2026-11-24 audit context](#2026-11-24-audit-context)
+- [Open ticket closeout](#open-ticket-closeout)
+- [Goal and boundary](#goal-and-boundary)
+- [General mechanisms, revisable plans](#general-mechanisms-revisable-plans)
+- [Existing foundation and known limits](#existing-foundation-and-known-limits)
+- [Outcome register](#outcome-register)
+- [Delivery decisions and next slices](#delivery-decisions-and-next-slices)
+- [Design economy and verification](#design-economy-and-verification)
+- [Terms and Abbreviations](#terms-and-abbreviations)
+
+## Current delivery order and completed work
+
+Use three delivery steps. Keep the detailed evidence with each existing owner;
+this register does not create a second implementation tracker.
+
+1. **Reconcile and correct the source at its existing owners.** Preserve the
+   [tagged standalone pre-SDK baseline](https://github.com/applicate2628/Orchestrarium/tree/baseline-pre-sdk-2026-11-23)
+   after [PR53](https://github.com/applicate2628/Orchestrarium/pull/53) and the
+   merged receiver-history correction [PR55](https://github.com/applicate2628/Orchestrarium/pull/55).
+   Keep the small [PR54](https://github.com/applicate2628/Orchestrarium/pull/54),
+   [PR56](https://github.com/applicate2628/Orchestrarium/pull/56),
+   [PR57](https://github.com/applicate2628/Orchestrarium/pull/57),
+   [PR58](https://github.com/applicate2628/Orchestrarium/pull/58),
+   [PR59](https://github.com/applicate2628/Orchestrarium/pull/59),
+   [PR60](https://github.com/applicate2628/Orchestrarium/pull/60) and
+   [PR62](https://github.com/applicate2628/Orchestrarium/pull/62) follow-ups at their
+   existing owners. Reconcile the dated release entries and verify the combined
+   governance, source projections and selected audit modes. Correct cancellation
+   at the scanner and SDK worker owners and control-state drift at uninstall
+   ([PR61](https://github.com/applicate2628/Orchestrarium/pull/61) for the current
+   installer, with the SDK receipt path retained in PR19);
+   regression tests must distinguish the old failure from completed cleanup or
+   preserved state. Keep the same-owner installer update/retirement correction
+   ([PR63](https://github.com/applicate2628/Orchestrarium/pull/63)) and the initially
+   absent ledger read correction ([PR64](https://github.com/applicate2628/Orchestrarium/pull/64))
+   with their existing owners. Carry only applicable deltas into SDK and retain
+   each correction's own receiving evidence.
+   Keep inherited lifecycle corrections as separate commits in the focused
+   [PR65](https://github.com/applicate2628/Orchestrarium/pull/65) follow-up from main:
+   staged-successor budgets, multi-bug rollback ownership,
+   restricted topology observation, selected close subjects, legacy-parent
+   compensation, pending-receipt settlement, historical PASS custody and empty
+   scratch namespace currentness.
+   Keep bounded Git status ordering in the separate repository-transfer
+   [PR66](https://github.com/applicate2628/Orchestrarium/pull/66). Carry applicable corrections into SDK;
+   they do not expand PR64's initially absent ledger scope.
+   Keep shared test-only capability and target-order corrections in
+   [PR67](https://github.com/applicate2628/Orchestrarium/pull/67), separate from
+   installer behavior changes; SDK's receipt finalizer assertions remain local
+   to its own integration.
+   Reconcile SDK with current main using one integrated candidate,
+   retaining current receiver/progress checks, exact ownership and rollback, and
+   the selected-client installation contract. A conflict-free Git tree alone is
+   not integration evidence.
+
+2. **Qualify the selected releases in dependency order.**
+   [PR21](https://github.com/applicate2628/Orchestrarium/pull/21) owns the independent
+   Rust scanner slice, which releases before SDK. Verify full findings and receipt
+   parity, both Git object formats, a small delta over large receiver history and
+   large new disclosure, progress, interruption/resume, resource settlement and
+   actual receiving on supported installation targets. Existing primitive probes
+   do not qualify the complete scanner or permit lower protections. In parallel,
+   [PR19](https://github.com/applicate2628/Orchestrarium/pull/19) and its
+   `docs/sdk-execution.md` own SDK offline, package, platform and failure-path
+   qualification; its release follows the selected Rust slice. Historical native
+   runs apply only to their recorded source and route. Any further provider calls
+   or installed receiving retain their own authorization. [PR18](https://github.com/applicate2628/Orchestrarium/pull/18)
+   remains the historical design/evidence reference. [PR17](https://github.com/applicate2628/Orchestrarium/pull/17)
+   independently qualifies PowerShell, POSIX and optional npm delivery of the same
+   accepted platform payload through the existing installer. Do not bundle provider
+   SDKs, create another installer or turn unrelated platform/migration work into a
+   prerequisite without a demonstrated dependency.
+
+3. **Close verified outcomes and continue the remaining product work.** Verify
+   installed receiving wherever an open ticket requires it, then archive only the
+   ticket whose actual closure conditions are met. Preserve unknown historical
+   run outcomes. Native-role lifecycle, task-specific selection, empirical
+   quality/cost feedback, conditional stopped cross-host continuation and optional
+   preferences remain independently scoped outcomes 2, 3, 4, 6 and 7 below. Move
+   optional instructions to on-demand guides only after checking installed entry
+   points. Keep the Orche rebrand and English README/instruction cleanup separate
+   from scanner/SDK qualification, preserving historical names and compatibility.
+
+The SDK integration keeps one authored skill catalog and independent ordinary
+copies for selected clients, as already specified by PR19 and PR17. Existing
+shared installations are migration inputs: preserve their referents and foreign
+state, use explicit selected-client migration, and refuse a transition that
+would silently change an unselected client. Main's newer hook, transaction,
+Windows access-rule and publication protections must survive that reconciliation.
+This is a source integration contract, not evidence that a working installation
+has been migrated or that a live provider route has been qualified.
+
+Task-first ranking and scoped Astra authorization (PR43), latest confirmed model
+families only (PR44), and exclusion of Low for every active choice (PR45) are
+merged source changes, not remaining 2.0 implementation. The current Codex families
+are Luna 6, Terra 6.1, Sol 6.2 and Astra 6.2. Existing role/task/host/approval
+controls still apply. Do not substitute old examples or historical profiles for
+the live policy. Completed routing changes do not prove a full comparative
+quality/cost audit: outcome 4 below remains separate evidence work.
+
+The role-lifecycle remainder (outcome 2), conditional comparison mechanism
+(outcome 3), stopped cross-host continuation (outcome 6) and optional named
+preferences (outcome 7) remain independently scoped future outcomes. They do not
+block current SDK delivery without an identified dependency. Rule-volume reduction
+belongs to the successive SDK/Rust transitions, not a new pre-SDK rewrite.
+
+The merged PR31 Windows replacement-security correction is historical. Do not
+conflate tagged source, isolated installation checks and actual receiving on
+any target with SDK or model-ranking completion.
+
+### 2026-11-24 audit context
+
+The earlier audit applied 28 relevant skills across four work lanes: integration
+and governance, SDK runtime, installer, and scanner/release review. Applicable
+PR54/56/57/58/59/60/62/64 changes were incorporated into the then-local PR19 candidate;
+their existing PRs retain standalone ownership and receiving evidence. Detailed
+integration findings stay with PR19, complete Rust scanner qualification with
+PR21, and scanner cancellation and source-mirror corrections with PR60. This
+plan records their sequence without creating another tracker or implementation PR.
+
+The scanner follow-up also corrects a reproduced Linux deadlock between the
+content reader and prior-disclosure process owners. It serializes their
+ownership while retaining complete settlement, cancellation and deadline checks;
+the original edited-blob case now completes on both applicable source branches.
+Historical-custody admission exposed an SDK error-mapping regression under an
+explicit event limit; the focused correction preserves the existing typed
+refusal and caller ceiling. These are source corrections within step 1, not
+new release workstreams.
+The empty-scratch correction retains exact namespace/absence observations until
+transaction completion without reinstating a historical-ledger veto for ordinary
+close. Foreign late arrivals remain preserved; completion and rollback reports
+distinguish the boundary at which the change was discovered.
+
+Focused offline source checks passed for provider projections, shared governance,
+scanner cancellation, Git object reads in both supported formats, and ledger
+absence/currentness.
+Native Windows runs supplied failure evidence used for focused corrections.
+Recorded checkpoints include the real Claude install/reinstall fixtures and
+linked-root receipt checks, Codex repeated and linked-root installations, exact
+rollback and drift refusals, detached validation and selected public-output
+checks. These are bounded results on recorded source revisions, not additive
+suite totals or proof of the working installation. Interrupted runs without a
+final result retain only their recorded partial observations.
+
+The original 627-case lifecycle selection now has completed-attempt evidence
+for every selected identity; all last 37 non-publication and eight publication
+modules completed as well. Recorded failures and skips remain part of that
+evidence, so these coverage statements do not mean a green combined suite.
+All 495 originally selected modules have execution or collection evidence.
+The shared lifecycle fixture port separately passed all 44 expanded cases on
+the main-based candidate, retaining its own source/test hash bindings.
+The repaired native legacy creator case reached recovery and passed on its
+recorded source. At that earlier bounded native checkpoint, 14 class cases were
+unexecuted. Later receiving must be assessed from its own completed outcomes,
+including the pending-close failure below, rather than retaining that old count
+as the current unexecuted inventory.
+
+At the earlier Rust checkpoint, 16 native primitive tests and framing/composition
+comparisons passed, but the complete matcher could not compile offline because
+`pcre2` was absent from that dependency cache. A guarded PR update also stopped
+at authentication before the native callback, supplying no callback acceptance
+or published-ref evidence. The unavailable dependency and authentication refusal
+are historical blockers, not the current build or GitHub access status.
+
+**Publication and receiving checkpoint, 2026-11-24.** Authenticated GitHub
+command-line access and eight guarded branch updates have since succeeded through
+the [native Git publication path](target-local-publication.md), with fresh Version 3
+and Version 4 checks and exact destination-ref readback. [PR54](https://github.com/applicate2628/Orchestrarium/pull/54)
+is merged as `b19ba4b0df3cdfdf14bc7a7bc616c3f6de5878f1`. Publication, merge and
+qualification remain separate; existing remote-carrier restrictions still apply.
+
+On PR21 source `0aa242623109d684a5b2be81a04cb806bfa1a81c`, five native matcher
+tests and 38 complete Python/Rust scanner comparisons passed across 16 existing
+methods and both Git object formats. An earlier bounded harness timeout remains
+recorded; unfinished methods completed separately. The local combined candidate
+`cee7521eca8e7d6aa5bcb21dc712eb035e22b632` passed independent integration review
+and 19 native callback/progress/timeout receiving cases. These scoped results do
+not establish standalone Windows runtime-library portability, all supported-host
+qualification or acceptance of a working installation; PR21 retains those gates.
+
+Fresh SDK native receiving on `e8edb9576a89e754b19d400c4c91753cd1eacf5b` exposed
+a public interrupted legacy-close replay defect. The local correction
+`143a1a8f6ef68f82d45ddc59e8d4332126af2ca8` passed independent source review and
+all ten focused Windows cases, including the unchanged failing scenarios, root
+ambiguity/currentness and resource admission. The original full-class baseline
+run remains separate evidence; the earlier failures are retained. PR19 and the
+applicable PR65 follow-up own promotion and remaining qualification. These focused
+results do not establish complete SDK, installed or provider acceptance.
+
+Six isolated Linux verifier cases still cannot import `pytest` under the required
+`-I` mode in the available interpreters; optional official ACP dependencies retain
+separate collection holds. Two POSIX socket-boundary cases stop at the environment's
+socket-creation refusal before their downstream special-file checks. Those cases
+remain unqualified. Full release qualification, live provider routes and actual
+installed receiving remain with their existing owners in step 2.
+
+## Open ticket closeout
+
+This is an index into the existing shared bug inbox, not a second tracker.
+The ticket owns its detailed evidence and disposition. Reconcile that record
+before work; archive it only after verifying its actual closure conditions.
+
+**Table 1. Open tickets, existing owners and closure evidence.**
+
+| Ticket | Owner / next action | Closure evidence |
+| --- | --- | --- |
+| 2026-11-21 publication commit-message diagnostics | Native scanner, PR21; tagged diagnostics are historical completion of the original symptom, not the later scalability follow-up. | Current installed proof for the full agreed large-history, interruption/resume and receipt scope. |
+| 2026-11-21 machine-path review | Lead/publication workflow, PR57; previously accepted content remains subject to the existing receiver and review scope. | Merge and verify the on-demand guidance at the intended Lead installation. Keep broader decision reuse separate. |
+| 2026-11-23 active-only audit summary | Work-item checker, PR58. | Verify installed failure summaries in both modes with unchanged counts and exit status. Do not infer the six historical run outcomes. |
+| 2026-11-21 R7 private output capture | Windows private-object owner with NablaMesh capture consumer. | Verify the supported capture and failure/cleanup contract; exact receiving and a new diagnostic run require their own authority. |
+| 2026-11-21 Windows Job first settlement failure | ProcessRunner / Windows Job owner. | Demonstrate that the actual first failure survives finalization and is distinct from the child result; do not infer a cause for an unattributed run. |
+| 2026-11-21 Windows Job handle preparation | Windows Job request/receipt owner. | Qualify exact request admission and an authoritative pre-create result with no child start; preserve ambiguous historical outcomes. |
+| 2026-11-14 Windows Job close-on-pending | Existing capture/application owner; Global Lead helper is a matching source surface, not confirmed incident ownership. | Resolve ownership, verify pending versus settled outcomes and cleanup on the affected path, or document the verified external disposition. |
+| 2026-11-04 standalone Codex instruction budget | Instruction installer and governance owners; deferred until after Rust/SDK. | Verify standalone installed loading and behavior without relying on a global install or raising limits. |
+
+The already archived receiver-reachability defect (PR55) stays closed.
+
+## Goal and boundary
+
+Deliver better task-specific orchestration: choose sufficient admitted model/effort
+profiles, add complementary expertise when useful, learn from verified outcomes,
+complete the separately admitted native-role lifecycle, and retain safe future
+continuation across hosts. Preserve functional ambition, not every mechanism from
+earlier drafts.
+
+npm distribution is owned by [PR17](https://github.com/applicate2628/Orchestrarium/pull/17),
+and native Rust operations by [PR21](https://github.com/applicate2628/Orchestrarium/pull/21),
+not the 2.0 release. Both are independently based on main. Outcomes 1 and 5 below retain their disposition and historical numbering,
+not duplicate design or delivery obligations. Their qualified slices may ship in
+current versions; 2.0 does not wait for them unless a selected outcome demonstrates
+a concrete dependency.
+This is the canonical scope, status, dependency and acceptance register for the
+remaining 2.0 outcomes (2, 3, 4, 6 and 7), with external-project dispositions retained.
+The [focused routing design](superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md)
+owns the proposed comparison contract, not the whole 2.0 roadmap. Current
+[shared governance](../shared/AGENTS.shared.md), [Lead contract](../src.codex/skills/lead/SKILL.md),
+[role policy](../shared/role-routing-policy.v1.json), [resolver](../scripts/resolve-agents-mode.py)
+and [installer](../scripts/production_installer.py) remain the live owners.
+
+**Change-Surface Contract**
+
+- Intended change surface: this plan, the focused routing design, docs index and release note.
+- Approved seams: remaining 2.0 product planning, external-project disposition, and a proposed advisory comparison at existing discovery → Lead → resolver boundaries.
+- Protected surfaces: all runtime code, tests, schemas, installed packs, configuration, persistence, execution, review and publication gates.
+- Blast radius: documentation only; no external contract or persisted-state migration.
+
+Product Manager owns scope decisions; Lead sequences admitted delivery; Architect
+owns any later structural boundary. The named specialist in each item owns its
+future artifact, not new authority. Existing required independent reviews remain.
+An unresolved decision blocks its dependent work only. Deferred does not mean
+cancelled, and a proposal is not a commitment to a particular implementation.
+
+## General mechanisms, revisable plans
+
+Current shared governance already requires general solutions for unfamiliar
+contract-valid scenarios; 2.0 does not introduce that rule. An unfamiliar task should
+normally require new data and a revised plan, not a core branch, status or exception
+list. Lead already revises sequence, grouping and
+parallelism at plan checkpoints; this is not a new engine. Preserve accepted goals,
+criteria, ownership, authorized effects, budgets, useful results and unresolved
+obligations. Methods may adapt; material boundary changes use existing controls.
+Replanning never resets retry lineage or waives required review and safety rules.
+Parallelize independent read-only checks, hashing and tests only within explicit
+worker/resource bounds; serialize writes to the same authoritative state and respect
+dependencies. Collect results in deterministic order, propagate failures and settle
+workers on cancellation. More threads are not a guarantee of lower total cost or
+latency; compare against a measured baseline before claiming an optimization.
+
+Instructions are not enforcement, and adding prose is not a reliability fix. The
+recommended design is a short invariant core with task-relevant detail, without
+hiding mandatory constraints, arbitrary token limits or a new context service.
+For each critical property, distinguish within its existing design and acceptance:
+- What the actual operation/host owner enforces before the effect, on which paths.
+- What independent result readback or domain verification establishes afterward.
+- What remains agent judgment or an uncontrolled-path limitation.
+
+Prefer an existing operation that makes the valid path straightforward over manual
+step lists, a hook per rule or new states. A supported alternate entrypoint must
+preserve the same effect contract; a bypassable helper, advisory resolver or prompt
+cannot establish machine enforcement. Direct host calls, shell or edits outside a
+controlled boundary remain explicit limitations, not guarantees supplied by a
+wrapper. The [Codex addendum](../src.codex/AGENTS.codex.md) explicitly records
+incomplete edit-hook coverage and behavioral, not host-enforced, tool isolation.
+Admit a concrete missing boundary separately if needed; do not prescribe a universal
+gate or claim all semantic judgment can be automated.
+
+Missing a scenario template is not itself a blocker when capability, permission
+and evidence suffice. A real blocker holds dependent effects; independent work
+continues unless actual shared-state or containment risk requires a wider stop.
+Domain checks remain essential: proofs, software tests and installed readback are
+not interchangeable. No runtime root cause is established by this plan.
+
+## Existing foundation and known limits
+
+- Exact native profile admission, task classification, host filtering, ready-lane
+  scheduling, execution provenance, independent review and receiving already have
+  owners. Reuse them; 2.0 does not introduce a second scheduler, registry service,
+  ledger, policy authority or approval pipeline.
+- External `auto` already uses task/lane-specific Codex/Claude priority profiles.
+  Configured priority is not current comparative evidence: the
+  [routing evidence notice](routing/full-v2-hard-r2-routing-evidence-2026-05-01.md)
+  explicitly marks carried-over rankings `ASSUMPTION (UNVERIFIED)` after model
+  changes. Requalification and measured preference are separate from permission
+  and actual execution availability.
+- Kimi is explicit-only through fixed `kimi-code/k3`, for policy-admitted read work
+  or scoped engineering mapped to the existing external worker. It remains
+  independently verified, nonauthorizing and outside `auto`. Grok is a
+  classifier-only policy realization with execution unavailable, not an enabled
+  worker. The [external dispatch contract](../src.codex/skills/lead/external-dispatch.md)
+  controls real paths. A native-profile comparator cannot automatically cover them.
+- Pending documentation correction: the comment on `externalProvider` in
+  [defaults](../shared/agents-mode.defaults.yaml) still describes an older Kimi
+  read-only/no-tools restriction, unlike current
+  [provider realization policy](../shared/role-routing-policy.v1.json) and README.
+  [PR62](https://github.com/applicate2628/Orchestrarium/pull/62) reconciles that
+  comment with the existing contract and leaves all configuration values intact;
+  its source correction remains pending until merged.
+- [Installation rules](../INSTALL.md) retain limited create-only/hash-pinned native
+  role handling and reserve broader adoption/update/deletion/reclaim for 2.0.
+  [Runtime limitations](../README.md) include unavailable generic Windows command
+  execution, unavailable generic POSIX Process Runner Version 1, and a source-only
+  durable operation store and route activation registry. The historical Rust-to-2.0
+  deferral in those runtime docs is superseded for sequencing by the independent native Rust
+  project, not by enabling any unavailable path. These are repository facts, not
+  provider guarantees or proof of behavior in a particular installed environment.
+
+## Outcome register
+
+### 1. npm skill-pack distribution
+
+**Disposition:** extracted into the
+[independent npm distribution project](https://github.com/applicate2628/Orchestrarium/pull/17); not a 2.0
+release deliverable or prerequisite by default. Toolchain Engineer and Product
+Manager retain package ownership there, including the unresolved package contract,
+runtime prerequisites and installer-safe delivery. Consume outcome 2 only for
+package actions that actually require its expanded native-role lifecycle.
+
+### 2. Fuller native-role lifecycle
+
+**Status:** explicit 2.0 remainder, partially served by today's limited installer.
+**Owner:** Toolchain Engineer at the existing production installer.
+
+Complete the admitted adoption, update, deletion and reclaim cases without taking
+ownership of customized or ambiguous files. Today's source manifest is validation,
+not proof of installed ownership; current narrow stock migrations do not establish
+a general lifecycle. [README](../README.md) and [INSTALL](../INSTALL.md) explicitly
+reserve the remaining work for 2.0. This is a capability gap, not evidence that
+today's conservative refusals are unsafe.
+
+**Recommended option:** extend the existing native-role planner and transaction
+with recorded ownership reconciled against observed and desired state. Reuse the
+canonical-skill reconciliation principle, not its skill-specific function or
+receipt assumptions. Role files, configuration registrations and ownership evidence
+form one coupled change; retain current rollback/readback. Update or remove only
+proven-owned, unchanged content within the authorized transition. Foreign files
+and unrelated configuration remain intact; filenames do not prove ownership.
+
+**Alternatives and open decision:** continuing stock-hash migrations is the smallest
+short-term bridge, not the general lifecycle. Legacy installs need explicit adoption
+or refusal where evidence is missing. Versioned directories with pointer switching
+would change provider paths, overrides and cleanup; do not prefer that larger design
+without evidence. Define adoption/update/deletion/reclaim semantics with the existing
+owner. Native-role removal is not whole-pack uninstall or shared-skill ownership.
+
+**Acceptance:** independently read back files, registrations and ownership together;
+probe managed rollback, customized or foreign roles, legacy adoption and repeated
+apply. Existing transaction rollback does not prove crash-atomicity: test restart
+after abrupt termination/power loss, reconcile partial persisted state before retry,
+and preserve foreign changes. Reuse the existing owner, not a new recovery service.
+New ordinary roles/releases should be data, not a migration branch each time.
+Verify global/project and provider differences where they affect the accepted contract.
+The independent npm distribution project consumes this owner only where its
+package actions require this expanded lifecycle; it does not add a second package
+state manager or make all distribution work depend on outcome 2.
+
+### 3. Task-specific exact-profile choice and complementary work
+
+**Status:** implemented task-first admission/routing foundation; a further measured
+comparison mechanism remains conditional, not a replacement ranking project.
+**Owner:** Lead, with any comparison extension at the existing resolver caller seam.
+
+Compare already-admitted exact model/effort choices for a concrete task, and compare
+whole useful routes rather than one universal model winner. Keep quality, scope
+coverage and independent challenge ahead of cost and latency. Retain useful coverage
+of the admitted task, different methods and falsification without mandatory role rosters or
+provider-family quotas. Follow the [routing design](superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md)
+for eligibility, uncertainty, evidence and accounting semantics.
+
+**Next decision and dependencies:** identify a real caller and walk its discovered
+options through Lead into the actual resolver. Accept evidence inputs and output
+consumer before coding. Prefer existing Lead judgment and its recorded rationale;
+a pure comparator is conditional on demonstrated repeated comparison needs. Item 4
+supplies comparative evidence, not new execution permission.
+External comparison separately needs the real provider admission/availability path.
+Insufficient comparative evidence need not prevent Lead from making an explained
+admissible choice; it must not become a fabricated ranking or capability assumption.
+
+Provider follow-through stays explicit: Lead and the existing external-routing
+owner must requalify current Claude/Codex profiles before claiming measured
+priorities. Evaluate Kimi only within its currently admitted explicit route; Product
+Manager and the routing owner must separately decide, from evidence, whether any
+future `auto` inclusion is wanted and admissible. For Grok, the existing adapter
+and routing owners must first establish a concrete available execution path and
+admission contract before comparison or consideration for `auto`. None of these
+steps is automatic promotion, permission to launch, or a promised new integration.
+
+**Acceptance:** useful task-specific rationale and bounded complementary assignments;
+no extra admitted profiles, scope, fallback or authority; explicit insufficient or
+incomparable evidence; whole-route cost including failed attempts and required
+review; unchanged resolver/host controls. No claim of improved selection before a
+matched comparison supports it.
+
+### 4. Empirical evaluation and curated outcome feedback
+
+**Status:** retained outcome; current-family advantage unverified.
+**Owner:** QA Engineer with the relevant mathematical, scientific, engineering and
+review specialists; Lead owns acceptance of routing evidence.
+
+Use representative NablaCAD tasks in mathematics, numerical methods, C++,
+computer-aided design (CAD), user interfaces (UI), review and recovery. Compare
+matched task/input/acceptance conditions and record exact profile, harness, tools,
+permissions, task context and observation date. Use fixed acceptance oracles and
+held-out tasks where applicable; report sample size, post-review defects, omissions
+and rework. Evaluate correctness, coverage, independent defect discovery and
+accepted-result quality before economics. Include
+all attempts, repeated context, correction, review and integration in cost/time;
+keep unknown or incompatible units explicit rather than manufacturing savings.
+
+**Next decision and dependencies:** select a small representative corpus and its
+acceptance oracles, admissible candidates, data permissions and approved budget.
+Existing runs may supply evidence where applicable; new provider or paid runs are
+not authorized by this plan. Start evaluation design alongside item 3, then use
+verified results to judge whether a comparison mechanism earns its complexity.
+
+**Acceptance:** reproducible matched evidence, unsuccessful and abandoned attempts
+included, with uncertainty and limitations visible. Curate accepted outcomes into
+later decisions through the existing run journal and [curated lessons](lessons.md),
+not a new learning subsystem. Keep run facts distinct from generalizable lessons,
+with provenance and expiry or invalidation after model, harness, tool, permission
+or material task changes. Negative results must not disappear through success-only
+selection. No autonomous policy
+promotion, background learning service or universal provider ranking follows.
+
+Optional independent blind proposals, named-artifact cross-critique, Lead synthesis
+and empirical arbitration may help demanding cases. Reuse the existing independent
+review route: do not impose extra stages, new roles, peer-chat infrastructure or
+mandatory paid reviews. Tests, proofs, counterexamples and measurements resolve
+checkable disagreement; majority agreement does not establish truth.
+
+### 5. Hybrid SDK coordination, native operations and portability
+
+**Disposition:** extracted into the
+[Historical SDK design PR18](https://github.com/applicate2628/Orchestrarium/pull/18),
+[SDK implementation PR19](https://github.com/applicate2628/Orchestrarium/pull/19) and
+[npm PR17](https://github.com/applicate2628/Orchestrarium/pull/17) and
+[native Rust PR21](https://github.com/applicate2628/Orchestrarium/pull/21),
+together with outcome 1. Each owning document retains its own boundaries and
+qualification; the two projects are independent, not stacked PRs. Lead and
+existing operation owners retain their responsibilities. Qualified slices may ship
+in current versions; no runtime migration or provider activation follows from this
+2.0 plan, and no duplicate implementation is retained here.
+
+### 6. Safe cross-host continuation
+
+**Status:** retained, deferred future direction; not a comparison prerequisite.
+**Owner:** Lead for admission; Architect and existing persistence/receiving owners
+for the eventual boundary.
+
+The existing [manual repository transfer](../src.codex/skills/manual-repo-transfer/SKILL.md)
+contract already covers portable/local inventory, writer freeze and verified restore;
+Lead already has a recovery contract. Preserve dirty/staged/local-only state as applicable,
+without forcing a clean commit or copying credentials as project state. The gap is
+verified orchestration-aware continuation, not inventing archive transfer.
+
+**Recommended first option:** connect existing transfer and Lead recovery for an
+explicitly stopped handoff: verify prior writer stop/exclusion, received artifacts,
+open obligations/dispatches, current host capabilities and the next admissible step.
+Reuse existing records; do not add a transfer service by default. An unknown external
+job outcome must be reconciled before retry, not interpreted as a fresh start.
+
+**Alternative and open decision:** decide whether stopped handoff meets the actual
+need. Live/concurrent takeover remains conditional and retained, not cancelled.
+If the old host could resume writes to the same authoritative target, a claimed stop
+is insufficient: require verified exclusion. Live takeover requires atomic ownership
+change and commit-time rejection of stale writers; local locks or a ledger alone do
+not prove it. The independent native Rust project is a dependency only
+if the chosen scenario requires a qualified runtime extension; extracting outcome 5
+does not admit takeover or block stopped-handoff work by default.
+
+**Acceptance:** restore accepted context and outstanding obligations; reject stale
+results and unsupported concurrent takeover without changing ownership. Verify old-
+writer exclusion, capability changes, interruption/recovery, cancellation and terminal
+settlement at actual owners. The [routing design](superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md)
+retains this boundary without imposing a new lease, registry or ledger service.
+
+### 7. Optional named policy preferences from PR #5
+
+**Status:** unresolved optional product decision, not a mandatory framework.
+**Owner:** Product Manager for need; existing instruction/handoff owner if retained.
+
+The old proposal packaged two named choices: `lean-implementation` and
+`complexity-review`, for lean implementation and complexity-focused review. Simplicity, smallest coherent fixes, owner-first changes
+and independent architecture review already belong to mandatory governance. They
+must not become optional switches. Ordinary scoped instructions can already request
+extra review focus.
+
+The recommended option now is ordinary task-specific instructions, not a selector.
+The unresolved distinct capability is persistent named opt-in preferences, narrowed by
+project restrictions and applicable task/provider context. Decide whether that
+convenience solves a recurring need before retaining a selector. Persistence and
+context filtering are not equivalent to generic prompt text; do not call them
+implemented merely because ordinary instructions work today.
+
+**Dependencies and acceptance if retained:** define the actual choices and consumer;
+no selection leaves prompts unchanged, projects may restrict but not enable choices,
+malformed owned restrictions fail visibly, and explicit selection still respects
+restrictions. Optional guidance cannot weaken governance or grant provider/role
+permission. Reuse existing handoff, prompt composition and installation. No new
+policy platform, hook, transport, mandatory review stage or plugin runtime. If not
+needed, explicitly retire the mechanism rather than silently losing the outcome.
+
+## Delivery decisions and next slices
+
+Remaining 2.0 outcomes are 2, 3, 4, 6 and 7; they are not all mandatory for the
+first release. Outcomes 1 and 5 now have independent project ownership and rollout,
+not a hidden 2.0 dependency. Current admission, replanning, review, recovery and
+generalization governance are the foundation, not new deliverables. Product Manager
+and Lead must accept the release scope; an open optional choice holds only its
+dependent slice.
+
+**Next bounded work, independently where inputs and owners permit:**
+1. Toolchain Engineer with Architect: define native-role ownership transitions and
+   the legacy-adoption boundary (item 2), using the existing installer transaction.
+   Implement only after that contract is accepted. The independent npm distribution
+   project consumes this owner only for package actions that need the expanded
+   lifecycle, not as a second ownership manager.
+2. Lead and QA Engineer: trace one real admitted routing caller and select matched
+   evaluation tasks/oracles (items 3–4). Start from existing rationale and evidence;
+   identify missing comparative evidence without launching providers. New runs need
+   approved candidates, data and budget. A comparator remains a later decision based
+   on demonstrated benefit, not the first implementation deliverable.
+
+**Separate conditional decisions:** choose a concrete stopped-handoff need before
+item 6; live takeover is a separate conditional capability, not an implication of
+runtime migration. Decide named preferences in item 7 only if ordinary instructions
+fail a recurring need. Neither these choices nor Kimi `auto`/Grok integration block
+independent work above. The extracted projects retain their own admission, owners,
+implementation boundaries and evidence; their npm/native/SDK designs are not repeated
+or selected for delivery here. No optional outcome is silently lost.
+
+After accepting a remaining 2.0 slice, implement and independently review its
+smallest coherent owner-local change against its outcome's acceptance and the
+failure probes below. For release, verify the selected installed/platform matrix
+and actual task outcomes; settle each retained 2.0 outcome as delivered, deferred
+with owner/next step, or explicitly retired with rationale. Outcomes 1 and 5 remain
+externally owned, not unfinished 2.0 obligations. A plan or comparator alone is not
+2.0.
+Historical Claude research PR16 and instruction-preservation PR15 are closed,
+without a GitHub merge record. That disposition alone proves neither delivery nor
+absence of their corrections. Any concrete remaining defect belongs to its current
+source owner, not a revived research project or an automatic 2.0 prerequisite.
+
+Current-source reconciliation, not a claim about PR merge state or installed behavior:
+- [b719ef77](https://github.com/applicate2628/Orchestrarium/commit/b719ef77bd2ebfad44daa7088c71595c9825403b)
+  integrates the PR #9 Russian advisory correction; the hook behavior already existed.
+- [2e91ebee](https://github.com/applicate2628/Orchestrarium/commit/2e91ebeeb4cd693c13cea714f995cc3389972268)
+  integrates the PR #14 Windows private-permission correction through native descriptor
+  rendering, preserving exact access checks. Do not carry it as a new 2.0 fix.
+- [54c11111](https://github.com/applicate2628/Orchestrarium/commit/54c11111a4fe1eb1073d2a259165edeca8a519ef) seals the
+  publication transcript input frontier; [3a542fc5](https://github.com/applicate2628/Orchestrarium/commit/3a542fc5827d3b80c3203bf94943e900a95a4ba2)
+  unifies current decision admission and native normalization custody. Reuse these
+  owner-level corrections, not new parallel guards or a new state engine. Their scoped
+  checks do not prove universal agent enforcement or installed receiving.
+Those historical commits do not establish every later installer correction or
+current installed behavior. The Kimi comment drift noted above is still present
+in main's defaults at the reconciliation revision; retain that small owner-scoped
+documentation correction rather than claiming it completed or expanding it into a
+new provider project.
+
+## Design economy and verification
+
+**Generalization acceptance under current governance:** later implementation must
+demonstrate these properties, not add another governance framework:
+- A previously unlisted task within existing capabilities can use a new plan without
+  adding a task-specific core branch, status or exception; genuine new capabilities
+  still require an admitted owner and contract, not a generic bypass.
+- A permitted plan revision preserves accepted results, remaining obligations,
+  identity and budget, while material boundary changes reach existing controls.
+- Skipped instructions or omitted manual steps do not bypass claimed machine
+  guarantees on supported effect paths. Test alternative entrypoints and stale state;
+  report uncontrolled paths and semantic judgment limits, not false enforcement.
+- Repeated requests and delayed results neither duplicate effects nor accept stale
+  results. Reconcile uncertain prior effects before retry; otherwise hold the affected
+  action. Event replay alone does not prove exactly-once external execution, and an
+  unknown outcome must not become success.
+- Unrelated authorized work remains possible during a local blocker unless the actual
+  dependency or containment boundary requires stopping it too.
+
+Test these properties with varied inputs and failure points at the actual owner,
+not only scripted happy paths. Retain domain-specific and integration checks; do not
+add a new schema, state service or mandatory stage just to express these properties.
+
+Earlier PR #8/#13 proposals are historical inputs, not parallel normative manuals.
+Keep exact-profile evidence, complementary work, empirical challenge, full-attempt
+accounting and safe future recovery. Do not carry speculative schema bundles,
+universal effort-intent scales, arbitrary fixed ceilings, duplicate ownership,
+phrase-presence tests or stronger blanket human escalation. Budget and data-boundary
+requirements remain in the focused routing contract and existing owners.
+
+This documentation change is accepted only after scope review, local-link checks,
+diff-surface inspection and preservation of existing release-note bytes/line endings.
+These checks do not prove runtime behavior, installed compatibility or benchmarks.
+Later implementation needs the probes under its own outcome and current gates.
+
+## Terms and Abbreviations
+
+- Exact profile: an admitted model and its model-local effort setting.
+- Lead: current orchestration owner, not a new scheduler.
+- Harness: the execution tools, instructions and environment around a model.
+- npm: package registry/tooling ecosystem; no package or command is selected here.
+- CAD / UI / CLI: computer-aided design / user interface / command-line interface.
+- POSIX: portable operating-system interface family used by Unix-like systems.
+- PR: pull request; a proposal is not evidence that its changes have landed.
+- Admission: existing permission and policy eligibility, distinct from ranking.
+- Empirical arbitration: settling checkable disagreement with observed evidence.
+- SDK: software development kit; [PR18](https://github.com/applicate2628/Orchestrarium/pull/18) owns historical design.
+  [PR19](https://github.com/applicate2628/Orchestrarium/pull/19) owns current SDK
+  implementation and qualification, not this remaining 2.0 roadmap.
+- ACP: Agent Client Protocol, used by supported provider adapters.
+- PCRE2: Perl Compatible Regular Expressions, version 2; a regular-expression
+  matching dependency of the complete native publication scanner.
