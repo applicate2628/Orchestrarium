@@ -593,35 +593,37 @@ print('FRESH_PUBLIC_READERS_OK')
         self.assertFalse(m._transition_intent_path(self.root, "flat-terminal-001").exists())
         m.check_readme(self.root)
 
-    def _finalization_cut(self, cut, *, caught=False):
+    def _finalization_cut(self, cut, *, caught=False, diagnostic_observer=None):
         evidence, _arguments = self.legacy_request()
         intent_path = m._transition_intent_path(self.root, "flat-terminal-001")
-        save, remove = m._legacy_save_intent, m.LifecycleWriteTarget.remove_owned
+        remove = m.LifecycleWriteTarget.remove_owned
+        primary = m.LifecycleError("WI-TEST-FINALIZATION", cut)
         fired = []
-        def saved(path, intent, **kwargs):
-            result = save(path, intent, **kwargs)
-            source = next((b for b in intent["capturedBindings"] if b.get("imageIndex") is not None
-                and intent["preparedImages"][b["imageIndex"]]["disposition"] == "source"), None)
-            if not fired and cut == "saved-null" and source is not None and "holdPath" in source and source["holdPath"] is None:
-                fired.append(cut)
-                raise m.LifecycleError("WI-TEST-FINALIZATION", cut)
-            return result
         def removed(owner, name, image, *, outcome_composer=None):
-            if cut == "last-cleanup" and owner.path == intent_path and name == intent_path.name:
+            if not fired and cut == "last-cleanup" and owner.path == intent_path and name == intent_path.name:
                 fired.append(cut)
-                raise m.LifecycleError("WI-TEST-FINALIZATION", cut)
+                raise primary
             result = remove(owner, name, image, outcome_composer=outcome_composer)
-            if cut == "remove-before-save" and name.startswith(f".{self.source.name}.") and name.endswith(".hold"):
+            selected = ((cut == "source-hold-removed" and owner.path.parent == self.source.parent
+                         and name.startswith(f".{self.source.name}."))
+                        or (cut == "all-holds-removed" and owner.path.parent == self.root / "work-items"
+                            and name.startswith(".README.md.")))
+            if not fired and selected and name.endswith(".hold"):
+                self.assertFalse(owner.path.exists())
+                if cut == "all-holds-removed":
+                    self.assertFalse(list(self.root.rglob("*.hold")))
                 fired.append(cut)
-                raise m.LifecycleError("WI-TEST-FINALIZATION", cut)
+                raise primary
             return result
-        m._legacy_save_intent, m.LifecycleWriteTarget.remove_owned = saved, removed
+        m.LifecycleWriteTarget.remove_owned = removed
         try:
-            with self.assertRaisesRegex(m.LifecycleError, cut):
+            with self.assertRaisesRegex(m.LifecycleError, cut) as caught_failure:
                 m.close_item(self.root, self.slug, self.closure, self.instant,
-                    legacy_evidence_data=evidence, apply=True, inject_failure_at=None if caught else "b1-owned-fixture")
+                    legacy_evidence_data=evidence, apply=True, inject_failure_at=None if caught else "b1-owned-fixture",
+                    diagnostic_observer=diagnostic_observer)
         finally:
-            m._legacy_save_intent, m.LifecycleWriteTarget.remove_owned = save, remove
+            m.LifecycleWriteTarget.remove_owned = remove
+        self.assertIs(caught_failure.exception, primary)
         self.assertEqual(fired, [cut])
         return evidence, intent_path
 
@@ -646,8 +648,8 @@ print('FRESH_PUBLIC_READERS_OK')
         m.check_readme(self.root)
 
     @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
-    def test_b1_saved_null_hold_resumes_only_finalization(self):
-        self._assert_finalization_recovery("saved-null")
+    def test_b1_all_holds_removed_resumes_only_finalization(self):
+        self._assert_finalization_recovery("all-holds-removed")
 
     def test_b1_image_observation_never_creates_namespace_and_absence_has_complete_parents(self):
         def namespace():
@@ -765,8 +767,8 @@ print('FRESH_PUBLIC_READERS_OK')
         self.assertTrue(all(not target._open and not target._directories for target in owners))
 
     @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
-    def test_b1_removed_hold_before_save_resumes_only_finalization(self):
-        self._assert_finalization_recovery("remove-before-save")
+    def test_b1_removed_source_hold_resumes_only_finalization(self):
+        self._assert_finalization_recovery("source-hold-removed")
 
     @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
     def test_b1_last_cleanup_resumes_without_expired_parent_identity(self):
@@ -775,6 +777,7 @@ print('FRESH_PUBLIC_READERS_OK')
     @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
     def test_b1_caught_late_failure_keeps_primary_and_never_claims_completed_rollback(self):
         rollbacks = []
+        observer = m.LifecycleDiagnosticObserver()
         composer_type = m.LifecycleOutcomeComposer
         original = composer_type.set_rollback
         def recorded(composer, state):
@@ -782,18 +785,26 @@ print('FRESH_PUBLIC_READERS_OK')
             return original(composer, state)
         composer_type.set_rollback = recorded
         try:
-            _evidence, intent_path = self._finalization_cut("saved-null", caught=True)
+            _evidence, intent_path = self._finalization_cut("all-holds-removed", caught=True,
+                diagnostic_observer=observer)
         finally:
             composer_type.set_rollback = original
-        self.assertIn("incomplete", rollbacks)
+        # The completed forward result is proved and only cleanup is resumed;
+        # none of that may be reported as restoration of the original state.
+        self.assertEqual(rollbacks, [])
         self.assertNotIn("completed", rollbacks)
+        self.assertIsNotNone(observer.snapshot)
+        self.assertEqual(observer.snapshot.primaryFailureId, "WI-TEST-FINALIZATION")
+        self.assertEqual(observer.snapshot.topLevelKind, "typed-primary")
+        self.assertEqual(observer.snapshot.rollback, "not-needed")
+        self.assertEqual(observer.snapshot.cleanupFailures, ())
         self.assertFalse(intent_path.exists())
         self.assertFalse(self.source.exists())
         self.assertEqual(m.work_item_dependency_state(self.root, self.slug), "done")
 
     @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
     def test_b1_remaining_native_objects_and_incomplete_proof_never_falsely_settle(self):
-        evidence, intent_path = self._finalization_cut("saved-null")
+        evidence, intent_path = self._finalization_cut("source-hold-removed")
         archive = self.root / "work-items/archive/2026-10" / self.slug
         intent = json.loads(intent_path.read_bytes())
         bindings = intent["capturedBindings"]
@@ -881,6 +892,10 @@ print('FRESH_PUBLIC_READERS_OK')
 
     @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
     def test_creator_rollback_and_foreign_replacement_preserve_then_real_recovery(self):
+        custody = tempfile.TemporaryDirectory(prefix="flat-terminal-custody-", dir=ROOT / ".scratch")
+        self.addCleanup(custody.cleanup)
+        custody_root = Path(custody.name)
+        self.assertFalse(custody_root.is_relative_to(self.root))
         evidence, _arguments = self.legacy_request()
         before = self.canonical_images()
         move = m.LifecycleTransaction.replace_directory
@@ -900,17 +915,35 @@ print('FRESH_PUBLIC_READERS_OK')
         archive = self.root / "work-items/archive/2026-10" / self.slug
         retained = archive / "legacy-source" / self.source.name
         foreign = b"caller-owned replacement must be preserved\n"
+        original_retained = custody_root / "original-retained.bin"
+        original_images = []
         def replace_after_promotion(transaction, path, destination, *, directory=True, **kwargs):
             result = move(transaction, path, destination, directory=directory, **kwargs)
             if directory:
-                m._atomic_write(retained, foreign)
+                self.assertFalse(original_retained.exists())
+                image, _parents = m._legacy_local_image(retained, maximum_bytes=retained.stat().st_size)
+                original_images.append(image)
+                retained.rename(original_retained)
+                # The foreign actor has no lifecycle producer authority.
+                with retained.open("xb") as replacement:
+                    replacement.write(foreign)
             return result
         m.LifecycleTransaction.replace_directory = replace_after_promotion
+        observer = m.LifecycleDiagnosticObserver()
         try:
-            with self.assertRaisesRegex(m.LifecycleError, "compensation"):
-                m.close_item(self.root, self.slug, self.closure, self.instant, legacy_evidence_data=evidence, apply=True)
+            with self.assertRaises(m.LifecycleError) as refused:
+                m.close_item(self.root, self.slug, self.closure, self.instant,
+                    legacy_evidence_data=evidence, apply=True, diagnostic_observer=observer)
         finally:
             m.LifecycleTransaction.replace_directory = move
+        self.assertEqual(refused.exception.failure_id, "WI-CATEGORY-MIGRATION-INVENTORY",
+            msg=f"primary={refused.exception!s}; cause={refused.exception.__cause__!r}; observer={observer.snapshot!r}")
+        self.assertIsNotNone(observer.snapshot)
+        self.assertEqual(observer.snapshot.primaryFailureId, refused.exception.failure_id)
+        self.assertEqual(observer.snapshot.topLevelKind, "typed-primary")
+        self.assertEqual(observer.snapshot.rollback, "incomplete")
+        self.assertTrue(any(row.phase == "rollback-postcheck" and row.failureId == "WI-LEGACY-COMPLETION-RECOVERY"
+                            for row in observer.snapshot.cleanupFailures))
         self.assertEqual(retained.read_bytes(), foreign)
         self.assertTrue(m._transition_intent_path(self.root, "flat-terminal-001").exists())
         with self.assertRaises(m.LifecycleError):
@@ -918,8 +951,14 @@ print('FRESH_PUBLIC_READERS_OK')
         # The fixture actor reconciles its own injected object through a retained
         # native image; the lifecycle owner never removes the foreign replacement.
         foreign_image, _parents = m._legacy_local_image(retained, maximum_bytes=len(foreign))
-        preserved = self.root / "foreign-preserved.bin"
+        preserved = custody_root / "foreign-preserved.bin"
         retained.rename(preserved)
+        self.assertEqual(len(original_images), 1)
+        original_retained.rename(retained)
+        restored_image, _parents = m._legacy_local_image(retained, maximum_bytes=retained.stat().st_size)
+        self.assertEqual(restored_image, original_images[0])
+        preserved_image, _parents = m._legacy_local_image(preserved, maximum_bytes=len(foreign))
+        self.assertEqual(preserved_image, foreign_image)
         action = m.recover_transition(self.root, "flat-terminal-001")
         self.assertEqual(action["status"], "settled")
         self.assertEqual(preserved.read_bytes(), foreign)
