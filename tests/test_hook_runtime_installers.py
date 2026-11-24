@@ -1028,16 +1028,21 @@ def test_trust_guidance_contract() -> None:
     assert "install-codex.ps1" not in install
 
 
-def test_trust_guidance_contract_rejects_trust_bypass_wording() -> None:
+@pytest.mark.parametrize("mutation", ["wrong-choice", "missing-step", "reordered-steps"])
+def test_trust_guidance_contract_rejects_mutations(mutation: str) -> None:
     text = (ROOT / "INSTALL.md").read_text(encoding="utf-8")
-    guidance = next(line for line in INSTALL_TRUST_GUIDANCE if "Trust all and continue" in line)
-    mutated = text.replace(
-        guidance,
-        guidance.replace(
-            "Trust all and continue", "Continue without trusting"
-        ),
-        1,
-    )
+    _assert_exact_order(text, INSTALL_TRUST_GUIDANCE)
+    position, definition_hash, choice, *_ = INSTALL_TRUST_GUIDANCE
+    if mutation == "wrong-choice":
+        mutated = text.replace(
+            choice, choice.replace("Trust all and continue", "Continue without trusting"), 1
+        )
+    elif mutation == "missing-step":
+        mutated = text.replace(definition_hash, "", 1)
+    else:
+        prefix, _, remaining = text.partition(position)
+        mutated = prefix + definition_hash + remaining.replace(definition_hash, position, 1)
+    assert mutated != text, "Mutation must change the valid original document"
     with pytest.raises(AssertionError):
         _assert_exact_order(mutated, INSTALL_TRUST_GUIDANCE)
 
