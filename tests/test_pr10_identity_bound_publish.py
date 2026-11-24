@@ -76,7 +76,9 @@ def test_fixed_candidate_swap_is_quarantined_before_canonical_replace(
 
     monkeypatch.setattr(ledger.os, "replace", racing_replace)
     monkeypatch.setattr(
-        ledger, "_validate_noncanonical_marker_candidate", lambda *_args: None
+        ledger, "_validate_noncanonical_marker_candidate",
+        lambda _item, _candidate, _validator, *, ledger_resource_budget=None,
+        transition_resource_budget=None: None,
     )
 
     with pytest.raises(ledger.LedgerNoncanonicalRecoveryError):
@@ -135,7 +137,9 @@ def test_canonical_replace_uses_the_admitted_inode_via_private_handoff(
     monkeypatch.setattr(ledger, "_write_exact_staging_file", capture_write)
     monkeypatch.setattr(ledger.os, "replace", capture_replace)
     monkeypatch.setattr(
-        ledger, "_validate_noncanonical_marker_candidate", lambda *_args: None
+        ledger, "_validate_noncanonical_marker_candidate",
+        lambda _item, _candidate, _validator, *, ledger_resource_budget=None,
+        transition_resource_budget=None: None,
     )
 
     completed, _history = command_for(ledger, operation)(

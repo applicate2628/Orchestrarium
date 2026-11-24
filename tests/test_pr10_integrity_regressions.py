@@ -136,8 +136,8 @@ def test_transfer_ledger_digest_never_uses_unbounded_read(
     requested_sizes: list[int] = []
 
     class TrackingReader:
-        def __init__(self, descriptor: int, mode: str) -> None:
-            self.stream = original_fdopen(descriptor, mode)
+        def __init__(self, descriptor: int, mode: str, *, closefd: bool = True) -> None:
+            self.stream = original_fdopen(descriptor, mode, closefd=closefd)
 
         def __enter__(self):
             self.stream.__enter__()
@@ -145,6 +145,9 @@ def test_transfer_ledger_digest_never_uses_unbounded_read(
 
         def fileno(self) -> int:
             return self.stream.fileno()
+
+        def seek(self, offset: int, whence: int = 0) -> int:
+            return self.stream.seek(offset, whence)
 
         def read(self, size: int = -1) -> bytes:
             requested_sizes.append(size)
@@ -165,7 +168,7 @@ def test_transfer_ledger_digest_never_uses_unbounded_read(
 
 
 def test_transfer_ledger_digest_enforces_fixed_cumulative_limit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     validator = load_module(VALIDATOR, "pr10_transfer_ledger_limit_validator")
     operation_id = "transfer-ledger-limit-op"
@@ -173,12 +176,14 @@ def test_transfer_ledger_digest_enforces_fixed_cumulative_limit(
     root, _ledger_path = _write_transfer_authority_fixture(
         tmp_path, validator, operation_id, ledger
     )
-    monkeypatch.setattr(
-        validator, "MAX_TRANSFER_LEDGER_BYTES", len(ledger) - 1, raising=False
-    )
-
     errors: list[str] = []
-    receipts = validator._transfer_receipts(root, errors)
+    exact_budget = validator.resolve_ledger_resource_budget(8, len(ledger))
+    assert operation_id in validator._transfer_receipts(
+        root, errors, ledger_resource_budget=exact_budget
+    )
+    assert errors == []
+    too_small = validator.resolve_ledger_resource_budget(8, len(ledger) - 1)
+    receipts = validator._transfer_receipts(root, errors, ledger_resource_budget=too_small)
 
     assert receipts == {}
     assert any(
@@ -404,7 +409,11 @@ def test_noncanonical_recovery_cleanup_preserves_same_bytes_replacement(
         return owned
 
     monkeypatch.setattr(ledger, "_write_exact_staging_file", replace_after_write)
-    monkeypatch.setattr(ledger, "_validate_noncanonical_marker_candidate", lambda *_: None)
+    monkeypatch.setattr(
+        ledger, "_validate_noncanonical_marker_candidate",
+        lambda _item, _candidate, _validator, *, ledger_resource_budget=None,
+        transition_resource_budget=None: None,
+    )
     command = (
         ledger._command_apply_noncanonical_history
         if operation == "apply"
@@ -890,24 +899,30 @@ def test_settlement_ledger_digest_uses_validator_limit(
 ) -> None:
     fixtures = load_module(LEGACY_TRANSFER_TESTS, "pr10_settlement_ledger_limit")
     fixture = fixtures.transition_fixture(tmp_path)
-    payload = fixtures.run_transition(fixture)
     lifecycle = fixture["lifecycle"]
-    archive = tmp_path / payload["archivePath"]
-    ledger = archive / "agent-runs.jsonl"
+    ledger = fixture["item"] / "agent-runs.jsonl"
     cap = 32 * 1024
     data = ledger.read_bytes() + b"\n" * cap
     ledger.write_bytes(data)
-    payload["ledgerSha256"] = hashlib.sha256(data).hexdigest()
+    fixture["ledgerSha"] = hashlib.sha256(data).hexdigest()
+    lifecycle.refresh_readme(tmp_path)
+    fixture["readmeSha"] = hashlib.sha256(
+        (tmp_path / "work-items" / "README.md").read_bytes()
+    ).hexdigest()
+    payload = fixtures.run_transition(fixture)
+    archive = tmp_path / payload["archivePath"]
     receipt = archive / "lifecycle-transition-receipt.json"
-    receipt.write_text(json.dumps(payload), encoding="utf-8")
     monkeypatch.setattr(lifecycle, "LEDGER_LOCATION_PROOF_BYTE_CAP", cap)
-    assert lifecycle._verify_settlement(tmp_path, receipt) == payload
     validator = lifecycle._validator_module()
-    monkeypatch.setattr(validator, "MAX_TRANSFER_LEDGER_BYTES", cap)
-    monkeypatch.setattr(lifecycle, "_validator_module", lambda: validator)
+    event_count = sum(bool(line.strip()) for line in data.splitlines())
+    exact_budget = validator.resolve_ledger_resource_budget(event_count, len(data))
+    assert lifecycle._verify_settlement(
+        tmp_path, receipt, ledger_resource_budget=exact_budget
+    ) == payload
+    too_small = validator.resolve_ledger_resource_budget(event_count, cap)
     with pytest.raises(lifecycle.LifecycleError) as caught:
-        lifecycle._verify_settlement(tmp_path, receipt)
-    assert caught.value.failure_id == "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH"
+        lifecycle._verify_settlement(tmp_path, receipt, ledger_resource_budget=too_small)
+    assert caught.value.failure_id == "WI-LEDGER-RESOURCE-INCOMPLETE"
 
 
 @pytest.mark.skipif(os.name != "posix" or not hasattr(os, "mkfifo"), reason="requires POSIX named pipes")
@@ -991,30 +1006,43 @@ def test_transition_recovery_reads_intent_images_with_bounds(
     target.write_bytes(b"x" * (limit + 1) if oversize else original)
     read_bytes = Path.read_bytes
     capture = lifecycle._capture_file_snapshot
+    read_image = lifecycle._read_lifecycle_image
+    reading_image = False
     admitted_limits: list[int | None] = []
+
+    def tracked_image_read(*args, **kwargs):
+        nonlocal reading_image
+        reading_image = True
+        try:
+            return read_image(*args, **kwargs)
+        finally:
+            reading_image = False
 
     def prohibit_whole_file(path):
         assert path != target, "recovery bypassed bounded image capture"
         return read_bytes(path)
 
     def tracked_capture(path, **kwargs):
-        if path == target:
+        # Root and README acquisition use their own finite bounds. Record every
+        # capture governed specifically by the retained intent's known images.
+        if path == target and reading_image:
             admitted_limits.append(kwargs.get("maximum_bytes"))
         return capture(path, **kwargs)
 
     monkeypatch.setattr(Path, "read_bytes", prohibit_whole_file)
     monkeypatch.setattr(lifecycle, "_capture_file_snapshot", tracked_capture)
+    monkeypatch.setattr(lifecycle, "_read_lifecycle_image", tracked_image_read)
     if oversize:
         with pytest.raises(lifecycle.LifecycleError) as caught:
-            lifecycle._recover_transition(tmp_path, intent_path)
+            lifecycle.recover_transition(tmp_path, fixture["operationId"])
         assert caught.value.failure_id == failure_id
         assert intent_path.exists()
     else:
-        result = lifecycle._recover_transition(tmp_path, intent_path)
+        result = lifecycle.recover_transition(tmp_path, fixture["operationId"])
         assert result is None if boundary == "T2" else result["status"] == "settled"
         assert not intent_path.exists()
-    assert admitted_limits and admitted_limits[0] is not None and admitted_limits[0] <= limit
-    assert all(value is not None for value in admitted_limits)
+    assert admitted_limits
+    assert all(value is not None and value <= limit for value in admitted_limits)
 
 
 def _bug_supersession_read_fixture(root: Path):
@@ -1106,31 +1134,43 @@ def test_bug_supersession_recovery_reads_intent_images_with_bounds(
     target.write_bytes(b"x" * (limit + 1) if oversize else after)
     read_bytes = Path.read_bytes
     capture = lifecycle._capture_file_snapshot
+    read_image = lifecycle._read_lifecycle_image
+    reading_image = False
     admitted_limits: list[int | None] = []
+
+    def tracked_image_read(*args, **kwargs):
+        nonlocal reading_image
+        reading_image = True
+        try:
+            return read_image(*args, **kwargs)
+        finally:
+            reading_image = False
 
     def prohibit_whole_file(path):
         assert path != target, "bug recovery bypassed bounded image capture"
         return read_bytes(path)
 
     def tracked_capture(path, **kwargs):
-        if path == target:
+        # Keep the intent-image envelope separate from other bounded readers.
+        if path == target and reading_image:
             admitted_limits.append(kwargs.get("maximum_bytes"))
         return capture(path, **kwargs)
 
     monkeypatch.setattr(Path, "read_bytes", prohibit_whole_file)
     monkeypatch.setattr(lifecycle, "_capture_file_snapshot", tracked_capture)
+    monkeypatch.setattr(lifecycle, "_read_lifecycle_image", tracked_image_read)
     if oversize:
         with pytest.raises(lifecycle.LifecycleError) as caught:
-            lifecycle._recover_transition(tmp_path, intent_path)
+            lifecycle.recover_transition(tmp_path, request["operation_id"])
         suffix = "ROLLBACK" if boundary == "B2" else "ROLLFORWARD"
         assert caught.value.failure_id == f"WI-BUG-SUPERSESSION-{suffix}-INDETERMINATE"
         assert intent_path.exists()
     else:
-        result = lifecycle._recover_transition(tmp_path, intent_path)
+        result = lifecycle.recover_transition(tmp_path, request["operation_id"])
         assert result is None if boundary == "B2" else result["status"] == "settled"
         assert not intent_path.exists()
-    assert admitted_limits and admitted_limits[0] is not None and admitted_limits[0] <= limit
-    assert all(value is not None for value in admitted_limits)
+    assert admitted_limits
+    assert all(value is not None and value <= limit for value in admitted_limits)
 
 
 @pytest.mark.parametrize("size", (0, 65537))
@@ -1141,23 +1181,33 @@ def test_atomic_write_verifies_through_the_known_bounded_image(
     lifecycle = load_module(MUTATE, "pr10_atomic_image_bound")
     target = tmp_path / "artifact.md"
     data = b"x" * size
-    original_replace = os.replace
+    receive_placement = lifecycle.LifecycleWriteTarget._receive_placement
+    mutated = False
 
-    def replacing(source, destination):
-        original_replace(source, destination)
+    def receive_then_grow(owner, record, published):
+        nonlocal mutated
+        receive_placement(owner, record, published)
         if replace_after_publish:
-            Path(destination).write_bytes(data + b"!")
+            assert owner.path == target
+            assert record.handle is not None
+            # The actual publication read leaves the owned native handle at EOF.
+            # This also reaches the Windows path, which does not use os.replace.
+            owner._write_handle(record.handle, b"!")
+            mutated = True
 
-    monkeypatch.setattr(os, "replace", replacing)
+    monkeypatch.setattr(lifecycle.LifecycleWriteTarget, "_receive_placement", receive_then_grow)
     monkeypatch.setattr(Path, "read_bytes", lambda _: pytest.fail("atomic verification used a whole-file read"))
     if replace_after_publish:
         with pytest.raises(lifecycle.LifecycleError) as caught:
             lifecycle._atomic_write(target, data)
-        assert caught.value.failure_id == "WI-ATOMIC-BYTE-CHECK"
+        assert caught.value.failure_id == "WI-LIFECYCLE-WRITE-BOUNDARY"
+        assert isinstance(caught.value.__cause__, OSError)
+        assert "admitted byte envelope" in str(caught.value.__cause__)
     else:
         lifecycle._atomic_write(target, data)
         with target.open("rb") as stream:
             assert stream.read() == data
+    assert mutated is replace_after_publish
 
 
 @pytest.mark.skipif(os.name != "posix" or not hasattr(os, "mkfifo"), reason="requires POSIX named pipes")
@@ -1200,7 +1250,7 @@ assert intent_path.is_file() and target.is_file()
 target.unlink()
 os.mkfifo(target)
 try:
-    lifecycle._recover_transition(root, intent_path)
+    lifecycle.recover_transition(root, operation)
 except lifecycle.LifecycleError as exc:
     assert exc.failure_id == failure_id, exc.failure_id
     assert intent_path.is_file()
@@ -1233,7 +1283,9 @@ def test_readme_reopened_transition_artifacts_are_bounded(tmp_path: Path, artifa
     target.write_bytes(b"x" * (lifecycle.LEDGER_LOCATION_PROOF_BYTE_CAP + 1))
     with pytest.raises(lifecycle.LifecycleError) as caught:
         lifecycle.render_readme_bytes(tmp_path)
-    assert caught.value.failure_id == "WI-README-STALE"
+    # Closure recognition precedes README construction and owns its read bound.
+    expected = "WI-LEGACY-COMPLETION-CUSTODY" if artifact == "closure" else "WI-README-STALE"
+    assert caught.value.failure_id == expected
 
 
 @pytest.mark.parametrize("large_selected_image", (False, True))
