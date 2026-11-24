@@ -5,6 +5,10 @@ A dated entry is not a release tag, publication notice, or confirmation of a
 local installation. For the frozen pre-SDK baseline and draft follow-up, see
 [Which version?](README.md#which-version).
 
+## 2026-11-24
+
+- On POSIX (Portable Operating System Interface) systems such as Linux, recheck a private rollback snapshot's exact child identity and bytes after an allowed parent-permission change and before disposal. A changed child remains preserved; the original source and the parent's original mode retain their existing protection.
+
 ## 2026-11-23
 
 - Historical upgrade checks distinguish legacy lookup digests from structural Version 2 witnesses, verify unchanged targets when historical material lacks a witness, and exercise supported upgrade, no-op and rollback behavior using authenticated factory data. Receipt and explicit-adoption checks use their current versioned formats. Archive fixtures pin Git newline settings per command so host checkout defaults cannot change historical payload bytes.

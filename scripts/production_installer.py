@@ -4903,6 +4903,8 @@ class _InstallTransaction:
                 writable = mode | stat.S_IWUSR
                 try:
                     self._chmod_owned(path.parent, bound_parent, writable, descriptor=descriptor)
+                    if not self._point_matches(path, expected, check_file_content=True):
+                        raise ValueError("E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: disposal permission content drift")
                     operation(path.name, dir_fd=descriptor)
                 finally:
                     # Restore the original mode on the same held object, even if
