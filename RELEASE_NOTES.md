@@ -211,6 +211,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 - Codex model routing now admits only the latest confirmed version in each family: Luna 6, Terra 6.1, Sol 6.2 and Astra 6.2. Older model profiles are removed from active choices rather than retained as launchable compatibility or quota-fallback routes. Existing user configuration is preserved and retired choices are reported explicitly; historical evidence and migration fixtures remain intact. This prevents new tasks from silently returning to obsolete model generations.
 
+- Reconciled the SDK design reference with the approved multivendor completion roadmap in PR19. Historical evidence stays dated, already implemented coordinator work is not reopened, and SDK dependency ownership is separated from qualified distribution delivery without creating another progress tracker.
+
 ## 2026-11-17
 
 - Task-first routing now favors Sol 6.2 for ordinary implementation, Luna Extra high for bounded mechanics and Terra 6.1 High for fitting bounded/repository/visual work. Astra High/Extra high can use genuine task-scoped approval for scientific formulation, complex audit, architecture and security, including covered repeats; Max and separate launch/spending permissions remain protected. Substantive results now require a proportionate nonauthor check, not only critical results, without adding duplicate review loops.
@@ -495,6 +497,12 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 - Separate npm distribution review from native Rust operations. This branch owns the npm plan and links to the independently based Rust proposal rather than carrying its plan or requiring it to merge. npm can explicitly use the existing Python installer; no package is published and no runtime is activated.
 
+- Reconcile the SDK design matrix with the consolidated coordinator implementation and its one bounded subscription-backed live cycle. Separate completed integration from the still-missing portable live caller and unqualified recovery, streaming and arbitrary planning scenarios; this status correction starts no provider.
+
+- Point SDK ownership references to separate npm PR17 and native Rust PR21 so neither independent project is mistaken for a combined prerequisite. This is link/ownership maintenance only, with no change to SDK behavior or qualification.
+
+- Reconciled the SDK plan with PR19's exact source head, separating the Host-led review bridge from the optional Agents coordinator. Capability-based admission supersedes product-wide version pins; the remaining supported Codex-subscription Model research and current-head qualification are explicit, without new runtime activation.
+
 ## 2026-10-25
 
 - PR-scoped corrective publication no longer depends on branch-protection/rules enumeration or proving rules absent. The hook retains exact open-PR/head/ref binding, scoped human consent and a fresh complete leak scan; the ordinary push remains subject to the server's configured rules and exceptions.
@@ -547,6 +555,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 - The shared-spine validation row now directs maintainers to follow existing producer/manifest dependencies and check affected consumers, so stale derived copies can be found before they block installation; provider-prompt parity is an example, not a fixed list or extra stage.
 
 - Defined npm distribution with explicit application and installer-owned retained executable/resource versions. Native Rust operation design is maintained in a separate proposal; SDK design belongs to PR18 and implementation to PR19. Preserve the earlier count-neutral manual-trust documentation and its corrected negative tests in their original owner scope. No native runtime or package publication is delivered here.
+
+- Defined an independent SDK integration project with one common Python/Agents SDK coordinator and existing Orchestrarium contract/state owners. Codex and Claude use direct official SDK adapters; ACP stdio stays inside Kimi/Grok adapters, not a universal layer. The plan starts with contract fixtures and an Agents/Codex read-only review slice, then adapter coverage and removal of replaced glue. Explicit approval/account/resume and result-to-ledger boundaries remain. Activation also requires owned descendant-process settlement, including failure, cancellation and coordinator crash, through the existing supervision owner rather than SDK close alone. This design does not install or activate runtimes.
 
 ## 2026-10-22
 
