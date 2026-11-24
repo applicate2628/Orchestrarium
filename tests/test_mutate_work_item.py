@@ -18930,12 +18930,15 @@ def test_legacy_parent_archive_repairs_descendant_uris_and_compensates_conflict(
         module.migrate_legacy(root, f"work-item:{parent}", incoming_links_inventory=None)
     assert missing.value.failure_id == "WI-LEGACY-LINK-UNMAPPED"
     original_refresh = module.refresh_readme
-    def fail_refresh(target):
+    injected = []
+    def fail_refresh(target, **kwargs):
+        injected.append(target)
         consumer.write_bytes(b"Concurrent author bytes.\n")
         raise module.LifecycleError("WI-README-STALE", "synthetic readback failure")
     monkeypatch.setattr(module, "refresh_readme", fail_refresh)
     with pytest.raises(module.LifecycleError) as conflict:
         module.migrate_legacy(root, f"work-item:{parent}", incoming_links_inventory=inventory)
+    assert injected == [root]
     assert conflict.value.failure_id == "WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE"
     assert consumer.read_bytes() == b"Concurrent author bytes.\n" and item.is_dir()
     monkeypatch.setattr(module, "refresh_readme", original_refresh)
@@ -18945,6 +18948,80 @@ def test_legacy_parent_archive_repairs_descendant_uris_and_compensates_conflict(
     assert (archived / "evidence.md").read_bytes() == evidence_before
     assert not (archived / "bug-dispositions-receipt.json").exists()
     assert module.migrate_legacy(root, f"work-item:{parent}", incoming_links_inventory=inventory) == archived
+
+
+@pytest.mark.parametrize("foreign_target", [None, "consumer", "parent-evidence"])
+def test_legacy_parent_archive_compensation_keeps_owned_inverse_boundaries(
+    tmp_path: Path, monkeypatch, foreign_target: str | None,
+) -> None:
+    module = load_module()
+    root = tmp_path / "legacy-parent-inverses"
+    parent = "owned-legacy-parent"
+    item = root / "work-items/active" / parent
+    archived = root / "work-items/archive/2026-10" / parent
+    instant = "2026-10-08T15:00:00Z"
+    write(item / "status.md", quick_status())
+    write(item / "closure.md", closure(instant))
+    write(item / "evidence.md", "Original accepted legacy evidence.\n")
+    item_identity = module._lifecycle_file_identity(item.lstat())
+    item_before = {leaf.name: leaf.read_bytes() for leaf in item.iterdir()}
+    evidence_identity = module._lifecycle_file_identity((item / "evidence.md").lstat())
+    consumer = seed_context_bug(root, "standalone", "owned-legacy-consumer")
+    consumer_before = consumer.read_bytes() + f"[proof](../active/{parent}/evidence.md#case)\n".encode()
+    consumer.write_bytes(consumer_before)
+    inventory = root / "incoming.json"
+    write(inventory, json.dumps({"reference": f"work-item:{parent}"}))
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    readme = root / "work-items/README.md"
+    readme_before = readme.read_bytes()
+    refresh = module.refresh_readme
+    injected, foreign_images = [], []
+
+    def fail_after_readme(target, **kwargs):
+        refresh(target, **kwargs)
+        injected.append(target)
+        assert archived.is_dir() and not item.exists()
+        assert readme.read_bytes() != readme_before
+        if foreign_target is not None:
+            selected = consumer if foreign_target == "consumer" else archived / "evidence.md"
+            data = selected.read_bytes()
+            original_identity = module._lifecycle_file_identity(selected.lstat())
+            replacement = selected.with_name("fixture-foreign-replacement.bin")
+            replacement.write_bytes(data)
+            os.replace(replacement, selected)
+            identity = module._lifecycle_file_identity(selected.lstat())
+            assert identity != original_identity
+            foreign_images.append((selected, data, identity))
+        raise module.LifecycleError("WI-README-STALE", "fault after actual parent and board publication")
+
+    monkeypatch.setattr(module, "refresh_readme", fail_after_readme)
+    with pytest.raises(module.LifecycleError) as refused:
+        module.migrate_legacy(root, f"work-item:{parent}", incoming_links_inventory=inventory)
+    assert injected == [root]
+    assert refused.value.failure_id == (
+        "WI-README-STALE" if foreign_target is None
+        else "WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE"
+    )
+    if foreign_target is not None:
+        assert isinstance(refused.value.__cause__, module.LifecycleError)
+        assert refused.value.__cause__.failure_id == "WI-README-STALE"
+        assert len(foreign_images) == 1
+        selected, data, identity = foreign_images[0]
+        assert selected.read_bytes() == data
+        assert module._lifecycle_file_identity(selected.lstat()) == identity
+    assert readme.read_bytes() == readme_before
+    if foreign_target == "parent-evidence":
+        assert not item.exists() and archived.is_dir()
+        assert module._lifecycle_file_identity(archived.lstat()) == item_identity
+        assert (archived / "status.md").read_bytes() != item_before["status.md"]
+        assert consumer.read_bytes() == consumer_before
+    else:
+        assert item.is_dir() and not archived.exists()
+        assert module._lifecycle_file_identity(item.lstat()) == item_identity
+        assert {leaf.name: leaf.read_bytes() for leaf in item.iterdir()} == item_before
+        assert module._lifecycle_file_identity((item / "evidence.md").lstat()) == evidence_identity
+        if foreign_target is None:
+            assert consumer.read_bytes() == consumer_before
 
 
 def _parent_successor_link_fixture(tmp_path: Path, *, opaque=False):

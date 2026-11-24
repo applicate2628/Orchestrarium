@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-24
 
+- Restore independently owned legacy-parent archive effects after a later failure, even when an external URI consumer changes. Compensation uses the existing operation-bound inverses; a foreign image inside the parent still prevents an overlapping restore and remains intact with the original failure reported.
+
 - Bind public close to its declared work-item before root acquisition. A repository named work-items can now close the selected task when its parent contains a different neighboring task, while duplicate selected identities and invalid subjects remain refused.
 
 - Restore documented subjectless topology observation through a repository alias when no root contract is present. Only this restricted read path normalizes the alias before shared root grammar; mutation, held contexts, selected subjects and contract-bearing roots retain their no-link checks.

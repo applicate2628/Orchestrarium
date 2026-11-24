@@ -20498,6 +20498,7 @@ def _move_terminal_category(root: Path, reference: str, *,
         readme_after = None
         moved = False
         _verify_project_binding_evidence(plan["ownerEvidence"], "WI-CLOSE-LINK-DRIFT")
+        transaction.bind_operation(plan)
         try:
             for row in plan["links"]:
                 _verify_captured_file(plan["consumerCaptures"][row["path"]], "WI-CLOSE-LINK-DRIFT")
@@ -20524,11 +20525,11 @@ def _move_terminal_category(root: Path, reference: str, *,
                     for name, data in (("status.md", terminal_status), ("closure.md", terminal_closure)):
                         if _read_lifecycle_image(target / name, data, failure_id="WI-CLOSE-LINK-DRIFT") != data:
                             raise LifecycleError("WI-CLOSE-LINK-DRIFT", "parent rollback image differs")
-                    _replace_lifecycle_directory(target, source)
+                    transaction.restore_owned_movement(target, source)
                 for path, before, after in ((status, prior_status, terminal_status), (closure, prior_closure, terminal_closure)):
                     if _read_lifecycle_image(path, before, after, failure_id="WI-CLOSE-LINK-DRIFT") not in {before, after}:
                         raise LifecycleError("WI-CLOSE-LINK-DRIFT", "parent rollback image differs")
-                    _atomic_write(path, before)
+                    transaction.restore_owned_file(path, before)
             except BaseException as cause:
                 failures.append(str(cause))
             for row in reversed(touched):
@@ -20537,14 +20538,14 @@ def _move_terminal_category(root: Path, reference: str, *,
                     if observed not in {row["before"], row["after"]}:
                         raise LifecycleError("WI-CLOSE-LINK-DRIFT", "URI rollback consumer changed")
                     if observed == row["after"]:
-                        _atomic_write(row["path"], row["before"])
+                        transaction.restore_owned_file(row["path"], row["before"])
                 except BaseException as cause:
                     failures.append(str(cause))
             try:
                 if readme.read_bytes() != readme_before.data:
                     if readme_after is None or readme.read_bytes() != readme_after:
                         raise LifecycleError("WI-README-STALE", "README rollback image differs")
-                    _atomic_write(readme, readme_before.data)
+                    transaction.restore_owned_file(readme, readme_before.data)
             except BaseException as cause:
                 failures.append(str(cause))
             for directory in reversed(created_dirs):
