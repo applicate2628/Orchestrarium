@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-24
 
+- Keep all selected bugs and link updates under the same admitted close operation. Failure after several bug dispositions can now restore each actual forward effect; inverse identity, one-use and currentness checks still preserve concurrent foreign edits and report incomplete cleanup when those edits prevent safe disposal.
+
 - Recheck the selected paired ledger binding immediately before executing its captured Python module. A link changed during import preparation now refuses before the originally selected code executes; the existing post-execution and cached-use checks remain in place.
 
 - Preserve byte-identical Git status metadata when repository transfer splits literal paths across bounded commands. Merge status records in native tracked-then-untracked pathname-byte order while retaining NUL-separated names, unchanged diff payloads, command limits and the aggregate output cap.

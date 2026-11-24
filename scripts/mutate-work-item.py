@@ -14659,6 +14659,8 @@ def _close_item_directory(
     for scratch in scratch_plan:
         if scratch.disposition == "completed-disposal":
             _recheck_completed_disposal(root, scratch, ledger_resource_budget=ledger_resource_budget)
+    # Every selected bug and link belongs to this close, including its inverses.
+    held.bind_operation(link_plan)
     try:
         for index, plan in enumerate(bug_plans, start=1):
             if plan.action != "terminalize":
@@ -14672,7 +14674,6 @@ def _close_item_directory(
                 )
             touched_bugs.append(plan)
             transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
-            transaction.bind_operation(plan)
             with _admit_lifecycle_write_target(plan.source, failure_id="WI-LIFECYCLE-WRITE-BOUNDARY", _operation_owner=plan) as write_target:
                 _atomic_write(plan.source, plan.after, target=write_target)
             if plan.source in consumer_captures:
