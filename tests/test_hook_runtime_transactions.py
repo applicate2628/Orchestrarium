@@ -515,7 +515,7 @@ def test_python_install_registers_direct_python_without_shell_hook_owners(
         assert all(".sh" not in command.casefold() for command in commands)
         assert all(
             ".py" in command.casefold()
-            or command.casefold().endswith(("python.exe", "python"))
+            or command == sys.executable
             for command in commands
         )
         installed = project / case.installed_root
