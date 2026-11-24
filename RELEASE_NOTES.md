@@ -7,7 +7,7 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-24
 
-- Finalize provider receipts when selected document or hook settings use an already admitted external file. Keep configuration controls separate from installed payload ownership, check the exact file identity and bytes before and after receipt publication, and refuse unselected neighbors, substituted files and changes to an admitted absent slot.
+- Finalize Codex receipts when hook settings use an already admitted external file. Carry the existing hook inventory authority through receipt publication, checking the original logical link chain, physical settings file and sidecar before and after the write. Keep these exact controls separate from payload ownership; refuse changed links, substituted files, missing sidecars and unselected neighboring or document files.
 
 - Reclaim exact, unreferenced retired Codex hooks from the already verified canonical runtime root during global upgrades. Custom bytes, still-referenced hooks and unselected configuration handlers retain their existing protection; rollback restores the original receipt and file image.
 

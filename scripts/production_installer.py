@@ -13423,7 +13423,7 @@ def _install_hooks(
     prior_specs=None,
     scoped_transitions=(),
     preview: bool = False,
-) -> None:
+) -> tuple[_CreateOnlyMutablePath, Any, Any] | None:
     installer = root / "scripts" / "install-hypothesis-hook.py"
     host = "windows" if os.name == "nt" else "posix"
     selected_specs = list(_hook_specs(provider, installed_root))
@@ -13776,6 +13776,8 @@ def _install_hooks(
         )
         if installed_health.returncode:
             raise RuntimeError("post-reclaim installed hook verification failed")
+    if owned and health_module is not None:
+        return mutable_owner, health_module, written
 
 
 def _checkpoint(
@@ -14166,19 +14168,28 @@ def _record_provider_install(root, provider, mode, target, anchor, transaction, 
                              config_before, docs_target, mode_target, registration,
                              installed_hook_root, hooks_enabled, *,
                              canonical_plan=None, canonical_target=None, selected_updates=None, reclaimed=(),
-                             payload_owners=(), control_paths=()):
+                             payload_owners=(), hook_control=None):
     """Record actual owned payload outcomes; configuration has separate semantics."""
     if owner.dry_run:
         return
     codec = _provider_ownership_module(root)
     scope = "global" if mode == "global" else "project"
     bindings = _provider_payload_bindings(provider, mode, target, transaction, payload_owners)
-    controls = {path: _admitted_mutation_image(transaction, path).get(path)
-                for path in control_paths if not path.is_relative_to(anchor)}
+    controls = {}
+    if hook_control is not None:
+        hook_owner, hook_health, hook_authority = hook_control
+        if (provider != "codex" or not hooks_enabled or hook_owner is not owner
+                or hook_owner.transaction is not transaction
+                or not isinstance(hook_authority, hook_health._InventoryAuthority)
+                or hook_authority.target != registration):
+            raise ValueError("E_PROVIDER_RECEIPT_INVALID: hook control owner")
+        controls = {path: _admitted_mutation_image(transaction, path).get(path)
+                    for path in (hook_authority.resolved_target, hook_authority.inventory)}
     def assert_controls():
+        if hook_control is not None:
+            hook_health._recheck_inventory_authority(hook_authority, for_write=False)
         for path, node in controls.items():
-            if (node is None and not transaction._image_matches(path, {})) or (node is not None and
-                    (node.kind != "file" or not transaction._point_matches(path, node, check_file_content=True))):
+            if node is None or node.kind != "file" or not transaction._point_matches(path, node, check_file_content=True):
                 raise _InstallFailure("E_PROVIDER_RECEIPT_DRIFT", "verify")
     prior = codec.decode_record(before.encode("utf-8"), provider, scope)["files"] if before else {}
     payload_roots = get_client(provider)["payload_roots"]
@@ -15241,6 +15252,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             target.parent if mode == "global" else project, "global" if mode == "global" else "project")
             if args.localize_hook_file else None)
         codex_hook_inventory = registration.parent / CODEX_HOOK_INVENTORY
+        hook_control = None
         if provider == "codex":
             codex_role_manifest = _source_codex_role_manifest(
                 root, source / "agents"
@@ -15422,17 +15434,13 @@ def install(provider: str, argv: list[str] | None = None) -> int:
         if provider == "claude":
             byte_targets.append(docs_target.parent / "AGENTS.md")
         byte_pointer_objects = tuple(logical for logical in byte_targets if logical.is_symlink())
-        control_paths = []
         for logical in byte_targets:
             _resolve_write_through_symlink(logical)
             storage = logical.resolve(strict=False)
-            control_paths.append(storage)
             if storage != Path(os.path.abspath(logical)):
                 if not logical.is_symlink():
                     transaction_paths = [path for path in transaction_paths if path != logical]
                 transaction_paths.append(storage)
-        if provider == "codex" and hooks_enabled:
-            control_paths.append(codex_hook_inventory)
         copy_paths = {
             canonical_agents_root / UI_CONTINUITY_CONTRACT_TARGET,
             agents_root / UI_CONTINUITY_CONTRACT_TARGET,
@@ -15780,7 +15788,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 # complete those writes before recording any create-only role
                 # under the same .codex containment root.
                 if hooks_enabled:
-                    _install_hooks(
+                    hook_control = _install_hooks(
                         root,
                         provider,
                         registration,
@@ -15949,7 +15957,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                                      canonical_plan=canonical_plan,
                                      canonical_target=canonical_skills_target,
                                      selected_updates=selected_updates, reclaimed=reclaimed,
-                                     payload_owners=payload_owners, control_paths=tuple(control_paths))
+                                     payload_owners=payload_owners, hook_control=hook_control)
             transaction.commit()
         applied = not args.dry_run
     except BaseException as exc:
