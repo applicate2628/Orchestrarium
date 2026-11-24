@@ -756,6 +756,83 @@ def test_transferred_review_is_target_only_with_native_origin_collision(tmp_path
         for row in result.context.rows if row.projection_transformation != "transferred")
 
 
+@pytest.mark.parametrize("byte_delta", [0, -1])
+def test_successor_start_transfer_budget_preserves_explicit_cap(tmp_path: Path, monkeypatch, byte_delta: int) -> None:
+    fixture = native_transfer_fixture(tmp_path)
+    receipt = run_transfer(fixture)
+    lifecycle = fixture["lifecycle"]
+    archive = tmp_path.joinpath(*receipt["archivePath"].split("/"))
+    receipt_path = archive / "lifecycle-transition-receipt.json"
+    source_ledger = archive / "agent-runs.jsonl"
+    backlog = tmp_path / "work-items/backlog" / f"{fixture['successorSlug']}.md"
+    status = successor_status(fixture["slug"], fixture["operationId"])
+    bootstrap = lifecycle._staged_admission_ledger_bytes(fixture["successorSlug"], status)
+    protected = {path: path.read_bytes() for path in (
+        source_ledger, receipt_path, tmp_path / "work-items/README.md", backlog)}
+    required_bytes = len(protected[source_ledger]) + len(protected[receipt_path]) + len(bootstrap)
+    required_events = len(protected[source_ledger].splitlines()) + len(bootstrap.splitlines())
+    ceiling = lifecycle._validator_module().LedgerResourceBudgetV1(required_events, required_bytes + byte_delta)
+    original = lifecycle.LifecycleTransaction.admit_ledger_creation
+    observed = []
+
+    def observe_creation(self, *args, **kwargs):
+        held = self.ledger_resource_budget
+        result = original(self, *args, **kwargs)
+        assert result is held
+        observed.append((result.max_events, result.max_ledger_bytes))
+        return result
+
+    monkeypatch.setattr(lifecycle.LifecycleTransaction, "admit_ledger_creation", observe_creation)
+    if byte_delta:
+        with pytest.raises(ValueError) as failed:
+            lifecycle.start_item(tmp_path, fixture["successorSlug"], status, ledger_resource_budget=ceiling)
+        assert str(failed.value) == (
+            "WI-LEDGER-RESOURCE-INCOMPLETE: admitted operation requires "
+            f"{required_events} events/{required_bytes} bytes; allowance is "
+            f"{required_events} events/{required_bytes + byte_delta} bytes")
+        assert observed == []
+        assert all(path.read_bytes() == raw for path, raw in protected.items())
+        assert not (tmp_path / "work-items/active" / fixture["successorSlug"]).exists()
+    else:
+        active = lifecycle.start_item(tmp_path, fixture["successorSlug"], status, ledger_resource_budget=ceiling)
+        assert observed == [(required_events, required_bytes)]
+        assert (active / "agent-runs.jsonl").read_bytes() == bootstrap
+        assert source_ledger.read_bytes() == protected[source_ledger]
+        assert receipt_path.read_bytes() == protected[receipt_path]
+
+
+@pytest.mark.parametrize("changed", ["receipt", "source-ledger"])
+def test_successor_start_transfer_budget_keeps_source_currentness(tmp_path: Path, monkeypatch, changed: str) -> None:
+    fixture = native_transfer_fixture(tmp_path)
+    receipt = run_transfer(fixture)
+    lifecycle = fixture["lifecycle"]
+    archive = tmp_path.joinpath(*receipt["archivePath"].split("/"))
+    receipt_path, source_ledger = archive / "lifecycle-transition-receipt.json", archive / "agent-runs.jsonl"
+    backlog = tmp_path / "work-items/backlog" / f"{fixture['successorSlug']}.md"
+    protected = {path: path.read_bytes() for path in (
+        receipt_path, source_ledger, backlog, tmp_path / "work-items/README.md")}
+    changed_path = receipt_path if changed == "receipt" else source_ledger
+    original = lifecycle.LifecycleTransaction.admit_ledger_creation
+    observed = []
+
+    def change_after_source_admission(self, *args, **kwargs):
+        assert self._ledger_admission_scope is not None
+        assert changed_path in self._retained_observations
+        observed.append(self.ledger_resource_budget)
+        changed_path.write_bytes(protected[changed_path] + b" ")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(lifecycle.LifecycleTransaction, "admit_ledger_creation", change_after_source_admission)
+    with pytest.raises(lifecycle.LifecycleError) as failed:
+        lifecycle.start_item(tmp_path, fixture["successorSlug"],
+            successor_status(fixture["slug"], fixture["operationId"]))
+    assert failed.value.failure_id == "WI-CATEGORY-MIGRATION-INVENTORY"
+    assert len(observed) == 1 and observed[0] is not None
+    assert changed_path.read_bytes() == protected[changed_path] + b" "
+    assert all(path.read_bytes() == raw for path, raw in protected.items() if path != changed_path)
+    assert not (tmp_path / "work-items/active" / fixture["successorSlug"]).exists()
+
+
 @pytest.mark.parametrize(
     ("drift", "failure_id"),
     (
