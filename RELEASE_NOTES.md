@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-24
 
+- Codex and Claude installation previews no longer create temporary move-probe directories inside the shared installed skills tree. Dry-run still checks planned contents and receipts using private staging; real updates still require the target filesystem's move-capability evidence before applying changes.
+
 - Linux publication scans now serialize content readers, prior-disclosure evidence and matcher process owners. They retain deadline and complete-reaping checks, reuse readers between ordinary reads, and preserve existing Windows process batching.
 
 - On POSIX (Portable Operating System Interface) systems such as Linux, recheck a private rollback snapshot's exact child identity and bytes after an allowed parent-permission change and before disposal. A changed child remains preserved; the original source and the parent's original mode retain their existing protection.

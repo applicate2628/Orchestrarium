@@ -10190,6 +10190,7 @@ def _preflight_canonical_skills(
     replace_unreceipted_skill_sha256: tuple[str, ...] = (),
     claude_transport_optional: bool = False,
     member_selection: tuple[tuple[str, tuple[str, ...]], ...] | None = None,
+    dry_run: bool = False,
 ) -> _CanonicalSkillsPlan:
     """Bind the complete affected set before the transaction applies any member."""
 
@@ -10438,7 +10439,9 @@ def _preflight_canonical_skills(
             source if global_install else None,
             member_selection=member_selection,
         )
-        return replace(plan, directory_move_parents=_preflight_directory_move_capabilities(plan, target))
+        if not dry_run:
+            plan = replace(plan, directory_move_parents=_preflight_directory_move_capabilities(plan, target))
+        return plan
     except BaseException:
         shutil.rmtree(stage.path, ignore_errors=True)
         raise
@@ -10490,6 +10493,7 @@ def _assert_canonical_skills_plan_current(
     root: Path,
     claude_transport_root: Path | None,
     transaction: _InstallTransaction | None = None,
+    dry_run: bool = False,
 ) -> None:
     """Reject any post-preflight drift before the transaction writes its first path."""
 
@@ -10503,15 +10507,16 @@ def _assert_canonical_skills_plan_current(
                              leads[0].installed_digest, plan.stage.digest)
             or plan.lead_receipt.source_digest != selection[2]):
             raise ValueError("E_CANONICAL_LEAD_SELECTION_INVALID: bound plan drift")
-    required_parents = {(target / skill.name).parent for skill in plan.skills
-                        if skill.accepted_prior is not None and skill.managed_before is None}
-    if required_parents != {parent for parent, _identity in plan.directory_move_parents}:
-        raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing directory move capability observation")
-    for parent, identity in plan.directory_move_parents:
-        if not _InstallTransaction._binding_identity_matches(
-            identity, _CreateOnlyMutablePath._identity(parent)
-        ):
-            raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: directory move parent drift")
+    if not dry_run:
+        required_parents = {(target / skill.name).parent for skill in plan.skills
+                            if skill.accepted_prior is not None and skill.managed_before is None}
+        if required_parents != {parent for parent, _identity in plan.directory_move_parents}:
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: missing directory move capability observation")
+        for parent, identity in plan.directory_move_parents:
+            if not _InstallTransaction._binding_identity_matches(
+                identity, _CreateOnlyMutablePath._identity(parent)
+            ):
+                raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED: directory move parent drift")
 
     lead_effect = None
     for skill in plan.skills:
@@ -10617,6 +10622,7 @@ def _apply_canonical_skills_plan(
         root=root,
         claude_transport_root=claude_transport_root,
         transaction=owner.transaction,
+        dry_run=owner.dry_run,
     )
     for skill in plan.skills:
         if skill.name == "lead":
@@ -10775,6 +10781,7 @@ def _install_canonical_skills(
         target,
         root=root,
         claude_transport_root=claude_transport_root,
+        dry_run=owner.dry_run,
     )
     try:
         _apply_canonical_skills_plan(
@@ -13985,6 +13992,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 replace_unreceipted_lead_sha256=args.replace_unreceipted_lead_sha256,
                 replace_modified_lead=tuple(args.replace_modified_lead),
                 replace_unreceipted_skill_sha256=tuple(args.replace_unreceipted_skill_sha256),
+                dry_run=args.dry_run,
             )
             claude_skill_projection_plan = _preflight_claude_skill_projections(
                 root / "src.codex" / "skills",
@@ -14029,6 +14037,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 replace_unreceipted_skill_sha256=tuple(args.replace_unreceipted_skill_sha256),
                 claude_transport_root=owned_peer_transport_root,
                 claude_transport_optional=True,
+                dry_run=args.dry_run,
             )
             if canonical_plan.transport_stage is None:
                 owned_peer_transport_root = None
