@@ -14,6 +14,7 @@ Use it together with:
 
 Current references and maintenance guidance:
 
+- [distribution-runtime-project.md](distribution-runtime-project.md) indexes the planned installer delivery channels and the separate Rust and software development kit (SDK) release owners.
 - [routing/gpt-6-2-production-hotfix-2026-11-17.md](routing/gpt-6-2-production-hotfix-2026-11-17.md) for the current factory Sol/Astra generation refresh and offline verification boundary
 - [agents-mode-reference.md](agents-mode-reference.md) for the shared operator schema
 - [external-worker-design.md](external-worker-design.md) for external execution adapter design notes

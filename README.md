@@ -60,6 +60,9 @@ It binds the supplied runtime to its notice inventory; it does not change
 provider permissions. [Historical runtime evidence](https://github.com/applicate2628/Orchestrarium/blob/082d46cd83324117abcb965842005d3c15ab99ed/scripts/distribution/runtime-evidence.md)
 records only the exact earlier inputs and checks.
 
+The [Orche distribution project](docs/npm-distribution-project.md) plans release
+acquisition through PowerShell, POSIX shells, and optional npm channels.
+
 ## Claude Code: interactive use and automated workers
 
 Installing the Claude Code pack does not start Claude or authorize paid use.
