@@ -11,6 +11,22 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 - On POSIX (Portable Operating System Interface) systems such as Linux, recheck a private rollback snapshot's exact child identity and bytes after an allowed parent-permission change and before disposal. A changed child remains preserved; the original source and the parent's original mode retain their existing protection.
 
+- Keep an empty selected scratch namespace current through close completion. Retain existing empty directory identities or exact owner absence in the lifecycle transaction; a late foreign entry refuses completion and is preserved. Unrelated work-item scratch namespaces remain outside that selection, and ordinary close does not acquire historical scratch rows when its physical selection is empty.
+
+- Admit independently verified historical PASS custody bytes before the final selected-ledger check, so an already missing original artifact can be restored without changing its ledger. Preserve one captured ledger image, exact replay, explicit event and byte limits, and typed failures when those limits are exceeded.
+
+- Settle partial-migration pending receipts through the existing exact native write owner. Promotion and retirement now publish their actual effects to the held transaction, preserve foreign replacements even when bytes match, and retain the original failure if cleanup also fails. Create-only publication and final directory durability checks remain required.
+
+- Restore independently owned legacy-parent archive effects after a later failure, even when an external URI consumer changes. Compensation uses the existing operation-bound inverses; a foreign image inside the parent still prevents an overlapping restore and remains intact with the original failure reported.
+
+- Bind public close to its declared work-item before root acquisition. A repository named work-items can now close the selected task when its parent contains a different neighboring task, while duplicate selected identities and invalid subjects remain refused.
+
+- Restore documented subjectless topology observation through a repository alias when no root contract is present. Only this restricted read path normalizes the alias before shared root grammar; mutation, held contexts, selected subjects and contract-bearing roots retain their no-link checks.
+
+- Keep all selected bugs and link updates under the same admitted close operation. Failure after several bug dispositions can now restore each actual forward effect; inverse identity, one-use and currentness checks still preserve concurrent foreign edits and report incomplete cleanup when those edits prevent safe disposal.
+
+- Establish the selected ledger operation before admitting a staged successor's transfer inputs. Preserve the budget already derived from its source ledger, receipt and bootstrap rows through creation, so a valid transferred obligation is not rejected by a smaller recomputed limit. Explicit caller limits and separate-operation budget resets retain their existing checks.
+
 ## 2026-11-23
 
 - Prioritize the smallest working end-to-end result. During planning and review, the Lead defers speculative safeguards and unrelated work to the existing plan unless needed for that result. Existing safety and approval requirements are unchanged; no new workflow gate is introduced. Contract tests check the QA roles' referral and still check that both owning contracts state the classification rule.
