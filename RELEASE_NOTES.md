@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-24
 
+- On POSIX (Portable Operating System Interface) systems such as Linux, recheck a private rollback snapshot's exact child identity and bytes after an allowed parent-permission change and before disposal. A changed child remains preserved; the original source and the parent's original mode retain their existing protection.
+
 - Finalize explicitly selected Claude instruction updates through the already verified physical owners of linked `agents` and `commands` directories, while keeping logical names in ownership receipts. Refuse overlapping payload roots and late link replacement; a changed link that prevents safe rollback retains recovery evidence and reports incomplete settlement.
 
 - Clarify the existing provider-output boundary: complete private command-line transport is acquired before choosing the public result, and the chosen text and final receipt are scanned before delivery. Published Software Development Kit (SDK) observations retain their separate checks. Supported authentication modes grant no execution authority or proof that arbitrary unknown secrets are absent.
