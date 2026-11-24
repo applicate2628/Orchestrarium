@@ -708,7 +708,7 @@ class ProducerIntegrationTests(unittest.TestCase):
         selection, payload = PI._read_native_config_selection(config, self.transaction([]))
         plan = SimpleNamespace(config_selection=selection, config_exists=True, config_prior_digest=PI._file_sha256(config),
                                config_payload=payload, legacy_exists=True, legacy_path=legacy)
-        transaction = self.transaction([])
+        transaction = self.transaction([legacy])
         primary = RuntimeError("later")
         with patch.object(PI, "CODEX_LEGACY_LUNA_SHA256", PI._file_sha256(legacy)):
             with self.assertRaises(RuntimeError) as caught:
@@ -718,6 +718,7 @@ class ProducerIntegrationTests(unittest.TestCase):
                     raise primary
         self.assertIs(primary, caught.exception)
         self.assertEqual(original_identity, PI._CreateOnlyMutablePath._identity(legacy))
+        self.assertEqual(b"synthetic frozen legacy", legacy.read_bytes())
         self.assert_clean()
 
     def legacy_fixture(self, existing_backup):

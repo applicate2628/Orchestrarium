@@ -3911,6 +3911,21 @@ def test_canonical_lead_provider_order_matrix(
         shutil.rmtree(stage.path, ignore_errors=True)
 
 
+def _record_synthetic_owned_fixture_changes(
+    root: Path, provider: str, mode: str, changed: list[Path],
+) -> None:
+    """Seed a prior generation only within the real install's existing ownership."""
+    codec = installer._provider_ownership_module(ROOT)
+    scope = "global" if mode == "global" else "project"
+    receipt = root / installer.get_client(provider)["provider_root"] / codec.RECEIPT_NAME
+    record = codec.decode_record(receipt.read_bytes(), provider, scope)
+    for path in changed:
+        relative = path.relative_to(root).as_posix()
+        assert relative in record["files"], "synthetic prior cannot add ownership"
+        record["files"][relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+    receipt.write_bytes(codec.serialize_record(record, provider, scope))
+
+
 @pytest.mark.parametrize("mode", ("repo", "target", "global"))
 @pytest.mark.parametrize("provider_order", (("codex", "claude"), ("claude", "codex")))
 def test_receipted_transport_upgrade_converges_from_either_provider(
@@ -3918,28 +3933,43 @@ def test_receipted_transport_upgrade_converges_from_either_provider(
 ) -> None:
     install_root = tmp_path / "installation"
     install_root.mkdir()
-    assert _same_root_install("claude", mode, install_root, monkeypatch) == 0
-    skills = install_root / ".agents" / "skills"
-    lead = skills / "lead"
+    for provider in ("codex", "claude"):
+        assert _same_root_install(provider, mode, install_root, monkeypatch) == 0
+    leads = {provider: install_root / installer.get_client(provider)["canonical_runtime"]
+             for provider in ("codex", "claude")}
     peer = install_root / ".claude" / "agents"
-    payload = (lead / "scripts" / "provider_prompt.py").read_bytes() + b"\n# supported predecessor example\n"
+    factory_payload = (ROOT / "scripts" / "provider_prompt.py").read_bytes()
+    payload = factory_payload + b"\n# supported predecessor example\n"
     manifest_path = Path("shared") / installer.TRANSPORT_PROJECTION_MANIFEST
-    manifest = json.loads((lead / manifest_path).read_bytes())
+    manifest = json.loads((leads["codex"] / manifest_path).read_bytes())
     manifest["packRevision"] = "supported-predecessor-example"
     manifest["files"]["provider_prompt.py"]["sha256"] = hashlib.sha256(payload).hexdigest()
     encoded = (json.dumps(manifest, indent=2) + "\n").encode()
-    for participant in (lead, peer):
+    for participant in (*leads.values(), peer):
         (participant / "scripts" / "provider_prompt.py").write_bytes(payload)
         (participant / manifest_path).write_bytes(encoded)
-    (skills / installer._LEAD_RECEIPT_NAME).write_bytes(
-        installer._lead_receipt_bytes(installer._tree_sha256(lead, ignore_runtime_cache=True))
-    )
+    for provider, lead in leads.items():
+        lead_receipt = lead.parent / installer._LEAD_RECEIPT_NAME
+        lead_receipt.write_bytes(installer._lead_receipt_bytes(
+            installer._tree_sha256(lead, ignore_runtime_cache=True)))
+        changed = [lead / "scripts" / "provider_prompt.py", lead / manifest_path, lead_receipt]
+        if provider == "claude":
+            changed.extend((peer / "scripts" / "provider_prompt.py", peer / manifest_path))
+        _record_synthetic_owned_fixture_changes(install_root, provider, mode, changed)
     for provider in provider_order:
+        unselected = "claude" if provider == "codex" else "codex"
+        peer_roots = [install_root / path for path in installer.get_client(unselected)["roots"]]
+        before = {path: installer._InstallTransaction._observe(path) for path in peer_roots}
         assert _same_root_install(provider, mode, install_root, monkeypatch) == 0
-        assert (lead / "scripts" / "provider_prompt.py").read_bytes() == (ROOT / "scripts" / "provider_prompt.py").read_bytes()
-        assert (peer / "scripts" / "provider_prompt.py").read_bytes() == (ROOT / "scripts" / "provider_prompt.py").read_bytes()
-        receipt = installer._read_lead_receipt(skills / installer._LEAD_RECEIPT_NAME)
+        assert {path: installer._InstallTransaction._observe(path) for path in peer_roots} == before
+        lead = leads[provider]
+        assert (lead / "scripts" / "provider_prompt.py").read_bytes() == factory_payload
+        if provider == "claude":
+            assert (peer / "scripts" / "provider_prompt.py").read_bytes() == factory_payload
+        receipt = installer._read_lead_receipt(lead.parent / installer._LEAD_RECEIPT_NAME)
         assert receipt is not None and receipt[2] == installer._tree_sha256(lead, ignore_runtime_cache=True)
+    for participant in (*leads.values(), peer):
+        assert (participant / "scripts" / "provider_prompt.py").read_bytes() == factory_payload
 
 
 @pytest.mark.parametrize("peer_state", ("absent", "unknown"))
@@ -3952,8 +3982,11 @@ def test_unselected_unproved_peer_does_not_veto_canonical_upgrade(
     skills = root / ".agents/skills"
     lead = skills / "lead"
     (lead / "SKILL.md").write_bytes((lead / "SKILL.md").read_bytes() + b"\nold generation example\n")
-    (skills / installer._LEAD_RECEIPT_NAME).write_bytes(
+    lead_receipt = skills / installer._LEAD_RECEIPT_NAME
+    lead_receipt.write_bytes(
         installer._lead_receipt_bytes(installer._tree_sha256(lead, ignore_runtime_cache=True)))
+    _record_synthetic_owned_fixture_changes(
+        root, "codex", "target", [lead / "SKILL.md", lead_receipt])
     peer = root / ".claude"
     if peer_state == "unknown":
         path = peer / "agents/scripts/provider_prompt.py"
@@ -4861,7 +4894,7 @@ def test_exact_tree_post_upgrade_failure_restores_nested_readonly_snapshot(
                 installer._remove_readonly_tree(path)
 
 
-def test_readonly_historical_projection_migration_uses_transaction_safe_rename(
+def test_readonly_historical_projection_migration_preserves_platform_disposal_boundary(
     tmp_path: Path,
 ) -> None:
     anchor = tmp_path / "global-home"
@@ -4875,13 +4908,32 @@ def test_readonly_historical_projection_migration_uses_transaction_safe_rename(
     expected = installer._tree_sha256(target)
     assert expected is not None
     target.chmod(0o555)
+    transaction = installer._InstallTransaction([], enabled=False)
+    original = transaction._observe(target)
+    source_before = transaction._observe(source)
+    denied = os.name == "posix" and not os.access(target, os.W_OK)
 
     owner = installer._CreateOnlyMutablePath(
-        anchor, installer._InstallTransaction([], enabled=False), dry_run=False
+        anchor, transaction, dry_run=False
     )
-    owner.replace_exact_tree_with_projection(Path("skills") / "analyst", expected, source)
+    if denied:
+        # A retained live tree does not acquire the private-snapshot exception
+        # that would allow changing its parent permissions for child disposal.
+        with pytest.raises(installer._InstallFailure) as caught:
+            owner.replace_exact_tree_with_projection(Path("skills") / "analyst", expected, source)
+        effect = transaction._effects[-1]
+        assert caught.value.stable_id == "E_ROLLBACK_SETTLEMENT_FAILED"
+        assert caught.value.recovery_path.is_dir()
+        assert any(isinstance(member.cause_exception, PermissionError)
+                   for member in caught.value.members)
+        assert not effect.settled
+        assert transaction._observe(effect.retained) == transaction._relocate(original, target, effect.retained)
+        assert transaction._observe(target) == effect.published_state
+    else:
+        owner.replace_exact_tree_with_projection(Path("skills") / "analyst", expected, source)
 
     assert installer._projection_resolves_to(target, source)
+    assert transaction._observe(source) == source_before
     assert not (target.parent / ".analyst.projection.tmp").exists()
     assert not (target.parent / ".analyst.projection.tombstone").exists()
 
@@ -5699,9 +5751,7 @@ def test_global_codex_install_uses_shared_agents_skills_root(tmp_path: Path) -> 
     assert (home / ".agents" / "skills" / "lead" / "SKILL.md").is_file()
     # Codex itself may seed runtime-owned `.system` skills under CODEX_HOME;
     # Orchestrarium's role bodies must not be duplicated there.
-    assert (home / ".codex" / "skills" / "lead").resolve() == (
-        home / ".agents" / "skills" / "lead"
-    ).resolve()
+    assert not os.path.lexists(home / ".codex" / "skills" / "lead")
     assert (home / ".codex" / "agents" / "architect.toml").is_file()
 
 
@@ -5729,9 +5779,23 @@ def test_live_codex_docs_use_shared_agents_global_root() -> None:
         "$HOME/.codex/contracts",
     )
 
+    delegated_roots = {
+        "src.codex/skills/design-panel/SKILL.md": ("lead/external-dispatch.md", "external-dispatch.md"),
+        "src.codex/skills/lead/SKILL.md": ("operating-model.md", "operating-model.md"),
+        "src.codex/skills/review-loop/SKILL.md": ("external-dispatch.md", "external-dispatch.md"),
+    }
     for path in live_codex_docs:
         text = path.read_text(encoding="utf-8")
-        assert "$HOME/.agents/" in text, path.relative_to(ROOT)
+        delegation = delegated_roots.get(path.relative_to(ROOT).as_posix())
+        if delegation is None:
+            assert "$HOME/.agents/" in text, path.relative_to(ROOT)
+        else:
+            # Thin skills name their current runtime owner instead of copying
+            # its installation path. Verify both sides of that delegation.
+            reference, owner_name = delegation
+            assert reference in text, path.relative_to(ROOT)
+            owner_text = (ROOT / "src.codex/skills/lead" / owner_name).read_text(encoding="utf-8")
+            assert "$HOME/.agents/" in owner_text, owner_name
         compatibility_markers = {
             ("INSTALL.md", "~/.codex/skills"): (
                 "$HOME/.agents/skills/",

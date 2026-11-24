@@ -307,6 +307,8 @@ class AbortPolicyOwnershipContract:
             ("scripts/production_installer.py", "_install_hooks", "get", "CODEX_BIN"),
             ("scripts/production_installer.py", "_resolve_global_home", "get", "USERPROFILE"),
             ("scripts/production_installer.py", "_resolve_global_home", "get", "HOME"),
+            ("scripts/production_installer.py", "_native_codex_default_home", "get", "HOME"),
+            ("scripts/production_installer.py", "_matching_native_codex_global_policy", "get", "CODEX_HOME"),
             ("scripts/production_installer.py", "install", "get", "ORCHESTRARIUM_NO_HYPOTHESIS_HOOK"),
         }
     )

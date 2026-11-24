@@ -14,6 +14,7 @@ Covers the cases listed in the architecture review of commit 79aa5eb:
 
 from __future__ import annotations
 
+import ast
 import json
 import hashlib
 import importlib.util
@@ -1045,6 +1046,10 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.target.write_bytes(original)
         installer = REPO_ROOT / "scripts" / "production_installer.py"
         text = installer.read_text(encoding="utf-8")
+        install_hooks = next(node for node in ast.parse(text).body
+                             if isinstance(node, ast.FunctionDef) and node.name == "_install_hooks")
+        text = ast.get_source_segment(text, install_hooks)
+        self.assertIsNotNone(text)
         self.assertLess(text.index('"--validate-only"'), text.index("for marker, script, event, matcher"))
 
         for platform in ("claude", "codex"):

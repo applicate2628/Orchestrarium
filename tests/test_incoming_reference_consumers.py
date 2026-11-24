@@ -894,7 +894,7 @@ def test_direct_image_failure_owners_keep_safe_representation_cause(module, tmp_
             tmp_path, source, tmp_path / "work-items/bugs/archive/2026-10/owned-record.md",
             [{"consumer": "active/side/design.md", "kind": "physical", "value": "../../bugs/owned-record.md"}],
             failure_id="WI-CLOSE-LINK-INVENTORY")),
-        ("WI-CLOSE-LINK-AUTHORITY", lambda: module._close_link_authority(tmp_path, consumer, raw, None, False, 1)),
+        ("WI-CLOSE-LINK-AUTHORITY", lambda: module._close_link_authority(tmp_path, consumer, raw, raw, None, False, 1)),
         ("WI-CLOSE-LINK-VERIFY", lambda: module._close_link_uri_changes(raw, raw)),
     ]
     for owner, invoke in operations:

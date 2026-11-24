@@ -54,7 +54,7 @@ def test_removed_clause_or_example_only_cannot_satisfy_contract():
 def test_receiving_projections_keep_canonical_trigger():
     for relative, heading in (
         ("src.codex/skills/lead/subagent-contracts.md", "Shared handoff template"),
-        ("src.claude/agents/contracts/subagent-contracts.md", "Handoff template"),
+        ("adapters/claude/agents/contracts/subagent-contracts.md", "Handoff template"),
         ("shared/references/subagent-operating-model.md", "4. Standard task template for any subagent"),
     ):
         unit = selected_unit((ROOT / relative).read_text(encoding="utf-8"), heading, "Reuse-assessment carry-forward.")
@@ -75,7 +75,7 @@ def test_architect_consumes_bounded_current_evidence():
     assert "do not revive superseded scope or seek blanket re-approval of unchanged work" in text
 
 def test_operating_models_route_to_existing_revalidation_owner():
-    for relative in ("src.codex/skills/lead/operating-model.md", "src.claude/agents/contracts/operating-model.md"):
+    for relative in ("src.codex/skills/lead/operating-model.md", "adapters/claude/agents/contracts/operating-model.md"):
         text = (ROOT / relative).read_text(encoding="utf-8")
         assert "materially changed architectural assumptions" in text
         assert "bounded revalidation in shared Reuse before hand-rolling" in text

@@ -99,17 +99,21 @@ def test_uninstall_menu_requires_confirmation_then_sets_apply(installer, monkeyp
                      ("claude", ["--uninstall", "--global", "--apply"])]
 
 
-def test_every_client_uses_one_command_entrypoint(monkeypatch):
+@pytest.mark.parametrize("no_bytecode", (False, True))
+def test_every_client_uses_one_command_entrypoint(monkeypatch, no_bytecode):
     from types import SimpleNamespace
     spec = importlib.util.spec_from_file_location("common_client_entry_test", ROOT / "install.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    executable = module.sys.executable
+    monkeypatch.setattr(module, "sys", SimpleNamespace(executable=executable, dont_write_bytecode=no_bytecode))
     calls = []
     monkeypatch.setattr(module.subprocess, "run", lambda argv, **kw: calls.append(argv) or SimpleNamespace(returncode=0))
     for name, _ in module.CLIENTS:
         assert module._run_production(name, ["--dry-run"]) == 0
-    assert all(Path(argv[1]).name == "install-client.py" and argv[2] == "--client" for argv in calls)
-    assert [argv[3] for argv in calls] == [name for name, _ in module.CLIENTS]
+    prefix = [executable, "-B"] if no_bytecode else [executable]
+    assert calls == [prefix + [str(ROOT / "scripts/install-client.py"), "--client", name, "--dry-run"]
+                     for name, _ in module.CLIENTS]
 
 
 def test_primary_client_and_unknown_adapter_fail_closed(installer):
