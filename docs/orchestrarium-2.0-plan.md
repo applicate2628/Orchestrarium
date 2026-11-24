@@ -202,8 +202,8 @@ results do not establish complete SDK, installed or provider acceptance.
 
 Six isolated Linux verifier cases still cannot import `pytest` under the required
 `-I` mode in the available interpreters; optional official ACP dependencies retain
-separate collection holds. Two POSIX socket-boundary cases stop at the environment's
-socket-creation refusal before their downstream special-file checks. Those cases
+separate collection holds. Earlier attempts at two POSIX socket-boundary cases stopped at socket creation
+before their downstream special-file checks. Those cases
 remain unqualified. Full release qualification, live provider routes and actual
 installed receiving remain with their existing owners in step 2.
 
@@ -321,13 +321,11 @@ not interchangeable. No runtime root cause is established by this plan.
   classifier-only policy realization with execution unavailable, not an enabled
   worker. The [external dispatch contract](../src.codex/skills/lead/external-dispatch.md)
   controls real paths. A native-profile comparator cannot automatically cover them.
-- Pending documentation correction: the comment on `externalProvider` in
-  [defaults](../shared/agents-mode.defaults.yaml) still describes an older Kimi
-  read-only/no-tools restriction, unlike current
-  [provider realization policy](../shared/role-routing-policy.v1.json) and README.
-  [PR62](https://github.com/applicate2628/Orchestrarium/pull/62) reconciles that
-  comment with the existing contract and leaves all configuration values intact;
-  its source correction remains pending until merged.
+- [PR62](https://github.com/applicate2628/Orchestrarium/pull/62), merged on
+  November 24, reconciled the `externalProvider` comment in
+  [defaults](../shared/agents-mode.defaults.yaml) with the existing Kimi read and
+  scoped-worker contract in [provider realization policy](../shared/role-routing-policy.v1.json).
+  Configuration values, route admission and execution permissions are unchanged.
 - [Installation rules](../INSTALL.md) retain limited create-only/hash-pinned native
   role handling and reserve broader adoption/update/deletion/reclaim for 2.0.
   [Runtime limitations](../README.md) include unavailable generic Windows command
@@ -585,10 +583,8 @@ Current-source reconciliation, not a claim about PR merge state or installed beh
   owner-level corrections, not new parallel guards or a new state engine. Their scoped
   checks do not prove universal agent enforcement or installed receiving.
 Those historical commits do not establish every later installer correction or
-current installed behavior. The Kimi comment drift noted above is still present
-in main's defaults at the reconciliation revision; retain that small owner-scoped
-documentation correction rather than claiming it completed or expanding it into a
-new provider project.
+current installed behavior. The later Kimi comment correction was received
+separately through PR62; it does not add a provider route or qualify installation.
 
 ## Design economy and verification
 
