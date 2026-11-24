@@ -31,7 +31,9 @@ def test_authenticated_prior_migrates_but_modified_prior_refuses(tmp_path, monke
         selected = next(item for item in plan.skills if item.name == name)
         assert selected.accepted_prior == strong
         with pytest.raises(RuntimeError, match="controlled rollback"):
-            with installer._InstallTransaction([installed], enabled=True) as tx:
+            with installer._InstallTransaction(
+                installer._canonical_skill_snapshot_paths(skills, plan), enabled=True,
+            ) as tx:
                 owner = installer._CreateOnlyMutablePath(tmp_path, tx, dry_run=False)
                 installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
                 assert installer._tree_sha256(installed, ignore_runtime_cache=True) == selected.source_digest

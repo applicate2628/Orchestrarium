@@ -1289,6 +1289,7 @@ def test_reserved_external_run_owns_cleanup_once_and_terminal_state(
     monkeypatch: pytest.MonkeyPatch,
     initialized: bool,
 ) -> None:
+    monkeypatch.setenv("CLAUDE_PROMPTS_DIR", str((tmp_path / "captures").resolve()))
     receipt_path = (tmp_path / f"owned-{initialized}.receipt").resolve()
     receipt = owner.TerminalReceiptV1.reserve(receipt_path)
     lifecycle = owner.RunCaptureLifecycle.create("claude", f"owned-{initialized}")

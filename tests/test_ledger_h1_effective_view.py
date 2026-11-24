@@ -165,6 +165,7 @@ def synthetic_artifacts(
     *,
     sealed_closer_artifact: str | None = None,
     sealed_closer_is_terminal: bool = False,
+    invalid_launch_binding: bool = True,
 ):
     item_a = root / "work-items" / "active" / "reader-a"
     item_b = root / "work-items" / "active" / "reader-b"
@@ -219,7 +220,7 @@ def synthetic_artifacts(
             "reader-b",
             eventKind="launch",
             status="running",
-            launchFlags="not-an-array",
+            **({"launchFlags": "not-an-array"} if invalid_launch_binding else {}),
         ),
         event(
             "terminal-bad-1",
@@ -257,7 +258,8 @@ def synthetic_artifacts(
                 artifactEvidenceEligible=True,
             )
         )
-    b_masks = [mask(), mask(), mask(launchEligible=True), mask()]
+    b_masks = [mask(launchEligible=not invalid_launch_binding),
+               mask(terminalEligible=not invalid_launch_binding), mask(launchEligible=True), mask()]
     views = []
     entries = []
     for index, (path, prefix, rows, masks_) in enumerate(

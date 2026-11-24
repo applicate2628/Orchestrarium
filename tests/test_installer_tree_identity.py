@@ -281,7 +281,9 @@ def test_witnessed_prior_migrates_and_transaction_rolls_back(tmp_path: Path, nam
         selected = next(item for item in plan.skills if item.name == name)
         assert selected.accepted_prior == strong
         with pytest.raises(RuntimeError, match="forced rollback"):
-            with installer._InstallTransaction([installed], enabled=True) as transaction:
+            with installer._InstallTransaction(
+                installer._canonical_skill_snapshot_paths(skills, plan), enabled=True,
+            ) as transaction:
                 owner = installer._CreateOnlyMutablePath(target, transaction, dry_run=False)
                 installer._apply_canonical_skills_plan(plan, skills, owner, root=root)
                 assert installer._tree_sha256(installed, ignore_runtime_cache=True) == selected.source_digest
