@@ -13,6 +13,10 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 - Clarify when an unchanged file needs no repeat review during a release rebuild, and when an exact-commit decision needs a new review. Lead opens the installed guidance only when handling scanner findings or rebuilding a release with prior findings. Fresh pre-push scans and existing decision scope are unchanged.
 
+- Work-item checker regression tests now require the explicit refusal for closure calls without an owner-issued source context and preserve resource budgets when observing real terminal evidence. The native legacy-close Goal fixtures run on Windows, matching their producer's supported platform, while portable checker cases remain active.
+
+- Name the selected active-only audit mode in failure summaries without attributing every failure to an active work item: global lifecycle checks can still report invalid archive structure. The full-audit summary, failure count, exit status and archive checks are unchanged.
+
 - The model resolver now compares eligible models and reasoning efforts using benchmark quality, task time, and one relative cost unit (Sol 6.2 High = 1). The Lead selects and explains the best fit for each task; the default is a fallback. The benchmark figures are not prices, launch permissions, or runtime guarantees.
 
 - On Windows, the installer keeps existing owned files and their access rules when a standalone Lead upgrade only updates bytes and adds ordinary files under existing folders. The same transaction verifies new files and rolls back on failure. Coupled transport replacements retain their existing path.
