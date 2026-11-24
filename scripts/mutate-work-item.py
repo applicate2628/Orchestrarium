@@ -767,7 +767,7 @@ class LifecycleTransaction:
             self._selected_ledger_scope_token = None
 
     def admit_ledger_operation(self, item, *, selected_snapshot=None, participant_snapshots=(),
-            known_row_bytes=(), unknown_terminal_rows=0):
+            known_row_bytes=(), unknown_terminal_rows=0, historical_pass_custody_blobs=None):
         """Hold one final pair from actual selected captures and producer effects."""
         self.ensure_selected_ledger_scope()
         snapshot = (selected_snapshot if selected_snapshot is not None else
@@ -777,7 +777,8 @@ class LifecycleTransaction:
         try:
             budget, predicates = _admit_ledger_operation(item, snapshot.path, snapshot.data,
                 ledger_resource_budget=self.ledger_resource_budget, participants=participants,
-                known_row_bytes=known_row_bytes, unknown_terminal_rows=unknown_terminal_rows)
+                known_row_bytes=known_row_bytes, unknown_terminal_rows=unknown_terminal_rows,
+                historical_pass_custody_blobs=historical_pass_custody_blobs)
         except ValueError as exc:
             message = str(exc)
             failure_id = message.split(":", 1)[0] if message.startswith("WI-LEDGER-RESOURCE-") else "WI-LEDGER-UNSETTLED"
@@ -873,6 +874,7 @@ class LifecycleTransaction:
         self._retained_observations: dict[Path, CapturedFileSnapshot | CapturedDirectorySnapshotV1] = {
             snapshot.path: snapshot for snapshot in inputs.inventories
         }
+        self._retained_absence_evidence: tuple = ()
         self._validator_reuse = None
         self._runtime_source_authority = _declared_runtime_source_authority()
         self._source_admission_failure: BaseException | None = None
@@ -966,6 +968,9 @@ class LifecycleTransaction:
             for kind, value in self._binding_evidence:
                 if kind == "integrity-failure":
                     raise value[1]
+            for row in self._retained_absence_evidence:
+                self._verify_integrity_constraint(row,
+                    lambda: _verify_project_binding_evidence((row,), "WI-CATEGORY-MIGRATION-INVENTORY"))
             self._verify_observation_map({path: value for path, value in self._retained_observations.items()
                                          if not self._is_runtime_source(path)},
                 **({"creation_owner": creation_owner} if creation_owner is not None else {}))
@@ -2026,7 +2031,8 @@ class LifecycleTransaction:
                     self._retain_source_failure(failure)
                 raise
 
-    def observe_retained_inputs(self, snapshots: Iterable[CapturedFileSnapshot | CapturedDirectorySnapshotV1]) -> None:
+    def observe_retained_inputs(self, snapshots: Iterable[CapturedFileSnapshot | CapturedDirectorySnapshotV1],
+                               *, absent_paths: Iterable[Path] = ()) -> None:
         for snapshot in snapshots:
             if (isinstance(snapshot, CapturedFileSnapshot)
                     and type(vars(snapshot).get("require_single_link")) is not bool):
@@ -2049,6 +2055,16 @@ class LifecycleTransaction:
                 self._verify_observation_map({snapshot.path: snapshot})
                 self._assert_source_admission()
             self._retained_observations[snapshot.path] = snapshot
+        for path in absent_paths:
+            path = _lifecycle_unresolved_absolute(path)
+            if not path.is_relative_to(self.repository_root):
+                raise LifecycleError("WI-CATEGORY-MIGRATION-INVENTORY", "retained absence escapes admitted repository")
+            evidence = []
+            _record_project_absence_at(path, evidence, "WI-CATEGORY-MIGRATION-INVENTORY")
+            _verify_project_binding_evidence(tuple(evidence), "WI-CATEGORY-MIGRATION-INVENTORY")
+            rows = tuple(row for row in evidence if row not in self._retained_absence_evidence)
+            self._binding_evidence += tuple(row for row in rows if row not in self._binding_evidence)
+            self._retained_absence_evidence += rows
 
     def cleanup_intersects_unsettled(self, paths: tuple[Path, ...]) -> bool:
         for path in paths:
@@ -2364,10 +2380,11 @@ def _lifecycle_participant(function, *, input_role: str = "caller-root", subject
     signature = inspect.signature(function)
     if subject_parameters is not None:
         if (not isinstance(subject_parameters, tuple) or not subject_parameters
-            or subject_parameters[0] not in ("category-slug", "category-reference", "transition")
-            or len(subject_parameters) != (3 if subject_parameters[0] == "category-slug" else 2)
+            or subject_parameters[0] not in ("category-slug", "category-reference", "transition", "legacy-close")
+            or len(subject_parameters) != (3 if subject_parameters[0] in ("category-slug", "legacy-close") else 2)
             or subject_parameters[-1] not in signature.parameters
-            or (subject_parameters[0] == "category-slug" and subject_parameters[1] not in CATEGORIES)):
+            or (subject_parameters[0] == "category-slug" and subject_parameters[1] not in CATEGORIES)
+            or (subject_parameters[0] == "legacy-close" and subject_parameters[1] not in signature.parameters)):
             raise TypeError("invalid lifecycle subject declaration")
     def prepare_subject(root, args, kwargs):
         if "_prepared_category" in kwargs:
@@ -2377,6 +2394,15 @@ def _lifecycle_participant(function, *, input_role: str = "caller-root", subject
         arguments = signature.bind(root, *args, **kwargs)
         arguments.apply_defaults()
         value = arguments.arguments[subject_parameters[-1]]
+        if subject_parameters[0] == "legacy-close":
+            slug = arguments.arguments[subject_parameters[1]]
+            _validate_slug(slug)
+            reference = ("work-item", slug)
+            if value is None:
+                return {"selected_reference": reference}, {}
+            request = _legacy_evidence_input(value)
+            return {"selected_transition": request["operationId"],
+                "selected_transition_fallback": reference}, {}
         if subject_parameters[0] == "category-slug":
             _validate_slug(value)
             return {"selected_reference": (subject_parameters[1], value)}, {}
@@ -2831,6 +2857,16 @@ def _project_root_candidates(root, input_role):
     return (resolved, resolved.parent) if resolved.parent / "work-items" == resolved else (resolved,)
 
 
+def _validate_transition_reference_fallback(operation_id, reference):
+    if reference is None:
+        return
+    if (operation_id is None or not isinstance(reference, tuple) or len(reference) != 2
+            or reference[0] != "work-item"):
+        raise LifecycleError("WI-LIFECYCLE-LOCK-IDENTITY", "transition fallback requires one declared work-item")
+    _validate_transition_operation_id(operation_id)
+    _validate_slug(reference[1])
+
+
 def select_transition_resource_inputs(root, *, input_role="caller-root", selection=None,
         read_admission=None, acquisition_ceiling=None, output_ceiling=None, acquired_input=None):
     """Select finite read demand from native metadata, before any pending JSON read.
@@ -2851,10 +2887,13 @@ def select_transition_resource_inputs(root, *, input_role="caller-root", selecti
         if read_admission is not None and read_admission != current.transition_resource_inputs.read_admission:
             raise LifecycleError("WI-LIFECYCLE-RESOURCE-DRIFT", "nested operation changed transition admission")
         return current.transition_resource_inputs
-    if selection is not None and (not isinstance(selection, dict) or
-            set(selection) - {"selected_locator", "selected_reference", "selected_transition"} or
-            sum(value is not None for value in selection.values()) > 1):
-        raise LifecycleError("WI-LIFECYCLE-LOCK-IDENTITY", "invalid transition resource selection")
+    if selection is not None:
+        if (not isinstance(selection, dict) or
+                set(selection) - {"selected_locator", "selected_reference", "selected_transition", "selected_transition_fallback"} or
+                sum(selection.get(key) is not None for key in ("selected_locator", "selected_reference", "selected_transition")) > 1):
+            raise LifecycleError("WI-LIFECYCLE-LOCK-IDENTITY", "invalid transition resource selection")
+        _validate_transition_reference_fallback(selection.get("selected_transition"),
+            selection.get("selected_transition_fallback"))
     if read_admission == "explicit" and acquisition_ceiling is None:
         raise LifecycleError("WI-LIFECYCLE-RESOURCE-INCOMPLETE", "explicit transition admission requires all three numeric controls")
     ceiling = _transition_resource_budget(acquisition_ceiling) if acquisition_ceiling is not None else None
@@ -5810,7 +5849,9 @@ def _record_project_absence_at(path: Path, evidence: list, failure_id: str) -> N
 
 def _observe_project_path_at(path: Path, expected_kind: str, evidence: list,
     failure_id: str):
-    _lifecycle_reject_unreduced_reparse(path, failure_id=failure_id,
+    # The leaf's first observation owns presence. A reparse walk of the leaf
+    # followed by a second lstat could turn disappearance into initial absence.
+    _lifecycle_reject_unreduced_reparse(path.parent, failure_id=failure_id,
         message="selected structural path is unsafe")
     try:
         info = path.lstat()
@@ -5819,6 +5860,11 @@ def _observe_project_path_at(path: Path, expected_kind: str, evidence: list,
         return None
     except OSError as exc:
         raise LifecycleError(failure_id, "selected structural path unavailable") from exc
+    if stat.S_ISLNK(info.st_mode) or bool(
+        getattr(info, "st_file_attributes", 0)
+        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    ):
+        raise LifecycleError(failure_id, "selected structural path is unsafe")
     if (expected_kind == "file" and not stat.S_ISREG(info.st_mode)) or (expected_kind == "directory" and not stat.S_ISDIR(info.st_mode)):
         raise LifecycleError(failure_id, "selected structural path has an unsupported type")
     if expected_kind == "file":
@@ -5829,23 +5875,13 @@ def _observe_project_path_at(path: Path, expected_kind: str, evidence: list,
 
 
 def _project_identity_children_at(path: Path, evidence: list, failure_id: str) -> tuple[Path, ...]:
-    _lifecycle_reject_unreduced_reparse(path, failure_id=failure_id,
-        message="root acquisition namespace is unsafe")
-    try:
-        info = path.lstat()
-    except FileNotFoundError:
-        _record_project_absence_at(path, evidence, failure_id)
+    if _observe_project_path_at(path, "directory", evidence, failure_id) is None:
         return ()
-    except OSError as exc:
-        raise LifecycleError(failure_id, "root acquisition namespace unavailable") from exc
-    if not stat.S_ISDIR(info.st_mode):
-        raise LifecycleError(failure_id, "root acquisition namespace is not a directory")
-    chain = _capture_path_parent_chain(path / ".project-identity-observation", failure_id)
     try:
         children = tuple(sorted(path.iterdir(), key=lambda child: child.name))
     except OSError as exc:
         raise LifecycleError(failure_id, "root acquisition namespace unavailable") from exc
-    evidence.extend((("chain", chain), ("membership", (path, tuple(child.name for child in children)))))
+    evidence.append(("membership", (path, tuple(child.name for child in children))))
     return children
 
 
@@ -5953,6 +5989,7 @@ def _resolve_project_root_identity(
     failure_id: str = "WI-LIFECYCLE-LOCK-IDENTITY",
     selected_locator: tuple[str, str] | None = None,
     selected_reference: tuple[str, str] | None = None, selected_transition: str | None = None,
+    selected_transition_fallback: tuple[str, str] | None = None,
     binding_evidence_out: list | None = None,
     acquisition_purpose: str = "bound-acquisition",
     acquired_input=None, ledger_resource_budget=None,
@@ -5964,6 +6001,7 @@ transition_resource_budget=None) -> tuple[Path, Path]:
         raise LifecycleError(failure_id, "unknown project root input role")
     if sum(value is not None for value in (selected_locator, selected_reference, selected_transition)) > 1:
         raise LifecycleError(failure_id, "multiple selected project subjects")
+    _validate_transition_reference_fallback(selected_transition, selected_transition_fallback)
     if selected_reference is not None:
         if not isinstance(selected_reference, tuple) or len(selected_reference) != 2 or selected_reference[0] not in CATEGORIES:
             raise LifecycleError("WI-REFERENCE-INVALID", "invalid selected logical subject")
@@ -6004,7 +6042,10 @@ transition_resource_budget=None) -> tuple[Path, Path]:
             raise LifecycleError(failure_id, "caller project root differs from held scope")
         current.verify()
         return current.repository_root, current.work_items_root
-    repositories = _project_root_candidates(root, input_role)
+    # Only the already-restricted observation route may normalize an alias.
+    # Bound acquisition retains the original path for the shared no-link gate.
+    repositories = _project_root_candidates(
+        resolved if acquisition_purpose == "topology-observation" else root, input_role)
     if len(repositories) == 1 and not selected:
         return resolved, resolved / "work-items"
     bindings = []
@@ -6023,12 +6064,26 @@ transition_resource_budget=None) -> tuple[Path, Path]:
         evidence.extend(observed)
         if matched:
             bindings.append(repository)
-    if selected and not bindings:
+    if selected_transition_fallback is not None and not bindings:
+        # A pending operation owns reentry before ordinary terminal acquisition.
+        # Only its absence across every candidate admits the declared subject.
         for repository in repositories:
-            subjects, observed = _read_project_namespace_identity_at(repository / "work-items", failure_id=failure_id, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
+            matched, observed = _read_selected_reference_at(repository / "work-items",
+                selected_transition_fallback, failure_id, ledger_resource_budget=ledger_resource_budget,
+                transition_resource_budget=transition_resource_budget)
             evidence.extend(observed)
-            if subjects or len(repositories) == 1:
+            if matched:
                 bindings.append(repository)
+    if selected and not bindings:
+        if selected_transition_fallback is not None:
+            if len(repositories) == 1:
+                bindings.append(repositories[0])
+        else:
+            for repository in repositories:
+                subjects, observed = _read_project_namespace_identity_at(repository / "work-items", failure_id=failure_id, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
+                evidence.extend(observed)
+                if subjects or len(repositories) == 1:
+                    bindings.append(repository)
     _verify_project_binding_evidence(tuple(evidence), failure_id)
     if len(bindings) != 1:
         outcome = "ambiguous" if bindings else "unbound"
@@ -11708,6 +11763,7 @@ def start_item(root: Path, slug: str, status_data: bytes, *, inject_readme_failu
     active_parent = work_items / "active"
     if admission_ledger is not None:
         transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+        transaction.ensure_selected_ledger_scope()
         participant_snapshots = []
         if transfer_relation is not None:
             source_item = resolve_category(root, f"work-item:{transfer_relation[0]}",
@@ -12475,6 +12531,31 @@ def _scratch_ledger_entries(item: Path, *, ledger_resource_budget=None) -> list[
     return _scratch_entries_from_events(item, effective_events)
 
 
+def _observe_empty_scratch_namespace(owner_root: Path, owner_inspection) -> None:
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if transaction is None:
+        return
+    failure_id = "WI-SCRATCH-OWNERSHIP-INCOMPLETE"
+    if not owner_inspection.exists:
+        transaction.observe_retained_inputs((), absent_paths=(owner_root,))
+    else:
+        owner = _capture_owned_directory_snapshot(owner_root, failure_id=failure_id)
+        if _lifecycle_file_identity(owner.metadata) != owner_inspection.identity[:2]:
+            raise LifecycleError(failure_id, "empty scratch owner changed during selection")
+        snapshots = [owner]
+        for name, metadata in owner.members:
+            if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode) or bool(
+                getattr(metadata, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+            ):
+                raise LifecycleError(failure_id, "empty scratch run namespace became unsafe")
+            run = _capture_owned_directory_snapshot(owner_root / name, failure_id=failure_id)
+            if run.members or _lifecycle_file_snapshot_key(run.metadata) != _lifecycle_file_snapshot_key(metadata):
+                raise LifecycleError(failure_id, "empty scratch run namespace changed during selection")
+            snapshots.append(run)
+        transaction.observe_retained_inputs(snapshots)
+    transaction.verify()
+
+
 def _scratch_disposition_plan(
     root: Path,
     item: Path,
@@ -12493,6 +12574,7 @@ def _scratch_disposition_plan(
         raise LifecycleError("WI-SCRATCH-UNSAFE-ENTRY", str(exc)) from exc
     originals, tombstones = _scratch_namespace_entries(owner_root)
     if not originals and not tombstones and not retention_paths and (not archived or selected_entries == []):
+        _observe_empty_scratch_namespace(owner_root, owner_inspection)
         return ()
     if selected_entries is None and not ledger.exists():
         if archived and retention_paths:
@@ -14401,6 +14483,7 @@ def _verify_parent_archive_link_targets(plan: dict, *, archived: bool,
             raise LifecycleError(failure_id, "declared absent URI target appeared")
 
 
+@functools.partial(_lifecycle_participant, subject_parameters=('legacy-close', 'slug', 'legacy_evidence_data'))
 def close_item(root, slug, closure_data, terminal_instant, *, inject_readme_failure=False,
                inject_bug_failure_after=None, allow_protected_uri_updates=False,
                legacy_evidence_data=None, apply=False, inject_failure_at=None, ledger_resource_budget=None,):
@@ -14642,6 +14725,8 @@ def _close_item_directory(
     for scratch in scratch_plan:
         if scratch.disposition == "completed-disposal":
             _recheck_completed_disposal(root, scratch, ledger_resource_budget=ledger_resource_budget)
+    # Every selected bug and link belongs to this close, including its inverses.
+    held.bind_operation(link_plan)
     try:
         for index, plan in enumerate(bug_plans, start=1):
             if plan.action != "terminalize":
@@ -14655,7 +14740,6 @@ def _close_item_directory(
                 )
             touched_bugs.append(plan)
             transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
-            transaction.bind_operation(plan)
             with _admit_lifecycle_write_target(plan.source, failure_id="WI-LIFECYCLE-WRITE-BOUNDARY", _operation_owner=plan) as write_target:
                 _atomic_write(plan.source, plan.after, target=write_target)
             if plan.source in consumer_captures:
@@ -14757,6 +14841,7 @@ def _close_item_directory(
                 raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "ordinary proof postimage differs")
             held.observe_retained_inputs((settlement_capture,))
             _verify_settlement(root, settlement_path, json.loads(settlement_data), ledger_resource_budget=ledger_resource_budget)
+        held.verify()
     except BaseException as exc:
         composer = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
         composer.capture_primary(exc)
@@ -15298,12 +15383,22 @@ def _retain_historical_pass_custody(
             item / "agent-runs.jsonl", failure_id=stale,
             maximum_bytes=None, ledger_resource_budget=ledger_resource_budget,
         )
-        ledger_resource_budget, captured = _CURRENT_LIFECYCLE_TRANSACTION.get().admit_ledger_operation(
-            item, selected_snapshot=captured)
         raw = captured.data
+        # Parse the exact captured image under its derived acquisition budget.
+        # Final H1 admission must see the selected custody bytes: the original
+        # artifact may already be missing, which is what this operation repairs.
+        try:
+            demand = validator.inspect_ledger_resource_demand(captured.path, ledger_resource_budget, source_bytes=raw)
+            parse_budget = validator.resolve_ledger_resource_budget(
+                ledger_resource_budget.max_events if ledger_resource_budget is not None else None,
+                ledger_resource_budget.max_ledger_bytes if ledger_resource_budget is not None else None, demand=demand)
+        except ValueError as exc:
+            message = str(exc)
+            failure_id = message.split(":", 1)[0] if message.startswith("WI-LEDGER-RESOURCE-") else "WI-LEDGER-UNSETTLED"
+            raise LifecycleError(failure_id, message) from exc
         errors: list[str] = []
         metadata: list[dict[str, object]] = []
-        events = validator.load_jsonl(captured.path, errors, metadata, raw, ledger_resource_budget=ledger_resource_budget)
+        events = validator.load_jsonl(captured.path, errors, metadata, raw, ledger_resource_budget=parse_budget)
         targets = [
             event for event, identity in zip(events, metadata)
             if identity["line"] == raw_line_ordinal
@@ -15328,6 +15423,8 @@ def _retain_historical_pass_custody(
                 or envelope.get("snapshotSha256") != expected_original_sha256
             ):
                 raise LifecycleError(stale, "replay request conflicts with immutable association")
+            ledger_resource_budget, captured = _CURRENT_LIFECYCLE_TRANSACTION.get().admit_ledger_operation(
+                item, selected_snapshot=captured)
             _, replay_errors = validator.resolve_historical_pass_custody(item, raw, events, metadata, ledger_resource_budget=ledger_resource_budget)
             if replay_errors:
                 raise LifecycleError(replay_errors[0].split(":", 1)[0], "; ".join(replay_errors))
@@ -15346,6 +15443,8 @@ def _retain_historical_pass_custody(
         envelope = _historical_pass_association(raw, target, raw_line_ordinal, expected_raw_line_sha256, expected_original_sha256)
         envelope_bytes = validator._canonical_projection_bytes(envelope)
         candidates = {association_key: envelope_bytes, snapshot_key: original_bytes}
+        ledger_resource_budget, captured = _CURRENT_LIFECYCLE_TRANSACTION.get().admit_ledger_operation(
+            item, selected_snapshot=captured, historical_pass_custody_blobs=candidates)
         states, acquired = [], []
         errors = validator.validate_work_item(
             item, strict_revise=False, historical_pass_custody_blobs=candidates,
@@ -20492,6 +20591,7 @@ def _move_terminal_category(root: Path, reference: str, *,
         readme_after = None
         moved = False
         _verify_project_binding_evidence(plan["ownerEvidence"], "WI-CLOSE-LINK-DRIFT")
+        transaction.bind_operation(plan)
         try:
             for row in plan["links"]:
                 _verify_captured_file(plan["consumerCaptures"][row["path"]], "WI-CLOSE-LINK-DRIFT")
@@ -20518,11 +20618,11 @@ def _move_terminal_category(root: Path, reference: str, *,
                     for name, data in (("status.md", terminal_status), ("closure.md", terminal_closure)):
                         if _read_lifecycle_image(target / name, data, failure_id="WI-CLOSE-LINK-DRIFT") != data:
                             raise LifecycleError("WI-CLOSE-LINK-DRIFT", "parent rollback image differs")
-                    _replace_lifecycle_directory(target, source)
+                    transaction.restore_owned_movement(target, source)
                 for path, before, after in ((status, prior_status, terminal_status), (closure, prior_closure, terminal_closure)):
                     if _read_lifecycle_image(path, before, after, failure_id="WI-CLOSE-LINK-DRIFT") not in {before, after}:
                         raise LifecycleError("WI-CLOSE-LINK-DRIFT", "parent rollback image differs")
-                    _atomic_write(path, before)
+                    transaction.restore_owned_file(path, before)
             except BaseException as cause:
                 failures.append(str(cause))
             for row in reversed(touched):
@@ -20531,14 +20631,14 @@ def _move_terminal_category(root: Path, reference: str, *,
                     if observed not in {row["before"], row["after"]}:
                         raise LifecycleError("WI-CLOSE-LINK-DRIFT", "URI rollback consumer changed")
                     if observed == row["after"]:
-                        _atomic_write(row["path"], row["before"])
+                        transaction.restore_owned_file(row["path"], row["before"])
                 except BaseException as cause:
                     failures.append(str(cause))
             try:
                 if readme.read_bytes() != readme_before.data:
                     if readme_after is None or readme.read_bytes() != readme_after:
                         raise LifecycleError("WI-README-STALE", "README rollback image differs")
-                    _atomic_write(readme, readme_before.data)
+                    transaction.restore_owned_file(readme, readme_before.data)
             except BaseException as cause:
                 failures.append(str(cause))
             for directory in reversed(created_dirs):
@@ -21990,7 +22090,7 @@ def _verify_structural_node(node: tuple, failure_id: str) -> None:
 def _admit_ledger_operation(item, ledger_path, selected_bytes, *, ledger_resource_budget=None,
         known_row_bytes=(), unknown_terminal_rows=0, validator=None, transition_resource_budget=None,
         participants=None, selected_snapshot=None, transfer_source_item=None,
-        transfer_operation_id=None, selected_transfer_snapshots_out=None):
+        transfer_operation_id=None, selected_transfer_snapshots_out=None, historical_pass_custody_blobs=None):
     """Freeze one operation's finite capacity from its exact selected image.
 
     The caller owns the primary capture (or permitted creation absence). This
@@ -22006,7 +22106,8 @@ def _admit_ledger_operation(item, ledger_path, selected_bytes, *, ledger_resourc
         selected_identity = (item / "agent-runs.jsonl").relative_to(root).as_posix()
         resolution = validator._resolve_ledger_h1_selected(root, item, selected_identity,
             selected_ledger_bytes=selected_bytes, ledger_resource_budget=ledger_resource_budget,
-            transition_resource_budget=transition_resource_budget, resource_artifacts_out=artifacts)
+            transition_resource_budget=transition_resource_budget, resource_artifacts_out=artifacts,
+            historical_pass_custody_blobs=historical_pass_custody_blobs)
         if resolution.classification == "invalid":
             failure_ids = resolution.context.observation.failure_ids
             raise LifecycleError(failure_ids[0] if failure_ids else "WI-LEDGER-UNSETTLED",
@@ -24549,6 +24650,36 @@ def _partial_recovery_exact_receipt_snapshot(
     return snapshot
 
 
+def _partial_recovery_settle_pending(
+    snapshot: CapturedFileSnapshot, *, receipt: Path | None = None,
+) -> None:
+    """Publish this captured pending image's promotion or exact retirement."""
+    failure_id = "WI-PARTIAL-MIGRATION-RECOVERY-RECEIPT-CONFLICT"
+    owner = LifecycleWriteTarget(
+        snapshot.path if receipt is None else receipt,
+        failure_id=failure_id,
+        _operation_owner=_CURRENT_LIFECYCLE_TRANSACTION.get(),
+    )
+    primary = None
+    try:
+        owner._acquire_existing_parents()
+        _verify_captured_file(snapshot, failure_id)
+        image = owner.owned_image(snapshot.path.name, maximum_bytes=max(1, snapshot.length))
+        if (image is None or image["identity"]["value"] != list(snapshot.identity)
+                or _unb64(image["data"]) != snapshot.data):
+            raise _partial_recovery_fail(failure_id, "pending recovery receipt image changed")
+        if receipt is None:
+            owner.remove_owned(snapshot.path.name, image)
+        else:
+            owner.promote_create({**image, "stagePath": str(snapshot.path)})
+    except BaseException as exc:
+        primary = exc
+        raise
+    finally:
+        owner.__exit__(type(primary) if primary is not None else None, primary,
+                       primary.__traceback__ if primary is not None else None)
+
+
 def _partial_recovery_settle_receipt(path: Path, data: bytes) -> bool:
     if _partial_recovery_exact_receipt_snapshot(path, data) is not None:
         return False
@@ -24567,11 +24698,7 @@ def _partial_recovery_settle_receipt(path: Path, data: bytes) -> bool:
             pending_snapshot.length < len(data)
             and data.startswith(pending_snapshot.data)
         ):
-            _verify_captured_file(
-                pending_snapshot,
-                "WI-PARTIAL-MIGRATION-RECOVERY-RECEIPT-CONFLICT",
-            )
-            pending.unlink()
+            _partial_recovery_settle_pending(pending_snapshot)
             _atomic_write(pending, data)
             pending_created = True
         else:
@@ -24594,7 +24721,7 @@ def _partial_recovery_settle_receipt(path: Path, data: bytes) -> bool:
     final_snapshot = None
     try:
         try:
-            os.link(pending, path)
+            _partial_recovery_settle_pending(pending_snapshot, receipt=path)
             linked_here = True
             final_snapshot = _partial_recovery_exact_receipt_snapshot(path, data)
             if final_snapshot is None or final_snapshot.identity != pending_snapshot.identity:
@@ -24626,10 +24753,13 @@ def _partial_recovery_settle_receipt(path: Path, data: bytes) -> bool:
                 "WI-PARTIAL-MIGRATION-RECOVERY-RECEIPT-CONFLICT",
                 "final recovery receipt reread identity differs",
             )
-        try:
-            pending.unlink()
-        except FileNotFoundError:
-            pass
+        if not linked_here:
+            _partial_recovery_settle_pending(pending_snapshot)
+        if os.path.lexists(pending):
+            raise _partial_recovery_fail(
+                "WI-PARTIAL-MIGRATION-RECOVERY-RECEIPT-CONFLICT",
+                "pending recovery receipt reappeared after settlement",
+            )
         return True
     except BaseException as exc:
         composer = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
@@ -24680,10 +24810,10 @@ def _partial_recovery_settle_receipt(path: Path, data: bytes) -> bool:
                     or pending.read_bytes() != data
                 ):
                     raise OSError("pending recovery receipt identity changed")
-                pending.unlink()
+                _partial_recovery_settle_pending(pending_snapshot)
             except FileNotFoundError:
                 pass
-            except OSError as cleanup_exc:
+            except (OSError, LifecycleError) as cleanup_exc:
                 if composer is not None:
                     composer.record_cleanup(
                         phase="receipt-pending",
