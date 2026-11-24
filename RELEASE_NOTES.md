@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-24
 
+- Recheck the selected paired ledger binding immediately before executing its captured Python module. A link changed during import preparation now refuses before the originally selected code executes; the existing post-execution and cached-use checks remain in place.
+
 - Preserve byte-identical Git status metadata when repository transfer splits literal paths across bounded commands. Merge status records in native tracked-then-untracked pathname-byte order while retaining NUL-separated names, unchanged diff payloads, command limits and the aggregate output cap.
 
 - Establish the selected ledger operation before admitting a staged successor's transfer inputs. Preserve the budget already derived from its source ledger, receipt and bootstrap rows through creation, so a valid transferred obligation is not rejected by a smaller recomputed limit. Explicit caller limits and separate-operation budget resets retain their existing checks.

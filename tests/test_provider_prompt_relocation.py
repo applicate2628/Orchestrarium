@@ -125,6 +125,37 @@ def test_ledger_binding_retains_actual_installer_target_spelling(tmp_path, monke
     assert not marker.exists()
 
 
+@pytest.mark.parametrize('preparation', ['spec_from_file_location', 'module_from_spec'])
+def test_ledger_import_rechecks_selected_binding_before_code(tmp_path, monkeypatch, preparation):
+    import shutil
+    from test_legacy_obligation_migration import make_directory_link
+    module, base, canonical, projection, marker = _ledger_project_scope(tmp_path)
+    monkeypatch.setattr(Path, 'home', classmethod(lambda cls: base))
+    skills = base / '.claude/skills'
+    backing = tmp_path / 'selected-skills'
+    skills.rename(backing)
+    make_directory_link(skills, backing)
+    replacement = tmp_path / 'replacement-skills'
+    shutil.copytree(backing, replacement)
+    prepare = getattr(module.importlib.util, preparation)
+    reached = []
+
+    def prepare_then_retarget(*args, **kwargs):
+        result = prepare(*args, **kwargs)
+        name = args[0] if preparation == 'spec_from_file_location' else args[0].name
+        if name == '_provider_paired_ledger_owner':
+            _remove_test_directory_link(skills)
+            make_directory_link(skills, replacement)
+            reached.append(True)
+        return result
+
+    monkeypatch.setattr(module.importlib.util, preparation, prepare_then_retarget)
+    with pytest.raises(ValueError, match='WI-LEDGER-RESOURCE-DRIFT'):
+        module._ledger_owner()
+    assert reached == [True]
+    assert not marker.exists()
+
+
 @pytest.mark.parametrize('use', ['inprocess', 'subprocess'])
 def test_ledger_projection_witness_survives_until_actual_use(tmp_path, monkeypatch, use):
     from test_legacy_obligation_migration import make_directory_link
@@ -209,11 +240,15 @@ def test_ledger_ambiguous_global_module_association_refuses_before_code(tmp_path
 def test_global_ledger_owner_binds_distinct_logical_backings(tmp_path, monkeypatch):
     import os
     import shutil
-    from test_provider_prompt_projections import _load_installer, _linked_global_claude, _linked_global_canonical_agents
+    from test_provider_prompt_projections import _load_installer, _linked_global_claude
     installer = _load_installer()
     logical, peer_backing = _linked_global_claude(tmp_path, monkeypatch, installer)
     skills = logical / 'skills'
     canonical_backing = peer_backing / 'skills'
+    # The selected Claude runtime is independent of Codex. Give its ordinary
+    # installed copy a separate global runtime backing before binding the reader.
+    skills.rename(canonical_backing)
+    os.symlink(canonical_backing, skills, target_is_directory=True)
     marker = tmp_path / 'peer-bootstrap-executed'
     (peer_backing / 'agents/scripts/linked_runtime_subroots.py').write_text(
         f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\n", encoding='utf-8')
@@ -261,17 +296,19 @@ def test_current_claude_missing_canonical_member_never_uses_peer_or_cwd(tmp_path
 def test_ledger_global_link_drift_is_checked_at_actual_use(tmp_path, monkeypatch, use):
     import shutil
     import os
-    from test_provider_prompt_projections import _load_installer, _linked_global_claude, _linked_global_canonical_agents
+    from test_provider_prompt_projections import _load_installer, _linked_global_claude
     installer = _load_installer()
     logical, peer_backing = _linked_global_claude(tmp_path, monkeypatch, installer)
-    agents, backing = logical / 'skills', peer_backing / 'skills'
+    skills, backing = logical / 'skills', peer_backing / 'skills'
+    skills.rename(backing)
+    os.symlink(backing, skills, target_is_directory=True)
     replacement = tmp_path / 'replacement-agents'
     shutil.copytree(backing, replacement)
     module = _load_owner(logical / 'agents/scripts/provider_prompt.py', 'ledger_binding_drift_' + use)
     reached, executed = [], []
     def retarget():
-        agents.unlink()
-        os.symlink(replacement, agents, target_is_directory=True)
+        skills.unlink()
+        os.symlink(replacement, skills, target_is_directory=True)
         reached.append(True)
     if use == 'inprocess':
         original = module.importlib.util.spec_from_file_location
@@ -476,8 +513,8 @@ def test_canonical_scope_preserves_ordinary_descendant_guard(tmp_path, monkeypat
 
 @pytest.mark.parametrize("provider,model,effort,allowed,needs", [
     ("codex", "gpt-6.1-terra", "medium", True, False),
-    ("codex", "gpt-6-astra", "high", True, True),
-    ("codex", "gpt-6-astra", "max", True, True),
+    ("codex", "gpt-6.2-astra", "high", True, True),
+    ("codex", "gpt-6.2-astra", "max", True, True),
     ("claude", "opus", "max", True, True),
     ("kimi", "kimi-code/k3", "max", True, True),
     ("codex", "gpt-6.1-terra", "low", False, False),
@@ -491,7 +528,7 @@ def test_shared_model_launch_requirements_and_single_assertion(provider, model, 
     assert required is needs
     assert (policy.qualify_launch(provider, model, effort, user_approved_launch=True) is None) is allowed
     assert (policy.qualify_launch(provider, model, effort) is None) is (allowed and not needs)
-    if provider == "codex" and model == "gpt-6-astra" and effort == "high":
+    if provider == "codex" and model == "gpt-6.2-astra" and effort == "high":
         assert policy.qualify_launch(provider, model, effort, user_approved_max=True) is not None
 
 
@@ -500,7 +537,7 @@ def test_actual_managed_launch_guard_precedes_receipt_and_keeps_control_local(mo
     owner = _load_owner(ROOT_OWNER, "managed_actual_launch_guard")
     flags = ["--user-approved-launch"] if approved else []
     argv = ["fixture", "--terminal-receipt", "synthetic-receipt.json", "--ledger-role", "backend-engineer", *flags,
-            "--", "--model", "gpt-6-astra", "-c", "model_reasoning_effort=high"]
+            "--", "--model", "gpt-6.2-astra", "-c", "model_reasoning_effort=high"]
     messages = []
     class ReachedReceipt(Exception): pass
     def reserve(*args): raise ReachedReceipt()
@@ -535,7 +572,7 @@ def test_policy_companion_stays_beside_logical_file_link(tmp_path):
     owner = _load_owner(owner_file, "logical_companion_test")
     policy = owner._load_model_launch_policy()
     assert Path(policy.__file__) == companion
-    assert policy.qualify_launch("codex", "gpt-6.1-sol", "high") is None
+    assert policy.qualify_launch("codex", "gpt-6.2-sol", "high") is None
 
 
 def test_kimi_namespace_is_forwarded_at_actual_nonmaintenance_edge(monkeypatch, tmp_path):
@@ -599,7 +636,7 @@ def test_real_public_launcher_import_reaches_shared_guard_in_selected_namespace(
             pytest.skip("Owned file link unavailable: " + type(error).__name__)
     assert not (logical / "resolve-agents-mode.py").exists()
     receipt = tmp_path / "receipt.json"
-    flags = (["--model", "gpt-6-astra", "-c", "model_reasoning_effort=high"] if provider == "codex"
+    flags = (["--model", "gpt-6.2-astra", "-c", "model_reasoning_effort=high"] if provider == "codex"
              else ["-p", "--output-format", "text", "--model", "opus", "--effort", "max"])
     result = subprocess.run([sys.executable, "-B", "-X", "utf8", str(wrapper), "fixture",
         "--terminal-receipt", str(receipt), "--ledger-role", "backend-engineer", "--", *flags],
@@ -651,14 +688,15 @@ def test_policy_route_is_current_before_captured_payload_executes(tmp_path, monk
             "scientific-software-engineer", "engineering",
             {"explicitModelControl": True, "explicitReasoningEffortControl": True}, repo_root=ROOT)
         assert description["status"] == "available"
-        inputs = dict(requested_model="gpt-6-astra", requested_effort="high",
+        inputs = dict(requested_model="gpt-6.2-astra", requested_effort="high",
             caller_rationale="Synthetic selected-route/currentness probe; no actual model launch.",
+            preference_deviation_reason="Exercise an admitted nondefault profile at the selected policy boundary.",
             approved_execution_scope={"scope": "owned fixture only"})
     else:
         monkeypatch.setattr(owner.TerminalReceiptV1, "reserve", no_receipt)
         monkeypatch.setattr(owner, "fail", lambda message: messages.append(message) or 1)
         argv = ["fixture", "--terminal-receipt", str(tmp_path / "unused-receipt.json"),
-            "--ledger-role", "backend-engineer", "--", "--model", "gpt-6-astra",
+            "--ledger-role", "backend-engineer", "--", "--model", "gpt-6.2-astra",
             "-c", "model_reasoning_effort=high"]
     with monkeypatch.context() as seam:
         if retarget:
@@ -673,7 +711,8 @@ def test_policy_route_is_current_before_captured_payload_executes(tmp_path, monk
         reason = result["configurationDiagnostic"]["reason"]
         assert reason == ("selected-companion-unavailable" if retarget else "individual-launch-approval-required")
         if not retarget:
-            assert owner.resolve_ordinary_native_dispatch(description, user_approved_launch=True, **inputs)["status"] == "resolved"
+            resolved = owner.resolve_ordinary_native_dispatch(description, user_approved_launch=True, **inputs)
+            assert resolved["status"] == "resolved", resolved
     else:
         assert result == 1
         expected = "E_MODEL_LAUNCH_POLICY_UNAVAILABLE" if retarget else "E_MODEL_LAUNCH_POLICY_DENIED"
