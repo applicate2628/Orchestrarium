@@ -5482,6 +5482,76 @@ def test_close_rolls_back_all_context_bugs_after_partial_disposition(
         assert not (root / "work-items" / "bugs" / "archive").exists()
 
 
+@pytest.mark.parametrize("concurrent_authoring", (False, True))
+def test_close_multiple_bug_rollback_preserves_link_consumer_currentness(
+    tmp_path: Path, monkeypatch, concurrent_authoring: bool,
+) -> None:
+    module = load_module()
+    root, slug = tmp_path / "repo", "multiple-bug-link-rollback"
+    instant = "2026-08-11T10:06:03Z"
+    seed_active(module, root, slug)
+    active = root / "work-items" / "active" / slug
+    write(active / "evidence.md", "Accepted implementation evidence.\n")
+    bugs = [seed_context_bug(root, slug, f"2026-08-11-close-bug-{index}") for index in (1, 2)]
+    before = {bug: bug.read_bytes() for bug in bugs}
+    consumer = seed_context_bug(root, "standalone", "2026-08-11-link-consumer")
+    consumer_before = consumer.read_bytes() + f"[Proof](../active/{slug}/evidence.md)\n".encode()
+    consumer.write_bytes(consumer_before)
+    write_bug_dispositions(root, slug, instant, [
+        {"id": bug.stem, "action": "terminalize", "inputSha256": hashlib.sha256(before[bug]).hexdigest(),
+         "status": "fixed", "resolution": "The accepted implementation fixes this defect.",
+         "evidence": "The selected regression checks passed."}
+        for bug in bugs
+    ])
+    module.refresh_readme(root)
+    status_before = (active / "status.md").read_bytes()
+    readme = root / "work-items" / "README.md"
+    readme_before = readme.read_bytes()
+    archive = root / "work-items" / "archive" / "2026-08" / slug
+    observed = {}
+
+    def fail_after_relocation(_root, *, ledger_resource_budget=None):
+        assert archive.is_dir() and not active.exists()
+        assert all(not bug.exists() for bug in bugs)
+        assert consumer.read_bytes() != consumer_before
+        if concurrent_authoring:
+            changed = consumer.read_bytes() + b"Concurrent user evidence must survive.\n"
+            consumer.write_bytes(changed)
+            observed["foreign"] = (changed, module._lifecycle_file_identity(consumer.lstat()))
+        observed["reached"] = True
+        raise module.LifecycleError("WI-README-STALE", "controlled failure after all close effects")
+
+    monkeypatch.setattr(module, "refresh_readme", fail_after_relocation)
+    observer = module.LifecycleDiagnosticObserver()
+    with pytest.raises(module.LifecycleError) as failure:
+        module.close_item(root, slug, closure(instant).encode(), instant, diagnostic_observer=observer)
+    assert observed["reached"]
+    assert failure.value.failure_id == ("WI-BUG-DISPOSITIONS-ROLLBACK" if concurrent_authoring else "WI-README-STALE")
+    assert observer.snapshot.primaryFailureId == "WI-README-STALE"
+    assert observer.snapshot.rollback == ("incomplete" if concurrent_authoring else "completed")
+    assert active.is_dir() and not archive.exists()
+    assert (active / "status.md").read_bytes() == status_before
+    assert not (active / "closure.md").exists()
+    assert all(bug.read_bytes() == before[bug] for bug in bugs)
+    bug_archive = root / "work-items" / "bugs" / "archive"
+    assert readme.read_bytes() == readme_before
+    if concurrent_authoring:
+        assert (consumer.read_bytes(), module._lifecycle_file_identity(consumer.lstat())) == observed["foreign"]
+        # Foreign-state refusal retains empty creator directories; it cannot
+        # authorize fresh deletion after independent inverses restored the bugs.
+        assert (bug_archive / "2026-08").is_dir()
+        assert not tuple((bug_archive / "2026-08").iterdir())
+        assert "remove created directory" in str(failure.value)
+        assert any(row.phase == "rollback-action" and row.failureId == "WI-CLOSE-LINK-DRIFT"
+                   for row in observer.snapshot.cleanupFailures)
+    else:
+        assert consumer.read_bytes() == consumer_before
+        assert not bug_archive.exists()
+        assert not observer.snapshot.cleanupFailures
+    assert module._CURRENT_LIFECYCLE_TRANSACTION.get() is None
+    assert module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get() is None
+
+
 def test_close_replay_verifies_bug_receipt_and_archived_bug_bytes(
     tmp_path: Path,
 ) -> None:
