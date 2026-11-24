@@ -14,20 +14,34 @@ def receiving_reader(source):
     from typing import Callable
     i = source.index("def _parse_batch_frame_header(")
     j = source.index("\ndef _parse_batch_check_frame(", i)
-    k = source.index("    async def read(", source.index("class _AsyncGitObjectReader:"))
+    reader_start = source.index("class _AsyncGitObjectReader:")
+    constructor = source.index("    def __init__(", reader_start)
+    constructor_end = source.index("\n    @property", constructor)
+    k = source.index("    async def read(", reader_start)
     l = source.index("    async def classify(", k)
     ns = dict(Refusal=Refusal, _refusal=Refusal, ObjectReadSuccess=lambda *fields: fields,
-              asyncio=asyncio, ReaderState=SimpleNamespace(ACTIVE=True),
+              asyncio=asyncio, ReaderState=SimpleNamespace(CREATED=False, ACTIVE=True),
+              _range_git_argv=lambda *args: args, OBJECT_REAP_ATTEMPT_SECONDS=3.0,
               _MAX_BLOB_BYTES=64*1048576, _MAX_COMMIT_TREE_BYTES=1048576,
               _READ_CHUNK_BYTES=65536, Callable=Callable)
-    exec("from __future__ import annotations\n" + source[i:j] + "\nclass Reader:\n" + source[k:l], ns)
+    exec("from __future__ import annotations\n" + source[i:j] + "\nclass Reader:\n"
+         + source[constructor:constructor_end] + "\n" + source[k:l], ns)
     return ns["Reader"]
+
+
+def object_request(reader, oid):
+    if reader._argv == ("cat-file", "--batch-command"):
+        return b"contents " + oid + b"\n"
+    if reader._argv == ("cat-file", "--batch"):
+        return oid + b"\n"
+    raise AssertionError("unqualified receiving reader command")
 
 
 async def reference(reader_type, wire, oid, expected, attempts):
     reader = reader_type()
-    reader._poisoned = False
     reader._state = True
+    requests = []
+    request = object_request(reader, oid)
     stdout = asyncio.StreamReader(limit=65536)
     stdout.feed_data(wire)
     stdout.feed_eof()
@@ -39,13 +53,14 @@ async def reference(reader_type, wire, oid, expected, attempts):
         return None
 
     reader._process = SimpleNamespace(
-        stdin=SimpleNamespace(write=lambda _: None, drain=drain), stdout=stdout
+        stdin=SimpleNamespace(write=requests.append, drain=drain), stdout=stdout
     )
     reader._within = identity
     reader._request_deadline = lambda _: None
     output = []
     for _ in range(attempts):
         result = await reader.read(oid.decode("ascii"), expected)
+        assert requests.pop(0) == request and not requests
         if isinstance(result, Refusal):
             output.append(f"R {result.code} {result.reason}")
             break

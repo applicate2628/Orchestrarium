@@ -9,7 +9,7 @@ from itertools import chain
 from pathlib import Path
 from types import SimpleNamespace
 
-from git_batch_parity import receiving_reader, reference
+from git_batch_parity import object_request, receiving_reader, reference
 from tree_record_parity import Refusal as RecordRefusal, receiving_parser
 from tree_walk_parity import Refusal, loop_from, run_reference
 
@@ -67,9 +67,10 @@ def fixtures(algorithm):
         yield case, root, frames, leaf, ({root, child} & frames.keys()) | {root}
 
 
-def native_git_fixtures(algorithm, scratch):
+def native_git_fixtures(algorithm, scratch, reader_type):
     """Obtain unmodified stdout frames from Git in a disposable repository."""
     with tempfile.TemporaryDirectory(prefix="git-frames-", dir=scratch) as root:
+        reader = reader_type()
         env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
         env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull, GIT_ALLOW_PROTOCOL="file")
 
@@ -85,7 +86,7 @@ def native_git_fixtures(algorithm, scratch):
             return oid
 
         def batch(oid):
-            return git("cat-file", "--batch", data=oid.hex().encode("ascii") + b"\n")
+            return git(*reader._argv, data=object_request(reader, oid.hex().encode("ascii")))
 
         git("init", "--quiet", "--bare", "--template=", f"--object-format={algorithm}")
         leaf = write("blob", b"git fixture\n")
@@ -117,7 +118,7 @@ def main():
     for algorithm, width in (("sha1", 20), ("sha256", 32)):
         cases = fixtures(algorithm)
         if args.git_scratch is not None:
-            cases = chain(cases, native_git_fixtures(algorithm, args.git_scratch))
+            cases = chain(cases, native_git_fixtures(algorithm, args.git_scratch, reader))
         for case, root, frames, leaf, trees in cases:
             graph = {}
             for oid, wire in frames.items():
