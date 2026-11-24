@@ -195,9 +195,23 @@ tests and 38 complete Python/Rust scanner comparisons passed across 16 existing
 methods and both Git object formats. An earlier bounded harness timeout remains
 recorded; unfinished methods completed separately. The local combined candidate
 `cee7521eca8e7d6aa5bcb21dc712eb035e22b632` passed independent integration review
-and 19 native callback/progress/timeout receiving cases. These scoped results do
-not establish standalone Windows runtime-library portability, all supported-host
-qualification or acceptance of a working installation; PR21 retains those gates.
+and 19 native callback/progress/timeout receiving cases. At that earlier
+checkpoint, standalone Windows runtime-library portability, other supported-host
+qualification and acceptance of a working installation were still unqualified.
+
+Later selected Windows x64 qualification used matcher worker `dd6c996f` with a
+statically linked C runtime (CRT) and scanner source `cee7521e`. Five Rust tests,
+62 complete Python/Rust comparisons (31 each for Git's SHA-1 and SHA-256
+Secure Hash Algorithm formats), and five actual native Git scenarios passed;
+the native callback scenarios used SHA-1, while SHA-256 was covered by complete
+scanner comparisons. Final retained pre-SDK package source `8d1342e0` (tree
+`55235639`) preserved that same worker, its verified notices and ten exact scanner
+roles, with all 644 application files matching the selected source. Assembly,
+retain-only operation, real read-only entrypoint help and retained-matcher
+ownership readback passed. These source-bound checkpoints do not establish other-host
+portability, complete large-project workload qualification, the SDK bundle, or
+activation in the working installation. The existing Rust and SDK owners retain
+those remaining boundaries; overlapping test selections are not added.
 
 The three original `e8edb957` legacy failures received separate public-admission
 (`143a1a8f`) and directory-origin (`d92a74e2`) corrections, with independent source
