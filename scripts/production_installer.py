@@ -14125,24 +14125,29 @@ def _selected_lead_prior_files(plan: _CanonicalSkillsPlan, target: Path, transac
 
 
 def _provider_payload_bindings(provider, mode, target, transaction, owners):
-    """Receive existing linked Claude owners without acquiring new storage."""
+    """Receive existing linked payload owners without acquiring new storage."""
     bindings = tuple(owner for owner in owners if owner.linked_authority is not None)
-    physical_roots = {target / name: target / name for name in ("agents", "commands", "skills")}
+    if not bindings:
+        return ()
+    allowed = {"claude": {target / "agents", target / "commands"},
+               "codex": {target.parent / ".agents", target / "agents"}}.get(provider, set())
     for index, bound in enumerate(bindings):
         authority = bound.linked_authority
-        if (provider != "claude" or mode != "global" or bound.transaction is not transaction
-                or authority.logical_root not in {target / "agents", target / "commands"}
+        if (mode != "global" or bound.transaction is not transaction
+                or authority.logical_root not in allowed
                 or authority.resolved_root != bound.anchor
                 or any(authority.logical_root == prior.linked_authority.logical_root for prior in bindings[:index])):
             raise ValueError("E_PROVIDER_RECEIPT_INVALID: linked payload owner")
-        physical_roots[authority.logical_root] = bound.anchor
-    for bound in bindings:
-        authority = bound.linked_authority
-        if any(logical != authority.logical_root and
-               (bound.anchor.is_relative_to(physical) or physical.is_relative_to(bound.anchor))
-               for logical, physical in physical_roots.items()):
-            raise ValueError("E_PROVIDER_RECEIPT_INVALID: overlapping payload roots")
         authority.assert_current()
+    # A canonical container may hold unrelated vendor storage. Compare only
+    # declared payload roots, and use the specific native owner within it.
+    bindings = tuple(sorted(bindings, key=lambda bound: len(bound.anchor.parts), reverse=True))
+    physical_roots = [_provider_payload_path(target.parent / relative, bindings)
+                      for relative in get_client(provider)["payload_roots"]]
+    for index, physical in enumerate(physical_roots):
+        if any(physical.is_relative_to(prior) or prior.is_relative_to(physical)
+               for prior in physical_roots[:index]):
+            raise ValueError("E_PROVIDER_RECEIPT_INVALID: overlapping payload roots")
     return bindings
 
 
@@ -14243,7 +14248,7 @@ def _record_provider_install(root, provider, mode, target, anchor, transaction, 
                     raise _InstallFailure("E_PROVIDER_RECEIPT_DRIFT", "verify")
             for member, digest in manifest:
                 path = skill_root / member
-                relative = path.relative_to(anchor).as_posix()
+                relative = _provider_payload_path(path, bindings, logical=True).relative_to(anchor).as_posix()
                 codec.validate_path(relative, provider, scope)
                 node = image.get(path)
                 if digest == "directory":
@@ -14254,7 +14259,7 @@ def _record_provider_install(root, provider, mode, target, anchor, transaction, 
                     raise _InstallFailure("E_PROVIDER_RECEIPT_DRIFT", "verify")
                 else:
                     files[relative] = digest
-            relative = skill_root.relative_to(anchor).as_posix()
+            relative = _provider_payload_path(skill_root, bindings, logical=True).relative_to(anchor).as_posix()
             if image.get(skill_root) is not None and image[skill_root].kind == "directory":
                 managed_directories.add(relative)
         transport_stage = getattr(canonical_plan, "transport_stage", None)
@@ -14290,7 +14295,7 @@ def _record_provider_install(root, provider, mode, target, anchor, transaction, 
             path = canonical_target / name
             node = current.get(path)
             if node is not None and node.kind == "file":
-                files[path.relative_to(anchor).as_posix()] = node.data
+                files[_provider_payload_path(path, bindings, logical=True).relative_to(anchor).as_posix()] = node.data
     # Retain prior ownership of unchanged payloads outside this run's write set.
     for relative, digest in prior.items():
         candidate = _provider_payload_path(anchor / relative, bindings)
@@ -15585,9 +15590,10 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     dry_run=args.dry_run,
                     linked_authority=codex_agents_authority,
                 )
-            payload_owners = _provider_payload_bindings(
-                provider, mode, target, transaction,
-                tuple(bound for bound in (claude_agents_owner, claude_commands_owner) if bound is not None))
+            payload_candidates = ((canonical_skills_owner, codex_agents_owner) if provider == "codex"
+                                  else (claude_agents_owner, claude_commands_owner))
+            payload_owners = _provider_payload_bindings(provider, mode, target, transaction,
+                tuple(bound for bound in payload_candidates if bound is not None))
             instruction_updates = _prepare_selected_claude_instructions(
                 instruction_grants, source, target, "global" if mode == "global" else "project",
                 create_only,

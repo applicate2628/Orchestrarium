@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-24
 
+- Preserve Codex ownership receipts when global canonical or native-role storage uses an already admitted directory link. Map verified physical members back to logical receipt names, reject overlap among selected payload roots, and preserve unrelated vendor neighbors without acquiring additional storage authority.
+
 - Admit an explicitly selected hook-file localization and its local inventory into the normal installation transaction, including the original link object. Preview leaves the registration, inventory and receipt unchanged; shared-source drift and same-byte inventory replacement remain refused, and rollback preserves the prior inventory identity.
 
 - On POSIX (Portable Operating System Interface) systems such as Linux, recheck a private rollback snapshot's exact child identity and bytes after an allowed parent-permission change and before disposal. A changed child remains preserved; the original source and the parent's original mode retain their existing protection.
