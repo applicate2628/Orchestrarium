@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-24
 
+- Establish the selected ledger operation before admitting a staged successor's transfer inputs. Preserve the budget already derived from its source ledger, receipt and bootstrap rows through creation, so a valid transferred obligation is not rejected by a smaller recomputed limit. Explicit caller limits and separate-operation budget resets retain their existing checks.
+
 - Record the reconciled SDK/main contracts and source-bound audit results in the existing SDK guide. Keep isolated installation evidence, incomplete combined qualification, dependency holds and authenticated publication requirements distinct from a release or working-installation claim.
 
 - Finalize Codex receipts when hook settings use an already admitted external file. Carry the existing hook inventory authority through receipt publication, checking the original logical link chain, physical settings file and sidecar before and after the write. Keep these exact controls separate from payload ownership; refuse changed links, substituted files, missing sidecars and unselected neighboring or document files.

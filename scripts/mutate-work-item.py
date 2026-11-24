@@ -11724,6 +11724,7 @@ def start_item(root: Path, slug: str, status_data: bytes, *, inject_readme_failu
     active_parent = work_items / "active"
     if admission_ledger is not None:
         transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+        transaction.ensure_selected_ledger_scope()
         participant_snapshots = []
         if transfer_relation is not None:
             source_item = resolve_category(root, f"work-item:{transfer_relation[0]}",
