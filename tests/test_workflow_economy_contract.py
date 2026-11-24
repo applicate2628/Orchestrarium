@@ -13,21 +13,21 @@ FUNCTIONAL_FIRST_EXTRACT = "shared/references/spine/functional-first-delivery.md
 METHODOLOGY = "shared/references/subagent-operating-model.md"
 PROJECTIONS = (
     "src.codex/skills/lead/operating-model.md",
-    "src.claude/agents/contracts/operating-model.md",
+    "adapters/claude/agents/contracts/operating-model.md",
     "src.codex/skills/review-loop/SKILL.md",
-    "src.claude/agents/contracts/review-loop.md",
+    "adapters/claude/agents/contracts/review-loop.md",
     "src.codex/skills/external-brigade/SKILL.md",
-    "src.claude/commands/agents-external-brigade.md",
+    "adapters/claude/commands/agents-external-brigade.md",
     "src.codex/skills/lead/subagent-contracts.md",
-    "src.claude/agents/contracts/subagent-contracts.md",
+    "adapters/claude/agents/contracts/subagent-contracts.md",
 )
 KIMI_WORKFLOW_PROJECTIONS = (
     "src.codex/skills/lead/operating-model.md",
-    "src.claude/agents/contracts/operating-model.md",
+    "adapters/claude/agents/contracts/operating-model.md",
 )
 KIMI_EXTERNAL_DISPATCH_PROJECTIONS = (
     "src.codex/skills/lead/external-dispatch.md",
-    "src.claude/agents/contracts/external-dispatch.md",
+    "adapters/claude/agents/contracts/external-dispatch.md",
 )
 
 DEAD_CODE_DISPOSITION_FIELD = "Dead/superseded code disposition:"
@@ -46,14 +46,14 @@ EXTERNAL_PROMPT_CONSUMERS = (
     "src.codex/skills/external-reviewer/SKILL.md",
     "src.codex/skills/review-loop/SKILL.md",
     "src.codex/skills/design-panel/SKILL.md",
-    "src.claude/agents/contracts/external-dispatch.md",
-    "src.claude/agents/consultant.md",
-    "src.claude/agents/external-worker.md",
-    "src.claude/agents/external-reviewer.md",
-    "src.claude/agents/contracts/review-loop.md",
-    "src.claude/agents/contracts/design-panel.md",
-    "src.claude/commands/agents-review-loop.md",
-    "src.claude/commands/agents-design-panel.md",
+    "adapters/claude/agents/contracts/external-dispatch.md",
+    "adapters/claude/agents/consultant.md",
+    "adapters/claude/agents/external-worker.md",
+    "adapters/claude/agents/external-reviewer.md",
+    "adapters/claude/agents/contracts/review-loop.md",
+    "adapters/claude/agents/contracts/design-panel.md",
+    "adapters/claude/commands/agents-review-loop.md",
+    "adapters/claude/commands/agents-design-panel.md",
     "docs/external-worker-design.md",
     "docs/agents-mode-reference.md",
     "shared/references/spine/verification-and-decision-discipline.md",
@@ -77,18 +77,18 @@ RETIRED_PROMPT_RELATIONS = (
 PROVENANCE_PROVIDER_TEMPLATES = (
     "src.codex/skills/lead/external-dispatch.md",
     "src.codex/skills/consultant/SKILL.md",
-    "src.claude/agents/contracts/external-dispatch.md",
+    "adapters/claude/agents/contracts/external-dispatch.md",
 )
 ARCHITECTURE_REVIEWER_PROJECTIONS = (
     "src.codex/skills/architecture-reviewer/SKILL.md",
-    "src.claude/agents/architecture-reviewer.md",
+    "adapters/claude/agents/architecture-reviewer.md",
 )
 LEAD_SKILL_PROJECTIONS = (
     "src.codex/skills/lead/SKILL.md",
 )
 LEAD_ROUTING_PROJECTIONS = (
     "src.codex/skills/lead/operating-model.md",
-    "src.claude/agents/contracts/operating-model.md",
+    "adapters/claude/agents/contracts/operating-model.md",
 )
 ARCHITECT_PROJECTIONS = (
     "src.codex/skills/architect/SKILL.md",
@@ -663,7 +663,7 @@ class TestWorkflowEconomyContract(unittest.TestCase):
         for role in PROFESSION_ROLES:
             paths = (
                 f"src.codex/skills/{role}/SKILL.md",
-                f"src.claude/agents/{role}.md",
+                f"adapters/claude/agents/{role}.md",
             )
             texts = tuple(self._read(path) for path in paths)
             for text in texts:
@@ -674,7 +674,7 @@ class TestWorkflowEconomyContract(unittest.TestCase):
         for role in D3_ROLES:
             paths = (
                 f"src.codex/skills/{role}/SKILL.md",
-                f"src.claude/agents/{role}.md",
+                f"adapters/claude/agents/{role}.md",
             )
             for path in paths:
                 text = self._read(path)
@@ -687,7 +687,7 @@ class TestWorkflowEconomyContract(unittest.TestCase):
         for role, clause in RUNTIME_ROLE_CLAUSES.items():
             paths = (
                 f"src.codex/skills/{role}/SKILL.md",
-                f"src.claude/agents/{role}.md",
+                f"adapters/claude/agents/{role}.md",
             )
             for path in paths:
                 text = self._read(path)
@@ -708,7 +708,7 @@ class TestWorkflowEconomyContract(unittest.TestCase):
         self.assertIn("Workflow economy is owned by `shared/AGENTS.shared.md`", methodology)
 
     def test_generic_review_keeps_risk_roles_conditional_and_critical_templates_strict(self) -> None:
-        template = json.loads(self._read("src.claude/agents/team-templates/review.json"))
+        template = json.loads(self._read("adapters/claude/agents/team-templates/review.json"))
         roles = {role["agentType"]: role for role in template["roles"]}
 
         self.assertEqual(template["requiredRoles"], [])
@@ -739,7 +739,7 @@ class TestWorkflowEconomyContract(unittest.TestCase):
             "critical templates",
         ):
             with self.subTest(template="review", marker=marker):
-                self._assert_contract_marker("src.claude/agents/team-templates/review.json", template["notes"], marker)
+                self._assert_contract_marker("adapters/claude/agents/team-templates/review.json", template["notes"], marker)
 
     def test_provider_review_entrypoints_keep_objective_selection_and_triggered_risk_gates(self) -> None:
         codex = "src.codex/AGENTS.codex.md"
@@ -749,14 +749,14 @@ class TestWorkflowEconomyContract(unittest.TestCase):
         for marker in ("objective-named reviewer", "only evidence-triggered helpers", "order present helpers as research → QA → review"):
             self._assert_contract_marker(codex, rows[0], marker)
 
-        claude = self._read("src.claude/CLAUDE.md")
+        claude = self._read("adapters/claude/CLAUDE.md")
         self.assertNotIn("| `review` |", claude)
         self.assertIn(".claude/agents/team-templates/", claude)
         self.assertIn("For `requiresLead: false` routes", claude)
 
         for relative, required_role in (
-            ("src.claude/agents/team-templates/security-sensitive.json", "security-reviewer"),
-            ("src.claude/agents/team-templates/performance-sensitive.json", "performance-reviewer"),
+            ("adapters/claude/agents/team-templates/security-sensitive.json", "security-reviewer"),
+            ("adapters/claude/agents/team-templates/performance-sensitive.json", "performance-reviewer"),
         ):
             critical = json.loads(self._read(relative))
             critical_roles = {role["agentType"]: role for role in critical["roles"]}
@@ -812,7 +812,7 @@ class TestWorkflowEconomyContract(unittest.TestCase):
                 DEAD_CODE_DISPOSITION_REQUIREMENT,
                 DEAD_CODE_DISPOSITION_ECHO,
             ),
-            "src.claude/agents/contracts/subagent-contracts.md": (
+            "adapters/claude/agents/contracts/subagent-contracts.md": (
                 DEAD_CODE_DISPOSITION_FIELD,
                 DEAD_CODE_DISPOSITION_REQUIREMENT,
                 DEAD_CODE_DISPOSITION_ECHO,
@@ -822,7 +822,7 @@ class TestWorkflowEconomyContract(unittest.TestCase):
                 DEAD_CODE_DISPOSITION_QA_SUPERSESSION,
                 DEAD_CODE_DISPOSITION_QA_PASS,
             ),
-            "src.claude/agents/qa-engineer.md": (
+            "adapters/claude/agents/qa-engineer.md": (
                 DEAD_CODE_DISPOSITION_QA_GATE,
                 DEAD_CODE_DISPOSITION_QA_SUPERSESSION,
                 DEAD_CODE_DISPOSITION_QA_PASS,
@@ -836,7 +836,7 @@ class TestWorkflowEconomyContract(unittest.TestCase):
 
         for relative, target in (
             ("src.codex/skills/lead/scripts/validate-skill-pack.py", "@ROOT/src.codex/skills/qa-engineer/SKILL.md"),
-            ("src.claude/agents/scripts/validate-skill-pack.py", "src.claude/agents/qa-engineer.md"),
+            ("adapters/claude/agents/scripts/validate-skill-pack.py", "adapters/claude/agents/qa-engineer.md"),
         ):
             text = self._read(relative)
             row = (
@@ -876,7 +876,7 @@ class TestWorkflowEconomyContract(unittest.TestCase):
         self.assertNotIn("обёртка `--ledger`", text)
 
     def test_review_loop_selects_supported_initial_routes_without_weakening_provenance(self) -> None:
-        for path in ("src.codex/skills/review-loop/SKILL.md", "src.claude/agents/contracts/review-loop.md"):
+        for path in ("src.codex/skills/review-loop/SKILL.md", "adapters/claude/agents/contracts/review-loop.md"):
             text = self._read(path)
             for required in (
                 "supported initial route", "external-only selection remains external-only",
