@@ -964,6 +964,19 @@ def _copy_current_staged_lead(installer, destination: Path) -> Path:
     return destination
 
 
+def test_staged_lead_resolves_conditional_publication_guidance_offline(tmp_path: Path) -> None:
+    lead = _copy_current_staged_lead(_load_installer(), tmp_path / "lead")
+    skill = (lead / "SKILL.md").read_text(encoding="utf-8")
+    trigger = "When handling a scan finding or a rebuild with prior findings"
+    link = "operating-model.md#reviewed-publication-exceptions"
+    assert skill.count(link) == 1
+    assert any(trigger in line and link in line for line in skill.splitlines())
+    guide = (lead / link.split("#")[0]).read_text(encoding="utf-8")
+    section = guide.split("## Reviewed publication exceptions", 1)[1].split("\n## ", 1)[0]
+    assert "same receiver already has the unchanged blob" in section
+    assert "standard history decisions apply only to their recorded commits" in section
+
+
 def _seed_partial_push_gate_staged_lead(destination: Path) -> Path:
     lead = _seed_revision_staged_lead(
         PARTIAL_PUSH_GATE_GLOBAL_LEAD_REVISION, destination
