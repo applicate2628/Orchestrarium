@@ -311,6 +311,106 @@ class LegacyFlatTerminalTests(unittest.TestCase):
             finally:
                 m._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
 
+    @unittest.skipUnless(m.os.name == "nt", "actual pending legacy owner requires Windows")
+    def test_public_legacy_close_selects_pending_operation_before_named_root_neighbors(self):
+        # Move the unstarted fixture below a repository literally named work-items.
+        # The outer fixture retains all inputs, including deliberately foreign ones.
+        outer = self.root
+        root = outer / "project/work-items"
+        root.mkdir(parents=True)
+        for path in tuple(outer.iterdir()):
+            if path != root.parent:
+                path.rename(root / path.name)
+        for name in ("source", "accepted", "closure_file", "bug_manifest"):
+            setattr(self, name, root / getattr(self, name).relative_to(outer))
+        self.root = root
+        neighbor = root / "backlog/different-neighbor.md"
+        neighbor.parent.mkdir()
+        neighbor.write_bytes(b"# Independently current neighboring task\n")
+        neighbor_image = (m._lifecycle_file_identity(neighbor.lstat()), neighbor.read_bytes())
+        evidence, _arguments = self.legacy_request()
+        callers = (root, root / "work-items")
+        archive = root / "work-items/archive/2026-10" / self.slug
+        for caller in callers:
+            self.assertEqual(m.close_item(caller, self.slug, self.closure, self.instant,
+                legacy_evidence_data=evidence, transition_read_admission="selected-native"), archive)
+        duplicate = root / "backlog" / f"{self.slug}.md"
+        duplicate.write_bytes(self.source.read_bytes())
+        with self.assertRaisesRegex(m.LifecycleError, "acquisition ambiguous"):
+            m.close_item(root, self.slug, self.closure, self.instant,
+                legacy_evidence_data=evidence, transition_read_admission="selected-native")
+        duplicate.rename(outer / "held-neighbor-duplicate.md")
+
+        intent = root / ".scratch/work-items-lifecycle-transitions/flat-terminal-001.json"
+        intent.parent.mkdir(parents=True, exist_ok=True)
+        intent.write_bytes(b"{malformed selected pending input\n")
+        malformed = (m._lifecycle_file_identity(intent.lstat()), intent.read_bytes())
+        for caller in callers:
+            with self.assertRaises(m.LifecycleError):
+                m.close_item(caller, self.slug, self.closure, self.instant,
+                    legacy_evidence_data=evidence, transition_read_admission="selected-native")
+            self.assertEqual((m._lifecycle_file_identity(intent.lstat()), intent.read_bytes()), malformed)
+        intent.rename(outer / "held-malformed-intent.json")
+        with self.assertRaisesRegex(m.LifecycleError, "interruption after derived board"):
+            m.close_item(root, self.slug, self.closure, self.instant, legacy_evidence_data=evidence,
+                apply=True, inject_failure_at="after-board", transition_read_admission="selected-native")
+        pending = (m._lifecycle_file_identity(intent.lstat()), intent.read_bytes())
+        changed = json.loads(evidence)
+        changed["expectedReadmeSha256"] = "0" * 64
+        for caller in callers:
+            with self.assertRaisesRegex(m.LifecycleError, "pending replay request differs"):
+                m.close_item(caller, self.slug, self.closure, self.instant,
+                    legacy_evidence_data=json.dumps(changed).encode(), apply=True,
+                    transition_read_admission="selected-native")
+            self.assertEqual(m.close_item(caller, self.slug, self.closure, self.instant,
+                legacy_evidence_data=evidence, transition_read_admission="selected-native"), archive)
+            self.assertEqual((m._lifecycle_file_identity(intent.lstat()), intent.read_bytes()), pending)
+
+        # A matching operation in one candidate outranks a mere neighboring slug.
+        duplicate.write_bytes(b"# Independent same-slug neighbor after the action began\n")
+        self.assertEqual(m.close_item(root, self.slug, self.closure, self.instant,
+            legacy_evidence_data=evidence, transition_read_admission="selected-native"), archive)
+        duplicate.rename(outer / "held-later-neighbor-duplicate.md")
+        selection = {"selected_transition": "flat-terminal-001",
+            "selected_transition_fallback": ("work-item", self.slug)}
+        budget = m.select_transition_resource_inputs(root, selection=selection,
+            read_admission="selected-native").acquisition
+        held = []
+        self.assertEqual(m._resolve_project_root_identity(root, binding_evidence_out=held,
+            transition_resource_budget=budget, **selection), (root, root / "work-items"))
+        competing = root.parent / ".scratch/work-items-lifecycle-transitions/flat-terminal-001.json"
+        competing.parent.mkdir(parents=True)
+        competing.write_bytes(pending[1])
+        with self.assertRaisesRegex(m.LifecycleError, "absence changed"):
+            m._verify_project_binding_evidence(tuple(held), "WI-LIFECYCLE-LOCK-IDENTITY")
+        with self.assertRaisesRegex(m.LifecycleError, "acquisition ambiguous"):
+            m.close_item(root, self.slug, self.closure, self.instant,
+                legacy_evidence_data=evidence, transition_read_admission="selected-native")
+        self.assertEqual(competing.read_bytes(), pending[1])
+        competing.rename(outer / "held-competing-intent.json")
+        self.assertEqual((m._lifecycle_file_identity(intent.lstat()), intent.read_bytes()), pending)
+        self.assertEqual(m.close_item(callers[1], self.slug, self.closure, self.instant,
+            legacy_evidence_data=evidence, apply=True, transition_read_admission="selected-native"), archive)
+        self.assertFalse(intent.exists())
+        self.assertEqual(m.work_item_dependency_state(root, self.slug), "done")
+        self.assertEqual((m._lifecycle_file_identity(neighbor.lstat()), neighbor.read_bytes()), neighbor_image)
+        self.assertIsNone(m._CURRENT_LIFECYCLE_TRANSACTION.get())
+
+    def test_pending_transition_fallback_requires_the_coupled_work_item(self):
+        for selection in (
+            {"selected_transition_fallback": ("work-item", self.slug)},
+            {"selected_reference": ("work-item", self.slug), "selected_transition": "flat-terminal-001"},
+            {"selected_transition": "flat-terminal-001", "selected_transition_fallback": ("bug", self.slug)},
+            {"selected_transition": "flat-terminal-001", "selected_transition_fallback": ("work-item", "../escape")},
+            {"selected_transition": "flat-terminal-001", "selected_transition_fallback": ["work-item", self.slug]},
+        ):
+            with self.subTest(selection=selection):
+                with self.assertRaises(m.LifecycleError):
+                    m.select_transition_resource_inputs(self.root, selection=selection,
+                        read_admission="selected-native")
+                with self.assertRaises(m.LifecycleError):
+                    m._resolve_project_root_identity(self.root, **selection)
+
     def test_public_legacy_close_requires_the_additive_evidence_and_apply_surface(self):
         _evidence, arguments = self.legacy_request()
         before = self.canonical_images()
@@ -1053,6 +1153,44 @@ print('FRESH_PUBLIC_READERS_OK')
                     self.assertEqual(fired, [True])
                     self.assertEqual(self.canonical_images(), before)
                     self.assertFalse(m._transition_intent_path(self.root, "flat-terminal-001").exists())
+
+    @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
+    def test_derivation_failure_restores_owned_directory_proofs_and_cleans_up(self):
+        from unittest.mock import patch
+        evidence, _arguments = self.legacy_request()
+        before = self.canonical_images()
+        identities = {name: m._lifecycle_file_identity((self.root / name).lstat()) for name in before}
+        stage = self.root / ".scratch/work-items"
+        archive = self.root / "work-items/archive"
+        self.assertFalse(stage.exists())
+        self.assertFalse(archive.exists())
+        derive = m._PendingLegacyCompletionPlan._derive_relocation_progress
+        primary = m.LifecycleError("WI-TEST-PROGRESS", "actual progress derivation fault")
+        observer = m.LifecycleDiagnosticObserver()
+        fired = []
+        def fail_derivation(plan, candidate, movement, binding, field, **kwargs):
+            if movement.directory and not fired:
+                self.assertFalse(movement.source.exists())
+                self.assertTrue(movement.destination.exists())
+                fired.append(True)
+                raise primary
+            return derive(plan, candidate, movement, binding, field, **kwargs)
+        with patch.object(m._PendingLegacyCompletionPlan, "_derive_relocation_progress", fail_derivation):
+            with self.assertRaises(m.LifecycleError) as caught:
+                m.close_item(self.root, self.slug, self.closure, self.instant,
+                    legacy_evidence_data=evidence, apply=True, diagnostic_observer=observer)
+        self.assertIs(caught.exception, primary)
+        self.assertEqual(fired, [True])
+        self.assertEqual(self.canonical_images(), before)
+        self.assertEqual({name: m._lifecycle_file_identity((self.root / name).lstat()) for name in before}, identities)
+        self.assertFalse(m._transition_intent_path(self.root, "flat-terminal-001").exists())
+        self.assertFalse(stage.exists())
+        self.assertFalse(archive.exists())
+        self.assertIsNotNone(observer.snapshot)
+        self.assertEqual(observer.snapshot.primaryFailureId, "WI-TEST-PROGRESS")
+        self.assertEqual(observer.snapshot.topLevelKind, "typed-primary")
+        self.assertEqual(observer.snapshot.rollback, "completed")
+        self.assertEqual(observer.snapshot.cleanupFailures, ())
 
     def test_shared_relocation_real_save_fsync_retain_and_unavailable_recovery(self):
         from unittest.mock import patch
