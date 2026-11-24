@@ -7,6 +7,10 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-24
 
+- Finalize repeated provider installs from the existing verified member images, including unchanged managed files outside the selected mutation paths. Switching Codex instructions between global-backed and standalone forms preserves foreign files and retains byte and identity drift checks.
+
+- Restore exact historical upgrades for five previously supported Init Project, Manual Repository Transfer, Second Opinion and Review Loop skill versions. Their structural identities are verified against the pinned Git revisions; legacy digest collisions and any modified file remain refused.
+
 - Install selected clients without reading skipped hook settings outside the transaction's admitted controls. An existing validated hook receipt survives a skipped update so later uninstall retains its original ownership evidence.
 
 - On Windows, materialize a legacy linked skill as an independent ordinary copy with the verified source tree's owner, group and access rules. Retain the original link for exact rollback and refuse source identity, content or permission drift through commit.

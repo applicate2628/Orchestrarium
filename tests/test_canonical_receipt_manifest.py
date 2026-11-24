@@ -269,6 +269,7 @@ return _stage_tree_manifest(storage_path, ignore_runtime_cache=ignore_runtime_ca
         self.assertEqual(sorted(name for name, _ in consumers),
                          ["_apply_canonical_skills_plan",
                           "_finalize_canonical_lead_receipt",
+                          "_same_transaction_lead_update",
                           "_selected_lead_prior_files"])
 
     def test_ordinary_tuple_branch_and_selection_bypasses(self):
@@ -367,7 +368,7 @@ for path, node in original.items():
         self.assertIsInstance(body[0].value.value, str)
         # This exact prefix pins source/currentness checks, migration/effect/
         # creator composition, the before-only return, and expected augmentation.
-        self.assertEqual([ast.dump(n) for n in body[1:-4]],
+        self.assertEqual([ast.dump(n) for n in body[1:-5]],
                          [ast.dump(n) for n in expected.body])
 
     def test_only_enabled_transaction_binds_composed_image_and_exact_tail(self):
@@ -378,10 +379,11 @@ if transaction is not None and transaction.enabled:
 actual = dict(_stage_tree_manifest(installed, ignore_runtime_cache=True, read_file=read_file))
 if actual != expected:
     raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_DRIFT: managed postcondition {skill.name}")
+return current_image if transaction is not None else None
 """)
-        # No transaction and disabled transactions both retain None. The
+        # Without an enabled transaction, read_file remains None. The
         # callback uses the composed image, never a fresh admission or original.
-        self.assertEqual([ast.dump(n) for n in self.node.body[-4:]],
+        self.assertEqual([ast.dump(n) for n in self.node.body[-5:]],
                          [ast.dump(n) for n in expected.body])
         self.assertEqual(len(_calls(self.node, "_stage_tree_manifest")), 1)
         self.assertEqual(len(_calls(self.node, "_image_file_bytes")), 1)
@@ -443,6 +445,8 @@ if actual != expected:
              "_assert_canonical_member_state(member, item.canonical_target, after=True)"),
             ("_assert_codex_legacy_canonical_current",
              "_assert_canonical_member_state(canonical, item.canonical_target, after=True)"),
+            ("_record_provider_install",
+             "_assert_canonical_member_state(member, skill_root, after=True, transaction=transaction)"),
         ]
         self.assertCountEqual(callers, expected)
 

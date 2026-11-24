@@ -523,13 +523,13 @@ ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
                   '378850fefc2c8b9b352988a34290e515f958b8ea2622c183a5ca5d9b636562fe': '7119c0781eb326dfc236198ba2b59aebf4648ee7e1cbc3bfaaf4272b4812f14d',
                   '4f0a5fdb8af605dc10cb2044f33db3339b410feaf23764cc395f9c3feaaf6353': '7ed43bf3286a8c9f4ff6a69d5b8835f6e1d5d81fa7981352082b88106c2c469d',
                   '905f0866931702acbc064dee39e487b51828e06df9dce99ac9db55d252499f07': '10fa991feccb30d815cd238eb6a02b9409ffe54222f04b0df57a127a89db3b7b',
-                  'c079a182db6139257be2b7b138c6a4b28aa730747c1988d54132f8b07504dd1c': None,
+                  'c079a182db6139257be2b7b138c6a4b28aa730747c1988d54132f8b07504dd1c': '41190dc7d303f7f5dd4b3928db45ce17b5e4b3749db1bc9fd832c48bfda31d3f',
                   'cd5bc7386f286393ee8dab782ed603fff7ad61e8c828f34cca102a3a5e2aba9f': '19b4794614f08a2233097f14c7e5b2343ca831e477c8802341fdd601770b6613'},
  'knowledge-archivist': {'112f1c024e39ca4a7833647aded8a93dbe8c16e94cd384b437c40c636af15eb4': '496f5577880769022a8207f77e3b1f89b656cd68614f342ad85245093214f862'},
  'manual-repo-transfer': {'03c0c2fd12a8273f8325fb145dc2b8e9e97502e497649fc2d474988a9f95070b': '5131cc4d18265cba6d7abf10225d717e3d8ac2a8b0f683efc803ca610dc95674',
                           '08adbe09ea67b47c77d5dc9c29965c1b487e9e7ea373dbea27da04266b6af632': '0da6838dff54201df4bf0c8e646d026d482ed8927ca095c083faaa6c9f9b1584',
-                          '45fc1efc9f0558664afb1f386c5fc7ac2692a607fb8c7be6265b2cfc4d10029b': None,
-                          'b73cde79962de55bd2cd52bc35f0b450d26cff78abb21b9a496bf38be686a9f3': None,
+                          '45fc1efc9f0558664afb1f386c5fc7ac2692a607fb8c7be6265b2cfc4d10029b': 'b77943d890facaec63168048fcc9f16d9e8f2ac4b66aac8783a9eaf751ceaa86',
+                          'b73cde79962de55bd2cd52bc35f0b450d26cff78abb21b9a496bf38be686a9f3': '403eed8bca5a3dcab934ae9a66305944e4cdb09a9d7433ff8681338cb8471b3f',
                           'cdc90d427cc593ee7b7212dd0ddeacbb13dc7474525b493bd8950318bbc3d92f': None,
                           'e0d160e3f216d79fe2aa221b6ed8d4d4b63dd06882d4ea69feb46cdccab1afcc': '44b24222acc7152cde916b4afbe63a6577a900ecef61760cf8355fb5874211f6'},
  'mathtype-book-page': {'2673b2e3132971af915a0302a2939df9f0f89e0b4d9e987616127452584ce862': '478581ba51149d7b69d167f8ec6327582069e5abc3f427f9bda8b2cf31a932e5'},
@@ -546,14 +546,14 @@ ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
  'repo-cleanup': {'36ca45866892cab034addd9eb69a849fc1dcd82e473846093bd4e38107736b24': '8f56fb527cb1d92527b1fc1f4976508dbf1115d85a340bdd57322da6e1985e57'},
  'review-changes': {'16047092a3e29a47c5f261f3920fe653b03678e76ffc2a14835a2ce69010de71': 'a7e084b0f126cd8e5f014748cf231c437bfd49f3034693f9d8ee66ffbf383d28'},
  'review-loop': {'2d78f499bf7b4bb2e6dafdf0ef875f2d9d39448c28df6f3835bc8153fba02ce0': 'b4074ade6274381b9a89f87a6d01ee251981a7d5dd164f9444ac0e3d56f88167',
-                 '3e7be1c11624a0fb7beae1c286dd09a3abb4c6b1fb70d138c9bfdc77c1d8df8a': None,
+                 '3e7be1c11624a0fb7beae1c286dd09a3abb4c6b1fb70d138c9bfdc77c1d8df8a': 'a781f6ae1e33ec3eb8b7ec46973ddb38fbadaa6830fcde6eaad9d4ebc93f94ed',
                  '90148e258a4584787194bddf14eac8730de4ed08c80ce69fd2562a0d15f67bf2': '8dbe55f5a208ab9f340e25e664d346cb73ab81baeda56e3bdd5e62dcc1d37730',
                  'd5a5190926d170a6498399e221028e11087974aef7fb7e49abb1d2052acac089': 'ac7a0a8942be1b295958a93cfa9cb4ac2bca943f3a4eb8459eb6b06f42c2cb69',
                  'd956cf70db42a7c936d21984fe6aeb83748de02c544eec56ca54971629f85f7e': '70392ab319a1ec665a177775ea8bc09def2aebefff868ebd84f70de0edd9f34f'},
  'second-opinion': {'b82628910567799a6f03962f3ec0289cb47b4607093c074466b1a2656b53f432': 'b8b8d488ce57f60d19afcf2ccf152be16e9f47c096638b06317cb21882238825',
                     'd3f1e93ddb6641b21e05c13e28e1f291137e608922c00c00a59fa28ccad54741': '2f65f8de5fca6dee975bd01859e60527d15208325339e2dbf50d916d5e1d10b5',
                     'f9a2114c8baead9ec8a259288ff74e157af60864c9f3d70ba0bcc52154b2b4b6': '7be172e27fac00bd7bfde542d7bd87b9a1dd874caee15b90c06d0b292201fc60',
-                    'fe989a918e11ff8066a0c8af54f73ba7bbf763719ea3b604ed147b79bec684d6': None},
+                    'fe989a918e11ff8066a0c8af54f73ba7bbf763719ea3b604ed147b79bec684d6': 'a2354bd41dde94b1b6e22004813a187834ce7df3216d0dd0273ba13b0c0be83d'},
  'security-engineer': {'2ffbb3f112e3d3cd05c8ae547eb6a9c3bfe642129cad60f086479c11a7b8fc07': '553f936b913adedf369643531ec1d2085ac3bd502a04dbcb352d03a4d385f5c1'},
  'security-reviewer': {'5ab908e960e9f25d8acb56f995160ac114dfcaa9bb01d1726f7ba446e8b394f5': 'c36e6eec324971b231f563915652c3be3ae6104618f35745a44c83d02382ec04'},
  'toolchain-engineer': {'51cf24ae0699a6bb379ee6bbf7b51e2a982cba12aaeab2dc76e57d4b4ccf2a74': 'f83bdad4a5a53723d0d4f8d77f6b32577da60d902972910f0543747148b94ad3'},
@@ -10222,8 +10222,8 @@ def _assert_canonical_member_source_current(skill: _CanonicalSkillPlan) -> None:
 def _assert_canonical_member_state(
     skill: _CanonicalSkillPlan, installed: Path, *, after: bool,
     transaction: _InstallTransaction | None = None,
-) -> None:
-    """Check the same D/P at apply and both projection receivers."""
+) -> dict[Path, _PhysicalNode] | None:
+    """Verify members and return their composed transaction image after application."""
     assert skill.managed_before is not None and skill.managed_after is not None and skill.selection is not None
     _assert_canonical_member_source_current(skill)
     if any(not _InstallTransaction._point_matches(path, node) for path, node in skill.container_witnesses):
@@ -10282,6 +10282,7 @@ def _assert_canonical_member_state(
     actual = dict(_stage_tree_manifest(installed, ignore_runtime_cache=True, read_file=read_file))
     if actual != expected:
         raise ValueError(f"E_CANONICAL_SKILLS_RECEIPT_DRIFT: managed postcondition {skill.name}")
+    return current_image if transaction is not None else None
 
 
 def _preflight_directory_move_capabilities(plan: _CanonicalSkillsPlan, target: Path) -> tuple[tuple[Path, tuple[int, int, int, int]], ...]:
@@ -14190,11 +14191,23 @@ def _record_provider_install(root, provider, mode, target, anchor, transaction, 
             if not isinstance(manifest, tuple):
                 raise _InstallFailure("E_PROVIDER_RECEIPT_INVALID", "verify")
             skill_root = canonical_target / name
+            member = next((skill for skill in canonical_plan.skills
+                           if skill.name == name and skill.managed_before is not None), None)
+            image = current
+            if member is not None:
+                if manifest != member.managed_after:
+                    raise _InstallFailure("E_PROVIDER_RECEIPT_DRIFT", "verify")
+                # Unchanged members are intentionally outside the write snapshot.
+                # Reuse their original witnesses composed with owned mutations.
+                image = _assert_canonical_member_state(
+                    member, skill_root, after=True, transaction=transaction)
+                if image is None:
+                    raise _InstallFailure("E_PROVIDER_RECEIPT_DRIFT", "verify")
             for member, digest in manifest:
                 path = skill_root / member
                 relative = path.relative_to(anchor).as_posix()
                 codec.validate_path(relative, provider, scope)
-                node = current.get(path)
+                node = image.get(path)
                 if digest == "directory":
                     if node is None or node.kind != "directory":
                         raise _InstallFailure("E_PROVIDER_RECEIPT_DRIFT", "verify")
@@ -14204,7 +14217,7 @@ def _record_provider_install(root, provider, mode, target, anchor, transaction, 
                 else:
                     files[relative] = digest
             relative = skill_root.relative_to(anchor).as_posix()
-            if current.get(skill_root) is not None and current[skill_root].kind == "directory":
+            if image.get(skill_root) is not None and image[skill_root].kind == "directory":
                 managed_directories.add(relative)
         transport_stage = getattr(canonical_plan, "transport_stage", None)
         if transport_stage is not None:

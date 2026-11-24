@@ -199,6 +199,11 @@ def test_independent_structural_receipt_precedes_stock_fallback(
     ("3a94f258a6c0b1f0b544bd1bdc8d75a91def6ffa", "external-reviewer"),
     ("3a94f258a6c0b1f0b544bd1bdc8d75a91def6ffa", "external-worker"),
     ("3a94f258a6c0b1f0b544bd1bdc8d75a91def6ffa", "init-project"),
+    ("9831fe66b157020f90f888ec8c878887135aa776", "init-project"),
+    ("6dbf861a4c119f59c52813a02758f14ea9050aa7", "manual-repo-transfer"),
+    ("94715eed9e0563a38d83572f4b6d525d2f9172d9", "manual-repo-transfer"),
+    ("0274b69a25e1b36f83da4c21f630d222d627c4ee", "second-opinion"),
+    ("01a7eb0ded829233c21c588f1234f62b31308f35", "review-loop"),
 ])
 def test_historical_fixture_has_independent_structural_witness(baseline, name, tmp_path):
     import subprocess

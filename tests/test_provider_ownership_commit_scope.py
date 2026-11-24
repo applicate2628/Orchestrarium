@@ -121,7 +121,7 @@ def test_record_uses_admitted_skill_members_not_all_copied_legacy_files(tmp_path
     received = []
     owner = SimpleNamespace(dry_run=False, anchor=tmp_path,
                             create_file=lambda relative, payload: received.append(payload))
-    plan = SimpleNamespace(skills=(SimpleNamespace(name="demo"),),
+    plan = SimpleNamespace(skills=(SimpleNamespace(name="demo", managed_before=None),),
         nonlead_expected=(("demo", (("SKILL.md", "a" * 64),)),),
         lead_receipt=None)
     monkeypatch.setattr(INSTALL, "_read_owned_text", lambda *args, **kwargs: None)
@@ -171,3 +171,63 @@ def test_record_consumes_bound_transport_migration_not_path_census(tmp_path, mon
             target / 'settings.json', transport, False,
             canonical_plan=plan, canonical_target=target / 'skills')
     assert len(received) == 1
+
+
+@pytest.mark.parametrize("mutation", ["none", "selected-update", "foreign-bytes", "foreign-identity"])
+def test_record_consumes_managed_member_image_without_expanding_mutation_paths(tmp_path, monkeypatch, mutation):
+    import shutil
+
+    target = tmp_path / ".claude"
+    skills = target / "skills"
+    installed = skills / "demo"
+    (installed / "agents").mkdir(parents=True)
+    body = installed / "SKILL.md"
+    body.write_bytes(b"owned body\n")
+    unchanged = installed / "agents/openai.yaml"
+    unchanged.write_bytes(b"owned metadata\n")
+    managed_before = INSTALL._stage_tree_manifest(installed)
+    source = tmp_path / "source/demo"
+    shutil.copytree(installed, source)
+    extra = installed / "operator-note.txt"
+    extra.write_bytes(b"protected operator content\n")
+    if mutation == "selected-update":
+        (source / "SKILL.md").write_bytes(b"updated owned body\n")
+    member = INSTALL._plan_canonical_skill_members(
+        INSTALL._CanonicalSkillPlan("demo", source, INSTALL._tree_sha256(source),
+            INSTALL._tree_sha256(installed), None, True), installed, managed_before, None)
+    plan = SimpleNamespace(skills=(member,), nonlead_expected=(("demo", member.managed_after),),
+        lead_receipt=None, member_selection=None)
+    receipt = target / CODEC.RECEIPT_NAME
+    paths = [receipt, *INSTALL._canonical_skill_snapshot_paths(skills, plan)]
+    assert all(path != unchanged and path not in unchanged.parents for path in paths)
+    monkeypatch.setattr(INSTALL, "_capture_provider_configs", lambda *args: {})
+    with INSTALL._InstallTransaction(paths, enabled=True) as transaction:
+        owner = INSTALL._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+        if mutation == "selected-update":
+            owner.migrate_exact_file(body.relative_to(tmp_path), dict(managed_before)["SKILL.md"],
+                (source / "SKILL.md").read_bytes(), retention_parent=target.relative_to(tmp_path))
+        elif mutation == "foreign-bytes":
+            unchanged.write_bytes(b"foreign changed metadata\n")
+        elif mutation == "foreign-identity":
+            replacement = tmp_path / "replacement.yaml"
+            replacement.write_bytes(unchanged.read_bytes())
+            replacement.replace(unchanged)
+        record = lambda: INSTALL._record_provider_install(
+            ROOT, "claude", "target", target, tmp_path, transaction, owner, None, {},
+            target / "CLAUDE.md", None, target / "settings.json", target / "agents", False,
+            canonical_plan=plan, canonical_target=skills)
+        if mutation.startswith("foreign-"):
+            foreign = INSTALL._InstallTransaction._capture_node(unchanged)
+            with pytest.raises(ValueError, match="E_CANONICAL_SKILLS_RECEIPT_DRIFT"):
+                record()
+            assert not receipt.exists()
+            assert INSTALL._InstallTransaction._point_matches(unchanged, foreign, check_file_content=True)
+        else:
+            record()
+            received = CODEC.decode_record(receipt.read_bytes(), "claude", "project")
+            assert received["files"] == {
+                (installed / relative).relative_to(tmp_path).as_posix(): digest
+                for relative, digest in member.managed_after if digest != "directory"}
+            assert extra.relative_to(tmp_path).as_posix() not in received["files"]
+        assert extra.read_bytes() == b"protected operator content\n"
+        transaction.commit()

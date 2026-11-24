@@ -30,6 +30,7 @@ def policy_case(tmp_path, monkeypatch):
 
 def render_local(case, **kwargs):
     backend, _global, local, _shared = case
+    kwargs.setdefault("prefer_global", True)
     backend._merge_codex_agents(ROOT, ROOT / "src.codex", local, False, **kwargs)
     return local.read_text(encoding="utf-8")
 
@@ -152,6 +153,8 @@ def test_project_install_records_and_uninstalls_global_backed_block(policy_case)
     text = local.read_text(encoding="utf-8")
     assert "Installation mode: global-backed." in text and shared not in text
     assert "Keep my test command." in text
+    extra = local.parent / ".agents/skills/accessibility-reviewer/operator-note.txt"
+    extra.write_bytes(b"protected operator content\n")
     assert backend.install("codex", arguments + ["--standalone-instructions"]) == 0
     assert shared in local.read_text(encoding="utf-8")
     assert backend.install("codex", arguments) == 0
@@ -159,6 +162,7 @@ def test_project_install_records_and_uninstalls_global_backed_block(policy_case)
     assert backend.install("codex", arguments + ["--uninstall", "--apply"]) == 0
     assert "Keep my test command." in local.read_text(encoding="utf-8")
     assert backend.CODEX_BEGIN not in local.read_text(encoding="utf-8")
+    assert extra.read_bytes() == b"protected operator content\n"
     assert global_doc.read_bytes() == before_global
 
 

@@ -1536,7 +1536,7 @@ def test_pre_rebase_staged_lead_drift_is_rejected_before_transaction(
     monkeypatch.setenv("HOME", str(home))
     assert installer.install("claude", ["--global", "--no-hypothesis-hook"]) == 0
 
-    skills = home / ".agents" / "skills"
+    skills = home / ".claude" / "skills"
     shutil.rmtree(skills / "lead")
     shutil.copytree(historical, skills / "lead")
     with (skills / "lead" / "SKILL.md").open("ab") as stream:
