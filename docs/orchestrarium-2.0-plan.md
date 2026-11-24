@@ -46,6 +46,17 @@ this register does not create a second implementation tracker.
    absent ledger read correction ([PR64](https://github.com/applicate2628/Orchestrarium/pull/64))
    with their existing owners. Carry only applicable deltas into SDK and retain
    each correction's own receiving evidence.
+   Keep inherited lifecycle corrections as separate commits in one focused
+   follow-up from main: staged-successor budgets, multi-bug rollback ownership,
+   restricted topology observation, selected close subjects, legacy-parent
+   compensation, pending-receipt settlement, historical PASS custody and empty
+   scratch namespace currentness.
+   Keep bounded Git status ordering in a separate
+   repository-transfer follow-up. Carry the applicable corrections into SDK;
+   they do not expand PR64's initially absent ledger scope.
+   Keep shared test-only capability and target-order corrections separate from
+   installer behavior changes; SDK's receipt finalizer assertions remain local
+   to its own integration.
    Reconcile SDK with current main using one integrated candidate,
    retaining current receiver/progress checks, exact ownership and rollback, and
    the selected-client installation contract. A conflict-free Git tree alone is
@@ -116,6 +127,19 @@ integration findings stay with PR19, complete Rust scanner qualification with
 PR21, and scanner cancellation and source-mirror corrections with PR60. This
 plan records their sequence without creating another tracker or implementation PR.
 
+The scanner follow-up also corrects a reproduced Linux deadlock between the
+content reader and prior-disclosure process owners. It serializes their
+ownership while retaining complete settlement, cancellation and deadline checks;
+the original edited-blob case now completes on both applicable source branches.
+Historical-custody admission exposed an SDK error-mapping regression under an
+explicit event limit; the focused correction preserves the existing typed
+refusal and caller ceiling. These are source corrections within step 1, not
+new release workstreams.
+The empty-scratch correction retains exact namespace/absence observations until
+transaction completion without reinstating a historical-ledger veto for ordinary
+close. Foreign late arrivals remain preserved; completion and rollback reports
+distinguish the boundary at which the change was discovered.
+
 Focused offline source checks passed for provider projections, shared governance,
 scanner cancellation, Git object reads in both supported formats, and ledger
 absence/currentness.
@@ -127,12 +151,25 @@ checks. These are bounded results on recorded source revisions, not additive
 suite totals or proof of the working installation. Interrupted runs without a
 final result retain only their recorded partial observations.
 
+The original 627-case lifecycle selection now has completed-attempt evidence
+for every selected identity; all last 37 non-publication and eight publication
+modules completed as well. Recorded failures and skips remain part of that
+evidence, so these coverage statements do not mean a green combined suite.
+All 495 originally selected modules have execution or collection evidence.
+The shared lifecycle fixture port separately passed all 44 expanded cases on
+the main-based candidate, retaining its own source/test hash bindings.
+The repaired native legacy creator case reached recovery and passed on its
+recorded source; 14 cases left unexecuted by the earlier bounded native class
+run retain an explicit qualification gap.
+
 The Rust primitives passed their 16 native tests. Framing and composition parity
 was checked against both the earlier Python reader and the integrated SDK reader;
 the complete publication matcher still cannot compile offline because `pcre2`
 is absent from the existing dependency cache. Six isolated Linux verifier cases
 cannot import `pytest` under the required `-I` mode in either available Python
 interpreter; optional official ACP dependencies retain separate collection holds.
+Two POSIX socket-boundary cases stop at the environment's socket-creation refusal
+before their downstream special-file checks. Preserve those exact evidence gaps.
 The audit leaves those cases unqualified. Full combined-candidate acceptance,
 live provider routes, actual installed receiving and complete Rust scanner
 qualification remain with their existing owners in step 2.
