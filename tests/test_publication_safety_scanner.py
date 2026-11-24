@@ -2374,6 +2374,7 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             "scripts/universal-hooks/scripts/check-publication-safety.py",
             "src.codex/skills/lead/scripts/check-publication-safety.py",
             "src.claude/agents/scripts/check-publication-safety.py",
+            "adapters/claude/agents/scripts/check-publication-safety.py",
         )
         for path in approved:
             with self.subTest(path=path), tempfile.TemporaryDirectory() as td:
@@ -2382,6 +2383,21 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
                 rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
                 self.assertEqual(rc, 0, out + err)
                 self.assertIn("receipt=v3", out)
+
+    def test_claude_history_handover_is_not_a_whole_source_exemption(self) -> None:
+        module = _load_canonical_scanner("_scanner_qualified_source_handover")
+        current = "src.claude/agents/scripts/check-publication-safety.py"
+        incoming = "adapters/claude/agents/scripts/check-publication-safety.py"
+        catalog = _join('re.compile(r"BEGIN RSA PRIVATE', ' KEY"),')
+        ordinary = _join("pass", "word: hunter2")
+        for path in (current, incoming):
+            with self.subTest(path=path):
+                self.assertEqual(list(module._selected_text_lines(catalog, path, "history-blob")), [])
+                self.assertTrue(list(module._selected_text_lines(catalog, path, "commit-message")))
+                self.assertTrue(
+                    module._content_hits(ordinary, path, lambda _line: (), subject_kind="history-blob")
+                )
+        self.assertTrue(list(module._selected_text_lines(catalog, incoming, "tracked-blob")))
 
     def test_bounded_oid_reader_refuses_count_bytes_and_deadline(self) -> None:
         module = _load_canonical_scanner("_scanner_v3_oid_stream")

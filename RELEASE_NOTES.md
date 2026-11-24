@@ -87,6 +87,14 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 - The publication scanner no longer reflags machine-path lines already published in the same tracked file in the verified receiver history. An edited blob does not erase that evidence. New lines, excess duplicates, different tracked paths, commit messages, binary subjects and other detectors retain their existing checks.
 
+- Add independently tested Rust scanner stages for verified Git objects, normalized whole lines and shared PCRE2 lexical matching. The Windows private mapping is a candidate component; production publication ownership and the shipped scanner are unchanged.
+
+- In the draft Rust index, advance positions in runs between line separators rather than updating state per character. Preserve raw and normalized coordinates, Unicode replacement, and split CRLF behavior. This does not change the installed scanner.
+
+- Recognize intentional scanner declarations in history from the approved SDK layout while retaining the shipped runtime layout. Ordinary findings and staged files still use the existing rules.
+
+- Align the draft Rust tree walker with receiver-aware publication scanning. A previously published tree in the receiver overlap still contributes path metadata at every visited prefix, while unpublished-tree coverage credits only newly selected trees. The release plan now places qualification of the selected Rust scanner after the tagged pre-SDK baseline, with the scanner release ahead of the SDK release and distribution qualification tracked separately.
+
 ## 2026-11-22
 
 - Let the guarded range scan continue while it reports newly verified work. Stalls still fail, and completed scans must still pass the same coverage, identity, and review checks.
@@ -120,6 +128,7 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 - Check large commit histories without a cumulative message-size cutoff. The scanner examines each bounded commit or tag and retains only structural metadata. Verify line bounds once per blob while preserving every path-specific check. Stream the same qualified Git revision inputs through the owned reader, avoiding the Windows command-line length limit on wide histories. Scoped Git object reads share the scan deadline rather than imposing a second default timeout. Findings, incomplete checks and publication authority stay distinct.
 
 - Add an opt-in local publication history report that identifies flagged commit messages by commit ID and line without exposing message text. The report binds the result to the checked range, marks truncated output, and does not change or authorize publication.
+- Rebase the native Rust plan onto the accepted pre-SDK source and record the isolated reminder-hook pilot, its read-only Codex registration evidence, and the remaining trust, invocation and lifecycle checks. Planning only: Python remains the production owner; no installer or hook behavior changes.
 
 - Run shared hook upgrade tests without an installed Codex executable. The rollback test now verifies that the simulated post-write health check actually ran before it checks restoration.
 
@@ -207,6 +216,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-18
 
+- The Rust migration plan now explicitly retains GUI-independent functional operations and replaceable clients through the shared architecture contract, with headless and client-replacement acceptance scoped to each migration slice. No Rust implementation or activation is claimed.
+
 - The shared development workflow now requires GUI-independent functional operations and a replaceable presentation client through the existing common contract. Architecture guidance adds headless and client-replacement acceptance while preserving required approvals, presentation-only behavior and explicitly justified user-requested exceptions.
 
 - The repository front page now introduces Orchestrarium in plain language and separates the current production packs from the unmerged SDK work in PR #19. The current mascot is the approved Little Orche, displayed as a compact logo; the future Orche rebrand is not applied. Existing installation identifiers and runtime behavior are unchanged; the page no longer repeats an outdated model-ranking summary.
@@ -227,6 +238,12 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
   native Rust operations and separate installer acceptance retain their owners.
 
 ## 2026-11-17
+
+- Inventory the full tracked Python/hook migration surface across native and SDK snapshots, retain each canonical owner and useful oracle, and map prior incidents to differential regression and scoped cutover/recovery. Record upstream library candidates and license boundaries without claiming a completed native port.
+
+- Expand the Rust workflow design across existing domain owners, scoped recovery, resource settlement and skill maintenance. Record installer process-loss evidence gaps, batch diagnostics and partial-setup recovery separately from already implemented behavior; no new scheduler, cleanup daemon or global stop is introduced.
+
+- Extend the native Rust proposal with staged SDK-to-Rust instruction reduction: move only covered deterministic obligations into their existing owners, retain semantic guidance and unsupported-host instructions, and retire procedural duplicates after verification. Planning only; no runtime activation or live rule removal.
 
 - Task-first routing now favors Sol 6.2 for ordinary implementation, Luna Extra high for bounded mechanics and Terra 6.1 High for fitting bounded/repository/visual work. Astra High/Extra high can use genuine task-scoped approval for scientific formulation, complex audit, architecture and security, including covered repeats; Max and separate launch/spending permissions remain protected. Substantive results now require a proportionate nonauthor check, not only critical results, without adding duplicate review loops.
 
@@ -328,6 +345,10 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 - Keep lifecycle fault-injection test doubles compatible with keyword arguments from their production owners. Forwarding wrappers preserve the complete call, while the controlled failure double accepts owner options without changing its injected failure; drift and rollback assertions remain unchanged.
 - Keep lifecycle tests discoverable through both test runners: pytest no longer reruns the unittest adapter, and unittest includes functions defined at the end of the module. Test assertions and production behavior are unchanged.
 - Restore fresh-install rollback through the existing identity-checked disposal owner instead of requiring a native move merely to retain newly created data. Existing-object replacement and runtime-observation custody retain their original safeguards. This removes a fresh-file recovery failure under an unsupported native move capability; directory atomic-publication refusal and POSIX disposal holds remain unchanged, so this is not complete DrvFS installation support.
+
+## 2026-11-12
+
+- Refine the independent native Rust plan into bounded work and receiving steps. Preserve the current Python owner and SDK acceptance boundary, explicitly test final process exit after output failures, and keep payload generation with the canonical policy source. This is planning only: no native build, installation, runtime activation or measured improvement is claimed.
 
 ## 2026-11-10
 
@@ -492,6 +513,10 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-10-26
 
+- Refine the native delivery plan to one Rust CLI operation owner, a thin PowerShell download/verification bootstrap and npm as a compatible optional channel. Keep the current Python installer until qualified native cutover; delivery scripts must not duplicate managed-file, trust or recovery behavior. The first Rust implementation slice remains a joint decision after SDK acceptance.
+
+- Isolate the native Rust operations plan from npm distribution so it can be reviewed and delivered independently. Preserve the first shared reminder-hook slice, existing ownership, parity and cutover criteria; this plan does not activate a native runtime or change production policy.
+
 - Publication hooks recover one proved literal PowerShell Git invocation when a supported host label incorrectly selects Bash parsing. Mixed quoting retains the original command and all publication checks; compound refusals now show only safe parser facts and compiled revision labels for diagnosis.
 
 - Optional review-closure V2 now separates actual source-bound Root semantic receiving from independently acquired machine promises. Unknown JSON/prose gains no schema from its keys or layout; an explicitly commissioned six-field review-loop result is checked by its existing value/state owner, retained source binding and known-aware reader marker. Genuine findings, native currentness, cold replay and minimal durable transfer remain required.
@@ -505,8 +530,6 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 - Clarified scratch retention at the ledger recording step: callers choose the existing typed owner namespace before acquisition and distinguish completed PASS-terminal retention from preserving partial or failed results and later Version 3 close-time retention. Existing verdict, ownership and lifecycle requirements remain unchanged.
 
 - Historical README catalogues preserve the existing input role when receiving never-admitted retirement records. They retain stored incoming/source inventory and exact archived payload/digest checks without starting an unrelated current-consumer sweep; strict retirement and integrity audits still detect later stale citations.
-
-- Refine the native delivery plan to one Rust CLI operation owner, a thin PowerShell download/verification bootstrap and npm as a compatible optional channel. Keep the current Python installer until qualified native cutover; delivery scripts must not duplicate managed-file, trust or recovery behavior. The first Rust implementation slice remains a joint decision after SDK acceptance.
 
 - Separate npm distribution review from native Rust operations. This branch owns the npm plan and links to the independently based Rust proposal rather than carrying its plan or requiring it to merge. npm can explicitly use the existing Python installer; no package is published and no runtime is activated.
 
