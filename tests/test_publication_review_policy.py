@@ -401,6 +401,7 @@ class PublicationReviewPolicyTests(unittest.TestCase):
 class PolicyIOContractTests(unittest.TestCase):
     def setUp(self) -> None:
         scratch = Path(__file__).resolve().parents[1] / ".scratch"
+        scratch.mkdir(exist_ok=True)
         self._temporary = tempfile.TemporaryDirectory(
             prefix="publication-review-policy-", dir=scratch
         )
