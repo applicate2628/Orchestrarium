@@ -386,7 +386,7 @@ def test_nonlead_linked_map_and_removed_source_refuse(tmp_path: Path) -> None:
         installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True)
 
 
-def test_nonlead_project_mode_keeps_prior_admission_and_no_map(tmp_path: Path) -> None:
+def test_nonlead_project_mode_records_owned_members_for_reinstall(tmp_path: Path) -> None:
     installer, source, home, skills, receipt = _fixture(tmp_path)
     plan = installer._preflight_canonical_skills(source, skills, root=ROOT)
     try:
@@ -396,15 +396,28 @@ def test_nonlead_project_mode_keeps_prior_admission_and_no_map(tmp_path: Path) -
             transaction.commit()
     finally:
         installer._discard_canonical_skills_plan(plan)
-    assert not receipt.exists()
+    assert json.loads(receipt.read_bytes())["skills"] == {
+        name: {"members": dict(installer._stage_tree_manifest(skills / name))}
+        for name in NAMES
+    }
     (source / "analyst" / "SKILL.md").write_bytes(b"next version")
-    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: analyst"):
-        installer._preflight_canonical_skills(source, skills, root=ROOT)
+    plan = installer._preflight_canonical_skills(source, skills, root=ROOT)
+    try:
+        _apply_member_plan(installer, plan, home, skills)
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+    assert (skills / "analyst" / "SKILL.md").read_bytes() == b"next version"
+    assert json.loads(receipt.read_bytes())["skills"]["analyst"] == {
+        "members": dict(installer._stage_tree_manifest(skills / "analyst"))
+    }
     with pytest.raises(ValueError, match="E_CANONICAL_SKILL_ADOPTION_MISMATCH"):
         installer._preflight_canonical_skills(
             source, skills, root=ROOT,
             replace_unreceipted_skill_sha256=("analyst=" + "0" * 64,),
         )
+    (skills / "analyst" / "SKILL.md").write_bytes(b"foreign edit")
+    with pytest.raises(ValueError, match="E_CANONICAL_SKILLS_RECEIPT_DRIFT"):
+        installer._preflight_canonical_skills(source, skills, root=ROOT)
 
 
 def test_nonlead_old_curated_prior_seeds_map(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -425,7 +438,7 @@ def test_nonlead_old_curated_prior_seeds_map(tmp_path: Path, monkeypatch: pytest
 
 
 @pytest.mark.parametrize("order", [("codex", "claude"), ("claude", "codex")])
-def test_nonlead_provider_orders_without_git_preserve_links_and_lead(
+def test_nonlead_provider_orders_without_git_preserve_unselected_copies_and_lead(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, order: tuple[str, str]
 ) -> None:
     installer = _installer()
@@ -439,29 +452,34 @@ def test_nonlead_provider_orders_without_git_preserve_links_and_lead(
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("HOME", str(home))
     assert installer.install(order[0], ["--global", "--no-hypothesis-hook"]) == 0
-    skills = home / ".agents" / "skills"
+    def selected_skills(provider: str) -> Path:
+        return home / (".agents" if provider == "codex" else ".claude") / "skills"
+
+    skills = selected_skills(order[0])
     lead_receipt = skills / ".orchestrarium-lead-receipt.v1.json"
     lead_bytes = lead_receipt.read_bytes()
     receipt = skills / RECEIPT
     prior = json.loads(receipt.read_bytes())["skills"]
-    links = {provider: (home / f".{provider}" / "skills" / "lead").lstat().st_ino
-             for provider in ("codex", "claude")
-             if (home / f".{provider}" / "skills" / "lead").exists()}
+    first_payload = _inventory(skills)
+    first_identity = (skills / "lead").lstat().st_ino
+    assert not (skills / "lead").is_symlink()
     for name in NAMES:
         with (receiver / "src.codex" / "skills" / name / "SKILL.md").open("ab") as stream:
             stream.write(b"\nsynthetic second version\n")
     assert installer.install(order[1], ["--global", "--no-hypothesis-hook"]) == 0
-    current = json.loads(receipt.read_bytes())["skills"]
+    second_skills = selected_skills(order[1])
+    current = json.loads((second_skills / RECEIPT).read_bytes())["skills"]
     for name in NAMES:
         assert current[name] != prior[name]
         assert current[name] == {"members": dict(installer._stage_tree_manifest(
-            skills / name, ignore_runtime_cache=True))}
+            second_skills / name, ignore_runtime_cache=True))}
+    assert not (second_skills / "lead").is_symlink()
     assert lead_receipt.read_bytes() == lead_bytes
-    for provider, inode in links.items():
-        assert (home / f".{provider}" / "skills" / "lead").lstat().st_ino == inode
+    assert _inventory(skills) == first_payload
+    assert (skills / "lead").lstat().st_ino == first_identity
 
 
-def test_nonlead_claude_projection_failure_rolls_back_map_and_trees(
+def test_nonlead_claude_copy_failure_rolls_back_receipts_and_trees(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     installer = _installer()
@@ -477,12 +495,16 @@ def test_nonlead_claude_projection_failure_rolls_back_map_and_trees(
     before = _inventory(home)
     with (receiver / "src.codex" / "skills" / "analyst" / "SKILL.md").open("ab") as stream:
         stream.write(b"\nchanged source\n")
-    original = installer._apply_claude_skill_projection_plan
-    def fail_after_projection(*args, **kwargs):
+    original = installer._apply_canonical_skills_plan
+    exercised = []
+    def fail_after_copy(*args, **kwargs):
+        assert args[1] == home / ".claude" / "skills"
         original(*args, **kwargs)
-        raise RuntimeError("injected after Claude projection")
-    monkeypatch.setattr(installer, "_apply_claude_skill_projection_plan", fail_after_projection)
+        exercised.append(True)
+        raise RuntimeError("injected after Claude copy")
+    monkeypatch.setattr(installer, "_apply_canonical_skills_plan", fail_after_copy)
     assert installer.install("claude", ["--global", "--no-hypothesis-hook"]) == 1
+    assert exercised == [True]
     assert _inventory(home) == before
 
 

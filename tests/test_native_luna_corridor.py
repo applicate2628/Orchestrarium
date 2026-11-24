@@ -2132,7 +2132,7 @@ def test_luna_semantic_task_matrix_never_authorizes_write_or_decision() -> None:
 
 
 def test_luna_native_tomls_are_standalone_trusted_and_manifest_bound() -> None:
-    """Catches role source that loses exact Luna/high least-privilege or digest binding."""
+    """Catches role source that loses exact Luna/xhigh least-privilege or digest binding."""
 
     policy = _policy()
     manifest_path = AGENTS_SOURCE / installer.CODEX_ROLE_MANIFEST
@@ -2151,7 +2151,7 @@ def test_luna_native_tomls_are_standalone_trusted_and_manifest_bound() -> None:
             "name": role_name,
             "description": role["description"],
             "model": "gpt-6-luna",
-            "model_reasoning_effort": "high",
+            "model_reasoning_effort": "xhigh",
             "sandbox_mode": sandbox,
             "developer_instructions": role["developer_instructions"],
             "features": NATIVE_ROLE_DISABLED_FEATURES,
@@ -2194,9 +2194,11 @@ def test_luna_native_tomls_are_standalone_trusted_and_manifest_bound() -> None:
             assert "model_reasoning_effort" not in role
         else:
             expected_pair = (
-                ("gpt-6.1-terra", "medium")
+                ("gpt-6.2-astra", "high")
+                if role_name in {"algorithm-scientist", "computational-scientist"}
+                else ("gpt-6.2-sol", "high")
                 if role_name in {"platform-engineer", "worker"}
-                else ("gpt-6.1-sol", "xhigh")
+                else ("gpt-6.2-sol", "xhigh")
             )
             assert (role["model"], role["model_reasoning_effort"]) == expected_pair
             assert role_bytes.count(('model = "' + expected_pair[0] + '"').encode()) == 1

@@ -224,12 +224,11 @@ def test_claude_activation_and_materialization_use_canonical_lead() -> None:
     )
     claude = ast.dump(ast.parse("provider == 'claude'", mode="eval").body)
     codex = ast.dump(ast.parse("provider == 'codex'", mode="eval").body)
-    source_arguments = {
-        "_preflight_canonical_skills": 0,
-        "_preflight_claude_skill_projections": 0,
-        "_apply_claude_skill_projection_plan": 1,
+    expected_arguments = {
+        "_preflight_canonical_skills": ("root / 'src.codex' / 'skills'", "canonical_skills_target"),
+        "_apply_canonical_skills_plan": ("canonical_plan", "canonical_skills_target", "canonical_skills_owner"),
     }
-    calls = {name: [] for name in source_arguments}
+    calls = {name: [] for name in expected_arguments}
     for branch in ast.walk(install):
         if not isinstance(branch, ast.If):
             continue
@@ -245,10 +244,11 @@ def test_claude_activation_and_materialization_use_canonical_lead() -> None:
                     and call.func.id in calls
                 ):
                     calls[call.func.id].append(call)
-    canonical = ast.dump(ast.parse("root / 'src.codex' / 'skills'", mode="eval").body)
-    for name, position in source_arguments.items():
+    for name, arguments in expected_arguments.items():
         assert len(calls[name]) == 1, (name, "missing or ambiguous Claude install route")
-        assert ast.dump(calls[name][0].args[position]) == canonical, name
+        assert [ast.dump(arg) for arg in calls[name][0].args] == [
+            ast.dump(ast.parse(argument, mode="eval").body) for argument in arguments
+        ], name
 
 
 RESTRICTION_OWNERS = (
@@ -336,7 +336,7 @@ def test_result_restriction_receiving_preserves_real_safety_and_identity() -> No
 def test_qa_and_lead_receive_restriction_against_admission() -> None:
     for relative in (
         "src.codex/skills/qa-engineer/SKILL.md",
-        "src.claude/agents/qa-engineer.md",
+        "adapters/claude/agents/qa-engineer.md",
     ):
         _requires_unit(
             ROOT / relative,
@@ -408,16 +408,19 @@ def test_context_economy_keeps_evidence_duty_without_verbatim_repetition() -> No
     assert "dispatch prompts must carry the constraint verbatim" not in reference
     assert "reuse the unchanged rule only when actually available to the receiver" in reference
     assert "supply missing governing content through the trusted route" in reference
+    for phrase in ("a decision-driving claim cites", "in-repo `file:line`",
+                   "installed-version binary surface check", "versioned official docs/upstream source",
+                   "target-environment smoke", "ASSUMPTION (UNVERIFIED)", "plus empirical step",
+                   "`should work`", "`should be fine`", "`probably`", "`likely`", "`I think`",
+                   "`based on training data`", "`in general`", "`this pattern usually works`"):
+        assert phrase in evidence, phrase
     for path in HANDOFFS:
         source = path.read_text(encoding="utf-8")
         field = source.split("Evidence discipline:\n", 1)[1].split("Defect-class inventory:", 1)[0]
-        # Concrete template duties remain unchanged in this bounded port.
-        for phrase in ("cite each decision-driving claim", "in-repo file:line",
-                       "installed-dependency surface check", "versioned official docs/upstream source URL",
-                       "target-environment smoke test", "ASSUMPTION (UNVERIFIED)",
-                       "with the resolving step", 'never use "should work"',
-                       '"should be fine"', '"probably"', '"likely"', '"I think"',
-                       '"based on training data"', '"in general"', '"this pattern usually works"'):
+        # Each compact template binds the unchanged shared duties above.
+        for phrase in ("task-specific source and verification requirements",
+                       "apply shared Evidence-citation discipline under Context handoff economy",
+                       "If that contract is missing", "selected trusted input path before relying on it"):
             assert phrase in field, (path, phrase)
 
 
@@ -481,6 +484,6 @@ def test_context_economy_codex_addendum_never_claims_native_loading() -> None:
         "supported invocation's actual context contract",
         "supply missing instructions when uncertain",
         "not a new host setting or proof of token savings",
-        "Global/project automatic AGENTS concatenation remains a separate installation/loading compatibility question",
+        "Global-backed project rendering requires the exact matching-policy checks documented in INSTALL.md",
         "never omit standalone project governance merely because a global file exists",
     )

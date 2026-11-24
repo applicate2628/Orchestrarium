@@ -2339,7 +2339,7 @@ def test_lead_receipt_nonordinary_refuses(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("order", [("codex", "claude"), ("claude", "codex")])
-def test_receipted_lead_provider_orders_without_git_keep_links_and_hooks(
+def test_receipted_provider_orders_without_git_preserve_unselected_copies_and_hooks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, order: tuple[str, str]
 ) -> None:
     installer = _load_installer()
@@ -2358,15 +2358,16 @@ def test_receipted_lead_provider_orders_without_git_keep_links_and_hooks(
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("HOME", str(home))
     assert installer.install(order[0], ["--global", "--no-hypothesis-hook"]) == 0
-    skills = home / ".agents" / "skills"
+    def selected_skills(provider: str) -> Path:
+        return home / (".agents" if provider == "codex" else ".claude") / "skills"
+
+    skills = selected_skills(order[0])
     receipt = skills / ".orchestrarium-lead-receipt.v1.json"
     first_digest = json.loads(receipt.read_bytes())["treeSha256"]
     assert first_digest == installer._tree_sha256(skills / "lead", ignore_runtime_cache=True)
-    first_links = {
-        provider: (home / f".{provider}" / "skills" / "lead").lstat().st_ino
-        for provider in ("codex", "claude")
-        if (home / f".{provider}" / "skills" / "lead").exists()
-    }
+    first_identity = (skills / "lead").lstat().st_ino
+    first_payload = _tree_bytes(skills)
+    assert not (skills / "lead").is_symlink()
     hook_files = (home / ".codex" / "hooks.json", home / ".claude" / "settings.json")
     sentinels = (
         {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
@@ -2385,11 +2386,15 @@ def test_receipted_lead_provider_orders_without_git_keep_links_and_hooks(
     with (receiver / "src.codex" / "skills" / "lead" / "SKILL.md").open("ab") as stream:
         stream.write(b"\nreceiver-version-B\n")
     assert installer.install(order[1], ["--global", "--no-hypothesis-hook"]) == 0
-    second_digest = json.loads(receipt.read_bytes())["treeSha256"]
+    second_skills = selected_skills(order[1])
+    second_receipt = second_skills / ".orchestrarium-lead-receipt.v1.json"
+    second_digest = json.loads(second_receipt.read_bytes())["treeSha256"]
     assert second_digest != first_digest
-    assert second_digest == installer._tree_sha256(skills / "lead", ignore_runtime_cache=True)
-    for provider, identity in first_links.items():
-        assert (home / f".{provider}" / "skills" / "lead").lstat().st_ino == identity
+    assert second_digest == installer._tree_sha256(second_skills / "lead", ignore_runtime_cache=True)
+    assert not (second_skills / "lead").is_symlink()
+    assert _tree_bytes(skills) == first_payload
+    assert (skills / "lead").lstat().st_ino == first_identity
+    assert json.loads(receipt.read_bytes())["treeSha256"] == first_digest
     assert tuple(json.loads(path.read_text(encoding="utf-8"))["hooks"] for path in hook_files) == hook_identities
 
 
@@ -2424,6 +2429,9 @@ def test_claude_global_adoption_dry_run_skips_codex_preflight(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     installer, source, anchor, skills, receipt = _receipt_fixture(tmp_path)
+    skills = anchor / ".claude" / "skills"
+    skills.mkdir(parents=True)
+    receipt = skills / receipt.name
     _apply_receipted(installer, source, anchor, skills)
     receipt.unlink()
     with (skills / "lead" / "SKILL.md").open("ab") as stream:
