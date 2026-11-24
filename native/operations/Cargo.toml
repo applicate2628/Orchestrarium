@@ -1,0 +1,29 @@
+[package]
+name = "orche-native-operations"
+version = "0.1.0"
+edition = "2024"
+publish = false
+autotests = false
+
+[[test]]
+name = "git_object_identity"
+path = "tests/git_object_identity.rs"
+
+[[example]]
+name = "tree_walk_driver"
+path = "tests/tree_walk_driver.rs"
+
+[[example]]
+name = "line_index_bench"
+path = "tests/line_index_bench.rs"
+
+[dependencies]
+gix-hash = { version = "=0.28.1", default-features = false, features = ["sha1", "sha256"] }
+gix-object = { version = "=0.66.1", default-features = false, features = ["sha1", "sha256"] }
+
+[[test]]
+name = "publication_line_index"
+path = "tests/publication_line_index.rs"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Memory"] }
