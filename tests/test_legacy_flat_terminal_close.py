@@ -70,8 +70,8 @@ class TestLifecycleValidatorReuse(unittest.TestCase):
             self.assertIs(first, nested(root))
             self.assertIs(first, owner._validator_module())
             child_owner = first.load_lifecycle_owner()
-            self.assertIsNot(child_owner, owner)
-            self.assertIsNone(child_owner._CURRENT_LIFECYCLE_TRANSACTION.get())
+            self.assertIs(child_owner, owner)
+            self.assertIs(child_owner._CURRENT_LIFECYCLE_TRANSACTION.get(), transaction)
             self.assertIs(owner._CURRENT_LIFECYCLE_TRANSACTION.get(), transaction)
             self.assertEqual(first.AGENT_RUN_SCHEMA, json.loads(self.schema.read_bytes()))
             if fail:
@@ -103,14 +103,20 @@ class TestLifecycleValidatorReuse(unittest.TestCase):
             if replacement is not None:
                 path.write_bytes(replacement)
             transaction = self.transaction()
-            with transaction:
-                token = owner._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
-                try:
-                    with self.assertRaises((owner.LifecycleError, OSError, ValueError, RuntimeError)):
+            initial_failure = None
+            with self.assertRaises((owner.LifecycleError, OSError, ValueError, RuntimeError)) as received:
+                with transaction:
+                    token = owner._CURRENT_LIFECYCLE_TRANSACTION.set(transaction)
+                    try:
                         owner._validator_module()
-                    self.assertIsNone(transaction._validator_reuse)
-                finally:
-                    owner._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+                    except (owner.LifecycleError, OSError, ValueError, RuntimeError) as error:
+                        initial_failure = error
+                        raise
+                    finally:
+                        owner._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
+            self.assertIs(received.exception, initial_failure)
+            self.assertIsNone(transaction._validator_reuse)
+            self.assertIsNone(transaction._file)
             if path.exists(): path.unlink()
             saved.rename(path)
         for path in (source, self.schema):
@@ -120,16 +126,21 @@ class TestLifecycleValidatorReuse(unittest.TestCase):
             try:
                 value = owner._validator_module(); self.validate_independently(value)
                 held = self.base / "held-original-input"
-                image, _parents = owner._legacy_local_image(path)
+                image, _parents = owner._legacy_local_image(
+                    path, maximum_bytes=len(original_source if path == source else original_schema),
+                )
                 # The fixture actor owns this copied input; production mutation
                 # rightly refuses to move a retained transaction participant.
                 path.rename(held)
                 path.write_bytes(held.read_bytes())
                 replaced = True
                 self.assertNotEqual(owner._lifecycle_file_identity(path.lstat()), tuple(image["identity"]["value"]))
-                with self.assertRaisesRegex(owner.LifecycleError, "changed"):
+                with self.assertRaisesRegex(owner.LifecycleError, "changed") as first_refusal:
                     owner._validator_module()
-                self.assertIs(transaction._validator_reuse, value)
+                self.assertIsNone(transaction._validator_reuse)
+                with self.assertRaises(owner.LifecycleError) as repeated_refusal:
+                    owner._validator_module()
+                self.assertIs(repeated_refusal.exception, first_refusal.exception)
             finally:
                 owner._CURRENT_LIFECYCLE_TRANSACTION.reset(token)
                 if replaced:

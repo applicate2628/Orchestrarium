@@ -124,7 +124,7 @@ def test_pid_helper_treats_linux_zombie_as_not_alive() -> None:
         child.wait(timeout=2.0)
 def _provider_source_root(platform: str) -> Path:
     return ROOT / (
-        "src.codex/skills/lead" if platform == "codex" else "src.claude/agents"
+        "src.codex/skills/lead" if platform == "codex" else "adapters/claude/agents"
     )
 
 
@@ -967,6 +967,7 @@ def test_hooks_run_from_foreign_cwd(tmp_path: Path, platform: str) -> None:
     for cwd in foreign_cwds:
         cwd.mkdir()
     for python_target in _owned_python_targets(platform):
+        assert python_target.is_file(), python_target
         if python_target.stem in CWD_SCANNING_HOOK_STEMS:
             continue
         runs = [
