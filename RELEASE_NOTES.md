@@ -9,6 +9,9 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 - Preserve SDK ledger absence handling through its explicit observation owner and final binding check. Direct reads of missing ledgers keep the `WI-LEDGER-RESOURCE-DRIFT` diagnostic, while ledger-free observation and disappearance during capture retain their distinct outcomes.
 
+
+- Restore owned directory proof trees from their admitted snapshots when a native relocation is compensated. A failure before legacy progress publication now restores the original files and completes cleanup without leaving a stale archive-parent proof or pending intent; unrelated owned directory trees keep their existing native identity checks.
+
 - Refuse selected root inputs that disappear after their first presence observation. Namespace enumeration now reuses the same currentness owner, so an observed file or directory cannot become an approved initial absence; genuine initial absence and later replacement retain their existing checks.
 
 - Restore exact public replay of an interrupted legacy flat close. Root admission now selects the request's pending operation before requiring settled work-item state, and uses the declared work-item only when that operation is absent. Both repository and work-items roots retain native currentness, ambiguity refusal, finite resource admission and ordinary close diagnostics; different requests and malformed pending inputs remain refused.

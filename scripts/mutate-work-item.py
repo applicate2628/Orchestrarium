@@ -664,6 +664,7 @@ class _PreparedLifecycleEffect:
     native_after: object = field(default=None, init=False, repr=False, compare=False)
     tree_before: tuple = field(default=(), init=False, repr=False, compare=False)
     tree_after: tuple = field(default=(), init=False, repr=False, compare=False)
+    directory_origins: tuple = field(default=(), init=False, repr=False, compare=False)
     inverse: object = field(default=None, init=False, repr=False, compare=False)
     inverse_origin: object = field(default=None, init=False, repr=False, compare=False)
     inverse_claim: object = field(default=None, init=False, repr=False, compare=False)
@@ -1634,7 +1635,10 @@ class LifecycleTransaction:
             tuple(affected), MappingProxyType(node_names), MappingProxyType(directories))
         for name, value in (("actor", self._operation_owner), ("process", os.getpid()),
                 ("thread", threading.current_thread()), ("inverse", inverse),
-                ("projection_evidence", tuple(projection_evidence))):
+                ("projection_evidence", tuple(projection_evidence)),
+                ("directory_origins", tuple((origin, origin.native_after, tuple(origin.tree_after))
+                    for kind, origin in self._binding_evidence
+                    if kind == "owned-effect" and origin.directory and origin.tree_after))):
             object.__setattr__(prepared, name, value)
         if directory and source is not None:
             object.__setattr__(prepared, "tree_before", self._capture_effect_tree(source, **capture_options))
@@ -1948,11 +1952,13 @@ class LifecycleTransaction:
             object.__setattr__(prepared, "forward_observation_values", MappingProxyType(dict(candidate_files)))
         self._binding_evidence = candidate_evidence
         self._retained_observations = candidate_files
-        for kind, origin in old_evidence:
-            if kind == "owned-effect" and origin.directory and origin.tree_after:
-                projected_tree = tuple(value for previous in origin.tree_after if (value := file(previous)) is not None)
-                object.__setattr__(origin, "tree_after", projected_tree)
-                object.__setattr__(origin, "native_after", file(origin.native_after))
+        # The evidence tuple retains each origin's identity, but its current
+        # tree advances in place. Compensation must project the admitted input
+        # snapshots, not the origin's already-published forward values.
+        for origin, prior_native, prior_tree in prepared.directory_origins:
+            projected_tree = tuple(value for previous in prior_tree if (value := file(previous)) is not None)
+            object.__setattr__(origin, "tree_after", projected_tree)
+            object.__setattr__(origin, "native_after", file(prior_native))
         inverse = prepared.inverse
         if inverse is not None:
             # Advance only through this actually verified nested publication.
