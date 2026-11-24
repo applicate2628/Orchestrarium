@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-24
 
+- Refresh the November 24 product-plan checkpoint after guarded branch publication and scoped Rust receiving. Preserve the earlier authentication and dependency-cache failures as historical evidence, identify the pending legacy-close correction and its separate qualification, and retain installation, provider and portability gates. No runtime or release completion is claimed.
+
 - Refresh the existing product plan with the four-lane audit, focused source corrections, pending combined qualification and local Git authentication hold. Keep inherited lifecycle corrections together, with repository-transfer ordering and test-only contract repairs separate, without expanding PR64's initially absent ledger scope. Retain the same three delivery steps, independent PR owners and Rust-before-SDK release order so completed source work is not mistaken for release or installed acceptance.
 
 ## 2026-11-23

@@ -1,10 +1,12 @@
 # Orchestrarium 2.0 product plan
 
-Status: audit context updated for 2026-11-24 against main `14a4e74a`, the
-peeled pre-SDK tag `3d8ac64b`, and the reviewed pull-request sources below. The
-integrated SDK candidate remains local and under qualification. The October
-outcomes remain in the register, not as prerequisites for every release. This
-plan does not authorize provider calls, publication, installation, or merges.
+Status: November 24 checkpoint after the eight audited branch publications.
+The earlier audit used main `14a4e74a` and the peeled pre-SDK tag `3d8ac64b`;
+the source bindings and remaining qualification are recorded below. The integrated
+SDK source is published; its pending-close correction is a separate local
+candidate. The October outcomes remain in the register, not as prerequisites for
+every release. This plan does not authorize provider calls, publication,
+installation, or merges.
 
 ## Contents
 
@@ -28,14 +30,14 @@ this register does not create a second implementation tracker.
    [tagged standalone pre-SDK baseline](https://github.com/applicate2628/Orchestrarium/tree/baseline-pre-sdk-2026-11-23)
    after [PR53](https://github.com/applicate2628/Orchestrarium/pull/53) and the
    merged receiver-history correction [PR55](https://github.com/applicate2628/Orchestrarium/pull/55).
-   Integrate the small [PR54](https://github.com/applicate2628/Orchestrarium/pull/54),
+   Keep the small [PR54](https://github.com/applicate2628/Orchestrarium/pull/54),
    [PR56](https://github.com/applicate2628/Orchestrarium/pull/56),
    [PR57](https://github.com/applicate2628/Orchestrarium/pull/57),
    [PR58](https://github.com/applicate2628/Orchestrarium/pull/58),
    [PR59](https://github.com/applicate2628/Orchestrarium/pull/59),
    [PR60](https://github.com/applicate2628/Orchestrarium/pull/60) and
-   [PR62](https://github.com/applicate2628/Orchestrarium/pull/62) follow-ups without
-   duplicating them. Reconcile the dated release entries and verify the combined
+   [PR62](https://github.com/applicate2628/Orchestrarium/pull/62) follow-ups at their
+   existing owners. Reconcile the dated release entries and verify the combined
    governance, source projections and selected audit modes. Correct cancellation
    at the scanner and SDK worker owners and control-state drift at uninstall
    ([PR61](https://github.com/applicate2628/Orchestrarium/pull/61) for the current
@@ -46,15 +48,17 @@ this register does not create a second implementation tracker.
    absent ledger read correction ([PR64](https://github.com/applicate2628/Orchestrarium/pull/64))
    with their existing owners. Carry only applicable deltas into SDK and retain
    each correction's own receiving evidence.
-   Keep inherited lifecycle corrections as separate commits in one focused
-   follow-up from main: staged-successor budgets, multi-bug rollback ownership,
+   Keep inherited lifecycle corrections as separate commits in the focused
+   [PR65](https://github.com/applicate2628/Orchestrarium/pull/65) follow-up from main:
+   staged-successor budgets, multi-bug rollback ownership,
    restricted topology observation, selected close subjects, legacy-parent
    compensation, pending-receipt settlement, historical PASS custody and empty
    scratch namespace currentness.
-   Keep bounded Git status ordering in a separate
-   repository-transfer follow-up. Carry the applicable corrections into SDK;
+   Keep bounded Git status ordering in the separate repository-transfer
+   [PR66](https://github.com/applicate2628/Orchestrarium/pull/66). Carry applicable corrections into SDK;
    they do not expand PR64's initially absent ledger scope.
-   Keep shared test-only capability and target-order corrections separate from
+   Keep shared test-only capability and target-order corrections in
+   [PR67](https://github.com/applicate2628/Orchestrarium/pull/67), separate from
    installer behavior changes; SDK's receipt finalizer assertions remain local
    to its own integration.
    Reconcile SDK with current main using one integrated candidate,
@@ -119,9 +123,9 @@ any target with SDK or model-ranking completion.
 
 ### 2026-11-24 audit context
 
-The audit applied 28 relevant skills across four work lanes: integration and
-governance, SDK runtime, installer, and scanner/release review. Applicable focused
-PR54/56/57/58/59/60/62/64 changes are incorporated into the local PR19 candidate;
+The earlier audit applied 28 relevant skills across four work lanes: integration
+and governance, SDK runtime, installer, and scanner/release review. Applicable
+PR54/56/57/58/59/60/62/64 changes were incorporated into the then-local PR19 candidate;
 their existing PRs retain standalone ownership and receiving evidence. Detailed
 integration findings stay with PR19, complete Rust scanner qualification with
 PR21, and scanner cancellation and source-mirror corrections with PR60. This
@@ -159,28 +163,49 @@ All 495 originally selected modules have execution or collection evidence.
 The shared lifecycle fixture port separately passed all 44 expanded cases on
 the main-based candidate, retaining its own source/test hash bindings.
 The repaired native legacy creator case reached recovery and passed on its
-recorded source; 14 cases left unexecuted by the earlier bounded native class
-run retain an explicit qualification gap.
+recorded source. At that earlier bounded native checkpoint, 14 class cases were
+unexecuted. Later receiving must be assessed from its own completed outcomes,
+including the pending-close failure below, rather than retaining that old count
+as the current unexecuted inventory.
 
-The Rust primitives passed their 16 native tests. Framing and composition parity
-was checked against both the earlier Python reader and the integrated SDK reader;
-the complete publication matcher still cannot compile offline because `pcre2`
-is absent from the existing dependency cache. Six isolated Linux verifier cases
-cannot import `pytest` under the required `-I` mode in either available Python
-interpreter; optional official ACP dependencies retain separate collection holds.
-Two POSIX socket-boundary cases stop at the environment's socket-creation refusal
-before their downstream special-file checks. Preserve those exact evidence gaps.
-The audit leaves those cases unqualified. Full combined-candidate acceptance,
-live provider routes, actual installed receiving and complete Rust scanner
-qualification remain with their existing owners in step 2.
+At the earlier Rust checkpoint, 16 native primitive tests and framing/composition
+comparisons passed, but the complete matcher could not compile offline because
+`pcre2` was absent from that dependency cache. A guarded PR update also stopped
+at authentication before the native callback, supplying no callback acceptance
+or published-ref evidence. The unavailable dependency and authentication refusal
+are historical blockers, not the current build or GitHub access status.
 
-Publication is held because local Git and the GitHub command-line interface lack
-usable GitHub credentials. A guarded PR update stopped at authentication before
-the native callback, so it supplied no callback acceptance or published-ref
-evidence. Resume through an authenticated, admitted
-[native Git publication path](target-local-publication.md), with fresh callback
-proof and exact destination-ref readback. Existing remote-carrier restrictions
-remain in force; the observed authentication failure does not change their scope.
+**Publication and receiving checkpoint, 2026-11-24.** Authenticated GitHub
+command-line access and eight guarded branch updates have since succeeded through
+the [native Git publication path](target-local-publication.md), with fresh Version 3
+and Version 4 checks and exact destination-ref readback. [PR54](https://github.com/applicate2628/Orchestrarium/pull/54)
+is merged as `b19ba4b0df3cdfdf14bc7a7bc616c3f6de5878f1`. Publication, merge and
+qualification remain separate; existing remote-carrier restrictions still apply.
+
+On PR21 source `0aa242623109d684a5b2be81a04cb806bfa1a81c`, five native matcher
+tests and 38 complete Python/Rust scanner comparisons passed across 16 existing
+methods and both Git object formats. An earlier bounded harness timeout remains
+recorded; unfinished methods completed separately. The local combined candidate
+`cee7521eca8e7d6aa5bcb21dc712eb035e22b632` passed independent integration review
+and 19 native callback/progress/timeout receiving cases. These scoped results do
+not establish standalone Windows runtime-library portability, all supported-host
+qualification or acceptance of a working installation; PR21 retains those gates.
+
+Fresh SDK native receiving on `e8edb9576a89e754b19d400c4c91753cd1eacf5b` exposed
+a public interrupted legacy-close replay defect. The local correction
+`143a1a8f6ef68f82d45ddc59e8d4332126af2ca8` passed independent source review and
+all ten focused Windows cases, including the unchanged failing scenarios, root
+ambiguity/currentness and resource admission. The original full-class baseline
+run remains separate evidence; the earlier failures are retained. PR19 and the
+applicable PR65 follow-up own promotion and remaining qualification. These focused
+results do not establish complete SDK, installed or provider acceptance.
+
+Six isolated Linux verifier cases still cannot import `pytest` under the required
+`-I` mode in the available interpreters; optional official ACP dependencies retain
+separate collection holds. Two POSIX socket-boundary cases stop at the environment's
+socket-creation refusal before their downstream special-file checks. Those cases
+remain unqualified. Full release qualification, live provider routes and actual
+installed receiving remain with their existing owners in step 2.
 
 ## Open ticket closeout
 
