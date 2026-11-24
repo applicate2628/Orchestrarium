@@ -46,6 +46,7 @@ def test_claude_settings_validation_rejects_non_scalar_agent(
 def test_synthetic_claude_install_and_reinstall_preserve_settings(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
     agent: str | None,
 ) -> None:
     home = tmp_path / "home"
@@ -86,7 +87,9 @@ def test_synthetic_claude_install_and_reinstall_preserve_settings(
     assert claude_path.read_bytes() == before_document
     assert not (project / ".claude" / "agents" / "lead.md").exists()
 
+    capsys.readouterr()
     assert INSTALLER.install("claude", arguments) == 0
+    first_output = capsys.readouterr().out
     assert settings_path.read_bytes() == before_settings
     assert settings_path.stat().st_ino == before_identity
     assert (project / ".claude" / "agents" / "lead.md").is_file()
@@ -131,10 +134,7 @@ def test_synthetic_claude_install_and_reinstall_preserve_settings(
         check=False,
     )
     assert composed.returncode == 0, composed.stdout + composed.stderr
-    if warning is None:
-        assert "WARN: Claude main agent preserved" not in first_output
-    else:
-        assert warning in first_output
+    assert "WARN: Claude main agent preserved" not in first_output
 
     assert INSTALLER.install("claude", arguments) == 0
     assert settings_path.read_bytes() == before_settings

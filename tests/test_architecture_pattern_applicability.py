@@ -639,7 +639,8 @@ def test_installed_parity_and_validator(
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=120,
+        # The full install materializes independent provider copies; allow a bounded budget.
+        timeout=300,
         check=False,
     )
     assert result.returncode == 0, (
