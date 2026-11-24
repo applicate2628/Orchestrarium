@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-24
 
+- Refuse selected root inputs that disappear after their first presence observation. Namespace enumeration now reuses the same currentness owner, so an observed file or directory cannot become an approved initial absence; genuine initial absence and later replacement retain their existing checks.
+
 - Restore exact public replay of an interrupted legacy flat close. Root admission now selects the request's pending operation before requiring settled work-item state, and uses the declared work-item only when that operation is absent. Both repository and work-items roots retain native currentness, ambiguity refusal, finite resource admission and ordinary close diagnostics; different requests and malformed pending inputs remain refused.
 
 - Keep an empty selected scratch namespace current through close completion. Retain existing empty directory identities or exact owner absence in the lifecycle transaction; a late foreign entry refuses completion and is preserved. Unrelated work-item scratch namespaces remain outside that selection, and ordinary close does not acquire historical scratch rows when its physical selection is empty.
