@@ -138,9 +138,27 @@ def test_scratch_revoke_derives_scope_and_restores_raw_target(tmp_path: Path) ->
     effective, counters, errors = validator.project_legacy_obligation_migrations(events, metadata, item)
     assert errors == [] and effective[1]["scratchEvidence"] == "legacy-pointer"
     assert counters == {"raw": 4, "apply": 1, "revoke": 1, "projected": 0}
+    with pytest.raises(lifecycle.LifecycleError) as invalid_ledger:
+        lifecycle._scratch_ledger_entries(item)
+    assert invalid_ledger.value.failure_id == "WI-LEDGER-UNSETTLED"
+    assert "scratchEvidence must be a list of objects" in str(invalid_ledger.value)
+
+    # An empty namespace needs no disposition. A present scratch root still
+    # requires the restored raw declaration to pass its original shape check.
+    assert lifecycle._scratch_disposition_plan(tmp_path, item, archived=False) == ()
+    scratch = tmp_path / ".scratch" / "work-items" / item.name / target["runId"] / "legacy-scratch"
+    scratch.mkdir(parents=True)
+    payload = scratch / "evidence.txt"
+    payload.write_bytes(b"preserve evidence after revoked normalization\n")
+    identity = payload.stat()
+    ledger_before = (item / "agent-runs.jsonl").read_bytes()
     with pytest.raises(lifecycle.LifecycleError) as caught:
         lifecycle._scratch_disposition_plan(tmp_path, item, archived=False)
     assert caught.value.failure_id == "WI-LEDGER-UNSETTLED"
+    assert "scratchEvidence must be a list of objects" in str(caught.value)
+    assert payload.read_bytes() == b"preserve evidence after revoked normalization\n"
+    assert (payload.stat().st_dev, payload.stat().st_ino) == (identity.st_dev, identity.st_ino)
+    assert (item / "agent-runs.jsonl").read_bytes() == ledger_before
 
 
 def test_scratch_wire_rejects_unknown_kind_scope_evidence_and_cross_kind_revoke(tmp_path: Path) -> None:
