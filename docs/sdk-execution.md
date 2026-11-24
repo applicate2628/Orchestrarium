@@ -1,6 +1,6 @@
 # Optional software development kit (SDK) execution implementation
 
-This branch implements part of the SDK integration project separately from Rust/npm.
+This document records the SDK integration project, owned separately from Rust/npm.
 Implemented source routes now include Codex, official Claude API and Copilot
 execution with canonical receiving, plus scoped child-Lead session coordination.
 The November 18 bounded native Codex read-only Consultant fresh/continuation pair
@@ -49,12 +49,16 @@ These results do not enable a default route or qualify arbitrary general use.
 
 ## Current main integration audit, 2026-11-24
 
-The local integration combines SDK source `96634fe5` with main `14a4e74a`.
-The first reviewed merge is `0332ede6`; subsequent narrowly scoped corrections
-retain that ancestry. Resolving the 73 conflicted files established a candidate,
-not release acceptance. Remote PR19 and the working installation are unchanged
-by this audit. The existing [product plan in PR13](https://github.com/applicate2628/Orchestrarium/pull/13) owns delivery
-order; this section owns the SDK integration decisions and evidence boundary.
+The initial November 24 integration combined SDK source `96634fe5` with main
+`14a4e74a`; its first reviewed merge was `0332ede6`. Resolving those 73 conflicts
+established the historical candidate, not release acceptance. The later SDK
+checkpoint `e8edb957` was published through authenticated native Git. The selected
+source qualification below applies to `7f9ad79a` (tree `a57480bc`) and its named
+predecessors; publication and merge authority remain with
+[PR19](https://github.com/applicate2628/Orchestrarium/pull/19). Source integration
+and isolated receiving do not establish an update of the working installation.
+The existing [product plan in PR13](https://github.com/applicate2628/Orchestrarium/pull/13)
+owns delivery order; this section owns SDK integration decisions and evidence boundaries.
 
 ### Reconciled integration contracts
 
@@ -224,10 +228,11 @@ the exact reviewed test overlays. It reached public recovery after the fixture
 actor restored its own original image; source and test hashes were unchanged.
 An earlier zero-test harness failure was only cross-version abstract syntax tree
 (AST) formatting, and an earlier test failure retained its own evidence. This
-one passing case does not qualify the 14 cases left unexecuted by the earlier
-bounded native class run or later lifecycle source changes.
+one passing case did not qualify the 14 cases left unexecuted at that earlier
+bounded checkpoint. The completed `e8edb957` class attempt and subsequent
+corrections are recorded below; the old unexecuted count is not a current inventory.
 
-The final focused Windows lifecycle selection used commit `cf36685d`, tree
+The earlier focused Windows lifecycle selection used commit `cf36685d`, tree
 `21c81f1f`, and the runtime SHA-256
 `9a74c309a0f860bdae7abc93b728840883aa7900521d8555143f6d205394bcb4`.
 All 33 cases in Table 2 passed with no failures or skips. Every group retained
@@ -239,7 +244,7 @@ three exact unittest temporary owners through child exit, and the two alias case
 used the existing private-thread symbolic-link privilege context. No assertion,
 runtime/test file or process-wide privilege was changed by that harness.
 
-**Table 2. Final focused Windows lifecycle selection.**
+**Table 2. Focused Windows lifecycle checkpoint at `cf36685d`.**
 
 | Group | Cases passed | Selected boundaries |
 | --- | ---: | --- |
@@ -267,28 +272,58 @@ Interrupted runs without a final result and report do not establish complete
 suite acceptance. A complete current-tree release verdict remains separate from
 these bounded results.
 
+The completed native legacy-class attempt at `e8edb957` comprised the initial
+bounded run and its unfinished tail: all 32 methods executed, with 29 passing and
+three failing. Two failures exposed public pending-close admission; the third
+exposed stale owned-directory proofs after compensation. Their original failed
+fixtures and outcomes remain preserved. The public admission correction at
+`143a1a8f` passed ten focused Windows cases, including the unchanged failing
+scenarios. Combined main candidate `b092e761` passed 15 selected Windows methods,
+including three root-observation methods with nine subtests; the same root
+observation correction separately passed those three methods/nine subtests on
+Linux. The directory-origin correction at `d92a74e2` passed 11 selected Windows
+cases, and its actual main port at `218d2f85` passed the same 11 cases. These
+corrections retain exact intent/currentness and native ownership checks; they do
+not automatically repair partial intents left by older failures.
+
+Selected SDK source `7f9ad79a` passed five native Windows installer boundary cases
+and seven static validation commands: hook mirrors, the shared governance spine,
+source provider projections, agents-mode documentation, the agents-mode contract,
+and the Codex and Claude packs. The spine retained all 114 required protection
+tokens; projection validation covered all 33 declared source members. Pack
+validation reported 578 Codex checks and 553 Claude checks, with no warnings or
+failures. The five selected cases had no failures or skips, source hashes stayed
+unchanged, and the owned native processes settled. These are separately bound
+checkpoints, not additive test totals, a new combined full-suite run, or installed
+provider qualification.
+
 ### Remaining qualification and publication
 
-Six isolated Stage0 verifier cases remain unqualified in the available Linux
-environment: the actual reviewed child uses Python's isolated `-I` mode and
-cannot import `pytest` from either existing interpreter. A preserved dependency
-probe failed before collecting or running a repository test and emitted no
-trusted events. The isolation contract is unchanged. Optional official Agent
-Client Protocol (ACP) dependencies retain their separate collection holds.
-Two POSIX socket-boundary cases additionally stop at socket creation: both
-existing interpreters receive `EPERM` (operation not permitted) from the
-environment before an AF_UNIX local socket can be bound. The downstream
-special-file negative paths in those cases remain unqualified; the tests and
-production checks are not weakened to hide that restriction.
+Earlier Linux attempts left six isolated Stage0 verifier cases unqualified:
+their reviewed child used Python's isolated `-I` mode and could not import
+`pytest` from the interpreters available to those attempts. The preserved
+prerequisite probe failed before collecting a repository test and emitted no
+trusted events. Optional official Agent Client Protocol (ACP) dependencies were
+also unavailable in their recorded collection attempts. Two earlier POSIX
+socket-boundary attempts stopped at socket creation with `EPERM` (operation not
+permitted), before an `AF_UNIX` (Unix-domain) socket could be bound. Their downstream
+special-file checks remain unqualified. These are historical environment results,
+not assertions about the current host; isolation and production guards remain
+unchanged.
 
-Publication remains held at the existing authenticated native Git boundary. The
-attempted guarded update stopped at missing GitHub credentials before the native
-callback; no callback acceptance or remote ref update is claimed. Continue through
-the existing [target-local publication contract](target-local-publication.md),
-with exact destination readback. The audit used existing tools and synthetic
-provider peers; it did not install dependencies, dispatch workflows, invoke a live
-provider or update the working installation. Historical live evidence below keeps
-its original revision and route limits.
+The earlier guarded publication attempt stopped at missing GitHub credentials
+before the native callback and supplied no callback acceptance. Authenticated
+publication subsequently resumed, including SDK checkpoint `e8edb957`; recorded
+main acceptances include PR54, PR56-PR65 and
+[PR68](https://github.com/applicate2628/Orchestrarium/pull/68). Each existing PR
+retains its own source and receiving authority. Further publication uses the
+[target-local publication contract](target-local-publication.md) and exact
+selected-revision/destination readback. Before SDK merge, publish and verify the
+final pre-SDK tag on the selected latest stable main through that same owner.
+The qualification above used existing tools and synthetic provider peers; it did
+not install dependencies, dispatch workflows, invoke a paid or live provider, or
+update the working installation. Historical live evidence below keeps its original
+revision and route limits.
 
 ## PR19 completion roadmap, updated 2026-11-18
 
@@ -1749,7 +1784,7 @@ user's manual trust review preceded the successful new handoff recorded below;
 the earlier failure is not relabelled or automatically retried.
 
 The bounded retained-runtime evidence at source `7075132c` is recorded in the
-[distribution qualification record](../scripts/distribution/README.md#windows-pristine-base-and-hook-registration-checkpoint).
+[historical distribution qualification record](https://github.com/applicate2628/Orchestrarium/blob/0564f567a726a4829c6b671281f86aa9df1e21bd/scripts/distribution/README.md#windows-pristine-base-and-hook-registration-checkpoint).
 It does not qualify global rollout, native hook trust or the real AGY-to-Codex handoff.
 
 ### User-operated originating Lead checkpoint, 2026-11-19
@@ -1783,7 +1818,8 @@ This is one observed external native Lead-to-Codex fresh read-only handoff, not
 synthetic caller evidence. It does not qualify AGY-native child management,
 AGY-to-Codex continuation, mutating Worker operations, other provider workers,
 POSIX behavior or global rollout. Historical direct Codex fresh/continuation
-evidence remains separately scoped. PR19 is still draft/unmerged.
+evidence remains separately scoped. This November 19 checkpoint does not
+establish the later PR19 publication or merge state.
 
 ### First-version delivery review, 2026-11-19
 
@@ -1810,9 +1846,11 @@ plugin disabled. No model calls, Actions, working-configuration changes or trust
 operations were performed; installer tests used isolated fixtures. Independent
 delta/document review found no release-blocking defect.
 
-No changed model-execution behavior currently justifies repeating the live pair.
-The expanded pre-merge audit found documentation drift rather than a production
-SDK execution defect: branch-dependent release wording, premature rebranding,
+At that November 19 comparison, no changed model-execution behavior justified
+repeating the live pair. An unchanged, already accepted live pair is not repeated
+merely for a later source revision; any changed or unmet applicable execution
+criterion must be assessed separately. The expanded pre-merge audit found
+documentation drift rather than a production SDK execution defect: branch-dependent release wording, premature rebranding,
 historical Windows/AGY evidence described as still future, and ambiguity between
 generic development setup and retained-runtime delivery. The delivery instructions
 now distinguish a fresh retained-derived provider environment and the observed
@@ -1831,7 +1869,8 @@ the unchanged installer source, including platform admission and recovery
 boundaries; these are not Linux model/process-custody qualification. The wider
 transport sweep originally exposed the fixture defect above; only the repaired
 focused cases are credited after that fix, not a rerun of the full sweep.
-Remaining release order:
+The release order retained by that review is:
+
 1. Publish and verify the final pre-SDK tag on the latest stable main on GitHub
    **before** merging SDK. This is a separately owned task, not completed here.
 2. Complete the requested independent pre-merge audit of the selected SDK v1
@@ -1862,12 +1901,12 @@ as release blockers:
 
 | Scope | Concrete remaining work | Verification/delivery boundary |
 |---|---|---|
-| First version: other-provider Lead to Codex | The user-operated AGY-to-Codex fresh read-only Consultant handoff is observed on Windows; preserve its exact result and finish selected-payload release reconciliation. | The user confirms the originating AGY session; retained launch, terminal and artifact records prove the bounded Codex SDK execution and receiving. This does not qualify every role, continuation, platform or provider. |
-| First version: Codex delivery | Integrate current main fixes, verify the selected payload and shared owner regressions, synchronize this plan and PR evidence. | The bounded Windows Codex Consultant pair is live-qualified at its recorded revision. PR remains draft/unmerged and not globally installed; installation and further model calls retain their own authorization. |
+| First version: other-provider Lead to Codex | Preserve the observed Windows AGY-to-Codex fresh read-only Consultant handoff at installed source `c835cc37` and reconcile the selected release payload against its exact evidence. | The user confirmed the originating AGY session; retained launch, terminal and artifact records prove that bounded execution and receiving. Other roles, continuation, platforms and providers retain their separate scope. |
+| First version: Codex delivery | Use the selected-source qualification checkpoints above and review any subsequent payload or shared-owner delta through PR19. | The bounded Windows Codex Consultant pair retains its recorded revision. PR19 owns publication and merge of the selected source; actual installed receiving and any further model calls retain their existing authorization and evidence requirements. |
 | Deferred: non-Codex workers and sessions | Non-Codex worker/runtime, account/tool enforcement, receiving and broader native session qualification beyond the selected originating Lead-to-Codex handoff. | Retain existing implementations and offline evidence without claiming live success. Not a first-version blocker under the revised decision. |
 | Deferred: wider platforms | Intended macOS/Linux SDK process custody and lifecycle qualification. | Windows success does not qualify POSIX or promise an operating-system sandbox. Preserve the exact platform evidence gaps. |
 
-The installed AGY package now has an explicit Consultant fresh/version-3 and
+The authored AGY package provides an explicit Consultant fresh/version-3 and
 continuation/version-5 operating path in its Lead skill and installation guide.
 An installed-entrypoint streaming fixture crosses the real Codex adapter, frame
 codec, scanner and canonical receiving for both turns and rejects duplicate
