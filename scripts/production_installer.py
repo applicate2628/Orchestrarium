@@ -14166,13 +14166,20 @@ def _record_provider_install(root, provider, mode, target, anchor, transaction, 
                              config_before, docs_target, mode_target, registration,
                              installed_hook_root, hooks_enabled, *,
                              canonical_plan=None, canonical_target=None, selected_updates=None, reclaimed=(),
-                             payload_owners=()):
+                             payload_owners=(), control_paths=()):
     """Record actual owned payload outcomes; configuration has separate semantics."""
     if owner.dry_run:
         return
     codec = _provider_ownership_module(root)
     scope = "global" if mode == "global" else "project"
     bindings = _provider_payload_bindings(provider, mode, target, transaction, payload_owners)
+    controls = {path: _admitted_mutation_image(transaction, path).get(path)
+                for path in control_paths if not path.is_relative_to(anchor)}
+    def assert_controls():
+        for path, node in controls.items():
+            if (node is None and not transaction._image_matches(path, {})) or (node is not None and
+                    (node.kind != "file" or not transaction._point_matches(path, node, check_file_content=True))):
+                raise _InstallFailure("E_PROVIDER_RECEIPT_DRIFT", "verify")
     prior = codec.decode_record(before.encode("utf-8"), provider, scope)["files"] if before else {}
     payload_roots = get_client(provider)["payload_roots"]
     original = {path: node for image in transaction._original.values() for path, node in image.items()}
@@ -14189,6 +14196,8 @@ def _record_provider_install(root, provider, mode, target, anchor, transaction, 
             continue
         logical = _provider_payload_path(path, bindings, logical=True)
         if not logical.is_relative_to(anchor):
+            if path in controls and controls[path] == node:
+                continue  # Exact admitted control leaves have separate ownership semantics.
             if any(path == selected or selected in path.parents for selected in transaction._readonly_paths):
                 continue  # Explicit external read dependencies are not provider-owned payloads.
             raise ValueError("E_PROVIDER_RECEIPT_INVALID: external mutation image")
@@ -14324,6 +14333,7 @@ def _record_provider_install(root, provider, mode, target, anchor, transaction, 
             codec.validate_path(relative, provider, scope)
             directories.add(relative)
     payload = codec.encode_record(files, provider, scope, configs=configs, directories=sorted(directories))
+    assert_controls()
     relative = receipt.relative_to(owner.anchor)
     if before is None:
         owner.create_file(relative, payload)
@@ -14338,6 +14348,7 @@ def _record_provider_install(root, provider, mode, target, anchor, transaction, 
             raise _selected_error(provider, "receipt outcome")
     for bound in bindings:
         bound.linked_authority.assert_current()
+    assert_controls()
 
 def _fresh_provider_receipt_candidate(target: Path) -> Path | None:
     """Existing receipts of every type remain on the unchanged legacy route."""
@@ -15411,13 +15422,17 @@ def install(provider: str, argv: list[str] | None = None) -> int:
         if provider == "claude":
             byte_targets.append(docs_target.parent / "AGENTS.md")
         byte_pointer_objects = tuple(logical for logical in byte_targets if logical.is_symlink())
+        control_paths = []
         for logical in byte_targets:
             _resolve_write_through_symlink(logical)
             storage = logical.resolve(strict=False)
+            control_paths.append(storage)
             if storage != Path(os.path.abspath(logical)):
                 if not logical.is_symlink():
                     transaction_paths = [path for path in transaction_paths if path != logical]
                 transaction_paths.append(storage)
+        if provider == "codex" and hooks_enabled:
+            control_paths.append(codex_hook_inventory)
         copy_paths = {
             canonical_agents_root / UI_CONTINUITY_CONTRACT_TARGET,
             agents_root / UI_CONTINUITY_CONTRACT_TARGET,
@@ -15934,7 +15949,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                                      canonical_plan=canonical_plan,
                                      canonical_target=canonical_skills_target,
                                      selected_updates=selected_updates, reclaimed=reclaimed,
-                                     payload_owners=payload_owners)
+                                     payload_owners=payload_owners, control_paths=tuple(control_paths))
             transaction.commit()
         applied = not args.dry_run
     except BaseException as exc:
