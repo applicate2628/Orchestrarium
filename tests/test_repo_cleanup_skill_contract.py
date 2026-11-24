@@ -147,24 +147,19 @@ def test_scratch_is_temporary_until_canonical_results_are_promoted() -> None:
 
 
 def test_host_refusal_preserves_target_without_bypass_or_false_pass() -> None:
-    surfaces = (CODEX_SKILL, CLAUDE_SKILL, REFERENCE)
-    required = (
-        "host refuses a validated owner action before execution",
-        "disposition `preserved`",
-        "redacted refusal reason",
-        "pre-action and post-refusal settlement probe results",
-        "no alternate shell, API, provider, command shape, retry, or allow-rule",
-        "same validated action",
-        "root main conversation and its existing current work-item",
-        "independent non-overlapping work continues",
-        "Artifact disposition and project hygiene",
-    )
-    for path in surfaces:
+    for path in (CODEX_SKILL, REFERENCE):
         text = path.read_text(encoding="utf-8")
-        for fragment in required:
-            assert fragment.casefold() in text.casefold(), (
-                f"{path.relative_to(ROOT)} missing {fragment!r}"
-            )
+        assert "shared artifact-disposition recovery rule" in text
+        assert "resume condition" in text
+    spine = (ROOT / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8")
+    for fragment in (
+        "An operational failure is not a denial",
+        "If effects are uncertain, check actual state first",
+        "holds only the covered action while applicable",
+        "never bypass it",
+        "when the action is currently allowed",
+    ):
+        assert fragment in spine
 
     body = _body(CODEX_SKILL)
     assert "owner-action-refused" not in body
@@ -390,12 +385,12 @@ def test_general_disposition_moves_disposable_artifacts_to_purgable_trash_first(
         "only from trash",
         "Agents never automatically purge manual-deletion trash",
         "Unknown, foreign, ambiguous, valuable, active or prohibited material stays preserved",
-        "Never bypass a denial",
+        "never bypass it",
         "a move grants no purge permission",
         "does not rewrite internal atomic replacement, transaction rollback or live-resource release contracts",
         "no-overwrite semantics",
         "source absence",
-        "exact source/destination authority",
+        "current source/destination authority",
     ):
         assert required in paragraph
     for obsolete in (

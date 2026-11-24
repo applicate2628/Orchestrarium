@@ -9,7 +9,7 @@
     },
     "provider_prompt.py": {
       "source": "scripts/provider_prompt.py",
-      "sha256": "4eb2ba7798ed1871109363be4bee2c7cc879066c22c5208ffc1d8b44f5f4c93c",
+      "sha256": "4a437835ec2c1971d1d37a31ad1abe702e28866b2a4973586911f8de07581e65",
       "destination": "scripts/provider_prompt.py"
     },
     "process_supervision/process_runner.py": {
@@ -39,7 +39,7 @@
     },
     "external-prompt-governance.md": {
       "source": "shared/external-prompt-governance.md",
-      "sha256": "0500ab5e9cb789d26f9df9fdf54c1883ab07df5f34ad1d820b5390b304583f71",
+      "sha256": "5a41cf5871c78ebf4e8c0a7b6e105bf03a233c44f370a56c86a5e7091a21f61e",
       "destination": "scripts/external-prompt-governance.md"
     },
     "external-role-taxonomy.v1.json": {
