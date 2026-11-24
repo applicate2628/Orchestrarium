@@ -27,6 +27,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 - Establish the selected ledger operation before admitting a staged successor's transfer inputs. Preserve the budget already derived from its source ledger, receipt and bootstrap rows through creation, so a valid transferred obligation is not rejected by a smaller recomputed limit. Explicit caller limits and separate-operation budget resets retain their existing checks.
 
+- Preserve byte-identical Git status metadata when repository transfer splits literal paths across bounded commands. Merge status records in native tracked-then-untracked pathname-byte order while retaining NUL-separated names, unchanged diff payloads, command limits and the aggregate output cap.
+
 ## 2026-11-23
 
 - Prioritize the smallest working end-to-end result. During planning and review, the Lead defers speculative safeguards and unrelated work to the existing plan unless needed for that result. Existing safety and approval requirements are unchanged; no new workflow gate is introduced. Contract tests check the QA roles' referral and still check that both owning contracts state the classification rule.
