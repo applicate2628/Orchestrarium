@@ -5875,23 +5875,13 @@ def _observe_project_path_at(path: Path, expected_kind: str, evidence: list,
 
 
 def _project_identity_children_at(path: Path, evidence: list, failure_id: str) -> tuple[Path, ...]:
-    _lifecycle_reject_unreduced_reparse(path, failure_id=failure_id,
-        message="root acquisition namespace is unsafe")
-    try:
-        info = path.lstat()
-    except FileNotFoundError:
-        _record_project_absence_at(path, evidence, failure_id)
+    if _observe_project_path_at(path, "directory", evidence, failure_id) is None:
         return ()
-    except OSError as exc:
-        raise LifecycleError(failure_id, "root acquisition namespace unavailable") from exc
-    if not stat.S_ISDIR(info.st_mode):
-        raise LifecycleError(failure_id, "root acquisition namespace is not a directory")
-    chain = _capture_path_parent_chain(path / ".project-identity-observation", failure_id)
     try:
         children = tuple(sorted(path.iterdir(), key=lambda child: child.name))
     except OSError as exc:
         raise LifecycleError(failure_id, "root acquisition namespace unavailable") from exc
-    evidence.extend((("chain", chain), ("membership", (path, tuple(child.name for child in children)))))
+    evidence.append(("membership", (path, tuple(child.name for child in children))))
     return children
 
 
