@@ -28,6 +28,124 @@ def test_skipped_hook_capture_does_not_read_or_adopt_unselected_control(tmp_path
         transaction.commit()
 
 
+@pytest.mark.parametrize("case", [
+    "external", "internal", "missing-binding", "wrong-transaction", "overlap",
+    "retarget-at-receipt", "ordinary-alias", "ordinary-descendant",
+    "skills-alias", "skills-descendant", "retarget-held",
+])
+def test_linked_payload_receipt_uses_admitted_physical_owner(tmp_path, monkeypatch, case):
+    import hashlib
+    import json
+    from test_selected_claude_linked_physical import _link
+
+    transaction_temp = tmp_path / "transaction-temp"
+    transaction_temp.mkdir()
+    monkeypatch.setattr(INSTALL.tempfile, "tempdir", str(transaction_temp))
+    home = tmp_path / "home"
+    target = home / ".claude"
+    target.mkdir(parents=True)
+    physical = (home if case == "internal" else tmp_path) / "physical-agents"
+    if case in {"ordinary-alias", "ordinary-descendant", "skills-alias", "skills-descendant"}:
+        physical = target / ("skills" if case.startswith("skills-") else "commands")
+        if case.endswith("-descendant"):
+            physical = physical / "nested"
+    (physical / "scripts").mkdir(parents=True)
+    (physical / "shared").mkdir()
+    logical = target / "agents"
+    _link(logical, physical)
+    old = physical / "old-owned.md"
+    old.write_bytes(b"retained prior ownership\n")
+    neighbor = physical / "custom.md"
+    neighbor.write_bytes(b"unowned neighbor\n")
+    runtime = physical / "scripts/example.py"
+    runtime.write_bytes(b"bound runtime\n")
+    manifest = physical / "shared" / INSTALL.TRANSPORT_PROJECTION_MANIFEST
+    manifest.write_bytes(b"bound manifest\n")
+    prior_files = {".claude/agents/" + path.relative_to(physical).as_posix():
+                   hashlib.sha256(path.read_bytes()).hexdigest() for path in (old, runtime, manifest)}
+    before = CODEC.encode_record(prior_files, "claude", "global", configs={})
+    receipt = target / CODEC.RECEIPT_NAME
+    receipt.write_bytes(before)
+    _, authority = INSTALL._resolve_global_claude_linked_subroot(ROOT, target, "global", "agents")
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    marker = foreign / "user.md"
+    marker.write_bytes(b"foreign content\n")
+    created = physical / "generated/new.md"
+    plan = SimpleNamespace(skills=(), nonlead_expected=(), lead_receipt=None,
+        transport_stage=SimpleNamespace(files=(("example.py", runtime.read_bytes()),),
+            manifest_payload=manifest.read_bytes()))
+    held_link = target / "held-original-link"
+    replaced_link = target / "replaced-link"
+
+    def capture(*args):
+        if case in {"retarget-at-receipt", "retarget-held"}:
+            logical.rename(held_link)
+            _link(logical, foreign)
+        return {}
+
+    monkeypatch.setattr(INSTALL, "_capture_provider_configs", capture)
+
+    def operation():
+        with INSTALL._InstallTransaction([receipt, runtime, manifest, created.parent], enabled=True) as transaction:
+            owner = INSTALL._CreateOnlyMutablePath(home, transaction, dry_run=False)
+            physical_owner = INSTALL._CreateOnlyMutablePath(
+                physical, transaction, dry_run=False, linked_authority=authority)
+            bindings = (physical_owner,)
+            if case == "missing-binding":
+                bindings = ()
+            elif case == "wrong-transaction":
+                bindings = (INSTALL._CreateOnlyMutablePath(physical,
+                    INSTALL._InstallTransaction([], enabled=False), dry_run=False, linked_authority=authority),)
+            elif case == "overlap":
+                _link(target / "commands", physical)
+                _, commands_authority = INSTALL._resolve_global_claude_linked_subroot(ROOT, target, "global", "commands")
+                bindings += (INSTALL._CreateOnlyMutablePath(
+                    physical, transaction, dry_run=False, linked_authority=commands_authority),)
+            physical_owner.create_file(created.relative_to(physical), b"new owned file\n")
+            try:
+                INSTALL._record_provider_install(ROOT, "claude", "global", target, home,
+                    transaction, owner, before.decode("utf-8"), {}, target / "CLAUDE.md", None,
+                    target / "settings.json", physical, False,
+                    canonical_plan=plan, canonical_target=target / "skills", payload_owners=bindings)
+            finally:
+                if case != "retarget-held" and (held_link.exists() or held_link.is_symlink()):
+                    logical.rename(replaced_link)
+                    held_link.rename(logical)
+            transaction.commit()
+
+    if case in {"external", "internal"}:
+        operation()
+        received = CODEC.decode_record(receipt.read_bytes(), "claude", "global")
+        assert received["files"] == {**prior_files,
+            ".claude/agents/generated/new.md": hashlib.sha256(created.read_bytes()).hexdigest()}
+        assert ".claude/agents/generated" in received["directories"]
+    else:
+        with pytest.raises((ValueError, RuntimeError), match="E_PROVIDER_RECEIPT_INVALID|E_RUNTIME_SUBROOT_IDENTITY_CHANGED|E_ROLLBACK") as failure:
+            operation()
+        assert receipt.read_bytes() == before
+        if case == "retarget-held":
+            assert isinstance(failure.value, INSTALL._InstallFailure)
+            assert failure.value.stable_id == "E_ROLLBACK_SETTLEMENT_FAILED"
+            assert failure.value.recovery_path is not None and failure.value.recovery_path.is_dir()
+            assert created.read_bytes() == b"new owned file\n"
+            assert logical.resolve() == foreign.resolve()
+            evidence = {"failure": failure.value.stable_id,
+                "recovery": str(failure.value.recovery_path), "retained_file": str(created),
+                "receipt_restored": True, "foreign_content_preserved": marker.read_bytes() == b"foreign content\n"}
+            (tmp_path / "recovery-observation.json").write_text(json.dumps(evidence, indent=2) + "\n")
+            print("retarget-held:", json.dumps(evidence, sort_keys=True))
+        else:
+            assert not created.exists()
+    assert neighbor.read_bytes() == b"unowned neighbor\n"
+    assert marker.read_bytes() == b"foreign content\n"
+    if case == "retarget-held":
+        with pytest.raises(ValueError, match="E_RUNTIME_SUBROOT_IDENTITY_CHANGED"):
+            authority.assert_current()
+    else:
+        authority.assert_current()
+
+
 def test_selected_hook_capture_uses_admitted_control_and_refuses_foreign_bytes(tmp_path):
     target = tmp_path / ".claude"
     target.mkdir()

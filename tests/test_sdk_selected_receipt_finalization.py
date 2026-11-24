@@ -70,8 +70,10 @@ class SelectedReceiptFinalizationTests(unittest.TestCase):
         if hasattr(rp, "compose_selected_candidate"):
             scope["_compose_selected_candidate"] = rp.compose_selected_candidate
         tree=ast.parse((ROOT/"scripts/production_installer.py").read_bytes())
-        fn=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=="_record_provider_install")
-        exec(compile(ast.Module(body=[fn],type_ignores=[]),"actual-finalizer","exec"),scope)
+        names={"_record_provider_install", "_provider_payload_bindings", "_provider_payload_path"}
+        functions=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name in names]
+        assert {n.name for n in functions} == names
+        exec(compile(ast.Module(body=functions,type_ignores=[]),"actual-finalizer","exec"),scope)
         self.run_finalizer=lambda:scope["_record_provider_install"](ROOT,self.provider,self.scope_name,target,
             anchor,self.tx,self.owner,self.raw.decode(),{},None,None,None,None,False,
             selected_updates=self.batch)

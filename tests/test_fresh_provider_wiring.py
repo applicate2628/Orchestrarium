@@ -278,7 +278,8 @@ class FreshProviderWiringTests(unittest.TestCase):
         self.assertEqual(
             {kw.arg: ast.unparse(kw.value) for kw in final.keywords},
             {"canonical_plan": "canonical_plan", "canonical_target": "canonical_skills_target",
-             "selected_updates": "selected_updates", "reclaimed": "reclaimed"},
+             "selected_updates": "selected_updates", "reclaimed": "reclaimed",
+             "payload_owners": "payload_owners"},
         )
         lead_final = self.one_call(scope, "_finalize_canonical_lead_receipt")
         self.assertLess(lead_final.lineno, final.lineno)

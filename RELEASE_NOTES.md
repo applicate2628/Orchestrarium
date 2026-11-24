@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-24
 
+- Finalize explicitly selected Claude instruction updates through the already verified physical owners of linked `agents` and `commands` directories, while keeping logical names in ownership receipts. Refuse overlapping payload roots and late link replacement; a changed link that prevents safe rollback retains recovery evidence and reports incomplete settlement.
+
 - Clarify the existing provider-output boundary: complete private command-line transport is acquired before choosing the public result, and the chosen text and final receipt are scanned before delivery. Published Software Development Kit (SDK) observations retain their separate checks. Supported authentication modes grant no execution authority or proof that arbitrary unknown secrets are absent.
 
 - Resolve hook-health package binding from the explicit documented settings path without requiring a home-directory environment. Isolated provider trust probes retain the same package-name and path relationship checks on Windows.

@@ -14122,15 +14122,50 @@ def _selected_lead_prior_files(plan: _CanonicalSkillsPlan, target: Path, transac
             if type(digest) is str and re.fullmatch(r"[0-9a-f]{64}", digest) is not None}
 
 
+def _provider_payload_bindings(provider, mode, target, transaction, owners):
+    """Receive existing linked Claude owners without acquiring new storage."""
+    bindings = tuple(owner for owner in owners if owner.linked_authority is not None)
+    physical_roots = {target / name: target / name for name in ("agents", "commands", "skills")}
+    for index, bound in enumerate(bindings):
+        authority = bound.linked_authority
+        if (provider != "claude" or mode != "global" or bound.transaction is not transaction
+                or authority.logical_root not in {target / "agents", target / "commands"}
+                or authority.resolved_root != bound.anchor
+                or any(authority.logical_root == prior.linked_authority.logical_root for prior in bindings[:index])):
+            raise ValueError("E_PROVIDER_RECEIPT_INVALID: linked payload owner")
+        physical_roots[authority.logical_root] = bound.anchor
+    for bound in bindings:
+        authority = bound.linked_authority
+        if any(logical != authority.logical_root and
+               (bound.anchor.is_relative_to(physical) or physical.is_relative_to(bound.anchor))
+               for logical, physical in physical_roots.items()):
+            raise ValueError("E_PROVIDER_RECEIPT_INVALID: overlapping payload roots")
+        authority.assert_current()
+    return bindings
+
+
+def _provider_payload_path(path, bindings, *, logical=False):
+    """Translate names only through the caller's already-admitted root pairs."""
+    for bound in bindings:
+        authority = bound.linked_authority
+        source, destination = ((bound.anchor, authority.logical_root) if logical
+                               else (authority.logical_root, bound.anchor))
+        if path.is_relative_to(source):
+            return destination / path.relative_to(source)
+    return path
+
+
 def _record_provider_install(root, provider, mode, target, anchor, transaction, owner, before,
                              config_before, docs_target, mode_target, registration,
                              installed_hook_root, hooks_enabled, *,
-                             canonical_plan=None, canonical_target=None, selected_updates=None, reclaimed=()):
+                             canonical_plan=None, canonical_target=None, selected_updates=None, reclaimed=(),
+                             payload_owners=()):
     """Record actual owned payload outcomes; configuration has separate semantics."""
     if owner.dry_run:
         return
     codec = _provider_ownership_module(root)
     scope = "global" if mode == "global" else "project"
+    bindings = _provider_payload_bindings(provider, mode, target, transaction, payload_owners)
     prior = codec.decode_record(before.encode("utf-8"), provider, scope)["files"] if before else {}
     payload_roots = get_client(provider)["payload_roots"]
     original = {path: node for image in transaction._original.values() for path, node in image.items()}
@@ -14145,11 +14180,12 @@ def _record_provider_install(root, provider, mode, target, anchor, transaction, 
     for path, node in current.items():
         if path in selected_paths or temporary(path) or node.kind != "file" or not any(path == base or base in path.parents for base in transaction.paths):
             continue
-        if not path.is_relative_to(anchor):
+        logical = _provider_payload_path(path, bindings, logical=True)
+        if not logical.is_relative_to(anchor):
             if any(path == selected or selected in path.parents for selected in transaction._readonly_paths):
                 continue  # Explicit external read dependencies are not provider-owned payloads.
             raise ValueError("E_PROVIDER_RECEIPT_INVALID: external mutation image")
-        relative = path.relative_to(anchor).as_posix()
+        relative = logical.relative_to(anchor).as_posix()
         parts = relative.split("/")
         if not any(relative.startswith(prefix + "/") for prefix in payload_roots) or "__pycache__" in parts:
             continue
@@ -14229,6 +14265,7 @@ def _record_provider_install(root, provider, mode, target, anchor, transaction, 
             for path, payload in declarations:
                 relative = path.relative_to(anchor).as_posix()
                 codec.validate_path(relative, provider, scope)
+                path = _provider_payload_path(path, bindings)
                 digest = hashlib.sha256(payload).hexdigest()
                 node = current.get(path)
                 if node is None:
@@ -14254,9 +14291,10 @@ def _record_provider_install(root, provider, mode, target, anchor, transaction, 
                 files[path.relative_to(anchor).as_posix()] = node.data
     # Retain prior ownership of unchanged payloads outside this run's write set.
     for relative, digest in prior.items():
-        if relative not in files and anchor / relative not in original and not temporary(anchor / relative):
-            candidate = anchor / relative
-            owner.destination(Path(relative))
+        candidate = _provider_payload_path(anchor / relative, bindings)
+        if relative not in files and candidate not in original and not temporary(candidate):
+            payload_owner = next((bound for bound in bindings if candidate.is_relative_to(bound.anchor)), owner)
+            payload_owner.destination(candidate.relative_to(payload_owner.anchor))
             if _file_sha256(candidate) == digest:
                 files[relative] = digest
     receipt = target / codec.RECEIPT_NAME
@@ -14273,7 +14311,7 @@ def _record_provider_install(root, provider, mode, target, anchor, transaction, 
     for path, node in current.items():
         if temporary(path) or node.kind != "directory" or not any(path == base or base in path.parents for base in created_roots):
             continue
-        relative = path.relative_to(anchor).as_posix()
+        relative = _provider_payload_path(path, bindings, logical=True).relative_to(anchor).as_posix()
         parts = relative.split("/")
         if any(relative == prefix or relative.startswith(prefix + "/") for prefix in payload_roots) and "__pycache__" not in parts:
             codec.validate_path(relative, provider, scope)
@@ -14291,6 +14329,8 @@ def _record_provider_install(root, provider, mode, target, anchor, transaction, 
             _assert_selected_replacement(selected, selected.owner, selected_updates.received[key], provider)
         if _read_owned_text(receipt, owner, preserve_newlines=True) != payload.decode("utf-8"):
             raise _selected_error(provider, "receipt outcome")
+    for bound in bindings:
+        bound.linked_authority.assert_current()
 
 def _fresh_provider_receipt_candidate(target: Path) -> Path | None:
     """Existing receipts of every type remain on the unchanged legacy route."""
@@ -15540,6 +15580,9 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     dry_run=args.dry_run,
                     linked_authority=codex_agents_authority,
                 )
+            payload_owners = _provider_payload_bindings(
+                provider, mode, target, transaction,
+                tuple(bound for bound in (claude_agents_owner, claude_commands_owner) if bound is not None))
             instruction_updates = _prepare_selected_claude_instructions(
                 instruction_grants, source, target, "global" if mode == "global" else "project",
                 create_only,
@@ -15568,11 +15611,13 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                             outcome.path == relative for outcome in selected_updates.outcomes):
                         # Only exact-current preparation can exempt this selected leaf.
                         continue
-                    selected_path = mutable_anchor / relative
+                    selected_path = _provider_payload_path(mutable_anchor / relative, payload_owners)
                     expected = selected_lead_files.get(selected_path, expected)
                     node = observed.get(selected_path)
                     if not transaction.enabled and any(selected_path == base or base in selected_path.parents for base in transaction.paths):
-                        create_only.destination(Path(relative), allow_leaf_reparse=True)
+                        payload_owner = next((bound for bound in payload_owners
+                            if selected_path.is_relative_to(bound.anchor)), create_only)
+                        payload_owner.destination(selected_path.relative_to(payload_owner.anchor), allow_leaf_reparse=True)
                         try:
                             node = transaction._capture_node(selected_path)
                         except FileNotFoundError:
@@ -15877,7 +15922,8 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                                      installed_hook_root, hooks_enabled,
                                      canonical_plan=canonical_plan,
                                      canonical_target=canonical_skills_target,
-                                     selected_updates=selected_updates, reclaimed=reclaimed)
+                                     selected_updates=selected_updates, reclaimed=reclaimed,
+                                     payload_owners=payload_owners)
             transaction.commit()
         applied = not args.dry_run
     except BaseException as exc:
