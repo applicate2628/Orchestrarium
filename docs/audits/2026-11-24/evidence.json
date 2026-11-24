@@ -1,0 +1,2057 @@
+{
+  "schemaVersion": 1,
+  "reportDate": "2026-11-24",
+  "scope": "Dated audit and qualification evidence; documentation only. Counts overlap across runs. No automatic deployment or live-provider qualification.",
+  "acceptance": {
+    "status": "COMPLETE",
+    "repository": "applicate2628/Orchestrarium",
+    "main": "f6154aa578f28be72dd1828c2ddd23104c7b8daf",
+    "tree": "3d836017361de8027613ca7ada4072e1bc35dcda",
+    "mergedPrCount": 19,
+    "mergedPrs": [
+      {
+        "headRefOid": "259f40f8843a85925b9d71177587206380bb00bb",
+        "mergeCommit": {
+          "oid": "94f0856bd1190a6c4c0f6ff3048b0ab33423a2a0"
+        },
+        "mergedAt": "2026-11-24T16:08:06Z",
+        "number": 13,
+        "state": "MERGED",
+        "title": "docs: consolidate the full Orchestrarium 2.0 product plan",
+        "url": "https://github.com/applicate2628/Orchestrarium/pull/13"
+      },
+      {
+        "headRefOid": "66c33c5a7772b1ffb0a856dc2cf1c7b675a17c4e",
+        "mergeCommit": {
+          "oid": "033ad5380a0320a7103179997e8a0c05076c57f7"
+        },
+        "mergedAt": "2026-11-24T16:06:44Z",
+        "number": 17,
+        "state": "MERGED",
+        "title": "docs: plan PowerShell bootstrap and compatible npm delivery",
+        "url": "https://github.com/applicate2628/Orchestrarium/pull/17"
+      },
+      {
+        "headRefOid": "46ec5e1a207acc440082453c27ebbe8975734f6a",
+        "mergeCommit": {
+          "oid": "9d733378b25320aea8bf2328dfd7fe73ffbeaee9"
+        },
+        "mergedAt": "2026-11-24T16:07:24Z",
+        "number": 18,
+        "state": "MERGED",
+        "title": "docs: reconcile SDK design with implementation and remaining qualification",
+        "url": "https://github.com/applicate2628/Orchestrarium/pull/18"
+      },
+      {
+        "headRefOid": "0bfc087ec2bcba36acc35d66862ec7538f49bc57",
+        "mergeCommit": {
+          "oid": "f6154aa578f28be72dd1828c2ddd23104c7b8daf"
+        },
+        "mergedAt": "2026-11-24T16:45:37Z",
+        "number": 19,
+        "state": "MERGED",
+        "title": "feat: add opt-in SDK execution and Codex subscription coordinator",
+        "url": "https://github.com/applicate2628/Orchestrarium/pull/19"
+      },
+      {
+        "headRefOid": "e14ac37ac340e20718c79471812b6f925d61085e",
+        "mergeCommit": {
+          "oid": "6835523c5f1c487f7359364ce4f7fa06df91448b"
+        },
+        "mergedAt": "2026-11-24T16:08:55Z",
+        "number": 21,
+        "state": "MERGED",
+        "title": "docs: plan native Rust operations and installer ownership",
+        "url": "https://github.com/applicate2628/Orchestrarium/pull/21"
+      },
+      {
+        "headRefOid": "5e553e2cfd72907ba534d8997fe20deb6a00e3cf",
+        "mergeCommit": {
+          "oid": "b19ba4b0df3cdfdf14bc7a7bc616c3f6de5878f1"
+        },
+        "mergedAt": "2026-11-24T13:58:35Z",
+        "number": 54,
+        "state": "MERGED",
+        "title": "Prioritize the working primary path",
+        "url": "https://github.com/applicate2628/Orchestrarium/pull/54"
+      },
+      {
+        "headRefOid": "fb079acd87708a93be26c118b21190bd2f09f53e",
+        "mergeCommit": {
+          "oid": "62767b74f6937b1b2216db138ab330639a2e4226"
+        },
+        "mergedAt": "2026-11-24T14:10:59Z",
+        "number": 56,
+        "state": "MERGED",
+        "title": "Scope recovery holds to active denials",
+        "url": "https://github.com/applicate2628/Orchestrarium/pull/56"
+      },
+      {
+        "headRefOid": "6def9e6f58eaa4babfca10c875eaa21f0808f676",
+        "mergeCommit": {
+          "oid": "05a424143bee20939b70601863e505d342f47ea8"
+        },
+        "mergedAt": "2026-11-24T14:12:14Z",
+        "number": 57,
+        "state": "MERGED",
+        "title": "Document review scope for release rebuilds",
+        "url": "https://github.com/applicate2628/Orchestrarium/pull/57"
+      },
+      {
+        "headRefOid": "10e958baac23702810f264d0824434fb8a69f19e",
+        "mergeCommit": {
+          "oid": "1b40af1b5754f9db9a01cd7429d1cf8cba564fde"
+        },
+        "mergedAt": "2026-11-24T14:12:57Z",
+        "number": 58,
+        "state": "MERGED",
+        "title": "Report the selected scope in audit failures",
+        "url": "https://github.com/applicate2628/Orchestrarium/pull/58"
+      },
+      {
+        "headRefOid": "e040f92607bdaef68de351163887416fac8f230e",
+        "mergeCommit": {
+          "oid": "29f6a3e795f8bf78b198ff59c8fa08057f96c06c"
+        },
+        "mergedAt": "2026-11-24T14:13:38Z",
+        "number": 59,
+        "state": "MERGED",
+        "title": "Keep Lead implementation acceptance within agreed scope",
+        "url": "https://github.com/applicate2628/Orchestrarium/pull/59"
+      },
+      {
+        "headRefOid": "1cfa2c0d0a226bdf62c3d269ab4177d4efdfa1bc",
+        "mergeCommit": {
+          "oid": "45443ae7eb324d8a8cad54c4660b9fad4a78926a"
+        },
+        "mergedAt": "2026-11-24T14:14:27Z",
+        "number": 60,
+        "state": "MERGED",
+        "title": "fix: deliver the current scanner and retain cleanup through cancellation",
+        "url": "https://github.com/applicate2628/Orchestrarium/pull/60"
+      },
+      {
+        "headRefOid": "3d9040a0bf91875b71be865a47c5ae7c42be2bdc",
+        "mergeCommit": {
+          "oid": "d102b7f321e47adaa89fe610d01f3e3a204aea3e"
+        },
+        "mergedAt": "2026-11-24T14:15:10Z",
+        "number": 61,
+        "state": "MERGED",
+        "title": "fix: preserve payload when uninstall controls change concurrently",
+        "url": "https://github.com/applicate2628/Orchestrarium/pull/61"
+      },
+      {
+        "headRefOid": "bfde786e9f227443745581ea91406f7502542760",
+        "mergeCommit": {
+          "oid": "f520c5d52d7453b434c14bd0630920a369db4920"
+        },
+        "mergedAt": "2026-11-24T14:15:53Z",
+        "number": 62,
+        "state": "MERGED",
+        "title": "docs: align Kimi defaults guidance with admitted routes",
+        "url": "https://github.com/applicate2628/Orchestrarium/pull/62"
+      },
+      {
+        "headRefOid": "4cf8c914dc356d5f034255cc9fa93858952227cf",
+        "mergeCommit": {
+          "oid": "1de0950d57efd6ea7c61a623a28c56cf5bda7474"
+        },
+        "mergedAt": "2026-11-24T14:16:41Z",
+        "number": 63,
+        "state": "MERGED",
+        "title": "fix: retain installer ownership through content updates and retirement",
+        "url": "https://github.com/applicate2628/Orchestrarium/pull/63"
+      },
+      {
+        "headRefOid": "e938b8bb85ace47e5c571bfcbfce2c095a1f2127",
+        "mergeCommit": {
+          "oid": "e73c8875423be140e99eb329973ff89c70fad89f"
+        },
+        "mergedAt": "2026-11-24T14:17:25Z",
+        "number": 64,
+        "state": "MERGED",
+        "title": "fix: preserve initially absent ledgers in obligation reads",
+        "url": "https://github.com/applicate2628/Orchestrarium/pull/64"
+      },
+      {
+        "headRefOid": "218d2f85cdf3fa3c0bb91ea20970da735cc3214a",
+        "mergeCommit": {
+          "oid": "3788cf655f80d31a12acfe42f57684fdf450399d"
+        },
+        "mergedAt": "2026-11-24T15:40:59Z",
+        "number": 65,
+        "state": "MERGED",
+        "title": "fix: preserve work-item lifecycle ownership and recovery",
+        "url": "https://github.com/applicate2628/Orchestrarium/pull/65"
+      },
+      {
+        "headRefOid": "929ccc79d209bb9973091d6a82ae88f927ad3af8",
+        "mergeCommit": {
+          "oid": "407de40a7988f8dcb23c1198bba50c6b5120fa92"
+        },
+        "mergedAt": "2026-11-24T16:05:23Z",
+        "number": 66,
+        "state": "MERGED",
+        "title": "fix: preserve native Git status order across transfer batches",
+        "url": "https://github.com/applicate2628/Orchestrarium/pull/66"
+      },
+      {
+        "headRefOid": "65b7e49f9f0b74f89974805b8f4856960dead91a",
+        "mergeCommit": {
+          "oid": "bd3f50161cdb00aa12ffecd86c2d9b2e77ac5782"
+        },
+        "mergedAt": "2026-11-24T16:06:04Z",
+        "number": 67,
+        "state": "MERGED",
+        "title": "test: align shared fixtures with current contract owners",
+        "url": "https://github.com/applicate2628/Orchestrarium/pull/67"
+      },
+      {
+        "headRefOid": "4d40d39073a89c6f7de34f368b76b684f5031b8a",
+        "mergeCommit": {
+          "oid": "006a969291780cba1f8194d5642e3d1c868fad61"
+        },
+        "mergedAt": "2026-11-24T15:16:33Z",
+        "number": 68,
+        "state": "MERGED",
+        "title": "fix(installer): keep dry-run move probes out of installed targets",
+        "url": "https://github.com/applicate2628/Orchestrarium/pull/68"
+      }
+    ],
+    "openPrsAtReadback": [],
+    "preSdkTag": {
+      "name": "baseline-pre-sdk-2026-11-24",
+      "object": "7a6fa90f7aa789df1a321d19922d2b764c4e965b",
+      "commit": "6835523c5f1c487f7359364ce4f7fa06df91448b"
+    },
+    "sdkPackageSource": "0bfc087ec2bcba36acc35d66862ec7538f49bc57",
+    "sdkPackageTreeEqualsMain": true,
+    "installedProfilesApplied": false,
+    "nativeHookTrustChanged": false,
+    "liveProviderCallsMade": false
+  },
+  "sourceBinding": {
+    "status": "FROZEN",
+    "commit": "0bfc087ec2bcba36acc35d66862ec7538f49bc57",
+    "tree": "3d836017361de8027613ca7ada4072e1bc35dcda",
+    "parents": [
+      "43745c94083a1d32e0f37813a5bf01cf5c400f1f",
+      "6835523c5f1c487f7359364ce4f7fa06df91448b"
+    ],
+    "qualifiedSource": "7f9ad79afc64c1237078b66a4b36a019a6d0e9ba",
+    "trackedFiles": 1389,
+    "nonDocFilesByteExactQualifiedSource": 1387,
+    "allTrackedBytesUnchangedAcrossGateAndCommit": true,
+    "changedFromQualifiedSource": [
+      "docs/orchestrarium-2.0-plan.md",
+      "docs/sdk-execution.md"
+    ],
+    "releaseNotesExactQualifiedSdkAndFullParentEntryUnion": true,
+    "sourceStatus": "",
+    "stagedGate": "PASS",
+    "gateElapsedSeconds": 3.665,
+    "rootReview": {
+      "commit": "0bfc087ec2bcba36acc35d66862ec7538f49bc57",
+      "tree": "3d836017361de8027613ca7ada4072e1bc35dcda",
+      "qualifiedPredecessor": "7f9ad79afc64c1237078b66a4b36a019a6d0e9ba",
+      "nonDocFilesExact": 1387,
+      "trackedFiles": 1389,
+      "onlyChangedFiles": [
+        "docs/orchestrarium-2.0-plan.md",
+        "docs/sdk-execution.md"
+      ],
+      "criticalOwnersSha256": {
+        "scripts/mutate-work-item.py": "c31d050d774ca55fd6018176fbddf0913cc3ac17eab8bddccf3dcd16bedd2c26",
+        "scripts/validate-work-item-state.py": "6d80638a1f6dc8eff2ba852eaa359b63252546fd2d7ed79e74d3fea7e70b58a0",
+        "scripts/production_installer.py": "c762e06e7fc3e457d5a73044a67c2833e3f2ecc8357e31b2a4034172d47aec72",
+        "src.codex/skills/lead/scripts/check-publication-safety.py": "e1e164bdaaeb7d0329e2f6c8c66ad18318242cab69d0d64e773c03bee4208ed8",
+        "tests/test_legacy_flat_terminal_close.py": "94f8e7e8b2a7cb23ef476d9744dc5fedc1fe863e9eab986ef3cddea1892a67e8"
+      },
+      "originalPrAncestryAndActualMainRetained": true,
+      "preSdkTagVerifiedBeforeMerge": true,
+      "sourceClean": true,
+      "review": "PASS",
+      "releaseNoteExemption": "Factual historical/current status and verified source-tag references only; no executable, contract or release behavior change."
+    }
+  },
+  "integrationCheckpoints": {
+    "finalHead": "e14ac37ac340e20718c79471812b6f925d61085e",
+    "finalTree": "5523563969f787f80e04dacbf170d7f1e90efd28",
+    "qualifiedSourceAncestor": "8d1342e03d060275b3ced2e7368a1167ebb77e94",
+    "wholeTreeMatchesQualifiedSource": true,
+    "testRuns": 0,
+    "stagedGateRuns": 6,
+    "checkpoints": [
+      {
+        "number": 66,
+        "originalRemoteHead": "9d53f99cb4421a1f77d538de6d3ce212a0f2ef60",
+        "head": "929ccc79d209bb9973091d6a82ae88f927ad3af8",
+        "tree": "8beb2f7eea243a98822dfa9316135a23d68c8666",
+        "previousHead": "218d2f85cdf3fa3c0bb91ea20970da735cc3214a",
+        "mergeInput": "9d53f99cb4421a1f77d538de6d3ce212a0f2ef60",
+        "parents": [
+          "218d2f85cdf3fa3c0bb91ea20970da735cc3214a",
+          "9d53f99cb4421a1f77d538de6d3ce212a0f2ef60"
+        ],
+        "changedPaths": [
+          "RELEASE_NOTES.md",
+          "src.codex/skills/manual-repo-transfer/scripts/repo_transfer.py",
+          "tests/test_manual_repo_transfer.py"
+        ],
+        "stagedGate": {
+          "resultSha256": "9df0e287536aa3485b8ea87511ea1ee4fb737ff5759467ed93ceb201bd634ed0",
+          "stdoutSha256": "6e5ca2d5017e9d85899b2c9fd293df159025a13ec9ff7ce503dc2dd9a50a6856",
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "qualifiedPass": true,
+          "exitCode": 0,
+          "seconds": 20.627,
+          "nativeClosureComplete": true,
+          "captureSettled": true,
+          "captureErrors": [],
+          "sourceHashesUnchanged": true,
+          "stateUnchanged": true,
+          "trackedFiles": 1127
+        }
+      },
+      {
+        "number": 67,
+        "originalRemoteHead": "24cb58e8f939e31349ed49e2ac903059e57bcf44",
+        "head": "65b7e49f9f0b74f89974805b8f4856960dead91a",
+        "tree": "af4c62a99e985b921b561da55e6bcbf73e10f65b",
+        "previousHead": "929ccc79d209bb9973091d6a82ae88f927ad3af8",
+        "mergeInput": "ea9285dc0eb54dc4750a8f64871cc6f25db7cedf",
+        "parents": [
+          "929ccc79d209bb9973091d6a82ae88f927ad3af8",
+          "ea9285dc0eb54dc4750a8f64871cc6f25db7cedf"
+        ],
+        "changedPaths": [
+          "RELEASE_NOTES.md",
+          "tests/test_legacy_flat_terminal_close.py",
+          "tests/test_receipted_claude_instruction_wiring.py",
+          "tests/test_runtime_capabilities.py"
+        ],
+        "stagedGate": {
+          "resultSha256": "78d324a9c634055d91942df00e9e7d372772780193cfb09d87558c9df18b2958",
+          "stdoutSha256": "829bbe6f62828c7140b58b840007a05b450be5cf8553904e4ecc9688a809bf64",
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "qualifiedPass": true,
+          "exitCode": 0,
+          "seconds": 8.601,
+          "nativeClosureComplete": true,
+          "captureSettled": true,
+          "captureErrors": [],
+          "sourceHashesUnchanged": true,
+          "stateUnchanged": true,
+          "trackedFiles": 1127
+        }
+      },
+      {
+        "number": 17,
+        "originalRemoteHead": "729c18460064bc2c3ee4b848d97de88f6bd65872",
+        "head": "66c33c5a7772b1ffb0a856dc2cf1c7b675a17c4e",
+        "tree": "5af344d3a1f52df2d82a2b87c3dd635b0f9e8810",
+        "previousHead": "65b7e49f9f0b74f89974805b8f4856960dead91a",
+        "mergeInput": "729c18460064bc2c3ee4b848d97de88f6bd65872",
+        "parents": [
+          "65b7e49f9f0b74f89974805b8f4856960dead91a",
+          "729c18460064bc2c3ee4b848d97de88f6bd65872"
+        ],
+        "changedPaths": [
+          "INSTALL.md",
+          "README.md",
+          "RELEASE_NOTES.md",
+          "docs/README.md",
+          "docs/distribution-runtime-project.md",
+          "docs/npm-distribution-project.md",
+          "tests/test_hook_runtime_installers.py"
+        ],
+        "stagedGate": {
+          "resultSha256": "e8ad66455c107aa5b731c0dd07706d199f3ead5245e2f11bf6a20211af2e651a",
+          "stdoutSha256": "048def73ffd19663099850ad85a374770e41b2edb29fdf0e38f90df3f8ae4847",
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "qualifiedPass": true,
+          "exitCode": 0,
+          "seconds": 8.787,
+          "nativeClosureComplete": true,
+          "captureSettled": true,
+          "captureErrors": [],
+          "sourceHashesUnchanged": true,
+          "stateUnchanged": true,
+          "trackedFiles": 1129
+        }
+      },
+      {
+        "number": 18,
+        "originalRemoteHead": "bc07ccd58086579c23ce0e0d02756025a058b34b",
+        "head": "46ec5e1a207acc440082453c27ebbe8975734f6a",
+        "tree": "a7681bf5b6756c701b6d339634ee0cb89e5fa0fd",
+        "previousHead": "66c33c5a7772b1ffb0a856dc2cf1c7b675a17c4e",
+        "mergeInput": "bc07ccd58086579c23ce0e0d02756025a058b34b",
+        "parents": [
+          "66c33c5a7772b1ffb0a856dc2cf1c7b675a17c4e",
+          "bc07ccd58086579c23ce0e0d02756025a058b34b"
+        ],
+        "changedPaths": [
+          "RELEASE_NOTES.md",
+          "docs/README.md",
+          "docs/sdk-integration-project.md"
+        ],
+        "stagedGate": {
+          "resultSha256": "292c899c231bcc81c78d2d5df4b130681bd78264f9ebeef499464c88ef733f58",
+          "stdoutSha256": "6e5ca2d5017e9d85899b2c9fd293df159025a13ec9ff7ce503dc2dd9a50a6856",
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "qualifiedPass": true,
+          "exitCode": 0,
+          "seconds": 7.714,
+          "nativeClosureComplete": true,
+          "captureSettled": true,
+          "captureErrors": [],
+          "sourceHashesUnchanged": true,
+          "stateUnchanged": true,
+          "trackedFiles": 1130
+        }
+      },
+      {
+        "number": 13,
+        "originalRemoteHead": "2fdea342ed61901b0d9a9cef640febcdc5a55bc2",
+        "head": "259f40f8843a85925b9d71177587206380bb00bb",
+        "tree": "d857546d5bbfde1598944c5ef8e856644625f408",
+        "previousHead": "46ec5e1a207acc440082453c27ebbe8975734f6a",
+        "mergeInput": "0fe4a1acad64399884bea51be040425025100020",
+        "parents": [
+          "46ec5e1a207acc440082453c27ebbe8975734f6a",
+          "0fe4a1acad64399884bea51be040425025100020"
+        ],
+        "changedPaths": [
+          "RELEASE_NOTES.md",
+          "docs/README.md",
+          "docs/orchestrarium-2.0-plan.md",
+          "docs/superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md"
+        ],
+        "stagedGate": {
+          "resultSha256": "b31e11c7098f3a9687d6818af1cf4eb9934a729ac97a5f5a519f10e0088529fc",
+          "stdoutSha256": "829bbe6f62828c7140b58b840007a05b450be5cf8553904e4ecc9688a809bf64",
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "qualifiedPass": true,
+          "exitCode": 0,
+          "seconds": 6.459,
+          "nativeClosureComplete": true,
+          "captureSettled": true,
+          "captureErrors": [],
+          "sourceHashesUnchanged": true,
+          "stateUnchanged": true,
+          "trackedFiles": 1132
+        }
+      },
+      {
+        "number": 21,
+        "originalRemoteHead": "0aa242623109d684a5b2be81a04cb806bfa1a81c",
+        "head": "e14ac37ac340e20718c79471812b6f925d61085e",
+        "tree": "5523563969f787f80e04dacbf170d7f1e90efd28",
+        "previousHead": "259f40f8843a85925b9d71177587206380bb00bb",
+        "mergeInput": "8d1342e03d060275b3ced2e7368a1167ebb77e94",
+        "parents": [
+          "259f40f8843a85925b9d71177587206380bb00bb",
+          "8d1342e03d060275b3ced2e7368a1167ebb77e94"
+        ],
+        "changedPaths": [
+          "INSTALL.md",
+          "RELEASE_NOTES.md",
+          "docs/native-operations-rust-project.md",
+          "docs/native-rust-skill-inventory.csv",
+          "docs/native-rust-source-inventory.csv",
+          "native/operations/Cargo.lock",
+          "native/operations/Cargo.toml",
+          "native/operations/README.md",
+          "native/operations/src/lib.rs",
+          "native/operations/src/publication/git_batch.rs",
+          "native/operations/src/publication/git_identity.rs",
+          "native/operations/src/publication/line_index.rs",
+          "native/operations/src/publication/mapped_stage_windows.rs",
+          "native/operations/src/publication/tree_record.rs",
+          "native/operations/src/publication/tree_walk.rs",
+          "native/operations/tests/git_batch_parity.py",
+          "native/operations/tests/git_object_identity.rs",
+          "native/operations/tests/line_index_bench.rs",
+          "native/operations/tests/publication_composition_parity.py",
+          "native/operations/tests/publication_line_index.rs",
+          "native/operations/tests/tree_record_parity.py",
+          "native/operations/tests/tree_walk_driver.rs",
+          "native/operations/tests/tree_walk_parity.py",
+          "native/operations/tests/windows_staging_worker.py",
+          "native/publication-match/src/lib.rs",
+          "native/publication-match/src/main.rs",
+          "scripts/universal-hooks/scripts/check-publication-safety.py",
+          "shared/references/repository-publication-safety.md",
+          "src.claude/agents/scripts/check-publication-safety.py",
+          "src.codex/skills/lead/scripts/check-publication-safety.py",
+          "tests/test_publication_safety_scanner.py"
+        ],
+        "stagedGate": {
+          "resultSha256": "a33d61dca4994a220601d15ef70d69ab9fd012012f500f9a991384ea9fbb8286",
+          "stdoutSha256": "501065d464d74e55e0cb811af8a4dbc0b11d8ab8fc07f83a9d5c332d48c0e4d0",
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "qualifiedPass": true,
+          "exitCode": 0,
+          "seconds": 17.212,
+          "nativeClosureComplete": true,
+          "captureSettled": true,
+          "captureErrors": [],
+          "sourceHashesUnchanged": true,
+          "stateUnchanged": true,
+          "trackedFiles": 1155
+        }
+      }
+    ]
+  },
+  "verificationRuns": [
+    {
+      "id": "main-broad-5e0d2b93",
+      "platform": "Windows x64",
+      "python": "3.14.10",
+      "sourceCommit": "5e0d2b936273578d2df2b93845fb17203a6d2702",
+      "sourceTree": "8cf7a472931eaca6bdb71a0e3172e7b98b6c73af",
+      "elapsedSeconds": 512.561,
+      "elapsedScope": "whole recorded lane",
+      "qualifiedPass": true,
+      "sourceHashesUnchanged": true,
+      "providerCalls": 0,
+      "dependencyInstallations": 0,
+      "harnessExitCode": 0,
+      "primaryCaseOutcomes": {
+        "passed": 132
+      },
+      "primaryCasesWithStructuredFinalResult": 132,
+      "junitSuites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "891",
+          "time": "429.431"
+        }
+      ],
+      "phaseResults": [
+        {
+          "label": "pack-codex",
+          "exitCode": 0,
+          "nativeClosureComplete": true,
+          "captureThreadsSettled": true,
+          "captureErrors": [],
+          "quiescent": true,
+          "qualifiedExecution": true,
+          "seconds": 30.444
+        },
+        {
+          "label": "pack-claude",
+          "exitCode": 0,
+          "nativeClosureComplete": true,
+          "captureThreadsSettled": true,
+          "captureErrors": [],
+          "quiescent": true,
+          "qualifiedExecution": true,
+          "seconds": 24.67
+        },
+        {
+          "label": "collect",
+          "exitCode": 0,
+          "nativeClosureComplete": true,
+          "captureThreadsSettled": true,
+          "captureErrors": [],
+          "quiescent": true,
+          "qualifiedExecution": true,
+          "seconds": 11.491
+        },
+        {
+          "label": "pytest",
+          "exitCode": 0,
+          "nativeClosureComplete": true,
+          "captureThreadsSettled": true,
+          "captureErrors": [],
+          "quiescent": true,
+          "qualifiedExecution": true,
+          "seconds": 433.87
+        }
+      ],
+      "selectedCount": 132
+    },
+    {
+      "id": "sdk-legacy-e8-initial",
+      "platform": "Windows x64",
+      "python": "3.14.10",
+      "sourceCommit": "e8edb9576a89e754b19d400c4c91753cd1eacf5b",
+      "sourceTree": "ff6ec21eb8a1d7013898dec1f37953f394878c0c",
+      "elapsedSeconds": 3633.552,
+      "elapsedScope": "whole recorded lane",
+      "qualifiedPass": false,
+      "sourceHashesUnchanged": true,
+      "providerCalls": 0,
+      "dependencyInstallations": 0,
+      "exitCode": 124,
+      "timedOut": true,
+      "nativeClosureComplete": true,
+      "captureThreadsSettled": true,
+      "captureErrors": [],
+      "harnessExitCode": 1,
+      "primaryCaseOutcomes": {},
+      "primaryCasesWithStructuredFinalResult": 0,
+      "junitSuites": [],
+      "phaseResults": [],
+      "nativeClosure": {
+        "direct_exit_code": 1,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": true,
+        "handles_closed": true,
+        "issues": []
+      },
+      "completedCallReports": 30,
+      "completedCallOutcomes": {
+        "passed": 28,
+        "failed": 2
+      },
+      "additionalSubtestCallReports": {
+        "passed": 12
+      },
+      "qualificationLimit": "Initial run timed out; completed call reports retained; two unfinished methods belong to the separate tail.",
+      "sourceTreeEvidence": "sdk-legacy-e8-input-binding"
+    },
+    {
+      "id": "sdk-legacy-e8-tail",
+      "platform": "Windows x64",
+      "python": "3.14.10",
+      "sourceCommit": "e8edb9576a89e754b19d400c4c91753cd1eacf5b",
+      "sourceTree": "ff6ec21eb8a1d7013898dec1f37953f394878c0c",
+      "elapsedSeconds": 1651.288,
+      "elapsedScope": "whole recorded lane",
+      "qualifiedPass": false,
+      "sourceHashesUnchanged": true,
+      "providerCalls": 0,
+      "dependencyInstallations": 0,
+      "exitCode": 1,
+      "timedOut": false,
+      "nativeClosureComplete": true,
+      "captureThreadsSettled": true,
+      "captureErrors": [],
+      "harnessExitCode": 1,
+      "primaryCaseOutcomes": {
+        "failed": 1,
+        "passed": 1
+      },
+      "primaryCasesWithStructuredFinalResult": 2,
+      "junitSuites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "1",
+          "skipped": "0",
+          "tests": "15",
+          "time": "1647.993"
+        }
+      ],
+      "phaseResults": [],
+      "nativeClosure": {
+        "direct_exit_code": 1,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      }
+    },
+    {
+      "id": "sdk-admission-143a-initial",
+      "platform": "Windows x64",
+      "python": "3.14.10",
+      "sourceCommit": "143a1a8f6ef68f82d45ddc59e8d4332126af2ca8",
+      "sourceTree": "96b0ff7b2c2f96e198d9f3a149870423d6d8dcb6",
+      "elapsedSeconds": 20.015,
+      "elapsedScope": "whole recorded lane",
+      "qualifiedPass": false,
+      "sourceHashesUnchanged": true,
+      "providerCalls": 0,
+      "dependencyInstallations": 0,
+      "exitCode": 3,
+      "timedOut": false,
+      "nativeClosureComplete": true,
+      "captureThreadsSettled": true,
+      "captureErrors": [],
+      "harnessExitCode": 1,
+      "primaryCaseOutcomes": {},
+      "primaryCasesWithStructuredFinalResult": 0,
+      "junitSuites": [],
+      "phaseResults": [],
+      "nativeClosure": {
+        "direct_exit_code": 3,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      }
+    },
+    {
+      "id": "sdk-admission-143a-corrected",
+      "platform": "Windows x64",
+      "python": "3.14.10",
+      "sourceCommit": "143a1a8f6ef68f82d45ddc59e8d4332126af2ca8",
+      "sourceTree": "96b0ff7b2c2f96e198d9f3a149870423d6d8dcb6",
+      "elapsedSeconds": 531.705,
+      "elapsedScope": "whole recorded lane",
+      "qualifiedPass": true,
+      "sourceHashesUnchanged": true,
+      "providerCalls": 0,
+      "dependencyInstallations": 0,
+      "exitCode": 0,
+      "timedOut": false,
+      "nativeClosureComplete": true,
+      "captureThreadsSettled": true,
+      "captureErrors": [],
+      "harnessExitCode": 0,
+      "primaryCaseOutcomes": {
+        "passed": 10
+      },
+      "primaryCasesWithStructuredFinalResult": 10,
+      "junitSuites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "15",
+          "time": "527.061"
+        }
+      ],
+      "phaseResults": [],
+      "nativeClosure": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      }
+    },
+    {
+      "id": "main-receiving-b092",
+      "platform": "Windows x64",
+      "python": "3.14.10",
+      "sourceCommit": "b092e761ca92f12049d746cd413a002851440004",
+      "sourceTree": "e98e7e56782d2333d333ca4038c13ca6bd9c629b",
+      "elapsedSeconds": 1377.57,
+      "elapsedScope": "whole recorded lane",
+      "qualifiedPass": true,
+      "sourceHashesUnchanged": true,
+      "providerCalls": 0,
+      "dependencyInstallations": 0,
+      "exitCode": 0,
+      "timedOut": false,
+      "nativeClosureComplete": true,
+      "captureThreadsSettled": true,
+      "captureErrors": [],
+      "harnessExitCode": 0,
+      "primaryCaseOutcomes": {
+        "passed": 15
+      },
+      "primaryCasesWithStructuredFinalResult": 15,
+      "junitSuites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "24",
+          "time": "1360.342"
+        }
+      ],
+      "phaseResults": [],
+      "nativeClosure": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      }
+    },
+    {
+      "id": "sdk-origin-tested-patch",
+      "platform": "Windows x64",
+      "python": "3.14.10",
+      "sourceCommit": "585de31ca066bffa2c70bfd2d2e05d53ce923f01",
+      "sourceTree": "8da6fdafaca6cb2886c768172dea170f7ed0b965",
+      "elapsedSeconds": 138.508,
+      "elapsedScope": "whole recorded lane",
+      "qualifiedPass": true,
+      "sourceHashesUnchanged": true,
+      "providerCalls": 0,
+      "dependencyInstallations": 0,
+      "exitCode": 0,
+      "timedOut": false,
+      "nativeClosureComplete": true,
+      "captureThreadsSettled": true,
+      "captureErrors": [],
+      "harnessExitCode": 0,
+      "primaryCaseOutcomes": {
+        "passed": 11
+      },
+      "primaryCasesWithStructuredFinalResult": 11,
+      "junitSuites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "11",
+          "time": "123.178"
+        }
+      ],
+      "phaseResults": [],
+      "nativeClosure": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "testedWorkingPatchSha256": "ff684120809b922b345f1adecd67e40d8bf53726582055c14f3c4a6991ca725e",
+      "committedResult": {
+        "commit": "d92a74e2670616a0a6d7ba19013fa47bed194b5f",
+        "tree": "2ee8adbb51b953dddae58704af7ce1ee43cc6d5f",
+        "parent": "585de31ca066bffa2c70bfd2d2e05d53ce923f01",
+        "allTestedSourceBytesUnchangedAfterCommit": true,
+        "committedChangedBlobHashesMatchTestedBytes": true,
+        "testedWorkingDiffSha256": "ff684120809b922b345f1adecd67e40d8bf53726582055c14f3c4a6991ca725e",
+        "changedHashes": {
+          "RELEASE_NOTES.md": "c4397f5c3f7997ea33ab8aaa0f451eeff77228930ba5497a0841b5efd04a05e1",
+          "scripts/mutate-work-item.py": "c31d050d774ca55fd6018176fbddf0913cc3ac17eab8bddccf3dcd16bedd2c26",
+          "tests/test_legacy_flat_terminal_close.py": "94f8e7e8b2a7cb23ef476d9744dc5fedc1fe863e9eab986ef3cddea1892a67e8",
+          "tests/test_mutate_work_item.py": "3a83b3c50a55b11b8390fe38919092268174f71ffca7196032457296da16e749"
+        }
+      }
+    },
+    {
+      "id": "main-origin-218d",
+      "platform": "Windows x64",
+      "python": "3.14.10",
+      "sourceCommit": "218d2f85cdf3fa3c0bb91ea20970da735cc3214a",
+      "sourceTree": "faa44301beefc0a4825a7a847e980fcfa9bc7a53",
+      "elapsedSeconds": 136.242,
+      "elapsedScope": "whole recorded lane",
+      "qualifiedPass": true,
+      "sourceHashesUnchanged": true,
+      "providerCalls": 0,
+      "dependencyInstallations": 0,
+      "harnessExitCode": 0,
+      "primaryCaseOutcomes": {
+        "passed": 11
+      },
+      "primaryCasesWithStructuredFinalResult": 11,
+      "junitSuites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "11",
+          "time": "113.553"
+        }
+      ],
+      "phaseResults": [
+        {
+          "label": "collect",
+          "exitCode": 0,
+          "nativeClosureComplete": true,
+          "captureThreadsSettled": true,
+          "captureErrors": [],
+          "quiescent": true,
+          "qualifiedExecution": true,
+          "seconds": 7.362
+        },
+        {
+          "label": "pytest",
+          "exitCode": 0,
+          "nativeClosureComplete": true,
+          "captureThreadsSettled": true,
+          "captureErrors": [],
+          "quiescent": true,
+          "qualifiedExecution": true,
+          "seconds": 115.196
+        }
+      ],
+      "selectedCount": 11
+    },
+    {
+      "id": "sdk-merge-49dc",
+      "platform": "Windows x64",
+      "python": "3.14.10",
+      "sourceCommit": "49dc4db215377f478fc1806e22b462b49a6bb8bc",
+      "sourceTree": "4db35fe9686abada8f904719350bcffbc4d4f894",
+      "elapsedSeconds": 176.758,
+      "elapsedScope": "whole recorded lane",
+      "qualifiedPass": false,
+      "sourceHashesUnchanged": true,
+      "providerCalls": 0,
+      "dependencyInstallations": 0,
+      "harnessExitCode": 1,
+      "primaryCaseOutcomes": {
+        "passed": 14,
+        "failed": 2
+      },
+      "primaryCasesWithStructuredFinalResult": 16,
+      "junitSuites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "2",
+          "skipped": "0",
+          "tests": "30",
+          "time": "156.529"
+        }
+      ],
+      "phaseResults": [
+        {
+          "label": "collect",
+          "exitCode": 0,
+          "nativeClosureComplete": true,
+          "captureThreadsSettled": true,
+          "captureErrors": [],
+          "quiescent": true,
+          "qualifiedExecution": true,
+          "seconds": 3.405
+        },
+        {
+          "label": "pytest",
+          "exitCode": 1,
+          "nativeClosureComplete": true,
+          "captureThreadsSettled": true,
+          "captureErrors": [],
+          "quiescent": true,
+          "qualifiedExecution": false,
+          "seconds": 158.373
+        }
+      ],
+      "selectedCount": 16
+    },
+    {
+      "id": "sdk-ledger-5228",
+      "platform": "Windows x64",
+      "python": "3.14.10",
+      "sourceCommit": "522854db3c42f1640f7d76b396b66d1b18f446e4",
+      "sourceTree": "e8153473fbc666df396f3cbaad7a39bb953902b8",
+      "elapsedSeconds": 26.799,
+      "elapsedScope": "whole recorded lane",
+      "qualifiedPass": true,
+      "sourceHashesUnchanged": true,
+      "providerCalls": 0,
+      "dependencyInstallations": 0,
+      "harnessExitCode": 0,
+      "primaryCaseOutcomes": {
+        "passed": 6
+      },
+      "primaryCasesWithStructuredFinalResult": 6,
+      "junitSuites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "6",
+          "time": "7.428"
+        }
+      ],
+      "phaseResults": [
+        {
+          "label": "collect",
+          "exitCode": 0,
+          "nativeClosureComplete": true,
+          "captureThreadsSettled": true,
+          "captureErrors": [],
+          "quiescent": true,
+          "qualifiedExecution": true,
+          "seconds": 2.308
+        },
+        {
+          "label": "pytest",
+          "exitCode": 0,
+          "nativeClosureComplete": true,
+          "captureThreadsSettled": true,
+          "captureErrors": [],
+          "quiescent": true,
+          "qualifiedExecution": true,
+          "seconds": 8.775
+        }
+      ],
+      "selectedCount": 6
+    },
+    {
+      "id": "sdk-qualified-7f9",
+      "platform": "Windows x64",
+      "python": "3.14.10",
+      "sourceCommit": "7f9ad79afc64c1237078b66a4b36a019a6d0e9ba",
+      "sourceTree": "a57480bc9455a73086a75825ef12709bceb429e3",
+      "elapsedSeconds": 145.095,
+      "elapsedScope": "whole recorded lane",
+      "qualifiedPass": true,
+      "sourceHashesUnchanged": true,
+      "providerCalls": 0,
+      "dependencyInstallations": 0,
+      "harnessExitCode": 0,
+      "primaryCaseOutcomes": {
+        "passed": 5
+      },
+      "primaryCasesWithStructuredFinalResult": 5,
+      "junitSuites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "5",
+          "time": "73.291"
+        }
+      ],
+      "phaseResults": [
+        {
+          "label": "collect",
+          "exitCode": 0,
+          "nativeClosureComplete": true,
+          "captureThreadsSettled": true,
+          "captureErrors": [],
+          "quiescent": true,
+          "qualifiedExecution": true,
+          "seconds": 2.639
+        },
+        {
+          "label": "pytest",
+          "exitCode": 0,
+          "nativeClosureComplete": true,
+          "captureThreadsSettled": true,
+          "captureErrors": [],
+          "quiescent": true,
+          "qualifiedExecution": true,
+          "seconds": 74.88
+        },
+        {
+          "label": "hooks-mirrors",
+          "exitCode": 0,
+          "nativeClosureComplete": true,
+          "captureThreadsSettled": true,
+          "captureErrors": [],
+          "quiescent": true,
+          "qualifiedExecution": true,
+          "seconds": 0.264
+        },
+        {
+          "label": "agents-spine",
+          "exitCode": 0,
+          "nativeClosureComplete": true,
+          "captureThreadsSettled": true,
+          "captureErrors": [],
+          "quiescent": true,
+          "qualifiedExecution": true,
+          "seconds": 0.199
+        },
+        {
+          "label": "source-projections",
+          "exitCode": 0,
+          "nativeClosureComplete": true,
+          "captureThreadsSettled": true,
+          "captureErrors": [],
+          "quiescent": true,
+          "qualifiedExecution": true,
+          "seconds": 0.604
+        },
+        {
+          "label": "agents-mode-docs",
+          "exitCode": 0,
+          "nativeClosureComplete": true,
+          "captureThreadsSettled": true,
+          "captureErrors": [],
+          "quiescent": true,
+          "qualifiedExecution": true,
+          "seconds": 0.228
+        },
+        {
+          "label": "agents-mode-contract",
+          "exitCode": 0,
+          "nativeClosureComplete": true,
+          "captureThreadsSettled": true,
+          "captureErrors": [],
+          "quiescent": true,
+          "qualifiedExecution": true,
+          "seconds": 1.229
+        },
+        {
+          "label": "pack-codex",
+          "exitCode": 0,
+          "nativeClosureComplete": true,
+          "captureThreadsSettled": true,
+          "captureErrors": [],
+          "quiescent": true,
+          "qualifiedExecution": true,
+          "seconds": 27.777
+        },
+        {
+          "label": "pack-claude",
+          "exitCode": 0,
+          "nativeClosureComplete": true,
+          "captureThreadsSettled": true,
+          "captureErrors": [],
+          "quiescent": true,
+          "qualifiedExecution": true,
+          "seconds": 22.772
+        }
+      ],
+      "selectedCount": 5
+    }
+  ],
+  "sdkQualifiedStaticChecks": {
+    "commit": "7f9ad79afc64c1237078b66a4b36a019a6d0e9ba",
+    "tree": "a57480bc9455a73086a75825ef12709bceb429e3",
+    "qualifiedPass": true,
+    "selectedCount": 5,
+    "passed": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "staticCommandsPassed": 7,
+    "spineProtectionTokens": [
+      114,
+      114
+    ],
+    "sourceProjectionFiles": 33,
+    "packChecks": {
+      "codex": {
+        "passed": 578,
+        "warnings": 0,
+        "failed": 0
+      },
+      "claude": {
+        "passed": 553,
+        "warnings": 0,
+        "failed": 0
+      }
+    },
+    "seconds": 145.095,
+    "trackedSourceFiles": 1389,
+    "sourceHashesUnchanged": true,
+    "nativeJobsComplete": 9,
+    "forcedJobTermination": false,
+    "ownerSha256": {
+      "scripts/production_installer.py": "c762e06e7fc3e457d5a73044a67c2833e3f2ecc8357e31b2a4034172d47aec72",
+      "scripts/mutate-work-item.py": "c31d050d774ca55fd6018176fbddf0913cc3ac17eab8bddccf3dcd16bedd2c26",
+      "scripts/validate-work-item-state.py": "6d80638a1f6dc8eff2ba852eaa359b63252546fd2d7ed79e74d3fea7e70b58a0",
+      "scripts/process_supervision/windows_job.py": "afa04aea5079f42727ee1aafbafc6d95a050be78cb6eeeb72cf47da086447afd",
+      "tests/test_global_lead_accepted_prior.py": "fcf58b0ac9b3e36375e8840cf48f2c970b55d551f748dad2b77429ec60fab9e2",
+      "tests/test_provider_prompt_projections.py": "a865c84ab6e6216f385eb8b143ca55b7324ec4046319c6377257f5a462befeac",
+      "scripts/skill_pack_validator_runtime.py": "ae687ef5c3a7442241a2401b9bec308b0506dfc024afca4591abf8dca66145e5",
+      "src.codex/skills/lead/scripts/validate-skill-pack.py": "69715a436ed09ca83e474ebd99c7e8a052472b3c16857186ccb7d05ca7052dbe",
+      "adapters/claude/agents/scripts/validate-skill-pack.py": "52393cd11811f725f282fc39c68663d9d49acab8a10635b76eede850c57d63ef"
+    }
+  },
+  "historicalLegacyOutcome": {
+    "sourceCommit": "e8edb9576a89e754b19d400c4c91753cd1eacf5b",
+    "distinctMethods": 32,
+    "passed": 29,
+    "failed": 3,
+    "runs": [
+      "sdk-legacy-e8-initial",
+      "sdk-legacy-e8-tail"
+    ],
+    "qualifiedFullSuite": false
+  },
+  "rustWorker": {
+    "build": {
+      "status": "PASS",
+      "source_commit": "cee7521eca8e7d6aa5bcb21dc712eb035e22b632",
+      "target": "x86_64-pc-windows-msvc",
+      "sha256": "dd6c996f2cbfe5bc1ccc874ff092bdabe0644fc90a1454c2a4722e89538039b7",
+      "bytes": 1058304,
+      "imports": [
+        "bcryptprimitives.dll",
+        "KERNEL32.dll",
+        "ntdll.dll",
+        "api-ms-win-core-synch-l1-2-0.dll"
+      ],
+      "source_inputs_unchanged": [
+        {
+          "path": "native/publication-match/Cargo.lock",
+          "sha256": "3ee4eddfaab72e2baf69a123c8849ebf414a440a06a218f88872e0f2a4e07b2c",
+          "after_sha256": "3ee4eddfaab72e2baf69a123c8849ebf414a440a06a218f88872e0f2a4e07b2c"
+        },
+        {
+          "path": "native/publication-match/Cargo.toml",
+          "sha256": "751e1902cd18d7de639a7f8926f9d8c3c2a2803747e063aa9b9aa20df1340afc",
+          "after_sha256": "751e1902cd18d7de639a7f8926f9d8c3c2a2803747e063aa9b9aa20df1340afc"
+        },
+        {
+          "path": "native/publication-match/src/lib.rs",
+          "sha256": "3a21294853abcb9344432363b79dcd7d2ba966d4671e41e73658e2111d7fc722",
+          "after_sha256": "3a21294853abcb9344432363b79dcd7d2ba966d4671e41e73658e2111d7fc722"
+        },
+        {
+          "path": "native/publication-match/src/main.rs",
+          "sha256": "2d4ae0686a3015313f6099c8150c3dd701be2820559fc727b01485e6e9ab640a",
+          "after_sha256": "2d4ae0686a3015313f6099c8150c3dd701be2820559fc727b01485e6e9ab640a"
+        },
+        {
+          "path": "native/publication-match/tests/protocol.rs",
+          "sha256": "00305b1efa60efa960819ae2a748be38cad03221515a8a918bad2946f5652f02",
+          "after_sha256": "00305b1efa60efa960819ae2a748be38cad03221515a8a918bad2946f5652f02"
+        }
+      ],
+      "scope": "Offline static-CRT build and existing matcher all-target tests; package/current worker qualification follows separately."
+    },
+    "preSdkComparisons": {
+      "source_commit": "cee7521eca8e7d6aa5bcb21dc712eb035e22b632",
+      "worker_sha256": "dd6c996f2cbfe5bc1ccc874ff092bdabe0644fc90a1454c2a4722e89538039b7",
+      "complete_existing_test_methods": 14,
+      "test_methods_by_stage": {
+        "static-effects-parity": 2,
+        "static-effects-sha256": 2,
+        "static-prior-parity-sha1": 5,
+        "static-prior-parity-sha256": 5
+      },
+      "completed_full_scan_pairs": 62,
+      "pairs_by_object_format": {
+        "sha1": 31,
+        "sha256": 31
+      },
+      "pairs_by_stage": {
+        "static-effects-parity": 6,
+        "static-effects-sha256": 6,
+        "static-prior-parity-sha1": 25,
+        "static-prior-parity-sha256": 25
+      },
+      "pairs_with_findings": 34,
+      "all_exact_outcomes_findings_refusals_equal": true,
+      "actual_worker_acquisitions": 62,
+      "all_pairs_acquired_actual_worker": true,
+      "completed_test_methods": [
+        {
+          "stage": "static-effects-parity",
+          "test": "tests/test_publication_native_effects.py::TestNativePublicationEffects::test_small_publication_does_not_rescan_large_receiver_history"
+        },
+        {
+          "stage": "static-effects-parity",
+          "test": "tests/test_publication_native_effects.py::TestNativePublicationEffects::test_compact_native_blob_count_preserves_exact_receipt_and_late_findings"
+        },
+        {
+          "stage": "static-effects-sha256",
+          "test": "tests/test_publication_native_effects.py::TestNativePublicationEffectsSHA256::test_small_publication_does_not_rescan_large_receiver_history"
+        },
+        {
+          "stage": "static-effects-sha256",
+          "test": "tests/test_publication_native_effects.py::TestNativePublicationEffectsSHA256::test_compact_native_blob_count_preserves_exact_receipt_and_late_findings"
+        },
+        {
+          "stage": "static-prior-parity-sha1",
+          "test": "tests/test_publication_prior_disclosure.py::TestPriorDisclosure::test_indexed_and_legacy_native_receipts_are_byte_identical"
+        },
+        {
+          "stage": "static-prior-parity-sha1",
+          "test": "tests/test_publication_prior_disclosure.py::TestPriorDisclosure::test_indexed_and_legacy_guarded_range_receipts_are_byte_identical"
+        },
+        {
+          "stage": "static-prior-parity-sha1",
+          "test": "tests/test_publication_prior_disclosure.py::TestPriorDisclosure::test_edited_blob_distinguishes_inherited_and_new_machine_paths"
+        },
+        {
+          "stage": "static-prior-parity-sha1",
+          "test": "tests/test_publication_prior_disclosure.py::TestPriorDisclosure::test_older_published_machine_path_is_not_new_disclosure"
+        },
+        {
+          "stage": "static-prior-parity-sha1",
+          "test": "tests/test_publication_prior_disclosure.py::TestPriorDisclosure::test_new_disclosure_still_fails_after_prior_inventory"
+        },
+        {
+          "stage": "static-prior-parity-sha256",
+          "test": "tests/test_publication_prior_disclosure.py::TestPriorDisclosure::test_indexed_and_legacy_native_receipts_are_byte_identical"
+        },
+        {
+          "stage": "static-prior-parity-sha256",
+          "test": "tests/test_publication_prior_disclosure.py::TestPriorDisclosure::test_indexed_and_legacy_guarded_range_receipts_are_byte_identical"
+        },
+        {
+          "stage": "static-prior-parity-sha256",
+          "test": "tests/test_publication_prior_disclosure.py::TestPriorDisclosure::test_edited_blob_distinguishes_inherited_and_new_machine_paths"
+        },
+        {
+          "stage": "static-prior-parity-sha256",
+          "test": "tests/test_publication_prior_disclosure.py::TestPriorDisclosure::test_older_published_machine_path_is_not_new_disclosure"
+        },
+        {
+          "stage": "static-prior-parity-sha256",
+          "test": "tests/test_publication_prior_disclosure.py::TestPriorDisclosure::test_new_disclosure_still_fails_after_prior_inventory"
+        }
+      ],
+      "fixture_correction": "Initial SHA-256 long temporary Git pack filename failed before the scanner. Prior completed SHA-1 cases were retained. Only two unfinished SHA-256 methods were repeated in a short private temporary directory; source, assertions and production limits were unchanged."
+    },
+    "preSdkActualGitCallbacks": {
+      "status": "PASS",
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 97.994,
+      "capture_complete": true,
+      "closure_complete": true,
+      "closure": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "selectedTests": [
+        "tests/test_native_git_push_gate.py::test_actual_git_callback_captured_v4_and_annotation_refusal[HEAD-False]",
+        "tests/test_native_git_push_gate.py::test_actual_git_callback_captured_v4_and_annotation_refusal[HEAD-True]",
+        "tests/test_native_git_push_gate.py::test_actual_push_v3_union_covers_disjoint_roots_and_custom_receiver[True-False]",
+        "tests/test_native_git_push_gate.py::test_actual_push_v3_union_covers_disjoint_roots_and_custom_receiver[True-True]",
+        "tests/test_native_git_push_gate.py::test_actual_first_publication_crosses_old_commit_count"
+      ],
+      "count": 5,
+      "scope": "Historical cee source; separate from the 24 final SDK scanner comparisons."
+    }
+  },
+  "package": {
+    "status": "PASS",
+    "source_commit": "0bfc087ec2bcba36acc35d66862ec7538f49bc57",
+    "source_tree": "3d836017361de8027613ca7ada4072e1bc35dcda",
+    "app_file_count": 685,
+    "app_exact_source_and_retained": true,
+    "runtime_file_count": 1210,
+    "runtime_exact_between_bundle_and_retained": true,
+    "sdk_source_roles": [
+      {
+        "role": "gate",
+        "path": "scripts/universal-hooks/scripts/check-git-push-gate.py",
+        "sha256": "0a55feefbc97ff022dd216f57e28e2a1a080c6217e3a121ee33c739593cd80c4",
+        "prior_cee_sha256": "24b7bdf13c58d0ec26d6284d998a519c4158a20ec47001b7f93ae4f67189b0e2",
+        "same_as_cee": false
+      },
+      {
+        "role": "hook_common",
+        "path": "scripts/universal-hooks/scripts/hook_common.py",
+        "sha256": "0c1ee34bb75fee34d7d27a0df2648ad6cfe51dc6e44d38a1df9a6bcd82d33789",
+        "prior_cee_sha256": "0c1ee34bb75fee34d7d27a0df2648ad6cfe51dc6e44d38a1df9a6bcd82d33789",
+        "same_as_cee": true
+      },
+      {
+        "role": "classifier",
+        "path": "scripts/universal-hooks/hooks/check-machine-local-path.py",
+        "sha256": "1eb5e693a46b9ce900cf64876a49ae52894c622fa40b2f6ac6931143517f805d",
+        "prior_cee_sha256": "318c6f0f6b0ac573d0cd7c62148683f6fe72b5fba04372d6764f08903ff9cf27",
+        "same_as_cee": false
+      },
+      {
+        "role": "posix_helper",
+        "path": "scripts/process_supervision/posix_process_group.py",
+        "sha256": "61bb9adf26b2a46f8c52317ac6a491c34dd4f236e7ef0f231228fd43c24a0738",
+        "prior_cee_sha256": "61bb9adf26b2a46f8c52317ac6a491c34dd4f236e7ef0f231228fd43c24a0738",
+        "same_as_cee": true
+      },
+      {
+        "role": "windows_job",
+        "path": "scripts/process_supervision/windows_job.py",
+        "sha256": "afa04aea5079f42727ee1aafbafc6d95a050be78cb6eeeb72cf47da086447afd",
+        "prior_cee_sha256": "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788",
+        "same_as_cee": false
+      },
+      {
+        "role": "scanner",
+        "path": "scripts/universal-hooks/scripts/check-publication-safety.py",
+        "sha256": "e1e164bdaaeb7d0329e2f6c8c66ad18318242cab69d0d64e773c03bee4208ed8",
+        "prior_cee_sha256": "a15b167c1caef7cb4fac40092bcffd2af0b93d9173e008f47c02d79b40f2ed52",
+        "same_as_cee": false
+      },
+      {
+        "role": "publication_review_policy",
+        "path": "scripts/universal-hooks/scripts/publication_review_policy.py",
+        "sha256": "1a1af90312e17bf34e7f829339705cbaec549b1a6ce81c456ae2011545275c23",
+        "prior_cee_sha256": "bfdd0870ea76527152269c4106264db1d748f68040d7ebbb5525ec2408171b5b",
+        "same_as_cee": false
+      },
+      {
+        "role": "linked_runtime_subroots",
+        "path": "scripts/linked_runtime_subroots.py",
+        "sha256": "eaf91693f8ccd63c23206e95175f353b503b9cb45e643a25fad82f918fbb26e0",
+        "prior_cee_sha256": "eaf91693f8ccd63c23206e95175f353b503b9cb45e643a25fad82f918fbb26e0",
+        "same_as_cee": true
+      },
+      {
+        "role": "receiver_scope",
+        "path": "scripts/universal-hooks/scripts/transfer_binding.py",
+        "sha256": "a91ca55cd6f2c11b9d5baf1b6e13bcd3033db6de416768d2d86a684858d79372",
+        "prior_cee_sha256": "a91ca55cd6f2c11b9d5baf1b6e13bcd3033db6de416768d2d86a684858d79372",
+        "same_as_cee": true
+      },
+      {
+        "role": "matcher_wire",
+        "path": "scripts/universal-hooks/scripts/publication_match_wire.py",
+        "sha256": "85a5ea05f09cdb6a993b2a3dc72560018892babb3f95dc22e9022d8c17a0c216",
+        "prior_cee_sha256": "85a5ea05f09cdb6a993b2a3dc72560018892babb3f95dc22e9022d8c17a0c216",
+        "same_as_cee": true
+      }
+    ],
+    "native_inputs_exact_0aa": true,
+    "worker_sha256": "dd6c996f2cbfe5bc1ccc874ff092bdabe0644fc90a1454c2a4722e89538039b7",
+    "notices_sha256": "152aa99924a52393cc5fa98a82c00912f7baf0fe531e77b9c4d5aa5503e51643",
+    "runtime_evidence_sha256": "b5481aa22160725377711deee90ca5b0f28435e21e3564f6de2a2ed457fc2453",
+    "completed_owned_stages": [
+      {
+        "stage": "sdk-bundle-assembly",
+        "elapsed_seconds": 20.558,
+        "capture_complete": true,
+        "closure_complete": true
+      },
+      {
+        "stage": "sdk-full-scanner-parity",
+        "elapsed_seconds": 104.932,
+        "capture_complete": true,
+        "closure_complete": true
+      },
+      {
+        "stage": "sdk-retain-only",
+        "elapsed_seconds": 18.908,
+        "capture_complete": true,
+        "closure_complete": true
+      },
+      {
+        "stage": "sdk-retained-help",
+        "elapsed_seconds": 5.481,
+        "capture_complete": true,
+        "closure_complete": true
+      },
+      {
+        "stage": "sdk-retained-owner-readback",
+        "elapsed_seconds": 0.494,
+        "capture_complete": true,
+        "closure_complete": true
+      },
+      {
+        "stage": "sdk-root-help",
+        "elapsed_seconds": 1.141,
+        "capture_complete": true,
+        "closure_complete": true
+      },
+      {
+        "stage": "source-clean-after",
+        "elapsed_seconds": 0.189,
+        "capture_complete": true,
+        "closure_complete": true
+      },
+      {
+        "stage": "source-clean-before",
+        "elapsed_seconds": 0.137,
+        "capture_complete": true,
+        "closure_complete": true
+      },
+      {
+        "stage": "source-identity-after",
+        "elapsed_seconds": 0.129,
+        "capture_complete": true,
+        "closure_complete": true
+      },
+      {
+        "stage": "source-identity-before",
+        "elapsed_seconds": 0.091,
+        "capture_complete": true,
+        "closure_complete": true
+      }
+    ],
+    "app_inventory_sha256": "c02466fc13e98b9bbb10f09f20cbcc2cd7c1e79ec0b038c30e1fc0486c7414ff",
+    "runtime_inventory_sha256": "077d95e80cad7e5474b17ad83f3eb2576d67d7de4e6021b97704b572fb520d48",
+    "scope": "SDK artifact assembly, fresh actual SDK-path full-scanner comparisons, retention/help/readback; no installed application, provider calls, Cargo build/fetch or SDK dependency installation.",
+    "members": [
+      {
+        "name": "bundle",
+        "manifest_sha256": "bd6ab3479a40dd22ab7bac1ee506a29b8aa3d94e39125de0cc0d0fa5f94d89d3",
+        "worker_sha256": "dd6c996f2cbfe5bc1ccc874ff092bdabe0644fc90a1454c2a4722e89538039b7",
+        "notices_sha256": "152aa99924a52393cc5fa98a82c00912f7baf0fe531e77b9c4d5aa5503e51643",
+        "runtime_evidence_sha256": "b5481aa22160725377711deee90ca5b0f28435e21e3564f6de2a2ed457fc2453"
+      },
+      {
+        "name": "retained",
+        "manifest_sha256": "bd6ab3479a40dd22ab7bac1ee506a29b8aa3d94e39125de0cc0d0fa5f94d89d3",
+        "worker_sha256": "dd6c996f2cbfe5bc1ccc874ff092bdabe0644fc90a1454c2a4722e89538039b7",
+        "notices_sha256": "152aa99924a52393cc5fa98a82c00912f7baf0fe531e77b9c4d5aa5503e51643",
+        "runtime_evidence_sha256": "b5481aa22160725377711deee90ca5b0f28435e21e3564f6de2a2ed457fc2453"
+      }
+    ],
+    "qualification": {
+      "source_commit": "0bfc087ec2bcba36acc35d66862ec7538f49bc57",
+      "source_tree": "3d836017361de8027613ca7ada4072e1bc35dcda",
+      "status": "PASS",
+      "tests": 6,
+      "subtests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "full_scanner_pairs": 24,
+      "pairs_by_format": {
+        "sha1": 12,
+        "sha256": 12
+      },
+      "pairs_by_function": {
+        "_scan_native_push": 14,
+        "_scan_range": 10
+      },
+      "finding_pairs": 14,
+      "actual_worker_acquisitions": 24,
+      "worker_sha256": "dd6c996f2cbfe5bc1ccc874ff092bdabe0644fc90a1454c2a4722e89538039b7",
+      "scanner_entrypoint": "bundle/app/adapters/claude/agents/scripts/check-publication-safety.py",
+      "scanner_sha256": "e1e164bdaaeb7d0329e2f6c8c66ad18318242cab69d0d64e773c03bee4208ed8",
+      "fixture_sha256": "8e6cbc0f2e6fc5dce6e9411fad86c315e2e6be648039b09b78902be37c26846e",
+      "qualification_helper_sha256": "5d107fd1b00ac445b6211d7f0690acb876390b0291eb0622aa06fa3ad39e3bc5",
+      "scope": "Fresh SDK path full-scanner Python/native comparisons; no provider calls, native Git callback claim or installed activation."
+    },
+    "manifestScope": "bootstrap, Python runtime, native worker and notices; application identity is separately bound to source commit/tree and the application inventory",
+    "publicInventory": {
+      "file": "package-inventory.csv",
+      "applicationFiles": 685,
+      "pythonRuntimeFiles": 1210,
+      "totalRows": 1895,
+      "scope": "Application and Python runtime members; other package members are bound separately by the manifest, worker and notices hashes. This count is distinct from 1901 full-package preview files."
+    }
+  },
+  "installedPreviews": [
+    {
+      "id": "presdk-codex",
+      "provider": "codex",
+      "status": "PASS",
+      "exit_code": 0,
+      "elapsed_seconds": 9.25,
+      "capture_complete": true,
+      "closure_complete": true,
+      "closure": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "profile_unchanged": true,
+      "package_unchanged": true,
+      "selected_profile_entries": 965,
+      "selected_profile_content_hashes": 608,
+      "package_files": 1860,
+      "source_commit": "8d1342e03d060275b3ced2e7368a1167ebb77e94",
+      "source_tree": "5523563969f787f80e04dacbf170d7f1e90efd28",
+      "peerManifestCoveredBeforeAfter": false,
+      "argv": [
+        "<retained-python>",
+        "-I",
+        "-B",
+        "<retained-package>/launch.py",
+        "--permanent-runtime",
+        "--global",
+        "--dry-run",
+        "--no-hypothesis-hook"
+      ]
+    },
+    {
+      "id": "presdk-claude",
+      "provider": "claude",
+      "status": "REFUSED",
+      "exit_code": 1,
+      "elapsed_seconds": 6.61,
+      "capture_complete": true,
+      "closure_complete": true,
+      "closure": {
+        "direct_exit_code": 1,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "profile_unchanged": true,
+      "package_unchanged": true,
+      "selected_profile_entries": 965,
+      "selected_profile_content_hashes": 608,
+      "package_files": 1860,
+      "source_commit": "8d1342e03d060275b3ced2e7368a1167ebb77e94",
+      "source_tree": "5523563969f787f80e04dacbf170d7f1e90efd28",
+      "peerManifestCoveredBeforeAfter": false,
+      "argv": [
+        "<retained-python>",
+        "-I",
+        "-B",
+        "<retained-package>/launch.py",
+        "--permanent-runtime",
+        "--global",
+        "--dry-run",
+        "--no-hypothesis-hook"
+      ],
+      "cause": "E_TRANSPORT_PROJECTION_PARITY / atomic-projection-state"
+    },
+    {
+      "id": "sdk-codex-initial",
+      "provider": "codex",
+      "status": "PASS",
+      "exit_code": 0,
+      "elapsed_seconds": 10.482,
+      "capture_complete": true,
+      "closure_complete": true,
+      "closure": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "profile_unchanged": true,
+      "package_unchanged": true,
+      "selected_profile_entries": 971,
+      "selected_profile_content_hashes": 612,
+      "package_files": 1901,
+      "source_commit": "0bfc087ec2bcba36acc35d66862ec7538f49bc57",
+      "source_tree": "3d836017361de8027613ca7ada4072e1bc35dcda",
+      "peer_manifest_covered_before_after": true,
+      "peer_manifest_sha256_before": "4b82d50b85758ee09f9c76b1ae00f1fa3f5164a693a1fba809260e194db3635a",
+      "peer_manifest_sha256_after": "4b82d50b85758ee09f9c76b1ae00f1fa3f5164a693a1fba809260e194db3635a",
+      "argv": [
+        "<retained-python>",
+        "-I",
+        "-B",
+        "<retained-package>/launch.py",
+        "--permanent-runtime",
+        "--clients",
+        "codex",
+        "--global",
+        "--dry-run",
+        "--no-hypothesis-hook"
+      ],
+      "providerOwnedClaudeReceiptCoveredBeforeAfter": false
+    },
+    {
+      "id": "sdk-claude-initial",
+      "provider": "claude",
+      "status": "REFUSED",
+      "exit_code": 1,
+      "elapsed_seconds": 5.319,
+      "capture_complete": true,
+      "closure_complete": true,
+      "closure": {
+        "direct_exit_code": 1,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "profile_unchanged": true,
+      "package_unchanged": true,
+      "selected_profile_entries": 971,
+      "selected_profile_content_hashes": 612,
+      "package_files": 1901,
+      "source_commit": "0bfc087ec2bcba36acc35d66862ec7538f49bc57",
+      "source_tree": "3d836017361de8027613ca7ada4072e1bc35dcda",
+      "peer_manifest_covered_before_after": true,
+      "peer_manifest_sha256_before": "4b82d50b85758ee09f9c76b1ae00f1fa3f5164a693a1fba809260e194db3635a",
+      "peer_manifest_sha256_after": "4b82d50b85758ee09f9c76b1ae00f1fa3f5164a693a1fba809260e194db3635a",
+      "argv": [
+        "<retained-python>",
+        "-I",
+        "-B",
+        "<retained-package>/launch.py",
+        "--permanent-runtime",
+        "--clients",
+        "claude",
+        "--global",
+        "--dry-run",
+        "--no-hypothesis-hook"
+      ],
+      "providerOwnedClaudeReceiptCoveredBeforeAfter": false
+    },
+    {
+      "id": "sdk-claude-receipt-repeat",
+      "provider": "claude",
+      "status": "REFUSED",
+      "exit_code": 1,
+      "elapsed_seconds": 5.014,
+      "capture_complete": true,
+      "closure_complete": true,
+      "closure": {
+        "direct_exit_code": 1,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "profile_unchanged": true,
+      "package_unchanged": true,
+      "selected_profile_entries": 972,
+      "selected_profile_content_hashes": 613,
+      "package_files": 1901,
+      "source_commit": "0bfc087ec2bcba36acc35d66862ec7538f49bc57",
+      "source_tree": "3d836017361de8027613ca7ada4072e1bc35dcda",
+      "peer_manifest_covered_before_after": true,
+      "peer_manifest_sha256_before": "4b82d50b85758ee09f9c76b1ae00f1fa3f5164a693a1fba809260e194db3635a",
+      "peer_manifest_sha256_after": "4b82d50b85758ee09f9c76b1ae00f1fa3f5164a693a1fba809260e194db3635a",
+      "selected_receipt_covered_before_after": true,
+      "selected_receipt_unchanged": true,
+      "selected_receipt_sha256_before": "18f9046e33ac4a341ab01878ca3aa37a2cd234e4efd002ed4f7ba94674f4709d",
+      "selected_receipt_sha256_after": "18f9046e33ac4a341ab01878ca3aa37a2cd234e4efd002ed4f7ba94674f4709d",
+      "cause": "E_CANONICAL_LEAD_RECEIPT_DRIFT",
+      "addedSnapshotRole": "<claude-profile>/skills/.orchestrarium-lead-receipt.v1.json",
+      "samePublicArgvAs": "sdk-claude-initial"
+    }
+  ],
+  "sdkClaudeDiagnosis": {
+    "stableId": "E_CANONICAL_LEAD_RECEIPT_DRIFT",
+    "owner": "scripts/production_installer.py::_preflight_canonical_skills",
+    "raiseLine": 10518,
+    "sourceCommit": "0bfc087ec2bcba36acc35d66862ec7538f49bc57",
+    "providerOwnedLead": "<claude-profile>/skills/lead",
+    "receipt": "<claude-profile>/skills/.orchestrarium-lead-receipt.v1.json",
+    "receiptSha256": "18f9046e33ac4a341ab01878ca3aa37a2cd234e4efd002ed4f7ba94674f4709d",
+    "observedTreeV2Sha256": "719573c49d1cd55e3a169da5bde06538d8f929b6ca74479aabbd0b59e3725cb4",
+    "stagedTreeV2Sha256": "f4f8ef4c8ed1dd146e2325de6b563eb39d4c0fd07304271c8991dd9593d8419c",
+    "stagedSourceDifferenceCounts": {
+      "added": 10,
+      "removed": 0,
+      "modified": 52
+    },
+    "stagedSourceDifferenceScope": "Counts compare currently installed authored Lead with new staged SDK source; they are not the unknown historical receipt beforeimage delta.",
+    "snapshot": {
+      "installedLeadRootAndDescendants": 93,
+      "fileMembers": 82,
+      "directoryMembers": 10,
+      "unclassifiedMembers": 0,
+      "reconstructedFromExistingCapturedHashes": true,
+      "reconstructedTreeV2Sha256": "719573c49d1cd55e3a169da5bde06538d8f929b6ca74479aabbd0b59e3725cb4",
+      "matchesPrintedObservedTree": true,
+      "receiptCoveredBeforeAfter": true,
+      "receiptBeforeMatchesPrintedIdentity": true,
+      "receiptUnchanged": true,
+      "receiptSha256Before": "18f9046e33ac4a341ab01878ca3aa37a2cd234e4efd002ed4f7ba94674f4709d",
+      "receiptSha256After": "18f9046e33ac4a341ab01878ca3aa37a2cd234e4efd002ed4f7ba94674f4709d",
+      "selectedProfileEntries": 972,
+      "selectedProfileContentHashes": 613,
+      "packageFiles": 1901,
+      "allCapturedProfileEntriesUnchanged": true,
+      "allPackageFilesUnchanged": true,
+      "original612ContentHashesStillMatch": true,
+      "peerManifestStillCovered": true,
+      "peerManifestSha256": "4b82d50b85758ee09f9c76b1ae00f1fa3f5164a693a1fba809260e194db3635a"
+    },
+    "sdkTransportAdmissionLine": 10651,
+    "sdkTransportAdmissionReached": false,
+    "modifiedLeadReplacementGranted": false,
+    "originalSdkSnapshot": {
+      "entries": 971,
+      "contentHashes": 612,
+      "providerOwnedReceiptOmitted": true
+    },
+    "originalPreSdkSnapshot": {
+      "entries": 965,
+      "contentHashes": 608,
+      "peerManifestOmitted": true
+    },
+    "historicalEvidenceLimit": {
+      "originalSdkCaptureEntries": 971,
+      "originalSdkContentHashes": 612,
+      "originalReceiptOmissionPreserved": true,
+      "originalPreviewUnmodified": true,
+      "noRetrospectiveReceiptClaim": true,
+      "preSdkCauseNotSubstituted": true,
+      "sdkTransportCompatibilityNotReached": true
+    }
+  },
+  "remainingScope": [
+    "Concrete review and authorized disposition of the modified provider-owned Claude Lead",
+    "Remaining SDK transport/ownership checks, authorized installation and installed readback",
+    "Separately authorized selected live-provider qualification"
+  ],
+  "normalization": {
+    "originalHashMeaning": "SHA-256 of the original preserved record, not of this public projection",
+    "personalAbsolutePaths": "replaced by logical roles or omitted",
+    "processAndNativeFileIdentities": "omitted",
+    "rawTranscriptsAndSelectionGrants": "not included",
+    "outcomesAndSourceRevisions": "retained; failures are not relabeled as successes"
+  },
+  "sourceRecords": [
+    {
+      "id": "github-acceptance",
+      "originalName": "final-github-acceptance-20261124.json",
+      "originalSha256": "5bda9e70b2a222ad39db284a18ddce6de622d90001ac1f1975b24eb5bfbd1fe6",
+      "originalBytes": 8956
+    },
+    {
+      "id": "final-source-binding",
+      "originalName": "final-binding.json",
+      "originalSha256": "c25941237563b5d2285aa649f49e1137be49b085381a59b2514fd78cd983c1e6",
+      "originalBytes": 3737
+    },
+    {
+      "id": "final-root-review",
+      "originalName": "root-review.json",
+      "originalSha256": "2fc47d9f148e635cbd647e31fc861406cab041e42da16ab91ece2df1b1a86c6a",
+      "originalBytes": 1245
+    },
+    {
+      "id": "sdk-package",
+      "originalName": "sdk-package-summary.json",
+      "originalSha256": "ab9c77c800acc2a683a50839f97b149dcaf80ab4b93718c09129ea45c5d77531",
+      "originalBytes": 8262
+    },
+    {
+      "id": "sdk-package-compact",
+      "originalName": "sdk-package-summary-compact.json",
+      "originalSha256": "8df8b83e5a063e840957dddc542d23dba787de53f94b2ba9b5fcea2c468d0409",
+      "originalBytes": 3772
+    },
+    {
+      "id": "sdk-qualification-document",
+      "originalName": "QUALIFICATION.md",
+      "originalSha256": "247678c8386695f97703b16ccc342519ee79a6e7c13650c02c33ff4c4d0aef2d",
+      "originalBytes": 20920
+    },
+    {
+      "id": "sdk-profile-summary",
+      "originalName": "sdk-full-payload-preview-summary.json",
+      "originalSha256": "d7d9e5175d39fc5641b81c2eae4a24f558efd6c7377a549f3def62221d8ce807",
+      "originalBytes": 11994
+    },
+    {
+      "id": "sdk-claude-diagnosis",
+      "originalName": "diagnosis.json",
+      "originalSha256": "b7793cf0df58d9ca7847fd138e6300d698c7c0f60fa5c5c48d5b400100135d2a",
+      "originalBytes": 11251
+    },
+    {
+      "id": "sdk-claude-repeat",
+      "originalName": "preview-summary.json",
+      "originalSha256": "d4811f8023a3b37bb7992460167b8bc10b5a1ccd067512b3e8889564eac5f547",
+      "originalBytes": 2539
+    },
+    {
+      "id": "presdk-codex-preview",
+      "originalName": "preview-summary.json",
+      "originalSha256": "06141c3107b5d65c4907124ba8993e71d03486952ba65978e2ca87c7153eba9a",
+      "originalBytes": 1147
+    },
+    {
+      "id": "presdk-claude-preview",
+      "originalName": "preview-summary.json",
+      "originalSha256": "89cbb53ed55cfcb033e110e5f001ad9c5d6c6e60c81955b48ea533af531792ba",
+      "originalBytes": 1477
+    },
+    {
+      "id": "sdk-origin-commit-binding",
+      "originalName": "commit-binding.json",
+      "originalSha256": "1efa819b51a8054e9a8d508a9256e3314c1ce17d6b9faefd7ceafd9fd36ccdd2",
+      "originalBytes": 1395
+    },
+    {
+      "id": "main-broad-5e0d2b93",
+      "originalName": "post-run.json",
+      "originalSha256": "07134352b801ecf51ad5d9a74f6577b22bc4a0da01fa11a5ad9de171f1e17ad4",
+      "originalBytes": 61403
+    },
+    {
+      "id": "sdk-legacy-e8-initial",
+      "originalName": "post-run.json",
+      "originalSha256": "3a66d42d2f612346bf2779d03c9f43125ac56335ba1a56bdad8a9d41c862a07f",
+      "originalBytes": 41024
+    },
+    {
+      "id": "sdk-legacy-e8-initial-events",
+      "originalName": "events.jsonl",
+      "originalSha256": "7e784079891e86b36aa7816165e3049acc3b1306700e6876474523121963e6d3",
+      "originalBytes": 69434
+    },
+    {
+      "id": "sdk-legacy-e8-tail",
+      "originalName": "post-run.json",
+      "originalSha256": "ef8afe0744c07861aeed0da742403afa592fb196760728b417f64585dabd2321",
+      "originalBytes": 4171
+    },
+    {
+      "id": "sdk-admission-143a-initial",
+      "originalName": "post-run.json",
+      "originalSha256": "1c98e6ea3cdac7d0c704601c89a9554e2543cfdb0747986b653a6a192162d292",
+      "originalBytes": 979
+    },
+    {
+      "id": "sdk-admission-143a-corrected",
+      "originalName": "post-run.json",
+      "originalSha256": "c63dbc80d44ef91da3acf6671dea8b117730d0d731f0c16c9c1a16d5da60fc96",
+      "originalBytes": 10134
+    },
+    {
+      "id": "main-receiving-b092",
+      "originalName": "post-run.json",
+      "originalSha256": "aeca6ea4025e062acf4558482a5eb2c7f52475d90fd2fd2a9512a6393e2b806e",
+      "originalBytes": 23884
+    },
+    {
+      "id": "sdk-origin-tested-patch",
+      "originalName": "post-run.json",
+      "originalSha256": "ca0789d8d78eabd7f29cfb197330d2ff87a34d19b53542a83e307e2e63e0fb85",
+      "originalBytes": 6959
+    },
+    {
+      "id": "main-origin-218d",
+      "originalName": "post-run.json",
+      "originalSha256": "9b4a0c18991e07f459148bd7df157624c7e9492be2b5da002f32a7fe0faeb549",
+      "originalBytes": 11587
+    },
+    {
+      "id": "sdk-merge-49dc",
+      "originalName": "post-run.json",
+      "originalSha256": "6a51d65af1b4560bdd3acb85b564b779327ec0c4d53d6cf0c5f9e78f77dea62c",
+      "originalBytes": 11199
+    },
+    {
+      "id": "sdk-ledger-5228",
+      "originalName": "post-run.json",
+      "originalSha256": "12566c4de73983239b309a8b3c9f873b25e150d44044f3c7b0577b8ca719fc30",
+      "originalBytes": 6841
+    },
+    {
+      "id": "sdk-qualified-7f9",
+      "originalName": "post-run.json",
+      "originalSha256": "4c1031ebe400dd3d95229833a5231422f07580990b55e19273a7a95ab23ece11",
+      "originalBytes": 12660
+    },
+    {
+      "id": "sdk-static-checks",
+      "originalName": "reviewed-result.json",
+      "originalSha256": "f5cc6e2945d1a910c867ece3feefc3468cbb1865d4784a387ec6660eb76a7f65",
+      "originalBytes": 5391
+    },
+    {
+      "id": "six-integration-checkpoints",
+      "originalName": "checkpoints.json",
+      "originalSha256": "f000a3ea5046c49c6169a2ef3c39d7a1224ae6b6ae1d6651eb8695fabd556d2f",
+      "originalBytes": 37514
+    },
+    {
+      "id": "pr-66-staged-gate",
+      "originalName": "result.json",
+      "originalSha256": "9df0e287536aa3485b8ea87511ea1ee4fb737ff5759467ed93ceb201bd634ed0",
+      "originalBytes": 1854
+    },
+    {
+      "id": "pr-67-staged-gate",
+      "originalName": "result.json",
+      "originalSha256": "78d324a9c634055d91942df00e9e7d372772780193cfb09d87558c9df18b2958",
+      "originalBytes": 1885
+    },
+    {
+      "id": "pr-17-staged-gate",
+      "originalName": "result.json",
+      "originalSha256": "e8ad66455c107aa5b731c0dd07706d199f3ead5245e2f11bf6a20211af2e651a",
+      "originalBytes": 1915
+    },
+    {
+      "id": "pr-18-staged-gate",
+      "originalName": "result.json",
+      "originalSha256": "292c899c231bcc81c78d2d5df4b130681bd78264f9ebeef499464c88ef733f58",
+      "originalBytes": 1803
+    },
+    {
+      "id": "pr-13-staged-gate",
+      "originalName": "result.json",
+      "originalSha256": "b31e11c7098f3a9687d6818af1cf4eb9934a729ac97a5f5a519f10e0088529fc",
+      "originalBytes": 1879
+    },
+    {
+      "id": "pr-21-staged-gate",
+      "originalName": "result.json",
+      "originalSha256": "a33d61dca4994a220601d15ef70d69ab9fd012012f500f9a991384ea9fbb8286",
+      "originalBytes": 3171
+    },
+    {
+      "id": "presdk-rust-62-comparisons",
+      "originalName": "selected-worker-parity-summary.json",
+      "originalSha256": "e49a97242da7842db9f063d7ea5d7aef8646b767aaa9511fa12f62344c71acba",
+      "originalBytes": 3978
+    },
+    {
+      "id": "rust-static-build",
+      "originalName": "static-build-summary.json",
+      "originalSha256": "10e13a071305c44f79c71ba22b99cb43b30180af9a0c612a511c2f88b81067b9",
+      "originalBytes": 1962
+    },
+    {
+      "id": "presdk-rust-native-callbacks",
+      "originalName": "static-native-receiving-result.json",
+      "originalSha256": "6e76e81831c5a03e828124e435df8023c4a565632794abf7810469339c98ab55",
+      "originalBytes": 2559
+    },
+    {
+      "id": "sdk-scanner-summary",
+      "originalName": "sdk-full-scanner-summary.json",
+      "originalSha256": "0ee3abdba4f7321ccaf25efb15f1f2f2d64f8179afeb2006bee13848f73fa0c3",
+      "originalBytes": 1136
+    },
+    {
+      "id": "sdk-scanner-comparisons",
+      "originalName": "sdk-full-scanner-parity.jsonl",
+      "originalSha256": "b3e9209d5c31a9e194f94faa7bb55b1da26cb9aec78f7db9515b377d67fc5c48",
+      "originalBytes": 26016
+    },
+    {
+      "id": "application-inventory",
+      "originalName": "sdk-app-inventory.json",
+      "originalSha256": "c02466fc13e98b9bbb10f09f20cbcc2cd7c1e79ec0b038c30e1fc0486c7414ff",
+      "originalBytes": 129054
+    },
+    {
+      "id": "python-runtime-inventory",
+      "originalName": "sdk-runtime-inventory.json",
+      "originalSha256": "077d95e80cad7e5474b17ad83f3eb2576d67d7de4e6021b97704b572fb520d48",
+      "originalBytes": 200643
+    },
+    {
+      "id": "presdk-claude-diagnosis",
+      "originalName": "diagnosis.json",
+      "originalSha256": "fe969b6decf2de72a888e146e41c299d9fa5a12cc95804c044740779c64f6399",
+      "originalBytes": 23288
+    },
+    {
+      "id": "sdk-legacy-e8-input-binding",
+      "originalName": "input-bindings.json",
+      "originalSha256": "8e8285a60a3d576a0a4ba843d21e0131e89447a858ae66dcc7ef3ab7a40b6c42",
+      "originalBytes": 229698
+    }
+  ],
+  "preSdkClaudeDiagnosis": {
+    "sourceCommit": "8d1342e03d060275b3ced2e7368a1167ebb77e94",
+    "sourceTree": "5523563969f787f80e04dacbf170d7f1e90efd28",
+    "finding": {
+      "classification": "Intentional refusal of an installed transport state outside the current, frozen-prior, or authenticated paired-predecessor contract.",
+      "observedCanonicalGeneration": "All 9 recorded canonical Lead transport members and its manifest match main 14a4e74a; this is a transport-generation claim, not a claim about the entire installed system.",
+      "observedClaudePeer": "Unrecognized member mixture: 7 of 9 member hashes differ from both the canonical generation and the retained 8d payload. Exact historical SDK revision is not established; only 5 of 9 match c835cc3776ce53afe9e704a6e213c2c6dbb48e44.",
+      "owner": "scripts/production_installer.py::_stage_claude_transport_projection",
+      "ownerFunctionLine": 7842,
+      "refusalLine": 7943,
+      "diagnostic": "E_TRANSPORT_PROJECTION_PARITY | context=transport-projection | cause=atomic-projection-state",
+      "sourceValidation": "The source manifest and private canonical stage are validated before destination-state admission. Reaching the atomic-state refusal distinguishes this branch from source manifest validation failure.",
+      "predecessorRule": "_transport_predecessor at line 7718 requires a valid canonical receipt/tree plus canonical and peer members that all match the same canonical manifest digest vector; recorded 7-member disagreement prevents this qualification, regardless of the previously uncaptured peer-manifest hash.",
+      "sparseRoutes": "All nine peer members are present; seven do not match the desired payload. Empty, limited two-current-member, all-current, and legacy-singleton sparse routes cannot admit this recorded state.",
+      "frozenPriorRule": "None of the 13 accepted frozen prior vectors matches the recorded peer members; the unknown original peer-manifest hash cannot repair those member mismatches.",
+      "optionalPeerRule": "_preflight_canonical_skills (10408-10424) permits an optional Claude peer to remain unclaimed without a predecessor. Claude installation requires transport admission; the Codex preview can pass while this Claude preview refuses.",
+      "effect": "No transport stage is returned and application is not authorized. The recorded dry-run exited 1 at 6.610 seconds with complete unforced native Job closure.",
+      "sourceDefectConclusion": "This diagnosis does not identify a source regression or retained-package corruption. The observed unsupported installed-state mismatch is sufficient to explain the refusal. No production guard, frozen allowlist, installed peer, or receipt was modified."
+    },
+    "limits": {
+      "originalSnapshotCoverage": "965 metadata entries and 608 content hashes unchanged; all 1860 retained-package files unchanged, as recorded by the existing preview evidence.",
+      "uncapturedPeerManifest": "The named Claude peer manifest was absent from the original before/after captures. A fresh metadata-only observation cannot establish retrospective content or metadata unchangedness.",
+      "freshMetadata": "Only the named physical path and its ordinary ancestor chain were inspected. No peer manifest content was opened or hashed in this diagnosis.",
+      "noRecallLimit": "Metadata guards are not an OS atomic no-recall handle. No broader no-recall or whole-profile guarantee is claimed.",
+      "traceLimit": "The precise earlier return or caught refusal inside _transport_predecessor was not instrumented; the recorded member mismatch independently prevents a qualified predecessor.",
+      "additionalTests": "None."
+    }
+  }
+}

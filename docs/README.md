@@ -39,6 +39,7 @@ Current references and maintenance guidance:
 
 Dated design and evidence, not current implementation plans:
 
+- [Audit and qualification — 2026-11-24](audits/2026-11-24/README.md) records all 19 accepted pull requests, source-bound checks, package qualification and the remaining installed-profile limits.
 - [sdk-integration-project.md](sdk-integration-project.md) records the historical SDK design, authority boundaries and dated evidence.
 - [claude-instruction-unification.md](claude-instruction-unification.md) — Claude instruction discovery research and original implementation handoff; use the current runtime and install references above for the implemented layout
 - [routing/sol-6-1-routing-proposal-2026-10-01.md](routing/sol-6-1-routing-proposal-2026-10-01.md) — prior Sol 6.1 generation decision and dated evidence
