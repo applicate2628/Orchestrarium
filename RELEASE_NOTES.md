@@ -29,6 +29,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 - Claude removal now rechecks all selected control files through the final ownership-record write, including files absent at preview. A control created or replaced during removal stops completion and restores the owned payload and receipt while preserving the new user content, so a newly added hook is not left pointing at a removed handler.
 
+- Clarify the Kimi provider comment in the configuration defaults to match the existing explicit read and scoped-worker routes. Tool access still depends on the validated capability file and policy; no setting, routing rule or execution permission changes.
+
 - The model resolver now compares eligible models and reasoning efforts using benchmark quality, task time, and one relative cost unit (Sol 6.2 High = 1). The Lead selects and explains the best fit for each task; the default is a fallback. The benchmark figures are not prices, launch permissions, or runtime guarantees.
 
 - On Windows, the installer keeps existing owned files and their access rules when a standalone Lead upgrade only updates bytes and adds ordinary files under existing folders. The same transaction verifies new files and rolls back on failure. Coupled transport replacements retain their existing path.
