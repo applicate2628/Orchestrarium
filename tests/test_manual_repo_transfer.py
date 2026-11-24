@@ -87,6 +87,7 @@ class RepoTransferTests(unittest.TestCase):
         self.remote = self.root / "remote.git"
         self.repo.mkdir()
         git(self.repo, "init", "--initial-branch=main")
+        git(self.repo, "config", "core.autocrlf", "false")
         git(self.repo, "config", "user.name", "Transfer Test")
         git(self.repo, "config", "user.email", "transfer@example.invalid")
 
