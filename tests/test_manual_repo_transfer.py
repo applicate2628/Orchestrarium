@@ -279,6 +279,11 @@ class RepoTransferTests(unittest.TestCase):
         git(self.repo, "add", staged.name)
         special = self.repo / "untracked ! [literal].txt"
         special.write_text("special\n", encoding="utf-8")
+        early_untracked = self.repo / "a-untracked-Ω.txt"
+        early_untracked.write_text("untracked Unicode path\n", encoding="utf-8")
+        late_staged = self.repo / "z-staged-Ж.txt"
+        late_staged.write_text("staged Unicode path\n", encoding="utf-8")
+        git(self.repo, "add", late_staged.name)
         paths = [
             ".scratch/evidence.txt",
             "node_modules/cache.bin",
@@ -287,12 +292,22 @@ class RepoTransferTests(unittest.TestCase):
             special.name,
             "tracked.txt",
             "untracked.txt",
+            early_untracked.name,
+            late_staged.name,
         ]
         if os.name == "posix":
             posix_special = self.repo / ":(glob)*\n.txt"
             posix_special.write_text("literal pathspec bytes\n", encoding="utf-8")
             paths.append(posix_special.name)
         expected = module.git_metadata(repository, paths)
+        native_status = module.run_git(repository, "status", "--no-renames",
+            "--porcelain=v1", "-z", "--untracked-files=all", "--",
+            *module.literal_pathspecs(paths)).stdout
+        self.assertEqual(native_status, expected[module.METADATA_NAMES[0]])
+        self.assertIn(f"?? {early_untracked.name}".encode("utf-8") + b"\0", native_status)
+        self.assertIn(f"A  {late_staged.name}".encode("utf-8") + b"\0", native_status)
+        if os.name == "posix":
+            self.assertIn(b"?? :(glob)*\n.txt\0", native_status)
         runner = module._load_process_runner()
         original_count = runner.MAX_ARGV_COUNT
         original_run = module.run_bound_git_process
@@ -306,7 +321,8 @@ class RepoTransferTests(unittest.TestCase):
             return original_run(bound, command, stdin_bytes=stdin_bytes)
 
         module.run_bound_git_process = recording_run
-        runner.MAX_ARGV_COUNT = len(module.git_command_prefix(repository)) + 9
+        bounded_count = len(module.git_command_prefix(repository)) + 9
+        runner.MAX_ARGV_COUNT = bounded_count
         try:
             actual = module.git_metadata(repository, paths)
         finally:
@@ -317,7 +333,7 @@ class RepoTransferTests(unittest.TestCase):
         self.assertGreater(len(observed), 3)
         for command in observed:
             encoded = [len(argument.encode("utf-8")) for argument in command]
-            self.assertLessEqual(len(command), runner.MAX_ARGV_COUNT)
+            self.assertLessEqual(len(command), bounded_count)
             self.assertLessEqual(sum(size + 1 for size in encoded), runner.MAX_ARGV_BYTES)
             self.assertLessEqual(max(encoded), runner.MAX_ARG_BYTES)
             if os.name == "nt":

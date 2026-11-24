@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-24
 
+- Preserve byte-identical Git status metadata when repository transfer splits literal paths across bounded commands. Merge status records in native tracked-then-untracked pathname-byte order while retaining NUL-separated names, unchanged diff payloads, command limits and the aggregate output cap.
+
 - Establish the selected ledger operation before admitting a staged successor's transfer inputs. Preserve the budget already derived from its source ledger, receipt and bootstrap rows through creation, so a valid transferred obligation is not rejected by a smaller recomputed limit. Explicit caller limits and separate-operation budget resets retain their existing checks.
 
 - Record the reconciled SDK/main contracts and source-bound audit results in the existing SDK guide. Keep isolated installation evidence, incomplete combined qualification, dependency holds and authenticated publication requirements distinct from a release or working-installation claim.
