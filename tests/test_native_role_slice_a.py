@@ -1361,7 +1361,7 @@ def test_resolver_exposes_componentwise_role_policy_without_changing_agents_mode
     )
     assert policy["schemaVersion"] == 1
     assert policy["modelTierOrder"] == ["mechanical", "balanced", "frontier", "apex"]
-    assert policy["effortOrder"] == ["low", "medium", "high", "xhigh", "max"]
+    assert policy["effortOrder"] == ["medium", "high", "xhigh", "max"]
     assert policy["taskClasses"]["critical-design"] == {
         "requiredModelTier": "frontier",
         "requiredEffort": "xhigh",
@@ -1373,7 +1373,6 @@ def test_resolver_exposes_componentwise_role_policy_without_changing_agents_mode
             "astra-high",
             "astra-xhigh",
             "astra-max",
-            "sol-5.6-xhigh",
         ],
     }
     assert policy["roles"]["architect"]["defaultProfile"] == "frontier-xhigh"
@@ -1383,7 +1382,7 @@ def test_resolver_exposes_componentwise_role_policy_without_changing_agents_mode
     # The new role policy is additive. Existing external-provider/profile
     # semantics remain under agents-mode and retain their shipped values.
     values = resolved["values"]
-    assert values["externalCodexProfile"] == "gpt-6.1-sol-xhigh"
+    assert values["externalCodexProfile"] == "gpt-6.2-sol-xhigh"
     assert values["externalClaudeProfile"] == "opus-xhigh"
     assert values["externalPriorityProfiles"]["balanced"][
         "worker.default-implementation"

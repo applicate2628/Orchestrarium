@@ -39,6 +39,12 @@ def load_validator():
 def make_archived_fixture(root: Path) -> tuple[Path, dict]:
     item = root / "work-items" / "archive" / "2026-08" / "archived-artifact"
     item.mkdir(parents=True)
+    # A ledger alone is unbound archive data. This historical work item has a
+    # legacy closure surface; it does not claim current lifecycle V1 authority.
+    (item / "closure.md").write_text(
+        "# Closure\n\n**Outcome**: Historical artifact archived.\n",
+        encoding="utf-8",
+    )
     recovered = b"recovered historical artifact\n"
     artifact_sha = sha(recovered)
     event = {
@@ -177,7 +183,7 @@ def test_checker_accepts_v2_disposition_without_mutating_archive_or_active_ledge
     archive, disposition = make_archived_fixture(tmp_path)
     write_disposition(tmp_path, disposition)
     active = active_item(tmp_path)
-    archive_before = (archive / "agent-runs.jsonl").read_bytes()
+    archive_before = {path.name: path.read_bytes() for path in archive.iterdir()}
     active_before = (active / "agent-runs.jsonl").read_bytes()
 
     result = subprocess.run(
@@ -186,7 +192,7 @@ def test_checker_accepts_v2_disposition_without_mutating_archive_or_active_ledge
 
     assert result.returncode == 0, result.stdout
     assert "WI-CATEGORY-UNKNOWN-ROOT" not in result.stdout
-    assert archive_before == (archive / "agent-runs.jsonl").read_bytes()
+    assert archive_before == {path.name: path.read_bytes() for path in archive.iterdir()}
     assert active_before == (active / "agent-runs.jsonl").read_bytes()
 
 
