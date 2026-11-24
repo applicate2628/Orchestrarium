@@ -1149,12 +1149,27 @@ def test_position_projection_preserves_terminal_and_existing_discharge(tmp_path:
 def test_model_like_projection_remains_open_revise(tmp_path: Path) -> None:
     item, expected = copied_fixture(tmp_path)
     validator = load_validator()
-    events, metadata = loaded(item, validator)
-    effective, _, errors = project(item, validator, events + [apply_anchor(events[1], str(metadata[1]["sha256"]))], metadata + [{}])
-    validity = validator.derive_event_validity(effective, item, errors)
-    open_revise, _ = validator.validate_closure(effective, errors, event_validity=validity)
+    ledger_path = item / "agent-runs.jsonl"
+    raw_lines = ledger_path.read_bytes().splitlines(keepends=True)
+    events, _metadata = loaded(item, validator)
+    launch = {**events[0], "scope": events[1]["scope"], "effort": events[1]["effort"]}
+    ledger_path.write_bytes(json.dumps(launch, separators=(",", ":")).encode() + b"\n" + b"".join(raw_lines[1:]))
+    lifecycle = load_script(LIFECYCLE, "model_like_projection_lifecycle")
+    lifecycle.migrate_legacy_ledger_obligation(tmp_path, item.name,
+        expected["targetRunId"], expected["targetRawSha256"], sha256(ledger_path.read_bytes()),
+        "migration-model-like", "2026-08-18T00:00:00Z")
+    states = []
+    errors = validator.validate_work_item(item, strict_revise=False,
+        validate_status_file=False, obligation_state_out=states)
+    assert errors == [] and len(states) == 1
+    context = states[0]._current_result.context
+    validity = validator.derive_event_validity(context.rows, item, errors, context=context)
+    open_revise, _ = validator.validate_closure(context.rows, errors, event_validity=validity, context=context)
     assert errors == []
     assert len(open_revise) == expected["openRevise"]
+    assert open_revise[0]["runId"] == expected["targetRunId"]
+    assert open_revise[0]["findingClass"] == expected["projectedFindingClass"]
+    assert ledger_path.read_bytes().splitlines(keepends=True)[1] == raw_lines[1]
 
 
 def test_legacy_unclassified_is_distinct_and_protected(tmp_path: Path) -> None:
@@ -1410,10 +1425,15 @@ def test_lifecycle_contention_uses_existing_lock_failure(tmp_path: Path) -> None
     lifecycle = load_script(LIFECYCLE, "migration_lifecycle_lock")
     before = (item / "agent-runs.jsonl").read_bytes()
     class Held:
-        def __init__(self, _root, *, input_role, original_root, binding_evidence):
+        def __init__(self, _root, *, input_role, original_root, binding_evidence,
+                     ledger_resource_budget, transition_resource_budget,
+                     transition_output_ceiling, _transition_resource_inputs):
             assert input_role == "repository-root"
             assert original_root == tmp_path
             assert binding_evidence is not None
+            assert ledger_resource_budget is None
+            assert transition_resource_budget is _transition_resource_inputs.acquisition
+            assert transition_output_ceiling is _transition_resource_inputs.output_ceiling
             self._unsettled_relocations = ()
         def __enter__(self): raise lifecycle.LifecycleError("WI-LIFECYCLE-LOCK-HELD", "held")
     with patch.object(lifecycle, "LifecycleTransaction", Held), pytest.raises(lifecycle.LifecycleError) as caught:
@@ -1464,7 +1484,15 @@ def test_lifecycle_commit_indeterminate_fails_closed(tmp_path: Path) -> None:
     before = (item / "agent-runs.jsonl").read_bytes()
     with pytest.raises(lifecycle.LifecycleError) as caught:
         lifecycle.migrate_legacy_ledger_obligation(tmp_path, item.name, expected["targetRunId"], expected["targetRawSha256"], sha256(before), "migration-op-indeterminate", "2026-08-18T00:00:00Z", inject_failure="post-replace-corrupt")
-    assert caught.value.failure_id == "WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE"
+    assert caught.value.failure_id == "WI-CATEGORY-MIGRATION-INVENTORY"
+    assert caught.value.detail.kind == "captured-file"
+    detail = dict(caught.value.detail.fields)
+    assert detail["predicate"] == "captured-size-differs"
+    assert detail["locator"] == f"work-items/active/{item.name}/agent-runs.jsonl"
+    after = (item / "agent-runs.jsonl").read_bytes()
+    assert after.startswith(before) and after.endswith(b"corrupt")
+    assert len(after.removesuffix(b"corrupt").splitlines()) == len(before.splitlines()) + 1
+    assert not (item / "ledger-migration-receipts/migration-op-indeterminate.json").exists()
 
 
 def test_crash_after_anchor_before_receipt_recovers_committed(tmp_path: Path) -> None:
@@ -1691,6 +1719,10 @@ def test_audit_requires_explicit_recovery_before_membership(tmp_path: Path) -> N
     assert str(caught.value) == (
         "pending lifecycle transition(s): transition-op-001; run: "
         "recover-transition --root <repo> --operation-id transition-op-001 --apply"
+        " [diagnostic=" + json.dumps({"kind": "transition-audit", "entries": [{
+            "kind": "transition-family", "family": "archive-with-successor-v1",
+            "slug": fixture["slug"], "successorSlug": fixture["successorSlug"], "bugsCount": 0,
+        }]}, sort_keys=True, separators=(",", ":")) + "]"
     )
     assert tree_state() == before
 
@@ -2873,8 +2905,17 @@ def test_lifecycle_write_boundary_original_public_cases(tmp_path: Path, monkeypa
         else:
             assert after.startswith(ledger_before) and len(after.splitlines()) == len(ledger_before.splitlines()) + 1
             monkeypatch.setattr(module, "_atomic_write", original)
-            assert module.main(args) == 0  # Exact replay reconciles the admitted late anchor.
+            assert module.main(args) == 1
+            assert "WI-LEDGER-MIGRATION-RECEIPT-MISMATCH" in capsys.readouterr().out
+            assert (item / "agent-runs.jsonl").read_bytes() == after
+            assert sorted(path.name for path in outside.iterdir()) == ["sentinel"]
+            # Preserve the substituted link and restore the original admitted parent for replay.
+            output.parent.rename(tmp_path / "retained-substituted-receipt-link")
+            output.parent.with_name("retained-parent").rename(output.parent)
+            assert module.main(args) == 0
             assert (item / "agent-runs.jsonl").read_bytes() == after and output.is_file()
+            assert (outside / "sentinel").read_bytes() == b"outside sentinel"
+            assert sorted(path.name for path in outside.iterdir()) == ["sentinel"]
 
 
 def test_migration_receipt_quarantine_collision_refuses_before_anchor(tmp_path: Path) -> None:
