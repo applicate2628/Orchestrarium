@@ -47,7 +47,9 @@ class ReceiptedClaudeInstructionWiringTests(unittest.TestCase):
         self.assertIsInstance(guard.body[-1], ast.Return)
         parse = self.one(install, "_parse_claude_receipt_grant")
         self.require(parse, "tuple(args.replace_claude_receipted_instructions)")
-        self.assertLess(guard.end_lineno, self.one(install, "_target").lineno)
+        targets = calls(install, "_target")
+        self.assertTrue(targets)
+        self.assertTrue(all(guard.end_lineno < call.lineno for call in targets))
         self.assertLess(guard.end_lineno, parse.lineno)
         self.assertNotIn("force", ast.unparse(parse))
 

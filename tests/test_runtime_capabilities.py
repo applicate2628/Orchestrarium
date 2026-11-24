@@ -12,7 +12,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 CONSUMERS = {
     "tests/test_python_production_entrypoints.py": {
-        "test_codex_production_entrypoint_creates_only_source_manifest_roles": None,
+        "test_codex_production_entrypoint_respects_platform_contract": None,
     },
     "tests/test_claude_subscription_guard.py": {},
     "tests/test_native_role_slice_a.py": {
@@ -191,7 +191,12 @@ def test_listed_capability_gates_admit_at_least_one_platform() -> None:
             assert admitted, f"{relative_path}::{function_name} has no admitted platform"
 
 
-def test_consumers_do_not_assign_codex_bin_locally() -> None:
+def test_consumers_delegate_codex_bin_selection_to_the_canonical_owner() -> None:
+    # In-process consumers may install the canonical fixture value with
+    # pytest's scoped environment patch; they must not select another host.
+    canonical_value = ast.dump(
+        ast.parse('codex_hook_host_env({}, ROOT)["CODEX_BIN"]', mode="eval").body
+    )
     for relative_path in CONSUMERS:
         tree = ast.parse((ROOT / relative_path).read_text(encoding="utf-8"))
         assignments = []
@@ -218,5 +223,7 @@ def test_consumers_do_not_assign_codex_bin_locally() -> None:
                 and isinstance(node.args[0], ast.Constant)
                 and node.args[0].value == "CODEX_BIN"
             ):
-                assignments.append(node.lineno)
+                if (len(node.args) != 2 or node.keywords
+                        or ast.dump(node.args[1]) != canonical_value):
+                    assignments.append(node.lineno)
         assert assignments == [], f"{relative_path}: local CODEX_BIN at {assignments}"

@@ -37,6 +37,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 - Preserve byte-identical Git status metadata when repository transfer splits literal paths across bounded commands. Merge status records in native tracked-then-untracked pathname-byte order while retaining NUL-separated names, unchanged diff payloads, command limits and the aggregate output cap.
 
+- Align legacy lifecycle regression fixtures with the current native ownership and finalization contracts. The checks retain original objects outside the action, interrupt actual hold disposal, preserve primary failure diagnostics and use the transaction's real validator owner. Physical apply checks remain on Windows; unsupported hosts verify refusal without canonical writes.
+
 ## 2026-11-23
 
 - Prioritize the smallest working end-to-end result. During planning and review, the Lead defers speculative safeguards and unrelated work to the existing plan unless needed for that result. Existing safety and approval requirements are unchanged; no new workflow gate is introduced. Contract tests check the QA roles' referral and still check that both owning contracts state the classification rule.
