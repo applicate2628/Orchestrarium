@@ -16,7 +16,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT_PATHS = (
     REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-passive-polling-stop.py",
-    REPO_ROOT / "src.claude" / "agents" / "scripts" / "check-passive-polling-stop.py",
+    REPO_ROOT / 'adapters/claude' / "agents" / "scripts" / "check-passive-polling-stop.py",
     REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-passive-polling-stop.py",
 )
 

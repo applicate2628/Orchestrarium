@@ -54,6 +54,14 @@ class ProducerIntegrationTests(unittest.TestCase):
         self.target = self.root / "target"
         self.target.mkdir()
 
+    def create_symlink(self, link, target, *, target_is_directory=False):
+        try:
+            link.symlink_to(target, target_is_directory=target_is_directory)
+        except OSError as exc:
+            if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+                self.skipTest("Windows host lacks symbolic-link creation privilege (WinError 1314)")
+            raise
+
     def transaction(self, paths, copies=(), link_objects=(), readonly=()):
         return PI._InstallTransaction(paths, enabled=True, copy_paths=tuple(copies),
                                       link_object_paths=tuple(link_objects), readonly_paths=tuple(readonly))
@@ -93,7 +101,7 @@ class ProducerIntegrationTests(unittest.TestCase):
                 selected = [parent]
                 if name == "replacement":
                     logical = capsule / "provider-skills"
-                    logical.symlink_to(parent, target_is_directory=True)
+                    self.create_symlink(logical, parent, target_is_directory=True)
                     alias = PI._InstallTransaction._capture_node(logical)
                     selected.append(logical / "lead" / "old")
                 tx = self.transaction(selected)
@@ -215,7 +223,7 @@ class ProducerIntegrationTests(unittest.TestCase):
                         else:
                             cache = target / "__pycache__"
                             if name == "reparse":
-                                cache.symlink_to(source, target_is_directory=True)
+                                self.create_symlink(cache, source, target_is_directory=True)
                             else:
                                 cache.mkdir()
                                 (cache / ("body.pyc.temporary" if name == "temporary" else "body.pyc")).write_bytes(b"unknown")
@@ -464,6 +472,46 @@ class ProducerIntegrationTests(unittest.TestCase):
         self.assertEqual(b"old", target.read_bytes())
         self.assert_clean()
 
+    def test_sdk_runtime_delivery_is_complete_and_rollback_preserves_unmanaged_files(self):
+        """Use the real delivery inventory and copy owner, without invoking providers."""
+        expected = {f"sdk_execution/{path.name}" for path in
+                    (ROOT / "scripts/sdk_execution").glob("*.py")}
+        expected.add("process_supervision/sdk_worker.py")
+        self.assertTrue(expected)
+        for host, relative in (("codex", "skills/lead/scripts"),
+                               ("claude", "agents/scripts")):
+            with self.subTest(host=host):
+                target = self.target / host / relative
+                destinations = PI._runtime_file_destinations(
+                    ROOT, target, include_codex_helpers=host == "codex")
+                selected = tuple((source, dest) for source, dest in destinations
+                                 if source.is_relative_to(ROOT / "scripts")
+                                 if source.relative_to(ROOT / "scripts").as_posix() in expected)
+                self.assertEqual(expected, {dest.relative_to(target).as_posix()
+                                            for _, dest in selected})
+                sentinel = target / "sdk_execution/operator-local.txt"
+                sentinel.parent.mkdir(parents=True)
+                sentinel.write_bytes(b"preserve operator file")
+                existing = target / "sdk_execution/contracts.py"
+                existing.write_bytes(b"prior installed contracts")
+                os.utime(existing, ns=(1_600_000_000_100_000_000, 1_600_000_000_200_000_000))
+                prior_mtime = existing.stat().st_mtime_ns
+                transaction = self.transaction([dest for _, dest in selected],
+                                               [dest for _, dest in selected])
+                with self.assertRaisesRegex(RuntimeError, "later producer failure"):
+                    with transaction:
+                        PI._install_runtime_files(ROOT, target, False,
+                            destinations=selected, mutable_owner=self.owner(transaction))
+                        for source, dest in selected:
+                            self.assertEqual(source.read_bytes(), dest.read_bytes())
+                        self.assertEqual(b"preserve operator file", sentinel.read_bytes())
+                        raise RuntimeError("later producer failure")
+                self.assertTrue(all(not dest.exists() for _, dest in selected if dest != existing))
+                self.assertEqual(b"prior installed contracts", existing.read_bytes())
+                self.assertEqual(prior_mtime, existing.stat().st_mtime_ns)
+                self.assertEqual(b"preserve operator file", sentinel.read_bytes())
+        self.assert_clean()
+
     def test_runtime_and_sync_wrappers_propagate_owner_and_skip_excluded(self):
         source = self.source / "runtime.py"
         source.write_bytes(b"runtime")
@@ -582,7 +630,7 @@ class ProducerIntegrationTests(unittest.TestCase):
         stale_tree.mkdir()
         (stale_tree / "leaf").write_bytes(b"user stale tree")
         link = skills / "agents-link"
-        link.symlink_to(stale_tree.name, target_is_directory=True)
+        self.create_symlink(link, stale_tree.name, target_is_directory=True)
         original = {p: PI._CreateOnlyMutablePath._identity(p) for p in (stale_file, stale_tree, link)}
         with self.transaction([]) as transaction:
             owner = self.owner(transaction)
@@ -599,7 +647,7 @@ class ProducerIntegrationTests(unittest.TestCase):
         referent = self.target / "referent"
         referent.mkdir()
         link = self.target / "agents-stale"
-        link.symlink_to(referent.name, target_is_directory=True)
+        self.create_symlink(link, referent.name, target_is_directory=True)
         original = PI._CreateOnlyMutablePath._identity(link)
         primary = RuntimeError("later")
         transaction = self.transaction([link], link_objects=(link,))
@@ -660,7 +708,7 @@ class ProducerIntegrationTests(unittest.TestCase):
         selection, payload = PI._read_native_config_selection(config, self.transaction([]))
         plan = SimpleNamespace(config_selection=selection, config_exists=True, config_prior_digest=PI._file_sha256(config),
                                config_payload=payload, legacy_exists=True, legacy_path=legacy)
-        transaction = self.transaction([])
+        transaction = self.transaction([legacy])
         primary = RuntimeError("later")
         with patch.object(PI, "CODEX_LEGACY_LUNA_SHA256", PI._file_sha256(legacy)):
             with self.assertRaises(RuntimeError) as caught:
@@ -670,6 +718,7 @@ class ProducerIntegrationTests(unittest.TestCase):
                     raise primary
         self.assertIs(primary, caught.exception)
         self.assertEqual(original_identity, PI._CreateOnlyMutablePath._identity(legacy))
+        self.assertEqual(b"synthetic frozen legacy", legacy.read_bytes())
         self.assert_clean()
 
     def legacy_fixture(self, existing_backup):
@@ -730,8 +779,10 @@ class ProducerIntegrationTests(unittest.TestCase):
                 backup.mkdir()
                 (backup / "leaf").write_bytes(b"historical")
                 foreign = transaction._capture_node(backup)
-                self.assertNotEqual(original.python_identity, foreign.python_identity)
+                self.assertNotEqual(original.python_identity[:2], foreign.python_identity[:2])
                 if os.name == "nt":
+                    self.assertIsNotNone(original.native_proof)
+                    self.assertIsNotNone(foreign.native_proof)
                     self.assertNotEqual(original.native_proof, foreign.native_proof)
                 foreign_identity = PI._CreateOnlyMutablePath._identity(backup)
                 def observed(path, **kwargs):
@@ -748,6 +799,8 @@ class ProducerIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(failure, f"replacement committed; foreign digest reads={len(foreign_reads)}; "
             f"source_is_original={PI._CreateOnlyMutablePath._identity(installed)==source_identity}; "
             f"recovery={transaction._remaining_recovery()}")
+        self.assertIsInstance(failure.cause, ValueError)
+        self.assertTrue(str(failure.cause).startswith("E_READ_ONLY_DEPENDENCY_CHANGED:"))
         self.assertEqual(foreign_reads, [])
         self.assertEqual(foreign_native_reads, [])
         self.assertFalse(transaction._effects)
@@ -763,14 +816,17 @@ class ProducerIntegrationTests(unittest.TestCase):
         transaction = self.transaction([installed, backup], readonly=(backup,))
         digest = PI._tree_sha256
         reads = []
-        with self.assertRaises(PI._InstallFailure):
+        with self.assertRaises(PI._InstallFailure) as caught:
             with transaction:
                 member = backup / "leaf"
                 before = transaction._original[backup][member]
                 member.rename(self.root / "original-backup-member")
                 member.write_bytes(b"historical")
                 foreign = transaction._capture_node(member, kind="file", data=before.data)
-                self.assertNotEqual(before.native_proof, foreign.native_proof)
+                if before.native_proof is not None:
+                    self.assertNotEqual(before.native_proof, foreign.native_proof)
+                else:
+                    self.assertNotEqual(before.python_identity[:2], foreign.python_identity[:2])
                 def observed(path, **kwargs):
                     if Path(path) == backup:
                         reads.append(path)
@@ -779,6 +835,8 @@ class ProducerIntegrationTests(unittest.TestCase):
                     owner = self.owner(transaction)
                     PI._apply_codex_legacy_skill_projection_plan(plan, canonical, projection,
                         PI._CreateOnlyMutablePath._identity(projection), owner, owner)
+        self.assertIsInstance(caught.exception.cause, ValueError)
+        self.assertTrue(str(caught.exception.cause).startswith("E_READ_ONLY_DEPENDENCY_CHANGED:"))
         self.assertEqual(reads, [])
         self.assertEqual(PI._CreateOnlyMutablePath._identity(installed), source_identity)
         self.assertFalse(transaction._effects)
@@ -1089,7 +1147,7 @@ class ProducerIntegrationTests(unittest.TestCase):
 
     def test_claude_current_stock_imports_and_policies_survive_migration(self):
         target, agents = self.target / "CLAUDE.md", self.target / "AGENTS.md"
-        source = (ROOT / "src.claude/CLAUDE.md").read_text()
+        source = (ROOT / 'adapters/claude/CLAUDE.md').read_text()
         anchor, body = source.split("\n", 1)
         shared = (ROOT / "shared/AGENTS.shared.md").read_text()
         prefix = "@before.md\n" + anchor + "\nKeep my rule between imports and the pack.\n@my-notes.md\n@AGENTS.md\n@second-notes.md  \n\n"
@@ -1099,7 +1157,7 @@ class ProducerIntegrationTests(unittest.TestCase):
         expected = prefix + "<!-- BEGIN ORCHESTRARIUM CLAUDE MANAGED -->\n" + body + "<!-- END ORCHESTRARIUM CLAUDE MANAGED -->\n" + suffix
         for _ in range(2):
             with self.transaction([target, agents]) as transaction:
-                PI._merge_claude_docs(ROOT, ROOT / "src.claude", target, False, mutable_owner=self.owner(transaction))
+                PI._merge_claude_docs(ROOT, ROOT / 'adapters/claude', target, False, mutable_owner=self.owner(transaction))
                 transaction.commit()
             self.assertEqual(expected, target.read_text())
             self.assertEqual("local prefix\n<!-- BEGIN ORCHESTRARIUM SHARED MANAGED -->\n" + shared + "<!-- END ORCHESTRARIUM SHARED MANAGED -->\nlocal suffix\n", agents.read_text())
@@ -1613,10 +1671,10 @@ class ProducerIntegrationTests(unittest.TestCase):
         selected = storage
         if linked:
             selected = self.root / "selected.json"
-            selected.symlink_to(storage)
+            self.create_symlink(selected, storage)
         if directory_link:
             alias = self.root / "selected-parent"
-            alias.symlink_to(self.target, target_is_directory=True)
+            self.create_symlink(alias, self.target, target_is_directory=True)
             selected = alias / storage.name
         return specs, selected, storage, storage.parent / I.INVENTORY_NAME, original, foreign
 
@@ -1843,7 +1901,7 @@ class ProducerIntegrationTests(unittest.TestCase):
         selected = storage
         if linked:
             selected = self.root / "selected.json"
-            selected.symlink_to(storage)
+            self.create_symlink(selected, storage)
         transaction = self.transaction([storage] + ([selected] if linked else []),
                                        link_objects=(selected,) if linked else ())
         primary = RuntimeError("verify after empty retirement and new registration")

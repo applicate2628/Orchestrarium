@@ -46,6 +46,7 @@ CODEX_TRUST_GUIDANCE = (
     "Changed Codex hooks may be untrusted or inactive.",
     "only after the required explicit interactive trust review and supported health receiving",
 )
+
 BYPASS_TOKENS = (
     "bypass_" + "hook_trust",
     "BYPASS_" + "HOOK_TRUST",
@@ -123,7 +124,7 @@ def test_pid_helper_treats_linux_zombie_as_not_alive() -> None:
         child.wait(timeout=2.0)
 def _provider_source_root(platform: str) -> Path:
     return ROOT / (
-        "src.codex/skills/lead" if platform == "codex" else "src.claude/agents"
+        "src.codex/skills/lead" if platform == "codex" else "adapters/claude/agents"
     )
 
 
@@ -323,7 +324,7 @@ def test_production_installed_claude_health_uses_manifest_without_repo_root(
     )
     assert install.returncode == 0, install.stdout + install.stderr
 
-    installed_root = project / ".agents" / "skills" / "lead"
+    installed_root = project / ".claude" / "skills" / "lead"
     health_path = installed_root / "scripts" / "check-hook-health.py"
     manifest_path = installed_root / "scripts" / "universal_hooks_manifest.py"
     settings = project / ".claude" / "settings.json"
@@ -935,7 +936,7 @@ def test_hook_health_failure_byte_4097_terminates_kills_and_reaps(
     ("platform", "source"),
     (
         ("codex", ROOT / "src.codex/skills/lead/scripts/check-bugfix-discipline.py"),
-        ("claude", ROOT / "src.claude/agents/scripts/check-bugfix-discipline.py"),
+        ("claude", ROOT / 'adapters/claude/agents/scripts/check-bugfix-discipline.py'),
     ),
 )
 def test_python_target_resolution_is_absolute_and_direct(
@@ -966,6 +967,7 @@ def test_hooks_run_from_foreign_cwd(tmp_path: Path, platform: str) -> None:
     for cwd in foreign_cwds:
         cwd.mkdir()
     for python_target in _owned_python_targets(platform):
+        assert python_target.is_file(), python_target
         if python_target.stem in CWD_SCANNING_HOOK_STEMS:
             continue
         runs = [
@@ -1055,3 +1057,25 @@ def test_trust_bypass_classifier_accepts_prohibition_but_rejects_enablement() ->
     assert not _bypass_is_evidence_only(
         f"Run `codex {token} exec` to skip the trust prompt."
     )
+
+
+@pytest.mark.skipif(not sys.platform.startswith('linux'), reason='Linux adopted child reaping')
+def test_posix_hook_health_accepts_already_exited_descendants(tmp_path: Path) -> None:
+    marker = tmp_path / 'exited-child.pid'
+    program = tmp_path / 'health-with-exited-child.py'
+    program.write_text(
+        'import os, pathlib, subprocess, sys, time\n'
+        'child = subprocess.Popen([sys.executable, "-c", "pass"])\n'
+        'pathlib.Path(sys.argv[1]).write_text(str(child.pid))\n'
+        'deadline = time.monotonic() + 5\n'
+        'while time.monotonic() < deadline:\n'
+        '    state = pathlib.Path(f"/proc/{child.pid}/stat").read_text().rsplit(")",1)[1].split()[0]\n'
+        '    if state == "Z": os._exit(0)\n'
+        '    time.sleep(0.01)\n'
+        'raise RuntimeError("child did not exit")\n', encoding='utf-8',
+    )
+    completed = PRODUCTION_INSTALLER._run_hook_health_bounded(
+        [str(program), str(marker)], tmp_path, program,
+    )
+    assert completed.returncode == 0
+    assert not Path('/proc', marker.read_text()).exists()

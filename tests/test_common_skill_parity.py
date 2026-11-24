@@ -1,4 +1,4 @@
-"""Independent live parity and frozen common-skill snapshot contracts."""
+"""Canonical live skill ownership and frozen historical snapshot contracts."""
 from __future__ import annotations
 
 import importlib
@@ -10,7 +10,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-LIVE_PACKS = ("src.claude", "src.codex")
+LIVE_PACKS = ("adapters/claude", "src.codex")
 GENERALIZE_SKILL = "generalize-from-instance"
 GENERALIZE_BODY_SHA256 = "c55e0d9389abce424e778c41816127c76948d67d92233e9afb26ab4d92cfaf97"
 IMPLEMENTATION_TO_THEORY_SKILL = "implementation-to-theory"
@@ -21,27 +21,27 @@ IMPLEMENTATION_TO_THEORY_BODY_SHA256 = (
 
 ACCEPTED_CANONICAL_WITH_FROZEN_MIGRATION_WITNESS = {
     'analyzing-video-bugs': {
-        'src.claude': 'cf78ec0176f1726891045a2c2626363377994f34f081f9a9ad0ffbdb60740e91',
-        'src.codex': '7305d3e067fd2ad5f22ef65148d67a6a005a3ab311eba6b4253077bf768dd842',
+        'adapters/claude': '5998cc2273e3c2f0994f2d1ae6dd22dbc7916bf1689ece5f5ea8ef7034cde603',
+        'src.codex': '2346f3f55e327877552e5db2a6c57f1475a23aeb46c46d44340104ad187d996f',
     },
     'repo-cleanup': {
-        'src.claude': '942d2eed5941b4468b28fcb8c89d3ac03416d963c598613c0e8e3cb5553b2616',
+        'adapters/claude': '942d2eed5941b4468b28fcb8c89d3ac03416d963c598613c0e8e3cb5553b2616',
         'src.codex': '6da4714557cae88de6ac967e52e7fc89ad852d8e279e441fcdef70b7432f231f',
     },
     'vak-dissertation-review': {
-        'src.claude': 'e259d114a1ea2372d9152a07445aeba82c51493b9caf7b39f3b6b96678e9b261',
+        'adapters/claude': 'e259d114a1ea2372d9152a07445aeba82c51493b9caf7b39f3b6b96678e9b261',
         'src.codex': '0ba50252acb53b2f3b2f7df573864b3f99a10b3969d04ce8107699293e2e7597',
     },
     'vcpkg-builder': {
-        'src.claude': '72208f4bec6ebf30eb49e99da12cc4e3cef6ef2572bb1583232a5fb1ebe791dc',
+        'adapters/claude': '72208f4bec6ebf30eb49e99da12cc4e3cef6ef2572bb1583232a5fb1ebe791dc',
         'src.codex': '0b250657452a93a77bcb73a3796f2d6795ba727e239bf47676639016467f0cc0',
     },
     'vcpkg-ports-updater': {
-        'src.claude': '17aedafce43a1de5c0917e2a14cba131fcd5dcccca67902ad42852108d90816f',
+        'adapters/claude': '17aedafce43a1de5c0917e2a14cba131fcd5dcccca67902ad42852108d90816f',
         'src.codex': 'bd1ca0e83dafd29a4cb2b2486ee2e9058764f396702f7bd45b72dfe719711734',
     },
     'windows-gui-manual-testing': {
-        'src.claude': '7dd186bbeee1fab2eb44e2d4f1c4772ffea87d918605efdcc00a5a8fb3c272b8',
+        'adapters/claude': '7dd186bbeee1fab2eb44e2d4f1c4772ffea87d918605efdcc00a5a8fb3c272b8',
         'src.codex': '3e5a0dd384fba8f6e6e840d579cdfb64fff1a5ebd136048a2635803d9912a30e',
     },
 }
@@ -96,30 +96,26 @@ def _live_common_skill_hashes(root: Path = ROOT) -> dict[str, dict[str, str]]:
             assert hashes == accepted, f"{name} canonical or historical body drifted: {hashes}"
             result[name] = hashes
             continue
-        assert len(set(hashes.values())) == 1, (
-            f"live common-skill {name} BODY drifted between production packs: {hashes}"
-        )
         result[name] = hashes
     return result
 
 
 def _assert_authoritative_status(root: Path = ROOT) -> None:
     readme = (root / "README.md").read_text(encoding="utf-8")
-    section = readme.partition("\n## Provider Packs\n")[2]
+    section = readme.partition("\n## Host integrations\n")[2]
     table = section.lstrip("\n").partition("\n\n")[0]
-    production = tuple(
-        (cells[0], cells[2])
+    clients = tuple(
+        tuple(part.strip() for part in line.strip("|").split("|")[:3])
         for line in table.splitlines()
-        if line.startswith("|")
-        for cells in ([part.strip() for part in line.strip("|").split("|")],)
-        if len(cells) >= 3 and cells[1] == "Production"
+        if line.startswith(("| Codex |", "| Antigravity |", "| Claude Code |"))
     )
-    assert production == (
-        ("Codex", "`src.codex/`"),
-        ("Claude Code", "`src.claude/`"),
-    ), "README production pack membership drifted"
+    assert clients == (
+        ("Codex", "Primary", "`src.codex/`"),
+        ("Antigravity", "Native startup integration only", "`adapters/antigravity/`"),
+        ("Claude Code", "Secondary adapter", "`adapters/claude/`"),
+    ), "README client membership drifted"
     assert _runtime().installer_choices_are_supported_production_packs(root), (
-        "installer production pack membership drifted"
+        "installer client membership drifted"
     )
 
 
@@ -129,6 +125,7 @@ def _copy_contract_tree(tmp_path: Path) -> Path:
         "shared/AGENTS.shared.md",
         "README.md",
         "install.py",
+        "scripts/installation/clients.py",
     ):
         source = ROOT / relative_path
         target = root / relative_path
@@ -157,7 +154,7 @@ def _add_live_name(root: Path, name: str) -> None:
     spine.write_text(text, encoding="utf-8")
 
 
-def test_common_skill_bodies_match_parity_or_exact_accepted_revisions() -> None:
+def test_common_skill_sources_are_present_and_well_formed() -> None:
     hashes = _live_common_skill_hashes()
     assert tuple(hashes) == _common_skills()
 
@@ -236,19 +233,46 @@ def test_live_add_changes_only_live_membership(tmp_path: Path) -> None:
     assert "fixture-live" in _live_common_skill_hashes(root)
 
 
+def _projection_plan(root: Path, target: Path):
+    from test_hook_runtime_transactions import production_installer as installer
+    canonical = root / "src.codex/skills"
+    projection = target / ".claude/skills"
+    plan = installer._preflight_claude_skill_projections(
+        canonical, root / 'adapters/claude/skills', target / ".agents/skills", projection,
+    )
+    return installer, canonical, projection, plan
+
+
+def test_current_claude_projection_consumes_canonical_skill_source(tmp_path: Path) -> None:
+    root = _copy_contract_tree(tmp_path)
+    installer, canonical, projection, plan = _projection_plan(root, tmp_path / "target")
+    assert {item.name for item in plan} == set(_common_skills(root))
+    for item in plan:
+        assert item.canonical_digest == installer._tree_sha256(canonical / item.name)
+        assert item.canonical_target == tmp_path / "target/.agents/skills" / item.name
+        assert item.action == "create"
+    installer._assert_skill_projection_plan_current(
+        plan, canonical, projection, failure_id="TEST-PROJECTION-DRIFT",
+    )
+
+
 @pytest.mark.parametrize("pack", LIVE_PACKS)
-def test_live_common_skill_mutation_reports_both_hashes(
-    tmp_path: Path,
-    pack: str,
+def test_canonical_mutation_invalidates_plan_but_historical_body_is_not_live(
+    tmp_path: Path, pack: str,
 ) -> None:
     root = _copy_contract_tree(tmp_path)
+    installer, canonical, projection, plan = _projection_plan(root, tmp_path / "target")
     path = _skill(root, pack, "mathtype-book-page")
-    path.write_bytes(path.read_bytes() + b"\nmutated production body\n")
-    with pytest.raises(AssertionError) as caught:
-        _live_common_skill_hashes(root)
-    message = str(caught.value)
-    assert "src.claude" in message and "src.codex" in message
-    assert "615499de68dc03fccb23954e8ed94662076a9a744a493b71232ebdcce55357be" in message
+    path.write_bytes(path.read_bytes() + b"\nmutated source body\n")
+    if pack == "src.codex":
+        with pytest.raises(ValueError, match="TEST-PROJECTION-DRIFT: preflight drift mathtype-book-page"):
+            installer._assert_skill_projection_plan_current(
+                plan, canonical, projection, failure_id="TEST-PROJECTION-DRIFT",
+            )
+    else:
+        installer._assert_skill_projection_plan_current(
+            plan, canonical, projection, failure_id="TEST-PROJECTION-DRIFT",
+        )
 
 
 @pytest.mark.parametrize(
@@ -282,21 +306,33 @@ def test_authoritative_status_preserves_production_class() -> None:
     (
         (
             "README.md",
-            "| Codex | Production | `src.codex/` |",
+            "| Codex | Primary | `src.codex/` |",
             "| Codex | Example | `src.codex/` |",
-            "README production pack membership drifted",
+            "README client membership drifted",
         ),
         (
             "README.md",
-            "| Claude Code | Production | `src.claude/` |",
-            "| Claude Code | Example | `src.claude/` |",
-            "README production pack membership drifted",
+            "| Claude Code | Secondary adapter | `adapters/claude/` |",
+            "| Claude Code | Example | `adapters/claude/` |",
+            "README client membership drifted",
         ),
         (
-            "install.py",
-            '"3": ("codex", "claude"),',
-            '"3": ("codex",),',
-            "installer production pack membership drifted",
+            "scripts/installation/clients.py",
+            '"id": "claude", "label": "Claude Code", "primary": False,',
+            '"id": "claude", "label": "Claude Code", "primary": True,',
+            "installer client membership drifted",
+        ),
+        (
+            "scripts/installation/clients.py",
+            '"id": "antigravity", "label": "Antigravity", "command": "agy", "primary": False,',
+            '"id": "antigravity", "label": "Antigravity", "command": "agy", "primary": True,',
+            "installer client membership drifted",
+        ),
+        (
+            "README.md",
+            "| Antigravity | Native startup integration only |",
+            "| Antigravity | Primary |",
+            "README client membership drifted",
         ),
     ),
 )
@@ -324,8 +360,29 @@ def test_doc_common_skill_lists_match_the_spine_owner() -> None:
     readme_names = set(re.findall(r"^- `\$([a-z][a-z0-9-]+)`", match.group(1), re.M))
     assert readme_names == owner
 
-    claude_md = (ROOT / "src.claude/CLAUDE.md").read_text(encoding="utf-8")
+    claude_md = (ROOT / 'adapters/claude/CLAUDE.md').read_text(encoding="utf-8")
     assert "## Common skills" not in claude_md
     assert not re.search(
         r"common-skills \((`\$[a-z0-9-]+`(?:,\s*`\$[a-z0-9-]+`)*)\)", claude_md
     ), "the Claude delta must import the shared common-skill inventory"
+
+
+@pytest.mark.parametrize("catalog", [
+    "CLIENTS = ((\"codex\", \"Codex\"),)",
+    "CLIENTS = ((\"grok\", \"Grok\"),)",
+    "CLIENTS = load_clients()",
+    "CLIENTS = ((\"codex\", \"Codex\"), (\"claude\", \"Claude Code\"))\nCLIENTS = ()",
+    "CLIENTS = (",
+])
+def test_installer_catalog_rejects_missing_dynamic_or_duplicate_inventory(tmp_path, catalog):
+    (tmp_path / "install.py").write_text(catalog, encoding="utf-8")
+    assert not _runtime().installer_choices_are_supported_production_packs(tmp_path)
+
+
+def test_installer_catalog_inspection_does_not_execute_entrypoint(tmp_path):
+    (tmp_path / "install.py").write_text(
+        'CLIENTS = (("codex", "Codex"), ("claude", "Claude Code"))\n'
+        'raise AssertionError("entrypoint must not run during inspection")\n',
+        encoding="utf-8",
+    )
+    assert _runtime().installer_choices_are_supported_production_packs(tmp_path)

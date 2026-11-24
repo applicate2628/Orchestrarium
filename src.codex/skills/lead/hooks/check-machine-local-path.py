@@ -212,6 +212,24 @@ def _content_to_scan(envelope: dict, tool_input: dict) -> list[tuple[str, str]]:
     return parts
 
 
+def written_content_advisory(parts: list[tuple[str, str]]) -> str | None:
+    """Shared audit policy for provider-decoded written content; no I/O or grants."""
+    for target, text in parts:
+        if target and _is_scratch_target(target):
+            continue
+        hits = find_machine_paths(text)
+        if hits:
+            shown = ", ".join(hits[:5])
+            return (
+                "[machine-local-path AUDIT] candidate machine-local path(s) in write to "
+                f"{target or '<unknown target>'}: {shown} "
+                "(machine-local-path-provenance rule: use a repo-neutral placeholder "
+                "such as <repo>, %USERPROFILE%, or ${CLAUDE_PROJECT_DIR}, or keep the "
+                "exact path only under .scratch/. AUDIT mode -- allowing this write.)"
+            )
+    return None
+
+
 def main() -> int:
     try:
         envelope = parse_envelope(read_stdin_utf8())
@@ -223,24 +241,13 @@ def main() -> int:
         return 0  # nothing to inspect; allow
 
     target = _target_path(tool_input)
-    for content_target, text in _content_to_scan(envelope, tool_input):
-        effective_target = content_target or target
-        if effective_target and _is_scratch_target(effective_target):
-            continue  # .scratch/ is the designated local-only evidence area; allow
-        hits = find_machine_paths(text)
-        if hits:
-            shown = ", ".join(hits[:5])
-            emit_advisory(
-                envelope,
-                "[machine-local-path AUDIT] candidate machine-local path(s) in write to "
-                f"{effective_target or '<unknown target>'}: {shown} "
-                "(machine-local-path-provenance rule: use a repo-neutral placeholder "
-                "such as <repo>, %USERPROFILE%, or ${CLAUDE_PROJECT_DIR}, or keep the "
-                "exact path only under .scratch/. AUDIT mode -- allowing this write.)",
-            )
-            # Exit 0: the advisory reaches the model via hookSpecificOutput.
-            # additionalContext (see hook_common.emit_advisory) -- never exit 2 (block).
-            return 0
+    message = written_content_advisory([
+        (content_target or target, text)
+        for content_target, text in _content_to_scan(envelope, tool_input)
+    ])
+    if message is not None:
+        emit_advisory(envelope, message)
+        return 0
     # AUDIT mode: always allow the write. (Promotion to a blocking PreToolUse
     # deny -- exit 2 -- is a separate reviewed step once the false-positive
     # rate is measured.)

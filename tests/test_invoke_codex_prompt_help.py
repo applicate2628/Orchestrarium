@@ -21,6 +21,10 @@ options:
   --prompt-file PATH             read the prompt from PATH
   -PromptFile PATH               legacy spelling for --prompt-file
   --terminal-receipt PATH        write the required terminal receipt to PATH
+  --sdk-review-binding PATH      opt into bounded Windows SDK review; no CLI fallback
+
+  --user-approved-launch         caller asserts genuine agreement for this one managed Astra/Max attempt
+  --astra-task-authorization-json <json>  existing Astra high/xhigh task grant (taskClass, scope, approvalReference)
   --ledger PATH                  append the optional terminal ledger event
   -Ledger PATH                   legacy spelling for --ledger
   --ledger-role ROLE             record the ledger execution role
@@ -77,8 +81,9 @@ def test_extra_help_arguments_do_not_bypass_provider_launch(tmp_path: Path) -> N
         """import json
 import sys
 
-def launch(provider, argv):
-    sys.stdout.write(json.dumps({"provider": provider, "argv": argv}, separators=(",", ":")))
+def launch(provider, argv, *, runtime_namespace):
+    sys.stdout.write(json.dumps({"provider": provider, "argv": argv,
+                                "runtime_namespace": str(runtime_namespace)}, separators=(",", ":")))
     return 73
 """,
         encoding="utf-8",
@@ -90,6 +95,7 @@ def launch(provider, argv):
     assert json.loads(completed.stdout) == {
         "provider": "codex",
         "argv": ["--help", "extra"],
+        "runtime_namespace": str(tmp_path),
     }
     assert completed.stderr == ""
 

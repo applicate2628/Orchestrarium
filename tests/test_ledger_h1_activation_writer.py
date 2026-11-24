@@ -174,7 +174,7 @@ def h1_manifest(root: Path) -> bytes:
     ) + b"\n"
 
 
-def fixture(root: Path):
+def fixture(root: Path, *, invalid_launch_binding: bool = True):
     reader_fixture = load_module(
         READER_FIXTURE_SCRIPT,
         f"ledger_h1_reader_fixture_{id(root)}",
@@ -183,6 +183,7 @@ def fixture(root: Path):
     reader_artifacts, items, paths, _expected = reader_fixture.synthetic_artifacts(
         reader,
         root,
+        invalid_launch_binding=invalid_launch_binding,
     )
     for relative, raw in reader_artifacts.ledger_bytes_by_path.items():
         target = root.joinpath(*relative.split("/"))
@@ -1009,7 +1010,9 @@ def test_archive_both_h1_members_preserves_logical_group_and_sealed_artifacts(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "both-archives"
-    writer, reader, request, items, paths = fixture(root)
+    # Successful archival needs a fully valid relation; the default fixture's
+    # deliberately invalid launch remains covered by the reader refusal cases.
+    writer, reader, request, items, paths = fixture(root, invalid_launch_binding=False)
     for index, item in enumerate(items, start=1):
         (item / "status.md").write_bytes(active_status(f"Relocate H1 member {index}."))
     applied = writer.apply_sealed_prefix_activation(root, request)

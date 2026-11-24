@@ -52,10 +52,9 @@ CURRENT_LIFECYCLE_SURFACES = (
     ROOT / "scripts" / "check-work-items-state.py",
     ROOT / "src.codex" / "AGENTS.codex.md",
     ROOT / "src.codex" / "skills" / "lead" / "SKILL.md",
-    ROOT / "src.claude" / "CLAUDE.md",
-    ROOT / "src.claude" / "skills" / "lead" / "SKILL.md",
-    ROOT / "src.claude" / "commands" / "agents-status.md",
-    ROOT / "src.claude" / "commands" / "agents-implement.md",
+    ROOT / 'adapters/claude' / "CLAUDE.md",
+    ROOT / 'adapters/claude' / "commands" / "agents-status.md",
+    ROOT / 'adapters/claude' / "commands" / "agents-implement.md",
     ROOT / "docs" / "epics.md",
     ROOT / "docs" / "dependencies.md",
     ROOT / "docs" / "decisions.md",
@@ -68,15 +67,15 @@ CURRENT_LIFECYCLE_SURFACES = (
     ROOT / "scripts" / "universal-hooks" / "scripts" / "hook_common.py",
     ROOT / "src.codex" / "skills" / "lead" / "scripts" / "workitem_sentinels.py",
     ROOT / "src.codex" / "skills" / "lead" / "scripts" / "hook_common.py",
-    ROOT / "src.claude" / "agents" / "scripts" / "workitem_sentinels.py",
-    ROOT / "src.claude" / "agents" / "scripts" / "hook_common.py",
+    ROOT / 'adapters/claude' / "agents" / "scripts" / "workitem_sentinels.py",
+    ROOT / 'adapters/claude' / "agents" / "scripts" / "hook_common.py",
 )
 RETIRED_ADAPTER_PATHS = tuple(
     ROOT / base / f"{OBSOLETE_MARKER}{suffix}"
     for base in (
         Path("scripts/universal-hooks/scripts"),
         Path("src.codex/skills/lead/scripts"),
-        Path("src.claude/agents/scripts"),
+        Path("adapters/claude/agents/scripts"),
     )
     for suffix in (".py", ".sh")
 )
@@ -146,12 +145,14 @@ def _install_specs(provider: str, registration: Path, installed_root: Path) -> N
             raise AssertionError(result.stdout + result.stderr)
 
 
-def _remove_obsolete(provider: str, registration: Path) -> None:
+def _remove_obsolete(provider: str, registration: Path, script: Path) -> None:
     result = _run_helper(
         provider,
         registration,
         "--script-marker",
         OBSOLETE_MARKER,
+        "--script-path",
+        str(script),
         "--hook-event",
         "Stop",
         "--remove",
@@ -175,15 +176,14 @@ class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
     def test_bug_disposition_close_contract_is_present_across_installed_surfaces(self) -> None:
         explicit_surfaces = (
             ROOT / "shared" / "AGENTS.shared.md",
-            ROOT / "src.claude" / "CLAUDE.md",
+            ROOT / 'adapters/claude' / "CLAUDE.md",
             ROOT / "src.codex" / "skills" / "lead" / "SKILL.md",
-            ROOT / "src.claude" / "skills" / "lead" / "SKILL.md",
             ROOT / "src.codex" / "skills" / "knowledge-archivist" / "SKILL.md",
-            ROOT / "src.claude" / "agents" / "knowledge-archivist.md",
+            ROOT / 'adapters/claude' / "agents" / "knowledge-archivist.md",
         )
         for path in explicit_surfaces:
             text = path.read_text(encoding="utf-8")
-            if path == ROOT / "src.claude" / "CLAUDE.md":
+            if path == ROOT / 'adapters/claude' / "CLAUDE.md":
                 text = (ROOT / "shared" / "AGENTS.shared.md").read_text(
                     encoding="utf-8"
                 ) + "\n" + text
@@ -201,7 +201,11 @@ class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
         )
         self.assertIn("bug-dispositions.json", codex_platform)
         self.assertIn("versioned Lead/lifecycle-owner contract", codex_platform)
-        self.assertIn("Physical location owns membership", codex_platform)
+        self.assertIn("apply shared **Physical lifecycle V1**", codex_platform)
+        self.assertIn(
+            "Physical location alone owns lifecycle",
+            (ROOT / "shared/AGENTS.shared.md").read_text(encoding="utf-8"),
+        )
 
         owner = (ROOT / "scripts" / "mutate-work-item.py").read_text(
             encoding="utf-8"
@@ -230,7 +234,7 @@ class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
             source_root = (
                 ROOT / "src.codex" / "skills" / "lead"
                 if provider == "codex"
-                else ROOT / "src.claude" / "agents"
+                else ROOT / 'adapters/claude' / "agents"
             )
             markers = {
                 marker
@@ -264,11 +268,11 @@ class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
         )
 
         codex = (ROOT / "src.codex" / "AGENTS.codex.md").read_text(encoding="utf-8")
-        self.assertIn("ships seven structural hooks", codex)
-        self.assertIn("auto-installs all twelve Codex hook entries", codex)
-        self.assertIn("Physical location owns membership", codex)
+        self.assertIn("Codex hook procedure in the existing Lead operating-model", codex)
+        self.assertIn("twelve Codex entries and thirteen Claude entries", install)
+        self.assertIn("apply shared **Physical lifecycle V1**", codex)
 
-        claude = (ROOT / "src.claude" / "CLAUDE.md").read_text(encoding="utf-8")
+        claude = (ROOT / 'adapters/claude' / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertIn("auto-installs thirteen `settings.json` entries", claude)
         self.assertIn("nine structural hooks", claude)
         self.assertIn("Physical location owns lifecycle membership", claude)
@@ -276,18 +280,18 @@ class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
         runtime = (
             ROOT / "scripts" / "universal-hooks" / "scripts" / "workitem_sentinels.py"
         ).read_text(encoding="utf-8")
-        self.assertIn("only after it physically enters archive/", runtime)
+        self.assertIn("Physical location owns lifecycle membership", runtime)
         self.assertIn('"event": "PeriodicCheck"', runtime)
 
     def test_disposable_upgrade_preserves_retained_hook_identities(self) -> None:
         installer = _load_installer()
         with tempfile.TemporaryDirectory() as directory:
             temp = Path(directory)
-            for provider, expected_count in (("codex", 13), ("claude", 13)):
+            for provider, expected_count in (("codex", 12), ("claude", 13)):
                 source_root = (
                     ROOT / "src.codex" / "skills" / "lead"
                     if provider == "codex"
-                    else ROOT / "src.claude" / "agents"
+                    else ROOT / 'adapters/claude' / "agents"
                 )
                 actual = temp / f"{provider}-actual.json"
                 expected = temp / f"{provider}-expected.json"
@@ -296,23 +300,33 @@ class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
                 seeded = json.loads(expected.read_text(encoding="utf-8"))
                 seeded["userSetting"] = {"preserve": True}
                 seeded["hooks"]["CustomEvent"] = copy.deepcopy(user_event)
-                seeded["hooks"].setdefault("Stop", []).append(
-                    {
-                        "hooks": [
-                            {
-                                "type": "command",
-                                "command": f"python /old/{OBSOLETE_MARKER}.py",
-                            }
-                        ]
-                    }
-                )
                 actual.write_text(json.dumps(seeded), encoding="utf-8")
+                retired_script = temp / f"{provider}-retired" / f"{OBSOLETE_MARKER}.py"
+                retired_script.parent.mkdir()
+                retired_script.write_text("# synthetic retired registration target\n", encoding="utf-8")
+                seeded_retired = _run_helper(
+                    provider, actual, "--script-marker", OBSOLETE_MARKER,
+                    "--script-path", str(retired_script), "--hook-event", "Stop",
+                )
+                self.assertEqual(seeded_retired.returncode, 0, seeded_retired.stdout + seeded_retired.stderr)
+                self.assertTrue(
+                    any(
+                        str(retired_script) in value
+                        for value in _all_strings(json.loads(actual.read_text(encoding="utf-8")))
+                    ),
+                    "the retired registration must exist before removal",
+                )
 
-                _remove_obsolete(provider, actual)
+                _remove_obsolete(provider, actual, retired_script)
                 _install_specs(provider, actual, source_root)
 
                 actual_data = json.loads(actual.read_text(encoding="utf-8"))
                 expected_data = json.loads(expected.read_text(encoding="utf-8"))
+                if provider == "codex":
+                    # The Codex codec preserves the group after removing its
+                    # last owned handler. Account for this exact seeded slot;
+                    # every retained and user-owned group still compares whole.
+                    expected_data["hooks"]["Stop"].append({"hooks": []})
                 self.assertEqual(actual_data.pop("userSetting"), {"preserve": True})
                 self.assertEqual(
                     actual_data["hooks"].pop("CustomEvent"),
@@ -329,20 +343,16 @@ class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
 
     def test_disposable_layouts_have_mirrored_runtime_support_and_no_adapter(self) -> None:
         canonical_runtime = ROOT / "scripts" / "universal-hooks" / "scripts"
+        installer = _load_installer()
         with tempfile.TemporaryDirectory() as directory:
             temp = Path(directory)
             for provider, source in (
                 ("codex", ROOT / "src.codex" / "skills" / "lead"),
-                ("claude", ROOT / "src.claude" / "agents"),
+                ("claude", ROOT / 'adapters/claude' / "agents"),
             ):
                 installed = temp / provider
                 shutil.copytree(source, installed)
-                for helper in (
-                    "mutate-work-item.py",
-                    "check-work-items-state.py",
-                    "validate-work-item-state.py",
-                ):
-                    shutil.copy2(ROOT / "scripts" / helper, installed / "scripts" / helper)
+                installer._install_runtime_files(ROOT, installed / "scripts", False)
                 for support in ("workitem_sentinels.py", "hook_common.py"):
                     self.assertEqual(
                         hashlib.sha256((installed / "scripts" / support).read_bytes()).hexdigest(),

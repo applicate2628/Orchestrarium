@@ -98,7 +98,7 @@
         "external-brigade",
         "none"
       ],
-      "$comment": "Exactly ONE main-conversation identity: 'main' (the main conversation, which also holds the Lead role). Current recovery state — Task, Current step, Last result, Next action, and staged lifecycle fields — is owned by status.md, not executionRole; its older 'orchestration: light|full-lead' scalar remains legacy-compatible. Ledgers written before 2026-07-11 may carry the legacy value 'lead'; readers map it to 'main' (see scripts/validate-work-item-state.py LEGACY_EXECUTION_ROLES). New writes must use 'main'."
+      "$comment": "Exactly ONE main-conversation identity: 'main' (the main conversation, which also holds the Lead role). Current recovery state \u2014 Task, Current step, Last result, Next action, and staged lifecycle fields \u2014 is owned by status.md, not executionRole; its older 'orchestration: light|full-lead' scalar remains legacy-compatible. Ledgers written before 2026-07-11 may carry the legacy value 'lead'; readers map it to 'main' (see scripts/validate-work-item-state.py LEGACY_EXECUTION_ROLES). New writes must use 'main'."
     },
     "assignedRole": {
       "type": "string"
@@ -249,7 +249,609 @@
     "actualExecutionPath": {
       "enum": [
         "direct-external-cli",
+        "direct-external-sdk",
         "internal"
+      ]
+    },
+    "sdkExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "adapter",
+        "model",
+        "effort",
+        "sandboxMode",
+        "approvalPolicy",
+        "accountBinding"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "schemaVersion": {
+              "const": 1
+            },
+            "operationKind": false,
+            "innerRequestSha256": false,
+            "outerBudgetBinding": false,
+            "innerBudgetBinding": false,
+            "childChoiceSha256": false,
+            "childAssignmentSha256": false,
+            "decisionSessionMode": false,
+            "childDecisionContextSha256": false
+          },
+          "if": {
+            "properties": {
+              "adapter": {
+                "const": "microsoft-copilot-sdk"
+              }
+            }
+          },
+          "then": {},
+          "else": {
+            "required": [
+              "sdkVersion",
+              "runtimeVersion"
+            ]
+          }
+        },
+        {
+          "properties": {
+            "schemaVersion": {
+              "const": 2
+            },
+            "sdkVersion": false,
+            "runtimeVersion": false,
+            "operationKind": false,
+            "innerRequestSha256": false,
+            "outerBudgetBinding": false,
+            "innerBudgetBinding": false,
+            "childChoiceSha256": false,
+            "childAssignmentSha256": false,
+            "decisionSessionMode": false,
+            "childDecisionContextSha256": false
+          },
+          "required": [
+            "requestSha256"
+          ]
+        },
+        {
+          "properties": {
+            "schemaVersion": {
+              "const": 3
+            },
+            "sdkVersion": false,
+            "runtimeVersion": false,
+            "childChoiceSha256": false,
+            "operationKind": {
+              "const": "coordination-inference"
+            },
+            "childAssignmentSha256": false,
+            "decisionSessionMode": false,
+            "childDecisionContextSha256": false
+          },
+          "required": [
+            "requestSha256",
+            "operationKind",
+            "innerRequestSha256",
+            "outerBudgetBinding",
+            "innerBudgetBinding"
+          ]
+        },
+        {
+          "properties": {
+            "schemaVersion": {
+              "const": 5
+            },
+            "sdkVersion": false,
+            "runtimeVersion": false,
+            "innerRequestSha256": false,
+            "operationKind": {
+              "const": "scoped-child-coordination"
+            }
+          },
+          "required": [
+            "requestSha256",
+            "operationKind",
+            "childChoiceSha256",
+            "outerBudgetBinding",
+            "innerBudgetBinding"
+          ]
+        }
+      ],
+      "properties": {
+        "requestSha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "$comment": "Optional for historical version-1 SDK rows; mandatory for selected version-2 metadata. SHA-256 of the canonical request and effect-relevant runtime selection, excluding expected launch SHA to avoid self-reference. Selected commitment, not an observed provider profile field."
+        },
+        "schemaVersion": {
+          "type": "integer",
+          "enum": [
+            1,
+            2,
+            3,
+            5
+          ]
+        },
+        "adapter": {
+          "enum": [
+            "openai-codex",
+            "claude-agent-sdk",
+            "microsoft-copilot-sdk"
+          ]
+        },
+        "sdkVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/!+-]{0,127}$"
+        },
+        "runtimeVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/!+-]{0,127}$"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$"
+        },
+        "effort": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "sandboxMode": {
+          "enum": [
+            "read-only",
+            "tool-restricted-read-only",
+            "tool-restricted-workspace-write",
+            "workspace-write"
+          ]
+        },
+        "approvalPolicy": {
+          "enum": [
+            "deny_all",
+            "deny_unadmitted"
+          ]
+        },
+        "accountBinding": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$"
+        },
+        "operationKind": {
+          "enum": [
+            "coordination-inference",
+            "scoped-child-coordination"
+          ]
+        },
+        "innerRequestSha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "$comment": "Immutable inner execution snapshot, required only for coordination inference."
+        },
+        "outerBudgetBinding": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$"
+        },
+        "innerBudgetBinding": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$"
+        },
+        "writeWorkspaceSha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "$comment": "SHA-256 of exact canonical request write_workspace UTF-8. Binds workspace without exporting a machine path; not permission or containment evidence."
+        },
+        "continuationSourceSha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "$comment": "Exact prior received native-turn linkage digest; selected request commitment and canonical one-use launch claim remain authoritative."
+        },
+        "forkSourceSha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "$comment": "Exact received source for a new native thread fork. Does not consume the source continuation slot or grant child-Lead authority."
+        },
+        "childChoiceSha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "$comment": "Immutable closed child catalog and received-state choice projection commitment."
+        },
+        "childAssignmentSha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "$comment": "Explicit Root assignment anchor for a scoped child decision."
+        },
+        "decisionSessionMode": {
+          "type": "string",
+          "const": "native-persistent",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "[a-z-]+"
+        },
+        "childDecisionContextSha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "$comment": "Immutable fresh-handoff decision context; not a native session continuation."
+        }
+      },
+      "$comment": "Exact SDK configuration, not permission or qualification evidence. Version 1 retains historical version-bearing metadata. Version 2 records only admitted controls and the request commitment, never fabricating SDK/runtime versions before startup; actual observed versions are retained in the scanned, artifact-bound review evidence. All tokens are bounded 128-character ASCII; version metadata additionally permits standard build/epoch markers. Codex read-only names its OS sandbox; Claude tool-restricted modes do not claim OS isolation; admitted Host tool callbacks own path permissions. Approval-policy labels are not blanket tool denials. Workspace-write adds its exact writeWorkspaceSha256 binding; selected v2 remains request-bound and observed v1 remains evidence only. Copilot prompt-only controls deny all tools; they do not prove account identity or OS process settlement.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "adapter": {
+                "const": "openai-codex"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sandboxMode": {
+                "enum": [
+                  "read-only",
+                  "workspace-write"
+                ]
+              },
+              "approvalPolicy": {
+                "const": "deny_all"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "adapter": {
+                "const": "claude-agent-sdk"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sandboxMode": {
+                "enum": [
+                  "tool-restricted-read-only",
+                  "tool-restricted-workspace-write"
+                ]
+              },
+              "approvalPolicy": {
+                "const": "deny_unadmitted"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "schemaVersion": {
+                "const": 3
+              }
+            },
+            "required": [
+              "schemaVersion"
+            ]
+          },
+          "then": {
+            "properties": {
+              "adapter": {
+                "const": "openai-codex"
+              },
+              "sandboxMode": {
+                "const": "read-only"
+              },
+              "approvalPolicy": {
+                "const": "deny_all"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "sandboxMode": {
+                "enum": [
+                  "workspace-write",
+                  "tool-restricted-workspace-write"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "writeWorkspaceSha256"
+            ],
+            "properties": {
+              "schemaVersion": {
+                "enum": [
+                  1,
+                  2
+                ]
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "writeWorkspaceSha256": false
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "continuationSourceSha256"
+            ]
+          },
+          "then": {
+            "properties": {
+              "schemaVersion": {
+                "enum": [
+                  1,
+                  2,
+                  5
+                ]
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "schemaVersion": {
+                      "const": 5
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "decisionSessionMode",
+                    "childAssignmentSha256"
+                  ]
+                }
+              }
+            ],
+            "anyOf": [
+              {
+                "properties": {
+                  "adapter": {
+                    "const": "openai-codex"
+                  },
+                  "sandboxMode": {
+                    "const": "read-only"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "adapter": {
+                    "const": "microsoft-copilot-sdk"
+                  },
+                  "sandboxMode": {
+                    "const": "tool-restricted-read-only"
+                  },
+                  "schemaVersion": {
+                    "enum": [
+                      1,
+                      2,
+                      5
+                    ]
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "adapter": {
+                    "const": "claude-agent-sdk"
+                  },
+                  "sandboxMode": {
+                    "const": "tool-restricted-read-only"
+                  },
+                  "schemaVersion": {
+                    "enum": [
+                      1,
+                      2,
+                      5
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "forkSourceSha256"
+            ]
+          },
+          "then": {
+            "properties": {
+              "adapter": {
+                "const": "openai-codex"
+              },
+              "sandboxMode": {
+                "const": "read-only"
+              },
+              "schemaVersion": {
+                "enum": [
+                  1,
+                  2
+                ]
+              }
+            }
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "forkSourceSha256",
+              "continuationSourceSha256"
+            ]
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": [
+                  "decisionSessionMode"
+                ]
+              },
+              {
+                "required": [
+                  "childAssignmentSha256"
+                ]
+              },
+              {
+                "required": [
+                  "childDecisionContextSha256"
+                ]
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "schemaVersion": {
+                "const": 5
+              },
+              "forkSourceSha256": false
+            },
+            "oneOf": [
+              {
+                "required": [
+                  "decisionSessionMode",
+                  "childAssignmentSha256"
+                ],
+                "properties": {
+                  "childDecisionContextSha256": false
+                }
+              },
+              {
+                "required": [
+                  "childAssignmentSha256",
+                  "childDecisionContextSha256"
+                ],
+                "properties": {
+                  "decisionSessionMode": false,
+                  "continuationSourceSha256": false
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "adapter": {
+                "const": "microsoft-copilot-sdk"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "schemaVersion": {
+                "enum": [
+                  1,
+                  2,
+                  5
+                ]
+              },
+              "sandboxMode": {
+                "enum": [
+                  "tool-restricted-read-only",
+                  "tool-restricted-workspace-write"
+                ]
+              },
+              "forkSourceSha256": false
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "sandboxMode": {
+                      "const": "tool-restricted-read-only"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "approvalPolicy": {
+                      "const": "deny_all"
+                    }
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "approvalPolicy": {
+                      "const": "deny_unadmitted"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "schemaVersion": {
+                "const": 5
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "adapter": {
+                "enum": [
+                  "openai-codex",
+                  "microsoft-copilot-sdk",
+                  "claude-agent-sdk"
+                ]
+              },
+              "sandboxMode": {
+                "enum": [
+                  "read-only",
+                  "tool-restricted-read-only"
+                ]
+              },
+              "approvalPolicy": {
+                "enum": [
+                  "deny_all",
+                  "deny_unadmitted"
+                ]
+              }
+            }
+          }
+        }
       ]
     },
     "artifactIdentity": {
@@ -413,7 +1015,12 @@
     "artifactRevision": {
       "type": "string",
       "minLength": 4,
-      "$comment": "Revision of the reviewed artifact at review time (plain string in the minimal slice: a git sha or content digest; mechanical git-object/blob verification is deferred)."
+      "$comment": "Legacy review revision remains a git sha or content digest. On an SDK terminal with an artifact, this is the lowercase SHA-256 of exact received output bytes, qualified with artifactSizeBytes by the existing snapshot and locator owners."
+    },
+    "artifactSizeBytes": {
+      "type": "integer",
+      "minimum": 0,
+      "$comment": "Exact received SDK terminal artifact length. Together with artifactRevision SHA-256, binds output bytes and bounds the existing snapshot reader."
     },
     "lane": {
       "type": "string",
@@ -625,6 +1232,16 @@
     },
     "notes": {
       "type": "string"
+    },
+    "terminalReceiptSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "$comment": "Exact already-committed external CLI terminal envelope bytes; not the lifecycle artifact."
+    },
+    "terminalReceiptSizeBytes": {
+      "type": "integer",
+      "minimum": 1,
+      "$comment": "Paired terminal receipt size bounds read-only recovery; legacy terminals may omit both fields."
     }
   },
   "oneOf": [
@@ -755,6 +1372,247 @@
     }
   ],
   "allOf": [
+    {
+      "if": {
+        "required": [
+          "artifactSizeBytes"
+        ]
+      },
+      "then": {
+        "required": [
+          "artifact",
+          "actualExecutionPath",
+          "eventKind"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "const": 2
+          },
+          "actualExecutionPath": {
+            "const": "direct-external-sdk"
+          },
+          "eventKind": {
+            "const": "terminal"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "artifact",
+          "actualExecutionPath",
+          "eventKind"
+        ],
+        "properties": {
+          "actualExecutionPath": {
+            "const": "direct-external-sdk"
+          },
+          "eventKind": {
+            "const": "terminal"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "artifactRevision",
+          "artifactSizeBytes"
+        ],
+        "properties": {
+          "artifactRevision": {
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "anyOf": [
+          {
+            "required": [
+              "sdkExecution"
+            ]
+          },
+          {
+            "required": [
+              "actualExecutionPath"
+            ],
+            "properties": {
+              "actualExecutionPath": {
+                "const": "direct-external-sdk"
+              }
+            }
+          }
+        ]
+      },
+      "then": {
+        "required": [
+          "sdkExecution",
+          "actualExecutionPath",
+          "eventKind",
+          "provider",
+          "model",
+          "effort",
+          "assignedRole",
+          "artifactIdentity",
+          "externalDispatchId",
+          "externalEvidenceRunId",
+          "effortMappingLoss"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "const": 2
+          },
+          "actualExecutionPath": {
+            "const": "direct-external-sdk"
+          },
+          "provider": {
+            "enum": [
+              "codex",
+              "claude",
+              "copilot"
+            ]
+          },
+          "eventKind": {
+            "enum": [
+              "launch",
+              "terminal"
+            ]
+          }
+        },
+        "not": {
+          "required": [
+            "launchFlags"
+          ]
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "eventKind": {
+                  "const": "launch"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "status": {
+                  "const": "running"
+                },
+                "gate": {
+                  "const": "none"
+                }
+              },
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "terminalClass"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "authorizing"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "closesRunIds"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "closerRunId"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "targetTuple"
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "eventKind": {
+                  "const": "terminal"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "terminalClass",
+                "authorizing",
+                "closesRunIds",
+                "launchRunId"
+              ],
+              "properties": {
+                "status": {
+                  "enum": [
+                    "completed",
+                    "revise",
+                    "blocked",
+                    "cancelled"
+                  ]
+                },
+                "terminalClass": {
+                  "const": "external-nonauthorizing"
+                },
+                "authorizing": {
+                  "const": false
+                },
+                "closesRunIds": {
+                  "const": []
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "provider": {
+                  "const": "codex"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "sdkExecution": {
+                  "properties": {
+                    "adapter": {
+                      "const": "openai-codex"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "provider": {
+                  "const": "claude"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "sdkExecution": {
+                  "properties": {
+                    "adapter": {
+                      "const": "claude-agent-sdk"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
     {
       "if": {
         "properties": {
@@ -1270,6 +2128,126 @@
               ]
             }
           ]
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "sdkExecution"
+        ],
+        "properties": {
+          "sdkExecution": {
+            "required": [
+              "schemaVersion"
+            ],
+            "properties": {
+              "schemaVersion": {
+                "const": 3
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "role": {
+            "const": "lead"
+          },
+          "executionRole": {
+            "const": "main"
+          },
+          "assignedRole": {
+            "const": "lead"
+          },
+          "provider": {
+            "const": "codex"
+          },
+          "gate": {
+            "const": "none"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "anyOf": [
+          {
+            "required": [
+              "terminalReceiptSha256"
+            ]
+          },
+          {
+            "required": [
+              "terminalReceiptSizeBytes"
+            ]
+          }
+        ]
+      },
+      "then": {
+        "required": [
+          "terminalReceiptSha256",
+          "terminalReceiptSizeBytes",
+          "eventKind",
+          "terminalClass",
+          "actualExecutionPath",
+          "authorizing"
+        ],
+        "properties": {
+          "eventKind": {
+            "const": "terminal"
+          },
+          "terminalClass": {
+            "const": "external-nonauthorizing"
+          },
+          "actualExecutionPath": {
+            "const": "direct-external-cli"
+          },
+          "authorizing": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "sdkExecution"
+        ],
+        "properties": {
+          "sdkExecution": {
+            "required": [
+              "schemaVersion"
+            ],
+            "properties": {
+              "schemaVersion": {
+                "const": 5
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "role": {
+            "const": "lead"
+          },
+          "executionRole": {
+            "const": "main"
+          },
+          "assignedRole": {
+            "const": "lead"
+          },
+          "provider": {
+            "enum": [
+              "codex",
+              "copilot",
+              "claude"
+            ]
+          },
+          "gate": {
+            "const": "none"
+          }
         }
       }
     }

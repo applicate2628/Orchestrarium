@@ -18,6 +18,7 @@ The rules below apply to every tracked file in the repository, including docs, r
 
 - Use `/.scratch/` for raw logs, transcripts, temp outputs, one-off experiments, and pre-redaction material.
 - Keep disposable material out of tracked paths until it is redacted and intentionally promoted.
+- Required recovery/acceptance evidence and important edits must also have verified custody outside disposable storage under the shared artifact-disposition owner. Keep raw/private copies local and ignored; preservation alone never authorizes publication.
 - The root `.gitignore` owns this boundary.
 
 ## Review and publication
@@ -145,14 +146,13 @@ same result. This is not evidence that complete native history meets its budget.
 
 ### Deferred timeout redesign and cancelled experiment
 
-The owner deferred timeout redesign until the Rust transition. Production
-scanner and supervisor budgets remain 240 and 300 seconds respectively. The
-scanner constant originated in 8f92dc73 (complete unpublished history, 2026-08-26);
-the supervisor constant originated in 1ac19a3f (process ownership and fail-closed
-publication, 2026-08-11). Those changes justify bounded work/settlement, but their
-inspected messages and diffs provide no measurement deriving the exact values.
-The supervisor budget also participates in authorization lifetime; it is not an
-isolated performance knob.
+The owner deferred timeout redesign until the Rust transition. The legacy source
+baseline used 240 seconds for the scanner and 300 seconds for the gate-owned
+child. The SDK branch retains its existing 900/960-second bounds from `347d1f5d`,
+which recorded approximately 485–530 seconds for its reference full-history
+Windows measurements. This does not introduce new timeout logic or qualify any
+other history. The supervisor budget also participates in authorization lifetime;
+it is not an isolated performance knob.
 
 One read-only internal experiment used a larger diagnostic-only budget with no
 callback, receipt, push or saved setting change. It was cancelled on the owner's

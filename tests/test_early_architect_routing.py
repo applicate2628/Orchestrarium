@@ -10,11 +10,11 @@ DETAIL = ROOT / "shared/references/spine/functional-first-delivery.md"
 ARCHITECT_SKILLS = (
     ROOT / "src.codex/skills/architect/SKILL.md",
 )
-CLAUDE_ARCHITECT_WRAPPER = ROOT / "src.claude/agents/architect.md"
-CLAUDE_INLINE_POLICY = ROOT / "src.claude/CLAUDE.md"
+CLAUDE_ARCHITECT_WRAPPER = ROOT / 'adapters/claude/agents/architect.md'
+CLAUDE_INLINE_POLICY = ROOT / 'adapters/claude/CLAUDE.md'
 LEAD_SKILLS = (
     ROOT / "src.codex/skills/lead/SKILL.md",
-    ROOT / "src.claude/skills/lead/SKILL.md",
+    ROOT / 'adapters/claude/skills/lead/SKILL.md',
 )
 
 
@@ -65,7 +65,7 @@ class TestEarlyArchitectRouting(unittest.TestCase):
             "For a bounded early package, the decision, owner, seam, protected surface, material-alternative disposition, and falsifying probe are explicit",
         )
         self.assertIn(
-            "The universal Architect skill (`.agents/skills/architect/SKILL.md`, sourced from `src.codex/skills/architect/SKILL.md`) is the sole role-contract body owner",
+            "The sole authored role-contract body is `src.codex/skills/architect/SKILL.md`; this Claude installation loads its ordinary copy at `.claude/skills/architect/SKILL.md`.",
             claude_wrapper,
         )
         self.assertIn(
@@ -73,7 +73,7 @@ class TestEarlyArchitectRouting(unittest.TestCase):
             claude_wrapper,
         )
         self.assertIn(
-            "Architect's sole role-contract body is the universal `.agents/skills/architect/SKILL.md` projection.",
+            "Architect's sole authored role-contract body is `src.codex/skills/architect/SKILL.md`, installed as an ordinary copy at `.claude/skills/architect/SKILL.md`.",
             claude_inline_policy,
         )
 

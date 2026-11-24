@@ -6,11 +6,11 @@ import io
 import json
 import os
 import re
-import subprocess
-import tarfile
 import shutil
 import subprocess
 import sys
+import tarfile
+
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -26,10 +26,38 @@ TRANSPORT_FILES = (
     "process_supervision/process_runner.py",
     "invoke-codex-prompt.py",
     "invoke-claude-prompt.py",
+    "invoke-copilot-prompt.py",
     "invoke-kimi-prompt.py",
     "invoke-grok-prompt.py",
     "external-prompt-governance.md",
     "external-role-taxonomy.v1.json",
+    "process_supervision/sdk_worker.py",
+    "sdk_execution/__init__.py",
+    "sdk_execution/_async.py",
+    "sdk_execution/acp_streams.py",
+    "sdk_execution/claude.py",
+    "sdk_execution/copilot.py",
+    "sdk_execution/codex.py",
+    "sdk_execution/codex_tools.py",
+    "sdk_execution/dispatch.py",
+    "sdk_execution/contracts.py",
+    "sdk_execution/coordinator.py",
+    "sdk_execution/coordination.py",
+    "sdk_execution/coordination_codex.py",
+    "sdk_execution/coordination_model.py",
+    "sdk_execution/coordination_receiving.py",
+    "sdk_execution/grok.py",
+    "sdk_execution/kimi.py",
+    "sdk_execution/mimo.py",
+    "sdk_execution/minimax.py",
+    "sdk_execution/receiving.py",
+    "sdk_execution/runtime.py",
+    "sdk_execution/worker.py",
+    "sdk_execution/native_binding.py",
+)
+SDK_TRANSPORT_FILES = tuple(
+    name for name in TRANSPORT_FILES
+    if name.startswith("sdk_execution/") or name in {"process_supervision/sdk_worker.py", "invoke-copilot-prompt.py"}
 )
 STOCK_8521_TRANSPORT_FILES = (
     "provider_prompt.py",
@@ -250,9 +278,13 @@ def _stock_8f92_blob(name: str) -> bytes:
 
 def _seed_stock_8f92_transport(projection: Path) -> dict[str, Path]:
     projection.mkdir(parents=True, exist_ok=True)
-    current_only = projection / "process_supervision" / "process_runner.py"
-    if current_only.exists():
-        current_only.unlink()
+    for current_only in (
+        projection / "model_routing/launch_policy.py",
+        projection / "process_supervision" / "process_runner.py",
+        *(projection / name for name in SDK_TRANSPORT_FILES),
+    ):
+        if current_only.exists():
+            current_only.unlink()
     paths: dict[str, Path] = {}
     for name in STOCK_8F92_TRANSPORT_FILES:
         path = projection / name
@@ -334,12 +366,21 @@ def _load_installer():
     return module
 
 
+_PEER_LEDGER_HELPERS = (
+    'scripts/agent-run-ledger.py',
+    'scripts/mutate-work-item.py',
+    'scripts/validate-work-item-state.py',
+    'scripts/check-work-items-state.py',
+    'shared/schemas/agent-runs.schema.json',
+)
+
+
 def _archived_815e_ledger_source(tmp_path: Path) -> Path:
     old_source = tmp_path / 'predecessor-source'
     old_source.mkdir()
     public_repository = subprocess.run(['git', '--no-optional-locks', 'rev-parse', '--show-toplevel'],
         cwd=ROOT, capture_output=True, text=True, check=True, timeout=30).stdout.strip()
-    package_bytes = subprocess.run(['git', '--no-optional-locks', 'archive', '--format=tar',
+    package_bytes = subprocess.run(['git', '-c', 'core.autocrlf=false', '--no-optional-locks', 'archive', '--format=tar',
         '815e9dfbc5932cc13ed1a8b01f44204e4b4d2349'], cwd=public_repository,
         capture_output=True, check=True, timeout=30).stdout
     with tarfile.open(fileobj=io.BytesIO(package_bytes), mode='r:') as package:
@@ -349,19 +390,45 @@ def _archived_815e_ledger_source(tmp_path: Path) -> Path:
     return old_source
 
 
-def test_codex_update_refuses_unowned_815e_project_peer_without_effects(
+def test_selected_legacy_peer_materialization_does_not_admit_unsupported_upgrade(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Converting links does not authorize replacement of an unowned generation."""
     old_source = _archived_815e_ledger_source(tmp_path)
     target = tmp_path / 'target'
     target.mkdir()
     arguments = ['--target', str(target), '--force', '--allow-unsafe-target', '--no-hypothesis-hook']
-    seeded = subprocess.run([sys.executable, '-X', 'utf8', '-B', str(old_source / 'scripts/install-claude.py'),
-        *arguments], cwd=old_source, capture_output=True, text=True, timeout=180)
+    seed_command = [sys.executable, '-X', 'utf8', '-B', str(old_source / 'scripts/install-claude.py'), *arguments]
+    if os.name == 'nt':
+        # The frozen installer predates private-thread symlink privilege
+        # activation. Supply that OS prerequisite without modifying its bytes,
+        # granting a missing privilege, or changing the process/system token.
+        # Load the capability first, then remove its source-owned import slots
+        # before loading the frozen installer and its exact dependency family.
+        bootstrap = (
+            "import importlib.util,sys\nfrom pathlib import Path\n"
+            "current_scripts=Path(" + repr(str(ROOT / 'scripts')) + ").resolve()\n"
+            "sys.path.insert(0,str(current_scripts))\n"
+            "spec=importlib.util.spec_from_file_location('fixture_windows_capability'," + repr(str(INSTALLER_PATH)) + ");"
+            "cap=importlib.util.module_from_spec(spec);sys.modules[spec.name]=cap;spec.loader.exec_module(cap);\n"
+            "with cap._WindowsBoundNode.symlink_privilege():\n"
+            "    for name,module in tuple(sys.modules.items()):\n"
+            "        origin=getattr(module,'__file__',None)\n"
+            "        if name != spec.name and origin and Path(origin).resolve().is_relative_to(current_scripts):\n"
+            "            del sys.modules[name]\n"
+            "    sys.path[0]=" + repr(str(old_source / 'scripts')) + "\n"
+            "    import production_installer as frozen\n"
+            "    result=frozen.install('claude'," + repr(arguments) + ")\n"
+            "raise SystemExit(result)\n"
+        )
+        seed_command = [sys.executable, '-X', 'utf8', '-B', '-c', bootstrap]
+    seeded = subprocess.run(seed_command, cwd=old_source, capture_output=True, text=True, timeout=180)
     assert seeded.returncode == 0, seeded.stdout + seeded.stderr
-
+    peer = target / '.claude/agents'
+    retained_names = _PEER_LEDGER_HELPERS
+    retained = {name: ((peer / name).read_bytes(), (peer / name).stat().st_ino) for name in retained_names}
+    assert _sha(retained['scripts/mutate-work-item.py'][0]) == '27960edec46770328bf34bca9290576cda4aad861234dd596ac3f05b1a0e7228'
     installer = _load_installer()
-    before = installer._InstallTransaction._observe(target)
     errors = []
     render = installer._installer_failure_text
 
@@ -370,18 +437,39 @@ def test_codex_update_refuses_unowned_815e_project_peer_without_effects(
         return render(error)
 
     monkeypatch.setattr(installer, '_installer_failure_text', record_failure)
-    assert installer.install('codex', arguments) == 1
+
+    def refuse_without_effects(client):
+        before = installer._InstallTransaction._observe(target)
+        assert installer.install(client, arguments) == 1
+        assert installer._InstallTransaction._observe(target) == before
+
+    refuse_without_effects('codex')
+    assert installer.install('claude', [*arguments, '--materialize-legacy-skills', '--apply']) == 0
+    # Link conversion preserves bytes but does not yet upgrade a legacy binding.
+    assert {name: ((peer / name).read_bytes(), (peer / name).stat().st_ino)
+            for name in retained_names} == retained
+    refuse_without_effects('codex')
+    errors.clear()
+    refuse_without_effects('claude')
     assert errors == ['E_ACCEPTED_PRIOR_COLLISION: accessibility-reviewer']
-    assert installer._InstallTransaction._observe(target) == before
 
 
-def test_codex_only_update_peer_ledger_uses_complete_canonical_owner(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The updated peer uses current canonical ledger code, not its retained legacy files."""
+def test_current_ordinary_peer_uses_its_own_complete_ledger_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A supported ordinary Claude pair owns its ledger across a Codex-only update."""
     from test_provider_prompt_relocation import _load_owner
     from test_ledger_resource_budget import fixture as ledger_fixture
-
+    # An elevated Windows token may create Administrators-owned directories.
+    # The runner intentionally requires user-owned cwd. An elevated harness can
+    # supply a fresh empty directory created by the same user without elevation.
+    prepared_cwd = os.environ.get('ORCHE_TEST_LEDGER_CWD') if os.name == 'nt' else None
+    decoy = Path(prepared_cwd) if prepared_cwd else tmp_path / 'decoy'
+    if prepared_cwd:
+        assert decoy.is_absolute() and decoy.is_dir() and not any(decoy.iterdir())
+    else:
+        decoy.mkdir()
+    if os.name == 'nt':
+        from scripts.process_supervision.process_runner import bind_cwd_identity
+        bind_cwd_identity(str(decoy))  # Fail at setup, never relax production admission.
     old_source = _archived_815e_ledger_source(tmp_path)
     frozen_legacy = _load_owner(old_source / 'scripts/provider_prompt.py', 'admitted_frozen_legacy_ledger_owner')
     assert frozen_legacy.ledger_helper().samefile(old_source / 'scripts/agent-run-ledger.py')
@@ -391,41 +479,42 @@ def test_codex_only_update_peer_ledger_uses_complete_canonical_owner(
     installer = _load_installer()
     assert installer.install('claude', arguments) == 0
     peer = target / '.claude/agents'
-    retained_names = ('scripts/agent-run-ledger.py', 'scripts/mutate-work-item.py',
-        'scripts/validate-work-item-state.py', 'scripts/check-work-items-state.py',
-        'shared/schemas/agent-runs.schema.json')
-    # Seed only historical helpers: transport bytes and ownership proof remain current.
+    retained_names = _PEER_LEDGER_HELPERS
+    # Only peer helper bytes are historical. The current transport and its proof
+    # were created by the ordinary installer and are not modified.
     for name in retained_names:
         (peer / name).write_bytes((old_source / name).read_bytes())
-    retained = {name: ((peer / name).read_bytes(), (peer / name).stat().st_ino) for name in retained_names}
-    assert _sha(retained['scripts/mutate-work-item.py'][0]) == '27960edec46770328bf34bca9290576cda4aad861234dd596ac3f05b1a0e7228'
+    assert _sha((peer / 'scripts/mutate-work-item.py').read_bytes()) == '27960edec46770328bf34bca9290576cda4aad861234dd596ac3f05b1a0e7228'
+    peer_after_migration = _tree_bytes(target / '.claude')
+    retained = {name: ((peer / name).read_bytes(), (peer / name).stat().st_ino)
+                for name in retained_names}
     assert installer.install('codex', arguments) == 0
+    assert _tree_bytes(target / '.claude') == peer_after_migration
     assert {name: ((peer / name).read_bytes(), (peer / name).stat().st_ino)
             for name in retained_names} == retained
-    canonical = target / '.agents/skills/lead'
+    canonical = target / '.claude/skills/lead'
     # The authority dependency is actually supplied by the same normal package.
     assert (canonical / 'scripts/linked_runtime_subroots.py').read_bytes() == (ROOT / 'scripts/linked_runtime_subroots.py').read_bytes()
     assert (peer / 'scripts/provider_prompt.py').read_bytes() == (ROOT / 'scripts/provider_prompt.py').read_bytes()
     source_owner = _load_owner(canonical / 'scripts/provider_prompt.py', 'canonical_ledger_seed_owner')
-    peer_owner = _load_owner(peer / 'scripts/provider_prompt.py', 'updated_peer_ledger_owner')
-    if os.name != "nt":
-        # This test owns ledger routing, not the Windows-only process oracle.
-        # Keep actual local helper execution and honor the binding callback.
+
+    def qualify_local_helper(module):
+        if os.name == "nt":
+            return  # Preserve real ProcessRunner/Windows qualification there.
+        # This test owns installed helper selection and ledger compatibility,
+        # not unavailable POSIX ProcessRunner containment. Execute the actual
+        # installed helper while retaining its caller-owned before-start check.
         from types import SimpleNamespace
-
-        def run_local_ledger(_runner, argv, *, cwd, environment, timeout_secs, before_start):
-            assert Path(argv[1]).samefile(canonical / 'scripts/agent-run-ledger.py')
+        def execute_helper(_runner, command, *, cwd, environment, timeout_secs, before_start):
+            assert Path(command[1]).samefile(canonical / 'scripts/agent-run-ledger.py')
             before_start()
-            completed = subprocess.run(
-                argv, cwd=cwd, env=environment, capture_output=True, timeout=timeout_secs,
-            )
-            return (
-                SimpleNamespace(outcome="success", target_exit_code=completed.returncode),
-                completed.stdout, completed.stderr,
-            )
+            result = subprocess.run(command, cwd=cwd, env=environment,
+                                    capture_output=True, timeout=timeout_secs)
+            return (SimpleNamespace(outcome="success", target_exit_code=result.returncode),
+                    result.stdout, result.stderr)
+        monkeypatch.setattr(module, "run_support_command", execute_helper)
 
-        monkeypatch.setattr(source_owner, 'run_support_command', run_local_ledger)
-        monkeypatch.setattr(peer_owner, 'run_support_command', run_local_ledger)
+    qualify_local_helper(source_owner)
     item, before = ledger_fixture(tmp_path / 'work', 4100)
     launch = ['--work-item', str(item), 'append', '--run-id', 'canonical-owner-launch',
         '--role', 'external-reviewer', '--execution-role', 'external-reviewer', '--assigned-role', 'qa-engineer',
@@ -438,7 +527,7 @@ def test_codex_only_update_peer_ledger_uses_complete_canonical_owner(
         '--terminal-class', 'external-nonauthorizing', '--authorizing', 'false',
         '--actual-execution-path', 'direct-external-cli', '--artifact-identity', 'synthetic-installed-owner',
         '--started-at', '2026-10-19T00:01:00Z', '--updated-at', '2026-10-19T00:01:00Z']
-    assert source_owner.ledger_helper() == canonical / 'scripts/agent-run-ledger.py'
+    assert source_owner.ledger_helper().samefile(canonical / 'scripts/agent-run-ledger.py')
     budget = dict(ledger_max_events=4200, ledger_max_bytes=len(before) + 400000)
     source_control = source_owner.Control(ledger=str(item), **budget)
     source_owner.prepare_ledger_admission(source_control, launch)
@@ -448,7 +537,8 @@ def test_codex_only_update_peer_ledger_uses_complete_canonical_owner(
         assert source_owner.run_ledger(runner, [*options, *terminal])
     after = (item / 'agent-runs.jsonl').read_bytes()
     assert after.startswith(before) and len(after.splitlines()) == 4102
-    owner = peer_owner
+    owner = _load_owner(peer / 'scripts/provider_prompt.py', 'updated_peer_ledger_owner')
+    qualify_local_helper(owner)
     received = owner.read_back_external_terminal(owner.Control(ledger=str(item), **budget), 'codex', 'canonical-owner-launch')
     assert received is not None and received['runId'] == 'canonical-owner-terminal'
     writer = owner._ledger_owner()
@@ -458,8 +548,7 @@ def test_codex_only_update_peer_ledger_uses_complete_canonical_owner(
     assert Path(validator.__file__).samefile(canonical / 'scripts/validate-work-item-state.py')
     assert Path(lifecycle.__file__).samefile(canonical / 'scripts/mutate-work-item.py')
     assert validator.AGENT_RUN_SCHEMA_PATH.samefile(canonical / 'shared/schemas/agent-runs.schema.json')
-    decoy = tmp_path / 'decoy'
-    (decoy / 'scripts').mkdir(parents=True)
+    (decoy / 'scripts').mkdir()
     marker = decoy / 'executed-decoy'
     (decoy / 'scripts/agent-run-ledger.py').write_text(
         f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\n", encoding='utf-8')
@@ -770,6 +859,48 @@ def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def test_sdk_transport_delivery_inventory_has_one_source_identity() -> None:
+    installer = _load_installer()
+    validator = _load_validator()
+    expected = {f"sdk_execution/{path.name}" for path in
+                (ROOT / "scripts/sdk_execution").glob("*.py")}
+    expected.add("process_supervision/sdk_worker.py")
+    assert expected <= set(installer.RUNTIME_HELPERS)
+    assert expected <= set(installer.TRANSPORT_PROJECTION_FILES)
+    assert all(installer.RUNTIME_HELPERS.count(name) == 1 for name in expected)
+    assert all(installer.TRANSPORT_PROJECTION_FILES.count(name) == 1 for name in expected)
+    assert tuple(installer.TRANSPORT_PROJECTION_FILES) == validator.TRANSPORT_FILES
+    manifest = json.loads((ROOT / "shared/provider-prompt-projections.v1.json").read_bytes())
+    assert tuple(manifest["files"]) == installer.TRANSPORT_PROJECTION_FILES
+    for name in expected:
+        assert manifest["files"][name] == {
+            "source": f"scripts/{name}",
+            "destination": f"scripts/{name}",
+            "sha256": _sha((ROOT / "scripts" / name).read_bytes()),
+        }
+
+
+def test_sdk_transport_manifest_rejects_native_binding_before_worker(
+    tmp_path: Path,
+) -> None:
+    validator = _load_validator()
+    manifest = json.loads((ROOT / "shared/provider-prompt-projections.v1.json").read_bytes())
+    files = manifest["files"]
+    names = list(files)
+    worker = "sdk_execution/worker.py"
+    native_binding = "sdk_execution/native_binding.py"
+    assert names.index(native_binding) == names.index(worker) + 1
+    names.remove(native_binding)
+    names.insert(names.index(worker), native_binding)
+    manifest["files"] = {name: files[name] for name in names}
+    path = tmp_path / "provider-prompt-projections.v1.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    for predecessor_only in (False, True):
+        with pytest.raises(ValueError, match="complete ordered transport set"):
+            validator._load_manifest(path, predecessor_only=predecessor_only)
+
+
 def test_source_manifest_binds_the_generated_governance_capsule() -> None:
     """Catches a projection manifest that ships a composer without its policy input."""
 
@@ -778,17 +909,7 @@ def test_source_manifest_binds_the_generated_governance_capsule() -> None:
         ROOT / "shared" / "provider-prompt-projections.v1.json", ROOT
     )
 
-    assert result["files"] == [
-        "model_routing/launch_policy.py",
-        "provider_prompt.py",
-        "process_supervision/process_runner.py",
-        "invoke-codex-prompt.py",
-        "invoke-claude-prompt.py",
-        "invoke-kimi-prompt.py",
-        "invoke-grok-prompt.py",
-        "external-prompt-governance.md",
-        "external-role-taxonomy.v1.json",
-    ]
+    assert result["files"] == list(TRANSPORT_FILES)
 
 
 def test_validator_rejects_provider_taxonomy_digest_literal_mismatch(
@@ -913,18 +1034,21 @@ def _tree_bytes(root: Path) -> dict[str, bytes]:
 def _linked_global_claude(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, installer
 ) -> tuple[Path, Path]:
-    """Create the only admitted linked-subroot shape over a seeded pack."""
+    """Seed both selected clients before exercising their paired global projections."""
 
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("HOME", str(home))
+    from tests.fixtures.runtime_capabilities import codex_hook_host_env
+    monkeypatch.setenv("CODEX_BIN", codex_hook_host_env(os.environ, ROOT)["CODEX_BIN"])
+    assert installer.install("codex", ["--global", "--no-hypothesis-hook"]) == 0
     assert installer.install("claude", ["--global", "--no-hypothesis-hook"]) == 0
     logical = home / ".claude"
     backing = tmp_path / "linked-claude"
     backing.mkdir()
     try:
-        for name in ("agents", "skills", "commands"):
+        for name in ("agents", "commands"):
             destination = backing / name
             shutil.move(str(logical / name), str(destination))
             os.symlink(destination, logical / name, target_is_directory=True)
@@ -1582,6 +1706,131 @@ def test_every_projection_violation_uses_one_stable_id(
     assert result.stderr.startswith("E_TRANSPORT_PROJECTION_PARITY:")
 
 
+@pytest.mark.parametrize("generation", ("PRE_SDK_TRANSPORT_FILES", "POLICY_TRANSPORT_FILES", "PRE_POLICY_SDK_TRANSPORT_FILES", "PRE_COPILOT_TRANSPORT_FILES", "PRE_COPILOT_ENTRY_TRANSPORT_FILES", "PRE_NATIVE_BINDING_TRANSPORT_FILES"))
+@pytest.mark.parametrize("inventory", ("exact-old", "missing-old", "partial-sdk", "reordered-old"))
+def test_pre_sdk_manifest_compatibility_is_predecessor_only_and_exact(
+    tmp_path: Path, inventory: str, generation: str,
+) -> None:
+    validator = _load_validator()
+    _source, _canonical, _peer, path = _fixture(tmp_path)
+    manifest = json.loads(path.read_bytes())
+    names = list(getattr(validator, generation))
+    if inventory == "missing-old":
+        names.pop()
+    elif inventory == "partial-sdk":
+        names.append(next(name for name in validator.TRANSPORT_FILES if name not in names))
+    elif inventory == "reordered-old":
+        names.reverse()
+    manifest["files"] = {name: manifest["files"][name] for name in names}
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    # A one-member generation extension can produce the complete current set,
+    # which both ordinary and compatibility loading intentionally admit.
+    if tuple(names) == validator.TRANSPORT_FILES:
+        assert tuple(validator._load_manifest(path)["files"]) == tuple(names)
+        assert tuple(validator._load_manifest(path, predecessor_only=True)["files"]) == tuple(names)
+        return
+    with pytest.raises(ValueError, match="complete ordered transport set"):
+        validator._load_manifest(path)
+    if inventory == "exact-old":
+        assert tuple(validator._load_manifest(path, predecessor_only=True)["files"]) == tuple(names)
+    else:
+        with pytest.raises(ValueError, match="complete ordered transport set"):
+            validator._load_manifest(path, predecessor_only=True)
+
+
+@pytest.mark.parametrize("generation", ("PRE_SDK_TRANSPORT_FILES", "POLICY_TRANSPORT_FILES", "PRE_POLICY_SDK_TRANSPORT_FILES", "PRE_COPILOT_TRANSPORT_FILES", "PRE_COPILOT_ENTRY_TRANSPORT_FILES", "PRE_NATIVE_BINDING_TRANSPORT_FILES"))
+@pytest.mark.parametrize("peer_change", (None, "unexpected-sdk", "customized-old"))
+def test_sdk_projection_upgrade_preserves_receipted_pre_sdk_generation(
+    tmp_path: Path, peer_change: str | None, generation: str,
+) -> None:
+    installer = _load_installer()
+    source, canonical_stage, peer, manifest_path = _fixture(tmp_path)
+    canonical = tmp_path / "installed/skills"
+    lead = canonical / "lead"
+    old_names = getattr(_load_validator(), generation)
+    manifest = json.loads(manifest_path.read_bytes())
+    manifest["files"] = {name: manifest["files"][name] for name in old_names}
+    payload = (json.dumps(manifest, indent=2) + "\n").encode()
+    for name in old_names:
+        _write_transport(lead / "scripts", name, (canonical_stage / name).read_bytes())
+    for name in set(TRANSPORT_FILES) - set(old_names):
+        (peer / name).unlink()
+    if not any(name.startswith("sdk_execution/") for name in old_names):
+        (peer / "sdk_execution").rmdir()
+    if "model_routing/launch_policy.py" not in old_names:
+        (peer / "model_routing").rmdir()
+    for base in (lead, peer.parent):
+        (base / "shared").mkdir(parents=True, exist_ok=True)
+        (base / "shared" / installer.TRANSPORT_PROJECTION_MANIFEST).write_bytes(payload)
+    (canonical / installer._LEAD_RECEIPT_NAME).write_bytes(installer._lead_receipt_bytes(
+        installer._tree_sha256(lead, ignore_runtime_cache=True)))
+    if peer_change == "unexpected-sdk":
+        _write_transport(peer, next(name for name in TRANSPORT_FILES if name not in old_names), b"unowned introduced member")
+    elif peer_change == "customized-old":
+        (peer / "provider_prompt.py").write_bytes(b"operator customization")
+    predecessor = installer._transport_predecessor(source, canonical, peer)
+    if peer_change is not None:
+        before = {path: path.read_bytes() for path in peer.parent.rglob("*") if path.is_file()}
+        with pytest.raises(ValueError, match="atomic projection state"):
+            installer._stage_claude_transport_projection(
+                source, canonical_stage, peer, predecessor=predecessor)
+        assert {path: path.read_bytes() for path in peer.parent.rglob("*") if path.is_file()} == before
+        return
+    assert predecessor is not None
+    stage = installer._stage_claude_transport_projection(
+        source, canonical_stage, peer, predecessor=predecessor)
+    assert {name for name, _ in stage.pending_files} == set(TRANSPORT_FILES) - set(old_names)
+    before = {path: path.read_bytes() for path in peer.parent.rglob("*") if path.is_file()}
+    paths = [peer / name for name in TRANSPORT_FILES]
+    paths.append(peer.parent / "shared" / installer.TRANSPORT_PROJECTION_MANIFEST)
+    transaction = installer._InstallTransaction(paths, enabled=True, copy_paths=tuple(paths))
+    with pytest.raises(RuntimeError, match="after upgrade"):
+        with transaction:
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            installer._apply_claude_transport_projection(stage, peer, owner)
+            installer._validate_committed_transport_projection(source, stage, canonical_stage, peer)
+            raise RuntimeError("after upgrade")
+    assert {path: path.read_bytes() for path in peer.parent.rglob("*") if path.is_file()} == before
+
+
+@pytest.mark.parametrize("commit", (False, True))
+def test_sdk_projection_uses_existing_transaction_and_preserves_neighbors(
+    tmp_path: Path, commit: bool,
+) -> None:
+    installer = _load_installer()
+    source, canonical, claude, manifest = _fixture(tmp_path)
+    for name in TRANSPORT_FILES:
+        (claude / name).unlink()
+    sentinel = claude / "sdk_execution/operator-local.txt"
+    sentinel.parent.mkdir(parents=True, exist_ok=True)
+    sentinel.write_bytes(b"operator-owned")
+    stage = installer._stage_claude_transport_projection(source, canonical, claude)
+    paths = [claude / name for name in TRANSPORT_FILES]
+    paths.append(claude.parent / "shared" / installer.TRANSPORT_PROJECTION_MANIFEST)
+    transaction = installer._InstallTransaction(paths, enabled=True, copy_paths=tuple(paths))
+    def apply():
+        with transaction:
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
+            installer._apply_claude_transport_projection(stage, claude, owner)
+            for name in TRANSPORT_FILES:
+                assert (claude / name).read_bytes() == (canonical / name).read_bytes()
+            installer._validate_committed_transport_projection(source, stage, canonical, claude)
+            if not commit:
+                raise RuntimeError("later install failure")
+            transaction.commit()
+    if commit:
+        apply()
+        assert all(path.is_file() for path in paths)
+        repeated = installer._stage_claude_transport_projection(source, canonical, claude)
+        assert repeated.pending_files == ()
+        assert not repeated.manifest_pending
+    else:
+        with pytest.raises(RuntimeError, match="later install failure"):
+            apply()
+        assert all(not path.exists() for path in paths)
+    assert sentinel.read_bytes() == b"operator-owned"
+
+
 def test_claude_projection_stage_has_one_create_only_apply_path(tmp_path: Path) -> None:
     installer = _load_installer()
     source, canonical, claude, _manifest = _fixture(tmp_path)
@@ -1700,8 +1949,20 @@ def test_recovery_wording_upgrades_exact_previous_main_projection(tmp_path: Path
     projection = tmp_path / "claude" / "agents" / "scripts"
     staged = installer._stage_claude_transport_projection(source, canonical, projection)
     assert staged.accepted_prior_set == commit
-    assert {name for name, _ in staged.pending_files} == {"provider_prompt.py", "external-prompt-governance.md"}
+    assert {name for name, _ in staged.pending_files} == {
+        name for name in TRANSPORT_FILES
+        if expected.get(name) != _sha(_authored_transport_path(source, name).read_bytes())
+    }
     assert staged.manifest_pending
+
+
+
+def _receiving_transport_order(installer) -> tuple[str, ...]:
+    """Keep the fixture's authored membership independent of application order."""
+    order = installer.TRANSPORT_PROJECTION_FILES
+    assert len(order) == len(TRANSPORT_FILES)
+    assert set(order) == set(TRANSPORT_FILES)
+    return order
 
 
 def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> None:
@@ -1980,17 +2241,20 @@ def test_immediate_448e_prior_applies_only_changed_transport_members_and_manifes
         return
 
     installer._apply_claude_transport_projection(staged, projection, owner)
-    assert owner.calls == [
-        ("create", f"scripts/{policy}", None, policy_bytes),
-        *(
-            ("migrate", f"scripts/{name}", STOCK_448E_PROJECTION_SHA256[name],
-             _authored_transport_path(source, name).read_bytes())
-            for name in TRANSPORT_FILES if name != policy
-        ),
-        ("migrate", "shared/provider-prompt-projections.v1.json",
-         STOCK_448E_PROJECTION_SHA256["provider-prompt-projections.v1.json"],
-         (source / "shared/provider-prompt-projections.v1.json").read_bytes()),
-    ]
+    expected_calls = []
+    for name in TRANSPORT_FILES:
+        payload = _authored_transport_path(source, name).read_bytes()
+        prior = STOCK_448E_PROJECTION_SHA256.get(name)
+        if prior is None:
+            expected_calls.append(("create", f"scripts/{name}", None, payload))
+        elif hashlib.sha256(payload).hexdigest() != prior:
+            expected_calls.append(("migrate", f"scripts/{name}", prior, payload))
+    expected_calls.append((
+        "migrate", "shared/provider-prompt-projections.v1.json",
+        STOCK_448E_PROJECTION_SHA256["provider-prompt-projections.v1.json"],
+        (source / "shared/provider-prompt-projections.v1.json").read_bytes(),
+    ))
+    assert owner.calls == expected_calls
 
 
 @pytest.mark.parametrize("name", tuple(STOCK_8F92_PROJECTION_SHA256))
@@ -2500,16 +2764,16 @@ def test_claude_transport_preflight_accepts_the_published_pre_e7_singleton(
     assert tuple(name for name, _payload in staged.pending_files) == TRANSPORT_FILES
 
 
-def test_full_stock_e7_codex_refuses_unqualified_tree_before_mutation(
+def test_e7_six_tree_upgrade_rolls_back_after_middle_replacement(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A pristine E7 install is not admitted by an incomplete strong catalog."""
+    """The accepted-prior e7 tree upgrade is all-or-nothing under a mid-flight fault."""
 
     installer = _load_installer()
     snapshot = tmp_path / "e7-source"
     snapshot.mkdir()
     archive = subprocess.run(
-        ["git", "archive", "--format=tar", "e7a691dea4f1d3cb154d338c63b274ebcd74ee4c"],
+        ["git", "-c", "core.autocrlf=false", "archive", "--format=tar", "e7a691dea4f1d3cb154d338c63b274ebcd74ee4c"],
         cwd=ROOT,
         check=True,
         capture_output=True,
@@ -2530,56 +2794,60 @@ def test_full_stock_e7_codex_refuses_unqualified_tree_before_mutation(
     )
     assert seeded.returncode == 0, seeded.stdout + seeded.stderr
     canonical = target / ".agents" / "skills"
-    legacy_digests = {
+    before = {
+        path.relative_to(canonical).as_posix(): path.read_bytes()
+        for path in canonical.rglob("*") if path.is_file()
+    }
+    e7_current_skill_priors = {
         skill.name: installer._legacy_tree_sha256(skill, ignore_runtime_cache=True)
         for skill in canonical.iterdir()
         if skill.is_dir() and (ROOT / "src.codex" / "skills" / skill.name).is_dir()
     }
-    assert legacy_digests == installer.E7_CANONICAL_SKILL_TREE_SHA256
-    assert installer._legacy_factory_identity_v2(
-        "accessibility-reviewer", legacy_digests["accessibility-reviewer"]
-    ) is None
+    assert installer.E7_CANONICAL_SKILL_TREE_SHA256 == e7_current_skill_priors
+    for name, legacy in e7_current_skill_priors.items():
+        assert installer._legacy_factory_identity_v2(name, legacy) == installer._tree_sha256(
+            canonical / name, ignore_runtime_cache=True)
+    # This test owns skill-tree rollback, not admission of unrelated e7 native
+    # roles. Keep the e7 skill trees intact and align only role files whose e7
+    # bytes have no current accepted-prior route.
+    for name in (
+        "analyst",
+        "backend-engineer",
+        "explorer",
+        "knowledge-archivist",
+        "planner",
+        "qa-engineer",
+    ):
+        installed_role = target / ".codex" / "agents" / f"{name}.toml"
+        old_role = snapshot / "src.codex" / "agents" / f"{name}.toml"
+        current_role = ROOT / "src.codex" / "agents" / f"{name}.toml"
+        assert installed_role.read_bytes() == old_role.read_bytes()
+        installed_role.write_bytes(current_role.read_bytes())
+    original = installer._CreateOnlyMutablePath.replace_exact_tree
+    calls = 0
 
-    def inventory():
-        return {
-            path.relative_to(target): (
-                installer._CreateOnlyMutablePath._identity(path),
-                os.readlink(path) if path.is_symlink() else
-                path.read_bytes() if path.is_file() else None,
-            )
-            for path in (target, *target.rglob("*"))
-        }
+    def fail_after_middle(self, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        result = original(self, *args, **kwargs)
+        if calls == 3:
+            raise RuntimeError("injected six-tree replacement failure")
+        return result
 
-    before = inventory()
-    original_finish = installer._finish_install_result
-    outcomes = []
-
-    def observe_finish(provider, destination, dry_run, applied, primary, cleanup):
-        outcomes.append((applied, primary, cleanup))
-        return original_finish(provider, destination, dry_run, applied, primary, cleanup)
-
-    original_enter = installer._InstallTransaction.__enter__
-    transactions = []
-
-    def observe_transaction(transaction):
-        transactions.append(transaction)
-        return original_enter(transaction)
-
-    monkeypatch.setattr(installer, "_finish_install_result", observe_finish)
-    monkeypatch.setattr(installer._InstallTransaction, "__enter__", observe_transaction)
-    assert installer.install(
+    monkeypatch.setattr(
+        installer._CreateOnlyMutablePath, "replace_exact_tree", fail_after_middle
+    )
+    result = installer.install(
         "codex",
         ["--target", str(target), "--force", "--allow-unsafe-target", "--no-hypothesis-hook"],
-    ) == 1
-    assert len(outcomes) == 1
-    applied, primary, cleanup = outcomes[0]
-    assert applied is False
-    assert type(primary) is ValueError
-    assert str(primary) == "E_LEGACY_TREE_WITNESS_UNAVAILABLE: accessibility-reviewer"
-    assert cleanup is None
-    assert transactions == []
-    assert inventory() == before
-
+    )
+    after = {
+        path.relative_to(canonical).as_posix(): path.read_bytes()
+        for path in canonical.rglob("*") if path.is_file()
+    }
+    assert result == 1
+    assert calls == 3
+    assert after == before
 
 def test_e7_claude_transport_replacement_rolls_back_trees_trio_and_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -2590,7 +2858,7 @@ def test_e7_claude_transport_replacement_rolls_back_trees_trio_and_manifest(
     snapshot = tmp_path / "e7-source"
     snapshot.mkdir()
     archive = subprocess.run(
-        ["git", "archive", "--format=tar", "e7a691dea4f1d3cb154d338c63b274ebcd74ee4c"],
+        ["git", "-c", "core.autocrlf=false", "archive", "--format=tar", "e7a691dea4f1d3cb154d338c63b274ebcd74ee4c"],
         cwd=ROOT, check=True, capture_output=True,
     ).stdout
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
@@ -2599,7 +2867,7 @@ def test_e7_claude_transport_replacement_rolls_back_trees_trio_and_manifest(
     target.mkdir()
     args = ["--target", str(target), "--force", "--allow-unsafe-target", "--no-hypothesis-hook"]
     assert installer.install("claude", args) == 0
-    canonical = target / ".agents" / "skills"
+    canonical = target / ".claude" / "skills"
     transport = target / ".claude" / "agents" / "scripts"
     manifest = transport.parent / "shared" / "provider-prompt-projections.v1.json"
 
@@ -2630,6 +2898,31 @@ def test_e7_claude_transport_replacement_rolls_back_trees_trio_and_manifest(
     assert _sha(legacy_provider) == installer.E7_LEGACY_PROVIDER_PROMPT_SHA256
     (transport / "provider_prompt.py").write_bytes(legacy_provider)
 
+    # Seed one coherent predecessor within the fresh install's existing ownership.
+    # Legacy tree entries retain the pinned factory qualification above instead of
+    # claiming that the current per-member receipts describe these older bytes.
+    nonlead_receipt = canonical / installer._NONLEAD_RECEIPT_NAME
+    nonlead_record = json.loads(nonlead_receipt.read_bytes())
+    for name in retained_names:
+        assert name in nonlead_record["skills"]
+        nonlead_record["skills"][name] = installer.E7_CANONICAL_SKILL_TREE_SHA256[name]
+    nonlead_receipt.write_bytes(installer._nonlead_receipt_bytes(
+        nonlead_record["skills"], schema=nonlead_record["schema"]))
+    codec = installer._provider_ownership_module(ROOT)
+    provider_receipt = target / ".claude" / installer._PROVIDER_RECEIPT_NAME
+    record = codec.decode_record(provider_receipt.read_bytes(), "claude", "project")
+    seeded = [nonlead_receipt, manifest, *(transport / name for name in TRANSPORT_FILES)]
+    seeded.extend(path for name in retained_names for path in (canonical / name).rglob("*")
+                  if path.is_file())
+    for path in seeded:
+        relative = path.relative_to(target).as_posix()
+        assert relative in record["files"], "synthetic prior cannot add ownership"
+        if path.is_file():
+            record["files"][relative] = _sha(path.read_bytes())
+        else:
+            del record["files"][relative]
+    provider_receipt.write_bytes(codec.serialize_record(record, "claude", "project"))
+
     def witness(path: Path):
         if not path.exists():
             return None
@@ -2643,6 +2936,7 @@ def test_e7_claude_transport_replacement_rolls_back_trees_trio_and_manifest(
             {path.relative_to(canonical): witness(path) for path in canonical.rglob("*")},
             {name: witness(transport / name) for name in TRANSPORT_FILES},
             witness(manifest),
+            witness(provider_receipt),
         )
 
     before = snapshot_effects()
@@ -2743,7 +3037,7 @@ def test_canonical_preflight_rejects_late_transport_collision_before_any_write(
 def test_immutable_canonical_plan_rejects_post_preflight_drift_before_write(
     tmp_path: Path,
 ) -> None:
-    """Applying a retained plan must fail before owner calls if a member changes."""
+    """Applying a retained plan must reject member drift before mutating owner calls."""
 
     installer = _load_installer()
     canonical = tmp_path / ".agents" / "skills"
@@ -2752,6 +3046,10 @@ def test_immutable_canonical_plan_rejects_post_preflight_drift_before_write(
         def __init__(self) -> None:
             super().__init__(tmp_path, installer._InstallTransaction([], enabled=False), dry_run=False)
             self.calls: list[str] = []
+
+        def destination(self, relative: Path, *, allow_leaf_reparse: bool = False) -> Path:
+            # Path resolution is read-only; calls records mutation attempts only.
+            return self.anchor / relative
 
         def create_tree(self, *_args, **_kwargs) -> None:
             self.calls.append("create_tree")
@@ -2806,10 +3104,10 @@ def test_canonical_stage_publishes_and_validates_transport_before_skill_projecti
     ).read_bytes() == (ROOT / "shared" / "provider-prompt-projections.v1.json").read_bytes()
 
 
-def test_global_claude_canonical_collision_preflights_before_transaction(
+def test_global_claude_skill_copy_collision_preflights_before_transaction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A rejected stock upgrade must not recreate the shared skills root."""
+    """A rejected stock upgrade preserves the selected independent skill copy."""
 
     installer = _load_installer()
     home = tmp_path / "home"
@@ -2818,7 +3116,8 @@ def test_global_claude_canonical_collision_preflights_before_transaction(
     monkeypatch.setenv("HOME", str(home))
     assert installer.install("claude", ["--global", "--no-hypothesis-hook"]) == 0
 
-    skills = home / ".agents" / "skills"
+    skills = home / ".claude" / "skills"
+    assert not (home / ".agents" / "skills").exists()
     consultant = skills / "consultant" / "SKILL.md"
     consultant.write_bytes(consultant.read_bytes() + b"custom collision\n")
     before_bytes = _tree_bytes(skills)
@@ -2851,11 +3150,13 @@ def test_global_claude_declared_linked_subroots_are_bound_and_dry_run_is_read_on
 ) -> None:
     installer = _load_installer()
     logical, backing = _linked_global_claude(tmp_path, monkeypatch, installer)
-    before = {name: _tree_bytes(backing / name) for name in ("agents", "skills", "commands")}
+    before = {name: _tree_bytes(backing / name) for name in ("agents", "commands")}
     links = {name: os.readlink(logical / name) for name in before}
+    ordinary_skills = _tree_bytes(logical / "skills")
+    assert not (logical / "skills").is_symlink()
 
     observed = {}
-    for name in ("agents", "skills", "commands"):
+    for name in ("agents", "commands"):
         resolved, authority = installer._resolve_global_claude_linked_subroot(
             ROOT, logical, "global", name
         )
@@ -2874,6 +3175,22 @@ def test_global_claude_declared_linked_subroots_are_bound_and_dry_run_is_read_on
     assert {name: _tree_bytes(backing / name) for name in before} == before
     for authority in observed.values():
         installer._assert_global_claude_linked_subroot_authority(ROOT, authority)
+
+    assert _tree_bytes(logical / "skills") == ordinary_skills
+    # A linked skills root is a separate, explicitly refused migration input.
+    shutil.move(str(logical / "skills"), str(backing / "skills"))
+    os.symlink(backing / "skills", logical / "skills", target_is_directory=True)
+    failures = []
+    render = installer._installer_failure_text
+    def capture_failure(error):
+        failures.append(str(error))
+        return render(error)
+    monkeypatch.setattr(installer, "_installer_failure_text", capture_failure)
+    assert installer.install("claude", ["--global", "--dry-run", "--no-hypothesis-hook"]) == 1
+    assert any(message.startswith("E_PROVIDER_SKILLS_MIGRATION_REQUIRED:") for message in failures)
+    assert os.readlink(logical / "skills") == str(backing / "skills")
+    assert _tree_bytes(backing / "skills") == ordinary_skills
+    assert {name: _tree_bytes(backing / name) for name in before} == before
 
 
 def test_linked_claude_subroot_is_rejected_outside_global_scope(
@@ -2912,17 +3229,26 @@ def test_linked_claude_subroot_rollback_restores_resolved_agent_bytes(
     marker = backing / "agents" / "consultant.md"
     original = marker.read_bytes()
     marker.write_bytes(b"custom linked agent before transaction\n")
-    links = {name: os.readlink(logical / name) for name in ("agents", "skills", "commands")}
+    marker_identity = installer._CreateOnlyMutablePath._identity(marker)
+    links = {name: os.readlink(logical / name) for name in ("agents", "commands")}
     sync_tree = installer._sync_tree
+    injected = []
 
     def fail_after_commands(source: Path, target: Path, dry_run: bool, **kwargs) -> None:
         sync_tree(source, target, dry_run, **kwargs)
         if source.name == "commands":
+            assert marker.read_bytes() == original
+            injected.append(source.name)
             raise RuntimeError("injected linked-subroot failure")
 
     monkeypatch.setattr(installer, "_sync_tree", fail_after_commands)
-    assert installer.install("claude", ["--global", "--no-hypothesis-hook"]) == 1
+    assert installer.install("claude", [
+        "--global", "--no-hypothesis-hook", "--replace-claude-instruction",
+        "agents/consultant.md=" + _sha(marker.read_bytes()),
+    ]) == 1
+    assert injected == ["commands"]
     assert marker.read_bytes() == b"custom linked agent before transaction\n"
+    assert installer._CreateOnlyMutablePath._identity(marker) == marker_identity
     assert original != marker.read_bytes()
     assert {name: os.readlink(logical / name) for name in links} == links
 

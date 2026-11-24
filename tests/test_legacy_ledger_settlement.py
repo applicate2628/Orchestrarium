@@ -362,6 +362,25 @@ def archived_settlement_fixture(root: Path) -> tuple[object, object, Path]:
     return owner, owner._load_agent_run_ledger().load_validator(), archived
 
 
+def observe_owned_invalidations(validator, monkeypatch):
+    observed = []
+    original = validator._resolve_closure_invalidations_from_inputs
+
+    def observe(
+        rows, validity, errors, telemetry=None, *, context=None,
+        pending_closing_effects_out=None, _item=None, _inputs=None,
+    ):
+        observed.append((rows, validity))
+        return original(
+            rows, validity, errors, telemetry, context=context,
+            pending_closing_effects_out=pending_closing_effects_out,
+            _item=_item, _inputs=_inputs,
+        )
+
+    monkeypatch.setattr(validator, "_resolve_closure_invalidations_from_inputs", observe)
+    return observed
+
+
 def apply_archive_projection(
     owner: object, root: Path, archived: Path, *, only_target: bool = False
 ) -> Path:
@@ -864,14 +883,7 @@ def test_archived_owner_settlement_legacy_revise_is_exact_invalidation_target(
     root = tmp_path / "repo"
     owner, validator, archived = archived_settlement_fixture(root)
     archive_before = tree_bytes(archived)
-    observed = []
-    original = validator.resolve_closure_invalidations
-
-    def observe(rows, validity, errors, telemetry=None, *, context=None):
-        observed.append((rows, validity))
-        return original(rows, validity, errors, telemetry, context=context)
-
-    monkeypatch.setattr(validator, "resolve_closure_invalidations", observe)
+    observed = observe_owned_invalidations(validator, monkeypatch)
     errors, _open_revise, _open_launches = validator.validate_archived_ledger_obligations(archived)
     target = next(index for index, row in enumerate(observed[-1][0]) if row.event.get("runId") == "legacy-run-0007")
     assert observed[-1][0][target].epoch == "raw"
@@ -892,14 +904,24 @@ def test_archived_owner_settlement_legacy_revise_is_exact_invalidation_target(
     wrong_digest = dict(rows[-1].event)
     wrong_digest["invalidatesEventSha256"] = "0" * 64
     altered_rows = (*rows[:-1], replace(rows[-1], event=MappingProxyType(wrong_digest)))
+    custody_errors: list[str] = []
+    assert validator.resolve_closure_invalidations(altered_rows, validity, custody_errors) == set()
+    assert any(
+        "WI-LEDGER-CUSTODY-STALE-TARGET: nonneutral rows require their exact issued context"
+        in error for error in custody_errors
+    )
+
+    # Exercise the relation binder separately from the public custody boundary.
     digest_errors: list[str] = []
-    validator.resolve_closure_invalidations(altered_rows, validity, digest_errors)
+    assert validator._bind_ordinary_invalidation(
+        altered_rows, validity, len(altered_rows) - 1, set(), digest_errors,
+    ) is None
     assert any("ledger-recovery:target-digest-mismatch" in error for error in digest_errors)
 
     order_errors: list[str] = []
-    validator.resolve_closure_invalidations(
-        (rows[-1], *rows[:-1]), (validity[-1], *validity[:-1]), order_errors,
-    )
+    assert validator._bind_ordinary_invalidation(
+        (rows[-1], *rows[:-1]), (validity[-1], *validity[:-1]), 0, set(), order_errors,
+    ) is None
     assert any("ledger-recovery:target-identity" in error for error in order_errors)
 
 
@@ -913,14 +935,7 @@ def test_archived_legacy_revise_without_valid_archive_projection_stays_ineligibl
     if projection == "manifest-drift":
         manifest = apply_archive_projection(owner, root, archived)
         manifest.write_bytes(manifest.read_bytes() + b" ")
-    observed = []
-    original = validator.resolve_closure_invalidations
-
-    def observe(rows, validity, errors, telemetry=None, *, context=None):
-        observed.append((rows, validity))
-        return original(rows, validity, errors, telemetry, context=context)
-
-    monkeypatch.setattr(validator, "resolve_closure_invalidations", observe)
+    observed = observe_owned_invalidations(validator, monkeypatch)
     errors, _open_revise, _open_launches = validator.validate_archived_ledger_obligations(archived)
 
     target = next(index for index, row in enumerate(observed[-1][0]) if row.event.get("runId") == "legacy-run-0007")

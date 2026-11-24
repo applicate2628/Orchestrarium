@@ -1,5 +1,5 @@
 """Isolated transaction mechanics and the shared installer error boundary."""
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 import errno
 import hashlib
@@ -21,45 +21,6 @@ PI = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = PI
 SPEC.loader.exec_module(PI)
 WINDOWS_FILE_ATTRIBUTE_PINNED = 0x00080000  # Win32 FILE_ATTRIBUTE_PINNED test value.
-
-
-_NATIVE_SET_COPY_TIMES = PI._WindowsBoundNode.set_copy_times
-_POSIX_UTIME = os.utime
-
-
-def _set_copy_times(target, atime_ns, mtime_ns):
-    """Apply the test effect to the held native handle or descriptor."""
-    if os.name == "nt":
-        return _NATIVE_SET_COPY_TIMES(target, atime_ns, mtime_ns)
-    _POSIX_UTIME(target, ns=(atime_ns, mtime_ns))
-
-
-def _patch_copy_times(effect):
-    """Inject at the real platform setter, preserving unrelated path-based utime."""
-    if os.name == "nt":
-        return patch.object(PI._WindowsBoundNode, "set_copy_times", effect)
-
-    def set_times(target, *args, **kwargs):
-        if type(target) is int and not args and tuple(kwargs) == ("ns",):
-            return effect(target, *kwargs["ns"])
-        return _POSIX_UTIME(target, *args, **kwargs)
-
-    supports_fd = os.supports_fd
-    if _POSIX_UTIME in supports_fd:
-        supports_fd = supports_fd | {set_times}
-    return patch.multiple(os, utime=set_times, supports_fd=supports_fd)
-
-
-def _copy_time_failure(error):
-    def fail(*_args):
-        raise error
-    return _patch_copy_times(fail)
-
-
-def _time_observations(current, assignment, *readbacks):
-    # POSIX reads the descriptor inside the setter before the shared driver
-    # reads it again. Windows' legacy no-result fixture has no assignment read.
-    return [current, *(() if os.name == "nt" else (assignment,)), *readbacks]
 
 
 def _write_windows_directory_attributes(path: Path, attributes: int) -> None:
@@ -306,6 +267,7 @@ class CopyMetadataTests(unittest.TestCase):
         self.assertFalse(participant.unknown)
 
     def setUp(self):
+        (ROOT / ".scratch").mkdir(exist_ok=True)
         self.temporary = tempfile.TemporaryDirectory(prefix="metadata-test-", dir=ROOT / ".scratch")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -1102,7 +1064,7 @@ class CopyMetadataTests(unittest.TestCase):
         participant = tx._copy_metadata[self.target]
         records = []
         def action():
-            with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=_time_observations(current, current, actual)):
+            with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=self.timestamp_readbacks([current, actual])):
                 tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]),
                                         lambda *args: records.append(args), participant)
         result, stderr, escaped = self.through_install(action)
@@ -1130,7 +1092,7 @@ class CopyMetadataTests(unittest.TestCase):
         desired = replace(current, mtime_ns=100)
         primary = OSError(errno.EIO, "created-readback")
         def action():
-            with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=_time_observations(current, current, primary)):
+            with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=self.timestamp_readbacks([current, primary])):
                 tx._apply_copy_metadata(created, node, desired, stat.S_IMODE(node.python_identity[2]),
                                         lambda *_args: self.fail("unexpected record"), participant)
         result, stderr, escaped = self.through_install(action)
@@ -1151,18 +1113,16 @@ class CopyMetadataTests(unittest.TestCase):
         tx = self.transaction([directory])
         primary = RuntimeError("nested-primary")
         inverse_error = OSError(errno.EIO, "PRIVATE_nested_inverse")
+        setter = self.actual_timestamp_setter()
         def inverse(bound, atime, mtime):
-            _set_copy_times(bound, atime, mtime)
+            setter(bound, atime, mtime)
             raise inverse_error
         def action():
-            inverse_patch = _patch_copy_times(inverse)
-            try:
+            with ExitStack() as patches:
                 with tx:
                     self.owner(tx).copy_file(Path("tree/target"), self.source)
-                    inverse_patch.start()
+                    patches.enter_context(self.timestamp_effect(inverse))
                     raise primary
-            finally:
-                inverse_patch.stop()
         result, stderr, escaped = self.through_install(action)
         aggregate = escaped[0]
         self.assertEqual(result, 1)
@@ -1352,12 +1312,50 @@ class CopyMetadataTests(unittest.TestCase):
             self.assertIn("mtime_ns[unix-epoch-ns]=before:2,projected:2,observed:2", context.render())
         self.assertEqual(hooks, [])
 
+    def actual_timestamp_setter(self):
+        if os.name == "nt":
+            return PI._WindowsBoundNode.set_copy_times
+        operation = os.utime
+        return lambda descriptor, atime, mtime: operation(descriptor, ns=(atime, mtime))
+
     @contextmanager
-    def no_timestamp_effect(self):
-        with _patch_copy_times(lambda *_args: None):
+    def timestamp_effect(self, operation):
+        if os.name == "nt":
+            with patch.object(PI._WindowsBoundNode, "set_copy_times", operation):
+                yield
+        else:
+            actual = os.utime
+            supported = os.supports_fd
+            def setter(target, *args, **kwargs):
+                if type(target) is int and not args and tuple(kwargs) == ("ns",):
+                    return operation(target, *kwargs["ns"])
+                return actual(target, *args, **kwargs)
+            if actual in supported:
+                supported = supported | {setter}
+            with patch.object(os, "utime", setter), patch.object(os, "supports_fd", supported):
+                yield
+
+    @contextmanager
+    def timestamp_failure(self, error):
+        """Inject failure at the actual host's bound timestamp operation."""
+        def fail(*_args):
+            raise error
+        with self.timestamp_effect(fail):
             yield
 
+    @contextmanager
+    def no_timestamp_effect(self):
+        with self.timestamp_effect(lambda *_args: None):
+            yield
+
+    def timestamp_readbacks(self, observations, *, assignment=None):
+        # The POSIX setter performs an additional same-operation read. The
+        # fixture specifies that observation separately from later readbacks;
+        # omitted assignment means the no-effect initial image.
+        return observations if os.name == "nt" else [observations[0], assignment or observations[0], *observations[1:]]
+
     def test_mixed_full_image_rejection_keeps_unknown_and_recovery(self):
+        setter = self.actual_timestamp_setter()
         reader = PI._InstallTransaction._read_copy_metadata
         source_inode = self.source.stat().st_ino
         target_inode = self.target.stat().st_ino
@@ -1369,7 +1367,7 @@ class CopyMetadataTests(unittest.TestCase):
             if late_write is not None and metadata.st_ino == target_inode:
                 atime, mtime = late_write
                 late_write = None
-                _set_copy_times(descriptor, atime, mtime)
+                setter(descriptor, atime, mtime)
             return replace(image, atime_ns=1_650_000_000_123_456_700) if metadata.st_ino == source_inode else image
 
         def mixed_effect(target, atime, mtime):
@@ -1377,12 +1375,12 @@ class CopyMetadataTests(unittest.TestCase):
             fd = target.descriptor if os.name == "nt" else target
             old = os.fstat(fd)
             if old.st_ino != target_inode:
-                return _set_copy_times(target, atime, mtime)
+                return setter(target, atime, mtime)
             self.assertNotEqual(old.st_atime_ns, atime)
             self.assertNotEqual(old.st_mtime_ns, mtime)
             if os.name == "nt":
                 # The legacy adapter drops assignment proof.
-                _set_copy_times(target, old.st_atime_ns, mtime)
+                setter(target, old.st_atime_ns, mtime)
             else:
                 # Leave the descriptor unchanged until the POSIX same-operation
                 # observation is acquired. The next read then sees the partial
@@ -1390,7 +1388,7 @@ class CopyMetadataTests(unittest.TestCase):
                 late_write = (old.st_atime_ns, mtime)
         transaction = self.transaction()
         with patch.object(PI._InstallTransaction, "_read_copy_metadata", staticmethod(source_observation)), \
-                _patch_copy_times(mixed_effect):
+                self.timestamp_effect(mixed_effect):
             with self.assertRaises(PI._InstallFailure) as caught:
                 with transaction:
                     self.owner(transaction).copy_file(Path("target"), self.source)
@@ -1410,7 +1408,7 @@ class CopyMetadataTests(unittest.TestCase):
         current = PI._CopyMetadataImage(100, 200, None, None)
         desired = PI._CopyMetadataImage(300, 400, None, None)
         tx, node, participant, records, record = self.diagnostic_case(current)
-        with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=_time_observations(current, current, current)):
+        with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=self.timestamp_readbacks([current, current])):
             with self.assertRaises(ValueError) as caught:
                 tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]),
                                         record, participant, restored=True)
@@ -1438,7 +1436,7 @@ class CopyMetadataTests(unittest.TestCase):
         primary = OSError(errno.EIO, "metadata-acquisition")
         primary.__cause__ = RuntimeError("kept-cause")
         chain = (primary.args, primary.__cause__, primary.__context__, primary.__suppress_context__)
-        with _copy_time_failure(operation), \
+        with self.timestamp_failure(operation), \
                 patch.object(tx, "_read_copy_metadata", side_effect=[current, primary]):
             with self.assertRaises(OSError) as caught:
                 tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
@@ -1474,7 +1472,7 @@ class CopyMetadataTests(unittest.TestCase):
                     def record(path, value):
                         records.append((path, value, participant.unknown))
                         raise later
-                with _copy_time_failure(operation), \
+                with self.timestamp_failure(operation), \
                         patch.object(tx, "_read_copy_metadata", side_effect=[current, desired]), \
                         patch.object(tx, "_capture_node", side_effect=later if stage == "identity" else None,
                                      return_value=node):
@@ -1514,7 +1512,7 @@ class CopyMetadataTests(unittest.TestCase):
         later.__context__ = ValueError("kept-later-context")
         chain = (later.args, later.__cause__, later.__context__, later.__suppress_context__)
         def action():
-            with _copy_time_failure(operation), \
+            with self.timestamp_failure(operation), \
                     patch.object(tx, "_read_copy_metadata", side_effect=[current, later]):
                 tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
         result, stderr, escaped = self.through_install(action)
@@ -1730,7 +1728,7 @@ class CopyMetadataTests(unittest.TestCase):
         tx, node, participant, records, record = self.diagnostic_case(current)
         primary = OSError(errno.EIO, "identity-acquisition")
         chain = (primary.args, primary.__cause__, primary.__context__)
-        with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=_time_observations(current, desired, desired)), \
+        with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=self.timestamp_readbacks([current, desired])), \
                 patch.object(tx, "_capture_node", side_effect=primary):
             with self.assertRaises(OSError) as caught:
                 tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
@@ -1755,10 +1753,11 @@ class CopyMetadataTests(unittest.TestCase):
         participant = PI._CopyMetadataParticipant(node, current, current)
         primary = OSError("completed-observed-operation")
         events = []
+        setter = self.actual_timestamp_setter()
         def fault(bound, atime, mtime):
             self.assertTrue(participant.unknown)
             events.append("operation")
-            _set_copy_times(bound, atime, mtime)
+            setter(bound, atime, mtime)
             raise primary
         def record(_path, _node):
             self.assertTrue(participant.unknown)
@@ -1773,7 +1772,7 @@ class CopyMetadataTests(unittest.TestCase):
             return trace
         try:
             sys.settrace(trace)
-            with _patch_copy_times(fault):
+            with self.timestamp_effect(fault):
                 with self.assertRaises(OSError) as caught:
                     tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
         finally:
@@ -1791,6 +1790,7 @@ class CopyMetadataTests(unittest.TestCase):
         os.utime(second, ns=(1_610_000_000_000_000_000,) * 2)
         tx = PI._InstallTransaction([self.target, second], enabled=True, copy_paths=(self.target, second))
         primary = RuntimeError("later-checkpoint")
+        setter = self.actual_timestamp_setter()
         failure_objects = [OSError(errno.EIO, "PRIVATE-inverse-token-one"), OSError(errno.EACCES, "PRIVATE-inverse-token-two")]
         winerror_descriptor = OSError.__dict__.get("winerror")
         if winerror_descriptor is not None:
@@ -1805,23 +1805,19 @@ class CopyMetadataTests(unittest.TestCase):
         count = 0
         def inverse(bound, atime, mtime):
             nonlocal count
-            _set_copy_times(bound, atime, mtime)
+            setter(bound, atime, mtime)
             error = failure_objects[count]
             count += 1
             raise error
         # Keep inverse patch active during context exit, not just the raise.
         def action():
-            inverse_patch = _patch_copy_times(inverse)
-            with patch.object(PI._InstallTransaction, "_settlement_failure", staticmethod(observe)):
-                try:
-                    with tx:
-                        owner = self.owner(tx)
-                        owner.copy_file(Path("target"), self.source)
-                        owner.copy_file(Path("second"), self.source)
-                        inverse_patch.start()
-                        raise primary
-                finally:
-                    inverse_patch.stop()
+            with patch.object(PI._InstallTransaction, "_settlement_failure", staticmethod(observe)), ExitStack() as patches:
+                with tx:
+                    owner = self.owner(tx)
+                    owner.copy_file(Path("target"), self.source)
+                    owner.copy_file(Path("second"), self.source)
+                    patches.enter_context(self.timestamp_effect(inverse))
+                    raise primary
         result, stderr, escaped = self.through_install(action)
         aggregate = escaped[0]
         self.assertEqual(result, 1)
@@ -2143,7 +2139,7 @@ class CopyMetadataTests(unittest.TestCase):
         primary = ValueError("record-callback")
         def record(*_args):
             raise primary
-        with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=_time_observations(current, desired, desired)):
+        with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=self.timestamp_readbacks([current, desired])):
             with self.assertRaises(ValueError) as caught:
                 tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
         self.assertIs(caught.exception, primary)
@@ -2190,7 +2186,7 @@ class CopyMetadataTests(unittest.TestCase):
         original = (primary.args, primary.__cause__, primary.__context__)
         desired = replace(current, mtime_ns=300)  # Require an operation, not the exact-image no-op.
         def action():
-            with _copy_time_failure(primary), \
+            with self.timestamp_failure(primary), \
                     patch.object(tx, "_read_copy_metadata", side_effect=[current, current]):
                 tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
         result, stderr, escaped = self.through_install(action)
@@ -2337,7 +2333,7 @@ class CopyMetadataTests(unittest.TestCase):
                 participant.before = desired if restored else current
                 before = participant.before
                 with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata",
-                        side_effect=_time_observations(current, desired, desired, later, final)) as metadata:
+                        side_effect=self.timestamp_readbacks([current, desired, later, final], assignment=desired)) as metadata:
                     result = tx._apply_copy_metadata(self.target, node, desired,
                         stat.S_IMODE(node.python_identity[2]), record, participant, restored=restored)
                 self.assertIs(result, final)
@@ -2355,7 +2351,7 @@ class CopyMetadataTests(unittest.TestCase):
         desired = replace(current, atime_ns=300, mtime_ns=400)
         wrong = replace(desired, mtime_ns=current.mtime_ns)
         tx, node, participant, records, record = self.diagnostic_case(current)
-        with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=_time_observations(current, current, wrong)):
+        with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata", side_effect=self.timestamp_readbacks([current, wrong])):
             with self.assertRaises(ValueError) as caught:
                 tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
         self.assertEqual(PI._copy_setter_detail(caught.exception).metadata_vs_projected, ("mtime_ns",))
@@ -2444,7 +2440,7 @@ class CopyMetadataTests(unittest.TestCase):
                 primary = OSError(errno.EPERM, "final-acquisition")
                 final = primary if acquisition else replace(desired, mtime_ns=600)
                 with self.no_timestamp_effect(), patch.object(tx, "_read_copy_metadata",
-                        side_effect=_time_observations(current, desired, desired, desired, final)):
+                        side_effect=self.timestamp_readbacks([current, desired, desired, final], assignment=desired)):
                     with self.assertRaises(OSError if acquisition else ValueError) as caught:
                         tx._apply_copy_metadata(self.target, node, desired, stat.S_IMODE(node.python_identity[2]), record, participant)
                 if acquisition:
@@ -2514,6 +2510,7 @@ class CopyMetadataTests(unittest.TestCase):
 
 class RetentionAndAnchorTests(unittest.TestCase):
     def setUp(self):
+        (ROOT / ".scratch").mkdir(exist_ok=True)
         self.temporary = tempfile.TemporaryDirectory(prefix="retention-test-", dir=ROOT / ".scratch")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -2650,6 +2647,7 @@ class RetentionAndAnchorTests(unittest.TestCase):
 
 class BytePublicationTests(unittest.TestCase):
     def setUp(self):
+        (ROOT / ".scratch").mkdir(exist_ok=True)
         self.temporary = tempfile.TemporaryDirectory(prefix="byte-test-", dir=ROOT / ".scratch")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -2786,7 +2784,12 @@ class BytePublicationTests(unittest.TestCase):
 
     def test_legacy_file_link_snapshot_keeps_write_through_selection_and_link_object(self):
         alias = self.root / "alias"
-        alias.symlink_to(self.target.name)
+        try:
+            alias.symlink_to(self.target.name)
+        except OSError as exc:
+            if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+                self.skipTest("Windows host lacks symbolic-link creation privilege (WinError 1314)")
+            raise
         original = alias.lstat().st_ino
         primary = RuntimeError("later")
         with self.assertRaises(RuntimeError) as caught:
@@ -2802,6 +2805,7 @@ class BytePublicationTests(unittest.TestCase):
 
 class CrossOwnerRetentionTests(unittest.TestCase):
     def setUp(self):
+        (ROOT / ".scratch").mkdir(exist_ok=True)
         self.temporary = tempfile.TemporaryDirectory(prefix="dual-owner-test-", dir=ROOT / ".scratch")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -2891,6 +2895,7 @@ class CrossOwnerRetentionTests(unittest.TestCase):
 
 class CreatedDirectorySnapshotHandoffTests(unittest.TestCase):
     def setUp(self):
+        (ROOT / ".scratch").mkdir(exist_ok=True)
         self.temporary = tempfile.TemporaryDirectory(prefix="creator-handoff-", dir=ROOT / ".scratch")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -4068,6 +4073,57 @@ class ScalarLinkedTraversalTests(unittest.TestCase):
                 transaction._bind_scalar_storage(link)
         self.assertIs(caught.exception, primary)
         self.assertEqual(file.read_bytes(), b"untouched")
+
+@unittest.skipUnless(os.name == "nt", "Windows pending deletion")
+class PendingNativeDisposalTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.directory = self.root / "owned"
+        self.directory.mkdir()
+        self.tx = PI._InstallTransaction([], enabled=False)
+        self.expected = self.tx._capture_node(self.directory)
+        self.held = PI._WindowsBoundNode(self.directory, purpose="observe")
+        self.held.__enter__()
+        self.addCleanup(self.release)
+
+    def release(self):
+        self.held.__exit__(None, None, None)
+
+    def test_short_observer_hold_finishes_without_redeleting(self):
+        calls = []
+        original = PI._WindowsBoundNode.mark_disposal
+        def mark(bound):
+            calls.append(bound.path)
+            return original(bound)
+        with patch.object(PI._WindowsBoundNode, "mark_disposal", mark), patch.object(PI.time, "sleep", side_effect=lambda _: self.release()) as sleep:
+            self.tx._dispose_node(self.directory, self.expected)
+        self.assertEqual(calls, [self.directory])
+        self.assertEqual(sleep.call_count, 1)
+        self.assertFalse(self.directory.exists())
+
+    def test_persistent_hold_stays_failure_with_bounded_wait(self):
+        with patch.object(PI.time, "monotonic", side_effect=[0.0, 0.3]), patch.object(PI.time, "sleep") as sleep:
+            with self.assertRaisesRegex(ValueError, "native disposal pending or replaced"):
+                self.tx._dispose_node(self.directory, self.expected)
+        self.assertEqual(sleep.call_count, 0)
+        self.release()
+        self.assertFalse(self.directory.exists())
+
+    def test_replacement_during_wait_is_preserved(self):
+        foreign = self.root / "foreign"
+        foreign.mkdir()
+        (foreign / "sentinel").write_bytes(b"foreign")
+        identity = foreign.stat().st_ino
+        def replace_after_release(_):
+            self.release()
+            foreign.rename(self.directory)
+        with patch.object(PI.time, "sleep", side_effect=replace_after_release):
+            with self.assertRaisesRegex(ValueError, "native disposal pending or replaced"):
+                self.tx._dispose_node(self.directory, self.expected)
+        self.assertEqual(self.directory.stat().st_ino, identity)
+        self.assertEqual((self.directory / "sentinel").read_bytes(), b"foreign")
 
 
 if __name__ == "__main__":

@@ -5,6 +5,25 @@ qualified standalone CPython runtime. It does not fetch Python, run a package
 manager, activate a provider, or install either client. The ordinary source
 installer is unchanged and does not require this bundle.
 
+## SDK integration boundary
+
+Selected clients receive independent ordinary copies. New installations do not
+use a shared skill directory or client-to-client projection links. Explicit legacy
+migration converts only the selected client's historical links; uninstall uses
+that client's ownership records and must not remove another client's files.
+
+This branch packages the selected-client SDK layout: `src.codex`,
+`adapters/claude`, shared resources and branding. The root selector supports
+`--clients` and `--list-clients`; installer lifecycle and ownership remain in
+the common installer rather than the distribution wrapper.
+
+The same standard-library base profile applies to this layout. Native
+pre-SDK receiving evidence is not native acceptance of this revision.
+The retained interpreter lifetime remains independent of any client uninstall.
+Provider SDKs, when deliberately prepared via the separate official provider
+setup, must use a separate environment. Do not modify the qualified retained
+Python or use historical wheel locks to prepare a provider environment.
+
 ## Runtime profile and evidence
 
 Use the cpython-stdlib-only profile: a standalone CPython 3.15 runtime with its
@@ -48,7 +67,9 @@ must be new, and no operation changes the existing source or runtime inputs.
 
 Launch the bundle with its generated shell or PowerShell entry. The launcher
 checks bundle-relative identity and evidence consistency before passing arguments
-to the existing installer. Applying an installation requires explicit
+to the existing installer. POSIX replaces the launcher process. Windows uses
+an argument sequence without a shell, waits, and returns the child exit status.
+Applying an installation requires explicit
 --retain-to ABSOLUTE_DIRECTORY or --permanent-runtime; retain the selected
 interpreter while installed hooks reference it.
 
@@ -124,9 +145,12 @@ references it. This mode initially migrates the installer’s ordinary installed
 hooks; re-running the same release is supported. Changing to a different
 retained root requires requalifying the predecessor, not editing the shared file.
 
-Earlier distribution assets and qualification records are preserved only in the
-[original Git checkpoint](https://github.com/applicate2628/Orchestrarium/tree/082d46cd83324117abcb965842005d3c15ab99ed/scripts/distribution).
-They are not current build inputs and must not be applied to new runtimes.
+Earlier distribution assets and qualification records are preserved in the
+[original pre-SDK checkpoint](https://github.com/applicate2628/Orchestrarium/tree/082d46cd83324117abcb965842005d3c15ab99ed/scripts/distribution).
+The last historical SDK wheel locks, notices and receipts are preserved at
+`31a68a50c15e2d5066da9970c91369b69a125ea3:scripts/distribution`.
+The retired assets and records in those snapshots are not current build inputs
+and do not qualify new runtimes.
 Do not relabel earlier records or rewrite historical releases.
 
 ### Shared upgrade contract

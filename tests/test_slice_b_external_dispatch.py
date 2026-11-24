@@ -137,7 +137,7 @@ def test_legacy_resolution_unchanged_and_auto_excludes_new_providers() -> None:
         "435c3646a5ff9c36bc5b4483d1a04ae7fb8f8ffde51dc5795e2c2918d22f7956"
     )
     assert hashlib.sha256(presets_path.read_bytes()).hexdigest() == (
-        "80f23e84686d9cefc4e9916098c088f83a992848b67b5dcdf26409cdcf5a8ae3"
+        "6eaaa91ce8c734241b455383b101a69b6c4295b8c36055f4e5506f4d3cc9d0ba"
     )
     array_lines = "\n".join(
         line
@@ -316,9 +316,9 @@ def test_external_dispatch_denies_unsupported_provider_and_native_is_unchanged()
         "stableId": None,
         "taskClass": "mechanical-read",
         "role": "mechanical-scout",
-        "requestedProfile": "luna-high",
+        "requestedProfile": "luna-xhigh",
         "requestedModel": "gpt-6-luna",
-        "requestedEffort": "high",
+        "requestedEffort": "xhigh",
         "sandbox": "read-only",
         "fallback": "none",
         "executionContract": json.loads(
@@ -390,9 +390,9 @@ def test_advisory_consultant_uses_skill_only_ranking_without_entering_native_rol
         "mechanical-read", "mechanical-scout", "enabled", repo_root=ROOT
     )
     assert luna["status"] == "native-required"
-    assert luna["requestedProfile"] == "luna-high"
+    assert luna["requestedProfile"] == "luna-xhigh"
     assert luna["requestedModel"] == "gpt-6-luna"
-    assert luna["requestedEffort"] == "high"
+    assert luna["requestedEffort"] == "xhigh"
     assert luna["fallback"] == "none"
 
 
@@ -671,10 +671,14 @@ def test_installed_claude_external_dispatch_rejects_ambiguous_anchor(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    resolver, _policy_root, project_root, _home = _install_dispatch_layout(
+    resolver, policy_root, project_root, home = _install_dispatch_layout(
         tmp_path, monkeypatch, "claude", "project"
     )
-    result = _run_installed_external_dispatch(
+    # Equal project/home bases denote one selected authority, not ambiguity.
+    assert RESOLVER._installed_external_policy_root(
+        resolver, project_root, project_root
+    ) == policy_root
+    shared_anchor = _run_installed_external_dispatch(
         resolver,
         provider="kimi",
         task_class="exploration",
@@ -683,11 +687,33 @@ def test_installed_claude_external_dispatch_rejects_ambiguous_anchor(
         home=project_root,
         cwd=tmp_path,
     )
+    assert shared_anchor.returncode == 0, shared_anchor.stdout + shared_anchor.stderr
+    assert json.loads(shared_anchor.stdout)["status"] == "external-authorized"
+
+    # Distinct logical bases now select the same physical resolver package.
+    home_agents = home / ".claude" / "agents"
+    _make_runtime_directory_link(
+        home_agents, policy_root, "junction" if os.name == "nt" else "symlink"
+    )
+    assert home.resolve() != project_root.resolve()
+    assert (home_agents / "scripts" / resolver.name).resolve() == resolver.resolve()
+    with pytest.raises(ValueError, match="installed external resolver layout is missing or ambiguous"):
+        RESOLVER._installed_external_policy_root(resolver, project_root, home)
+    result = _run_installed_external_dispatch(
+        resolver,
+        provider="kimi",
+        task_class="exploration",
+        role="analyst",
+        project_root=project_root,
+        home=home,
+        cwd=tmp_path,
+    )
 
     assert result.returncode == 0, result.stdout + result.stderr
     decision = json.loads(result.stdout)
     assert decision["status"] == "denied"
     assert decision["stableId"] == "E_KIMI_DISPATCH_DENIED"
+    assert decision["executionAuthorized"] is False
     assert decision["fallback"] == "none"
 
 

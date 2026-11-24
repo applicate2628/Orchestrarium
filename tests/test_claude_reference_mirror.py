@@ -10,10 +10,10 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VALIDATOR = REPO_ROOT / "scripts" / "validate-claude-md.py"
-EN_REFERENCE = REPO_ROOT / "references-claude" / "claude-md-structural-enforcement.md"
+EN_REFERENCE = REPO_ROOT / 'adapters/claude/references' / "claude-md-structural-enforcement.md"
 RU_REFERENCE = (
     REPO_ROOT
-    / "references-claude"
+    / 'adapters/claude/references'
     / "ru"
     / "claude-md-structural-enforcement.md"
 )
@@ -104,3 +104,16 @@ def test_reference_mirror_refuses_unreviewed_russian_payload_byte_drift(
 
     assert not ok
     assert any("CRM-RU-HOOK-PAYLOAD-PIN" in message for message in messages), messages
+
+
+def test_matching_nonempty_status_inventory_is_accepted(tmp_path: Path) -> None:
+    validator = _load_validator()
+    copies = []
+    for name, source in (("en.md", EN_REFERENCE), ("ru.md", RU_REFERENCE)):
+        path = tmp_path / name
+        # Outside the pinned payload: exercise inventory equality independently.
+        path.write_bytes(source.read_bytes() + b"\nTEST-STATUS-SAMPLE\n")
+        copies.append(path)
+    ok, messages = validator.validate_reference_mirror(*copies)
+    assert ok, messages
+    assert "PASS: Claude reference mirror status IDs 1/1" in messages

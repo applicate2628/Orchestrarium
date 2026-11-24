@@ -12,8 +12,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 ADAPTER_PATHS = (
     REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-work-items-archival-stop.py",
     REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-work-items-archival-stop.sh",
-    REPO_ROOT / "src.claude" / "agents" / "scripts" / "check-work-items-archival-stop.py",
-    REPO_ROOT / "src.claude" / "agents" / "scripts" / "check-work-items-archival-stop.sh",
+    REPO_ROOT / 'adapters/claude' / "agents" / "scripts" / "check-work-items-archival-stop.py",
+    REPO_ROOT / 'adapters/claude' / "agents" / "scripts" / "check-work-items-archival-stop.sh",
     REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-work-items-archival-stop.py",
     REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-work-items-archival-stop.sh",
 )
@@ -38,7 +38,7 @@ class TestArchivalStopAdapterRetirement(unittest.TestCase):
 
     def test_production_registration_has_no_archival_stop_entry(self) -> None:
         installer = _load_installer()
-        for provider, expected_count in (("codex", 13), ("claude", 13)):
+        for provider, expected_count in (("codex", 12), ("claude", 13)):
             specs = installer._hook_specs(provider, REPO_ROOT / "unused")
             self.assertEqual(len(specs), expected_count)
             self.assertNotIn(

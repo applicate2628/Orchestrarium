@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from tests.fixtures.codex_hook_fixture import (
     FAKE_CODEX_HOOKS_HOST,
+    _load_installer,
     prepare_codex_home,
 )
 from tests.fixtures.provider_prompt_projection import (
@@ -20,9 +21,9 @@ from tests.fixtures.provider_prompt_projection import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-WATCH = ROOT / "src.claude/agents/scripts/await-codex-dispatch.py"
-CODEX = ROOT / "src.claude/agents/scripts/invoke-codex-prompt.py"
-CLAUDE = ROOT / "src.claude/agents/scripts/invoke-claude-prompt.py"
+WATCH = ROOT / 'adapters/claude/agents/scripts/await-codex-dispatch.py'
+CODEX = ROOT / 'adapters/claude/agents/scripts/invoke-codex-prompt.py'
+CLAUDE = ROOT / 'adapters/claude/agents/scripts/invoke-claude-prompt.py'
 
 
 def _watch(tmp_path: Path, *extra: str):
@@ -276,22 +277,13 @@ def test_python_prompt_owner_returns_complete_result_and_reclaims_artifacts(
     projection = tmp_path / f"{provider}-projection" / "agents" / "scripts"
     projection.mkdir(parents=True)
     projected_entrypoint = projection / entrypoint.name
-    shutil.copyfile(entrypoint, projected_entrypoint)
     materialize_provider_prompt_runtime(ROOT, projection)
-    projection_shared = projection.parents[1] / "shared"
-    projection_shared.mkdir()
-    shutil.copyfile(
-        ROOT / "shared" / "provider-prompt-projections.v1.json",
-        projection_shared / "provider-prompt-projections.v1.json",
-    )
-    shutil.copyfile(
-        ROOT / "shared" / "external-prompt-governance.md",
-        projection / "external-prompt-governance.md",
-    )
-    shutil.copyfile(
-        ROOT / "shared" / "external-role-taxonomy.v1.json",
-        projection / "external-role-taxonomy.v1.json",
-    )
+    for source, destination in _load_installer()._runtime_file_destinations(
+        ROOT, projection, include_codex_helpers=provider == "codex"
+    ):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+    shutil.copyfile(entrypoint, projected_entrypoint)
     env_capture = tmp_path / f"{provider}.env"
     fake = tmp_path / f"fake-{provider}.py"
     prompt = tmp_path / "prompt.md"
@@ -330,9 +322,6 @@ def test_python_prompt_owner_returns_complete_result_and_reclaims_artifacts(
     if provider == "codex":
         env["CODEX_HOME"] = str(prepare_codex_home(tmp_path))
         env["OPENAI_API_KEY"] = "fake-commercial-credential"
-        helper = Path(env["CODEX_HOME"]) / "skills" / "lead" / "scripts" / "check-hook-health.py"
-        helper.parent.mkdir(parents=True)
-        shutil.copyfile(ROOT / "scripts" / helper.name, helper)
     if provider == "claude":
         env["ANTHROPIC_API_KEY"] = "fake-commercial-credential"
     result = subprocess.run(

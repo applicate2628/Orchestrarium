@@ -26,6 +26,7 @@ def load_module(path: Path, name: str):
 
 def test_kimi_mcp_header_aliases_protect_carried_values() -> None:
     owner = load_module(PROVIDER, "pr10_header_alias_owner")
+    synthetic_header_value = "plural-header-secret"
     selection = owner.KimiCapabilitySelectionV1(
         mcp_servers=(
             owner.KimiMcpServerV1(
@@ -33,7 +34,7 @@ def test_kimi_mcp_header_aliases_protect_carried_values() -> None:
                 command="fixture",
                 args=(
                     "--headers",
-                    "Authorization: Bearer plural-header-secret",
+                    f"Authorization: Bearer {synthetic_header_value}",
                     "--request-header=X-Api-Key: request-header-secret",
                 ),
             ),
@@ -114,7 +115,9 @@ def test_noncanonical_failed_apply_retains_owned_candidate_without_unlink(
     canonical.write_bytes(original)
     candidate = item / "agent-runs.jsonl.tmp"
     monkeypatch.setattr(
-        ledger, "_validate_noncanonical_marker_candidate", lambda *_args: None
+        ledger, "_validate_noncanonical_marker_candidate",
+        lambda _item, _candidate, _validator, *, ledger_resource_budget=None,
+        transition_resource_budget=None: None,
     )
     original_unlink = ledger.Path.unlink
 
@@ -229,7 +232,9 @@ def test_noncanonical_publish_never_commits_a_swapped_candidate(
 
     monkeypatch.setattr(ledger, "_write_exact_staging_file", write_then_swap)
     monkeypatch.setattr(
-        ledger, "_validate_noncanonical_marker_candidate", lambda *_args: None
+        ledger, "_validate_noncanonical_marker_candidate",
+        lambda _item, _candidate, _validator, *, ledger_resource_budget=None,
+        transition_resource_budget=None: None,
     )
     command = (
         ledger._command_apply_noncanonical_history

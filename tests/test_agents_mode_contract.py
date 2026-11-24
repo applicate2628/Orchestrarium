@@ -90,7 +90,7 @@ class AgentsModeContractTest(unittest.TestCase):
         first_write = reference.split("## First-write defaults", 1)[1].split("## ", 1)[0]
         for provider, label, directory, overlay, initializer in (
             ("codex", "Codex", ".agents", "src.codex/AGENTS.codex.md", "src.codex/skills/init-project/SKILL.md"),
-            ("claude", "Claude Code", ".claude", "src.claude/CLAUDE.md", "src.claude/commands/agents-init-project.md"),
+            ("claude", "Claude Code", ".claude", "adapters/claude/CLAUDE.md", "adapters/claude/commands/agents-init-project.md"),
         ):
             row = next(line for line in provider_rows.splitlines() if line.startswith(f"| {label} |"))
             init = (root / initializer).read_text(encoding="utf-8")
@@ -133,6 +133,20 @@ class AgentsModeContractTest(unittest.TestCase):
                          "Read-time normalization preserves"):
             self.assertNotIn(obsolete, maintenance)
 
+    def test_claude_initializer_documents_order_without_authorizing_read_writes(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        text = (root / 'adapters/claude/commands/agents-init-project.md').read_text(encoding="utf-8")
+        rule = next(line for line in text.splitlines() if line.startswith("- For decision-driving reads,"))
+        layers = (
+            "`.claude/.agents-mode.yaml`", "`.claude/.agents-mode`",
+            "`~/.claude/.agents-mode.yaml`", "`~/.claude/.agents-mode`",
+            "`~/.agents-mode.yaml`", "built-in defaults",
+        )
+        positions = [rule.index(layer) for layer in layers]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("inspection grants no write to the source overlay", rule)
+        self.assertIn("explicitly selected authorized project configuration", rule)
+
     def test_validator_rejects_init_canonical_shape_drift(self) -> None:
         root = Path(__file__).resolve().parents[1]
 
@@ -144,7 +158,7 @@ class AgentsModeContractTest(unittest.TestCase):
                 "shared/agents-mode.defaults.yaml",
                 "docs/agents-mode-reference.md",
                 "src.codex/skills/init-project/SKILL.md",
-                "src.claude/commands/agents-init-project.md",
+                "adapters/claude/commands/agents-init-project.md",
                 "scripts/sync-agents-mode-docs.py",
             ]
             for relative in files:

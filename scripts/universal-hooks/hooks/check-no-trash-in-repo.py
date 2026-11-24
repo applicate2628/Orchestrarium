@@ -518,17 +518,8 @@ def is_repository_root(cwd_value: object) -> bool:
         return False
 
 
-def main() -> int:
-    try:
-        envelope = parse_envelope(read_stdin_utf8())
-    except Exception:
-        return 0  # malformed envelope -> fail open
-
-    acquired = acquire_tool_input(envelope.get("tool_name"), envelope.get("tool_input"))
-    if not acquired.resolved or acquired.command is None:
-        return 0
-    command = acquired.command
-
+def command_advisory(command: str, cwd: object, dialect: str | None) -> str | None:
+    """Shared command audit; only probes cwd/.git, never executes the command."""
     reasons: list[str] = []
 
     add_count = count_git_worktree_adds(command)
@@ -549,8 +540,6 @@ def main() -> int:
 
     # Trigger (2) is NOT gated on the repository-root probe: a drive-letter prefix
     # with no separator is always a mistake, wherever the process is running.
-    resolved_dialect = resolve_command_dialect(envelope.get("tool_name"))
-    dialect = resolved_dialect.dialect if resolved_dialect.exact else None
 
     mangled = mangled_windows_targets(command, dialect)
     if mangled:
@@ -564,7 +553,7 @@ def main() -> int:
         )
 
     # Triggers (3)/(4) need a CONFIRMED repository-root CWD and no directory change.
-    if is_repository_root(envelope.get("cwd")) and not changes_directory(command, dialect):
+    if is_repository_root(cwd) and not changes_directory(command, dialect):
         artifacts = root_destined_artifact_targets(command, dialect)
         if artifacts:
             reasons.append(
@@ -587,13 +576,27 @@ def main() -> int:
             )
 
     if reasons:
-        emit_advisory(
-            envelope,
-            "[stray-artifact AUDIT] " + " ALSO: ".join(reasons) + " AUDIT mode -- allowing.",
-        )
-        # Exit 0: the advisory reaches the model via hookSpecificOutput.
-        # additionalContext (see hook_common.emit_advisory) -- never exit 2 (block).
+        return "[stray-artifact AUDIT] " + " ALSO: ".join(reasons) + " AUDIT mode -- allowing."
+    return None
+
+
+def main() -> int:
+    try:
+        envelope = parse_envelope(read_stdin_utf8())
+    except Exception:
+        return 0  # malformed envelope -> fail open
+
+    acquired = acquire_tool_input(envelope.get("tool_name"), envelope.get("tool_input"))
+    if not acquired.resolved or acquired.command is None:
+        return 0
+
+    resolved_dialect = resolve_command_dialect(envelope.get("tool_name"))
+    dialect = resolved_dialect.dialect if resolved_dialect.exact else None
+    message = command_advisory(acquired.command, envelope.get("cwd"), dialect)
+    if message is not None:
+        emit_advisory(envelope, message)
     return 0
+
 
 
 if __name__ == "__main__":

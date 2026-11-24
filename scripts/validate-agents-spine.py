@@ -171,6 +171,8 @@ TEXTUAL_REVISION_TEETH = [
 ]
 
 REUSE_BEFORE_HAND_ROLLING_TEETH = [
+    "Proactively discover applicable ready-made solutions",
+    "Discovery grants no installation, paid-execution or model-quota authority",
     "Reuse before hand-rolling",
     "from scratch",
     "repo-standard mechanism",

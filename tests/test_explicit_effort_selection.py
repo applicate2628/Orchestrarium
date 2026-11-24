@@ -19,6 +19,7 @@ sys.modules[spec.name] = resolver
 spec.loader.exec_module(resolver)
 HOST = {"explicitModelControl": True, "explicitReasoningEffortControl": True}
 SCOPE = {"read": True}
+CHOICE_REASON = "Compare the requested profile on this bounded, independently checked task."
 
 
 class ExplicitSelectionTests(unittest.TestCase):
@@ -69,26 +70,31 @@ class ExplicitSelectionTests(unittest.TestCase):
                         continue
                     self.assertIn(profile, allowed, (role, task))
                     effort = policy["profiles"][profile]["effort"]
-                    result = self.select(description, "gpt-6.1-sol", effort)
+                    result = self.select(description, "gpt-6.2-sol", effort,
+                                         preference_deviation_reason=CHOICE_REASON)
                     self.assertEqual((result["status"], result["resolvedModel"], result["resolvedEffort"], result["fallback"]),
-                                     ("resolved", "gpt-6.1-sol", effort, "none"), (role, task, result))
+                                     ("resolved", "gpt-6.2-sol", effort, "none"), (role, task, result))
                     self.assertEqual(result["invocation"]["mode"], "generic-explicit-profile")
                 if "luna-high" in allowed:
                     self.assertIn("terra-6.1-high", allowed, (role, task))
                     for profile in ("terra-6.1-medium", "terra-6.1-high"):
                         if profile not in allowed:
                             continue
-                        result = self.select(description, "gpt-6.1-terra", policy["profiles"][profile]["effort"])
+                        result = self.select(description, "gpt-6.1-terra", policy["profiles"][profile]["effort"],
+                                             preference_deviation_reason=CHOICE_REASON)
                         self.assertEqual((result["status"], result["fallback"]), ("resolved", "none"), (role, task, result))
         desc = self.describe("backend-engineer", "engineering")
-        for model, effort in (("gpt-6-astra", "high"), ("gpt-6.1-terra", "max"), ("gpt-unknown", "high")):
-            result = self.select(desc, model, effort)
+        for model, effort in (("gpt-6-astra", "high"), ("gpt-6.1-sol", "high"),
+                              ("gpt-6.2-astra", "high"), ("gpt-6.1-terra", "max"),
+                              ("gpt-unknown", "high")):
+            result = self.select(desc, model, effort, preference_deviation_reason=CHOICE_REASON)
             self.assertEqual((result["status"], result["fallback"]), ("denied", "none"))
         for task, role in (("mechanical-read", "mechanical-scout"), ("mechanical", "mechanical-worker")):
             decision = resolver.resolve_role_dispatch(task, role, "disabled", repo_root=ROOT)
             self.assertEqual((decision["status"], decision["fallback"]), ("unavailable", "none"))
         ordinary = self.describe("backend-engineer", "engineering")
-        self.assertEqual(self.select(ordinary, "gpt-6.1-terra", "high")["status"], "resolved")
+        self.assertEqual(self.select(ordinary, "gpt-6.1-terra", "high",
+                                    preference_deviation_reason=CHOICE_REASON)["status"], "resolved")
 
     def test_omitted_choice_uses_recommendation_and_partial_pair_is_denied(self):
         desc = self.describe()
@@ -106,24 +112,31 @@ class ExplicitSelectionTests(unittest.TestCase):
 
     def test_exact_choices_controls_floors_and_approval(self):
         desc = self.describe()
+        missing_reason = self.select(desc, "gpt-6.1-terra", "xhigh")
+        self.assertEqual(missing_reason["stableId"], "E_ORDINARY_NATIVE_PREFERENCE_DEVIATION_REASON_REQUIRED")
         for effort in ("high", "xhigh"):
-            result = self.select(desc, "gpt-6.1-terra", effort)
+            result = self.select(desc, "gpt-6.1-terra", effort,
+                                 preference_deviation_reason=CHOICE_REASON)
             self.assertEqual((result["resolvedModel"], result["resolvedEffort"]), ("gpt-6.1-terra", effort))
             self.assertEqual(result["invocation"]["mode"], "generic-explicit-profile")
         self.assertEqual(self.select(desc, "gpt-6.1-terra", "low")["status"], "denied")
         self.assertEqual(self.select(desc, "gpt-6-luna", "medium")["status"], "denied")
         no_controls = self.describe(host={"explicitModelControl": False, "explicitReasoningEffortControl": False})
         self.assertEqual(self.select(no_controls, "gpt-6.1-terra", "high")["stableId"], "E_ORDINARY_NATIVE_CONTROLS_UNAVAILABLE")
-        filtered = self.describe(host={**HOST, "reportedModels": ["gpt-6.1-sol"], "reportedEfforts": ["high"]})
+        filtered = self.describe(host={**HOST, "reportedModels": ["gpt-6.2-sol"], "reportedEfforts": ["high"]})
         self.assertEqual(self.select(filtered, "gpt-6.1-terra", "high")["status"], "denied")
-        for model, effort in (("gpt-6-astra", "high"), ("gpt-6.1-terra", "max")):
-            self.assertEqual(self.select(desc, model, effort)["status"], "denied")
-            self.assertEqual(self.select(desc, model, effort, user_approved_launch=True)["status"], "resolved")
+        for model, effort in (("gpt-6.2-astra", "high"), ("gpt-6.1-terra", "max")):
+            denied = self.select(desc, model, effort, preference_deviation_reason=CHOICE_REASON)
+            self.assertEqual(denied["status"], "denied")
+            self.assertEqual(denied["configurationDiagnostic"]["reason"], "individual-launch-approval-required")
+            self.assertEqual(self.select(desc, model, effort, user_approved_launch=True,
+                                        preference_deviation_reason=CHOICE_REASON)["status"], "resolved")
         science = self.describe("scientific-software-engineer", "engineering")
-        self.assertEqual(science["defaultModel"], "gpt-6.1-sol")
-        self.assertEqual(self.select(science, "gpt-6.1-sol", "high")["status"], "resolved")
+        self.assertEqual(science["defaultModel"], "gpt-6.2-sol")
+        self.assertEqual(self.select(science, "gpt-6.2-sol", "high")["status"], "resolved")
         engineering = self.describe("backend-engineer", "engineering")
-        self.assertEqual(self.select(engineering, "gpt-6-luna", "high")["status"], "resolved")
+        self.assertEqual(self.select(engineering, "gpt-6-luna", "high",
+                                    preference_deviation_reason=CHOICE_REASON)["status"], "resolved")
 
     def test_configured_carrier_and_role_tuples_are_complete_and_binding(self):
         with tempfile.TemporaryDirectory(prefix="ordinary-controls-") as directory:
@@ -133,6 +146,8 @@ class ExplicitSelectionTests(unittest.TestCase):
             carrier_path = roles / "default.toml"
             role_path = roles / "backend-engineer.toml"
             carrier_base, role_base = carrier_path.read_bytes(), role_path.read_bytes()
+            self.assertIn(b'model = "gpt-6.2-sol"\n', role_base)
+            self.assertIn(b'model_reasoning_effort = "high"\n', role_base)
             manifest = ROOT / "src.codex/agents/orchestrarium-role-manifest.json"
 
             def describe():
@@ -144,39 +159,47 @@ class ExplicitSelectionTests(unittest.TestCase):
 
             for controls, expected in (
                 (b"", "resolved"),
-                (b'model = "gpt-6.1-terra"\n', "denied"),
-                (b'model_reasoning_effort = "medium"\n', "denied"),
-                (b'model = "gpt-6.1-terra"\nmodel_reasoning_effort = "medium"\n', "resolved"),
+                (b'model = "gpt-6.2-sol"\n', "denied"),
+                (b'model_reasoning_effort = "high"\n', "denied"),
+                (b'model = "gpt-6.2-sol"\nmodel_reasoning_effort = "high"\n', "resolved"),
+                (b'model = "gpt-6.1-terra"\nmodel_reasoning_effort = "medium"\n', "denied"),
                 (b'model = "gpt-6.1-sol"\nmodel_reasoning_effort = "high"\n', "denied"),
             ):
                 with self.subTest(carrier=controls):
                     carrier_path.write_bytes(controls + carrier_base)
                     desc = describe()
-                    for model, effort in ((None, None), ("gpt-6.1-terra", "medium")):
+                    for model, effort in ((None, None), ("gpt-6.2-sol", "high")):
                         result = self.select(desc, model, effort)
                         self.assertEqual(result["status"], expected, result)
+                        if expected == "denied":
+                            self.assertEqual(result["configurationDiagnostic"]["stage"], "configured-carrier-conflict")
                         if controls and (b"model =" not in controls or b"model_reasoning_effort =" not in controls):
                             self.assertEqual(result["configurationDiagnostic"]["reason"], "incomplete-configured-tuple")
-                            self.assertEqual(desc["configurationProvenance"]["genericProfileCompatibility"]["terra-6.1-medium"], "conflict")
+                            self.assertEqual(desc["configurationProvenance"]["genericProfileCompatibility"]["frontier-high"], "conflict")
+                        elif expected == "denied":
+                            self.assertEqual(result["configurationDiagnostic"]["reason"], "requested-tuple-overridden")
 
             carrier_path.write_bytes(carrier_base)
-            for missing in (b'model = "gpt-6.1-terra"\n', b'model_reasoning_effort = "medium"\n'):
+            for missing in (b'model = "gpt-6.2-sol"\n', b'model_reasoning_effort = "high"\n'):
                 with self.subTest(role_missing=missing):
                     role_path.write_bytes(role_base.replace(missing, b"", 1))
                     desc = describe()
-                    for model, effort in ((None, None), ("gpt-6.1-terra", "medium")):
+                    for model, effort in ((None, None), ("gpt-6.2-sol", "high")):
                         result = self.select(desc, model, effort)
                         self.assertEqual(result["status"], "denied", result)
                         self.assertEqual(result["configurationDiagnostic"]["stage"], "inherited-control-unresolved")
 
-            role_path.write_bytes(role_base.replace(b'model_reasoning_effort = "medium"', b'model_reasoning_effort = "high"', 1))
+            role_path.write_bytes(role_base.replace(b'model_reasoning_effort = "high"', b'model_reasoning_effort = "xhigh"', 1))
             desc = describe()
-            self.assertEqual(self.select(desc)["resolvedEffort"], "high")
-            self.assertEqual(self.select(desc, "gpt-6.1-terra", "high")["status"], "resolved")
-            self.assertEqual(self.select(desc, "gpt-6.1-terra", "medium")["status"], "denied")
-            role_path.write_bytes(role_base.replace(b'model_reasoning_effort = "medium"', b'model_reasoning_effort = "low"', 1))
+            self.assertEqual(self.select(desc)["resolvedEffort"], "xhigh")
+            self.assertEqual(self.select(desc, "gpt-6.2-sol", "xhigh")["status"], "resolved")
+            overridden = self.select(desc, "gpt-6.2-sol", "high", preference_deviation_reason=CHOICE_REASON)
+            self.assertEqual(overridden["status"], "denied")
+            self.assertEqual(overridden["configurationDiagnostic"]["stage"], "configured-profile-policy")
+            self.assertEqual(overridden["configurationDiagnostic"]["reason"], "requested-tuple-overridden")
+            role_path.write_bytes(role_base.replace(b'model_reasoning_effort = "high"', b'model_reasoning_effort = "low"', 1))
             desc = describe()
-            for model, effort in ((None, None), ("gpt-6.1-terra", "medium")):
+            for model, effort in ((None, None), ("gpt-6.2-sol", "high")):
                 result = self.select(desc, model, effort)
                 self.assertEqual(result["status"], "denied", result)
                 self.assertEqual(result["configurationDiagnostic"]["reason"], "configured-tuple-not-admitted")
@@ -187,13 +210,14 @@ class ExplicitSelectionTests(unittest.TestCase):
             shutil.copy2(ROOT / "src.codex/agents/default.toml", roles / "default.toml")
             manifest = ROOT / "src.codex/agents/orchestrarium-role-manifest.json"
             for role, task, expected in (
-                ("backend-engineer", "engineering", ("gpt-6.1-terra", "medium")),
-                ("worker", "recovery", ("gpt-6.1-sol", "high")),
+                ("backend-engineer", "engineering", ("gpt-6.2-sol", "high")),
+                ("worker", "recovery", ("gpt-6.2-sol", "high")),
             ):
                 with self.subTest(role=role, task=task):
                     content = (ROOT / "src.codex/agents" / (role + ".toml")).read_bytes()
-                    content = content.replace(b'model = "gpt-6.1-terra"\n', b"", 1)
-                    content = content.replace(b'model_reasoning_effort = "medium"\n', b"", 1)
+                    for control in (b'model = "gpt-6.2-sol"\n', b'model_reasoning_effort = "high"\n'):
+                        self.assertIn(control, content)
+                        content = content.replace(control, b"", 1)
                     (roles / (role + ".toml")).write_bytes(content)
                     desc = resolver._describe_ordinary_native_role_options_in_layout(
                         role, task, HOST, repo_root=ROOT, manifest_path=manifest, role_root=roles)
@@ -201,8 +225,9 @@ class ExplicitSelectionTests(unittest.TestCase):
                     self.assertIsNone(desc["defaultConfigurationError"])
                     default = self.select(desc)
                     self.assertEqual((default["resolvedModel"], default["resolvedEffort"]), expected)
-                    for model, effort in (("gpt-6.1-terra", "medium"), ("gpt-6.1-sol", "high")):
-                        self.assertEqual(self.select(desc, model, effort)["status"], "resolved")
+                    for model, effort in (("gpt-6.1-terra", "medium"), ("gpt-6.2-sol", "high")):
+                        self.assertEqual(self.select(desc, model, effort,
+                                                    preference_deviation_reason=CHOICE_REASON)["status"], "resolved")
 
     def test_installed_cli_foreign_home_and_cwd(self):
         with tempfile.TemporaryDirectory() as tmp:

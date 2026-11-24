@@ -131,6 +131,18 @@ def test_explicit_retention_runs_before_reexec(launcher,tmp_path,monkeypatch):
     assert calls[0][1]==[str(destination/'python/bin/python3'),'-I','-B',str(destination/'launch.py'),'--permanent-runtime','--global']
 
 
+def test_official_sdk_setup_preview_keeps_selected_worker_path(launcher, tmp_path, monkeypatch):
+    root, exe, _ = bundle(tmp_path, launcher)
+    monkeypatch.setattr(launcher, '__file__', str(root/'launch.py'))
+    monkeypatch.setattr(launcher.sys, 'executable', str(exe))
+    calls = []
+    monkeypatch.setattr(launcher, '_exec_child', lambda *args: (calls.append(args), 0)[1])
+    arguments = ['--sdk-setup', 'claude', '--sdk-venv', str(tmp_path/'selected worker')]
+    assert launcher.main(['--permanent-runtime', *arguments]) == 0
+    assert calls[0][1] == [str(exe), '-I', '-B', str(root/'app/install.py'), *arguments]
+    assert not (tmp_path/'selected worker').exists()
+
+
 def test_missing_retention_target_never_executes(launcher,tmp_path,monkeypatch):
     root,exe,_=bundle(tmp_path,launcher)
     monkeypatch.setattr(launcher,'__file__',str(root/'launch.py'))
@@ -236,7 +248,7 @@ def test_apply_requires_explicit_runtime_lifetime(launcher, tmp_path, monkeypatc
     assert '--retain-to' in capsys.readouterr().err
 
 
-@pytest.mark.parametrize('args', [['--help'], ['--dry-run']])
+@pytest.mark.parametrize('args', [['--list-clients'], ['--help'], ['--clients', 'codex', '--dry-run']])
 def test_read_only_launch_needs_no_permanent_placement(launcher, tmp_path, monkeypatch, args):
     root, exe, _ = bundle(tmp_path, launcher)
     monkeypatch.setattr(launcher, '__file__', str(root / 'launch.py'))
@@ -244,7 +256,7 @@ def test_read_only_launch_needs_no_permanent_placement(launcher, tmp_path, monke
     calls = []
     monkeypatch.setattr(launcher, '_exec_child', lambda *values: (calls.append(values), 0)[1])
     assert launcher.main(args) == 0
-    assert calls[0][1][4:] == args
+    assert calls[0][1] == [str(exe), '-I', '-B', str(root/'app/install.py'), *args]
 
 
 def test_windows_child_waits_and_propagates_failure(launcher, monkeypatch):
@@ -299,8 +311,12 @@ def test_changed_expected_record_refused_before_launch(launcher, tmp_path):
 
 
 
-@pytest.mark.parametrize("args", [["--help"], ["--global", "--dry-run"]])
-def test_preview_executes_real_entry_without_bundle_bytecode(launcher, tmp_path, monkeypatch, args):
+@pytest.mark.parametrize("args, forwarded", [
+    (["--help"], None),
+    (["--clients", "claude", "--global", "--dry-run"],
+     ["--client", "claude", "--global", "--dry-run"]),
+])
+def test_preview_executes_real_entry_without_bundle_bytecode(launcher, tmp_path, monkeypatch, args, forwarded):
     root, exe, _ = bundle(tmp_path, launcher)
     source = PATH.parents[2]
     entry = root / "app/install.py"
@@ -309,7 +325,13 @@ def test_preview_executes_real_entry_without_bundle_bytecode(launcher, tmp_path,
     scripts.mkdir()
     bootstrap = "python_installer_bootstrap.py"
     (scripts / bootstrap).write_bytes((source / "scripts" / bootstrap).read_bytes())
-    (scripts / "install-claude.py").write_text("import sys\nprint(repr(sys.argv[1:]))\n", encoding="utf-8")
+    installation = scripts / "installation"
+    installation.mkdir()
+    for name in ("__init__.py", "clients.py", "sdk_setup.py"):
+        (installation / name).write_bytes((source / "scripts/installation" / name).read_bytes())
+    (scripts / "install-client.py").write_text(
+        "import sys\nfrom installation.clients import CLIENTS\n"
+        "print('DISPATCH:', repr(sys.argv[1:]))\n", encoding="utf-8")
     home = tmp_path / "home"
     home.mkdir()
     actual_python = sys.executable
@@ -325,7 +347,7 @@ def test_preview_executes_real_entry_without_bundle_bytecode(launcher, tmp_path,
         # Exercise the actual installer and CPython isolation with unchanged flags.
         assert python == argv[0] == str(exe)
         result = subprocess.run(
-            [actual_python, *argv[1:]], input="2\n",
+            [actual_python, *argv[1:]], input="",
             env=env, capture_output=True, text=True, timeout=20,
         )
         observed.append(result)
@@ -334,7 +356,11 @@ def test_preview_executes_real_entry_without_bundle_bytecode(launcher, tmp_path,
     monkeypatch.setattr(launcher, "_exec_child", execute)
     before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
     assert launcher.main(args) == 0, observed[0].stderr
-    assert repr(args) in observed[0].stdout
+    if forwarded is None:
+        assert "Orche client selection" in observed[0].stdout
+        assert "DISPATCH:" not in observed[0].stdout
+    else:
+        assert "DISPATCH: " + repr(forwarded) in observed[0].stdout
     after = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
     assert after == before
     assert list(home.iterdir()) == []

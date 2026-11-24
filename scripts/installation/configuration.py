@@ -219,3 +219,46 @@ def remove_native_features(payload: bytes, owned: dict[str, bool]) -> bytes:
     if tomllib.loads(result.decode("utf-8")) != expected_data:
         raise ValueError("Unrelated native features changed")
     return result
+
+
+def json_projection(payload: bytes | None, prior: dict | None, desired: dict | None) -> bytes:
+    """Merge/remove only receipt-bound named members and discovery entries."""
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Duplicate JSON configuration member")
+            result[key] = value
+        return result
+    data = {} if payload is None else json.loads(payload.decode("utf-8"), object_pairs_hook=unique)
+    if type(data) is not dict:
+        raise ValueError("JSON configuration must be an object")
+    if prior:
+        for key, value in prior["members"].items():
+            if key in data and data[key] != value:
+                raise ValueError("Modified owned JSON member preserved")
+            data.pop(key, None)
+        entries = data.get("entries", [])
+        if type(entries) is not list:
+            raise ValueError("Invalid discovery entries")
+        for entry in prior["entries"]:
+            if entries.count(entry) > 1:
+                raise ValueError("Ambiguous owned discovery entry")
+            if entry in entries:
+                entries.remove(entry)
+        if "entries" in data:
+            data["entries"] = entries
+    if desired:
+        for key, value in desired["members"].items():
+            if key in data:
+                raise ValueError("Unowned named JSON member preserved")
+            data[key] = value
+        if desired["entries"]:
+            entries = data.setdefault("entries", [])
+            if type(entries) is not list:
+                raise ValueError("Invalid discovery entries")
+            for entry in desired["entries"]:
+                if entry in entries:
+                    raise ValueError("Unowned discovery entry preserved")
+                entries.append(entry)
+    return (json.dumps(data, ensure_ascii=True, indent=2) + "\n").encode("utf-8")

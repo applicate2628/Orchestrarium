@@ -24,11 +24,21 @@ def test_build_uses_relative_layout_and_keeps_source(builder, tmp_path):
     assert data['entry'] == 'app/install.py'
     assert (out/'app/install.py').read_bytes() == (SOURCE/'install.py').read_bytes()
     assert (out/'launch.py').read_bytes() == (SOURCE/'scripts/distribution/launch.py').read_bytes()
+    assert 'exec "$root/python/bin/python3" -I -B "$root/launch.py" "$@"' in (out/'orche').read_text()
     # Windows does not expose POSIX executable permission bits.
     if os.name != 'nt':
         assert (out/'orche').stat().st_mode & 0o111
     assert not (out/'app/tests').exists() and not (out/'app/.git').exists()
     assert (runtime/'bin/python3').read_bytes() == b'not executed'
+
+
+def test_generated_windows_launcher_suppresses_bytecode(builder, tmp_path):
+    runtime = tmp_path/'runtime'
+    runtime.mkdir()
+    (runtime/'python.exe').write_bytes(b'not executed')
+    out = build_synthetic_bundle(builder, SOURCE, runtime, tmp_path/'bundle',
+                                 target='windows-x64', release='development')
+    assert "& (Join-Path $PSScriptRoot 'python/python.exe') -I -B (Join-Path $PSScriptRoot 'launch.py') @args" in (out/'orche.ps1').read_text()
 
 
 def test_existing_output_is_never_overwritten(builder,tmp_path):
@@ -223,11 +233,14 @@ def test_runtime_retains_qualified_standard_library_extension_and_neighbors(buil
 
 
 @pytest.mark.parametrize("package_dir", ["lib/python3.15/site-packages", "lib/python3.16/dist-packages", "Lib/site-packages"])
-def test_stdlib_profile_refuses_populated_package_locations_without_stripping_neighbors(builder, tmp_path, package_dir):
+@pytest.mark.parametrize("package_name", ["unrelated-provider", "pip", "setuptools", "wheel"])
+def test_stdlib_profile_refuses_populated_package_locations_without_stripping_neighbors(
+    builder, tmp_path, package_dir, package_name
+):
     source, runtime = small_inputs(builder, tmp_path)
     packages = runtime / package_dir
     packages.mkdir(parents=True)
-    package = packages / "unrelated-provider"
+    package = packages / package_name
     package.mkdir()
     (package / "payload").write_bytes(b"keep input")
     neighbor = runtime / "bin/ordinary-helper"
@@ -282,6 +295,39 @@ def test_unrelated_linked_entry_directory_remains_supported(builder, tmp_path):
     build_synthetic_bundle(builder, source, runtime, output, target='linux-x64', release='development')
     assert (output / 'python/Scripts').is_symlink()
     assert (output / 'python/Scripts/helper').read_bytes() == b'keep'
+
+
+def test_base_runtime_rejects_third_party_metadata_outside_site_packages(builder, tmp_path):
+    source, runtime = small_inputs(builder, tmp_path)
+    metadata = runtime / "vendor/another_provider-1.0.dist-info"
+    metadata.mkdir(parents=True)
+    (metadata / "METADATA").write_text("Name: another-provider\nVersion: 1.0\n")
+    with pytest.raises(ValueError, match="third-party package content"):
+        build_synthetic_bundle(builder, source, runtime, tmp_path / "output",
+                               target="linux-x64", release="development")
+    assert (metadata / "METADATA").is_file()
+    assert not (tmp_path / "output").exists()
+
+
+def test_empty_package_directory_is_valid_base_python(builder, tmp_path):
+    source, runtime = small_inputs(builder, tmp_path)
+    (runtime / "lib/python3.15/site-packages").mkdir(parents=True)
+    output = tmp_path / "output"
+    build_synthetic_bundle(builder, source, runtime, output, target="linux-x64", release="development")
+    assert (output / "python/lib/python3.15/site-packages").is_dir()
+
+
+def test_pristine_cpython_site_packages_marker_requires_upstream_projection(builder, tmp_path):
+    source, runtime = small_inputs(builder, tmp_path)
+    marker = runtime / "Lib/site-packages/README.txt"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("This directory exists so that 3rd party packages can be installed here.\n")
+    output = tmp_path / "output"
+    before = marker.read_bytes()
+    with pytest.raises(ValueError, match="third-party package content"):
+        build_synthetic_bundle(builder, source, runtime, output, target="linux-x64", release="development")
+    assert marker.read_bytes() == before
+    assert not output.exists()
 
 
 

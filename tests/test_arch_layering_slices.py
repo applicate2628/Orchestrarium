@@ -49,7 +49,7 @@ def test_claude_architect_layering_slice_resolves_to_universal_body() -> None:
         ROOT / "src.codex/skills/architect/SKILL.md"
     )
     assert validator.claude_path(ROOT, "backend-engineer") == (
-        ROOT / "src.claude/agents/backend-engineer.md"
+        ROOT / 'adapters/claude/agents/backend-engineer.md'
     )
 
 

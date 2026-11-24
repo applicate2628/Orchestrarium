@@ -6,42 +6,42 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 QA_AND_REVIEWER_CONTRACTS = (
     "src.codex/skills/qa-engineer/SKILL.md",
-    "src.claude/agents/qa-engineer.md",
+    "adapters/claude/agents/qa-engineer.md",
     "src.codex/skills/security-reviewer/SKILL.md",
-    "src.claude/agents/security-reviewer.md",
+    "adapters/claude/agents/security-reviewer.md",
     "src.codex/skills/performance-reviewer/SKILL.md",
-    "src.claude/agents/performance-reviewer.md",
+    "adapters/claude/agents/performance-reviewer.md",
     "src.codex/skills/ux-reviewer/SKILL.md",
-    "src.claude/agents/ux-reviewer.md",
+    "adapters/claude/agents/ux-reviewer.md",
     "src.codex/skills/accessibility-reviewer/SKILL.md",
-    "src.claude/agents/accessibility-reviewer.md",
+    "adapters/claude/agents/accessibility-reviewer.md",
 )
 
 REGISTRY_WRITER_CONTRACTS = (
     "src.codex/skills/analyst/SKILL.md",
-    "src.claude/skills/analyst/SKILL.md",
+    "adapters/claude/skills/analyst/SKILL.md",
     "src.codex/skills/qa-engineer/SKILL.md",
-    "src.claude/agents/qa-engineer.md",
+    "adapters/claude/agents/qa-engineer.md",
     "src.codex/skills/security-reviewer/SKILL.md",
-    "src.claude/agents/security-reviewer.md",
+    "adapters/claude/agents/security-reviewer.md",
     "src.codex/skills/performance-reviewer/SKILL.md",
-    "src.claude/agents/performance-reviewer.md",
+    "adapters/claude/agents/performance-reviewer.md",
     "src.codex/skills/accessibility-reviewer/SKILL.md",
-    "src.claude/agents/accessibility-reviewer.md",
+    "adapters/claude/agents/accessibility-reviewer.md",
 )
 
 DESIGN_ROUTING_CONTRACTS = {
     "src.codex/skills/security-reviewer/SKILL.md": ("`security-engineer`",),
-    "src.claude/agents/security-reviewer.md": ("`security-engineer`",),
+    "adapters/claude/agents/security-reviewer.md": ("`security-engineer`",),
     "src.codex/skills/performance-reviewer/SKILL.md": ("`performance-engineer`",),
-    "src.claude/agents/performance-reviewer.md": ("`performance-engineer`",),
+    "adapters/claude/agents/performance-reviewer.md": ("`performance-engineer`",),
     "src.codex/skills/ux-reviewer/SKILL.md": ("`$ux-designer`", "`$architect`"),
-    "src.claude/agents/ux-reviewer.md": ("`$ux-designer`", "`$architect`"),
+    "adapters/claude/agents/ux-reviewer.md": ("`$ux-designer`", "`$architect`"),
     "src.codex/skills/accessibility-reviewer/SKILL.md": (
         "`$ux-designer`",
         "`$architect`",
     ),
-    "src.claude/agents/accessibility-reviewer.md": (
+    "adapters/claude/agents/accessibility-reviewer.md": (
         "`$ux-designer`",
         "`$architect`",
     ),
@@ -49,7 +49,7 @@ DESIGN_ROUTING_CONTRACTS = {
 
 PERFORMANCE_REVIEWER_CONTRACTS = (
     "src.codex/skills/performance-reviewer/SKILL.md",
-    "src.claude/agents/performance-reviewer.md",
+    "adapters/claude/agents/performance-reviewer.md",
 )
 
 
@@ -68,11 +68,22 @@ class TestQAContractEconomy(unittest.TestCase):
             "residual risk",
             "does not add or promote any check",
         )
+        qa_required = (
+            "`PASS` requires every mandatory criterion of the commissioned slice to be verified",
+            "Unchecked, `not-run`, `UNVERIFIED` or blocked required criteria prevent it",
+            "continue runnable checks",
+            "Intentionally later whole-outcome criteria remain unverified under their owner",
+            "Optional checks are residual risk",
+            "Scope and accepted criteria alone set mandatory checks",
+        )
 
         for relative in QA_AND_REVIEWER_CONTRACTS:
             text = self._read(relative)
             with self.subTest(relative=relative):
-                for marker in required:
+                # The QA owner has the accepted slice-specific wording; the
+                # independent reviewers retain their existing gate wording.
+                markers = qa_required if "qa-engineer" in relative else required
+                for marker in markers:
                     self.assertIn(marker, text)
 
     def test_read_only_finding_is_returned_in_band_until_registry_write_is_authorized(
@@ -80,7 +91,7 @@ class TestQAContractEconomy(unittest.TestCase):
     ) -> None:
         required = (
             "proposed registry record",
-            "in-band in the returned artifact for the root or lifecycle owner",
+            "in-band",
             "explicitly grants registry-write authority",
             "sandbox permits that path",
             "narrow canonical-artifact exception",

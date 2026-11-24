@@ -11,7 +11,7 @@ SHARED = ROOT / "shared/AGENTS.shared.md"
 PROJECTIONS = (
     ("src.codex/skills/lead/SKILL.md", "Flow-continuity rule"),
     ("src.codex/skills/lead/operating-model.md", "Primary-task lock"),
-    ("src.claude/agents/contracts/operating-model.md", "Primary-task lock"),
+    ("adapters/claude/agents/contracts/operating-model.md", "Primary-task lock"),
     ("shared/references/subagent-operating-model.md", "3.9 Rolling-loop execution"),
 )
 CASES = {
@@ -112,7 +112,7 @@ def test_stop_after_current_run_is_consumed_by_later_resume() -> None:
 @pytest.mark.parametrize("relative,constant", (
     ("scripts/universal-hooks/scripts/mcp_continuity_policy.py", "TURN_ANCHOR_CONTEXT"),
     ("src.codex/skills/lead/scripts/mcp_continuity_policy.py", "TURN_ANCHOR_CONTEXT"),
-    ("src.claude/agents/scripts/mcp_continuity_policy.py", "TURN_ANCHOR_CONTEXT"),
+    ("adapters/claude/agents/scripts/mcp_continuity_policy.py", "TURN_ANCHOR_CONTEXT"),
     ("src.codex/skills/lead/hooks/check-parallel-mcp-momentum.py", "REMINDER"),
 ))
 def test_reminders_reconcile_holds_without_becoming_state_mutators(relative: str, constant: str) -> None:

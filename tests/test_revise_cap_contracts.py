@@ -15,34 +15,32 @@ GENERIC_CONSUMERS = (
     Path("shared/references/ru/workflow-strategy-comparison.md"),
     Path("shared/references/spine/delegation-principles.md"),
     Path("shared/references/cross-pack-reconciliation.md"),
-    Path("src.claude/skills/lead/SKILL.md"),
-    Path("src.claude/agents/contracts/operating-model.md"),
+    Path("adapters/claude/skills/lead/SKILL.md"),
+    Path("adapters/claude/agents/contracts/operating-model.md"),
     Path("src.codex/skills/lead/SKILL.md"),
     Path("src.codex/skills/lead/operating-model.md"),
-    Path("src.claude/commands/agents-bugfix.md"),
-    Path("src.claude/commands/agents-design.md"),
-    Path("src.claude/commands/agents-perf.md"),
-    Path("src.claude/commands/agents-refactor.md"),
-    Path("src.claude/commands/agents-research.md"),
-    Path("src.claude/commands/agents-security.md"),
-    Path("references-claude/operating-model-diagram.md"),
-    Path("references-claude/ru/operating-model-diagram.md"),
+    Path("adapters/claude/commands/agents-bugfix.md"),
+    Path("adapters/claude/commands/agents-design.md"),
+    Path("adapters/claude/commands/agents-perf.md"),
+    Path("adapters/claude/commands/agents-refactor.md"),
+    Path("adapters/claude/commands/agents-research.md"),
+    Path("adapters/claude/commands/agents-security.md"),
+    Path("adapters/claude/references/operating-model-diagram.md"),
+    Path("adapters/claude/references/ru/operating-model-diagram.md"),
     Path("references-codex/operating-model-diagram.md"),
     Path("references-codex/ru/operating-model-diagram.md"),
 )
 REVIEW_LOOP_CONSUMERS = (
     Path("shared/references/review-loop-methodology.md"),
     Path("shared/references/ru/review-loop-methodology.md"),
-    Path("src.claude/agents/contracts/review-loop.md"),
-    Path("src.claude/commands/agents-review-loop.md"),
+    Path("adapters/claude/agents/contracts/review-loop.md"),
     Path("src.codex/skills/review-loop/SKILL.md"),
-    Path("src.claude/agents/hooks/dispatch_sentinels.py"),
+    Path("adapters/claude/agents/hooks/dispatch_sentinels.py"),
 )
 GENERIC_SCAN_ROOTS = (
     Path("shared"),
-    Path("src.claude"),
+    Path("adapters/claude"),
     Path("src.codex"),
-    Path("references-claude"),
     Path("references-codex"),
 )
 REVIEW_LOOP_CAP_PATTERNS = {
@@ -52,22 +50,20 @@ REVIEW_LOOP_CAP_PATTERNS = {
     Path("shared/references/ru/review-loop-methodology.md"): re.compile(
         r"ограничение в \*\*N = (?P<cap>\d+)\*\* раунда"
     ),
-    Path("src.claude/agents/contracts/review-loop.md"): re.compile(
+    Path("adapters/claude/agents/contracts/review-loop.md"): re.compile(
         r"cap at \*\*N = (?P<cap>\d+)\*\* rounds"
-    ),
-    Path("src.claude/commands/agents-review-loop.md"): re.compile(
-        r"cap N=(?P<cap>\d+) reached"
     ),
     Path("src.codex/skills/review-loop/SKILL.md"): re.compile(
         r"cap at \*\*N = (?P<cap>\d+)\*\* rounds"
     ),
-    Path("src.claude/agents/hooks/dispatch_sentinels.py"): re.compile(
+    Path("adapters/claude/agents/hooks/dispatch_sentinels.py"): re.compile(
         r"review family at\s+(?P<cap>\d+) rounds"
     ),
 }
 
 GENERIC_CAP_LINE = re.compile(
-    r"(?i)(?=.*\bREVISE\b)(?=.*\b3\b)(?=.*(?:cap|cycle|iteration|round|предел|цикл|итерац|раунд))"
+    r"(?i)(?=[^.!?;\n]*\bREVISE\b)(?=[^.!?;\n]*\b3\b)"
+    r"(?=[^.!?;\n]*(?:\b(?:cap|cycles?|iterations?|rounds?)\b|предел|цикл|итерац|раунд))"
 )
 OWNER_CONTRACT = re.compile(
     r"REVISE.*?escalate(?:s)? after (?P<cap>\d+) consecutive "
@@ -89,6 +85,14 @@ def _review_loop_state_module():
 
 
 class ReviseCapContractsTest(unittest.TestCase):
+    def test_cap_inventory_does_not_join_unrelated_policy_sentences(self) -> None:
+        self.assertIsNone(GENERIC_CAP_LINE.search(
+            "Complete work-cycle step 3 before dispatch. REVISE stays with its owner."
+        ))
+        self.assertIsNotNone(GENERIC_CAP_LINE.search(
+            "PASS advances; REVISE escalates after 3 consecutive same-role/artifact cycles."
+        ))
+
     def test_generic_lead_cap_has_one_numeric_owner(self) -> None:
         owner_match = OWNER_CONTRACT.search(_text(GENERIC_OWNER))
         self.assertIsNotNone(owner_match, "shared spine must own the generic REVISE cap")
@@ -167,6 +171,17 @@ class ReviseCapContractsTest(unittest.TestCase):
         )
         self.assertEqual(default_args.cap, module.REVIEW_LOOP_ROUND_CAP)
         self.assertEqual(override_args.cap, 7)
+
+    def test_review_loop_command_delegates_cap_to_installed_owner(self) -> None:
+        command = _text(Path("adapters/claude/commands/agents-review-loop.md"))
+        for marker in (
+            "Read `agents/contracts/review-loop.md` relative to this command's selected Claude installation root",
+            "It owns the operative loop rules",
+            "do not re-derive any of that here",
+            "Resolve `agents/scripts/review_loop_state.py` within that same selected Claude installation root",
+        ):
+            self.assertIn(marker, command)
+        self.assertNotRegex(command, r"cap\s+(?:at\s+)?N\s*=\s*\d+")
 
 
 if __name__ == "__main__":

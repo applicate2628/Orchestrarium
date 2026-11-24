@@ -131,7 +131,7 @@ class SelectedClaudeInstructionWiringTests(unittest.TestCase):
         expected = {
             "_SelectedSource": ["path", "node", "raw"],
             "_SelectedReplacement": ["owner", "sources", "path", "before_node", "before",
-                                     "after", "digest", "parents"],
+                                     "after", "digest", "parents", "global_policy"],
             "_SelectedProviderUpdates": ["provider", "owner", "scope", "receipt",
                 "receipt_node", "receipt_before", "receipt_parents",
                 "receipt_parent_preimage", "items", "outcomes", "payload", "received"],
@@ -271,19 +271,17 @@ class SelectedClaudeInstructionWiringTests(unittest.TestCase):
         self.require(branch, "owner._assert_fresh_file(created[0]) != payload")
         self.assertEqual(calls(final, "register_readonly"), [])
 
-    def test_exactly_one_receipt_branch_finalizes_before_commit(self):
+    def test_complete_sdk_receipt_finalizes_once_before_commit(self):
         install = self.fn("install")
-        branch = self.guard(install, "selected_updates is not None")
-        selected = self.one(branch, "_record_selected_provider_receipt")
-        self.assertIs(branch.body[0].value, selected)
-        self.assertEqual(len(branch.body), 1)
-        self.assertEqual(len(branch.orelse), 1)
-        self.one(ast.Module(body=branch.orelse, type_ignores=[]), "_record_fresh_provider_receipt")
+        final = self.one(install, "_record_provider_install")
+        self.assertIn("selected_updates=selected_updates", ast.unparse(final))
+        self.assertEqual(calls(install, "_record_selected_provider_receipt"), [])
+        self.assertEqual(calls(install, "_record_fresh_provider_receipt"), [])
         commit = self.one(install, "commit")
-        self.assertLess(branch.end_lineno, commit.lineno)
+        self.assertLess(final.end_lineno, commit.lineno)
         scope = next(node for node in ast.walk(install) if isinstance(node, ast.With)
                      and any(ast.unparse(item.context_expr) == "transaction" for item in node.items))
-        self.assertIs(scope.body[-2], branch)
+        self.assertIs(scope.body[-2].value, final)
         self.assertIs(scope.body[-1].value, commit)
 
 

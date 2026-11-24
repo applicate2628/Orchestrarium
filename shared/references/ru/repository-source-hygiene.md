@@ -23,7 +23,7 @@ Platform variants (`.sh`/`.ps1`/`.py`) той же команды с тем же
 
 `shared/AGENTS.shared.md` `Directory-level entity separation` требует чтобы directories организовывались вокруг одного primary entity type. Orchestrarium monorepo имеет **три намеренно co-located директории**, которые служат documented design constraint и exempt от per-entity-type split:
 
-- `src.claude/agents/scripts/` — Claude pack: co-locates blocking-enforcement hooks (`check-bugfix-discipline.*`, `check-git-push-gate.*`, `check-passive-polling-stop.*`, плюс общий `hook_common.py`), SessionStart context hooks (`mcp-usage-reminder.*`, `agents-mode-reminder.*`), provider invocation wrappers (`invoke-claude-api.*`, `invoke-claude-prompt.*`, `invoke-codex-prompt.*`), publication gates (`check-publication-safety.*`), и pack validators (`validate-skill-pack.*`).
+- `adapters/claude/agents/scripts/` — Claude pack: co-locates blocking-enforcement hooks (`check-bugfix-discipline.*`, `check-git-push-gate.*`, `check-passive-polling-stop.*`, плюс общий `hook_common.py`), SessionStart context hooks (`mcp-usage-reminder.*`, `agents-mode-reminder.*`), provider invocation wrappers (`invoke-claude-api.*`, `invoke-claude-prompt.*`, `invoke-codex-prompt.*`), publication gates (`check-publication-safety.*`), и pack validators (`validate-skill-pack.*`).
 
 - `src.codex/skills/lead/scripts/` — Codex pack: тот же entity-type co-location pattern (без локальных обёрток вызова провайдеров: установщик переносит канонические обёртки из `scripts/` в обе среды исполнения).
 
@@ -87,3 +87,18 @@ Subject to `Worktree safety`: не удалять или двигать v1 files
 - **Worktree safety**: существующее правило против модификации файлов вне admitted change surface (`shared/AGENTS.shared.md` `### Operational and environment safety`).
 - **Classification test**: two-signal placement check (actor/lifecycle + I/O contract) применённый перед added or moving any source file.
 - **Repo-local concretization**: per-repo extension of shared rule, declared в `AGENTS.md` / `CLAUDE.md` или в repo-specific shared reference как этот документ.
+
+## Восстановление независимо от scratch
+
+Владелец правила — **Artifact disposition and project hygiene** в shared/AGENTS.shared.md.
+Важные правки, неопубликованные коммиты и обязательные свидетельства нельзя хранить
+единственным экземпляром в .scratch или другом временном хранилище. На значимых
+этапах и до паузы, передачи, приёмки или очистки нужна проверенная копия у
+существующего канонического владельца вне временной области. Для Git проверяются
+общий каталог объектов, доступность нужных объектов и отсутствие зависимости через
+alternates; внешний worktree со служебным Git-каталогом в scratch недостаточен.
+Данные назначения перечитываются; ссылки и .gitignore не заменяют сохранение.
+Сырые материалы остаются локальными, без автоматической публикации. Новое хранилище
+или механизм жизненного цикла не вводится. Воспроизводимые кэши могут оставаться
+временными; единственная важная копия запрещает зависимую очистку. Это независимость
+от удаления scratch, а не гарантия внешнего резервного копирования или сохранности диска.

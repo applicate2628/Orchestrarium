@@ -19,14 +19,9 @@ def _isolated_validator():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     module.run_installer = lambda *_args: None
-    def migrate_shared(_root, _case, userprofile):
-        shared = userprofile / ".agents-mode.yaml"
-        if shared.is_file():
-            shared.write_bytes(shared.read_bytes().replace(
-                b"externalClaudeApiMode: disabled", b"reserveResolver: disabled",
-            ))
-    module.run_global_installer = migrate_shared
+    module.run_global_installer = lambda *_args: None
     module.validate_codex_native_role_install = lambda *_args: None
+    module.validate_shared_preference_resolution = lambda *_args: None
     return module
 
 
@@ -183,6 +178,21 @@ class AgentsModeInstallerRegressionTest(unittest.TestCase):
                 validator.run_global_installer = global_install
                 with self.assertRaisesRegex(validator.InstallerRegressionError, "created a preferences file"):
                     validator.run_regression(root)
+
+    def test_shared_preference_rewrite_is_not_a_pass(self) -> None:
+        validator = _isolated_validator()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+
+            def rewrite_shared(_root, _case, home):
+                shared = home / ".agents-mode.yaml"
+                if shared.is_file():
+                    shared.write_bytes(shared.read_bytes().replace(
+                        b"externalClaudeApiMode: disabled", b"reserveResolver: disabled"))
+
+            validator.run_global_installer = rewrite_shared
+            with self.assertRaisesRegex(validator.InstallerRegressionError, "shared global: preference bytes or file type changed"):
+                validator.run_regression(root)
 
     def test_installer_regression_validator_passes(self) -> None:
         root = Path(__file__).resolve().parents[1]

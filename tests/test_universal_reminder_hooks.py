@@ -11,12 +11,22 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MCP_HOOK = REPO_ROOT / "scripts" / "universal-hooks" / "hooks" / "check-mcp-momentum.py"
 MCP_POLICY = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "mcp_continuity_policy.py"
 MCP_REMINDER_PY = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "mcp-usage-reminder.py"
 TURN_ANCHOR_PY = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "turn-anchor-reminder.py"
+
+
+def _load_policy(name: str):
+    spec = importlib.util.spec_from_file_location(name, MCP_POLICY)
+    assert spec is not None and spec.loader is not None
+    policy = importlib.util.module_from_spec(spec)
+    with patch.object(sys, "path", [str(MCP_POLICY.parent), *sys.path]):
+        spec.loader.exec_module(policy)
+    return policy
 
 
 def run_hook(script: Path, envelope: dict) -> subprocess.CompletedProcess:
@@ -65,12 +75,7 @@ class McpContinuityContract(unittest.TestCase):
                     self.assertNotIn(fragment, text)
 
     def test_mcp_usage_reminder_matches_policy_owned_text_and_shape(self) -> None:
-        spec = importlib.util.spec_from_file_location(
-            "mcp_continuity_policy_session_start_test", MCP_POLICY
-        )
-        assert spec is not None and spec.loader is not None
-        policy = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(policy)
+        policy = _load_policy("mcp_continuity_policy_session_start_test")
         for source in ("startup", "compact"):
             with self.subTest(source=source):
                 python_result = run_hook(
@@ -99,12 +104,7 @@ class TestTurnAnchorEmitsValidContext(unittest.TestCase):
 
     def test_turn_anchor_uses_policy_owned_continuation_context_without_tool_choice(self) -> None:
         self.assertTrue(MCP_POLICY.is_file(), f"missing {MCP_POLICY}")
-        spec = importlib.util.spec_from_file_location(
-            "mcp_continuity_policy_turn_anchor_test", MCP_POLICY
-        )
-        assert spec is not None and spec.loader is not None
-        policy = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(policy)
+        policy = _load_policy("mcp_continuity_policy_turn_anchor_test")
         result = subprocess.run(
             [sys.executable, str(TURN_ANCHOR_PY)],
             input="",
@@ -202,10 +202,7 @@ class TestTurnAnchorEmitsValidContext(unittest.TestCase):
                     self.assertIn(fragment, context)
 
     def test_policy_contexts_omit_repeated_manuals_but_keep_required_checks(self) -> None:
-        spec = importlib.util.spec_from_file_location("compact_mcp_policy_test", MCP_POLICY)
-        assert spec is not None and spec.loader is not None
-        policy = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(policy)
+        policy = _load_policy("compact_mcp_policy_test")
         combined = policy.SESSION_START_CONTEXT + "\n" + policy.TURN_ANCHOR_CONTEXT
         for removed_manual in (
             "Non-normative interface example only",

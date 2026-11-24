@@ -172,6 +172,8 @@ def test_independent_structural_receipt_precedes_stock_fallback(
     assert bool(calls) == (evidence == "legacy")
 
 @pytest.mark.parametrize("baseline,name", [
+    ("06b1838500fa9c656e13565698f517e5f9ce4eca", "consultant"),
+    ("e55b2466281ecc50ad2a940a4de14a5ea90fb98c", "consultant"),
     ("2dbf91b3e96e9dbf2bf785d16bf6964faf766d46", "github-pr-review-bot"),
     ("2dbf91b3e96e9dbf2bf785d16bf6964faf766d46", "manual-repo-transfer"),
     ("4e193102e852b25437b3244a4896b31a5e8fc6c5", "architect"),
@@ -197,6 +199,11 @@ def test_independent_structural_receipt_precedes_stock_fallback(
     ("3a94f258a6c0b1f0b544bd1bdc8d75a91def6ffa", "external-reviewer"),
     ("3a94f258a6c0b1f0b544bd1bdc8d75a91def6ffa", "external-worker"),
     ("3a94f258a6c0b1f0b544bd1bdc8d75a91def6ffa", "init-project"),
+    ("9831fe66b157020f90f888ec8c878887135aa776", "init-project"),
+    ("6dbf861a4c119f59c52813a02758f14ea9050aa7", "manual-repo-transfer"),
+    ("94715eed9e0563a38d83572f4b6d525d2f9172d9", "manual-repo-transfer"),
+    ("0274b69a25e1b36f83da4c21f630d222d627c4ee", "second-opinion"),
+    ("01a7eb0ded829233c21c588f1234f62b31308f35", "review-loop"),
 ])
 def test_historical_fixture_has_independent_structural_witness(baseline, name, tmp_path):
     import subprocess
@@ -274,7 +281,9 @@ def test_witnessed_prior_migrates_and_transaction_rolls_back(tmp_path: Path, nam
         selected = next(item for item in plan.skills if item.name == name)
         assert selected.accepted_prior == strong
         with pytest.raises(RuntimeError, match="forced rollback"):
-            with installer._InstallTransaction([installed], enabled=True) as transaction:
+            with installer._InstallTransaction(
+                installer._canonical_skill_snapshot_paths(skills, plan), enabled=True,
+            ) as transaction:
                 owner = installer._CreateOnlyMutablePath(target, transaction, dry_run=False)
                 installer._apply_canonical_skills_plan(plan, skills, owner, root=root)
                 assert installer._tree_sha256(installed, ignore_runtime_cache=True) == selected.source_digest

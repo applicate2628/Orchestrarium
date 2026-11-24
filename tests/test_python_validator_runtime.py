@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / "scripts/skill_pack_validator_runtime.py"
 VALIDATORS = (
     ROOT / "src.codex/skills/lead/scripts/validate-skill-pack.py",
-    ROOT / "src.claude/agents/scripts/validate-skill-pack.py",
+    ROOT / 'adapters/claude/agents/scripts/validate-skill-pack.py',
 )
 SHARED_INVARIANT_ACTIONS = (
     (
@@ -52,7 +52,7 @@ SHARED_INVARIANT_ACTIONS = (
 )
 PROVIDER_RUNTIME_MIRRORS = (
     ROOT / "src.codex/skills/lead/scripts/skill_pack_validator_runtime.py",
-    ROOT / "src.claude/agents/scripts/skill_pack_validator_runtime.py",
+    ROOT / 'adapters/claude/agents/scripts/skill_pack_validator_runtime.py',
 )
 EXPECTED_SUMMARIES = (
     r"^  PASS: [1-9][0-9]*  WARN: 0  FAIL: 0$",
@@ -62,18 +62,18 @@ EXPECTED_SUMMARIES = (
 PACK_DELIVERY_ACTION_CASES = (
     ("codex", VALIDATORS[0], "src.codex/skills/external-worker/SKILL.md", "external-worker requires file/stdin prompt delivery"),
     ("codex", VALIDATORS[0], "src.codex/skills/external-reviewer/SKILL.md", "external-reviewer requires file/stdin prompt delivery"),
-    ("claude", VALIDATORS[1], "src.claude/agents/external-worker.md", "external-worker requires file/stdin prompt delivery"),
-    ("claude", VALIDATORS[1], "src.claude/agents/external-reviewer.md", "external-reviewer requires file/stdin prompt delivery"),
+    ("claude", VALIDATORS[1], "adapters/claude/agents/external-worker.md", "external-worker requires file/stdin prompt delivery"),
+    ("claude", VALIDATORS[1], "adapters/claude/agents/external-reviewer.md", "external-reviewer requires file/stdin prompt delivery"),
 )
 
 CLAUDE_ADAPTER_READ_WRITE_ACTION_CASES = (
     (
-        "src.claude/agents/external-worker.md",
+        "adapters/claude/agents/external-worker.md",
         "external-worker normalizes agents-mode before routing",
         "external-worker persists normalization only in an authorized write",
     ),
     (
-        "src.claude/agents/external-reviewer.md",
+        "adapters/claude/agents/external-reviewer.md",
         "external-reviewer normalizes agents-mode before routing",
         "external-reviewer persists normalization only in an authorized write",
     ),
@@ -93,13 +93,13 @@ PACK_ROUTING_READ_ACTION_CASES = (
         (("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "All keys take one shared global value"), ("Persist canonical formatting only for a separately authorized normalization", "Persist canonical formatting on every routing read")),
     ),
     (
-        "claude", VALIDATORS[1], "src.claude/agents/consultant.md",
+        "claude", VALIDATORS[1], "adapters/claude/agents/consultant.md",
         "consultant reads the Claude overlay in memory",
         ("normalize its effective values in memory", "do not rewrite them merely to read or trust their flags"),
         (("do not rewrite them merely to read or trust their flags", "rewrite the supplied file during the routing read"),),
     ),
     (
-        "claude", VALIDATORS[1], "src.claude/agents/consultant.md",
+        "claude", VALIDATORS[1], "adapters/claude/agents/consultant.md",
         "consultant preserves precedence and authorized-write boundary",
         ("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "A routing read does not rewrite the supplying file, recreate a legacy file, or synthesize a local override", "Persist canonical formatting only for a separately authorized normalization"),
         (("Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "All keys take one shared global value"), ("Persist canonical formatting only for a separately authorized normalization", "Persist canonical formatting on every routing read")),
@@ -117,19 +117,19 @@ PACK_ROUTING_READ_ACTION_CASES = (
         (("Do not recreate a legacy file or synthesize a local override on read alone", "Recreate legacy files and synthesize local overrides on routing reads"), ("Persist canonical formatting only within an authorized install/configuration write", "Persist canonical formatting on every routing read")),
     ),
     (
-        "claude", VALIDATORS[1], "src.claude/agents/contracts/subagent-contracts.md",
+        "claude", VALIDATORS[1], "adapters/claude/agents/contracts/subagent-contracts.md",
         "subagent contracts preserve Claude in-memory key restrictions",
         ("Read the effective Claude overlay and normalize its effective values in memory", "On the Claude line, do not write `externalClaudeProfile` into the canonical `.agents-mode.yaml` file; it remains Codex-line only"),
         (("normalize its effective values in memory", "write normalized values to disk while routing"), ("do not write `externalClaudeProfile`", "write `externalClaudeProfile`")),
     ),
     (
-        "claude", VALIDATORS[1], "src.claude/agents/contracts/subagent-contracts.md",
+        "claude", VALIDATORS[1], "adapters/claude/agents/contracts/subagent-contracts.md",
         "subagent contracts preserve Claude precedence and read-only routing",
         ("read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.claude/.agents-mode.yaml`", "Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale", "a read does not rewrite its input"),
         (("pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, then the shared cross-pack global", "pack-local global legacy `~/.claude/.agents-mode`, then pack-local global `~/.claude/.agents-mode.yaml`"), ("a read does not rewrite its input", "a read rewrites its input to canonical YAML")),
     ),
     (
-        "claude", VALIDATORS[1], "src.claude/agents/contracts/subagent-contracts.md",
+        "claude", VALIDATORS[1], "adapters/claude/agents/contracts/subagent-contracts.md",
         "subagent contracts restrict Claude writes to authorization",
         ("Do not recreate a legacy file or synthesize a local override on read alone", "Persist canonical formatting only within an authorized install/configuration write", "removing retired canonical keys"),
         (("Do not recreate a legacy file or synthesize a local override on read alone", "Recreate legacy files and synthesize local overrides on routing reads"), ("Persist canonical formatting only within an authorized install/configuration write", "Persist canonical formatting on every routing read")),
@@ -484,9 +484,9 @@ def _materialize_installed_pack(
     else:
         pack = target / ".claude"
         shutil.copytree(
-            ROOT / "src.claude", pack,
+            ROOT / 'adapters/claude', pack,
             ignore=lambda path, names: {"skills"}
-            if Path(path) == ROOT / "src.claude" else set(),
+            if Path(path) == ROOT / 'adapters/claude' else set(),
         )
         universal_skills = target / ".agents" / "skills"
         shutil.copytree(ROOT / "src.codex" / "skills", universal_skills)
@@ -1299,8 +1299,8 @@ def test_common_pin_completeness_uses_exact_applicable_action_names(
             parity_actions = ((
                 "check_common_skill_body_parity",
                 "manual-repo-transfer",
-                "src.codex/skills/manual-repo-transfer/SKILL.md",
-                "src.claude/skills/manual-repo-transfer/SKILL.md",
+                str(candidate),
+                str(candidate),
             ),)
     elif mutation == "extra":
         applicable_names = (*names, "synthetic-common")
@@ -1333,7 +1333,7 @@ def test_common_pin_completeness_uses_exact_applicable_action_names(
         assert expected_fragment in output
 
 
-@pytest.mark.parametrize("changed_pack", (None, "src.codex", "src.claude", "frontmatter", "missing-claude"))
+@pytest.mark.parametrize("changed_pack", (None, "src.codex", "adapters/claude", "frontmatter", "missing-claude"))
 @pytest.mark.parametrize("provider", ("codex", "claude"))
 def test_manual_transfer_current_body_parity_in_monorepo(
     tmp_path: Path,
@@ -1349,14 +1349,17 @@ def test_manual_transfer_current_body_parity_in_monorepo(
         "shared/AGENTS.shared.md",
         "src.codex/AGENTS.codex.md",
         "src.codex/skills/manual-repo-transfer/SKILL.md",
-        "src.claude/skills/manual-repo-transfer/SKILL.md",
+        "adapters/claude/skills/manual-repo-transfer/SKILL.md",
     ):
         target = root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / relative, target)
+    # Generic equality fixture, not a requirement that historical Source is live.
+    shutil.copy2(root / "src.codex/skills/manual-repo-transfer/SKILL.md",
+                 root / 'adapters/claude/skills/manual-repo-transfer/SKILL.md')
     (root / "src.codex/skills/lead/scripts").mkdir(parents=True)
-    (root / "src.claude/agents/scripts").mkdir(parents=True)
-    if changed_pack in ("src.codex", "src.claude"):
+    (root / 'adapters/claude/agents/scripts').mkdir(parents=True)
+    if changed_pack in ("src.codex", "adapters/claude"):
         skill = root / changed_pack / "skills/manual-repo-transfer/SKILL.md"
         skill.write_bytes(skill.read_bytes() + b"\nfixture body drift\n")
     elif changed_pack == "frontmatter":
@@ -1365,14 +1368,14 @@ def test_manual_transfer_current_body_parity_in_monorepo(
         assert "description:" in content
         skill.write_text(content.replace("description:", "description: fixture ", 1), encoding="utf-8")
     elif changed_pack == "missing-claude":
-        (root / "src.claude/skills/manual-repo-transfer/SKILL.md").unlink()
+        (root / 'adapters/claude/skills/manual-repo-transfer/SKILL.md').unlink()
     action = (
         "check_common_skill_body_parity",
         "manual-repo-transfer",
         "src.codex/skills/manual-repo-transfer/SKILL.md",
-        "src.claude/skills/manual-repo-transfer/SKILL.md",
+        "adapters/claude/skills/manual-repo-transfer/SKILL.md",
     )
-    script = root / ("src.codex/skills/lead/scripts" if provider == "codex" else "src.claude/agents/scripts") / "validate-skill-pack.py"
+    script = root / ("src.codex/skills/lead/scripts" if provider == "codex" else "adapters/claude/agents/scripts") / "validate-skill-pack.py"
     result = runtime.validate_pack(
         script=script,
         provider=provider,
@@ -1382,7 +1385,7 @@ def test_manual_transfer_current_body_parity_in_monorepo(
         curated_role_skills=frozenset(),
         root=root,
     )
-    assert result.errors == (1 if changed_pack in ("src.codex", "src.claude", "missing-claude") else 0)
+    assert result.errors == (1 if changed_pack in ("src.codex", "adapters/claude", "missing-claude") else 0)
     assert "cross-provider body parity" in capsys.readouterr().out
 
 
@@ -1404,12 +1407,10 @@ def test_manual_transfer_standalone_checks_local_skill_only(
         local.unlink()
     elif mutation == "invalid-frontmatter":
         local.write_bytes(b"---\nname: wrong\ndescription: fixture\n---\nbody\n")
-    action = (
-        "check_common_skill_body_parity",
-        "manual-repo-transfer",
-        "src.codex/skills/manual-repo-transfer/SKILL.md",
-        "src.claude/skills/manual-repo-transfer/SKILL.md",
-    )
+    pack = _load(VALIDATORS[0 if provider == "codex" else 1], f"standalone_live_pack_{provider}_{mutation}")
+    action, = [a for a in pack._DECLARED_ACTIONS
+               if len(a) > 1 and a[1] == "manual-repo-transfer"
+               and a[0] == "check_common_skill_live_body"]
     result = runtime.validate_pack(
         script=script,
         provider=provider,
@@ -1450,7 +1451,7 @@ def test_shared_blueprint_checks_contract_without_whole_file_snapshot(
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / relative, target)
     (root / "src.codex/skills/lead/scripts").mkdir(parents=True)
-    (root / "src.claude/agents/scripts").mkdir(parents=True)
+    (root / 'adapters/claude/agents/scripts').mkdir(parents=True)
     blueprint = root / "shared/references/subagent-operating-model.md"
     content = blueprint.read_text(encoding="utf-8")
     if mutation == "prose":
@@ -1459,7 +1460,7 @@ def test_shared_blueprint_checks_contract_without_whole_file_snapshot(
         assert "## 8. Gates: what each stage must prove" in content
         content = content.replace("## 8. Gates: what each stage must prove", "## 8. Gates", 1)
     blueprint.write_text(content, encoding="utf-8")
-    script = root / ("src.codex/skills/lead/scripts" if provider == "codex" else "src.claude/agents/scripts") / "validate-skill-pack.py"
+    script = root / ("src.codex/skills/lead/scripts" if provider == "codex" else "adapters/claude/agents/scripts") / "validate-skill-pack.py"
     layout = runtime.detect_layout(script, provider, root)
     actions = tuple(
         action
@@ -1499,7 +1500,10 @@ def test_codex_addendum_h2_inventory_accepts_terms_and_rejects_shape_drift(
         "## Codex-specific runtime notes",
         "## Codex-side repository concretization",
         "## Shared core now owns",
+        "## Global-backed project installation",
         "## Terms and Abbreviations",
+        "## Scratch-independent recovery",
+        "## Review-loop receiving",
     )
     path_resolver = runtime.Validator(layout)
     try:
@@ -1530,6 +1534,11 @@ def test_codex_addendum_h2_inventory_accepts_terms_and_rejects_shape_drift(
     assert without_terms != source
     assert check(source) == 0
     assert check(without_terms) == 1
+    misplaced = source.replace(
+        b"## Scratch-independent recovery", b"## Unreviewed recovery owner", 1
+    )
+    assert misplaced != source
+    assert check(misplaced) == 1
     assert check(source + newline + b"## 1. Main rule for the lead" + newline) == 1
 
 
@@ -2259,7 +2268,7 @@ def test_extracted_provider_source_is_detected_as_standalone(
         scripts.mkdir(parents=True)
         shutil.copy2(ROOT / "src.codex" / "AGENTS.codex.md", scripts.parents[2] / "AGENTS.codex.md")
     else:
-        scripts = extracted / "src.claude" / "agents" / "scripts"
+        scripts = extracted / 'adapters/claude' / "agents" / "scripts"
         scripts.mkdir(parents=True)
     validator = scripts / "validate-skill-pack.py"
     validator.touch()
@@ -2339,7 +2348,7 @@ def test_installer_copies_windows_job_owner_from_canonical_runtime(
     "launcher",
     (
         ROOT / "src.codex/skills/lead/scripts/validate-skill-pack.sh",
-        ROOT / "src.claude/agents/scripts/validate-skill-pack.sh",
+        ROOT / 'adapters/claude/agents/scripts/validate-skill-pack.sh',
     ),
 )
 def test_retained_posix_surface_is_only_a_thin_python_launcher(
@@ -2362,12 +2371,12 @@ def _minimal_claude_skill_layout(tmp_path: Path):
     contents = {
         "shared/AGENTS.shared.md": "## Role index\n- `$lead`.\n## Common skills\n- `$lead`.\n",
         "src.codex/AGENTS.codex.md": "fixture provider addendum\n",
-        "src.claude/agents/lead.md": "fixture Claude wrapper\n",
-        "src.claude/commands/agents-status.md": "fixture Claude command\n",
-        "src.claude/CLAUDE.md": (ROOT / "src.claude/CLAUDE.md").read_text(encoding="utf-8"),
+        "adapters/claude/agents/lead.md": "fixture Claude wrapper\n",
+        "adapters/claude/commands/agents-status.md": "fixture Claude command\n",
+        "adapters/claude/CLAUDE.md": (ROOT / 'adapters/claude/CLAUDE.md').read_text(encoding="utf-8"),
         "src.codex/skills/lead/SKILL.md": (
             "---\nname: lead\ndescription: fixture\n---\n"
-            "the orchestration owner stays in the main session\n"
+            "Hold `$lead` in the main orchestration session. Root owns global admission,\n"
             "apply the current-owner reuse check\n"
             "<!-- APAT-BLOCK:LEAD-ROUTING:BEGIN -->\n"
             "is not a universal Architect prelude\n"
@@ -2375,7 +2384,7 @@ def _minimal_claude_skill_layout(tmp_path: Path):
         "src.codex/skills/lead/subagent-contracts.md": (
             "An accepted plan is an input, not proof the capability is still missing\n"
         ),
-        "src.claude/skills/lead/SKILL.md": (
+        "adapters/claude/skills/lead/SKILL.md": (
             "---\nname: lead\ndescription: historical fixture\n---\n"
             "hold the Lead role AS the main conversation\n"
         ),
@@ -2385,7 +2394,7 @@ def _minimal_claude_skill_layout(tmp_path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
     (root / "src.codex/skills/lead/scripts").mkdir()
-    scripts = root / "src.claude/agents/scripts"
+    scripts = root / 'adapters/claude/agents/scripts'
     scripts.mkdir()
     return module, runtime, root, scripts / "validate-skill-pack.py"
 
@@ -2404,14 +2413,14 @@ def test_claude_current_body_actions_use_canonical_owner_and_fail_visibly(
         shutil.rmtree(root / "src.codex/skills")
     elif mutation in ("main-context", "reuse"):
         pattern = (
-            "the orchestration owner stays in the main session"
+            "Hold `$lead` in the main orchestration session. Root owns global admission,"
             if mutation == "main-context" else "apply the current-owner reuse check"
         )
         body.write_text(body.read_text(encoding="utf-8").replace(pattern, "fixture removed"), encoding="utf-8")
     elif mutation == "handoff":
         (body.parent / "subagent-contracts.md").write_text("fixture removed\n", encoding="utf-8")
     elif mutation == "historical-decoy":
-        (root / "src.claude/skills/lead/SKILL.md").write_text("unrelated historical body\n", encoding="utf-8")
+        (root / 'adapters/claude/skills/lead/SKILL.md').write_text("unrelated historical body\n", encoding="utf-8")
     actions = tuple(
         (scope, tuple(action for action in group if
             action[1].startswith("@SKILLS/lead/")
@@ -2423,7 +2432,7 @@ def test_claude_current_body_actions_use_canonical_owner_and_fail_visibly(
     assert layout.skills == root / "src.codex/skills"
     assert not layout.standalone
     observed = tuple(runtime._applicable_actions(actions, layout))
-    assert any("the orchestration owner stays in the main session" in action for action in observed)
+    assert any("Hold `$lead` in the main orchestration session. Root owns global admission," in action for action in observed)
     assert any("apply the current-owner reuse check" in action for action in observed)
     assert any("An accepted plan is an input, not proof the capability is still missing" in action for action in observed)
     exit_code = runtime.run_validator_cli(
@@ -2467,7 +2476,7 @@ def test_claude_curated_registry_uses_actual_provider_clause(
     extra = root / "src.codex/skills/backend-engineer/SKILL.md"
     extra.parent.mkdir()
     extra.write_text("---\nname: backend-engineer\ndescription: fixture\n---\n", encoding="utf-8")
-    clause = root / "src.claude/CLAUDE.md"
+    clause = root / 'adapters/claude/CLAUDE.md'
     content = clause.read_text(encoding="utf-8")
     if mutation == "missing":
         clause.unlink()
@@ -2488,8 +2497,8 @@ def test_claude_curated_registry_uses_actual_provider_clause(
     assert result.checks == 1
     validator = runtime.Validator(result.layout)
     try:
-        assert validator.path("@PACK/agents/lead.md") == root / "src.claude/agents/lead.md"
-        assert validator.path("@PACK/commands/agents-status.md") == root / "src.claude/commands/agents-status.md"
+        assert validator.path("@PACK/agents/lead.md") == root / 'adapters/claude/agents/lead.md'
+        assert validator.path("@PACK/commands/agents-status.md") == root / 'adapters/claude/commands/agents-status.md'
         assert validator.path("@SCRIPTS/validate-skill-pack.py") == script
     finally:
         validator.close()
@@ -2502,7 +2511,7 @@ def test_claude_extracted_source_keeps_local_body_and_historical_main_context(
     shutil.rmtree(root / "src.codex")
     layout = runtime.detect_layout(script, "claude", root)
     assert layout.standalone
-    assert layout.skills == root / "src.claude/skills"
+    assert layout.skills == root / 'adapters/claude/skills'
     applicable = tuple(runtime._applicable_actions(module.ACTIONS, layout))
     assert not any(action in applicable for action in module._CURRENT_SKILL_ACTIONS)
     historical = tuple(action for action in applicable if
@@ -2537,6 +2546,63 @@ def test_current_owner_reuse_actions_cover_current_source_and_installed_scopes(
             {"all"} if module.PROVIDER == "codex" else {"dev_repo_nonstandalone", "installed"}
         )
 
+@pytest.mark.parametrize('provider,index', [('codex', 0), ('claude', 1)])
+@pytest.mark.parametrize('mutation', ['current', 'drift', 'missing', 'frontmatter'])
+def test_manual_transfer_live_action_uses_canonical_source(tmp_path, provider, index, mutation):
+    runtime = _load(RUNTIME, f'live_transfer_{provider}_{mutation}')
+    pack = _load(VALIDATORS[index], f'live_transfer_pack_{provider}_{mutation}')
+    action, = [a for a in pack._DECLARED_ACTIONS
+               if len(a) > 1 and a[1] == 'manual-repo-transfer'
+               and a[0] in ('check_common_skill_body_parity', 'check_common_skill_live_body')]
+    assert action[0] == 'check_common_skill_live_body'
+    root = tmp_path / 'repo'
+    for relative in ('shared/AGENTS.shared.md', 'src.codex/AGENTS.codex.md',
+                     'src.codex/skills/manual-repo-transfer/SKILL.md',
+                     'adapters/claude/skills/manual-repo-transfer/SKILL.md'):
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / relative, target)
+    historical = root / 'adapters/claude/skills/manual-repo-transfer/SKILL.md'
+    before = historical.read_bytes()
+    for directory in ('src.codex/skills/lead/scripts', 'adapters/claude/agents/scripts'):
+        (root / directory).mkdir(parents=True)
+    live = root / 'src.codex/skills/manual-repo-transfer/SKILL.md'
+    if mutation == 'drift':
+        live.write_bytes(live.read_bytes() + b'\nchanged live body\n')
+    elif mutation == 'missing':
+        live.unlink()
+    elif mutation == 'frontmatter':
+        live.write_text(live.read_text().replace('description:', 'description: fixture ', 1))
+    script = root / VALIDATORS[index].relative_to(ROOT)
+    result = runtime.validate_pack(script=script, provider=provider, actions=(action,),
+        maintainer_only_shared_reference_names=frozenset(), utility_skills=frozenset(),
+        curated_role_skills=frozenset(), root=root)
+    assert result.errors == (1 if mutation in ('drift', 'missing') else 0)
+    assert historical.read_bytes() == before
+
+@pytest.mark.parametrize('provider,index', [('codex', 0), ('claude', 1)])
+def test_manual_transfer_standalone_source_preserves_local_body_contract(tmp_path, provider, index):
+    runtime = _load(RUNTIME, f'transfer_source_{provider}')
+    pack = _load(VALIDATORS[index], f'transfer_source_pack_{provider}')
+    action, = [a for a in pack._DECLARED_ACTIONS
+               if len(a) > 1 and a[0] == 'check_common_skill_live_body'
+               and a[1] == 'manual-repo-transfer']
+    root = tmp_path / 'source'
+    paths = ['shared/AGENTS.shared.md', ('src.codex/skills/manual-repo-transfer/SKILL.md' if provider == 'codex' else 'adapters/claude/skills/manual-repo-transfer/SKILL.md')]
+    if provider == 'codex':
+        paths.append('src.codex/AGENTS.codex.md')
+    for relative in paths:
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / relative, target)
+    script = root / VALIDATORS[index].relative_to(ROOT)
+    script.parent.mkdir(parents=True, exist_ok=True)
+    local = root / ('src.codex/skills/manual-repo-transfer/SKILL.md' if provider == 'codex' else 'adapters/claude/skills/manual-repo-transfer/SKILL.md')
+    local.write_bytes(local.read_bytes() + b'\nStandalone local customization.\n')
+    result = runtime.validate_pack(script=script, provider=provider, actions=(action,),
+        maintainer_only_shared_reference_names=frozenset(), utility_skills=frozenset(),
+        curated_role_skills=frozenset(), root=root)
+    assert result.errors == 0
 
 @pytest.mark.parametrize("validator", VALIDATORS)
 @pytest.mark.parametrize("operation", (
@@ -2576,11 +2642,11 @@ def test_behavioral_source_gate_applicability_uses_detected_layout(
         files = {
             "shared/AGENTS.shared.md": "fixture shared policy",
             "src.codex/AGENTS.codex.md": "fixture Codex addendum",
-            "src.claude/CLAUDE.md": "fixture Claude entrypoint",
+            "adapters/claude/CLAUDE.md": "fixture Claude entrypoint",
             "src.codex/skills/lead/SKILL.md": "fixture canonical skill",
             "src.codex/agents/orchestrarium-role-manifest.json": "{}",
             "src.codex/skills/lead/scripts/validate-skill-pack.py": "",
-            "src.claude/agents/scripts/validate-skill-pack.py": "",
+            "adapters/claude/agents/scripts/validate-skill-pack.py": "",
         }
         if kind == "export":
             files = {path: body for path, body in files.items()
@@ -2663,7 +2729,7 @@ def test_codex_skill_metadata_checks_catalog_without_claiming_foreign_skills(
     "path",
     (
         ROOT / "src.codex/skills/second-opinion/SKILL.md",
-        ROOT / "src.claude/commands/agents-second-opinion.md",
+        ROOT / "adapters/claude/commands/agents-second-opinion.md",
     ),
 )
 def test_consultant_reporting_uses_memory_only_normalization(path):

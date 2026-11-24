@@ -10912,6 +10912,10 @@ def _capture_runtime_source(relative: Path, *, failure_id: str, authority=None):
         raise
 
 
+_paired_source_binding = None
+_paired_validator_module = None
+
+
 def _validator_module():
     path = Path(__file__).with_name("validate-work-item-state.py")
     transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
@@ -10948,6 +10952,10 @@ def _validator_module():
             return transaction._validator_reuse
     if transaction is None:
         owner = actual_lifecycle_owner()
+        if _paired_source_binding is not None:
+            _paired_source_binding.assert_current()
+            verify_cached_lifecycle_owner(_paired_validator_module, owner)
+            return _paired_validator_module
         spec = importlib.util.spec_from_file_location("work_item_state_validator", path)
         if spec is None or spec.loader is None:
             raise LifecycleError("WI-VALIDATOR-LOAD", f"cannot load validator: {path}")
@@ -15394,10 +15402,12 @@ def _retain_historical_pass_custody(
         # Final H1 admission must see the selected custody bytes: the original
         # artifact may already be missing, which is what this operation repairs.
         try:
-            demand = validator.inspect_ledger_resource_demand(captured.path, ledger_resource_budget, source_bytes=raw)
+            demand = validator.inspect_ledger_resource_demand(
+                captured.path, ledger_resource_budget, source_bytes=raw)
             parse_budget = validator.resolve_ledger_resource_budget(
                 ledger_resource_budget.max_events if ledger_resource_budget is not None else None,
-                ledger_resource_budget.max_ledger_bytes if ledger_resource_budget is not None else None, demand=demand)
+                ledger_resource_budget.max_ledger_bytes if ledger_resource_budget is not None else None,
+                demand=demand)
         except ValueError as exc:
             message = str(exc)
             failure_id = message.split(":", 1)[0] if message.startswith("WI-LEDGER-RESOURCE-") else "WI-LEDGER-UNSETTLED"
@@ -22096,7 +22106,8 @@ def _verify_structural_node(node: tuple, failure_id: str) -> None:
 def _admit_ledger_operation(item, ledger_path, selected_bytes, *, ledger_resource_budget=None,
         known_row_bytes=(), unknown_terminal_rows=0, validator=None, transition_resource_budget=None,
         participants=None, selected_snapshot=None, transfer_source_item=None,
-        transfer_operation_id=None, selected_transfer_snapshots_out=None, historical_pass_custody_blobs=None):
+        transfer_operation_id=None, selected_transfer_snapshots_out=None,
+        historical_pass_custody_blobs=None):
     """Freeze one operation's finite capacity from its exact selected image.
 
     The caller owns the primary capture (or permitted creation absence). This

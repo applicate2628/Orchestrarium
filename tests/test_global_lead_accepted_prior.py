@@ -75,21 +75,6 @@ STOCK_CONSULTANT_PRIORS = (
         id="e55b2466",
     ),
 )
-SUPPORTED_CONSULTANT_PRIORS = (
-    pytest.param(
-        "7872d36d1019d1ac8c2e1615a9f9dbde47395815",
-        "f1a23b5ceaa93c29cf0c5f9c9eec8c5997a7b4339fcd90abd13798df77e60793",
-        id="witnessed-7872",
-    ),
-    pytest.param(
-        "3a94f258a6c0b1f0b544bd1bdc8d75a91def6ffa",
-        "63c358fcb0bc435177359927760d80f04c8133a5e14505115180bd60b600184a",
-        id="witnessed-gpt6",
-    ),
-)
-FACTORY_BRIDGE_REVISION = "1560b867b58d789429c5d67f38f5b38d7bccfd5a"
-FACTORY_BRIDGE_LEGACY_SHA256 = "fdd2c0638232462cf2257dd5ec3ba2523bea820363cfbece0b1edfa5c0a45247"
-FACTORY_BRIDGE_STRONG_SHA256 = "665ae82dcabafd0857153a7288e8cccaa27340e56c0874b5e884e154417f0e81"
 PARTIAL_KIMI_LUNA_GLOBAL_LEAD_TREE_SHA256 = (
     "006161c105d8fcaaa3e9ae891e8b14e42ca170c026445062f983884a9296a3c6"
 )
@@ -487,15 +472,24 @@ OBSERVED_GLOBAL_LEAD_ABSENT_TRANSPORT_FILES = (
     "shared/provider-prompt-projections.v1.json",
 )
 
-def _load_installer():
-    spec = importlib.util.spec_from_file_location(
-        "global_lead_accepted_prior_installer", INSTALLER_PATH
-    )
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+SUPPORTED_CONSULTANT_PRIORS = (
+    pytest.param(
+        "7872d36d1019d1ac8c2e1615a9f9dbde47395815",
+        "f1a23b5ceaa93c29cf0c5f9c9eec8c5997a7b4339fcd90abd13798df77e60793",
+        id="witnessed-7872",
+    ),
+    pytest.param(
+        "3a94f258a6c0b1f0b544bd1bdc8d75a91def6ffa",
+        "63c358fcb0bc435177359927760d80f04c8133a5e14505115180bd60b600184a",
+        id="witnessed-gpt6",
+    ),
+)
+
+FACTORY_BRIDGE_REVISION = "1560b867b58d789429c5d67f38f5b38d7bccfd5a"
+
+FACTORY_BRIDGE_LEGACY_SHA256 = "fdd2c0638232462cf2257dd5ec3ba2523bea820363cfbece0b1edfa5c0a45247"
+
+FACTORY_BRIDGE_STRONG_SHA256 = "665ae82dcabafd0857153a7288e8cccaa27340e56c0874b5e884e154417f0e81"
 
 
 def _git_archive_bytes(revision: str, *paths: str) -> bytes:
@@ -509,6 +503,34 @@ def _git_archive_bytes(revision: str, *paths: str) -> bytes:
         check=True,
         capture_output=True,
     ).stdout
+
+
+def _historical_identity(installer, name: str, historical: Path, legacy: str) -> str | None:
+    """Check frozen provenance separately from the current structural admission witness."""
+    assert installer._legacy_tree_sha256(historical, ignore_runtime_cache=True) == legacy
+    strong = installer._legacy_factory_identity_v2(name, legacy)
+    if strong is not None:
+        assert installer._tree_sha256(historical, ignore_runtime_cache=True) == strong
+    return strong
+
+
+def _assert_preflight_refusal_preserves_tree(installer, skills: Path, failure: str) -> None:
+    before = installer._InstallTransaction._observe(skills)
+    with pytest.raises(ValueError, match=failure):
+        unexpected = installer._preflight_canonical_skills(ROOT / "src.codex/skills", skills, root=ROOT)
+        installer._discard_canonical_skills_plan(unexpected)
+    assert installer._InstallTransaction._observe(skills) == before
+
+
+def _load_installer():
+    spec = importlib.util.spec_from_file_location(
+        "global_lead_accepted_prior_installer", INSTALLER_PATH
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _seed_revision_staged_lead(revision: str, destination: Path) -> Path:
@@ -677,6 +699,17 @@ def _extract_stock_consultant(destination: Path, revision: str) -> Path:
     return destination / "src.codex" / "skills" / "consultant"
 
 
+def _expected_prior_v2(installer, name: str, legacy: str) -> str:
+    """A legacy pin selects a shipped witness; acceptance uses its strong ID."""
+    witnesses = (installer.GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256 if name == "lead"
+                 else installer.ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256[name])
+    assert isinstance(witnesses, dict)
+    assert legacy in witnesses
+    strong = witnesses[legacy]
+    assert isinstance(strong, str) and len(strong) == 64
+    return strong
+
+
 def _tree_bytes(root: Path) -> dict[Path, bytes]:
     return {
         path.relative_to(root): path.read_bytes()
@@ -685,61 +718,31 @@ def _tree_bytes(root: Path) -> dict[Path, bytes]:
     }
 
 
-def _historical_identity(installer, name: str, historical: Path, legacy: str) -> str | None:
-    """Check frozen provenance separately from the current structural admission witness."""
-    assert installer._legacy_tree_sha256(historical, ignore_runtime_cache=True) == legacy
-    strong = installer._legacy_factory_identity_v2(name, legacy)
-    if strong is not None:
-        assert installer._tree_sha256(historical, ignore_runtime_cache=True) == strong
-    return strong
-
-
-def _assert_preflight_refusal_preserves_tree(installer, skills: Path, failure: str) -> None:
-    before = installer._InstallTransaction._observe(skills)
-    with pytest.raises(ValueError, match=failure):
-        unexpected = installer._preflight_canonical_skills(ROOT / "src.codex/skills", skills, root=ROOT)
-        installer._discard_canonical_skills_plan(unexpected)
-    assert installer._InstallTransaction._observe(skills) == before
-
-
-@pytest.mark.parametrize(
-    ("revision", "expected_prior"), STOCK_CONSULTANT_PRIORS + SUPPORTED_CONSULTANT_PRIORS,
-)
-def test_historical_archive_ignores_checkout_newline_defaults(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, revision: str, expected_prior: str,
-) -> None:
-    monkeypatch.setenv("GIT_CONFIG_COUNT", "2")
-    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
-    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "true")
-    monkeypatch.setenv("GIT_CONFIG_KEY_1", "core.eol")
-    monkeypatch.setenv("GIT_CONFIG_VALUE_1", "crlf")
-    historical = _extract_stock_consultant(tmp_path / "historical", revision)
-    assert _load_installer()._legacy_tree_sha256(historical) == expected_prior
-    for relative, payload in _tree_bytes(historical).items():
-        assert payload == _historical_blob(revision, f"src.codex/skills/consultant/{relative.as_posix()}")
+def _runtime_cache_insensitive_tree_bytes(root: Path) -> dict[Path, bytes]:
+    files: dict[Path, bytes] = {}
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root)
+        metadata = path.lstat()
+        if (
+            stat.S_ISREG(metadata.st_mode)
+            and not path.is_symlink()
+            and relative.suffix.casefold() == ".pyc"
+            and "__pycache__" in relative.parts[:-1]
+        ):
+            continue
+        files[relative] = path.read_bytes()
+    return files
 
 
 @pytest.mark.parametrize(("revision", "expected_prior"), STOCK_CONSULTANT_PRIORS)
-def test_unwitnessed_consultant_prior_refuses_without_effects(
-    tmp_path: Path, revision: str, expected_prior: str,
-) -> None:
-    installer = _load_installer()
-    historical = _extract_stock_consultant(tmp_path / "historical", revision)
-    assert _historical_identity(installer, "consultant", historical, expected_prior) is None
-    skills = tmp_path / "target/.agents/skills"
-    shutil.copytree(historical, skills / "consultant")
-    _assert_preflight_refusal_preserves_tree(
-        installer, skills, "E_LEGACY_TREE_WITNESS_UNAVAILABLE: consultant")
-
-
-@pytest.mark.parametrize(("revision", "expected_prior"), SUPPORTED_CONSULTANT_PRIORS)
 def test_exact_stock_consultant_is_accepted_and_replaced_byte_for_byte(
     tmp_path: Path, revision: str, expected_prior: str
 ) -> None:
     installer = _load_installer()
     historical = _extract_stock_consultant(tmp_path / "historical", revision)
-    strong = _historical_identity(installer, "consultant", historical, expected_prior)
-    assert strong is not None
+    assert installer._legacy_tree_sha256(historical) == expected_prior
 
     target = tmp_path / "target"
     skills_root = target / ".agents" / "skills"
@@ -751,7 +754,7 @@ def test_exact_stock_consultant_is_accepted_and_replaced_byte_for_byte(
     )
     try:
         selected = next(skill for skill in plan.skills if skill.name == "consultant")
-        assert selected.accepted_prior == strong
+        assert selected.accepted_prior == _expected_prior_v2(installer, selected.name, expected_prior)
         owner = installer._CreateOnlyMutablePath(
             target, installer._InstallTransaction([], enabled=False), dry_run=False
         )
@@ -763,13 +766,13 @@ def test_exact_stock_consultant_is_accepted_and_replaced_byte_for_byte(
         installer._discard_canonical_skills_plan(plan)
 
 
-@pytest.mark.parametrize(("revision", "expected_prior"), SUPPORTED_CONSULTANT_PRIORS)
+@pytest.mark.parametrize(("revision", "expected_prior"), STOCK_CONSULTANT_PRIORS)
 def test_stock_consultant_one_byte_drift_is_rejected(
     tmp_path: Path, revision: str, expected_prior: str
 ) -> None:
     installer = _load_installer()
     historical = _extract_stock_consultant(tmp_path / "historical", revision)
-    assert _historical_identity(installer, "consultant", historical, expected_prior) is not None
+    assert installer._legacy_tree_sha256(historical) == expected_prior
     skills_root = tmp_path / "target" / ".agents" / "skills"
     skills_root.mkdir(parents=True)
     installed = skills_root / "consultant"
@@ -777,32 +780,36 @@ def test_stock_consultant_one_byte_drift_is_rejected(
     with (installed / "SKILL.md").open("ab") as stream:
         stream.write(b"x")
 
-    _assert_preflight_refusal_preserves_tree(
-        installer, skills_root, "E_ACCEPTED_PRIOR_COLLISION: consultant")
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: consultant"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", skills_root, root=ROOT
+        )
 
 
-@pytest.mark.parametrize(("revision", "expected_prior"), SUPPORTED_CONSULTANT_PRIORS)
+@pytest.mark.parametrize(("revision", "expected_prior"), STOCK_CONSULTANT_PRIORS)
 def test_stock_consultant_prior_is_rejected_for_another_skill(
     tmp_path: Path, revision: str, expected_prior: str
 ) -> None:
     installer = _load_installer()
     historical = _extract_stock_consultant(tmp_path / "historical", revision)
-    assert _historical_identity(installer, "consultant", historical, expected_prior) is not None
+    assert installer._legacy_tree_sha256(historical) == expected_prior
     skills_root = tmp_path / "target" / ".agents" / "skills"
     skills_root.mkdir(parents=True)
     shutil.copytree(historical, skills_root / "design-panel")
 
-    _assert_preflight_refusal_preserves_tree(
-        installer, skills_root, "E_ACCEPTED_PRIOR_COLLISION: design-panel")
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: design-panel"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", skills_root, root=ROOT
+        )
 
 
-@pytest.mark.parametrize(("revision", "expected_prior"), SUPPORTED_CONSULTANT_PRIORS)
+@pytest.mark.parametrize(("revision", "expected_prior"), STOCK_CONSULTANT_PRIORS)
 def test_stock_consultant_transaction_abort_restores_prior(
     tmp_path: Path, revision: str, expected_prior: str
 ) -> None:
     installer = _load_installer()
     historical = _extract_stock_consultant(tmp_path / "historical", revision)
-    assert _historical_identity(installer, "consultant", historical, expected_prior) is not None
+    assert installer._legacy_tree_sha256(historical) == expected_prior
     target = tmp_path / "target"
     skills_root = target / ".agents" / "skills"
     skills_root.mkdir(parents=True)
@@ -814,7 +821,10 @@ def test_stock_consultant_transaction_abort_restores_prior(
     )
     try:
         with pytest.raises(RuntimeError, match="forced consultant rollback"):
-            transaction = installer._InstallTransaction([installed], enabled=True)
+            transaction = installer._InstallTransaction(
+                list(installer._canonical_skill_snapshot_paths(skills_root, plan)),
+                enabled=True,
+            )
             with transaction:
                 owner = installer._CreateOnlyMutablePath(
                     target, transaction, dry_run=False
@@ -830,13 +840,13 @@ def test_stock_consultant_transaction_abort_restores_prior(
     assert {path.name for path in skills_root.iterdir()} == {"consultant"}
 
 
-@pytest.mark.parametrize(("revision", "expected_prior"), SUPPORTED_CONSULTANT_PRIORS)
+@pytest.mark.parametrize(("revision", "expected_prior"), STOCK_CONSULTANT_PRIORS)
 def test_stock_consultant_second_preflight_is_noop(
     tmp_path: Path, revision: str, expected_prior: str
 ) -> None:
     installer = _load_installer()
     historical = _extract_stock_consultant(tmp_path / "historical", revision)
-    assert _historical_identity(installer, "consultant", historical, expected_prior) is not None
+    assert installer._legacy_tree_sha256(historical) == expected_prior
     target = tmp_path / "target"
     skills_root = target / ".agents" / "skills"
     skills_root.mkdir(parents=True)
@@ -873,51 +883,72 @@ def test_stock_consultant_second_preflight_is_noop(
     assert _tree_bytes(skills_root) == before
 
 
-def _assert_historical_skill_acceptance_or_refusal(
-    installer, tmp_path: Path, name: str, expected_prior: str, historical: Path,
-    *, supported: bool,
+def _assert_exact_stock_skill_is_accepted_and_drift_refused(
+    installer,
+    tmp_path: Path,
+    name: str,
+    expected_prior: str,
+    historical: Path,
 ) -> None:
-    strong = _historical_identity(installer, name, historical, expected_prior)
-    assert (strong is not None) == supported
+    assert installer._legacy_tree_sha256(historical) == expected_prior
+
     skills_root = tmp_path / "target" / ".agents" / "skills"
     skills_root.mkdir(parents=True)
     shutil.copytree(historical, skills_root / name)
-    if not supported:
-        _assert_preflight_refusal_preserves_tree(
-            installer, skills_root, rf"E_LEGACY_TREE_WITNESS_UNAVAILABLE: {name}")
-    else:
-        plan = installer._preflight_canonical_skills(
-            ROOT / "src.codex" / "skills", skills_root, root=ROOT)
-        try:
-            selected = next(skill for skill in plan.skills if skill.name == name)
-            assert selected.accepted_prior == strong
-            owner = installer._CreateOnlyMutablePath(
-                tmp_path / "target", installer._InstallTransaction([], enabled=False), dry_run=False)
-            installer._apply_canonical_skills_plan(plan, skills_root, owner, root=ROOT)
-            assert installer._tree_sha256(
-                skills_root / name, ignore_runtime_cache=selected.ignore_runtime_cache) == selected.source_digest
-        finally:
-            installer._discard_canonical_skills_plan(plan)
-        before_noop = installer._InstallTransaction._observe(skills_root)
-        current_plan = installer._preflight_canonical_skills(
-            ROOT / "src.codex" / "skills", skills_root, root=ROOT)
-        try:
-            selected = next(skill for skill in current_plan.skills if skill.name == name)
-            assert selected.accepted_prior is None
-            installer._apply_canonical_skills_plan(current_plan, skills_root, owner, root=ROOT)
-            assert installer._InstallTransaction._observe(skills_root) == before_noop
-        finally:
-            installer._discard_canonical_skills_plan(current_plan)
+    plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        selected = next(skill for skill in plan.skills if skill.name == name)
+        assert selected.accepted_prior == _expected_prior_v2(installer, selected.name, expected_prior)
+        owner = installer._CreateOnlyMutablePath(
+            tmp_path / "target",
+            installer._InstallTransaction([], enabled=False),
+            dry_run=False,
+        )
+        installer._apply_canonical_skills_plan(plan, skills_root, owner, root=ROOT)
+        assert (
+            installer._tree_sha256(
+                skills_root / name, ignore_runtime_cache=selected.ignore_runtime_cache
+            )
+            == selected.source_digest
+        )
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+    before_noop = {
+        path.relative_to(skills_root): path.read_bytes()
+        for path in skills_root.rglob("*")
+        if path.is_file()
+    }
+    current_plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        selected = next(skill for skill in current_plan.skills if skill.name == name)
+        assert selected.accepted_prior is None
+        installer._apply_canonical_skills_plan(current_plan, skills_root, owner, root=ROOT)
+        assert {
+            path.relative_to(skills_root): path.read_bytes()
+            for path in skills_root.rglob("*")
+            if path.is_file()
+        } == before_noop
+    finally:
+        installer._discard_canonical_skills_plan(current_plan)
+
     drift_root = tmp_path / "drift" / ".agents" / "skills"
+    drift_root.mkdir(parents=True)
     shutil.copytree(historical, drift_root / name)
     with (drift_root / name / "SKILL.md").open("ab") as stream:
         stream.write(b"one byte of drift\n")
-    _assert_preflight_refusal_preserves_tree(
-        installer, drift_root, rf"E_ACCEPTED_PRIOR_COLLISION: {name}")
+    with pytest.raises(ValueError, match=rf"E_ACCEPTED_PRIOR_COLLISION: {name}"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", drift_root, root=ROOT
+        )
 
 
 @pytest.mark.parametrize(("name", "expected_prior"), GPT6_STOCK_SKILL_PRIORS)
-def test_gpt6_stock_skill_obeys_structural_witness_policy(
+def test_gpt6_exact_stock_skill_upgrades_and_one_byte_drift_is_rejected(
     tmp_path: Path, name: str, expected_prior: str
 ) -> None:
     installer = _load_installer()
@@ -930,18 +961,20 @@ def test_gpt6_stock_skill_obeys_structural_witness_policy(
             name, GPT6_STOCK_PRIOR_REVISION, tmp_path / "historical"
         )
     )
-    _assert_historical_skill_acceptance_or_refusal(
-        installer, tmp_path, name, expected_prior, historical, supported=name != "lead"
+    _assert_exact_stock_skill_is_accepted_and_drift_refused(
+        installer, tmp_path, name, expected_prior, historical
     )
 
 
-def _copy_current_staged_lead(installer, destination: Path) -> Path:
+def _copy_current_staged_lead(
+    installer, destination: Path, *, retained_from: Path | None = None,
+) -> Path:
     if destination.exists():
         shutil.rmtree(destination)
     stage = installer._stage_canonical_lead_tree(
         ROOT,
         ROOT / "src.codex" / "skills" / "lead",
-        destination / "scripts",
+        (retained_from or destination) / "scripts",
     )
     try:
         shutil.copytree(stage.path, destination)
@@ -985,18 +1018,74 @@ def _seed_current_hybrid_global_lead(installer, destination: Path) -> Path:
     return lead
 
 
-def test_unwitnessed_hybrid_global_lead_refuses_drift_and_extra_members(tmp_path: Path) -> None:
+def test_exact_current_hybrid_global_lead_migrates_noops_and_rejects_drift(
+    tmp_path: Path,
+) -> None:
     installer = _load_installer()
-    historical = _seed_current_hybrid_global_lead(installer, tmp_path / "historical/lead")
+    historical = _seed_current_hybrid_global_lead(
+        installer, tmp_path / "historical" / "lead"
+    )
+    # Retired members are carried until their separate cleanup owner runs.
+    current = _copy_current_staged_lead(
+        installer, tmp_path / "current" / "lead", retained_from=historical
+    )
     historical_files = _tree_bytes(historical)
     for relative, source in CURRENT_HYBRID_GLOBAL_LEAD_OVERLAYS.items():
         assert historical_files[Path(relative)] == _historical_blob(*source)
-    _assert_historical_skill_acceptance_or_refusal(
-        installer, tmp_path, "lead", CURRENT_HYBRID_GLOBAL_LEAD_TREE_SHA256, historical, supported=False)
-    extra_root = tmp_path / "extra/.agents/skills"
-    shutil.copytree(historical, extra_root / "lead")
-    (extra_root / "lead/unrecognized.txt").write_text("extra\n", encoding="utf-8")
-    _assert_preflight_refusal_preserves_tree(installer, extra_root, "E_ACCEPTED_PRIOR_COLLISION: lead")
+    assert (
+        installer._legacy_tree_sha256(historical, ignore_runtime_cache=True)
+        == CURRENT_HYBRID_GLOBAL_LEAD_TREE_SHA256
+    )
+
+    target = tmp_path / "target"
+    skills_root = target / ".agents" / "skills"
+    shutil.copytree(historical, skills_root / "lead")
+    plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        lead = next(skill for skill in plan.skills if skill.name == "lead")
+        assert lead.accepted_prior == _expected_prior_v2(installer, lead.name, CURRENT_HYBRID_GLOBAL_LEAD_TREE_SHA256)
+        owner = installer._CreateOnlyMutablePath(
+            target, installer._InstallTransaction([], enabled=False), dry_run=False
+        )
+        installer._apply_canonical_skills_plan(plan, skills_root, owner, root=ROOT)
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+    assert _runtime_cache_insensitive_tree_bytes(
+        skills_root / "lead"
+    ) == _runtime_cache_insensitive_tree_bytes(current)
+
+    before_noop = _tree_bytes(skills_root)
+    current_plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        lead = next(skill for skill in current_plan.skills if skill.name == "lead")
+        assert lead.accepted_prior is None
+        installer._apply_canonical_skills_plan(
+            current_plan, skills_root, owner, root=ROOT
+        )
+    finally:
+        installer._discard_canonical_skills_plan(current_plan)
+    assert _tree_bytes(skills_root) == before_noop
+
+    drift_root = tmp_path / "drift" / ".agents" / "skills"
+    drift = _seed_current_hybrid_global_lead(installer, drift_root / "lead")
+    with (drift / "SKILL.md").open("ab") as stream:
+        stream.write(b"x")
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: lead"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", drift_root, root=ROOT
+        )
+
+    extra_root = tmp_path / "extra" / ".agents" / "skills"
+    extra = _seed_current_hybrid_global_lead(installer, extra_root / "lead")
+    (extra / "unrecognized.txt").write_text("extra\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: lead"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", extra_root, root=ROOT
+        )
 
 
 @pytest.mark.parametrize(
@@ -1016,129 +1105,187 @@ def test_unwitnessed_hybrid_global_lead_refuses_drift_and_extra_members(tmp_path
         ),
     ),
 )
-def test_unwitnessed_immediate_stock_lead_refuses_without_effects(
+def test_exact_immediate_stock_lead_migrates_and_rejects_drift(
     tmp_path: Path, revision: str, expected_digest: str,
 ) -> None:
     installer = _load_installer()
-    skills_root = tmp_path / "historical/.agents/skills"
-    historical = _seed_revision_staged_lead(revision, skills_root / "lead")
-    assert _historical_identity(installer, "lead", historical, expected_digest) is None
-    _assert_preflight_refusal_preserves_tree(
-        installer, skills_root, "E_LEGACY_TREE_WITNESS_UNAVAILABLE: lead")
-    with (historical / "scripts/process_supervision/process_runner.py").open("ab") as stream:
-        stream.write(b"x")
-    _assert_preflight_refusal_preserves_tree(installer, skills_root, "E_ACCEPTED_PRIOR_COLLISION: lead")
+    skills_root = tmp_path / "accepted" / ".agents" / "skills"
+    historical = _seed_revision_staged_lead(
+        revision, skills_root / "lead"
+    )
+    assert (
+        installer._legacy_tree_sha256(historical, ignore_runtime_cache=True)
+        == expected_digest
+    )
 
-
-def test_unwitnessed_partial_push_gate_lead_refuses_without_effects(tmp_path: Path) -> None:
-    installer = _load_installer()
-    baseline = _seed_revision_staged_lead(PARTIAL_PUSH_GATE_GLOBAL_LEAD_REVISION, tmp_path / "baseline/lead")
-    historical = _seed_partial_push_gate_staged_lead(tmp_path / "historical/lead")
-    baseline_files, historical_files = _tree_bytes(baseline), _tree_bytes(historical)
-    overlay = Path("scripts/check-git-push-gate.py")
-    assert len(baseline_files) == len(historical_files) == 55
-    assert {relative for relative in baseline_files
-            if baseline_files[relative] != historical_files[relative]} == {overlay}
-    assert historical_files[overlay] == _historical_blob(
-        PARTIAL_PUSH_GATE_OVERLAY_REVISION, "scripts/universal-hooks/scripts/check-git-push-gate.py")
-    _assert_historical_skill_acceptance_or_refusal(
-        installer, tmp_path, "lead", PARTIAL_PUSH_GATE_GLOBAL_LEAD_TREE_SHA256, historical, supported=False)
-
-
-@pytest.mark.parametrize("commit", (False, True))
-def test_authenticated_factory_bridge_preserves_upgrade_noop_and_rollback(
-    tmp_path: Path, commit: bool,
-) -> None:
-    installer = _load_installer()
-    historical = _seed_revision_staged_lead(FACTORY_BRIDGE_REVISION, tmp_path / "historical/lead")
-    assert _historical_identity(
-        installer, "lead", historical, FACTORY_BRIDGE_LEGACY_SHA256) == FACTORY_BRIDGE_STRONG_SHA256
-    source = tmp_path / "source-skills"
-    shutil.copytree(ROOT / "src.codex/skills/lead", source / "lead")
-    anchor = tmp_path / "target"
-    skills = anchor / ".agents/skills"
-    shutil.copytree(historical, skills / "lead")
-    before = installer._InstallTransaction._observe(skills)
-    plan = installer._preflight_canonical_skills(source, skills, root=ROOT)
+    plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
     try:
-        selected = next(skill for skill in plan.skills if skill.name == "lead")
-        assert selected.accepted_prior == FACTORY_BRIDGE_STRONG_SHA256
-        receiving = nullcontext() if commit else pytest.raises(RuntimeError, match="factory bridge rollback")
-        with receiving, installer._InstallTransaction([skills], enabled=True) as transaction:
-            owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=False)
-            installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
-            installer._finalize_canonical_lead_receipt(plan, skills, owner)
-            assert installer._tree_sha256(skills / "lead", ignore_runtime_cache=True) == selected.source_digest
-            if commit:
-                transaction.commit()
-            else:
-                raise RuntimeError("factory bridge rollback")
+        lead = next(skill for skill in plan.skills if skill.name == "lead")
+        assert lead.accepted_prior == _expected_prior_v2(installer, lead.name, expected_digest)
     finally:
         installer._discard_canonical_skills_plan(plan)
-    if commit:
-        before_noop = installer._InstallTransaction._observe(skills)
-        current = installer._preflight_canonical_skills(source, skills, root=ROOT)
-        try:
-            assert next(skill for skill in current.skills if skill.name == "lead").accepted_prior is None
-            owner = installer._CreateOnlyMutablePath(
-                anchor, installer._InstallTransaction([], enabled=False), dry_run=False)
-            installer._apply_canonical_skills_plan(current, skills, owner, root=ROOT)
-            assert installer._InstallTransaction._observe(skills) == before_noop
-        finally:
-            installer._discard_canonical_skills_plan(current)
-    else:
-        assert installer._InstallTransaction._observe(skills) == before
-    drift = tmp_path / "drift/.agents/skills"
-    shutil.copytree(historical, drift / "lead")
-    with (drift / "lead/SKILL.md").open("ab") as stream:
+
+    drift_root = tmp_path / "drift" / ".agents" / "skills"
+    drift = _seed_revision_staged_lead(
+        revision, drift_root / "lead"
+    )
+    with (drift / "scripts" / "process_supervision" / "process_runner.py").open(
+        "ab"
+    ) as stream:
         stream.write(b"x")
-    _assert_preflight_refusal_preserves_tree(installer, drift, "E_ACCEPTED_PRIOR_COLLISION: lead")
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: lead"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", drift_root, root=ROOT
+        )
 
 
-def test_partial_kimi_luna_global_lead_legacy_id_is_lookup_only() -> None:
+def test_exact_partial_push_gate_lead_migrates_rolls_back_and_rejects_drift(
+    tmp_path: Path,
+) -> None:
+    installer = _load_installer()
+    baseline = _seed_revision_staged_lead(
+        PARTIAL_PUSH_GATE_GLOBAL_LEAD_REVISION,
+        tmp_path / "baseline" / "lead",
+    )
+    historical = _seed_partial_push_gate_staged_lead(
+        tmp_path / "historical" / "lead"
+    )
+    baseline_files = _tree_bytes(baseline)
+    historical_files = _tree_bytes(historical)
+    overlay = Path("scripts/check-git-push-gate.py")
+    assert len(baseline_files) == len(historical_files) == 55
+    assert {
+        relative
+        for relative in baseline_files
+        if baseline_files[relative] != historical_files[relative]
+    } == {overlay}
+    assert historical_files[overlay] == _historical_blob(
+        PARTIAL_PUSH_GATE_OVERLAY_REVISION,
+        "scripts/universal-hooks/scripts/check-git-push-gate.py",
+    )
+    assert (
+        installer._legacy_tree_sha256(historical, ignore_runtime_cache=True)
+        == PARTIAL_PUSH_GATE_GLOBAL_LEAD_TREE_SHA256
+    )
+
+    target = tmp_path / "target"
+    skills_root = target / ".agents" / "skills"
+    shutil.copytree(historical, skills_root / "lead")
+    plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        lead = next(skill for skill in plan.skills if skill.name == "lead")
+        assert lead.accepted_prior == _expected_prior_v2(installer, lead.name, PARTIAL_PUSH_GATE_GLOBAL_LEAD_TREE_SHA256)
+        owner = installer._CreateOnlyMutablePath(
+            target, installer._InstallTransaction([], enabled=False), dry_run=False
+        )
+        installer._apply_canonical_skills_plan(plan, skills_root, owner, root=ROOT)
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+    current = _copy_current_staged_lead(
+        installer, tmp_path / "current" / "lead", retained_from=historical
+    )
+    assert _runtime_cache_insensitive_tree_bytes(
+        skills_root / "lead"
+    ) == _runtime_cache_insensitive_tree_bytes(current)
+    before_noop = _tree_bytes(skills_root)
+    current_plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        lead = next(skill for skill in current_plan.skills if skill.name == "lead")
+        assert lead.accepted_prior is None
+        installer._apply_canonical_skills_plan(
+            current_plan, skills_root, owner, root=ROOT
+        )
+    finally:
+        installer._discard_canonical_skills_plan(current_plan)
+    assert _tree_bytes(skills_root) == before_noop
+
+    drift_root = tmp_path / "drift" / ".agents" / "skills"
+    shutil.copytree(historical, drift_root / "lead")
+    with (drift_root / "lead" / "SKILL.md").open("ab") as stream:
+        stream.write(b"x")
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: lead"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", drift_root, root=ROOT
+        )
+
+    rollback_target = tmp_path / "rollback"
+    rollback_skills = rollback_target / ".agents" / "skills"
+    rollback_lead = rollback_skills / "lead"
+    shutil.copytree(historical, rollback_lead)
+    prior_bytes = _tree_bytes(rollback_lead)
+    rollback_plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", rollback_skills, root=ROOT
+    )
+    try:
+        with pytest.raises(RuntimeError, match="forced Lead rollback"):
+            transaction = installer._InstallTransaction(
+                list(installer._canonical_skill_snapshot_paths(rollback_skills, rollback_plan)),
+                enabled=True,
+            )
+            with transaction:
+                rollback_owner = installer._CreateOnlyMutablePath(
+                    rollback_target, transaction, dry_run=False
+                )
+                installer._apply_canonical_skills_plan(
+                    rollback_plan,
+                    rollback_skills,
+                    rollback_owner,
+                    root=ROOT,
+                )
+                raise RuntimeError("forced Lead rollback")
+    finally:
+        installer._discard_canonical_skills_plan(rollback_plan)
+    assert _tree_bytes(rollback_lead) == prior_bytes
+    assert {path.name for path in rollback_skills.iterdir()} == {"lead"}
+
+
+def test_partial_kimi_luna_global_lead_prior_is_exactly_hash_pinned() -> None:
     installer = _load_installer()
 
     assert (
         PARTIAL_KIMI_LUNA_GLOBAL_LEAD_TREE_SHA256
         in installer.GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
     )
-    assert installer._legacy_factory_identity_v2("lead", PARTIAL_KIMI_LUNA_GLOBAL_LEAD_TREE_SHA256) is None
     one_byte_falsifier = "1" + PARTIAL_KIMI_LUNA_GLOBAL_LEAD_TREE_SHA256[1:]
     assert one_byte_falsifier not in installer.GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
 
 
-def test_pre_diagnostic_global_lead_legacy_id_is_lookup_only() -> None:
+def test_pre_diagnostic_global_lead_prior_is_exactly_hash_pinned() -> None:
     installer = _load_installer()
 
     assert (
         PRE_DIAGNOSTIC_GLOBAL_LEAD_TREE_SHA256
         in installer.GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
     )
-    assert installer._legacy_factory_identity_v2("lead", PRE_DIAGNOSTIC_GLOBAL_LEAD_TREE_SHA256) is None
     one_byte_falsifier = "1" + PRE_DIAGNOSTIC_GLOBAL_LEAD_TREE_SHA256[1:]
     assert one_byte_falsifier not in installer.GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
 
 
-def test_pre_public_capture_global_lead_legacy_id_is_lookup_only() -> None:
+def test_pre_public_capture_global_lead_prior_is_exactly_hash_pinned() -> None:
     installer = _load_installer()
 
     assert (
         PRE_PUBLIC_CAPTURE_GLOBAL_LEAD_TREE_SHA256
         in installer.GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
     )
-    assert installer._legacy_factory_identity_v2("lead", PRE_PUBLIC_CAPTURE_GLOBAL_LEAD_TREE_SHA256) is None
     one_byte_falsifier = "1" + PRE_PUBLIC_CAPTURE_GLOBAL_LEAD_TREE_SHA256[1:]
     assert one_byte_falsifier not in installer.GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
 
 
-def test_pre_child_nonzero_global_lead_legacy_id_is_lookup_only() -> None:
+def test_pre_child_nonzero_global_lead_prior_is_exactly_hash_pinned() -> None:
     installer = _load_installer()
 
     assert (
         PRE_CHILD_NONZERO_GLOBAL_LEAD_TREE_SHA256
         in installer.GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
     )
-    assert installer._legacy_factory_identity_v2("lead", PRE_CHILD_NONZERO_GLOBAL_LEAD_TREE_SHA256) is None
     one_byte_falsifier = "1" + PRE_CHILD_NONZERO_GLOBAL_LEAD_TREE_SHA256[1:]
     assert one_byte_falsifier not in installer.GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
 
@@ -1161,17 +1308,32 @@ def _seed_provider_auth_baseline_staged_lead(destination: Path) -> Path:
     return lead
 
 
-def test_unwitnessed_provider_auth_baseline_lead_refuses_without_effects(tmp_path: Path) -> None:
+def test_exact_provider_auth_baseline_lead_is_accepted_and_drift_refused(
+    tmp_path: Path,
+) -> None:
     installer = _load_installer()
-    skills_root = tmp_path / ".agents/skills"
+    skills_root = tmp_path / ".agents" / "skills"
     historical = _seed_provider_auth_baseline_staged_lead(skills_root / "lead")
-    assert _historical_identity(
-        installer, "lead", historical, PROVIDER_AUTH_BASELINE_GLOBAL_LEAD_TREE_SHA256) is None
-    _assert_preflight_refusal_preserves_tree(
-        installer, skills_root, "E_LEGACY_TREE_WITNESS_UNAVAILABLE: lead")
-    with (historical / "SKILL.md").open("ab") as stream:
+    assert installer._legacy_tree_sha256(
+        historical, ignore_runtime_cache=True
+    ) == PROVIDER_AUTH_BASELINE_GLOBAL_LEAD_TREE_SHA256
+
+    plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        lead = next(skill for skill in plan.skills if skill.name == "lead")
+        assert lead.accepted_prior == _expected_prior_v2(installer, lead.name, PROVIDER_AUTH_BASELINE_GLOBAL_LEAD_TREE_SHA256)
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+    _seed_provider_auth_baseline_staged_lead(skills_root / "lead")
+    with (skills_root / "lead" / "SKILL.md").open("ab") as stream:
         stream.write(b"customized\n")
-    _assert_preflight_refusal_preserves_tree(installer, skills_root, "E_ACCEPTED_PRIOR_COLLISION: lead")
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: lead"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", skills_root, root=ROOT
+        )
 
 
 @pytest.mark.parametrize(
@@ -1230,26 +1392,75 @@ def test_unwitnessed_provider_auth_baseline_lead_refuses_without_effects(tmp_pat
         "stock-5b", "stock-4c", "stock-6aa", "stock-2db",
     ),
 )
-def test_unwitnessed_shipped_global_lead_refuses_without_effects(
-    tmp_path: Path, revision: str, expected_digest: str,
+def test_exact_shipped_global_lead_is_accepted_and_one_byte_drift_refused(
+    tmp_path: Path,
+    revision: str,
+    expected_digest: str,
 ) -> None:
     installer = _load_installer()
-    historical = _seed_revision_staged_lead(revision, tmp_path / "historical/lead")
-    _assert_historical_skill_acceptance_or_refusal(
-        installer, tmp_path, "lead", expected_digest, historical, supported=False)
+    historical = _seed_revision_staged_lead(
+        revision, tmp_path / "historical" / "lead"
+    )
+    assert installer._legacy_tree_sha256(
+        historical, ignore_runtime_cache=True
+    ) == expected_digest
+
+    skills_root = tmp_path / "exact" / ".agents" / "skills"
+    shutil.copytree(historical, skills_root / "lead")
+    plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        lead = next(skill for skill in plan.skills if skill.name == "lead")
+        assert lead.accepted_prior == _expected_prior_v2(installer, lead.name, expected_digest)
+        owner = installer._CreateOnlyMutablePath(
+            tmp_path,
+            installer._InstallTransaction([], enabled=False),
+            dry_run=False,
+        )
+        installer._apply_canonical_skills_plan(plan, skills_root, owner, root=ROOT)
+        assert installer._tree_sha256(
+            skills_root / "lead", ignore_runtime_cache=True
+        ) == lead.source_digest
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+    drift_root = tmp_path / "drift" / ".agents" / "skills"
+    shutil.copytree(historical, drift_root / "lead")
+    with (drift_root / "lead" / "SKILL.md").open("ab") as stream:
+        stream.write(b"x")
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: lead"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", drift_root, root=ROOT
+        )
 
 
-def test_unwitnessed_pre_range_v3_lead_refuses_without_effects(tmp_path: Path) -> None:
+def test_exact_pre_range_v3_lead_is_accepted_and_customized_tree_refused(
+    tmp_path: Path,
+) -> None:
     installer = _load_installer()
-    skills_root = tmp_path / ".agents/skills"
+    skills_root = tmp_path / ".agents" / "skills"
     historical = _seed_pre_range_v3_staged_lead(skills_root / "lead")
-    assert _historical_identity(
-        installer, "lead", historical, PRE_RANGE_V3_GLOBAL_LEAD_TREE_SHA256) is None
-    _assert_preflight_refusal_preserves_tree(
-        installer, skills_root, "E_LEGACY_TREE_WITNESS_UNAVAILABLE: lead")
-    with (historical / "SKILL.md").open("ab") as stream:
+    assert installer._legacy_tree_sha256(
+        historical, ignore_runtime_cache=True
+    ) == PRE_RANGE_V3_GLOBAL_LEAD_TREE_SHA256
+
+    plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        lead = next(skill for skill in plan.skills if skill.name == "lead")
+        assert lead.accepted_prior == _expected_prior_v2(installer, lead.name, PRE_RANGE_V3_GLOBAL_LEAD_TREE_SHA256)
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+    _seed_pre_range_v3_staged_lead(skills_root / "lead")
+    with (skills_root / "lead" / "SKILL.md").open("ab") as stream:
         stream.write(b"customized\n")
-    _assert_preflight_refusal_preserves_tree(installer, skills_root, "E_ACCEPTED_PRIOR_COLLISION: lead")
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: lead"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", skills_root, root=ROOT
+        )
 
 
 def _seed_pre_rebase_staged_lead(destination: Path) -> Path:
@@ -1266,11 +1477,53 @@ def _seed_pre_rebase_staged_lead(destination: Path) -> Path:
     return lead
 
 
-def test_unwitnessed_pre_rebase_staged_lead_refuses_without_effects(tmp_path: Path) -> None:
+def test_exact_pre_rebase_staged_lead_is_accepted_and_current_is_noop(
+    tmp_path: Path,
+) -> None:
+    """The observed staged Lead tree upgrades exactly once, without a no-op rewrite."""
+
     installer = _load_installer()
     historical = _seed_pre_rebase_staged_lead(tmp_path / "historical")
-    _assert_historical_skill_acceptance_or_refusal(
-        installer, tmp_path, "lead", PRE_REBASE_GLOBAL_LEAD_TREE_SHA256, historical, supported=False)
+    assert (
+        installer._legacy_tree_sha256(historical, ignore_runtime_cache=True)
+        == PRE_REBASE_GLOBAL_LEAD_TREE_SHA256
+    )
+
+    skills_root = tmp_path / "target" / ".agents" / "skills"
+    skills_root.mkdir(parents=True)
+    shutil.copytree(historical, skills_root / "lead")
+    plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        lead = next(skill for skill in plan.skills if skill.name == "lead")
+        assert lead.accepted_prior == _expected_prior_v2(installer, lead.name, PRE_REBASE_GLOBAL_LEAD_TREE_SHA256)
+        owner = installer._CreateOnlyMutablePath(
+            tmp_path / "target", installer._InstallTransaction([], enabled=False), dry_run=False
+        )
+        installer._apply_canonical_skills_plan(plan, skills_root, owner, root=ROOT)
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+    before_noop = {
+        path.relative_to(skills_root): path.read_bytes()
+        for path in skills_root.rglob("*")
+        if path.is_file()
+    }
+    current_plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        lead = next(skill for skill in current_plan.skills if skill.name == "lead")
+        assert lead.accepted_prior is None
+        installer._apply_canonical_skills_plan(current_plan, skills_root, owner, root=ROOT)
+    finally:
+        installer._discard_canonical_skills_plan(current_plan)
+    assert {
+        path.relative_to(skills_root): path.read_bytes()
+        for path in skills_root.rglob("*")
+        if path.is_file()
+    } == before_noop
 
 
 def test_pre_rebase_staged_lead_drift_is_rejected_before_transaction(
@@ -1286,7 +1539,7 @@ def test_pre_rebase_staged_lead_drift_is_rejected_before_transaction(
     monkeypatch.setenv("HOME", str(home))
     assert installer.install("claude", ["--global", "--no-hypothesis-hook"]) == 0
 
-    skills = home / ".agents" / "skills"
+    skills = home / ".claude" / "skills"
     shutil.rmtree(skills / "lead")
     shutil.copytree(historical, skills / "lead")
     with (skills / "lead" / "SKILL.md").open("ab") as stream:
@@ -1319,15 +1572,15 @@ def test_pre_rebase_staged_lead_drift_is_rejected_before_transaction(
     ("name", "expected_prior"),
     tuple(STOCK_8521_CANONICAL_SKILL_TREE_SHA256.items()),
 )
-def test_exact_8521_stock_skill_obeys_structural_witness_policy(
+def test_exact_8521_stock_skill_is_accepted_and_drift_refused(
     tmp_path: Path, name: str, expected_prior: str
 ) -> None:
-    """The 8521 witness boundary is independent of the current registry lookup."""
+    """Only the verified 8521 stock tree may upgrade to the current skill."""
 
     installer = _load_installer()
     historical = _extract_8521_skill(name, tmp_path / "historical")
-    _assert_historical_skill_acceptance_or_refusal(
-        installer, tmp_path, name, expected_prior, historical, supported=name != "lead"
+    _assert_exact_stock_skill_is_accepted_and_drift_refused(
+        installer, tmp_path, name, expected_prior, historical
     )
 
 
@@ -1342,8 +1595,8 @@ def test_exact_7872_stock_skill_is_accepted_and_drift_refused(
 
     installer = _load_installer()
     historical = _extract_7872_skill(name, tmp_path / "historical")
-    _assert_historical_skill_acceptance_or_refusal(
-        installer, tmp_path, name, expected_prior, historical, supported=True
+    _assert_exact_stock_skill_is_accepted_and_drift_refused(
+        installer, tmp_path, name, expected_prior, historical
     )
 
 
@@ -1354,18 +1607,17 @@ def test_exact_7872_stock_skill_is_accepted_and_drift_refused(
         for name, (revision, digest) in ADDITIONAL_STOCK_SKILL_PRIORS.items()
     ),
 )
-def test_exact_additional_stock_skill_obeys_structural_witness_policy(
+def test_exact_additional_stock_skill_is_accepted_and_drift_refused(
     tmp_path: Path, name: str, revision: str, expected_prior: str
 ) -> None:
-    """Each historical fixture retains its independently specified support boundary."""
+    """Only each exact named shipped stock tree may upgrade to the current skill."""
 
     installer = _load_installer()
     historical = _extract_additional_stock_skill(
         name, revision, tmp_path / "historical"
     )
-    _assert_historical_skill_acceptance_or_refusal(
-        installer, tmp_path, name, expected_prior, historical,
-        supported=name not in {"init-project", "manual-repo-transfer", "second-opinion", "review-loop"},
+    _assert_exact_stock_skill_is_accepted_and_drift_refused(
+        installer, tmp_path, name, expected_prior, historical
     )
 
 
@@ -1408,8 +1660,10 @@ def test_github_pr_review_bot_prior_is_skill_scoped(tmp_path: Path) -> None:
     skills_root.mkdir(parents=True)
     shutil.copytree(historical, skills_root / "consultant")
 
-    _assert_preflight_refusal_preserves_tree(
-        installer, skills_root, "E_ACCEPTED_PRIOR_COLLISION: consultant")
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: consultant"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", skills_root, root=ROOT
+        )
 
 
 def test_github_pr_review_bot_prior_transaction_abort_restores_prior(
@@ -1432,7 +1686,10 @@ def test_github_pr_review_bot_prior_transaction_abort_restores_prior(
     )
     try:
         with pytest.raises(RuntimeError, match="forced review skill rollback"):
-            transaction = installer._InstallTransaction([installed], enabled=True)
+            transaction = installer._InstallTransaction(
+                list(installer._canonical_skill_snapshot_paths(skills_root, plan)),
+                enabled=True,
+            )
             with transaction:
                 owner = installer._CreateOnlyMutablePath(
                     target, transaction, dry_run=False
@@ -1448,7 +1705,7 @@ def test_github_pr_review_bot_prior_transaction_abort_restores_prior(
     assert {path.name for path in skills_root.iterdir()} == {"github-pr-review-bot"}
 
 
-def test_unwitnessed_947_manual_transfer_refuses_without_effects(
+def test_exact_947_manual_transfer_is_accepted_and_drift_refused(
     tmp_path: Path,
 ) -> None:
     installer = _load_installer()
@@ -1457,13 +1714,12 @@ def test_unwitnessed_947_manual_transfer_refuses_without_effects(
         "94715eed9e0563a38d83572f4b6d525d2f9172d9",
         tmp_path / "historical",
     )
-    _assert_historical_skill_acceptance_or_refusal(
+    _assert_exact_stock_skill_is_accepted_and_drift_refused(
         installer,
         tmp_path,
         "manual-repo-transfer",
         "b73cde79962de55bd2cd52bc35f0b450d26cff78abb21b9a496bf38be686a9f3",
         historical,
-        supported=False,
     )
 
 
@@ -1481,7 +1737,7 @@ def test_exact_2db_manual_transfer_is_accepted_and_drift_refused(
         "2dbf91b3e96e9dbf2bf785d16bf6964faf766d46",
         tmp_path / "historical",
     )
-    _assert_historical_skill_acceptance_or_refusal(
+    _assert_exact_stock_skill_is_accepted_and_drift_refused(
         installer,
         tmp_path,
         "manual-repo-transfer",
@@ -1492,7 +1748,6 @@ def test_exact_2db_manual_transfer_is_accepted_and_drift_refused(
             )
         ],
         historical,
-        supported=True,
     )
 
 
@@ -1547,8 +1802,6 @@ def test_stock_canonical_skill_runtime_cache_migrates(tmp_path: Path) -> None:
     name = "manual-repo-transfer"
     expected_prior = STOCK_7872_CANONICAL_SKILL_TREE_SHA256[name]
     historical = _extract_7872_skill(name, tmp_path / "historical")
-    strong = _historical_identity(installer, name, historical, expected_prior)
-    assert strong is not None
     skills_root = tmp_path / "target" / ".agents" / "skills"
     skills_root.mkdir(parents=True)
     installed = _copy_manual_transfer_with_runtime_cache(
@@ -1560,8 +1813,8 @@ def test_stock_canonical_skill_runtime_cache_migrates(tmp_path: Path) -> None:
     )
     try:
         selected = next(skill for skill in plan.skills if skill.name == name)
-        assert selected.installed_digest == strong
-        assert selected.accepted_prior == strong
+        assert selected.installed_digest == _expected_prior_v2(installer, selected.name, expected_prior)
+        assert selected.accepted_prior == _expected_prior_v2(installer, selected.name, expected_prior)
         owner = installer._CreateOnlyMutablePath(
             tmp_path / "target",
             installer._InstallTransaction([], enabled=False),
@@ -1648,21 +1901,53 @@ def _seed_exact_observed_global_lead(
     ),
     ids=("pre-h2", "current-h2"),
 )
-def test_unwitnessed_observed_global_lead_refuses_without_effects(
-    tmp_path: Path, expected_digest: str, historical_files: dict[str, bytes | tuple[str, str]],
+def test_only_exact_observed_global_lead_tree_is_an_accepted_prior(
+    tmp_path: Path,
+    expected_digest: str,
+    historical_files: dict[str, bytes | tuple[str, str]],
 ) -> None:
     installer = _load_installer()
-    skills_root = tmp_path / ".agents/skills"
-    lead = _seed_exact_observed_global_lead(installer, skills_root, expected_digest, historical_files)
-    assert _historical_identity(installer, "lead", lead, expected_digest) is None
-    _assert_preflight_refusal_preserves_tree(
-        installer, skills_root, "E_LEGACY_TREE_WITNESS_UNAVAILABLE: lead")
-    with (lead / "SKILL.md").open("ab") as stream:
+    skills_root = tmp_path / ".agents" / "skills"
+    lead = _seed_exact_observed_global_lead(
+        installer, skills_root, expected_digest, historical_files
+    )
+
+    plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        planned_lead = next(skill for skill in plan.skills if skill.name == "lead")
+        assert planned_lead.accepted_prior == _expected_prior_v2(installer, planned_lead.name, expected_digest)
+
+        owner = installer._CreateOnlyMutablePath(
+            tmp_path, installer._InstallTransaction([], enabled=False), dry_run=False
+        )
+        installer._apply_canonical_skills_plan(plan, skills_root, owner, root=ROOT)
+        assert (
+            installer._tree_sha256(skills_root / "lead", ignore_runtime_cache=True)
+            == planned_lead.source_digest
+        )
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+    _seed_exact_observed_global_lead(
+        installer, skills_root, expected_digest, historical_files
+    )
+    with (skills_root / "lead" / "SKILL.md").open("ab") as stream:
         stream.write(b"x")
-    _assert_preflight_refusal_preserves_tree(installer, skills_root, "E_ACCEPTED_PRIOR_COLLISION: lead")
-    _seed_exact_observed_global_lead(installer, skills_root, expected_digest, historical_files)
-    (skills_root / "lead/unrecognized.txt").write_text("extra\n", encoding="utf-8")
-    _assert_preflight_refusal_preserves_tree(installer, skills_root, "E_ACCEPTED_PRIOR_COLLISION: lead")
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: lead"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", skills_root, root=ROOT
+        )
+
+    _seed_exact_observed_global_lead(
+        installer, skills_root, expected_digest, historical_files
+    )
+    (skills_root / "lead" / "unrecognized.txt").write_text("extra\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: lead"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", skills_root, root=ROOT
+        )
 
 
 def test_receipted_lead_two_source_versions_upgrade(tmp_path: Path) -> None:
@@ -1784,8 +2069,12 @@ def test_lead_receipt_exact_current_reentry(tmp_path: Path) -> None:
     receipt.write_bytes(original.replace(
         json.loads(original)["treeSha256"].encode("ascii"), b"0" * 64
     ))
-    _apply_receipted(installer, source, anchor, skills)
-    assert receipt.read_bytes() == original
+    # A present structural receipt is authoritative even for a current tree:
+    # mismatches fail closed rather than silently replacing ownership evidence.
+    before = _tree_bytes(skills)
+    with pytest.raises(ValueError, match="E_CANONICAL_LEAD_RECEIPT_DRIFT"):
+        _apply_receipted(installer, source, anchor, skills)
+    assert _tree_bytes(skills) == before
     assert (skills / "lead").stat().st_ino == lead_identity
 
 
@@ -1949,32 +2238,19 @@ def test_unreceipted_lead_adoption_is_digest_bound_global_only(tmp_path: Path) -
     (source / "lead" / "SKILL.md").write_bytes(b"next version")
     observed = installer._tree_sha256(skills / "lead", ignore_runtime_cache=True)
     assert observed is not None
-    before = installer._InstallTransaction._observe(skills)
-    with pytest.raises(ValueError, match="E_CANONICAL_LEAD_ADOPTION_REQUIRED") as failure:
+    with pytest.raises(installer._InstallFailure, match="E_CANONICAL_LEAD_ADOPTION_REQUIRED") as failure:
         installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True)
-    assert observed in str(failure.value)
-    assert installer._InstallTransaction._observe(skills) == before
-    for supplied, refusal in (
-        ("tree-v2:" + "0" * 64, "E_CANONICAL_LEAD_ADOPTION_MISMATCH"),
-        ("tree-v2:" + observed.upper(), "E_CANONICAL_SKILL_ADOPTION_MISMATCH"),
-    ):
-        with pytest.raises(ValueError, match=refusal):
+    assert "adoption=tree-v2:" + observed in installer._installer_failure_text(failure.value)
+    for supplied in ("tree-v2:" + "0" * 64, observed.upper()):
+        with pytest.raises(ValueError, match="E_CANONICAL_LEAD_ADOPTION_MISMATCH"):
             installer._preflight_canonical_skills(
                 source, skills, root=ROOT, global_install=True,
                 replace_unreceipted_lead_sha256=supplied,
             )
-        assert installer._InstallTransaction._observe(skills) == before
     with pytest.raises(ValueError, match="E_CANONICAL_LEAD_ADOPTION_MISMATCH"):
         installer._preflight_canonical_skills(
             source, skills, root=ROOT, replace_unreceipted_lead_sha256="tree-v2:" + observed,
         )
-    assert installer._InstallTransaction._observe(skills) == before
-    with pytest.raises(ValueError, match="E_LEGACY_TREE_WITNESS_UNAVAILABLE: lead"):
-        installer._preflight_canonical_skills(
-            source, skills, root=ROOT, global_install=True,
-            replace_unreceipted_lead_sha256=observed,
-        )
-    assert installer._InstallTransaction._observe(skills) == before
     assert installer._parser("codex").parse_args(["--global", "--force"]).force
     plan = installer._preflight_canonical_skills(
         source, skills, root=ROOT, global_install=True,
@@ -1991,13 +2267,11 @@ def test_unreceipted_lead_adoption_is_digest_bound_global_only(tmp_path: Path) -
         )
     finally:
         installer._discard_canonical_skills_plan(plan)
-    before = installer._InstallTransaction._observe(skills)
     with pytest.raises(ValueError, match="E_CANONICAL_LEAD_ADOPTION_MISMATCH"):
         installer._preflight_canonical_skills(
             source, skills, root=ROOT, global_install=True,
             replace_unreceipted_lead_sha256="tree-v2:" + observed,
         )
-    assert installer._InstallTransaction._observe(skills) == before
 
 
 def test_unreceipted_lead_adoption_dry_run_is_read_only(tmp_path: Path) -> None:
@@ -2005,7 +2279,7 @@ def test_unreceipted_lead_adoption_dry_run_is_read_only(tmp_path: Path) -> None:
     _apply_receipted(installer, source, anchor, skills)
     receipt.unlink()
     (source / "lead" / "SKILL.md").write_bytes(b"next version")
-    before = installer._InstallTransaction._observe(skills)
+    before = _tree_bytes(skills)
     digest = installer._tree_sha256(skills / "lead", ignore_runtime_cache=True)
     plan = installer._preflight_canonical_skills(
         source, skills, root=ROOT, global_install=True,
@@ -2018,7 +2292,7 @@ def test_unreceipted_lead_adoption_dry_run_is_read_only(tmp_path: Path) -> None:
         installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
     finally:
         installer._discard_canonical_skills_plan(plan)
-    assert installer._InstallTransaction._observe(skills) == before
+    assert _tree_bytes(skills) == before
     assert not receipt.exists()
 
 
@@ -2069,13 +2343,16 @@ def test_lead_receipt_nonordinary_refuses(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("order", [("codex", "claude"), ("claude", "codex")])
-def test_receipted_lead_provider_orders_without_git_keep_links_and_hooks(
+def test_receipted_provider_orders_without_git_preserve_unselected_copies_and_hooks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, order: tuple[str, str]
 ) -> None:
     installer = _load_installer()
     receiver = tmp_path / "receiver"
     receiver.mkdir()
-    archive = _git_archive_bytes("HEAD")
+    archive = subprocess.run(
+        ["git", "archive", "--format=tar", "HEAD"], cwd=ROOT,
+        check=True, capture_output=True,
+    ).stdout
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
         package.extractall(receiver, filter="data")
     assert not (receiver / ".git").exists()
@@ -2085,15 +2362,16 @@ def test_receipted_lead_provider_orders_without_git_keep_links_and_hooks(
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("HOME", str(home))
     assert installer.install(order[0], ["--global", "--no-hypothesis-hook"]) == 0
-    skills = home / ".agents" / "skills"
+    def selected_skills(provider: str) -> Path:
+        return home / (".agents" if provider == "codex" else ".claude") / "skills"
+
+    skills = selected_skills(order[0])
     receipt = skills / ".orchestrarium-lead-receipt.v1.json"
     first_digest = json.loads(receipt.read_bytes())["treeSha256"]
     assert first_digest == installer._tree_sha256(skills / "lead", ignore_runtime_cache=True)
-    first_links = {
-        provider: (home / f".{provider}" / "skills" / "lead").lstat().st_ino
-        for provider in ("codex", "claude")
-        if (home / f".{provider}" / "skills" / "lead").exists()
-    }
+    first_identity = (skills / "lead").lstat().st_ino
+    first_payload = _tree_bytes(skills)
+    assert not (skills / "lead").is_symlink()
     hook_files = (home / ".codex" / "hooks.json", home / ".claude" / "settings.json")
     sentinels = (
         {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
@@ -2112,11 +2390,15 @@ def test_receipted_lead_provider_orders_without_git_keep_links_and_hooks(
     with (receiver / "src.codex" / "skills" / "lead" / "SKILL.md").open("ab") as stream:
         stream.write(b"\nreceiver-version-B\n")
     assert installer.install(order[1], ["--global", "--no-hypothesis-hook"]) == 0
-    second_digest = json.loads(receipt.read_bytes())["treeSha256"]
+    second_skills = selected_skills(order[1])
+    second_receipt = second_skills / ".orchestrarium-lead-receipt.v1.json"
+    second_digest = json.loads(second_receipt.read_bytes())["treeSha256"]
     assert second_digest != first_digest
-    assert second_digest == installer._tree_sha256(skills / "lead", ignore_runtime_cache=True)
-    for provider, identity in first_links.items():
-        assert (home / f".{provider}" / "skills" / "lead").lstat().st_ino == identity
+    assert second_digest == installer._tree_sha256(second_skills / "lead", ignore_runtime_cache=True)
+    assert not (second_skills / "lead").is_symlink()
+    assert _tree_bytes(skills) == first_payload
+    assert (skills / "lead").lstat().st_ino == first_identity
+    assert json.loads(receipt.read_bytes())["treeSha256"] == first_digest
     assert tuple(json.loads(path.read_text(encoding="utf-8"))["hooks"] for path in hook_files) == hook_identities
 
 
@@ -2139,9 +2421,9 @@ def test_global_codex_native_preflight_precedes_transaction_without_adoption(
     )
     def reject_transaction(*_args, **_kwargs):
         raise AssertionError("transaction entered before native preflight")
-    monkeypatch.setattr(installer, "_InstallTransaction", reject_transaction)
+    monkeypatch.setattr(installer._InstallTransaction, "__enter__", reject_transaction)
     assert installer.install("codex", ["--global", "--no-hypothesis-hook"]) == 1
-    assert "E_CREATE_ONLY_CONFIG_INVALID" in capsys.readouterr().err
+    assert "cause=validation-failed" in capsys.readouterr().err
     assert _tree_bytes(home) == before
     assert installer._CreateOnlyMutablePath._identity(config) == identity
 
@@ -2151,6 +2433,9 @@ def test_claude_global_adoption_dry_run_skips_codex_preflight(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     installer, source, anchor, skills, receipt = _receipt_fixture(tmp_path)
+    skills = anchor / ".claude" / "skills"
+    skills.mkdir(parents=True)
+    receipt = skills / receipt.name
     _apply_receipted(installer, source, anchor, skills)
     receipt.unlink()
     with (skills / "lead" / "SKILL.md").open("ab") as stream:
@@ -2222,6 +2507,73 @@ def test_global_codex_dry_run_reads_linked_inventory_only_for_selected_hooks(
     assert registration.readlink() == link
     assert _tree_bytes(home) == before
     assert _tree_bytes(shared) == shared_before
+
+
+@pytest.mark.parametrize(
+    ("revision", "expected_prior"), STOCK_CONSULTANT_PRIORS + SUPPORTED_CONSULTANT_PRIORS,
+)
+def test_historical_archive_ignores_checkout_newline_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, revision: str, expected_prior: str,
+) -> None:
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "2")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "true")
+    monkeypatch.setenv("GIT_CONFIG_KEY_1", "core.eol")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_1", "crlf")
+    historical = _extract_stock_consultant(tmp_path / "historical", revision)
+    assert _load_installer()._legacy_tree_sha256(historical) == expected_prior
+    for relative, payload in _tree_bytes(historical).items():
+        assert payload == _historical_blob(revision, f"src.codex/skills/consultant/{relative.as_posix()}")
+
+
+@pytest.mark.parametrize("commit", (False, True))
+def test_authenticated_factory_bridge_preserves_upgrade_noop_and_rollback(
+    tmp_path: Path, commit: bool,
+) -> None:
+    installer = _load_installer()
+    historical = _seed_revision_staged_lead(FACTORY_BRIDGE_REVISION, tmp_path / "historical/lead")
+    assert _historical_identity(
+        installer, "lead", historical, FACTORY_BRIDGE_LEGACY_SHA256) == FACTORY_BRIDGE_STRONG_SHA256
+    source = tmp_path / "source-skills"
+    shutil.copytree(ROOT / "src.codex/skills/lead", source / "lead")
+    anchor = tmp_path / "target"
+    skills = anchor / ".agents/skills"
+    shutil.copytree(historical, skills / "lead")
+    before = installer._InstallTransaction._observe(skills)
+    plan = installer._preflight_canonical_skills(source, skills, root=ROOT)
+    try:
+        selected = next(skill for skill in plan.skills if skill.name == "lead")
+        assert selected.accepted_prior == FACTORY_BRIDGE_STRONG_SHA256
+        receiving = nullcontext() if commit else pytest.raises(RuntimeError, match="factory bridge rollback")
+        with receiving, installer._InstallTransaction([skills], enabled=True) as transaction:
+            owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=False)
+            installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
+            installer._finalize_canonical_lead_receipt(plan, skills, owner)
+            assert installer._tree_sha256(skills / "lead", ignore_runtime_cache=True) == selected.source_digest
+            if commit:
+                transaction.commit()
+            else:
+                raise RuntimeError("factory bridge rollback")
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+    if commit:
+        before_noop = installer._InstallTransaction._observe(skills)
+        current = installer._preflight_canonical_skills(source, skills, root=ROOT)
+        try:
+            assert next(skill for skill in current.skills if skill.name == "lead").accepted_prior is None
+            owner = installer._CreateOnlyMutablePath(
+                anchor, installer._InstallTransaction([], enabled=False), dry_run=False)
+            installer._apply_canonical_skills_plan(current, skills, owner, root=ROOT)
+            assert installer._InstallTransaction._observe(skills) == before_noop
+        finally:
+            installer._discard_canonical_skills_plan(current)
+    else:
+        assert installer._InstallTransaction._observe(skills) == before
+    drift = tmp_path / "drift/.agents/skills"
+    shutil.copytree(historical, drift / "lead")
+    with (drift / "lead/SKILL.md").open("ab") as stream:
+        stream.write(b"x")
+    _assert_preflight_refusal_preserves_tree(installer, drift, "E_ACCEPTED_PRIOR_COLLISION: lead")
 
 
 def _forbid_installed_directory_creation(monkeypatch, target: Path) -> list[Path]:

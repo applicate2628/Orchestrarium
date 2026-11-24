@@ -36,7 +36,7 @@ class CodexDocumentPreparationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tree = ast.parse(SOURCE.read_bytes())
-        names = {"_prepare_codex_agents", "_merge_codex_agents", "_render_codex_document", "_codex_document_payload", "_warn_codex_project_budget"}
+        names = {"_prepare_codex_agents", "_merge_codex_agents", "_render_codex_document", "_codex_document_payload", "_codex_instruction_pack", "_warn_codex_project_budget"}
         nodes = [n for n in cls.tree.body if isinstance(n, ast.FunctionDef)
                  and n.name in names]
         if {n.name for n in nodes} != names:
@@ -235,7 +235,7 @@ class CodexDocumentPreparationTests(unittest.TestCase):
         self.scope["_prepare_codex_agents"] = spy
         output = self.merge_result(project_scope=True)
         spy.assert_called_once_with(self.root, self.source, self.target,
-                                    mutable_owner=self.owner, project_scope=True)
+                                    mutable_owner=self.owner, project_scope=True, prefer_global=False)
         self.adapter.assert_called_once()
         self.assertEqual(len(self.writes), 1)
         target, content, owner = self.writes[0]

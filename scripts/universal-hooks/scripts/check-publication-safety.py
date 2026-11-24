@@ -100,10 +100,11 @@ def _load_posix_process_group_module():
     elif (
         script.parents[0].name == "scripts"
         and script.parents[1].name == "agents"
-        and script.parents[2].name == "src.claude"
+        and script.parents[2].name == "claude"
+        and script.parents[3].name == "adapters"
     ):
         candidates.append(
-            script.parents[3]
+            script.parents[4]
             / "scripts"
             / "process_supervision"
             / "posix_process_group.py"
@@ -167,9 +168,10 @@ def _load_windows_job_module():
         elif (
             script.parents[0].name == "scripts"
             and script.parents[1].name == "agents"
-            and script.parents[2].name == "src.claude"
+            and script.parents[2].name == "claude"
+            and script.parents[3].name == "adapters"
         ):
-            candidates.append(script.parents[3] / "scripts" / "process_supervision" / "windows_job.py")
+            candidates.append(script.parents[4] / "scripts" / "process_supervision" / "windows_job.py")
         available = tuple(path for path in candidates if path.is_file())
         if len(available) != 1:
             raise RuntimeError("Windows Job helper unavailable or ambiguous")
@@ -218,12 +220,12 @@ else:
 _SCANNER_EXEMPT_PATHS = frozenset({
     "scripts/universal-hooks/scripts/check-publication-safety.py",
     "src.codex/skills/lead/scripts/check-publication-safety.py",
-    "src.claude/agents/scripts/check-publication-safety.py",
-})
-# The approved receiving layout can appear in selected history before it
-# becomes a current runtime. Do not use it to resolve scanner code.
-_HISTORICAL_SCANNER_SOURCE_PATHS = frozenset({
     "adapters/claude/agents/scripts/check-publication-safety.py",
+})
+# Selected Git history retains the pre-relocation scanner owner. This grants
+# only its existing catalog-line treatment, never a current runtime source.
+_HISTORICAL_SCANNER_SOURCE_PATHS = frozenset({
+    "src.claude/agents/scripts/check-publication-safety.py",
 })
 _SIMPLE_RULES = (
     (True, re.compile(r"AKIA[0-9A-Z]{16}")),
@@ -1670,7 +1672,8 @@ def _selected_text_lines(text: str, path: str, subject_kind: str) -> Iterator[tu
     source_path = path.replace("\\", "/")
     scanner = _is_source_text_subject(subject_kind) and (
         source_path in _SCANNER_EXEMPT_PATHS
-        or (subject_kind == "history-blob" and source_path in _HISTORICAL_SCANNER_SOURCE_PATHS)
+        or (subject_kind in {"history-blob", "git-object-blob"}
+            and source_path in _HISTORICAL_SCANNER_SOURCE_PATHS)
     )
     for number, offset, line in _text_lines(text):
         if not scanner or not _intentional_scanner_line(line):
@@ -4331,7 +4334,7 @@ class _ReaderFinalizerResult:
 
 
 class _AsyncGitObjectReader:
-    """One owned asynchronous `git cat-file --batch` session.
+    """One owned asynchronous `git cat-file --batch-command` session.
 
     The reader owns the child and all three pipe transitions. Every request is
     bounded by one monotonic deadline; the caller owns exactly one finalizer.
@@ -4340,11 +4343,12 @@ class _AsyncGitObjectReader:
     def __init__(
         self,
         *,
-        argv: tuple[str, ...] = _range_git_argv("cat-file", "--batch"),
+        argv: tuple[str, ...] | None = None,
         request_timeout: float | None = None,
         settle_timeout: float = OBJECT_REAP_ATTEMPT_SECONDS,
     ) -> None:
-        self._argv = argv
+        self._command_mode = argv is None
+        self._argv = _range_git_argv("cat-file", "--batch-command") if argv is None else argv
         self._request_timeout = request_timeout
         self._settle_timeout = settle_timeout
         self._process: asyncio.subprocess.Process | None = None
@@ -4444,7 +4448,7 @@ class _AsyncGitObjectReader:
             return _refusal("PS-MSG-READ", "reader-state")
         try:
             deadline = self._request_deadline(scan_deadline)
-            process.stdin.write(oid.encode("ascii") + b"\n")
+            process.stdin.write((b"contents " if self._command_mode else b"") + oid.encode("ascii") + b"\n")
             await self._within(process.stdin.drain(), deadline)
             header = await self._within(process.stdout.readline(), deadline)
             if not header.endswith(b"\n"):
@@ -4518,7 +4522,7 @@ class _AsyncGitObjectReader:
             return _refusal("PS-MSG-FRAME", "batch-check-request")
         try:
             deadline = self._request_deadline(scan_deadline)
-            process.stdin.write(encoded_name + b"\n")
+            process.stdin.write((b"info " if self._command_mode else b"") + encoded_name + b"\n")
             await self._within(process.stdin.drain(), deadline)
             header = await self._within(process.stdout.readline(), deadline)
             if not header.endswith(b"\n") or len(header) > 256:

@@ -17,6 +17,7 @@ class ProjectionDiagnosticTests(unittest.TestCase):
     def setUp(self):
         tree = ast.parse(SOURCE.read_bytes())
         names = {'_InstallFailure', '_RollbackFailureMember', '_CopySetterDiagnostic',
+                 '_AtomicTransportProjectionStateError',
                  '_passive_owner_storage', '_store_copy_setter_detail', '_copy_setter_detail',
                  '_copy_setter_operation_errors', '_merge_copy_setter_operation_errors',
                  '_retain_copy_setter_operation_errors', '_installer_failure_text'}

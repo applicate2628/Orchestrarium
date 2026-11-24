@@ -11095,7 +11095,7 @@ def test_root_contract_has_one_shared_documentation_owner_and_pack_pointers(
         "shared/references/README.md",
         "docs/work-item-execution-tracking.md",
         "references-codex/repository-task-memory.md",
-        "references-claude/repository-task-memory.md",
+        "adapters/claude/references/repository-task-memory.md",
     ):
         assert pointer in (root / relative).read_text(encoding="utf-8")
 
@@ -14971,7 +14971,7 @@ def test_decision_v0_manifest_is_repo_local_and_preflight_read_only(
     for contract_path, no_fence_marker in (
         (repository / "docs" / "decisions.md", "NO `---` YAML fences"),
         (repository / "src.codex" / "skills" / "lead" / "SKILL.md", "no `---` fences"),
-        (repository / "src.claude" / "skills" / "lead" / "SKILL.md", "no `---` fences"),
+        (repository / 'adapters/claude' / "skills" / "lead" / "SKILL.md", "no `---` fences"),
     ):
         contract = contract_path.read_text(encoding="utf-8")
         assert "list-item" in contract
@@ -19066,6 +19066,7 @@ def test_legacy_parent_archive_repairs_descendant_uris_and_compensates_conflict(
         module.migrate_legacy(root, f"work-item:{parent}", incoming_links_inventory=inventory)
     assert injected == [root]
     assert conflict.value.failure_id == "WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE"
+    assert injected == [root]
     assert consumer.read_bytes() == b"Concurrent author bytes.\n" and item.is_dir()
     monkeypatch.setattr(module, "refresh_readme", original_refresh)
     consumer.write_bytes(before)

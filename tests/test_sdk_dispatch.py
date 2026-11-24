@@ -1,0 +1,557 @@
+"""Offline bridge constraints; no native/provider process or network is invoked."""
+from dataclasses import replace
+import json
+from pathlib import Path
+import sys
+import types
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+import provider_prompt as owner
+from sdk_execution import dispatch, runtime, receiving
+from test_agent_run_ledger import prepare_valid_work_item
+
+
+def binding():
+    return dict(schemaVersion=1, accountBinding="fixture-account", expectedAccountEmail=None,
+                coordinatorBinding="fixture-host-invocation", scope=["review fixture source"],
+                artifactIdentity="fixture-review", maxEvents=100, jobMemoryLimitBytes=268435456)
+
+
+def fixture(tmp_path, monkeypatch, **changes):
+    # Explicitly simulate supported-platform preflight only; never run native code.
+    monkeypatch.setattr(dispatch, "_require_supported_platform", lambda: None)
+    item = prepare_valid_work_item(tmp_path)
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("Review fixture source only.")
+    path = tmp_path / "binding.json"
+    path.write_text(json.dumps(binding()))
+    executable = tmp_path / "fixture.exe"
+    executable.write_bytes(b"never execute this file")
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(owner, "_resolve_launch_provider_command", lambda *a: ([str(executable)], None))
+    monkeypatch.setattr(owner, "resolve_provider_auth_configuration", lambda *a: types.SimpleNamespace(mode="codex-api-key"))
+    control = owner.Control(topic="fixture", prompt_file=prompt, terminal_receipt=tmp_path / "receipt.json",
+                            ledger=str(item), ledger_role="qa-engineer", ledger_role_explicit=True,
+                            ledger_artifact="sdk-review.json", ledger_max_events=100,
+                            ledger_max_bytes=1048576)
+    for k, v in changes.items():
+        setattr(control, k, v)
+    flags, model, effort = owner.resolved_profile("codex", control.provider_flags)
+    selected = owner.PolicyBoundLaunch(control, "fixture", tuple(flags), model, effort,
+                                       owner.external_role_provenance(control, "codex"), None)
+    return selected, path, dict(CODEX_HOME=str(home))
+
+
+def prepare(tmp_path, monkeypatch, **changes):
+    selected, path, environment = fixture(tmp_path, monkeypatch, **changes)
+    return dispatch.prepare_dispatch(selected, path, source_environment=environment,
+                                     cancellation_probe=lambda: False)
+
+
+def test_binding_is_closed_nonsecret_data_contract(tmp_path):
+    path = tmp_path / "input.json"
+    path.write_text(json.dumps(binding()))
+    assert dispatch.read_binding(path) == binding()
+    for field in ("approved", "callback", "executable", "codexHome", "configOverrides", "ledgerMaxEvents", "mcpScope"):
+        path.write_text(json.dumps({**binding(), field: True}))
+        with pytest.raises(dispatch.DispatchError, match="BINDING_INVALID"):
+            dispatch.read_binding(path)
+    path.write_text('{"schemaVersion":1,"schemaVersion":1}')
+    with pytest.raises(dispatch.DispatchError):
+        dispatch.read_binding(path)
+
+
+@pytest.mark.parametrize("key,value", [("schemaVersion", True), ("maxEvents", True),
+    ("maxEvents", 0), ("jobMemoryLimitBytes", -1), ("scope", []), ("scope", ["a\nb"]),
+    ("expectedAccountEmail", ""), ("accountBinding", "")])
+def test_invalid_binding_values(tmp_path, key, value):
+    path = tmp_path / "input.json"
+    path.write_text(json.dumps({**binding(), key: value}))
+    with pytest.raises(dispatch.DispatchError):
+        dispatch.read_binding(path)
+
+
+def test_prepare_uses_control_and_exact_canonical_ledger_demand(tmp_path, monkeypatch):
+    operation = prepare(tmp_path, monkeypatch)
+    assert operation.request.role == "qa-engineer"
+    assert operation.selection.mcp_scope.servers == ()
+    assert operation.selection.ledger_max_events == 100
+    assert operation.request.max_events == 100
+    assert operation.request.external_dispatch_id != operation.request.external_evidence_run_id
+    assert operation.request.prompt.count("Review fixture source only.") == 1
+    assert operation.prevalidated.control.resolved_ledger_budget is not None
+    assert not (Path(operation.selection.work_item) / "sdk-review.json").exists()
+    assert not (Path(operation.selection.work_item) / "agent-runs.jsonl").exists()
+
+
+@pytest.mark.parametrize("change", [dict(ledger_lane="review"), dict(ledger_role="consultant"),
+    dict(ledger_role="backend-engineer"), dict(ledger_role_explicit=False), dict(ledger_closes=["other"]),
+    dict(provider_flags=["--model", "fixture", "-c", "model_reasoning_effort=high", "--sandbox", "workspace-write"])])
+def test_no_implicit_lane_loss_role_conversion_or_fallback(tmp_path, monkeypatch, change):
+    with pytest.raises(dispatch.DispatchError, match="REVIEW_ONLY"):
+        prepare(tmp_path, monkeypatch, **change)
+
+
+def test_guard_one_invocation_stages_drift_and_cancellation(tmp_path, monkeypatch):
+    operation = prepare(tmp_path, monkeypatch)
+    with pytest.raises(dispatch.DispatchError):
+        operation.assert_current(operation.request, "sdk_prepare")
+    operation._consumed = True  # Unit boundary; execute owns this transition in production.
+    for effect in dispatch._STAGES[:7]:
+        operation.assert_current(operation.request, effect)
+    operation.assert_current(operation.request, "query")
+    operation.assert_current(operation.request, "thread_start")
+    operation.assert_current(operation.request, "query")
+    operation.assert_current(operation.request, "turn_start")
+    for effect in ("turn_start", "resume", "reconcile", "tool", "account", "query"):
+        with pytest.raises(dispatch.DispatchError, match="EFFECT_DENIED"):
+            operation.assert_current(operation.request, effect)
+    with pytest.raises(dispatch.DispatchError, match="NOT_CURRENT"):
+        operation.assert_current(replace(operation.request, scope=("other",)), "query")
+    operation.prevalidated.control.ledger_lane = "drift"
+    with pytest.raises(dispatch.DispatchError, match="NOT_CURRENT"):
+        operation.assert_current(operation.request, "query")
+    operation.prevalidated.control.ledger_lane = None
+    operation._cancelled = lambda: True
+    with pytest.raises(dispatch.DispatchError, match="NOT_CURRENT"):
+        operation.assert_current(operation.request, "query")
+
+
+def test_execute_retains_before_receiving_and_forwards_capture(tmp_path, monkeypatch):
+    operation = prepare(tmp_path, monkeypatch)
+    run = types.SimpleNamespace(observation=object())
+    called = []
+    def fake_runtime(request, selection, **kwargs):
+        called.append(kwargs)
+        for effect in dispatch._STAGES:
+            kwargs["authority"](request, effect)
+        return run
+    monkeypatch.setattr(runtime, "run_admitted_codex", fake_runtime)
+    monkeypatch.setattr(receiving, "terminal_payload", lambda *a, **k: (_ for _ in ()).throw(ValueError("receiving failed")))
+    process = object()
+    assert operation.execute(process) is run
+    assert operation.runtime_run is run
+    assert called[0]["owner"] is process
+    assert called[0]["capture_limit_bytes"] == operation.prevalidated.control.capture_max_bytes
+    # A separate call is required after process-owner closure; execute never receives.
+    run.request, run.selection, run.output_context = operation.request, operation.selection, object()
+    with pytest.raises(ValueError, match="receiving failed"):
+        operation.receive()
+    assert operation.runtime_run is run
+    with pytest.raises(dispatch.DispatchError, match="RECEIVING_UNAVAILABLE"):
+        operation.receive()
+    with pytest.raises(dispatch.DispatchError, match="OPERATION_CONSUMED"):
+        operation.execute(process)
+
+
+def test_receiving_success_no_second_append_or_terminal_receipt_write(tmp_path, monkeypatch):
+    operation = prepare(tmp_path, monkeypatch)
+    terminal = dict(runId=operation.request.external_evidence_run_id, status="completed", gate="PASS")
+    run = types.SimpleNamespace(request=operation.request, selection=operation.selection, observation=object(),
+                                output_context=types.SimpleNamespace(needles=()))
+    payload = dict(resultText="review", status="completed", gate="PASS", cancelled=False, timedOut=False)
+    monkeypatch.setattr(runtime, "run_admitted_codex", lambda *a, **k: run)
+    monkeypatch.setattr(receiving, "terminal_payload", lambda *a, **k: payload)
+    receives = []
+    monkeypatch.setattr(receiving, "receive_runtime_run", lambda *a, **k: receives.append(a[0]) or terminal)
+    monkeypatch.setattr(owner, "parse_provider_result", lambda line: payload)
+    monkeypatch.setattr(owner, "_provider_terminal_line_safety", lambda *a: None)
+    monkeypatch.setattr(owner, "record_terminal", lambda *a, **k: pytest.fail("second append"))
+    operation.execute(object())
+    result = operation.receive()
+    assert receives == [run]
+    assert result.exit_code == 0
+    assert result.terminal == terminal
+    assert result.terminal_bytes.startswith(owner.SDK_RESULT_PREFIX.encode())
+    assert not operation.prevalidated.control.terminal_receipt.exists()
+
+
+def test_before_worker_receiving_uses_known_terminal_without_another_append(tmp_path, monkeypatch):
+    operation = prepare(tmp_path, monkeypatch)
+    terminal = dict(runId=operation.request.external_evidence_run_id, status="blocked", gate="none")
+    run = types.SimpleNamespace(request=operation.request, selection=operation.selection, observation=None,
+                                terminal=terminal, output_context=types.SimpleNamespace(needles=()))
+    payload = dict(resultText="worker not started", status="blocked", gate="none")
+    monkeypatch.setattr(runtime, "run_admitted_codex", lambda *a, **k: run)
+    monkeypatch.setattr(receiving, "preworker_failure_payload", lambda current: payload if current is run else pytest.fail("wrong run"))
+    monkeypatch.setattr(receiving, "receive_runtime_run", lambda *a, **k: pytest.fail("duplicate receiving"))
+    monkeypatch.setattr(owner, "parse_provider_result", lambda line: payload)
+    monkeypatch.setattr(owner, "_provider_terminal_line_safety", lambda *a: None)
+    operation.execute(object())
+    assert operation.receive().exit_code == 1
+
+
+def test_guard_deadline_and_event_query_bound(tmp_path, monkeypatch):
+    operation = prepare(tmp_path, monkeypatch)
+    operation._consumed = True
+    operation.deadline = 0
+    with pytest.raises(dispatch.DispatchError, match="NOT_CURRENT"):
+        operation.assert_current(operation.request, "sdk_prepare")
+    operation.deadline = float("inf")  # Exercise query bound independently.
+    for effect in dispatch._STAGES[:7]:
+        operation.assert_current(operation.request, effect)
+    for _ in range(operation.request.max_events):
+        operation.assert_current(operation.request, "query")
+    with pytest.raises(dispatch.DispatchError, match="EFFECT_DENIED"):
+        operation.assert_current(operation.request, "query")
+
+
+def test_unsupported_platform_refuses_before_owner_or_binding_effects(monkeypatch):
+    monkeypatch.setattr(dispatch, "_require_supported_platform", lambda: (_ for _ in ()).throw(dispatch.DispatchError("E_CODEX_SDK_WINDOWS_ONLY")))
+    monkeypatch.setattr(dispatch, "_owner", lambda: pytest.fail("owner reached before platform check"))
+    with pytest.raises(dispatch.DispatchError, match="WINDOWS_ONLY"):
+        dispatch.prepare_dispatch(None, Path("unused"), source_environment={}, cancellation_probe=lambda: False)
+
+
+def test_preparation_os_error_is_stable_and_does_not_expose_path(tmp_path, monkeypatch):
+    selected, path, environment = fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(owner, "prompt_bytes", lambda *a, **k: (_ for _ in ()).throw(OSError("private local path")))
+    with pytest.raises(dispatch.DispatchError, match="^E_CODEX_SDK_PREPARATION_FAILED$"):
+        dispatch.prepare_dispatch(selected, path, source_environment=environment, cancellation_probe=lambda: False)
+
+
+def test_recovery_is_scanned_diagnostic_not_prompt_or_protocol_custody(tmp_path, monkeypatch):
+    from test_sdk_receiving import synthetic_observation
+    operation = prepare(tmp_path, monkeypatch)
+    observation = synthetic_observation(monkeypatch, operation.request)
+    operation.runtime_run = runtime.RuntimeRun(operation.request, operation.selection,
+                                               owner.ProviderOutputContext(()), observation)
+    payload = operation.recovery_bytes()
+    record = json.loads(payload)
+    assert record["restorableObservation"] is False
+    assert record["replayAuthorized"] is False
+    assert record["receiving"] == "not-established"
+    assert record["decodedResult"]["result"]["review"]["verdict"] == "PASS"
+    assert "request" not in record["decodedResult"]["result"]
+    assert "observations" not in record["decodedResult"]["result"]
+    assert "Review fixture source only." not in payload.decode()
+    assert set(record["stdout"]) == {"byteLength", "sha256", "truncated", "payloadOmitted"}
+    assert "needles" not in payload.decode()
+
+
+@pytest.mark.parametrize("unsafe", (False, True))
+def test_interrupted_terminal_is_scanned_without_receiving_or_replay(tmp_path, monkeypatch, unsafe):
+    from process_supervision.sdk_worker import SdkWorkerInterrupted
+    from test_sdk_receiving import synthetic_observation
+    operation = prepare(tmp_path, monkeypatch)
+    usage = {"unsafe": "fixture-secret"} if unsafe else {}
+    observed = synthetic_observation(monkeypatch, operation.request, usage=usage)
+    context = owner.ProviderOutputContext((b"fixture-secret",) if unsafe else ())
+    partial = runtime.RuntimeRun(operation.request, operation.selection, context, None)
+    terminal = SdkWorkerInterrupted(operation.request, observed.result, None, None)
+    interruption = runtime.InterruptedRuntime(partial, terminal)
+    def interrupt(*args, **kwargs):
+        raise interruption
+    monkeypatch.setattr(runtime, "run_admitted_codex", interrupt)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        operation.execute(object())
+    assert caught.value is interruption
+    assert operation.runtime_run is None
+    assert operation.has_interrupted_evidence()
+    with pytest.raises(dispatch.DispatchError, match="RECEIVING_UNAVAILABLE"):
+        operation.receive()
+    with pytest.raises(dispatch.DispatchError, match="OPERATION_CONSUMED"):
+        operation.execute(object())
+    payload = operation.recovery_bytes()
+    record = json.loads(payload)
+    assert record["workerObservation"] == "interrupted-after-terminal"
+    assert record["authorizing"] is record["restorableObservation"] is record["replayAuthorized"] is False
+    assert record["receiving"] == "not-established"
+    assert not {"process", "stdout", "stderr"} & record.keys()
+    assert b"fixture-secret" not in payload
+    if unsafe:
+        assert record["unsafeOutputOmitted"] is True
+        assert "decodedResult" not in record
+    else:
+        assert record["decodedResult"]["result"]["review"]["verdict"] == "PASS"
+
+
+def test_recovery_unsafe_output_omits_payload_but_keeps_process_diagnostics(tmp_path, monkeypatch):
+    from test_sdk_receiving import synthetic_observation
+    operation = prepare(tmp_path, monkeypatch)
+    observation = synthetic_observation(monkeypatch, operation.request, usage={"unsafe": "fixture-secret"})
+    operation.runtime_run = runtime.RuntimeRun(operation.request, operation.selection,
+                                               owner.ProviderOutputContext((b"fixture-secret",)), observation)
+    payload = operation.recovery_bytes()
+    record = json.loads(payload)
+    assert record["unsafeOutputOmitted"] is True
+    assert "decodedResult" not in record
+    assert record["process"]["authorizing"] is False
+    assert b"fixture-secret" not in payload
+
+
+def test_recovery_requires_original_bound_observation(tmp_path, monkeypatch):
+    operation = prepare(tmp_path, monkeypatch)
+    with pytest.raises(dispatch.DispatchError, match="RECOVERY_UNAVAILABLE"):
+        operation.recovery_bytes()
+    operation.runtime_run = runtime.RuntimeRun(operation.request, operation.selection,
+                                               owner.ProviderOutputContext(()), object())
+    with pytest.raises(dispatch.DispatchError, match="RECOVERY_UNAVAILABLE"):
+        operation.recovery_bytes()
+
+
+@pytest.mark.parametrize("name", ["agent-runs.jsonl", "agent-runs.jsonl.lock"])
+@pytest.mark.parametrize("target", ["artifact", "receipt"])
+def test_output_cannot_alias_ledger_or_its_lock(tmp_path, monkeypatch, name, target):
+    selected, path, environment = fixture(tmp_path, monkeypatch)
+    if target == "artifact":
+        selected.control.ledger_artifact = name
+    else:
+        selected.control.terminal_receipt = Path(selected.control.ledger) / name
+    with pytest.raises(dispatch.DispatchError, match="OUTPUT_ALIAS"):
+        dispatch.prepare_dispatch(selected, path, source_environment=environment, cancellation_probe=lambda: False)
+
+
+@pytest.mark.parametrize("field,value", [("ledger_artifact", "different-review.json"),
+                                        ("result_max_bytes", 1234), ("capture_max_bytes", 1234)])
+def test_receiving_rejects_control_drift_before_any_write(tmp_path, monkeypatch, field, value):
+    operation = prepare(tmp_path, monkeypatch)
+    run = types.SimpleNamespace(observation=object())
+    monkeypatch.setattr(runtime, "run_admitted_codex", lambda *a, **k: run)
+    monkeypatch.setattr(receiving, "receive_runtime_run", lambda *a, **k: pytest.fail("write on drift"))
+    operation.execute(object())
+    setattr(operation.prevalidated.control, field, value)
+    with pytest.raises(dispatch.DispatchError, match="RECEIVING_DRIFT"):
+        operation.receive()
+    assert operation.runtime_run is run
+
+
+def test_recovery_cap_is_frozen_and_read_only(tmp_path, monkeypatch):
+    operation = prepare(tmp_path, monkeypatch)
+    limit = operation.recovery_max_bytes
+    assert limit == operation._capture_limit + 6 * operation._result_limit + 65536
+    operation.prevalidated.control.capture_max_bytes *= 2
+    operation.prevalidated.control.result_max_bytes *= 2
+    assert operation.recovery_max_bytes == limit
+    with pytest.raises(AttributeError):
+        operation.recovery_max_bytes = limit * 2
+
+
+def test_dispatch_selects_fixed_bounded_profile_without_endpoint_or_hook_overrides(tmp_path, monkeypatch):
+    operation = prepare(tmp_path, monkeypatch)
+    assert operation.selection.config_overrides == runtime.CODEX_BOUNDED_REVIEW_OVERRIDES
+    assert operation.selection.config_overrides[:4] == (
+        'features.memories=false', 'notify=[]', 'model_provider="openai"', 'approvals_reviewer="user"')
+    assert all('openai_base_url' not in value and 'features.hooks' not in value
+               for value in operation.selection.config_overrides)
+
+
+def test_prepare_preserves_omitted_ledger_caps(tmp_path, monkeypatch):
+    operation = prepare(tmp_path, monkeypatch, ledger_max_events=None, ledger_max_bytes=None)
+    assert operation.selection.ledger_max_events is None
+    assert operation.selection.ledger_max_bytes is None
+    assert operation.prevalidated.control.resolved_ledger_budget is None
+    assert runtime.CodexRuntimeSelection.from_dict(operation.selection.to_dict()) == operation.selection
+    assert not (Path(operation.selection.work_item) / "agent-runs.jsonl").exists()
+
+
+def test_direct_dispatch_obeys_shared_model_policy_before_binding(tmp_path, monkeypatch):
+    selected, path, environment = fixture(tmp_path, monkeypatch,
+        provider_flags=["--model", "gpt-6-astra", "-c", "model_reasoning_effort=high"])
+    monkeypatch.setattr(dispatch, "read_binding", lambda *a: pytest.fail("unapproved binding reached"))
+    with pytest.raises(dispatch.DispatchError):
+        dispatch.prepare_dispatch(selected, path, source_environment=environment, cancellation_probe=lambda: False)
+
+
+def test_dispatch_rejects_change_of_launch_agreement_projection(tmp_path, monkeypatch):
+    operation = prepare(tmp_path, monkeypatch, user_approved_launch=True)
+    operation._consumed = True
+    operation.prevalidated.control.user_approved_launch = False
+    with pytest.raises(dispatch.DispatchError, match="INVOCATION_NOT_CURRENT"):
+        operation.assert_current(operation.request, "sdk_prepare")
+
+
+def scoped_astra_operation(tmp_path, monkeypatch):
+    return prepare(tmp_path, monkeypatch, task_class="review",
+                   astra_task_authorization={"taskClass": "review", "scope": "fixture review",
+                                             "approvalReference": "fixture-existing-approval"},
+                   provider_flags=["--model", "gpt-6.2-astra", "-c", "model_reasoning_effort=high"])
+
+
+@pytest.mark.parametrize("field,value", [("scope", "another valid scope"),
+                                          ("approvalReference", "another approval")])
+def test_prepared_sdk_rejects_changed_valid_astra_grant(tmp_path, monkeypatch, field, value):
+    operation = scoped_astra_operation(tmp_path, monkeypatch)
+    operation._consumed = True
+    operation.prevalidated.control.astra_task_authorization[field] = value
+    with pytest.raises(dispatch.DispatchError, match="INVOCATION_NOT_CURRENT"):
+        operation.assert_current(operation.request, "sdk_prepare")
+    assert operation._stage == 0
+
+
+def test_prepared_sdk_rejects_reclassification_with_matching_replacement_grant(tmp_path, monkeypatch):
+    operation = scoped_astra_operation(tmp_path, monkeypatch)
+    operation._consumed = True
+    operation.prevalidated.control.task_class = "critical-design"
+    operation.prevalidated.control.astra_task_authorization["taskClass"] = "critical-design"
+    with pytest.raises(dispatch.DispatchError, match="INVOCATION_NOT_CURRENT"):
+        operation.assert_current(operation.request, "sdk_prepare")
+    assert operation._stage == 0
+
+
+def test_prepared_sdk_accepts_equivalent_grant_and_rejects_revocation(tmp_path, monkeypatch):
+    operation = scoped_astra_operation(tmp_path, monkeypatch)
+    operation._consumed = True
+    control = operation.prevalidated.control
+    control.astra_task_authorization = dict(reversed(list(control.astra_task_authorization.items())))
+    operation.assert_current(operation.request, "sdk_prepare")
+    control.astra_task_authorization = None
+    with pytest.raises(dispatch.DispatchError, match="INVOCATION_NOT_CURRENT"):
+        operation.assert_current(operation.request, "sdk_launch_admission")
+    assert operation._stage == 1
+
+
+def test_explicit_task_selector_preserves_consultant_and_readonly(tmp_path, monkeypatch):
+    operation = prepare(tmp_path, monkeypatch, ledger_role="consultant", sdk_task_binding=tmp_path / "task.json")
+    assert operation.request.result_kind == "task"
+    assert operation.request.role == "consultant"
+    assert runtime.execution_role(operation.request) == "consultant"
+    assert runtime.selected_sdk_execution(operation.request, operation.selection)["sandboxMode"] == "read-only"
+    operation._consumed = True
+    operation.prevalidated.control.sdk_task_binding = None
+    with pytest.raises(dispatch.DispatchError, match="NOT_CURRENT"):
+        operation.assert_current(operation.request, "sdk_prepare")
+
+
+@pytest.mark.parametrize("role", ["qa-engineer", "backend-engineer", "lead"])
+def test_task_selector_cannot_convert_other_roles(tmp_path, monkeypatch, role):
+    # The shared taxonomy rejects unsupported Lead before SDK preparation.
+    expected = "ROLE_UNSUPPORTED" if role == "lead" else "REVIEW_ONLY"
+    with pytest.raises(ValueError, match=expected):
+        prepare(tmp_path, monkeypatch, ledger_role=role, sdk_task_binding=tmp_path / "task.json")
+
+
+@pytest.mark.parametrize("model", ["gpt-6-sol", "gpt-5.6-terra", "gpt-6-astra", "gpt-6.2-terra"])
+def test_retired_codex_family_denied_before_binding_or_claim_even_if_approved(tmp_path, monkeypatch, model):
+    monkeypatch.setattr(dispatch, "_require_supported_platform", lambda: None)
+    control = owner.Control(ledger_role="qa-engineer", ledger_role_explicit=True,
+        provider_flags=["--model", model, "-c", "model_reasoning_effort=high"],
+        user_approved_launch=True)
+    flags, selected_model, effort = owner.resolved_profile("codex", control.provider_flags)
+    selected = owner.PolicyBoundLaunch(control, "audit", tuple(flags), selected_model, effort,
+                                       owner.external_role_provenance(control, "codex"), None)
+    touched = []
+    monkeypatch.setattr(dispatch, "read_binding", lambda *a: touched.append("binding"))
+    monkeypatch.setattr(runtime, "claim_launch", lambda *a, **k: touched.append("claim"))
+    with pytest.raises(ValueError, match="E_CODEX_SDK_PREPARATION_FAILED"):
+        dispatch.prepare_dispatch(selected, tmp_path / "not-read.json", source_environment={},
+                                  cancellation_probe=lambda: False)
+    assert touched == []
+
+
+@pytest.mark.parametrize("model", ["gpt-6-luna", "gpt-6.1-terra", "gpt-6.2-sol", "gpt-6.2-astra"])
+def test_latest_family_retains_actual_sdk_preparation(tmp_path, monkeypatch, model):
+    operation = prepare(tmp_path, monkeypatch, user_approved_launch=True,
+        provider_flags=["--model", model, "-c", "model_reasoning_effort=high"])
+    assert operation.request.model == model
+    assert operation.request.effort == "high"
+    assert not (Path(operation.selection.work_item) / "agent-runs.jsonl").exists()
+
+
+@pytest.mark.parametrize("provider,model,effort,approved,denied", [
+    ("copilot", "gpt-6-sol", "high", False, False),
+    ("claude", "gpt-6-astra", "high", False, False),
+    ("codex", "gpt-6.2-astra", "high", False, True),
+    ("codex", "gpt-6.2-astra", "high", True, False),
+    ("codex", "gpt-6.2-sol", "max", False, True),
+    ("codex", "gpt-6.2-sol", "max", True, False),
+])
+def test_sdk_model_policy_keeps_provider_and_existing_approval_boundaries(
+        tmp_path, monkeypatch, provider, model, effort, approved, denied):
+    monkeypatch.setattr(dispatch, "_require_supported_platform", lambda: None)
+    flags = (["--model", model, "-c", "model_reasoning_effort="+effort] if provider == "codex"
+             else ["--model", model, "--effort", effort])
+    control = owner.Control(ledger_role="qa-engineer", ledger_role_explicit=True,
+                            provider_flags=flags, user_approved_launch=approved)
+    resolved, selected_model, selected_effort = owner.resolved_profile(provider, flags)
+    selected = owner.PolicyBoundLaunch(control, "audit", tuple(resolved), selected_model, selected_effort,
+                                       owner.external_role_provenance(control, provider), None)
+    class BindingReached(Exception): pass
+    def stop_at_binding(*args): raise BindingReached()
+    monkeypatch.setattr(dispatch, "read_binding", stop_at_binding)
+    if denied:
+        with pytest.raises(ValueError, match="E_CODEX_SDK_PREPARATION_FAILED"):
+            dispatch.prepare_dispatch(selected, tmp_path / "not-read.json", provider=provider,
+                                      source_environment={}, cancellation_probe=lambda: False)
+    else:
+        with pytest.raises(BindingReached):
+            dispatch.prepare_dispatch(selected, tmp_path / "not-read.json", provider=provider,
+                                      source_environment={}, cancellation_probe=lambda: False)
+
+
+@pytest.mark.parametrize("phase,expected,code", [
+    ("serialize", "candidate_serialization_failed", None),
+    ("context", "scan_context_unavailable", None),
+    ("result", "result_scan_failed", "E_EXTERNAL_PROVIDER_MACHINE_PATH_ECHO"),
+    ("candidate", "candidate_scan_failed", "E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"),
+    ("candidate_unknown", "candidate_scan_failed", None),
+    ("exception", "result_scan_failed", None),
+    ("prompt", "prompt_echo", None),
+    ("prompt_exception", "prompt_check_failed", None),
+])
+def test_recovery_omission_has_closed_reason_without_payload(tmp_path, monkeypatch, phase, expected, code):
+    from test_sdk_receiving import synthetic_observation
+    operation = prepare(tmp_path, monkeypatch)
+    observation = synthetic_observation(monkeypatch, operation.request)
+    if phase == "prompt":
+        original_result_dict = type(observation.result).to_dict
+        monkeypatch.setattr(type(observation.result), "to_dict",
+                            lambda result: {**original_result_dict(result), "native_result_text": operation.request.prompt})
+    context = object() if phase == "context" else owner.ProviderOutputContext(())
+    operation.runtime_run = runtime.RuntimeRun(operation.request, operation.selection, context, observation)
+    untrusted_payload = "untrusted-exception-payload-do-not-export"
+    if phase == "prompt_exception":
+        original = dispatch.json_text
+        def fail_prompt(value):
+            if value == operation.request.prompt:
+                raise RuntimeError(untrusted_payload)
+            return original(value)
+        monkeypatch.setattr(dispatch, "json_text", fail_prompt)
+    elif phase == "serialize":
+        original = dispatch.json_text
+        def fail_candidate(value):
+            if type(value) is dict and set(value) == {"protocolError", "cancel", "result"}:
+                raise RuntimeError(untrusted_payload)
+            return original(value)
+        monkeypatch.setattr(dispatch, "json_text", fail_candidate)
+    elif phase in {"result", "exception"}:
+        def fail_result(*args):
+            raise ValueError(code if phase == "result" else untrusted_payload)
+        monkeypatch.setattr(receiving, "scan_execution_output", fail_result)
+    elif phase in {"candidate", "candidate_unknown"}:
+        monkeypatch.setattr(receiving, "scan_execution_output", lambda *args: None)
+        monkeypatch.setattr(owner, "provider_output_safety_scan_terminal",
+                            lambda *args, **kwargs: code if phase == "candidate" else untrusted_payload)
+    payload = operation.recovery_bytes()
+    record = json.loads(payload)
+    assert record["unsafeOutputOmitted"] is True
+    assert record["omissionReason"] == expected
+    if code is None:
+        assert "safetyFailureCode" not in record
+    else:
+        assert record["safetyFailureCode"] == code
+    assert "decodedResult" not in record
+    assert record["restorableObservation"] is False and record["replayAuthorized"] is False
+    assert untrusted_payload.encode() not in payload
+    assert operation.request.prompt.encode() not in payload
+
+
+def test_recovery_known_scanner_reason_and_normal_compatibility(tmp_path, monkeypatch):
+    from test_sdk_receiving import synthetic_observation
+    operation = prepare(tmp_path, monkeypatch)
+    observation = synthetic_observation(monkeypatch, operation.request, usage={"unsafe": "fixture-secret"})
+    operation.runtime_run = runtime.RuntimeRun(operation.request, operation.selection,
+                                               owner.ProviderOutputContext((b"fixture-secret",)), observation)
+    unsafe = json.loads(operation.recovery_bytes())
+    assert unsafe["omissionReason"] == "result_scan_failed"
+    assert unsafe["safetyFailureCode"] == "E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+    safe_observation = synthetic_observation(monkeypatch, operation.request)
+    operation.runtime_run = runtime.RuntimeRun(operation.request, operation.selection,
+                                               owner.ProviderOutputContext(()), safe_observation)
+    safe = json.loads(operation.recovery_bytes())
+    assert "decodedResult" in safe
+    assert not ({"omissionReason", "safetyFailureCode", "unsafeOutputOmitted"} & set(safe))

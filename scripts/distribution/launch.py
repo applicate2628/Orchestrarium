@@ -236,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         help_requested = '--help' in args or '-h' in args
         dry_run = '--dry-run' in args or '-DryRun' in args
-        read_only = help_requested or dry_run
+        read_only = help_requested or dry_run or '--list-clients' in args
         if '--shared-hook-runtime' in args:
             if dry_run and destination is not None:
                 print('Orche: shared-hook preview must use --permanent-runtime; '

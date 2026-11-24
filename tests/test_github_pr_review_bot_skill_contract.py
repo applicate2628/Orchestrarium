@@ -334,7 +334,7 @@ def test_live_validator_pins_match_the_canonical_skill_body() -> None:
     expected = _canonical_skill_body_sha256(SKILL_PATHS[0])
     validator_paths = (
         ROOT / "src.codex/skills/lead/scripts/validate-skill-pack.py",
-        ROOT / "src.claude/agents/scripts/validate-skill-pack.py",
+        ROOT / 'adapters/claude/agents/scripts/validate-skill-pack.py',
     )
     for path in validator_paths:
         text = path.read_text(encoding="utf-8")
@@ -344,3 +344,12 @@ def test_live_validator_pins_match_the_canonical_skill_body() -> None:
         )
         assert match is not None, f"missing github-pr-review-bot body pin: {path}"
         assert match.group(1) == expected, f"stale github-pr-review-bot body pin: {path}"
+
+
+def test_optional_sdk_handoff_keeps_revision_and_action_owners() -> None:
+    for path in (*SKILL_PATHS, PROTOCOL_PATH):
+        body = path.read_text(encoding="utf-8")
+        section = body.split("## Optional SDK task handoff", 1)[1].split("## Connector author identity", 1)[0]
+        for clause in ("full hosted `headRefOid`", "`executor_result`", "not a GitHub prerequisite",
+                       "retain the original", "automatically repeat a model call", "cannot resolve threads"):
+            assert clause in section, f"missing SDK owner boundary: {clause}"

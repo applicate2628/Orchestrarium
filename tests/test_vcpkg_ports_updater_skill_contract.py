@@ -38,7 +38,7 @@ def test_vcpkg_ports_updater_has_the_common_general_overlay_contract() -> None:
         "agents/openai.yaml",
         "references/upstream-sync.md",
     }
-    claude_root = ROOT / "src.claude" / "skills" / "vcpkg-ports-updater"
+    claude_root = ROOT / 'adapters/claude' / "skills" / "vcpkg-ports-updater"
     claude_files = {
         path.relative_to(claude_root).as_posix()
         for path in claude_root.rglob("*")
@@ -138,12 +138,15 @@ def test_new_skill_install_is_create_only_idempotent_and_collision_safe(
 
     with (installed / "SKILL.md").open("ab") as stream:
         stream.write(b"one byte of user drift\n")
+    drifted = (installed / "SKILL.md").read_bytes()
     with pytest.raises(
-        ValueError, match="E_ACCEPTED_PRIOR_COLLISION: vcpkg-ports-updater"
+        ValueError, match="E_CANONICAL_SKILLS_RECEIPT_DRIFT: vcpkg-ports-updater"
     ):
         installer._preflight_canonical_skills(
             ROOT / "src.codex" / "skills", skills_root, root=ROOT
         )
+
+    assert (installed / "SKILL.md").read_bytes() == drifted
 
 
 def test_claude_installer_projection_is_create_only_idempotent_and_collision_safe(
@@ -162,7 +165,7 @@ def test_claude_installer_projection_is_create_only_idempotent_and_collision_saf
     )
     plan = installer._preflight_claude_skill_projections(
         ROOT / "src.codex" / "skills",
-        ROOT / "src.claude" / "skills",
+        ROOT / 'adapters/claude' / "skills",
         canonical_target,
         projection_root,
     )
@@ -176,7 +179,7 @@ def test_claude_installer_projection_is_create_only_idempotent_and_collision_saf
 
     current = installer._preflight_claude_skill_projections(
         ROOT / "src.codex" / "skills",
-        ROOT / "src.claude" / "skills",
+        ROOT / 'adapters/claude' / "skills",
         canonical_target,
         projection_root,
     )
@@ -197,7 +200,7 @@ def test_claude_installer_projection_is_create_only_idempotent_and_collision_saf
     ):
         installer._preflight_claude_skill_projections(
             ROOT / "src.codex" / "skills",
-            ROOT / "src.claude" / "skills",
+            ROOT / 'adapters/claude' / "skills",
             canonical_target,
             projection_root,
         )

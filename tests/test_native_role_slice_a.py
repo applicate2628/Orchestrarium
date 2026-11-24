@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ast
+import io
+from contextlib import redirect_stdout, redirect_stderr
 from collections import Counter
 from dataclasses import replace
 import importlib.util
@@ -9,6 +11,7 @@ import hashlib
 import os
 import stat
 import shutil
+import shlex
 import subprocess
 import sys
 import tomllib
@@ -16,6 +19,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from tests.fixtures.runtime_capabilities import NATIVE_ROLE_DISABLED_FEATURES
 from tests.fixtures.runtime_capabilities import codex_hook_host_env
 
 
@@ -103,6 +107,7 @@ def test_replacement_restore_boundary_retains_unknown_state(
     tree = tmp_path / "parent/child"
     tree.mkdir(parents=True)
     (tree / "body").write_bytes(b"old\n")
+    old_inode = tree.stat().st_ino
     source = tmp_path / "source"
     source.mkdir()
     (source / "body").write_bytes(b"new\n")
@@ -110,37 +115,69 @@ def test_replacement_restore_boundary_retains_unknown_state(
     publish = installer._InstallTransaction._publish_retained
     armed = False
     injected = False
+    retained_before = []
+    detached = []
+    publication_faults = []
     def injected_native_move(old, new):
+        if Path(old) == tree and not armed:
+            retained_before.append(Path(new))
         if armed and boundary == "detach" and Path(old) == tree:
-            (tree / "foreign").write_bytes(b"foreign at detach\n")
+            foreign = tree / "foreign"
+            foreign.write_bytes(b"foreign at detach\n")
+            detached.append((Path(new), tree.stat().st_ino, foreign.stat().st_ino))
         return native_move(old, new)
     def injected_publish(transaction, old, new, **keywords):
         nonlocal injected
         if Path(new) == tree:
             if boundary == "inside-writer" and not armed and not injected:
                 injected = True
+                publication_faults.append("inside-writer")
                 raise RuntimeError("inside writer failure")
             if boundary == "publish" and armed:
+                publication_faults.append("publish")
                 tree.mkdir()
                 (tree / "foreign").write_bytes(b"foreign at publication\n")
         return publish(transaction, old, new, **keywords)
     monkeypatch.setattr(installer._InstallTransaction, "_native_publish_no_replace", staticmethod(injected_native_move))
     monkeypatch.setattr(installer._InstallTransaction, "_publish_retained", injected_publish)
+    primary = RuntimeError("post writer failure")
     with pytest.raises((RuntimeError, installer._InstallFailure)) as caught:
         with installer._InstallTransaction([tree.parent], enabled=True) as transaction:
             owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
-            owner.replace_exact_tree(tree.relative_to(tmp_path), installer._tree_sha256(tree), source)
+            owner.replace_exact_tree(tree.relative_to(tmp_path), installer._tree_sha256(tree), source,
+                                     ignore_runtime_cache=boundary == "detach")
+            if boundary == "detach":
+                # Only an actual runtime observation enters the custody move.
+                (tree / "__pycache__").mkdir()
+                (tree / "__pycache__/runtime.pyc").write_bytes(b"runtime observation\n")
             armed = True
-            raise RuntimeError("post writer failure")
+            raise primary
     if boundary == "inside-writer":
+        assert publication_faults == ["inside-writer"]
         assert type(caught.value) is RuntimeError
         assert str(caught.value) == "inside writer failure"
         assert (tree / "body").read_bytes() == b"old\n"
     else:
         assert isinstance(caught.value, installer._InstallFailure)
-        assert str(caught.value.cause) == "post writer failure"
-        assert (tree / "foreign").is_file()
+        assert caught.value.cause is primary
         assert caught.value.recovery_path.is_dir()
+        if boundary == "detach":
+            assert len(detached) == 1
+            quarantine, replacement_inode, foreign_inode = detached[0]
+            assert quarantine.name.endswith(".after")
+            assert quarantine.stat().st_ino == replacement_inode
+            assert (quarantine / "foreign").stat().st_ino == foreign_inode
+            assert (quarantine / "foreign").read_bytes() == b"foreign at detach\n"
+            assert (quarantine / "body").read_bytes() == b"new\n"
+            assert len(retained_before) == 1
+            assert retained_before[0].stat().st_ino == old_inode
+            assert (retained_before[0] / "body").read_bytes() == b"old\n"
+            assert tree in caught.value.unresolved_paths
+            assert any(member.path == str(tree) and "publication beforeimage drift" in member.cause
+                       for member in caught.value.members)
+        else:
+            assert publication_faults == ["publish"]
+            assert (tree / "foreign").read_bytes() == b"foreign at publication\n"
 
 
 @pytest.mark.parametrize("foreign_kind", ("file", "empty-directory", "nonempty-directory"))
@@ -301,7 +338,11 @@ def test_directory_sibling_retention_preserves_foreign_slot_and_parent_snapshot(
     with pytest.raises(installer._InstallFailure) as caught:
         with installer._InstallTransaction([target.parent], enabled=True) as transaction:
             owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
-            owner.replace_exact_tree(target.relative_to(tmp_path), installer._tree_sha256(target), source)
+            owner.replace_exact_tree(target.relative_to(tmp_path), installer._tree_sha256(target), source,
+                                     ignore_runtime_cache=boundary == "quarantine")
+            if boundary == "quarantine":
+                (target / "__pycache__").mkdir()
+                (target / "__pycache__/runtime.pyc").write_bytes(b"runtime observation\n")
             effect = transaction._effects[-1]
             retained, retained_state = effect.retained, dict(effect.retained_state)
             armed = True
@@ -322,25 +363,42 @@ def test_directory_sibling_retention_preserves_foreign_slot_and_parent_snapshot(
         assert installer._InstallTransaction._observe(target) == original
 
 
-def test_readonly_created_directory_rollback_uses_same_parent_detach(tmp_path: Path) -> None:
+def test_readonly_created_directory_rollback_preserves_platform_disposal_boundary(tmp_path: Path) -> None:
     source = tmp_path / "source"
     source.mkdir()
     (source / "body").write_bytes(b"created\n")
     source.chmod(0o555)
+    source_before = installer._InstallTransaction._observe(source)
     target = tmp_path / "parent/participant"
     target.parent.mkdir()
     before = installer._InstallTransaction._observe(target.parent)
-    with pytest.raises(RuntimeError, match="^created directory rollback$"):
+    primary = RuntimeError("created directory rollback")
+    with pytest.raises((RuntimeError, installer._InstallFailure)) as caught:
         with installer._InstallTransaction([target.parent], enabled=True) as transaction:
             owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
             owner.create_tree(target.relative_to(tmp_path), source)
             assert transaction._effects[-1].retained.parent == target.parent
-            raise RuntimeError("created directory rollback")
-    assert installer._InstallTransaction._observe(target.parent) == before
-    source.chmod(0o755)
+            created = transaction._observe(target)
+            denied = os.name == "posix" and not os.access(target, os.W_OK)
+            raise primary
+    if denied:
+        # POSIX unlink requires a writable parent. Live created trees do not
+        # receive the private-snapshot permission exception.
+        assert isinstance(caught.value, installer._InstallFailure)
+        assert caught.value.cause is primary
+        assert any(isinstance(member.cause_exception, PermissionError)
+                   for member in caught.value.members)
+        assert caught.value.recovery_path.is_dir()
+        assert transaction._observe(target) == created
+        assert not transaction._effects[-1].settled
+        assert transaction._effects[-1].quarantine is None
+    else:
+        assert caught.value is primary
+        assert transaction._observe(target.parent) == before
+    assert transaction._observe(source) == source_before
 
 
-def test_partial_quarantine_disposal_protects_recovery_from_ancestor_restore(
+def test_partial_replacement_disposal_protects_recovery_from_ancestor_restore(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     target = tmp_path / "parent/participant"
@@ -350,6 +408,8 @@ def test_partial_quarantine_disposal_protects_recovery_from_ancestor_restore(
     source = tmp_path / "source"
     source.mkdir()
     (source / "body").write_bytes(b"new\n")
+    replacement = tmp_path / "foreign-replacement"
+    replacement.write_bytes(b"foreign during disposal\n")
     foreign = None
     foreign_state = None
     two_images = False
@@ -362,16 +422,16 @@ def test_partial_quarantine_disposal_protects_recovery_from_ancestor_restore(
         nonlocal foreign, foreign_state, two_images, hits
         effect = transaction._effects[-1] if transaction._effects else None
         result = dispose_node(path, expected)
-        if effect is not None and effect.quarantine == path.parent and foreign is None:
+        if effect is not None and effect.location == path.parent and foreign is None:
             hits += 1
             assert not path.exists() and not path.is_symlink()
-            assert effect.quarantine.parent == target.parent
-            assert effect.restored_state == original
-            assert transaction._observe(target) == original
+            assert effect.retained.parent == target.parent
+            assert effect.restored_state is None
+            assert transaction._observe(effect.retained) == transaction._relocate(original, target, effect.retained)
             two_images = True
             foreign = path
-            foreign.write_bytes(b"foreign during disposal\n")
-            foreign_state = transaction._observe(effect.quarantine)
+            os.rename(replacement, foreign)
+            foreign_state = transaction._observe(target)
             assert foreign_state[foreign].python_identity[:2] != expected.python_identity[:2]
             if os.name == "nt":
                 assert foreign_state[foreign].native_proof != expected.native_proof
@@ -386,11 +446,13 @@ def test_partial_quarantine_disposal_protects_recovery_from_ancestor_restore(
     assert hits == 1 and two_images and foreign is not None
     assert caught.value.cause is primary
     assert caught.value.members and caught.value.recovery_path.is_dir()
-    assert transaction._observe(target) == original
-    assert transaction._observe(foreign.parent) == foreign_state
+    assert transaction._observe(target) == foreign_state
     assert foreign.read_bytes() == b"foreign during disposal\n"
     effect = transaction._effects[-1]
-    assert not effect.settled and effect.quarantine_state is not None
+    assert transaction._observe(effect.retained) == transaction._relocate(original, target, effect.retained)
+    assert not effect.settled and effect.restored_state is None
+    assert effect.quarantine is None
+    assert target in caught.value.unresolved_paths
 
 
 def test_disabled_direct_writers_settle_only_their_validated_resources(
@@ -986,12 +1048,22 @@ def test_migration_stage_settlement_preserves_a_later_occupant(
         with pytest.raises(installer._InstallFailure) as failure:
             owner.migrate_exact_file(Path("role"), hashlib.sha256(b"old stock bytes\n").hexdigest(), b"desired\n")
         assert failure.value.cause is primary
-        assert "migration beforeimage drift" in str(primary)
+        assert str(primary) == "E_ROLLBACK_RESTORE_BLOCKED_BY_IDENTITY: publication beforeimage drift"
         assert relocated.read_bytes() == b"desired\n"
     assert hits == 1
     assert transaction._observe(foreign) == foreign_state
     record = transaction._slice_a_migrated[-1]
     assert transaction._observe(record.tombstone_path) == transaction._relocate(before, path, record.tombstone_path)
+
+
+def _private_disposal_snapshot(source: Path):
+    transaction = installer._InstallTransaction([], enabled=False)
+    born = {}
+    private = transaction._allocate_owned_directory(source.parent, "private-disposal-", born.__setitem__)
+    target = private / "snapshot"
+    expected = transaction._copy_snapshot(source, target, transaction._observe(source))
+    assert transaction._backup_root_state[target] == expected[target]
+    return transaction, target, expected
 
 
 @pytest.mark.parametrize("kind", ("file", "directory"))
@@ -1004,55 +1076,72 @@ def test_disposal_accepts_only_legal_platform_readonly_effect(tmp_path: Path, ki
         target.write_bytes(b"owned bytes\n")
     target.chmod(stat.S_IREAD | (stat.S_IEXEC if kind == "directory" else 0))
     transaction = installer._InstallTransaction([], enabled=False)
-    transaction._dispose_image(target, transaction._observe(target))
+    expected = transaction._observe(target)
+    source = target
+    source_before = expected
+    if os.name == "posix" and kind == "directory":
+        transaction, target, expected = _private_disposal_snapshot(source)
+    transaction._dispose_image(target, expected)
     assert not target.exists()
+    if target != source:
+        assert transaction._observe(source) == source_before
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX write permissions are independent fields")
 def test_disposal_rejects_undeclared_posix_group_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    target = tmp_path / "owned"
-    target.mkdir()
-    (target / "body").write_bytes(b"owned bytes\n")
-    target.chmod(0o555)
-    transaction = installer._InstallTransaction([], enabled=False)
-    expected = transaction._observe(target)
-    chmod = Path.chmod
-    def add_group_write(path, mode, *args, **kwargs):
-        chmod(path, mode, *args, **kwargs)
-        if path == target:
-            chmod(path, stat.S_IMODE(path.stat().st_mode) | stat.S_IWGRP)
-    monkeypatch.setattr(Path, "chmod", add_group_write)
+    source = tmp_path / "owned"
+    source.mkdir()
+    (source / "body").write_bytes(b"owned bytes\n")
+    source.chmod(0o555)
+    transaction, target, expected = _private_disposal_snapshot(source)
+    chmod = os.fchmod
+    hits = []
+    def add_group_write(descriptor, mode):
+        chmod(descriptor, mode)
+        current = os.fstat(descriptor)
+        if (current.st_dev, current.st_ino) == expected[target].python_identity[:2] and mode & stat.S_IWUSR:
+            hits.append(mode)
+            chmod(descriptor, mode | stat.S_IWGRP)
+    monkeypatch.setattr(os, "fchmod", add_group_write)
     with pytest.raises(ValueError, match="disposal permission transition"):
         transaction._dispose_image(target, expected)
     assert target.exists() and (target / "body").read_bytes() == b"owned bytes\n"
+    assert hits == [0o755]
+    assert transaction._observe(target) == expected
+    assert (source / "body").read_bytes() == b"owned bytes\n"
+    assert stat.S_IMODE(source.stat().st_mode) == 0o555
 
 
-@pytest.mark.skipif(os.name != "posix", reason="Windows readonly disposition does not call chmod")
-def test_disposal_retains_readonly_file_modified_during_chmod(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    target = tmp_path / "owned"
-    target.write_bytes(b"owned bytes\n")
-    target.chmod(stat.S_IREAD)
-    transaction = installer._InstallTransaction([], enabled=False)
-    expected = transaction._observe(target)
-    chmod = Path.chmod
+@pytest.mark.skipif(os.name != "posix", reason="Windows readonly disposition does not call parent fchmod")
+def test_disposal_retains_snapshot_file_modified_during_parent_chmod(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = tmp_path / "owned"
+    source.mkdir()
+    (source / "body").write_bytes(b"owned bytes\n")
+    source.chmod(0o555)
+    transaction, target, expected = _private_disposal_snapshot(source)
+    chmod = os.fchmod
     hits = 0
-    def modify_bytes(path, mode, *args, **kwargs):
+    def modify_bytes(descriptor, mode):
         nonlocal hits
-        chmod(path, mode, *args, **kwargs)
-        if path == target:
+        chmod(descriptor, mode)
+        current = os.fstat(descriptor)
+        if (current.st_dev, current.st_ino) == expected[target].python_identity[:2] and mode & stat.S_IWUSR:
             hits += 1
-            target.write_bytes(b"foreign bytes\n")
-    monkeypatch.setattr(Path, "chmod", modify_bytes)
+            (target / "body").write_bytes(b"foreign bytes\n")
+    monkeypatch.setattr(os, "fchmod", modify_bytes)
     with pytest.raises(ValueError, match="disposal permission content drift"):
         transaction._dispose_image(target, expected)
-    assert target.read_bytes() == b"foreign bytes\n"
+    assert (target / "body").read_bytes() == b"foreign bytes\n"
     assert hits == 1
-    assert installer._CreateOnlyMutablePath._identity(target)[:2] == expected[target].python_identity[:2]
+    assert installer._CreateOnlyMutablePath._identity(target) == expected[target].python_identity
+    assert installer._CreateOnlyMutablePath._identity(target / "body") == expected[target / "body"].python_identity
+    assert (source / "body").read_bytes() == b"owned bytes\n"
+    assert stat.S_IMODE(source.stat().st_mode) == 0o555
 
 
 POST_MATERIALIZATION_WRITER_IDS = {
     "lead-receipt",
-    "claude-skill-projection",
+    "provider-receipt",
     "runtime-outside",
     "ui-continuity",
     "hook-registration",
@@ -1065,7 +1154,7 @@ POST_MATERIALIZATION_WRITER_IDS = {
 }
 POST_MATERIALIZATION_ARTIFACT_CLASSES = {
     "lead-receipt",
-    "claude-skill-projection",
+    "provider-receipt",
     "runtime-outside",
     "ui-continuity",
     "hooks",
@@ -1329,7 +1418,7 @@ def test_resolver_exposes_componentwise_role_policy_without_changing_agents_mode
     )
     assert policy["schemaVersion"] == 1
     assert policy["modelTierOrder"] == ["mechanical", "balanced", "frontier", "apex"]
-    assert policy["effortOrder"] == ["low", "medium", "high", "xhigh", "max"]
+    assert policy["effortOrder"] == ["medium", "high", "xhigh", "max"]
     assert policy["taskClasses"]["critical-design"] == {
         "requiredModelTier": "frontier",
         "requiredEffort": "xhigh",
@@ -1350,7 +1439,7 @@ def test_resolver_exposes_componentwise_role_policy_without_changing_agents_mode
     # The new role policy is additive. Existing external-provider/profile
     # semantics remain under agents-mode and retain their shipped values.
     values = resolved["values"]
-    assert values["externalCodexProfile"] == "gpt-6.1-sol-xhigh"
+    assert values["externalCodexProfile"] == "gpt-6.2-sol-xhigh"
     assert values["externalClaudeProfile"] == "opus-xhigh"
     assert values["externalPriorityProfiles"]["balanced"][
         "worker.default-implementation"
@@ -1378,11 +1467,7 @@ def test_source_native_roles_match_policy_profiles_and_supported_toml_fields() -
         profile = policy["profiles"][corridor["defaultProfile"]]
         assert set(parsed) <= SUPPORTED_NATIVE_FIELDS, role_name
         assert parsed["name"] == role_name
-        assert parsed["features"] == {
-            "apps": False, "plugins": False, "computer_use": False,
-            "browser_use": False, "browser_use_external": False,
-            "browser_use_full_cdp_access": False, "in_app_browser": False,
-        }
+        assert parsed["features"] == NATIVE_ROLE_DISABLED_FEATURES
         if role_name == "default":
             assert "model" not in parsed
             assert "model_reasoning_effort" not in parsed
@@ -1407,6 +1492,48 @@ def test_source_native_roles_match_policy_profiles_and_supported_toml_fields() -
             "sha256": hashlib.sha256(role_bytes).hexdigest(),
             "developerInstructionsSha256": hashlib.sha256(parsed["developer_instructions"].encode()).hexdigest(),
         }
+
+
+def _observe_codex_install(arguments, *, home=None):
+    """Observe the actual installer error without changing its public sanitizer."""
+    errors = []
+    render = installer._installer_failure_text
+    def observe(error):
+        errors.append(error)
+        return render(error)
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with pytest.MonkeyPatch.context() as scoped:
+        scoped.chdir(ROOT)
+        scoped.setattr(installer, "_installer_failure_text", observe)
+        scoped.setenv("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK", "1")
+        scoped.setenv("CODEX_BIN", codex_hook_host_env({}, ROOT)["CODEX_BIN"])
+        if home is not None:
+            scoped.setenv("HOME", str(home))
+            scoped.setenv("USERPROFILE", str(home))
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            status = installer.install("codex", arguments)
+    return SimpleNamespace(returncode=status, stdout=stdout.getvalue(),
+                           stderr=stderr.getvalue(), errors=tuple(errors))
+
+
+def _assert_observed_validation(result, expected):
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "cause=validation-failed" in result.stderr
+    assert len(result.errors) == 1
+    assert type(result.errors[0]) is ValueError
+    assert str(result.errors[0]) == expected
+
+
+def test_validation_oracle_rejects_an_unrelated_earlier_failure(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    project.mkdir()
+    def unrelated(*_args, **_kwargs):
+        raise ValueError("unrelated earlier validation failure")
+    monkeypatch.setattr(installer, "_preflight_canonical_skills", unrelated)
+    result = _observe_codex_install(["--target", str(project), "--force", "--allow-unsafe-target"])
+    _assert_observed_validation(result, "unrelated earlier validation failure")
+    with pytest.raises(AssertionError):
+        _assert_observed_validation(result, "E_CREATE_ONLY_CONFIG_INLINE_AGENTS")
 
 
 def _run_codex_installer(
@@ -1713,7 +1840,10 @@ def test_config_storage_alias_stale_plan_preserves_changed_input(tmp_path: Path,
         logical.symlink_to(Path("../backing/nested/settings.toml"))
     elif drift == "ancestor":
         ancestor.unlink()
-        ancestor.symlink_to(Path("./backing"), target_is_directory=True)
+        # Preserve the raw spelling: Path("./backing") normalizes to "backing",
+        # making this drift depend on whether the filesystem recycles the inode.
+        ancestor.symlink_to("./backing", target_is_directory=True)
+        assert os.readlink(ancestor) != "backing"
     elif drift == "referent":
         storage.rename(storage.with_suffix(".displaced"))
         storage.write_bytes(payload)
@@ -2297,7 +2427,9 @@ def test_inline_agents_table_fails_before_transaction_without_mutation(
     def transaction_entered(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("transaction entered")
 
-    monkeypatch.setattr(installer, "_InstallTransaction", transaction_entered)
+    # Read-only preflight may construct a disabled owner; a mutation context
+    # must still never be entered for the refused inline table.
+    monkeypatch.setattr(installer._InstallTransaction, "__enter__", transaction_entered)
     arguments = [
         "--target",
         str(project),
@@ -2308,11 +2440,8 @@ def test_inline_agents_table_fails_before_transaction_without_mutation(
     if dry_run:
         arguments.append("--dry-run")
 
-    result = installer.install("codex", arguments)
-    captured = capsys.readouterr()
-
-    assert result == 1
-    assert "E_CREATE_ONLY_CONFIG_INLINE_AGENTS" in captured.err
+    result = _observe_codex_install(arguments)
+    _assert_observed_validation(result, "E_CREATE_ONLY_CONFIG_INLINE_AGENTS")
     assert _no_follow_inventory(project) == before
     assert config.read_bytes() == payload
     assert installer._CreateOnlyMutablePath._identity(config) == config_identity
@@ -2462,10 +2591,11 @@ def test_mismatched_legacy_luna_state_fails_closed_and_is_preserved(
     )
     legacy.write_bytes(legacy_payload)
 
-    result = _run_codex_installer(project, install_hooks=False)
+    result = _observe_codex_install(["--target", str(project), "--force", "--allow-unsafe-target"])
 
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "E_CREATE_ONLY_COLLISION" in result.stderr
+    assert "cause=validation-failed" in result.stderr
+    _assert_observed_validation(result, ("E_CREATE_ONLY_COLLISION: agents.luna_mechanical" if mismatch == "mapping" else f"E_CREATE_ONLY_COLLISION: {Path('agents') / 'luna-mechanical.toml'}"))
     assert config.read_bytes() == config_payload
     assert legacy.read_bytes() == legacy_payload
     assert not (project / ".codex" / "agents" / "analyst.toml").exists()
@@ -2528,20 +2658,38 @@ def test_receipted_upgrade_retirement_preserves_targets_receipt_and_rollback(
     assert hashlib.sha256(stock).hexdigest() == installer._CODEX_RETIRED_PS1[
         "skills/lead/hooks/check-mcp-momentum.py"
     ]
-    retired.write_bytes(stock)
-    receipt.write_bytes(installer._lead_receipt_bytes(installer._tree_sha256(lead, ignore_runtime_cache=True)))
+    def seed_retired_stock():
+        retired.write_bytes(stock)
+        receipt.write_bytes(installer._lead_receipt_bytes(installer._tree_sha256(lead, ignore_runtime_cache=True)))
+        # The synthetic predecessor's outer receipt must bind its seeded Lead
+        # receipt. Refresh only that existing witness, without claiming extras.
+        codec = installer._provider_ownership_module(ROOT)
+        provider_receipt = home / ".codex" / installer._PROVIDER_RECEIPT_NAME
+        record = codec.decode_record(provider_receipt.read_bytes(), "codex", "global")
+        relative = receipt.relative_to(home).as_posix()
+        assert relative in record["files"]
+        record["files"][relative] = hashlib.sha256(receipt.read_bytes()).hexdigest()
+        provider_receipt.write_bytes(codec.serialize_record(record, "codex", "global"))
+    seed_retired_stock()
     registration = home / ".codex" / "hooks.json"
     config = json.loads(registration.read_bytes())
-    command = f"{Path(sys.executable).as_posix()} {retired.as_posix()}"
+    # Model a valid registered command even when the retained interpreter path
+    # contains spaces. Malformed shell text must not authorize target retirement.
+    arguments = [Path(sys.executable).as_posix(), retired.as_posix()]
+    command = " ".join(arguments) if os.name == "nt" else shlex.join(arguments)
     retained = {"type": "command", "command": command + " --retained-custom"}
     mixed = {
         "matcher": "Grep|Bash|PowerShell|shell_command|exec_command", "description": "retained-mixed",
-        "hooks": [{"type": "command", "command": command}, retained],
+        # Retiring the trailing managed handler preserves the custom trust slot.
+        "hooks": [retained, {"type": "command", "command": command}],
     }
     unrelated_target = home / "unrelated.py"
     unrelated_target.write_bytes(b"print('unrelated')\n")
+    unrelated_arguments = [Path(sys.executable).as_posix(), unrelated_target.as_posix()]
+    unrelated_command = (" ".join(unrelated_arguments) if os.name == "nt"
+                         else shlex.join(unrelated_arguments))
     unrelated = {"matcher": "CustomTool", "hooks": [{
-        "type": "command", "command": f"{Path(sys.executable).as_posix()} {unrelated_target.as_posix()}",
+        "type": "command", "command": unrelated_command,
     }]}
     config["description"] = "user metadata"
     config["hooks"]["PreToolUse"].extend([mixed, unrelated])
@@ -2577,16 +2725,17 @@ def test_receipted_upgrade_retirement_preserves_targets_receipt_and_rollback(
     assert json.loads(receipt.read_bytes())["treeSha256"] == installer._tree_sha256(lead, ignore_runtime_cache=True)
     assert unrelated in json.loads(registration.read_bytes())["hooks"]["PreToolUse"]
 
-    retired.write_bytes(stock)
-    receipt.write_bytes(installer._lead_receipt_bytes(installer._tree_sha256(lead, ignore_runtime_cache=True)))
+    seed_retired_stock()
     before = _no_follow_inventory(home)
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("HOME", str(home))
+    reclaimed = []
     def fail_after_reclaim(*_args, **_kwargs):
-        assert not retired.exists(), "rollback control must run after actual reclamation"
+        reclaimed.append(not retired.exists())
         raise RuntimeError("injected post-reclaim receipt finalization")
     monkeypatch.setattr(installer, "_finalize_canonical_lead_receipt", fail_after_reclaim)
     assert installer.install("codex", ["--global", "--force"]) == 1
+    assert reclaimed == [True], "rollback control must run after actual reclamation"
     assert _no_follow_inventory(home) == before
 
 
@@ -2611,7 +2760,7 @@ def test_global_codex_and_claude_provider_paths_keep_role_registration_owned(
 def test_global_provider_linked_canonical_agents_root_preserves_link_and_vendor_content(
     tmp_path: Path, provider: str, kind: str
 ) -> None:
-    """A user-global canonical skills root may be a bound directory link."""
+    """Codex owns linked canonical storage; Claude preserves that unselected peer."""
 
     home = tmp_path / "home"
     home.mkdir()
@@ -2643,16 +2792,23 @@ def test_global_provider_linked_canonical_agents_root_preserves_link_and_vendor_
     contract_bytes = (ROOT / installer.UI_CONTINUITY_CONTRACT_SOURCE).read_bytes()
     canonical_leaf = backing / installer.UI_CONTINUITY_CONTRACT_TARGET
     provider_leaf = home / f".{provider}" / installer.UI_CONTINUITY_CONTRACT_TARGET
-    assert canonical_leaf.read_bytes() == contract_bytes
+    if provider == "codex":
+        assert canonical_leaf.read_bytes() == contract_bytes
+        assert (backing / "skills" / "lead" / "SKILL.md").is_file()
+    else:
+        assert _no_follow_inventory(backing) == before
+        assert (home / ".claude" / "skills" / "lead" / "SKILL.md").is_file()
     assert provider_leaf.read_bytes() == contract_bytes
-    assert (backing / "skills" / "lead" / "SKILL.md").is_file()
 
     reinstalled = _run_global_installer(provider, home)
     assert reinstalled.returncode == 0, reinstalled.stdout + reinstalled.stderr
     assert installer._CreateOnlyMutablePath._identity(logical) == link_identity
     assert os.readlink(logical) == raw_target
     assert vendor.read_bytes() == b"preserve vendor content\n"
-    assert canonical_leaf.read_bytes() == contract_bytes
+    if provider == "codex":
+        assert canonical_leaf.read_bytes() == contract_bytes
+    else:
+        assert _no_follow_inventory(backing) == before
     assert provider_leaf.read_bytes() == contract_bytes
 
 
@@ -2692,14 +2848,14 @@ def test_global_provider_linked_canonical_agents_root_rolls_back_after_fault(
     original = installer._install_ui_continuity_contract
     contract_bytes = (ROOT / installer.UI_CONTINUITY_CONTRACT_SOURCE).read_bytes()
     calls = 0
+    published = []
 
     def fail_after_canonical_skills(*args: object, **kwargs: object) -> None:
         nonlocal calls
         calls += 1
         original(*args, **kwargs)
         if calls == 2:
-            assert canonical_leaf.read_bytes() == contract_bytes
-            assert provider_leaf.read_bytes() == contract_bytes
+            published.append((canonical_leaf.read_bytes(), provider_leaf.read_bytes()))
             raise RuntimeError("injected post-canonical-skills failure")
 
     monkeypatch.setattr(
@@ -2712,6 +2868,7 @@ def test_global_provider_linked_canonical_agents_root_rolls_back_after_fault(
 
     assert result == 1
     assert calls == 2
+    assert published == [(contract_bytes if provider == "codex" else canonical_prior, contract_bytes)]
     assert installer._CreateOnlyMutablePath._identity(logical) == link_identity
     assert os.readlink(logical) == raw_target
     assert _no_follow_inventory(backing) == before
@@ -2878,9 +3035,9 @@ def test_global_codex_linked_agents_multihop_windows_reparse_chain_is_identity_b
         "stableId": None,
         "taskClass": "mechanical-read",
         "role": "mechanical-scout",
-        "requestedProfile": "luna-high",
+        "requestedProfile": "luna-xhigh",
         "requestedModel": "gpt-6-luna",
-        "requestedEffort": "high",
+        "requestedEffort": "xhigh",
         "sandbox": "read-only",
         "fallback": "none",
         "executionContract": json.loads(
@@ -2916,10 +3073,13 @@ def test_project_local_codex_agents_link_remains_denied(tmp_path: Path) -> None:
     except OSError as exc:
         pytest.skip(f"directory symlink unavailable: {exc}")
 
-    result = _run_codex_installer(project, install_hooks=False)
+    before = _no_follow_inventory(project)
+    result = _observe_codex_install(["--target", str(project), "--force", "--allow-unsafe-target"])
 
     assert result.returncode == 1
-    assert "E_RUNTIME_SUBROOT_SCOPE_DENIED" in result.stderr
+    assert "cause=validation-failed" in result.stderr
+    _assert_observed_validation(result, "E_RUNTIME_SUBROOT_SCOPE_DENIED")
+    assert _no_follow_inventory(project) == before
     assert not (project / ".codex" / "config.toml").exists()
     assert _no_follow_inventory(backing) == {}
 
@@ -3061,8 +3221,12 @@ def test_installer_and_resolver_deny_linked_codex_ancestor(
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("HOME", str(home))
 
-    assert installer.install("codex", ["--global", "--force", "--no-hypothesis-hook"]) == 1
-    assert "E_RUNTIME_SUBROOT_SCOPE_DENIED" in capsys.readouterr().err
+    home_before = _no_follow_inventory(home)
+    backing_before = _no_follow_inventory(backing)
+    result = _observe_codex_install(["--global", "--force", "--no-hypothesis-hook"], home=home)
+    _assert_observed_validation(result, "E_RUNTIME_SUBROOT_SCOPE_DENIED")
+    assert _no_follow_inventory(home) == home_before
+    assert _no_follow_inventory(backing) == backing_before
 
     scripts = home / ".agents" / "skills" / "lead" / "scripts"
     shared = scripts.parent / "shared"
@@ -3106,10 +3270,15 @@ def test_global_codex_linked_role_leaf_is_not_overwritten(tmp_path: Path) -> Non
     except OSError as exc:
         pytest.skip(f"file or directory symlink unavailable: {exc}")
 
-    result = _run_codex_global_installer(home)
+    home_before = _no_follow_inventory(home)
+    backing_before = _no_follow_inventory(backing)
+    result = _observe_codex_install(["--global", "--force"], home=home)
 
     assert result.returncode == 1
-    assert "E_CREATE_ONLY_TYPE_COLLISION" in result.stderr
+    assert "cause=validation-failed" in result.stderr
+    _assert_observed_validation(result, f"E_CREATE_ONLY_TYPE_COLLISION: {Path('agents') / 'analyst.toml'}")
+    assert _no_follow_inventory(home) == home_before
+    assert _no_follow_inventory(backing) == backing_before
     assert (backing / "analyst.toml").is_symlink()
 
 
@@ -3173,7 +3342,15 @@ def test_global_codex_linked_agents_retarget_before_rollback_is_unsafe(
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("HOME", str(home))
 
+    authority = LinkedRuntimeSubrootAuthority.bind(
+        logical, scope="global", trusted_global_roots=(logical,),
+    )
+    assert authority is not None
+    original_at_retarget = []
+    replacement_before = _no_follow_inventory(replacement)
+
     def retarget_then_fail(*_args: object, **_kwargs: object) -> None:
+        original_at_retarget.append(_no_follow_inventory(original))
         logical.unlink()
         _make_runtime_directory_link(logical, replacement, "symlink")
         raise RuntimeError("forced retarget before rollback")
@@ -3184,7 +3361,12 @@ def test_global_codex_linked_agents_retarget_before_rollback_is_unsafe(
     captured = capsys.readouterr()
 
     assert result == 1
-    assert "E_RUNTIME_SUBROOT_ROLLBACK_UNSAFE" in captured.err
+    assert "E_ROLLBACK_SETTLEMENT_FAILED" in captured.err
+    with pytest.raises(ValueError, match="^E_RUNTIME_SUBROOT_IDENTITY_CHANGED$"):
+        authority.assert_current()
+    assert len(original_at_retarget) == 1
+    assert _no_follow_inventory(original) == original_at_retarget[0]
+    assert _no_follow_inventory(replacement) == replacement_before
     assert os.path.samefile(logical, replacement)
     assert replacement_sentinel.read_bytes() == b"replacement remains untouched\n"
     assert any(original.glob("*.toml"))
@@ -3359,10 +3541,10 @@ def test_codex_install_has_zero_post_tree_writes_below_canonical_lead(
     original_copy = installer._copy_file
     descendant_writes: list[Path] = []
 
-    def record_copy(source: Path, target: Path, dry_run: bool) -> None:
+    def record_copy(source: Path, target: Path, dry_run: bool, **kwargs) -> None:
         if canonical_lead in target.parents:
             descendant_writes.append(target)
-        original_copy(source, target, dry_run)
+        original_copy(source, target, dry_run, **kwargs)
 
     monkeypatch.setattr(installer, "_copy_file", record_copy)
     result = installer.install(
@@ -3406,10 +3588,10 @@ def test_post_materialization_writer_inventory_is_complete_and_fail_closed(
     claude_records = installer._post_materialization_writer_destinations(
         provider="claude",
         root=ROOT,
-        source=ROOT / "src.claude",
+        source=ROOT / 'adapters/claude',
         target=claude_target,
         agents_root=claude_target,
-        canonical_skills_target=canonical_skills,
+        canonical_skills_target=claude_target / "skills",
         docs_target=claude_target / "CLAUDE.md",
         mode_target=claude_target / ".agents-mode.yaml",
         registration=claude_target / "settings.json",
@@ -3479,9 +3661,11 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
 ) -> None:
     """The actual two-provider writer calls must echo every declared destination."""
 
+    monkeypatch.setenv("CODEX_BIN", codex_hook_host_env({}, ROOT)["CODEX_BIN"])
+
     artifact_class = {
         "lead-receipt": "lead-receipt",
-        "claude-skill-projection": "claude-skill-projection",
+        "provider-receipt": "provider-receipt",
         "runtime-outside": "runtime-outside",
         "ui-continuity": "ui-continuity",
         "hook-registration": "hooks",
@@ -3524,19 +3708,6 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
         published = True
 
     monkeypatch.setattr(installer, "_apply_canonical_skills_plan", canonical)
-
-    original_projection = installer._apply_claude_skill_projection_plan
-
-    def projections(plan, canonical_source, projection_root, owner):
-        original_projection(
-            plan, canonical_source, projection_root, owner
-        )
-        for item in plan:
-            emit("claude-skill-projection", projection_root / item.name)
-
-    monkeypatch.setattr(
-        installer, "_apply_claude_skill_projection_plan", projections
-    )
 
     original_runtime = installer._install_runtime_files
 
@@ -3664,10 +3835,20 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
     original_receipt = installer._finalize_canonical_lead_receipt
 
     def receipt(plan, target, owner, reclaimed=()):
-        original_receipt(plan, target, owner, reclaimed)
+        result = original_receipt(plan, target, owner, reclaimed)
         emit("lead-receipt", target / installer._LEAD_RECEIPT_NAME)
+        return result
 
     monkeypatch.setattr(installer, "_finalize_canonical_lead_receipt", receipt)
+
+    original_provider_receipt = installer._record_provider_install
+
+    def provider_receipt(root, provider, mode, target, *args, **kwargs):
+        result = original_provider_receipt(root, provider, mode, target, *args, **kwargs)
+        emit("provider-receipt", target / installer._PROVIDER_RECEIPT_NAME)
+        return result
+
+    monkeypatch.setattr(installer, "_record_provider_install", provider_receipt)
 
     monkeypatch.setenv("CODEX_BIN", codex_hook_host_env({}, ROOT)["CODEX_BIN"])
     for provider in ("codex", "claude"):
@@ -3743,6 +3924,21 @@ def test_canonical_lead_provider_order_matrix(
         shutil.rmtree(stage.path, ignore_errors=True)
 
 
+def _record_synthetic_owned_fixture_changes(
+    root: Path, provider: str, mode: str, changed: list[Path],
+) -> None:
+    """Seed a prior generation only within the real install's existing ownership."""
+    codec = installer._provider_ownership_module(ROOT)
+    scope = "global" if mode == "global" else "project"
+    receipt = root / installer.get_client(provider)["provider_root"] / codec.RECEIPT_NAME
+    record = codec.decode_record(receipt.read_bytes(), provider, scope)
+    for path in changed:
+        relative = path.relative_to(root).as_posix()
+        assert relative in record["files"], "synthetic prior cannot add ownership"
+        record["files"][relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+    receipt.write_bytes(codec.serialize_record(record, provider, scope))
+
+
 @pytest.mark.parametrize("mode", ("repo", "target", "global"))
 @pytest.mark.parametrize("provider_order", (("codex", "claude"), ("claude", "codex")))
 def test_receipted_transport_upgrade_converges_from_either_provider(
@@ -3750,28 +3946,43 @@ def test_receipted_transport_upgrade_converges_from_either_provider(
 ) -> None:
     install_root = tmp_path / "installation"
     install_root.mkdir()
-    assert _same_root_install("claude", mode, install_root, monkeypatch) == 0
-    skills = install_root / ".agents" / "skills"
-    lead = skills / "lead"
+    for provider in ("codex", "claude"):
+        assert _same_root_install(provider, mode, install_root, monkeypatch) == 0
+    leads = {provider: install_root / installer.get_client(provider)["canonical_runtime"]
+             for provider in ("codex", "claude")}
     peer = install_root / ".claude" / "agents"
-    payload = (lead / "scripts" / "provider_prompt.py").read_bytes() + b"\n# supported predecessor example\n"
+    factory_payload = (ROOT / "scripts" / "provider_prompt.py").read_bytes()
+    payload = factory_payload + b"\n# supported predecessor example\n"
     manifest_path = Path("shared") / installer.TRANSPORT_PROJECTION_MANIFEST
-    manifest = json.loads((lead / manifest_path).read_bytes())
+    manifest = json.loads((leads["codex"] / manifest_path).read_bytes())
     manifest["packRevision"] = "supported-predecessor-example"
     manifest["files"]["provider_prompt.py"]["sha256"] = hashlib.sha256(payload).hexdigest()
     encoded = (json.dumps(manifest, indent=2) + "\n").encode()
-    for participant in (lead, peer):
+    for participant in (*leads.values(), peer):
         (participant / "scripts" / "provider_prompt.py").write_bytes(payload)
         (participant / manifest_path).write_bytes(encoded)
-    (skills / installer._LEAD_RECEIPT_NAME).write_bytes(
-        installer._lead_receipt_bytes(installer._tree_sha256(lead, ignore_runtime_cache=True))
-    )
+    for provider, lead in leads.items():
+        lead_receipt = lead.parent / installer._LEAD_RECEIPT_NAME
+        lead_receipt.write_bytes(installer._lead_receipt_bytes(
+            installer._tree_sha256(lead, ignore_runtime_cache=True)))
+        changed = [lead / "scripts" / "provider_prompt.py", lead / manifest_path, lead_receipt]
+        if provider == "claude":
+            changed.extend((peer / "scripts" / "provider_prompt.py", peer / manifest_path))
+        _record_synthetic_owned_fixture_changes(install_root, provider, mode, changed)
     for provider in provider_order:
+        unselected = "claude" if provider == "codex" else "codex"
+        peer_roots = [install_root / path for path in installer.get_client(unselected)["roots"]]
+        before = {path: installer._InstallTransaction._observe(path) for path in peer_roots}
         assert _same_root_install(provider, mode, install_root, monkeypatch) == 0
-        assert (lead / "scripts" / "provider_prompt.py").read_bytes() == (ROOT / "scripts" / "provider_prompt.py").read_bytes()
-        assert (peer / "scripts" / "provider_prompt.py").read_bytes() == (ROOT / "scripts" / "provider_prompt.py").read_bytes()
-        receipt = installer._read_lead_receipt(skills / installer._LEAD_RECEIPT_NAME)
+        assert {path: installer._InstallTransaction._observe(path) for path in peer_roots} == before
+        lead = leads[provider]
+        assert (lead / "scripts" / "provider_prompt.py").read_bytes() == factory_payload
+        if provider == "claude":
+            assert (peer / "scripts" / "provider_prompt.py").read_bytes() == factory_payload
+        receipt = installer._read_lead_receipt(lead.parent / installer._LEAD_RECEIPT_NAME)
         assert receipt is not None and receipt[2] == installer._tree_sha256(lead, ignore_runtime_cache=True)
+    for participant in (*leads.values(), peer):
+        assert (participant / "scripts" / "provider_prompt.py").read_bytes() == factory_payload
 
 
 @pytest.mark.parametrize("peer_state", ("absent", "unknown"))
@@ -3784,8 +3995,11 @@ def test_unselected_unproved_peer_does_not_veto_canonical_upgrade(
     skills = root / ".agents/skills"
     lead = skills / "lead"
     (lead / "SKILL.md").write_bytes((lead / "SKILL.md").read_bytes() + b"\nold generation example\n")
-    (skills / installer._LEAD_RECEIPT_NAME).write_bytes(
+    lead_receipt = skills / installer._LEAD_RECEIPT_NAME
+    lead_receipt.write_bytes(
         installer._lead_receipt_bytes(installer._tree_sha256(lead, ignore_runtime_cache=True)))
+    _record_synthetic_owned_fixture_changes(
+        root, "codex", "target", [lead / "SKILL.md", lead_receipt])
     peer = root / ".claude"
     if peer_state == "unknown":
         path = peer / "agents/scripts/provider_prompt.py"
@@ -3834,57 +4048,38 @@ def test_codex_health_requires_target_derived_inventory_sidecar(tmp_path: Path) 
 def test_codex_health_rejects_drifted_inventory_sidecar_before_host_query(
     tmp_path: Path,
 ) -> None:
-    """A generated sidecar remains authoritative for its own config target."""
+    """The CLI rejects real registration drift against producer-bound inventory."""
+    from tests.test_hook_health import CHECKER, _host_trust_fixture
 
     config = tmp_path / ".codex" / "hooks.json"
     config.parent.mkdir()
-    config.write_text('{"hooks": {}}\n', encoding="utf-8")
-    host_os = "windows" if os.name == "nt" else "posix"
-    source_path = str(config.resolve()).replace("\\", "/")
-    if host_os == "windows":
-        source_path = source_path.casefold()
-    identity = json.dumps(
-        {
-            "command": "synthetic",
-            "event": "pretooluse",
-            "handlerType": "command",
-            "matcher": None,
-            "sourcePath": source_path,
-        },
-        separators=(",", ":"),
-        sort_keys=True,
+    rows, _records = _host_trust_fixture(config)
+    inventory = config.with_name("codex-hook-inventory.json")
+    CHECKER.write_codex_inventory(
+        target=config, specs=[(stem, Path(argv[-1]), event, matcher)
+                              for event, stem, argv, matcher in rows],
+        inventory_path=inventory, host_os="posix",
     )
-    config.with_name("codex-hook-inventory.json").write_text(
-        json.dumps(
-            {
-                "schemaVersion": 1,
-                "sourcePath": source_path,
-                "hooks": [{"stem": "synthetic", "identity": identity}],
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-
+    before = inventory.read_bytes()
+    changed = json.loads(config.read_text(encoding="utf-8"))
+    changed["hooks"]["PreToolUse"][0]["matcher"] = "synthetic drift"
+    config.write_text(json.dumps(changed), encoding="utf-8")
+    queried = tmp_path / "host-query"
+    host = tmp_path / "unexpected_codex.py"
+    host.write_text("from pathlib import Path\nPath(" + repr(str(queried))
+                    + ").write_text('unexpected')\nraise SystemExit(123)\n", encoding="utf-8")
+    environment = dict(os.environ, CODEX_BIN=str(host))
     result = subprocess.run(
-        [
-            sys.executable,
-            str(CHECK_HOOK_HEALTH),
-            "--target",
-            str(config),
-            "--platform",
-            "codex",
-            "--codex-trust-mode",
-            "report",
-        ],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
+        [sys.executable, str(CHECK_HOOK_HEALTH), "--target", str(config),
+         "--platform", "codex", "--host-os", "posix",
+         "--installed-root", str(ROOT / "src.codex/skills/lead"),
+         "--codex-trust-mode", "report"],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", env=environment,
     )
-
     assert result.returncode == 1
     assert "Codex hook registration drifted from generated inventory" in result.stderr
+    assert inventory.read_bytes() == before
+    assert not queried.exists()
 
 
 def test_codex_hooks_inventory_is_outside_lead_and_rolls_back_with_registration(
@@ -4161,12 +4356,17 @@ def test_customized_disabled_luna_role_remains_a_collision(
     role = agents / f"{name}.toml"
     customized = DISABLED_LUNA_MIGRATABLE_ROLE_BYTES[name] + b"# operator change\n"
     role.write_bytes(customized)
+    before = _no_follow_inventory(project)
+    role_identity = installer._CreateOnlyMutablePath._identity(role)
 
-    result = _run_codex_installer(project, install_hooks=False)
+    result = _observe_codex_install(["--target", str(project), "--force", "--allow-unsafe-target"])
 
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "E_CREATE_ONLY_COLLISION" in result.stderr
+    assert "cause=validation-failed" in result.stderr
+    _assert_observed_validation(result, "E_CREATE_ONLY_ROLE_CONTRACT: owned-profession-contract/instructions-mismatch")
     assert role.read_bytes() == customized
+    assert installer._CreateOnlyMutablePath._identity(role) == role_identity
+    assert _no_follow_inventory(project) == before
 
 
 def test_disabled_luna_migration_rolls_back_bytes_and_identities(
@@ -4228,30 +4428,48 @@ def test_exact_intermediate_role_prior_is_admitted(name: str, tmp_path: Path) ->
 
 
 @pytest.mark.parametrize("name", tuple(INTERMEDIATE_MIGRATABLE_ROLE_BYTES))
-def test_intermediate_role_byte_drift_fails_before_transaction(
-    name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_intermediate_role_with_operator_comment_is_preserved(
+    name: str, tmp_path: Path,
 ) -> None:
-    """The intermediate admission remains hash-pinned rather than an adoption path."""
-
+    """A non-stock hash does not authorize migration over compatible user text."""
     project = tmp_path / name
     agents = project / ".codex" / "agents"
     agents.mkdir(parents=True)
     role = agents / f"{name}.toml"
-    role.write_bytes(INTERMEDIATE_MIGRATABLE_ROLE_BYTES[name] + b"# operator mutation\n")
+    payload = INTERMEDIATE_MIGRATABLE_ROLE_BYTES[name] + b"# operator mutation\n"
+    role.write_bytes(payload)
+    identity = installer._CreateOnlyMutablePath._identity(role)
+
+    result = _run_codex_installer(project, install_hooks=False)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert role.read_bytes() == payload
+    assert installer._CreateOnlyMutablePath._identity(role) == identity
+    assert (agents / "analyst.toml").is_file()
+    registrations = tomllib.loads((project / ".codex/config.toml").read_text())["agents"]
+    assert registrations[name] == _expected_native_role_mappings()[name]
+    assert project / ".codex" / registrations[name]["config_file"] == role
+
+
+def test_owned_profession_instruction_mutation_is_rejected_before_native_role_plan(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    agents = project / ".codex" / "agents"
+    agents.mkdir(parents=True)
+    role = agents / "platform-engineer.toml"
+    original = (ROOT / "src.codex/agents/platform-engineer.toml").read_bytes()
+    payload = original.replace(b"activate $platform-engineer", b"activate $worker")
+    assert payload != original
+    role.write_bytes(payload)
+    identity = installer._CreateOnlyMutablePath._identity(role)
     before = _no_follow_inventory(project)
-
-    def transaction_entered(*_args: object, **_kwargs: object) -> str:
-        raise AssertionError("transaction entered")
-
-    monkeypatch.setattr(installer._InstallTransaction, "__enter__", transaction_entered)
-    result = installer.install(
-        "codex",
-        ["--target", str(project), "--force", "--allow-unsafe-target", "--no-hypothesis-hook"],
-    )
-    captured = capsys.readouterr()
-
-    assert result == 1
-    assert "E_CREATE_ONLY_COLLISION" in captured.err
+    with pytest.raises(ValueError, match="^E_CREATE_ONLY_ROLE_CONTRACT: owned-profession-contract/instructions-mismatch$"):
+        installer._preflight_codex_native_roles(
+            ROOT, ROOT / "src.codex/agents", agents, project / ".codex/config.toml",
+        )
+    assert role.read_bytes() == payload
+    assert installer._CreateOnlyMutablePath._identity(role) == identity
     assert _no_follow_inventory(project) == before
 
 
@@ -4319,48 +4537,84 @@ def test_global_stock_role_and_registration_priors_migrate_together(
     assert parsed["unrelated"]["value"] == "preserve-byte-exact"
 
 
-@pytest.mark.parametrize("mutation", ("role-byte", "description", "config-file", "shape"))
-def test_stock_role_or_registration_mutation_fails_before_transaction(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], mutation: str
+@pytest.mark.parametrize("mutation", ("role-byte", "description", "shape"))
+def test_stock_role_or_registration_compatible_customization_is_preserved(
+    tmp_path: Path, mutation: str,
 ) -> None:
-    """Only exact stock prior bytes/shapes are admissible before snapshots exist."""
-
+    """Compatible user controls are not stock-migration authority."""
     project = tmp_path / "project"
     project.mkdir()
     agents, config = _seed_stock_native_role_priors(project)
+    role = agents / "worker.toml"
+    seed = config.read_bytes()
+    stock_description = tomllib.loads(seed.decode())["agents"]["mechanical-scout"]["description"]
     if mutation == "role-byte":
-        role = agents / "worker.toml"
         role.write_bytes(role.read_bytes() + b"# operator mutation\n")
     elif mutation == "description":
-        config.write_bytes(
-            config.read_bytes().replace(
-                b"Read-only deterministic mechanical scout for bounded inventories and checks.",
-                b"Read-only deterministic mechanical scout for bounded inventories and checks!",
-            )
-        )
-    elif mutation == "config-file":
-        config.write_bytes(
-            config.read_bytes().replace(
-                b"agents/mechanical-worker.toml", b"agents/operator-worker.toml"
-            )
-        )
+        old = b"Read-only deterministic mechanical scout for bounded inventories and checks."
+        new = b"Read-only deterministic mechanical scout for bounded inventories and checks!"
+        assert seed.count(old) == 1 and old != new
+        changed = seed.replace(old, new)
+        assert changed != seed and new in changed
+        config.write_bytes(changed)
     else:
-        config.write_bytes(config.read_bytes() + b"extra = true\n")
+        config.write_bytes(config.read_bytes() + b"extra   = true   # operator spacing\n")
+    role_before = role.read_bytes()
+    role_identity = installer._CreateOnlyMutablePath._identity(role)
+    selected = "mechanical-scout" if mutation == "description" else "mechanical-worker"
+    selected_bytes = None
+    if mutation in ("description", "shape"):
+        header = f"[agents.{selected}]\n".encode()
+        marker = f"# operator formatting {mutation}\n".encode()
+        payload = config.read_bytes()
+        assert payload.count(header) == 1
+        payload = payload.replace(header, header + marker, 1)
+        config.write_bytes(payload)
+        start = payload.index(header)
+        end = payload.find(b"\n[", start + len(header))
+        selected_bytes = payload[start:end if end >= 0 else len(payload)]
+        assert marker in selected_bytes
+    parsed = tomllib.loads(config.read_text())["agents"]
+    selected_before = parsed[selected]
+    if mutation == "description":
+        assert selected_before["description"] != stock_description
+    if mutation == "shape":
+        assert selected_before["extra"] is True
+        assert selected_before["config_file"] == "agents/mechanical-worker.toml"
+
+    result = _run_codex_installer(project, install_hooks=False)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    registered = tomllib.loads(config.read_text())["agents"][selected]
+    if mutation in ("description", "shape"):
+        assert registered == selected_before
+        assert selected_bytes is not None and config.read_bytes().count(selected_bytes) == 1
+    if mutation == "role-byte":
+        assert role.read_bytes() == role_before
+        assert installer._CreateOnlyMutablePath._identity(role) == role_identity
+        assert tomllib.loads(config.read_text())["agents"]["worker"] == _expected_native_role_mappings()["worker"]
+    assert (agents / "analyst.toml").is_file()
+
+
+def test_stock_registration_wrong_config_file_is_rejected_without_mutation(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    agents, config = _seed_stock_native_role_priors(project)
+    payload = config.read_bytes().replace(
+        b"agents/mechanical-worker.toml", b"agents/operator-worker.toml")
+    config.write_bytes(payload)
+    parsed = tomllib.loads(payload.decode())["agents"]["mechanical-worker"]
+    assert parsed["config_file"] == "agents/operator-worker.toml"
     before = _no_follow_inventory(project)
-
-    def transaction_entered(*_args: object, **_kwargs: object) -> str:
-        raise AssertionError("transaction entered")
-
-    monkeypatch.setattr(installer._InstallTransaction, "__enter__", transaction_entered)
-    result = installer.install(
-        "codex",
-        ["--target", str(project), "--force", "--allow-unsafe-target", "--no-hypothesis-hook"],
-    )
-    captured = capsys.readouterr()
-
-    assert result == 1
-    assert "E_CREATE_ONLY_COLLISION" in captured.err
+    config_identity = installer._CreateOnlyMutablePath._identity(config)
+    result = _observe_codex_install(["--target", str(project), "--force", "--allow-unsafe-target"])
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "cause=validation-failed" in result.stderr
+    _assert_observed_validation(result, "E_CREATE_ONLY_COLLISION: agents.mechanical-worker")
+    assert config.read_bytes() == payload
+    assert installer._CreateOnlyMutablePath._identity(config) == config_identity
     assert _no_follow_inventory(project) == before
+    assert not (agents / "operator-worker.toml").exists()
 
 
 def test_stock_role_and_registration_migration_rolls_back_bytes_and_identities(
@@ -4653,7 +4907,7 @@ def test_exact_tree_post_upgrade_failure_restores_nested_readonly_snapshot(
                 installer._remove_readonly_tree(path)
 
 
-def test_readonly_historical_projection_migration_uses_transaction_safe_rename(
+def test_readonly_historical_projection_migration_preserves_platform_disposal_boundary(
     tmp_path: Path,
 ) -> None:
     anchor = tmp_path / "global-home"
@@ -4667,13 +4921,32 @@ def test_readonly_historical_projection_migration_uses_transaction_safe_rename(
     expected = installer._tree_sha256(target)
     assert expected is not None
     target.chmod(0o555)
+    transaction = installer._InstallTransaction([], enabled=False)
+    original = transaction._observe(target)
+    source_before = transaction._observe(source)
+    denied = os.name == "posix" and not os.access(target, os.W_OK)
 
     owner = installer._CreateOnlyMutablePath(
-        anchor, installer._InstallTransaction([], enabled=False), dry_run=False
+        anchor, transaction, dry_run=False
     )
-    owner.replace_exact_tree_with_projection(Path("skills") / "analyst", expected, source)
+    if denied:
+        # A retained live tree does not acquire the private-snapshot exception
+        # that would allow changing its parent permissions for child disposal.
+        with pytest.raises(installer._InstallFailure) as caught:
+            owner.replace_exact_tree_with_projection(Path("skills") / "analyst", expected, source)
+        effect = transaction._effects[-1]
+        assert caught.value.stable_id == "E_ROLLBACK_SETTLEMENT_FAILED"
+        assert caught.value.recovery_path.is_dir()
+        assert any(isinstance(member.cause_exception, PermissionError)
+                   for member in caught.value.members)
+        assert not effect.settled
+        assert transaction._observe(effect.retained) == transaction._relocate(original, target, effect.retained)
+        assert transaction._observe(target) == effect.published_state
+    else:
+        owner.replace_exact_tree_with_projection(Path("skills") / "analyst", expected, source)
 
     assert installer._projection_resolves_to(target, source)
+    assert transaction._observe(source) == source_before
     assert not (target.parent / ".analyst.projection.tmp").exists()
     assert not (target.parent / ".analyst.projection.tombstone").exists()
 
@@ -4874,7 +5147,10 @@ def test_tree_sha256_rejects_cache_symlink_before_ignoring_bytecode(
     except OSError as exc:
         pytest.skip(f"symlink unavailable: {exc}")
 
-    assert installer._tree_sha256(tree, ignore_runtime_cache=True) is None
+    with pytest.raises(ValueError, match="^E_CANONICAL_LEAD_STAGE_INVALID: reparse"):
+        installer._tree_sha256(tree, ignore_runtime_cache=True)
+    assert (cache / "validator.pyc").is_symlink()
+    assert target.read_bytes() == b"bytecode"
 
 
 def test_create_tree_omits_runtime_cache_from_fresh_materialization(
@@ -5118,6 +5394,7 @@ def test_interrupted_role_creation_rolls_back_only_created_roles(tmp_path: Path)
 
     target = tmp_path / "agents"
     target.mkdir()
+    (target / "user-note.txt").write_bytes(b"preserved unrelated user bytes")
     before = {
         path.relative_to(target).as_posix(): path.read_bytes()
         for path in target.rglob("*")
@@ -5127,7 +5404,7 @@ def test_interrupted_role_creation_rolls_back_only_created_roles(tmp_path: Path)
     try:
         transaction = installer._InstallTransaction([target], enabled=True)
         with transaction:
-            owner = installer._CreateOnlyMutablePath(target, transaction, dry_run=False)
+            owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
             installer._install_codex_native_roles(
                 ROOT,
                 ROOT / "src.codex" / "agents",
@@ -5250,35 +5527,40 @@ def test_global_home_reparse_is_rejected_with_global_stable_error(
         linked.symlink_to(actual, target_is_directory=True)
     except OSError as exc:
         pytest.skip(f"directory symlink unavailable: {exc}")
-    monkeypatch.setenv("USERPROFILE", str(linked))
-    monkeypatch.delenv("HOME", raising=False)
+    selected = "USERPROFILE" if os.name == "nt" else "HOME"
+    monkeypatch.setenv(selected, str(linked))
+    monkeypatch.delenv("HOME" if os.name == "nt" else "USERPROFILE", raising=False)
 
     with pytest.raises(ValueError, match="E_GLOBAL_HOME_REPARSE"):
         installer._resolve_global_home()
 
 
+@pytest.mark.parametrize("platform", ("nt", "posix"))
 def test_global_home_missing_matching_and_mismatch_rules(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str,
 ) -> None:
-    """Windows global mode has one explicit USERPROFILE route and no HOME fallback."""
-
+    """Exercise each environment-selection policy using real current-host paths."""
     primary = tmp_path / "primary"
     alternate = tmp_path / "alternate"
     primary.mkdir()
     alternate.mkdir()
-    monkeypatch.delenv("USERPROFILE", raising=False)
-    monkeypatch.setenv("HOME", str(primary))
-    with pytest.raises(ValueError, match="E_GLOBAL_HOME_AMBIGUOUS"):
-        installer._select_global_home_environment(
-            None, str(primary), platform="nt"
-        )
-
-    monkeypatch.setenv("USERPROFILE", str(primary))
-    assert installer._resolve_global_home() == primary
-
-    monkeypatch.setenv("HOME", str(alternate))
+    select = installer._select_global_home_environment
+    monkeypatch.setattr(installer, "_select_global_home_environment",
+                        lambda userprofile, home: select(userprofile, home, platform=platform))
+    primary_key = "USERPROFILE" if platform == "nt" else "HOME"
+    other_key = "HOME" if platform == "nt" else "USERPROFILE"
+    monkeypatch.delenv(primary_key, raising=False)
+    monkeypatch.setenv(other_key, str(primary))
     with pytest.raises(ValueError, match="E_GLOBAL_HOME_AMBIGUOUS"):
         installer._resolve_global_home()
+    monkeypatch.setenv(primary_key, str(primary))
+    assert installer._resolve_global_home() == primary
+    monkeypatch.setenv(other_key, str(alternate))
+    if platform == "nt":
+        with pytest.raises(ValueError, match="E_GLOBAL_HOME_AMBIGUOUS"):
+            installer._resolve_global_home()
+    else:
+        assert installer._resolve_global_home() == primary
 
 
 def test_canonical_skill_and_projection_matrix_is_create_only(tmp_path: Path) -> None:
@@ -5467,7 +5749,7 @@ def test_global_codex_install_uses_shared_agents_skills_root(tmp_path: Path) -> 
     home.mkdir()
     import os
 
-    env = os.environ.copy()
+    env = codex_hook_host_env(os.environ, ROOT)
     env["USERPROFILE"] = str(home)
     env["HOME"] = str(home)
     result = subprocess.run(
@@ -5482,9 +5764,7 @@ def test_global_codex_install_uses_shared_agents_skills_root(tmp_path: Path) -> 
     assert (home / ".agents" / "skills" / "lead" / "SKILL.md").is_file()
     # Codex itself may seed runtime-owned `.system` skills under CODEX_HOME;
     # Orchestrarium's role bodies must not be duplicated there.
-    assert (home / ".codex" / "skills" / "lead").resolve() == (
-        home / ".agents" / "skills" / "lead"
-    ).resolve()
+    assert not os.path.lexists(home / ".codex" / "skills" / "lead")
     assert (home / ".codex" / "agents" / "architect.toml").is_file()
 
 
@@ -5512,9 +5792,23 @@ def test_live_codex_docs_use_shared_agents_global_root() -> None:
         "$HOME/.codex/contracts",
     )
 
+    delegated_roots = {
+        "src.codex/skills/design-panel/SKILL.md": ("lead/external-dispatch.md", "external-dispatch.md"),
+        "src.codex/skills/lead/SKILL.md": ("operating-model.md", "operating-model.md"),
+        "src.codex/skills/review-loop/SKILL.md": ("external-dispatch.md", "external-dispatch.md"),
+    }
     for path in live_codex_docs:
         text = path.read_text(encoding="utf-8")
-        assert "$HOME/.agents/" in text, path.relative_to(ROOT)
+        delegation = delegated_roots.get(path.relative_to(ROOT).as_posix())
+        if delegation is None:
+            assert "$HOME/.agents/" in text, path.relative_to(ROOT)
+        else:
+            # Thin skills name their current runtime owner instead of copying
+            # its installation path. Verify both sides of that delegation.
+            reference, owner_name = delegation
+            assert reference in text, path.relative_to(ROOT)
+            owner_text = (ROOT / "src.codex/skills/lead" / owner_name).read_text(encoding="utf-8")
+            assert "$HOME/.agents/" in owner_text, owner_name
         compatibility_markers = {
             ("INSTALL.md", "~/.codex/skills"): (
                 "$HOME/.agents/skills/",
@@ -6013,11 +6307,11 @@ def test_scalar_opened_foreign_origin_is_closed_before_read_or_write(
             redirected.append(descriptor)
             return descriptor
         return real_open(path, flags, *args, **kwargs)
-    def read(descriptor):
+    def read(descriptor, **kwargs):
         metadata = os.fstat(descriptor)
         if (metadata.st_dev, metadata.st_ino) == foreign[other].python_identity[:2]:
             foreign_reads.append(True)
-        return real_read(descriptor)
+        return real_read(descriptor, **kwargs)
     monkeypatch.setattr(installer.os, "open", open_file)
     monkeypatch.setattr(installer._InstallTransaction, "_descriptor_bytes", staticmethod(read))
     primary = RuntimeError("forced scalar inverse foreign descriptor")

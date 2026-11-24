@@ -29,24 +29,54 @@ class PosixInstallationHoldTests(unittest.TestCase):
                            if isinstance(node, ast.FunctionDef) and node.name == "install")
 
     def invoke_prefix(self, host, provider, argv):
-        # Compile only argument parsing and the immediately following statement.
+        # Compile through the actual platform guard, including pure option checks.
         # No installer import, preflight, filesystem operation or dependency runs.
         prefix = copy.deepcopy(self.install)
-        prefix.body = prefix.body[:2] + [ast.Return(value=ast.Constant(CONTINUED))]
+        guard_index = self.platform_guard_index()
+        prefix.body = prefix.body[:guard_index + 1]
+        allowed_calls = {"get_client", "_parser", "_parser(provider).parse_args",
+                         "os.environ.get", "any", "vars", "vars(args).items",
+                         "print", "_installer_platform_admitted"}
+        self.assertTrue({ast.unparse(node.func) for node in ast.walk(prefix)
+                         if isinstance(node, ast.Call)} <= allowed_calls)
+        prefix.body.append(ast.Return(value=ast.Constant(CONTINUED)))
         module = ast.fix_missing_locations(ast.Module(body=[self.parser, self.admission, prefix], type_ignores=[]))
         output, error = io.StringIO(), io.StringIO()
-        scope = {"__builtins__": {"print": print}, "argparse": argparse,
-                 "os": SimpleNamespace(name=host), "sys": SimpleNamespace(stderr=error)}
+        scope = {"__builtins__": {"print": print, "any": any, "vars": vars},
+                 "argparse": argparse, "Path": Path,
+                 "os": SimpleNamespace(name=host, environ={}), "sys": SimpleNamespace(stderr=error),
+                 "get_client": lambda provider: None}
         exec(compile(module, str(SOURCE), "exec",
                      flags=__future__.annotations.compiler_flag), scope)
         with contextlib.redirect_stdout(output), contextlib.redirect_stderr(error):
             result = scope["install"](provider, argv)
         return result, output.getvalue(), error.getvalue()
 
-    def test_hold_immediately_follows_argument_parsing(self):
-        self.assertEqual(ast.unparse(self.install.body[0]),
+    def argument_parsing_index(self):
+        matches = [index for index, node in enumerate(self.install.body)
+                   if isinstance(node, ast.Assign)
+                   and any(isinstance(target, ast.Name) and target.id == "args"
+                           for target in node.targets)
+                   and isinstance(node.value, ast.Call)
+                   and isinstance(node.value.func, ast.Attribute)
+                   and node.value.func.attr == "parse_args"]
+        self.assertEqual(len(matches), 1)
+        return matches[0]
+
+    def platform_guard_index(self):
+        matches = [index for index, node in enumerate(self.install.body)
+                   if isinstance(node, ast.If)
+                   and ast.unparse(node.test) == "not _installer_platform_admitted()"]
+        self.assertEqual(len(matches), 1)
+        return matches[0]
+
+    def test_hold_follows_parsing_before_target_and_staging_operations(self):
+        parse_index = self.argument_parsing_index()
+        self.assertEqual(ast.unparse(self.install.body[parse_index]),
                          "args = _parser(provider).parse_args(argv)")
-        guard = self.install.body[1]
+        guard_index = self.platform_guard_index()
+        self.assertLess(parse_index, guard_index)
+        guard = self.install.body[guard_index]
         self.assertIsInstance(guard, ast.If)
         self.assertEqual(ast.unparse(guard.test), "not _installer_platform_admitted()")
         self.assertEqual(ast.unparse(self.admission.body[-1]), "return os.name in {'nt', 'posix'}")

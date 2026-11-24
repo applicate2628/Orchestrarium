@@ -25,7 +25,7 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-CL = REPO_ROOT / "src.claude" / "agents" / "hooks"
+CL = REPO_ROOT / 'adapters/claude' / "agents" / "hooks"
 CX = REPO_ROOT / "src.codex" / "skills" / "lead" / "hooks"
 
 MACHINE_PATH_SCRIPTS = (CL / "check-machine-local-path.py", CX / "check-machine-local-path.py")

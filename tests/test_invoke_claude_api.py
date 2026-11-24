@@ -10,7 +10,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULE = ROOT / "src.claude/agents/scripts/invoke-claude-api.py"
+MODULE = ROOT / 'adapters/claude/agents/scripts/invoke-claude-api.py'
 SPEC = importlib.util.spec_from_file_location("invoke_claude_api_test", MODULE)
 assert SPEC and SPEC.loader
 OWNER = importlib.util.module_from_spec(SPEC)

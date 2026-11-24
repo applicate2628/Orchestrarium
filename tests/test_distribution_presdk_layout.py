@@ -1,4 +1,4 @@
-"""Source-layout and memory-only runtime evidence checks for pre-SDK distribution."""
+"""Source-layout and memory-only runtime evidence checks for the SDK distribution."""
 import importlib.util
 import ast
 import sys
@@ -20,7 +20,7 @@ def load(name):
     spec.loader.exec_module(module)
     return module
 
-class PreSdkDistributionTests(unittest.TestCase):
+class SdkDistributionTests(unittest.TestCase):
     def setUp(self):
         self.builder = load("build")
         self.launcher = load("launch")
@@ -47,9 +47,9 @@ class PreSdkDistributionTests(unittest.TestCase):
                 self.assertFalse(Path(name).is_absolute())
                 self.assertTrue((ROOT / name).exists())
         selected = set(self.builder.APP_INPUTS)
-        self.assertTrue({"install.py", "scripts", "src.codex", "src.claude",
-                         "references-codex", "references-claude", "shared"} <= selected)
-        self.assertFalse({"adapters", "assets/branding"} & selected)
+        self.assertTrue({"install.py", "scripts", "src.codex", "adapters", "assets/branding",
+                         "references-codex", "shared"} <= selected)
+        self.assertFalse({"src.claude", "references-claude"} & selected)
 
     def test_qualified_evidence_bytes_are_preserved(self):
         evidence = {"schemaVersion": 2, "target": "windows-x64",
@@ -231,12 +231,12 @@ class PreSdkDistributionTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "bundle manifest"):
                     self.launcher._manifest(root)
 
-    def test_sdk_only_list_clients_is_not_an_apply_retention_exemption(self):
+    def test_list_clients_needs_no_apply_retention(self):
         with patch.object(self.launcher, "resolve_launch",
                           return_value=(Path("python"), Path("install.py"))), patch.object(
-                self.launcher, "_exec_child") as child, redirect_stderr(io.StringIO()):
-            self.assertEqual(self.launcher.main(["--list-clients"]), 2)
-            child.assert_not_called()
+                self.launcher, "_exec_child", return_value=0) as child, redirect_stderr(io.StringIO()):
+            self.assertEqual(self.launcher.main(["--list-clients"]), 0)
+            child.assert_called_once()
 
     def test_explicit_permanent_runtime_still_dispatches_existing_installer(self):
         with patch.object(self.launcher, "resolve_launch",
@@ -253,20 +253,22 @@ class RootInstallerDispatchTests(unittest.TestCase):
         code = compile(ast.fix_missing_locations(ast.Module(
             body=ast.parse("from __future__ import annotations").body + [dispatch],
             type_ignores=[])), str(ROOT / "install.py"), "exec")
-        for provider in ("codex", "claude"):
-            for arguments in ([], ["--target", "relative project"], ["--global"],
+        for no_bytecode in (False, True):
+            for provider in ("codex", "claude", "antigravity"):
+                for arguments in ([], ["--target", "relative project"], ["--global"],
                               ["--no-hypothesis-hook", "--dry-run"]):
-                with self.subTest(provider=provider, arguments=arguments):
-                    runner = Mock(return_value=SimpleNamespace(returncode=23))
-                    scope = {"ROOT": ROOT, "sys": sys,
-                             "subprocess": SimpleNamespace(run=runner)}
-                    exec(code, scope)
-                    forwarded = list(arguments)
-                    self.assertEqual(scope["_run_production"](provider, forwarded), 23)
-                    runner.assert_called_once_with([
-                        sys.executable, str(ROOT / "scripts" / f"install-{provider}.py"),
-                        *arguments])
-                    self.assertEqual(forwarded, arguments)
+                    with self.subTest(provider=provider, arguments=arguments, no_bytecode=no_bytecode):
+                        runner = Mock(return_value=SimpleNamespace(returncode=23))
+                        scope = {"ROOT": ROOT, "sys": SimpleNamespace(
+                                     executable=sys.executable, dont_write_bytecode=no_bytecode),
+                                 "subprocess": SimpleNamespace(run=runner)}
+                        exec(code, scope)
+                        forwarded = list(arguments)
+                        self.assertEqual(scope["_run_production"](provider, forwarded), 23)
+                        runner.assert_called_once_with([
+                            sys.executable, *(["-B"] if no_bytecode else []),
+                            str(ROOT / "scripts" / "install-client.py"), "--client", provider, *arguments])
+                        self.assertEqual(forwarded, arguments)
 
 if __name__ == "__main__":
     unittest.main()

@@ -22,11 +22,12 @@ TARGETS = {
     'macos-x64': 'bin/python3', 'macos-arm64': 'bin/python3',
     'windows-x64': 'python.exe', 'windows-arm64': 'python.exe',
 }
-APP_INPUTS = ('install.py', 'scripts', 'src.codex', 'src.claude', 'shared',
-              'references-codex', 'references-claude', 'docs', 'README.md',
+APP_INPUTS = ('install.py', 'scripts', 'src.codex', 'adapters', 'shared',
+              'references-codex', 'docs', 'README.md',
               'INSTALL.md', 'RELEASE_NOTES.md', 'LICENSE', 'AGENTS.md', 'CLAUDE.md',
-              'pyproject.toml')
+              'pyproject.toml', 'assets/branding')
 IGNORE = shutil.ignore_patterns('__pycache__', '*.pyc', '.DS_Store')
+
 PYTHON_PACKAGE_DIRS = frozenset({'site-packages', 'dist-packages'})
 RUNTIME_PROFILE = 'cpython-stdlib-only'
 ACTIVE_DISTRIBUTION_FILES = frozenset({'build.py', 'launch.py', 'README.md', 'notices'})
@@ -71,7 +72,7 @@ def _validate_tree(path: Path, boundary: Path, *, runtime: bool = False, ignore=
                 and (not stat.S_ISDIR(metadata.st_mode) or any(path.iterdir())))
                 or name.endswith(('.dist-info', '.egg-info', '.pth'))
                 or name == 'pyvenv.cfg'):
-            raise ValueError('The pre-SDK runtime profile does not admit third-party package content')
+            raise ValueError('The CPython standard-library runtime profile does not admit third-party package content')
     if stat.S_ISLNK(metadata.st_mode):
         target = path.resolve(strict=True)
         if not target.is_relative_to(boundary):

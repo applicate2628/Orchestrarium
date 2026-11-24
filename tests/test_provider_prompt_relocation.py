@@ -13,7 +13,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 ROOT_OWNER = ROOT / "scripts" / "provider_prompt.py"
-CLAUDE_SCRIPTS = ROOT / "src.claude" / "agents" / "scripts"
+CLAUDE_SCRIPTS = ROOT / 'adapters/claude' / "agents" / "scripts"
 
 
 def test_root_is_the_only_authored_transport_owner() -> None:
@@ -63,11 +63,23 @@ def test_ledger_source_pairing_ignores_a_cwd_owner(tmp_path, monkeypatch):
     assert Path(module._ledger_owner().__file__).samefile(ROOT / 'scripts/agent-run-ledger.py')
 
 
+
+def _remove_test_directory_link(path: Path) -> None:
+    # POSIX directory symlinks unlink; Windows junctions use rmdir.
+    if path.is_symlink():
+        path.unlink()
+    elif sys.platform == "win32" and path.is_junction():
+        path.rmdir()
+    else:
+        # Preserve the ordinary selected tree while simulating replacement.
+        path.rename(path.with_name(path.name + '-retained'))
+
+
 def _ledger_project_scope(tmp_path, *, provider_target=None):
     from test_legacy_obligation_migration import make_directory_link
     base = tmp_path / 'scope'
-    canonical = base / '.agents/skills/lead'
     provider_root = base / '.claude' if provider_target is None else provider_target
+    canonical = provider_root / 'skills/lead'
     assert provider_root.parent == base
     marker = tmp_path / 'selected-ledger-executed'
     for relative in ('scripts/agent-run-ledger.py', 'scripts/validate-work-item-state.py',
@@ -84,8 +96,7 @@ def _ledger_project_scope(tmp_path, *, provider_target=None):
     peer.parent.mkdir(parents=True)
     peer.write_bytes(ROOT_OWNER.read_bytes())
     projection = provider_root / 'skills/lead'
-    projection.parent.mkdir(parents=True)
-    make_directory_link(projection, canonical)
+    assert projection == canonical and projection.is_dir()
     module = _load_owner(peer, 'projection_bound_ledger_' + str(id(tmp_path)))
     return module, base, canonical, projection, marker
 
@@ -107,10 +118,41 @@ def test_ledger_binding_retains_actual_installer_target_spelling(tmp_path, monke
     assert binding is not None
     # Compare actual path objects' spelling: WindowsPath equality casefolds.
     assert [os.fspath(row[0]) for row in binding.roots] == [
-        os.fspath(base / '.agents'), os.fspath(target / 'agents'), os.fspath(target / 'skills'),
+        os.fspath(target / 'skills'), os.fspath(target / 'agents'),
     ]
     assert binding.helper.samefile(canonical / 'scripts/agent-run-ledger.py')
     binding.assert_current()
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize('preparation', ['spec_from_file_location', 'module_from_spec'])
+def test_ledger_import_rechecks_selected_binding_before_code(tmp_path, monkeypatch, preparation):
+    import shutil
+    from test_legacy_obligation_migration import make_directory_link
+    module, base, canonical, projection, marker = _ledger_project_scope(tmp_path)
+    monkeypatch.setattr(Path, 'home', classmethod(lambda cls: base))
+    skills = base / '.claude/skills'
+    backing = tmp_path / 'selected-skills'
+    skills.rename(backing)
+    make_directory_link(skills, backing)
+    replacement = tmp_path / 'replacement-skills'
+    shutil.copytree(backing, replacement)
+    prepare = getattr(module.importlib.util, preparation)
+    reached = []
+
+    def prepare_then_retarget(*args, **kwargs):
+        result = prepare(*args, **kwargs)
+        name = args[0] if preparation == 'spec_from_file_location' else args[0].name
+        if name == '_provider_paired_ledger_owner':
+            _remove_test_directory_link(skills)
+            make_directory_link(skills, replacement)
+            reached.append(True)
+        return result
+
+    monkeypatch.setattr(module.importlib.util, preparation, prepare_then_retarget)
+    with pytest.raises(ValueError, match='WI-LEDGER-RESOURCE-DRIFT'):
+        module._ledger_owner()
+    assert reached == [True]
     assert not marker.exists()
 
 
@@ -123,7 +165,7 @@ def test_ledger_projection_witness_survives_until_actual_use(tmp_path, monkeypat
     unrelated = tmp_path / 'unrelated-lead'
     unrelated.mkdir()
     before = projection.resolve(strict=True)
-    projection.rmdir()
+    _remove_test_directory_link(projection)
     make_directory_link(projection, unrelated)
     assert projection.resolve(strict=True) != before
     monkeypatch.setattr(module, '_ledger_helper_binding', lambda: selected)
@@ -153,7 +195,7 @@ def test_ledger_projection_is_rechecked_before_canonical_bootstrap(tmp_path, mon
     def read_then_retarget(path):
         payload = read(path)
         if path == authority:
-            projection.rmdir()
+            _remove_test_directory_link(projection)
             make_directory_link(projection, unrelated)
             reached.append(True)
         return payload
@@ -171,7 +213,7 @@ def test_ledger_initial_wrong_projection_and_unrelated_file_do_not_change_scope(
     selected.assert_current()
     unrelated = tmp_path / 'unrelated-lead'
     unrelated.mkdir()
-    projection.rmdir()
+    _remove_test_directory_link(projection)
     make_directory_link(projection, unrelated)
     assert module.ledger_helper() is None
     with pytest.raises(ValueError, match='WI-LEDGER-RESOURCE-MISSING'):
@@ -198,17 +240,22 @@ def test_ledger_ambiguous_global_module_association_refuses_before_code(tmp_path
 def test_global_ledger_owner_binds_distinct_logical_backings(tmp_path, monkeypatch):
     import os
     import shutil
-    from test_provider_prompt_projections import _load_installer, _linked_global_claude, _linked_global_canonical_agents
+    from test_provider_prompt_projections import _load_installer, _linked_global_claude
     installer = _load_installer()
     logical, peer_backing = _linked_global_claude(tmp_path, monkeypatch, installer)
-    agents, canonical_backing = _linked_global_canonical_agents(tmp_path, logical.parent)
+    skills = logical / 'skills'
+    canonical_backing = peer_backing / 'skills'
+    # The selected Claude runtime is independent of Codex. Give its ordinary
+    # installed copy a separate global runtime backing before binding the reader.
+    skills.rename(canonical_backing)
+    os.symlink(canonical_backing, skills, target_is_directory=True)
     marker = tmp_path / 'peer-bootstrap-executed'
     (peer_backing / 'agents/scripts/linked_runtime_subroots.py').write_text(
         f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\n", encoding='utf-8')
-    expected = canonical_backing / 'skills/lead/scripts/agent-run-ledger.py'
+    expected = canonical_backing / 'lead/scripts/agent-run-ledger.py'
     for index, module_path in enumerate((logical / 'agents/scripts/provider_prompt.py',
             peer_backing / 'agents/scripts/provider_prompt.py',
-            agents / 'skills/lead/scripts/provider_prompt.py')):
+            skills / 'lead/scripts/provider_prompt.py')):
         module = _load_owner(module_path, 'linked_ledger_owner_' + str(index))
         assert module.ledger_helper().samefile(expected)
         assert Path(module._ledger_owner().__file__).samefile(expected)
@@ -229,7 +276,7 @@ def test_current_claude_missing_canonical_member_never_uses_peer_or_cwd(tmp_path
     target = tmp_path / 'target'
     target.mkdir()
     assert installer.install('claude', ['--target', str(target), '--force', '--allow-unsafe-target', '--no-hypothesis-hook']) == 0
-    (target / '.agents/skills/lead/scripts' / missing).unlink()
+    (target / '.claude/skills/lead/scripts' / missing).unlink()
     decoy = tmp_path / 'cwd/scripts'
     decoy.mkdir(parents=True)
     marker = tmp_path / 'cwd-ledger-executed'
@@ -249,17 +296,19 @@ def test_current_claude_missing_canonical_member_never_uses_peer_or_cwd(tmp_path
 def test_ledger_global_link_drift_is_checked_at_actual_use(tmp_path, monkeypatch, use):
     import shutil
     import os
-    from test_provider_prompt_projections import _load_installer, _linked_global_claude, _linked_global_canonical_agents
+    from test_provider_prompt_projections import _load_installer, _linked_global_claude
     installer = _load_installer()
-    logical, _peer_backing = _linked_global_claude(tmp_path, monkeypatch, installer)
-    agents, backing = _linked_global_canonical_agents(tmp_path, logical.parent)
+    logical, peer_backing = _linked_global_claude(tmp_path, monkeypatch, installer)
+    skills, backing = logical / 'skills', peer_backing / 'skills'
+    skills.rename(backing)
+    os.symlink(backing, skills, target_is_directory=True)
     replacement = tmp_path / 'replacement-agents'
     shutil.copytree(backing, replacement)
     module = _load_owner(logical / 'agents/scripts/provider_prompt.py', 'ledger_binding_drift_' + use)
     reached, executed = [], []
     def retarget():
-        agents.unlink()
-        os.symlink(replacement, agents, target_is_directory=True)
+        skills.unlink()
+        os.symlink(replacement, skills, target_is_directory=True)
         reached.append(True)
     if use == 'inprocess':
         original = module.importlib.util.spec_from_file_location
@@ -464,8 +513,8 @@ def test_canonical_scope_preserves_ordinary_descendant_guard(tmp_path, monkeypat
 
 @pytest.mark.parametrize("provider,model,effort,allowed,needs", [
     ("codex", "gpt-6.1-terra", "medium", True, False),
-    ("codex", "gpt-6-astra", "high", True, True),
-    ("codex", "gpt-6-astra", "max", True, True),
+    ("codex", "gpt-6.2-astra", "high", True, True),
+    ("codex", "gpt-6.2-astra", "max", True, True),
     ("claude", "opus", "max", True, True),
     ("kimi", "kimi-code/k3", "max", True, True),
     ("codex", "gpt-6.1-terra", "low", False, False),
@@ -479,7 +528,7 @@ def test_shared_model_launch_requirements_and_single_assertion(provider, model, 
     assert required is needs
     assert (policy.qualify_launch(provider, model, effort, user_approved_launch=True) is None) is allowed
     assert (policy.qualify_launch(provider, model, effort) is None) is (allowed and not needs)
-    if provider == "codex" and model == "gpt-6-astra" and effort == "high":
+    if provider == "codex" and model == "gpt-6.2-astra" and effort == "high":
         assert policy.qualify_launch(provider, model, effort, user_approved_max=True) is not None
 
 
@@ -488,7 +537,7 @@ def test_actual_managed_launch_guard_precedes_receipt_and_keeps_control_local(mo
     owner = _load_owner(ROOT_OWNER, "managed_actual_launch_guard")
     flags = ["--user-approved-launch"] if approved else []
     argv = ["fixture", "--terminal-receipt", "synthetic-receipt.json", "--ledger-role", "backend-engineer", *flags,
-            "--", "--model", "gpt-6-astra", "-c", "model_reasoning_effort=high"]
+            "--", "--model", "gpt-6.2-astra", "-c", "model_reasoning_effort=high"]
     messages = []
     class ReachedReceipt(Exception): pass
     def reserve(*args): raise ReachedReceipt()
@@ -523,7 +572,7 @@ def test_policy_companion_stays_beside_logical_file_link(tmp_path):
     owner = _load_owner(owner_file, "logical_companion_test")
     policy = owner._load_model_launch_policy()
     assert Path(policy.__file__) == companion
-    assert policy.qualify_launch("codex", "gpt-6.1-sol", "high") is None
+    assert policy.qualify_launch("codex", "gpt-6.2-sol", "high") is None
 
 
 def test_kimi_namespace_is_forwarded_at_actual_nonmaintenance_edge(monkeypatch, tmp_path):
@@ -587,7 +636,7 @@ def test_real_public_launcher_import_reaches_shared_guard_in_selected_namespace(
             pytest.skip("Owned file link unavailable: " + type(error).__name__)
     assert not (logical / "resolve-agents-mode.py").exists()
     receipt = tmp_path / "receipt.json"
-    flags = (["--model", "gpt-6-astra", "-c", "model_reasoning_effort=high"] if provider == "codex"
+    flags = (["--model", "gpt-6.2-astra", "-c", "model_reasoning_effort=high"] if provider == "codex"
              else ["-p", "--output-format", "text", "--model", "opus", "--effort", "max"])
     result = subprocess.run([sys.executable, "-B", "-X", "utf8", str(wrapper), "fixture",
         "--terminal-receipt", str(receipt), "--ledger-role", "backend-engineer", "--", *flags],
@@ -611,7 +660,12 @@ def test_policy_route_is_current_before_captured_payload_executes(tmp_path, monk
         "def launch_requirements(*args, **kwargs): return None, False\n"
         "def qualify_launch(*args, **kwargs): return None\n", encoding="utf8")
     try:
-        script.symlink_to(ROOT / "scripts" / script.name)
+        if kind == "R":
+            # Resolver companions belong to its selected physical package.
+            # Keep the raced companion beside a fixture-owned physical module.
+            script.write_bytes((ROOT / "scripts" / script.name).read_bytes())
+        else:
+            script.symlink_to(ROOT / "scripts" / script.name)
         selected.symlink_to(good)
     except OSError as error:
         pytest.skip("Owned supported-link fixture unavailable: " + type(error).__name__)
@@ -634,14 +688,15 @@ def test_policy_route_is_current_before_captured_payload_executes(tmp_path, monk
             "scientific-software-engineer", "engineering",
             {"explicitModelControl": True, "explicitReasoningEffortControl": True}, repo_root=ROOT)
         assert description["status"] == "available"
-        inputs = dict(requested_model="gpt-6-astra", requested_effort="high",
+        inputs = dict(requested_model="gpt-6.2-astra", requested_effort="high",
             caller_rationale="Synthetic selected-route/currentness probe; no actual model launch.",
+            preference_deviation_reason="Exercise an admitted nondefault profile at the selected policy boundary.",
             approved_execution_scope={"scope": "owned fixture only"})
     else:
         monkeypatch.setattr(owner.TerminalReceiptV1, "reserve", no_receipt)
         monkeypatch.setattr(owner, "fail", lambda message: messages.append(message) or 1)
         argv = ["fixture", "--terminal-receipt", str(tmp_path / "unused-receipt.json"),
-            "--ledger-role", "backend-engineer", "--", "--model", "gpt-6-astra",
+            "--ledger-role", "backend-engineer", "--", "--model", "gpt-6.2-astra",
             "-c", "model_reasoning_effort=high"]
     with monkeypatch.context() as seam:
         if retarget:
@@ -656,7 +711,8 @@ def test_policy_route_is_current_before_captured_payload_executes(tmp_path, monk
         reason = result["configurationDiagnostic"]["reason"]
         assert reason == ("selected-companion-unavailable" if retarget else "individual-launch-approval-required")
         if not retarget:
-            assert owner.resolve_ordinary_native_dispatch(description, user_approved_launch=True, **inputs)["status"] == "resolved"
+            resolved = owner.resolve_ordinary_native_dispatch(description, user_approved_launch=True, **inputs)
+            assert resolved["status"] == "resolved", resolved
     else:
         assert result == 1
         expected = "E_MODEL_LAUNCH_POLICY_UNAVAILABLE" if retarget else "E_MODEL_LAUNCH_POLICY_DENIED"

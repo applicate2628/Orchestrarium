@@ -64,7 +64,7 @@ from unittest import mock
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CANONICAL_SCANNER = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-publication-safety.py"
 CODEX_SCANNER = REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-publication-safety.py"
-CLAUDE_SCANNER = REPO_ROOT / "src.claude" / "agents" / "scripts" / "check-publication-safety.py"
+CLAUDE_SCANNER = REPO_ROOT / 'adapters/claude' / "agents" / "scripts" / "check-publication-safety.py"
 CODEX_REF = REPO_ROOT / "src.codex" / "skills" / "lead" / "hooks" / "check-machine-local-path.py"
 PUSH_GATE = REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-git-push-gate.py"
 SCANNERS = (CODEX_SCANNER, CLAUDE_SCANNER)
@@ -2169,6 +2169,114 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             self.assertIn("subjects=2", out)
             self.assertIn("paths=2", out)
 
+    def test_value_keyword_prefilter_preserves_matching_observations(self) -> None:
+        module = _load_canonical_scanner("_scanner_ascii_keyword_prefilter")
+        class WithoutPrefilter(str):
+            def isascii(self):
+                return False
+        lines = ["ordinary prose without credential assignments", "x" * 4096,
+                 "Unicode \u0131 \u0130 \u017f \u212a"]
+        for family in ("password", "secret", "token", "api_key", "api-key", "ApiKey"):
+            for spelling in (family, family.upper(), family.title()):
+                lines.extend([spelling + " = 'synthetic" + "123456value'",
+                              spelling + " = callable_name()",
+                              "prefix_" + spelling + " = 'synthetic" + "123456value'"])
+        lines.extend(["ap\u0131_key = 'synthetic" + "123456value'",
+                      "pa\u017f\u017fword = 'synthetic" + "123456value'"])
+        def observed(line, binary):
+            return [(row.family, row.leaf_index, row.match.span(), row.match.groups())
+                    for row in module._line_observations(line, 2, 5, "history-blob", binary=binary)]
+        for line in lines:
+            for binary in (False, True):
+                with self.subTest(line=line, binary=binary):
+                    self.assertEqual(observed(line, binary), observed(WithoutPrefilter(line), binary))
+
+    def test_selected_history_budget_preserves_object_and_time_bounds(self) -> None:
+        with mock.patch.dict(os.environ):
+            os.environ.pop("ORCHE_PUBLICATION_SCAN_SECONDS", None)
+            module = _load_canonical_scanner("_scanner_selected_history_budget")
+        self.assertEqual(module._MAX_BLOBS, 50_000)
+        self.assertEqual(module._MAX_PATH_BYTES, 4_096)
+        self.assertEqual(module._MAX_BLOB_BYTES, 64 * 1024 * 1024)
+        self.assertEqual(module._SCAN_DEADLINE_SECONDS, 240.0)
+        for seconds in ("240", "900", "3600"):
+            with self.subTest(seconds=seconds), mock.patch.dict(
+                os.environ, {"ORCHE_PUBLICATION_SCAN_SECONDS": seconds},
+            ):
+                self.assertEqual(module._publication_scan_budget_seconds(), float(seconds))
+        for seconds in ("239", "3601", "900.0"):
+            with self.subTest(seconds=seconds), mock.patch.dict(
+                os.environ, {"ORCHE_PUBLICATION_SCAN_SECONDS": seconds},
+            ):
+                with self.assertRaises(ValueError):
+                    module._publication_scan_budget_seconds()
+        # Exact path coverage is indexed on disk, independently of unique
+        # blob count; per-object bytes and the shared deadline still bound work.
+        with contextlib.closing(module.sqlite3.connect("")) as db:
+            index = module._HistoryIndex(db)
+            index.add_blob("blob", 1, b"digest", False)
+            for path in (b"first", b"second", b"third"):
+                self.assertTrue(index.add(("owner", path, "blob"), "100644"))
+            subjects, paths = index.seal()
+            self.assertEqual(index.blob_count, 1)
+            self.assertEqual((len(subjects), len(paths)), (3, 3))
+
+    def test_blob_limits_are_inclusive_and_receipt_counts_only_unique_objects(self) -> None:
+        module = _load_canonical_scanner("_scanner_aggregate_budget_boundary")
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            payloads = {"a.txt": b"shared clean\n", "b.txt": b"shared clean\n",
+                        "c.txt": b"distinct clean\n"}
+            for name, payload in payloads.items():
+                (repo / name).write_bytes(payload)
+            subprocess.run([_git(), "-C", str(repo), "add", "."], check=True, capture_output=True)
+            subprocess.run([_git(), "-C", str(repo), "commit", "-qm", "budget boundary"],
+                           check=True, capture_output=True)
+            total = sum(map(len, set(payloads.values())))
+            finder = module._path_finder(CANONICAL_SCANNER)
+            largest = max(map(len, payloads.values()))
+            for budget, cap, reason in (
+                ("_MAX_BLOB_BYTES", largest - 1, "blob-bytes"),
+                ("_MAX_BLOBS", 1, "blob-count"),
+            ):
+                with self.subTest(budget=budget), contextlib.chdir(repo), mock.patch.object(module, budget, cap):
+                    outcome = module._scan_range("origin", "refs/heads/main", finder, source_revision="HEAD")
+                    self.assertEqual(outcome.kind, "refusal")
+                    self.assertEqual(outcome.refusal.failure_id, "PS-MSG-LIMIT")
+                    self.assertEqual(outcome.refusal.reason, reason)
+            with (contextlib.chdir(repo), mock.patch.object(module, "_MAX_BLOB_BYTES", largest),
+                  mock.patch.object(module, "_MAX_BLOBS", 2)):
+                outcome = module._scan_range("origin", "refs/heads/main", finder, source_revision="HEAD")
+            self.assertEqual(outcome.kind, "clean")
+            self.assertEqual(outcome.history.blob_bytes, total)
+            self.assertEqual(len(outcome.history.blob_ids), 2)
+            self.assertEqual(len(outcome.history.subjects), 3)
+
+    def test_history_blob_changed_between_acquisition_and_scan_refuses(self) -> None:
+        module = _load_canonical_scanner("_scanner_history_blob_reread")
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            self._commit_file(repo, "body.txt", "clean original")
+            blob = subprocess.check_output([_git(), "-C", str(repo), "rev-parse", "HEAD:body.txt"]).decode().strip()
+            rereads = []
+            class ChangedReader(module._AsyncGitObjectReader):
+                async def read(self, oid, expected_type, *, scan_deadline=None):
+                    result = await super().read(oid, expected_type, scan_deadline=scan_deadline)
+                    if oid == blob and not isinstance(result, module.Refusal):
+                        rereads.append(oid)
+                        if len(rereads) == 2:
+                            return dataclasses.replace(result, raw=b"clean modified\n")
+                    return result
+            with contextlib.chdir(repo):
+                outcome = asyncio.run(module._scan_range_async(
+                    "origin", "refs/heads/main", module._path_finder(CANONICAL_SCANNER),
+                    source_revision="HEAD", reader_factory=ChangedReader,
+                ))
+            self.assertEqual(len(rereads), 2)
+            self.assertEqual(outcome.kind, "refusal")
+            self.assertEqual(outcome.refusal.failure_id, "PS-MSG-COVERAGE")
+            self.assertEqual(outcome.refusal.reason, "object-content-identity")
+
     def test_range_mode_same_raw_path_with_two_blobs_binds_two_detector_paths(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = self._init_range_repo(Path(td))
@@ -2373,6 +2481,7 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
         approved = (
             "scripts/universal-hooks/scripts/check-publication-safety.py",
             "src.codex/skills/lead/scripts/check-publication-safety.py",
+            "adapters/claude/agents/scripts/check-publication-safety.py",
             "src.claude/agents/scripts/check-publication-safety.py",
             "adapters/claude/agents/scripts/check-publication-safety.py",
         )
@@ -2384,20 +2493,47 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
                 self.assertEqual(rc, 0, out + err)
                 self.assertIn("receipt=v3", out)
 
+    def test_historical_scanner_catalog_exemption_is_history_only(self) -> None:
+        module = _load_canonical_scanner("_scanner_historical_catalog")
+        historical = "src.claude/agents/scripts/check-publication-safety.py"
+        catalog = _join('re.compile(r"BEGIN PRIVATE', ' KEY"),')
+        leak = "pass" + "word" + ": hunter2"
+
+        for kind in ("history-blob", "git-object-blob"):
+            with self.subTest(kind=kind):
+                self.assertFalse(module._content_hits(
+                    catalog, historical, lambda _line: (), subject_kind=kind,
+                ))
+                for path, content in (
+                    ("decoy/check-publication-safety.py", catalog),
+                    (historical, catalog + " # " + leak),
+                    (historical, catalog + "\n" + leak),
+                ):
+                    with self.subTest(path=path, content_kind="catalog or synthetic leak"):
+                        self.assertTrue(module._content_hits(
+                            content, path, lambda _line: (), subject_kind=kind,
+                        ))
+
+        for kind in ("tracked-blob", "path-blob", "commit-message", "tag-annotation"):
+            with self.subTest(kind=kind):
+                self.assertTrue(module._content_hits(
+                    catalog, historical, lambda _line: (), subject_kind=kind,
+                ))
+
     def test_claude_history_handover_is_not_a_whole_source_exemption(self) -> None:
         module = _load_canonical_scanner("_scanner_qualified_source_handover")
-        current = "src.claude/agents/scripts/check-publication-safety.py"
-        incoming = "adapters/claude/agents/scripts/check-publication-safety.py"
+        current = "adapters/claude/agents/scripts/check-publication-safety.py"
+        historical = "src.claude/agents/scripts/check-publication-safety.py"
         catalog = _join('re.compile(r"BEGIN RSA PRIVATE', ' KEY"),')
         ordinary = _join("pass", "word: hunter2")
-        for path in (current, incoming):
+        for path in (current, historical):
             with self.subTest(path=path):
                 self.assertEqual(list(module._selected_text_lines(catalog, path, "history-blob")), [])
                 self.assertTrue(list(module._selected_text_lines(catalog, path, "commit-message")))
                 self.assertTrue(
                     module._content_hits(ordinary, path, lambda _line: (), subject_kind="history-blob")
                 )
-        self.assertTrue(list(module._selected_text_lines(catalog, incoming, "tracked-blob")))
+        self.assertTrue(list(module._selected_text_lines(catalog, historical, "tracked-blob")))
 
     def test_bounded_oid_reader_refuses_count_bytes_and_deadline(self) -> None:
         module = _load_canonical_scanner("_scanner_v3_oid_stream")
@@ -6020,6 +6156,22 @@ class TestPublicationSafetyScannerEarlyRefusalCleanup(unittest.TestCase):
 
 class TestReviewedCandidateProjection(unittest.TestCase):
     """Detector identity and projection checks; no reviewer authority is minted."""
+
+    def setUp(self):
+        # Standalone policy imports must not occupy the next captured scan's
+        # reserved module slots. Restore only these test-owned import effects.
+        missing = object()
+        before = {name: sys.modules.get(name, missing) for name in (
+            "_orchestrarium_publication_review_policy_v1",
+            "_orchestrarium_linked_runtime_subroots_v1",
+        )}
+        def restore():
+            for name, value in before.items():
+                if value is missing:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = value
+        self.addCleanup(restore)
 
     def _owners(self):
         scanner = _load_canonical_scanner("_reviewed_candidate_projection")

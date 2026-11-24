@@ -141,8 +141,9 @@ def unsettled_launch_run_ids(item: Path, context: Any, validator: Any) -> set[st
         context=context,
         )
     )
-    if validity_errors:
-        return set()
+    # The owner already withholds invalid launch authority. An unrelated row's
+    # diagnostic must not hide a qualified open launch from stale reporting.
+    # command_check retains these diagnostics through full item validation.
     return {
         run_id
         for event in open_launches

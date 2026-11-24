@@ -37,9 +37,9 @@ def write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def run_validator(work_item: Path) -> subprocess.CompletedProcess[str]:
+def run_validator(work_item: Path, *resource_args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, str(VALIDATOR), "--work-item", str(work_item)],
+        [sys.executable, str(VALIDATOR), "--work-item", str(work_item), *resource_args],
         cwd=ROOT,
         text=True,
         stdout=subprocess.PIPE,
@@ -578,9 +578,14 @@ def test_v3_decoder_enforces_utf8_depth_and_event_count_bounds(tmp_path: Path) -
         item / "agent-runs.jsonl",
         repeated * (validator.MAX_LEDGER_EVENTS + 1),
     )
-    result = run_validator(item)
+    # Public omission derives admission from the selected input. An explicit
+    # positive pair, not the old diagnostic default, is the hard ceiling.
+    result = run_validator(
+        item, "--ledger-max-events", str(validator.MAX_LEDGER_EVENTS),
+        "--ledger-max-bytes", str(len(repeated.encode("utf-8")) * (validator.MAX_LEDGER_EVENTS + 1) + 1024),
+    )
     assert result.returncode == 1
-    assert "ledger exceeds bounded event count" in result.stdout
+    assert "WI-LEDGER-RESOURCE-INCOMPLETE" in result.stdout
 
 
 def test_raw_v1_v2_are_readable_but_do_not_create_v3_authorization() -> None:
@@ -1089,12 +1094,12 @@ def test_obligations_json_incomplete_acquisition_is_null(tmp_path, suffix, cause
     assert any(cause in value for value in payload["diagnostics"])
 
 
-def test_load_jsonl_count_limit_records_incomplete_in_same_pass(tmp_path, monkeypatch):
+def test_load_jsonl_count_limit_records_incomplete_in_same_pass(tmp_path):
     module = load_validator_module()
-    monkeypatch.setattr(module, "MAX_LEDGER_EVENTS", 1)
     observed = []
     errors = []
-    events = module.load_jsonl(tmp_path / "unused", errors, source_bytes=b'{}\n{}\n', ledger_acquisition_complete_out=observed)
+    events = module.load_jsonl(tmp_path / "unused", errors, source_bytes=b'{}\n{}\n', ledger_acquisition_complete_out=observed,
+        ledger_resource_budget=module.LedgerResourceBudgetV1(1, 6))
     assert events == [] and observed == [False]
     assert any("bounded event count" in value for value in errors)
 
@@ -1108,6 +1113,76 @@ def test_obligations_json_approved_ledger_free_is_explicit(tmp_path, resource_ar
     assert payload["result"] == "PASS" and payload["diagnostics"] == []
     assert payload["ledgerSha256"] is None
     assert payload["obligations"] == {"openLaunches": [], "openRevises": [], "unresolvedHistory": []}
+
+
+@pytest.mark.parametrize("candidate", [False, True], ids=["staged", "candidate"])
+def test_obligations_absence_does_not_admit_required_ledgers(tmp_path, candidate):
+    module = load_validator_module()
+    write(tmp_path / "status.md", minimal_quick_fix_status() if candidate else minimal_staged_status())
+    selected = tmp_path / "agent-runs.jsonl"
+    observed = module._obligations_observation(tmp_path, selected if candidate else None, True, {})
+    assert observed["result"] == "FAIL" and observed["obligations"] is None
+    assert observed["selection"] == ("candidate" if candidate else "live")
+    assert any("missing ledger:" in value for value in observed["diagnostics"])
+    # The observation-only absence route must not change generic capture errors.
+    with pytest.raises(ValueError, match="WI-LEDGER-RESOURCE-DRIFT"):
+        module.read_ledger_bytes(selected)
+
+
+@pytest.mark.parametrize("failure", [
+    "directory", "dangling-link", "unreadable", "capture-drift", "present-disappears",
+    "absence-appears", "parent-replaced",
+])
+def test_obligations_absence_preserves_physical_acquisition_failures(tmp_path, monkeypatch, failure):
+    module = load_validator_module()
+    owner = module.load_lifecycle_owner()
+    item, captured = _selection_revise_fixture(tmp_path)
+    ledger = item / "agent-runs.jsonl"
+    if failure == "directory":
+        ledger.mkdir()
+    elif failure == "dangling-link":
+        try:
+            ledger.symlink_to(item / "missing-target")
+        except (OSError, NotImplementedError):
+            pytest.skip("host does not support creating synthetic symbolic links")
+    elif failure in {"unreadable", "capture-drift", "present-disappears"}:
+        ledger.write_bytes(captured)
+        if failure == "unreadable":
+            original = owner._open_readonly_nofollow
+            def refuse_selected(path):
+                if path == ledger:
+                    raise PermissionError("synthetic unreadable selected ledger")
+                return original(path)
+            monkeypatch.setattr(owner, "_open_readonly_nofollow", refuse_selected)
+        elif failure == "capture-drift":
+            original = owner._capture_file_snapshot
+            def drift_selected(path, **kwargs):
+                if path == ledger:
+                    raise owner.LifecycleError("WI-LEDGER-RESOURCE-DRIFT", "synthetic selected capture drift")
+                return original(path, **kwargs)
+            monkeypatch.setattr(owner, "_capture_file_snapshot", drift_selected)
+        else:
+            original = module.read_ledger_bytes
+            def remove_before_capture(path, *args, **kwargs):
+                if path == ledger:
+                    ledger.unlink()
+                return original(path, *args, **kwargs)
+            monkeypatch.setattr(module, "read_ledger_bytes", remove_before_capture)
+    else:
+        original = owner._record_project_absence_at
+        def change_after_absence(path, evidence, failure_id):
+            original(path, evidence, failure_id)
+            if path == ledger:
+                if failure == "absence-appears":
+                    ledger.write_bytes(captured)
+                else:
+                    item.rename(item.with_name("retained-original"))
+                    write(item / "status.md", minimal_quick_fix_status())
+        monkeypatch.setattr(owner, "_record_project_absence_at", change_after_absence)
+    observed = module._obligations_observation(item, None, True, {})
+    assert observed["result"] == "FAIL" and observed["obligations"] is None, observed
+    assert observed["selection"] == "live" and observed["ledgerSha256"] is None
+    assert any("WI-LEDGER-RESOURCE-DRIFT" in value for value in observed["diagnostics"])
 
 
 @pytest.mark.parametrize("explicit_budget", [False, True], ids=["omitted", "finite"])
@@ -1134,6 +1209,7 @@ def test_ledger_disappearance_after_initial_presence_is_not_absence(tmp_path, mo
     assert observed["result"] == "FAIL" and observed["selection"] == "live", observed
     assert observed["obligations"] is None and observed["ledgerSha256"] is None
     assert any("WI-LEDGER-RESOURCE-DRIFT" in error for error in observed["diagnostics"])
+
 
 
 def _selection_revise_fixture(tmp_path):
@@ -1181,12 +1257,12 @@ def test_selected_api_read_failure_is_not_successful_empty_acquisition(tmp_path,
     item, captured = _selection_revise_fixture(tmp_path)
     selected = item / "agent-runs.jsonl"
     selected.write_bytes(captured)
-    original = module.read_ledger_bytes
+    original = module._read_ledger_image
     def fail_selected(path, *args, **kwargs):
-        if path == selected:
+        if path == selected and kwargs.get("source_bytes") is None:
             raise OSError("controlled selected acquisition failure")
         return original(path, *args, **kwargs)
-    monkeypatch.setattr(module, "read_ledger_bytes", fail_selected)
+    monkeypatch.setattr(module, "_read_ledger_image", fail_selected)
     acquired = []
     errors = module.validate_work_item(item, ledger_acquisition_complete_out=acquired)
     assert any("cannot read ledger:" in value and "controlled selected acquisition failure" in value for value in errors)
@@ -1237,14 +1313,14 @@ def test_archive_authority_preserves_migrated_review_and_neutral_settlement(tmp_
     ]
     rows = list(module._runtime_rows_from_events(events))
     rows[1] = replace(rows[1], epoch="migration-replaced")
-    masks = module._derive_authority_masks(rows, [True] * 3, tmp_path, policy="archive")
+    masks = module._derive_authority_masks(rows, [True] * 3, tmp_path, policy="archive", _definition="current")
     assert masks[0].launch_eligible
     assert tuple(vars(masks[1]).values()) == (False, False, True, False, False)
     assert masks[2].terminal_eligible
-    assert masks == module._derive_authority_masks(rows, [True] * 3, tmp_path)
+    assert masks == module._derive_authority_masks(rows, [True] * 3, tmp_path, _definition="current")
     assert not any(
         any(vars(mask).values())
-        for mask in module._derive_authority_masks(rows, [False] * 3, tmp_path, policy="archive")
+        for mask in module._derive_authority_masks(rows, [False] * 3, tmp_path, policy="archive", _definition="current")
     )
 
 
@@ -1256,8 +1332,8 @@ def test_archive_authority_has_no_historical_uplift(tmp_path, epoch):
         module._runtime_rows_from_events([event])[0], epoch=epoch,
         authority=module.LedgerAuthorityV1(True, True, True, True, True),
     )
-    assert module._derive_authority_masks([row], [False], tmp_path)[0].launch_eligible
-    archive_mask = module._derive_authority_masks([row], [False], tmp_path, policy="archive")[0]
+    assert module._derive_authority_masks([row], [False], tmp_path, _definition="historical")[0].launch_eligible
+    archive_mask = module._derive_authority_masks([row], [False], tmp_path, policy="archive", _definition="current")[0]
     assert not any(vars(archive_mask).values())
 
 

@@ -1,0 +1,560 @@
+"""Small immutable, nonauthorizing executor values; no vendor SDK imports."""
+from __future__ import annotations
+
+import json
+import hashlib
+import math
+from dataclasses import asdict, dataclass, field, fields
+from pathlib import PurePosixPath, PureWindowsPath
+from typing import Any
+
+
+def _text(value: object, name: str, limit: int = 4096) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value.encode("utf-8")) > limit:
+        raise ValueError(f"invalid {name}")
+    return value
+
+
+def _keys(value: object, expected: set[str]) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != expected:
+        raise ValueError("missing or unexpected contract fields")
+    return value
+
+
+def strict_json(value: str, *, max_bytes: int = 1_048_576) -> Any:
+    if not isinstance(value, str) or len(value.encode("utf-8")) > max_bytes:
+        raise ValueError("JSON byte limit exceeded")
+    def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, item in items:
+            if key in result:
+                raise ValueError("duplicate JSON key")
+            result[key] = item
+        return result
+    def invalid_constant(value: str) -> None:
+        raise ValueError("non-finite JSON number")
+    def finite_float(value: str) -> float:
+        parsed = float(value)
+        if not math.isfinite(parsed):
+            raise ValueError("non-finite JSON number")
+        return parsed
+    try:
+        return json.loads(value, object_pairs_hook=pairs, parse_constant=invalid_constant, parse_float=finite_float)
+    except RecursionError as exc:
+        raise ValueError("JSON nesting too deep") from exc
+
+
+def json_text(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True)
+
+
+def validate_transcript_snapshot(value):
+    """Opaque native transcript commitment, not an interpreted native turn tip."""
+    value = _keys(value, {"path", "sha256", "size", "file_identity", "root_identity"})
+    path = PurePosixPath(_text(value["path"], "transcript path"))
+    if path.is_absolute() or ".." in path.parts or str(path) != value["path"] or "\\" in value["path"] or ":" in value["path"]:
+        raise ValueError("invalid transcript path")
+    if type(value["size"]) is not int or value["size"] <= 0:
+        raise ValueError("invalid transcript size")
+    digest = value["sha256"]
+    if type(digest) is not str or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+        raise ValueError("invalid transcript digest")
+    for name in ("file_identity", "root_identity"):
+        identity = value[name]
+        if type(identity) is not list or len(identity) != 2 or any(type(v) is not int or v < 0 for v in identity):
+            raise ValueError("invalid transcript identity")
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class NativeContinuation:
+    """Prior received native turn identity, not permission to resume it."""
+    prior_dispatch_id: str
+    prior_evidence_run_id: str
+    prior_request_sha256: str
+    native_thread_id: str
+    native_turn_id: str
+    transcript_json: str | None = None
+
+    def __post_init__(self):
+        for item in fields(self):
+            if item.name != "transcript_json":
+                _text(getattr(self, item.name), item.name)
+        if self.transcript_json is not None:
+            validate_transcript_snapshot(strict_json(self.transcript_json, max_bytes=16384))
+        if (len(self.prior_request_sha256) != 64
+                or any(c not in "0123456789abcdef" for c in self.prior_request_sha256)):
+            raise ValueError("invalid continuation predecessor digest")
+        if self.prior_dispatch_id == self.prior_evidence_run_id:
+            raise ValueError("distinct continuation predecessor identities required")
+
+    def to_dict(self):
+        value = asdict(self)
+        if self.transcript_json is None:
+            value.pop("transcript_json")
+        return value
+
+    @classmethod
+    def from_dict(cls, value):
+        if isinstance(value, dict) and "transcript_json" not in value:
+            value = {**value, "transcript_json": None}
+        return cls(**_keys(value, {item.name for item in fields(cls)}))
+
+    @property
+    def source_sha256(self):
+        return hashlib.sha256(json_text(self.to_dict()).encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionRequest:
+    work_item_id: str
+    provider: str
+    external_dispatch_id: str
+    external_evidence_run_id: str
+    artifact_id: str
+    role: str
+    model: str
+    effort: str
+    cwd: str
+    account_binding: str
+    prompt: str
+    coordinator_binding: str
+    scope: tuple[str, ...]
+    max_output_bytes: int = 1_048_576
+    max_events: int = 4096
+    context_mode: str = "fresh"
+    result_kind: str = field(default="review", kw_only=True)
+    tool_profile: str = field(default="default", kw_only=True)
+    write_workspace: str | None = field(default=None, kw_only=True)
+    native_continuation: NativeContinuation | None = field(default=None, kw_only=True)
+
+    def __post_init__(self) -> None:
+        for field in fields(self):
+            if field.name not in {"scope", "max_output_bytes", "max_events", "write_workspace", "native_continuation"}:
+                _text(getattr(self, field.name), field.name, 262_144 if field.name == "prompt" else 4096)
+        if self.tool_profile not in {"default", "prompt-only"}:
+            raise ValueError("unsupported tool profile")
+        if self.tool_profile == "prompt-only" and (
+            self.provider not in {"claude", "copilot"} or self.write_workspace is not None
+        ):
+            raise ValueError("prompt-only profile requires an implemented read-only provider")
+        if self.result_kind not in {"review", "task"}:
+            raise ValueError("unsupported result kind")
+        if self.write_workspace is not None:
+            _text(self.write_workspace, "write workspace")
+            # This is the whole workspace write boundary, not a file allowlist.
+            # Lexical checks are portable; runtime owns resolved identity,
+            # reparse/custody checks and the actual authorization before effects.
+            path = (PureWindowsPath(self.write_workspace)
+                    if PureWindowsPath(self.write_workspace).drive or "\\" in self.write_workspace
+                    else PurePosixPath(self.write_workspace))
+            if (not path.is_absolute() or ".." in path.parts
+                    or str(path) != self.write_workspace or "\0" in self.write_workspace
+                    or self.write_workspace != self.cwd):
+                raise ValueError("write workspace must be normalized absolute cwd")
+            if self.provider not in {"codex", "claude", "copilot"} or self.result_kind != "task":
+                raise ValueError("write workspace requires implemented task contract")
+            # Role eligibility belongs to the existing taxonomy/adapter owner,
+            # not a second worker role list in this portable value codec.
+        elif self.result_kind == "task" and (self.provider not in {"codex", "claude", "copilot"} or self.role != "consultant"):
+            raise ValueError("task adapter combination not implemented")
+        if self.native_continuation is not None:
+            if (type(self.native_continuation) is not NativeContinuation
+                    or self.context_mode not in {"continuation", "fork"} or self.provider not in {"codex", "copilot", "claude"}
+                    or self.role != "consultant" or self.result_kind != "task" or self.write_workspace is not None
+                    or (self.provider != "claude" and self.tool_profile != ("prompt-only" if self.provider == "copilot" else "default"))
+                    or (self.provider in {"copilot", "claude"} and self.context_mode != "continuation")):
+                raise ValueError("native continuation requires an implemented read-only Consultant route")
+            prior = self.native_continuation
+            if (prior.transcript_json is not None) != (self.provider == "claude"):
+                raise ValueError("provider transcript commitment mismatch")
+            if {self.external_dispatch_id, self.external_evidence_run_id} & {prior.prior_dispatch_id, prior.prior_evidence_run_id}:
+                raise ValueError("continuation requires new execution identities")
+        elif self.context_mode in {"continuation", "fork"}:
+            raise ValueError("native continuation binding required")
+        if self.context_mode not in {"fresh", "handoff", "continuation", "fork"}:
+            raise ValueError("unsupported context mode")
+        if self.provider not in {"codex", "claude", "kimi", "grok", "minimax", "mimo", "copilot"}:
+            raise ValueError("invalid provider")
+        if self.provider == "copilot" and (self.tool_profile != ("default" if self.write_workspace is not None else "prompt-only") or (self.context_mode != "fresh" and self.native_continuation is None)):
+            raise ValueError("Copilot requires prompt-only evidence or scoped default-profile tasks")
+        if self.external_dispatch_id == self.external_evidence_run_id:
+            raise ValueError("dispatch and evidence identities must differ")
+        if not isinstance(self.scope, tuple) or not 1 <= len(self.scope) <= 128:
+            raise ValueError("invalid scope")
+        for item in self.scope:
+            _text(item, "scope item")
+        for name, maximum in (("max_output_bytes", 16_777_216), ("max_events", 65_536)):
+            value = getattr(self, name)
+            if type(value) is not int or not 1 <= value <= maximum:
+                raise ValueError(f"invalid {name}")
+        if self.effort not in {"low", "medium", "high", "xhigh", "max"}:
+            raise ValueError("unsupported effort")
+
+    @property
+    def run_id(self) -> str:
+        """Compatibility name for the existing dispatch identity, not a third ID."""
+        return self.external_dispatch_id
+
+    @property
+    def effort_mapping_loss(self) -> str:
+        return "none"
+
+    def to_dict(self) -> dict[str, Any]:
+        result = asdict(self)
+        result["scope"] = list(self.scope)
+        # Omission is the canonical fresh spelling, preserving retained request hashes.
+        if self.context_mode == "fresh":
+            result.pop("context_mode")
+        if self.result_kind == "review":
+            result.pop("result_kind")
+        if self.tool_profile == "default":
+            result.pop("tool_profile")
+        if self.write_workspace is None:
+            result.pop("write_workspace")
+        if self.native_continuation is None:
+            result.pop("native_continuation")
+        else:
+            result["native_continuation"] = self.native_continuation.to_dict()
+        return result
+
+    @classmethod
+    def from_dict(cls, value: object) -> ExecutionRequest:
+        # Older serialized requests predate explicit context selection and were fresh.
+        if isinstance(value, dict) and "context_mode" not in value:
+            value = {**value, "context_mode": "fresh"}
+        if isinstance(value, dict) and "tool_profile" not in value:
+            value = {**value, "tool_profile": "default"}
+        if isinstance(value, dict) and "result_kind" not in value:
+            value = {**value, "result_kind": "review"}
+        if isinstance(value, dict) and "write_workspace" not in value:
+            value = {**value, "write_workspace": None}
+        if isinstance(value, dict) and "native_continuation" not in value:
+            value = {**value, "native_continuation": None}
+        data = dict(_keys(value, {field.name for field in fields(cls)}))
+        if data["native_continuation"] is not None:
+            data["native_continuation"] = NativeContinuation.from_dict(data["native_continuation"])
+        if not isinstance(data["scope"], list):
+            raise ValueError("scope must be a list")
+        data["scope"] = tuple(data["scope"])
+        return cls(**data)
+
+
+@dataclass(frozen=True, slots=True)
+class Finding:
+    severity: str
+    path: str
+    line: int
+    message: str
+    evidence: str
+
+    def __post_init__(self) -> None:
+        if self.severity not in {"low", "medium", "high", "critical"}:
+            raise ValueError("invalid finding severity")
+        for name in ("path", "message", "evidence"):
+            _text(getattr(self, name), name, 16_384)
+        path = PurePosixPath(self.path)
+        if path.is_absolute() or ".." in path.parts or "\\" in self.path or ":" in self.path:
+            raise ValueError("finding path must be repository relative")
+        if type(self.line) is not int or self.line < 1:
+            raise ValueError("invalid finding line")
+
+    @classmethod
+    def from_dict(cls, value: object) -> Finding:
+        return cls(**_keys(value, {field.name for field in fields(cls)}))
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewResult:
+    run_id: str
+    artifact_id: str
+    role: str
+    verdict: str
+    findings: tuple[Finding, ...]
+
+    def __post_init__(self) -> None:
+        for name in ("run_id", "artifact_id", "role"):
+            _text(getattr(self, name), name)
+        if self.verdict not in {"PASS", "REVISE"}:
+            raise ValueError("invalid review verdict")
+        if not isinstance(self.findings, tuple) or len(self.findings) > 100:
+            raise ValueError("invalid findings")
+        if any(not isinstance(item, Finding) for item in self.findings):
+            raise ValueError("invalid finding")
+
+    def to_dict(self) -> dict[str, Any]:
+        result = asdict(self)
+        result["findings"] = [asdict(item) for item in self.findings]
+        return result
+
+    @classmethod
+    def from_dict(cls, value: object) -> ReviewResult:
+        data = dict(_keys(value, {field.name for field in fields(cls)}))
+        if not isinstance(data["findings"], list):
+            raise ValueError("findings must be a list")
+        data["findings"] = tuple(Finding.from_dict(item) for item in data["findings"])
+        return cls(**data)
+
+
+def review_schema(request: ExecutionRequest) -> dict[str, Any]:
+    """Native outputSchema, independently revalidated after completion."""
+    if request.result_kind != "review":
+        raise ValueError("review result kind required")
+    return {
+        "type": "object", "additionalProperties": False,
+        "required": ["run_id", "artifact_id", "role", "verdict", "findings"],
+        "properties": {
+            "run_id": {"type": "string", "enum": [request.external_evidence_run_id]},
+            "artifact_id": {"type": "string", "enum": [request.artifact_id]},
+            "role": {"type": "string", "enum": [request.role]},
+            "verdict": {"type": "string", "enum": ["PASS", "REVISE"]},
+            "findings": {"type": "array", "maxItems": 100, "items": {
+                "type": "object", "additionalProperties": False,
+                "required": ["severity", "path", "line", "message", "evidence"],
+                "properties": {
+                    "severity": {"type": "string", "enum": ["low", "medium", "high", "critical"]},
+                    "path": {"type": "string"}, "line": {"type": "integer", "minimum": 1},
+                    "message": {"type": "string"}, "evidence": {"type": "string"},
+                },
+            }},
+        },
+    }
+
+
+@dataclass(frozen=True, slots=True)
+class TaskResult:
+    """Provider-produced task evidence, not a review verdict or effect receipt."""
+    run_id: str
+    artifact_id: str
+    role: str
+    content: str
+
+    def __post_init__(self) -> None:
+        for name in ("run_id", "artifact_id", "role"):
+            _text(getattr(self, name), name)
+        # Outer ExecutionRequest owns the narrower selected output budget.
+        _text(self.content, "task content", 16_777_216)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: object) -> TaskResult:
+        return cls(**_keys(value, {field.name for field in fields(cls)}))
+
+
+def validate_task(payload: object, *, request: ExecutionRequest) -> TaskResult:
+    if request.result_kind != "task":
+        raise ValueError("task result kind required")
+    if isinstance(payload, str):
+        payload = strict_json(payload, max_bytes=request.max_output_bytes)
+    result = TaskResult.from_dict(payload)
+    if (result.run_id, result.artifact_id, result.role) != (
+        request.external_evidence_run_id, request.artifact_id, request.role
+    ):
+        raise ValueError("task identity mismatch")
+    if len(json_text(result.to_dict()).encode("utf-8")) > request.max_output_bytes:
+        raise ValueError("task output too large")
+    return result
+
+
+def task_schema(request: ExecutionRequest) -> dict[str, Any]:
+    if request.result_kind != "task":
+        raise ValueError("task result kind required")
+    return {
+        "type": "object", "additionalProperties": False,
+        "required": ["run_id", "artifact_id", "role", "content"],
+        "properties": {
+            "run_id": {"type": "string", "enum": [request.external_evidence_run_id]},
+            "artifact_id": {"type": "string", "enum": [request.artifact_id]},
+            "role": {"type": "string", "enum": [request.role]},
+            "content": {"type": "string", "minLength": 1},
+        },
+    }
+
+
+@dataclass(frozen=True, slots=True)
+class Observation:
+    sequence: int
+    kind: str
+    payload_json: str
+
+    def __post_init__(self) -> None:
+        if type(self.sequence) is not int or self.sequence < 0:
+            raise ValueError("invalid sequence")
+        _text(self.kind, "observation kind", 256)
+        _text(self.payload_json, "observation payload", 16_777_216)
+        if not isinstance(strict_json(self.payload_json, max_bytes=16_777_216), dict):
+            raise ValueError("observation payload must be object")
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: object) -> Observation:
+        return cls(**_keys(value, {field.name for field in fields(cls)}))
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionResult:
+    request: ExecutionRequest
+    status: str
+    provider_status: str | None = None
+    actual_execution_path: str = "direct-external-sdk"
+    native_result_text: str | None = None
+    native_thread_id: str | None = None
+    native_turn_id: str | None = None
+    sdk_execution_json: str | None = None
+    observations: tuple[Observation, ...] = ()
+    review: ReviewResult | None = None
+    task: TaskResult | None = field(default=None, kw_only=True)
+    usage_json: str | None = None
+    execution_error: str | None = None
+    capture_error: str | None = None
+    cleanup_error: str | None = None
+    protocol_closed: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.request, ExecutionRequest):
+            raise ValueError("invalid result request")
+        if self.status not in {"completed", "failed", "interrupted", "incomplete"}:
+            raise ValueError("invalid execution status")
+        if self.provider_status not in {None, "completed", "failed", "interrupted"}:
+            raise ValueError("invalid provider status")
+        if self.actual_execution_path not in {"direct-external-sdk", "direct-external-cli"}:
+            raise ValueError("invalid actual execution path")
+        if self.native_result_text is not None:
+            _text(self.native_result_text, "native result text", self.request.max_output_bytes)
+        if sum(value is not None for value in (self.review, self.task, self.native_result_text)) > 1:
+            raise ValueError("result representations are mutually exclusive")
+        if self.actual_execution_path == "direct-external-cli":
+            if self.sdk_execution_json is not None or self.review is not None or self.task is not None:
+                raise ValueError("CLI result must preserve native text and provenance")
+        elif self.native_result_text is not None:
+            raise ValueError("SDK result requires structured evidence")
+        has_result = self.review is not None or self.task is not None or self.native_result_text is not None
+        if self.status == "completed" and (self.provider_status != "completed" or not has_result or self.execution_error or self.capture_error or self.cleanup_error or not self.protocol_closed):
+            raise ValueError("completed result lacks required evidence")
+        if not isinstance(self.observations, tuple) or any(not isinstance(o, Observation) for o in self.observations):
+            raise ValueError("invalid observations")
+        if len(self.observations) > self.request.max_events:
+            raise ValueError("observation count exceeded")
+        if sum(len(o.payload_json.encode("utf-8")) for o in self.observations) > self.request.max_output_bytes:
+            raise ValueError("observation bytes exceeded")
+        if type(self.protocol_closed) is not bool:
+            raise ValueError("invalid protocol closure")
+        for name in ("native_thread_id", "native_turn_id", "execution_error", "capture_error", "cleanup_error"):
+            if getattr(self, name) is not None:
+                _text(getattr(self, name), name)
+        for name in ("sdk_execution_json", "usage_json"):
+            value = getattr(self, name)
+            if value is not None and (not isinstance(value, str) or not isinstance(strict_json(value, max_bytes=65_536), dict)):
+                raise ValueError(f"invalid {name}")
+        if self.task is not None:
+            if not isinstance(self.task, TaskResult):
+                raise ValueError("invalid task result")
+            validate_task(self.task.to_dict(), request=self.request)
+        if self.review is not None:
+            if self.request.result_kind != "review":
+                raise ValueError("review result kind required")
+            if not isinstance(self.review, ReviewResult) or (
+                self.review.run_id, self.review.artifact_id, self.review.role
+            ) != (self.request.external_evidence_run_id, self.request.artifact_id, self.request.role):
+                raise ValueError("review identity mismatch")
+
+    @property
+    def sdk_execution(self) -> dict[str, Any] | None:
+        return strict_json(self.sdk_execution_json, max_bytes=65_536) if self.sdk_execution_json else None
+
+    @property
+    def usage(self) -> dict[str, Any] | None:
+        return strict_json(self.usage_json, max_bytes=65_536) if self.usage_json else None
+
+    def to_dict(self) -> dict[str, Any]:
+        result = {
+            "request": self.request.to_dict(), "status": self.status, "provider_status": self.provider_status,
+            "actual_execution_path": self.actual_execution_path, "native_result_text": self.native_result_text,
+            "native_thread_id": self.native_thread_id, "native_turn_id": self.native_turn_id,
+            "sdk_execution_json": self.sdk_execution_json,
+            "observations": [o.to_dict() for o in self.observations],
+            "review": self.review.to_dict() if self.review else None, "usage_json": self.usage_json,
+            "execution_error": self.execution_error, "capture_error": self.capture_error,
+            "cleanup_error": self.cleanup_error, "protocol_closed": self.protocol_closed,
+        }
+
+        if self.task is not None:
+            result["task"] = self.task.to_dict()
+        return result
+
+    @classmethod
+    def from_dict(cls, value: object) -> ExecutionResult:
+        if isinstance(value, dict) and "task" not in value:
+            value = {**value, "task": None}
+        data = dict(_keys(value, {field.name for field in fields(cls)}))
+        data["request"] = ExecutionRequest.from_dict(data["request"])
+        if not isinstance(data["observations"], list):
+            raise ValueError("observations must be a list")
+        data["observations"] = tuple(Observation.from_dict(o) for o in data["observations"])
+        data["review"] = ReviewResult.from_dict(data["review"]) if data["review"] is not None else None
+        data["task"] = TaskResult.from_dict(data["task"]) if data["task"] is not None else None
+        return cls(**data)
+
+    def to_tool_output(self) -> dict[str, Any]:
+        """External evidence, not a ledger write, accepted review, or settlement."""
+        result = {
+            "authoritative": False, "process_settlement": "not_established",
+            "actual_execution_path": self.actual_execution_path, "native_result_text": self.native_result_text,
+            "run_id": self.request.run_id, "external_dispatch_id": self.request.external_dispatch_id,
+            "external_evidence_run_id": self.request.external_evidence_run_id,
+            "status": self.status, "provider_status": self.provider_status, "review": self.review.to_dict() if self.review else None,
+            "execution_error": self.execution_error, "capture_error": self.capture_error,
+            "cleanup_error": self.cleanup_error, "protocol_closed": self.protocol_closed,
+            "usage": self.usage,
+        }
+
+        if self.task is not None:
+            result["task"] = self.task.to_dict()
+        return result
+
+
+@dataclass(frozen=True, slots=True)
+class CancelReceipt:
+    run_id: str
+    requested: bool
+    acknowledged: bool
+    native_thread_id: str | None = None
+    native_turn_id: str | None = None
+    error: str | None = None
+
+    def __post_init__(self) -> None:
+        _text(self.run_id, "run_id")
+        if type(self.requested) is not bool or type(self.acknowledged) is not bool:
+            raise ValueError("invalid cancellation receipt")
+        if self.acknowledged and not self.requested:
+            raise ValueError("unrequested acknowledgement")
+        for name in ("native_thread_id", "native_turn_id", "error"):
+            if getattr(self, name) is not None:
+                _text(getattr(self, name), name)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: object) -> CancelReceipt:
+        return cls(**_keys(value, {field.name for field in fields(cls)}))
+
+
+def validate_review(payload: object, *, request: ExecutionRequest | None = None) -> ReviewResult:
+    """Validate shape and, when supplied, the authoritative request binding."""
+    if request is not None and request.result_kind != "review":
+        raise ValueError("review result kind required")
+    if isinstance(payload, str):
+        if len(payload.encode("utf-8")) > (request.max_output_bytes if request else 1_048_576):
+            raise ValueError("review output too large")
+        payload = strict_json(payload, max_bytes=request.max_output_bytes if request else 1_048_576)
+    review = ReviewResult.from_dict(payload)
+    if request is not None and (review.run_id, review.artifact_id, review.role) != (
+        request.external_evidence_run_id, request.artifact_id, request.role
+    ):
+        raise ValueError("review identity mismatch")
+    return review

@@ -15,25 +15,27 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 
 MCP_PY_SCRIPTS = (
     ROOT / "scripts" / "universal-hooks" / "scripts" / "mcp-usage-reminder.py",
     ROOT / "src.codex" / "skills" / "lead" / "scripts" / "mcp-usage-reminder.py",
-    ROOT / "src.claude" / "agents" / "scripts" / "mcp-usage-reminder.py",
+    ROOT / 'adapters/claude' / "agents" / "scripts" / "mcp-usage-reminder.py",
 )
 MCP_POLICY_SCRIPTS = (
     ROOT / "scripts" / "universal-hooks" / "scripts" / "mcp_continuity_policy.py",
     ROOT / "src.codex" / "skills" / "lead" / "scripts" / "mcp_continuity_policy.py",
-    ROOT / "src.claude" / "agents" / "scripts" / "mcp_continuity_policy.py",
+    ROOT / 'adapters/claude' / "agents" / "scripts" / "mcp_continuity_policy.py",
 )
 
 def _load_policy(path: Path, module_name: str):
     spec = importlib.util.spec_from_file_location(module_name, path)
     assert spec is not None and spec.loader is not None
     policy = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(policy)
+    with patch.object(sys, "path", [str(path.parent), *sys.path]):
+        spec.loader.exec_module(policy)
     return policy
 
 
@@ -46,7 +48,7 @@ CANONICAL_TURN_ANCHOR_CONTEXT = CANONICAL_MCP_POLICY.TURN_ANCHOR_CONTEXT
 # (script, config subdir under cwd, expected-context-dict-key)
 AGENTS_MODE_PY = (
     (ROOT / "src.codex" / "skills" / "lead" / "scripts" / "agents-mode-reminder.py", ".agents", "codex"),
-    (ROOT / "src.claude" / "agents" / "scripts" / "agents-mode-reminder.py", ".claude", "claude"),
+    (ROOT / 'adapters/claude' / "agents" / "scripts" / "agents-mode-reminder.py", ".claude", "claude"),
 )
 
 DELEGATION_HEADING = (

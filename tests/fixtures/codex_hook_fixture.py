@@ -37,11 +37,16 @@ def _load_checker():
 
 def prepare_codex_home(tmp_path: Path) -> Path:
     """Create the trusted hooks.json expected by the fake Codex app-server."""
-    codex_home = tmp_path / "codex-home"
+    codex_home = tmp_path / ".codex"
     codex_home.mkdir()
     hooks: dict[str, list[dict]] = {}
-    installed_root = ROOT / "src.codex" / "skills" / "lead"
-    for _marker, script, event, matcher in _load_installer()._hook_specs(
+    installed_root = tmp_path / ".agents" / "skills" / "lead"
+    installer = _load_installer()
+    staged = installer._stage_canonical_lead_tree(
+        ROOT, ROOT / "src.codex/skills/lead", installed_root / "scripts")
+    installed_root.parent.mkdir(parents=True)
+    staged.path.rename(installed_root)
+    for _marker, script, event, matcher in installer._hook_specs(
         "codex", installed_root
     ):
         entry = {"hooks": [{"type": "command", "command": f"{sys.executable} {script}"}]}
@@ -53,7 +58,7 @@ def prepare_codex_home(tmp_path: Path) -> Path:
     )
     _load_checker().write_codex_inventory(
         target=codex_home / "hooks.json",
-        specs=_load_installer()._hook_specs("codex", installed_root),
+        specs=installer._hook_specs("codex", installed_root),
         inventory_path=codex_home / "codex-hook-inventory.json",
         host_os="windows" if sys.platform == "win32" else "posix",
     )

@@ -57,7 +57,7 @@ NON_REGISTERED_ENTRYPOINT_STEMS = frozenset({
 # ---------------------------------------------------------------------------
 
 PACK_ONLY_SCRIPTS = {
-    "src.claude/agents/scripts": frozenset({
+    "adapters/claude/agents/scripts": frozenset({
         # Provider-specialized SessionStart context hook: walks the CLAUDE-line
         # .agents-mode.yaml read-order (./.claude/, ~/.claude/) and speaks
         # Agent-tool dispatch idiom; the codex twin walks ./.agents/ + ~/.codex/
@@ -88,7 +88,7 @@ PACK_ONLY_SCRIPTS = {
 }
 
 PACK_ONLY_HOOKS = {
-    "src.claude/agents/hooks": frozenset({
+    "adapters/claude/agents/hooks": frozenset({
         # Claude-only typed-routing audit: keys on the subagent-dispatch tool
         # (captured tool_name "Agent"). Codex CLI exposes no analogous
         # subagent-dispatch tool, so there is no Codex/canon mirror.
@@ -224,14 +224,14 @@ def retained_hook_specs(catalog: Path, platform: str, installed_root: Path):
     except (AttributeError, KeyError, SyntaxError, TypeError, ValueError) as exc:
         raise ValueError("invalid retained hook catalog") from exc
 
-MIRROR_SCRIPT_DIRS = ("src.claude/agents/scripts", "src.codex/skills/lead/scripts")
-MIRROR_HOOK_DIRS = ("src.claude/agents/hooks", "src.codex/skills/lead/hooks")
+MIRROR_SCRIPT_DIRS = ("adapters/claude/agents/scripts", "src.codex/skills/lead/scripts")
+MIRROR_HOOK_DIRS = ("adapters/claude/agents/hooks", "src.codex/skills/lead/hooks")
 
 # A universal implementation may be specialized by one provider at a different
 # source-hygiene placement.  Exclusions are explicit and path-scoped so a
 # provider cannot silently drop an otherwise universal file.
 MIRROR_EXCLUSIONS = {
-    "src.claude/agents/hooks": frozenset({"check-mcp-momentum.py"}),
+    "adapters/claude/agents/hooks": frozenset({"check-mcp-momentum.py"}),
 }
 
 
@@ -271,7 +271,7 @@ def mirror_names(root: Path, subdir: str, mirror_rel_dir: str) -> tuple[str, ...
 class DriftEntry(NamedTuple):
     canon_path: Path
     mirror_path: Path
-    mirror_rel: str  # e.g. "src.claude/agents/scripts/check-foo.py", posix-style
+    mirror_rel: str  # e.g. "adapters/claude/agents/scripts/check-foo.py", posix-style
 
 
 def find_drift(root: Path) -> list[DriftEntry]:

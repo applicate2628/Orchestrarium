@@ -122,8 +122,37 @@ class ReceiptedClaudeInstructionWiringTests(unittest.TestCase):
                      "bind_readonly_path", "register_readonly", "commit"):
             self.assertEqual(calls(prepare, name), [], name)
         install = self.fn("install")
-        self.one(install, "_record_selected_provider_receipt")
-        self.one(install, "_record_fresh_provider_receipt")
+        scopes = [node for node in ast.walk(install) if isinstance(node, ast.With)
+                  and any(shape(item.context_expr) == shape(expression("transaction"))
+                          for item in node.items)]
+        self.assertEqual(len(scopes), 1)
+        scope = scopes[0]
+        final = self.one(scope, "_record_provider_install")
+        self.assertEqual([ast.unparse(arg) for arg in final.args[5:8]],
+                         ["transaction", "create_only", "ownership_before"])
+        self.assertEqual({item.arg: ast.unparse(item.value) for item in final.keywords}
+                         ["selected_updates"], "selected_updates")
+        self.assertIs(scope.body[-2].value, final)
+        self.assertEqual(ast.unparse(scope.body[-1]), "transaction.commit()")
+        self.assertEqual(calls(install, "_record_selected_provider_receipt"), [])
+        self.assertEqual(calls(install, "_record_fresh_provider_receipt"), [])
+        finalizer = self.fn("_record_provider_install")
+        for body in (finalizer, self.fn("_provider_payload_bindings"),
+                     self.fn("_provider_payload_path")):
+            for name in ("_InstallTransaction", "_CreateOnlyMutablePath", "bind_or_create_anchor",
+                         "bind_readonly_path", "register_readonly", "bind", "resolve", "_target"):
+                self.assertEqual(calls(body, name), [], name)
+        for binding in ("batch.owner is not owner", "batch.provider != provider",
+                        "batch.scope != scope", "batch.receipt != target / codec.RECEIPT_NAME",
+                        "set(batch.received) != set(batch.items)"):
+            self.require(finalizer, binding)
+        publication = self.one(finalizer, "replace_exact_file")
+        self.assertEqual(ast.unparse(publication),
+                         "owner.replace_exact_file(relative, hashlib.sha256(selected_updates.receipt_before).hexdigest(), payload)")
+        checks = calls(finalizer, "_assert_selected_replacement")
+        self.assertEqual(len(checks), 2)
+        self.assertLess(checks[0].lineno, publication.lineno)
+        self.assertLess(publication.lineno, checks[1].lineno)
         self.assertEqual(calls(prepare, "_plan_receipt_changes"), [])
 
     def test_owner_platform_admission_and_default_instruction_route_are_preserved(self):

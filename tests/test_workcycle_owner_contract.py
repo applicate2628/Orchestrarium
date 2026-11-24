@@ -14,12 +14,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 LEAD_CONTRACTS = (
+    # Both selected clients install this canonical body; the old Claude copy
+    # remains a frozen migration input, not the current policy owner.
     ROOT / "src.codex" / "skills" / "lead" / "SKILL.md",
-    ROOT / "src.claude" / "skills" / "lead" / "SKILL.md",
 )
 ARCHIVIST_CONTRACTS = (
     ROOT / "src.codex" / "skills" / "knowledge-archivist" / "SKILL.md",
-    ROOT / "src.claude" / "agents" / "knowledge-archivist.md",
+    ROOT / 'adapters/claude' / "agents" / "knowledge-archivist.md",
 )
 SHARED_MODEL = ROOT / "shared" / "references" / "subagent-operating-model.md"
 
@@ -49,8 +50,8 @@ def test_lead_recipe_encodes_the_ordered_work_cycle_without_widening_admission()
         ordered_obligations = (
             "exactly one admitted work-item",
             "remain active concurrently",
-            "before asking the host to schedule",
-            "exact `launchRunId`",
+            "create or select its own work-item before dispatch",
+            "exact Root-created `launchRunId`",
             "one bounded `$knowledge-archivist` reconciliation",
         )
         offsets = [recipe.index(fragment) for fragment in ordered_obligations]
@@ -86,8 +87,9 @@ def test_shared_recipe_is_provider_neutral_and_preserves_independent_items() -> 
     for obligation in (
         "exactly one admitted work-item",
         "Independent authorized items may remain active concurrently",
-        "before scheduling",
-        "exact `launchRunId`",
+        "Apply dispatch admission before a non-trivial provider or subagent dispatch",
+        "Root uses its exact launch identity for native and direct external equivalents",
+        "for an actual wrapper execution Root consumes actual IDs and persisted terminal readback without a second pair",
         "stable active-item set",
     ):
         assert obligation in recipe, obligation

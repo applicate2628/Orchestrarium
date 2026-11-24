@@ -11,12 +11,14 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from tests.test_ledger_h1_effective_view import (
     canonical,
     digest,
     event,
     load_validator,
+    mask,
     materialize_live_artifacts,
     synthetic_artifacts,
 )
@@ -344,20 +346,25 @@ class ActiveC3RecoveryTests(unittest.TestCase):
         module = load_validator()
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            artifacts, items, paths, _expected = synthetic_artifacts(module, root)
-            ledger_path = paths[0]
-            owner_context = module._load_effective_ledger_group(
-                root, compatibility_artifacts=artifacts
-            )[ledger_path]
-            item = items[0]
-            target = event(
-                "revise-a-0001",
-                "reader-a",
-                gate="REVISE",
-                status="revise",
-                artifact="target.md",
-                findingClass="architecture",
-            )
+            def unsupported_target(run_id, work_item, **values):
+                if run_id == "revise-a-0001":
+                    values["findingClass"] = "architecture"
+                return event(run_id, work_item, **values)
+
+            def unsupported_target_mask(**values):
+                if values.get("reviseTargetEligible"):
+                    # Historical REVISE identity survives, but an unsupported
+                    # class is not individually valid artifact evidence.
+                    values["artifactEvidenceEligible"] = False
+                return mask(**values)
+
+            # Vary only the synthetic input producer, so all prefix digests,
+            # manifest rows and activation receipts describe these exact bytes.
+            # The production issuer and its receiving checks remain unmodified.
+            with patch("tests.test_ledger_h1_effective_view.event", unsupported_target), \
+                    patch("tests.test_ledger_h1_effective_view.mask", unsupported_target_mask):
+                artifacts, items, paths, _expected = synthetic_artifacts(module, root)
+            ledger_path, item = paths[0], items[0]
             waiver = event(
                 "waive-unsupported-sealed-class",
                 "reader-a",
@@ -373,38 +380,18 @@ class ActiveC3RecoveryTests(unittest.TestCase):
                     }
                 ],
             )
-            authority = module.LedgerAuthorityV1
-            rows = (
-                module.RuntimeLedgerRowV1(
-                    target,
-                    1,
-                    "1" * 64,
-                    "1" * 64,
-                    "2" * 64,
-                    "sealed-prefix",
-                    authority(False, False, True, False, True),
-                ),
-                module.RuntimeLedgerRowV1(
-                    waiver,
-                    2,
-                    "3" * 64,
-                    "3" * 64,
-                    "4" * 64,
-                    "strict-suffix",
-                    module._NO_LEDGER_AUTHORITY,
-                ),
+            ledgers = dict(artifacts.ledger_bytes_by_path)
+            ledgers[ledger_path] += canonical(waiver) + b"\n"
+            candidate = replace(artifacts, ledger_bytes_by_path=ledgers)
+            context = module.load_effective_ledger_view(
+                root, item, ledger_path, compatibility_artifacts=candidate
             )
-            context = module.LedgerValidationContextV1(
-                ledger_path,
-                rows,
-                module.LedgerCompatibilityViewV1(
-                    {"ledgerPath": ledger_path}, "5" * 64, {}
-                ),
-                module.LedgerCompatibilityObservationV1("active", (), ()),
-                ("reader-a\0revise-a-0001",),
-                (),
-                replace(owner_context.invocation_token, rows_by_path={ledger_path: rows}),
-            )
+            self.assertEqual(context.observation.activation_state, "active", context.observation)
+            rows = context.rows
+            target = next(row for row in rows if row.event["runId"] == "revise-a-0001")
+            self.assertEqual(target.epoch, "sealed-prefix")
+            self.assertTrue(target.authority.revise_target_eligible)
+            self.assertFalse(target.authority.artifact_evidence_eligible)
             telemetry: dict[str, int] = {}
             errors: list[str] = []
 
@@ -428,6 +415,7 @@ class ActiveC3RecoveryTests(unittest.TestCase):
                 [row.get("runId") for row in open_revise], ["revise-a-0001"]
             )
             self.assertEqual(telemetry.get("closure-accepted", 0), 0)
+            self.assertFalse(any("EFFECTIVE-VIEW-BYPASS" in error for error in errors))
 
 
 if __name__ == "__main__":

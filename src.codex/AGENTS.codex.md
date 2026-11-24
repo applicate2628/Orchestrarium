@@ -52,6 +52,8 @@ Preserve exact accepted profession/task inputs, genuine authority and all indepe
 
 Reuse unchanged applicable procedure content actually present in the receiver's context under shared **Context handoff economy**. If required content, selected-layout identity or current controls are missing, stale, conflicting or uncertain, hold only the dependent operation and restore its owning inputs. After handoff, interruption, compaction or resume, restore missing applicable obligations and current authority before the next dependent decision or action, including receiving an outstanding result; do not reread unchanged content already actually present. Missing inputs, rejection or drift confer no retry, fallback, alternative-route or permission-reset authority and prove no runtime qualification. A genuinely authorized later action still requires resolved owner inputs and its own applicable gates.
 
+- Repo-local mechanical-plan preflight permits an ordinary filesystem volume at or above the explicitly observed exact root while rechecking native path identity. Detected mounts below that root remain refused, and links, junctions, reparse points and identity drift remain refused throughout the chain. This changes neither root-selection authority nor host permissions and does not establish host containment.
+
 If approved delivery work needs delegation and no narrower delegated role is already named, use `$lead` from `$HOME/.agents/skills/lead` as the default coordinator. If the task is about roadmap ownership, prioritization, milestone shaping, or admission into discovery or delivery, use `$product-manager` instead.
 
 ## Template routing

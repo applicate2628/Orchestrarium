@@ -150,7 +150,7 @@ DOCS_FROM_MAIN_TRANSFORMED = {
 # Standalone files that MUST be carried from the published branch (fail closed if missing).
 REQUIRED_CARRY = ("README.md", "INSTALL.md")
 
-COMMAND_RE = re.compile(r"^src\.claude/commands/(agents-[\w-]+)\.md$")
+COMMAND_RE = re.compile(r"^(?:src\.claude|adapters/claude)/commands/(agents-[\w-]+)\.md$")
 
 _YAML_LEADING_INDICATORS = set("-?:,[]{}#&*!|>'\"%@` ")
 
@@ -188,6 +188,8 @@ def show(ref: str, path: str) -> bytes:
 def include_from_main(path: str, provider: str) -> bool:
     if path in MAINTAINER_ONLY_FILES:
         return False
+    if provider == "claude" and path.startswith("adapters/claude/"):
+        return True
     if path.startswith((f"src.{provider}/", f"references-{provider}/", *SHARED_PREFIXES)):
         return True
     if provider == "claude" and path.startswith(CLAUDE_CANONICAL_SKILLS_PREFIX):
@@ -270,7 +272,8 @@ def extract(provider: str, source_ref: str, branch_ref: str, out: Path) -> dict[
             if m:
                 name = m.group(1)
                 skill = skill_from_command(name, show(source_ref, path).decode("utf-8"))
-                write_file(out, f"src.claude/skills/{name}/SKILL.md", skill.encode("utf-8"))
+                source_pack = path.split("/commands/", 1)[0]
+                write_file(out, f"{source_pack}/skills/{name}/SKILL.md", skill.encode("utf-8"))
                 counts["skills_generated"] += 1
 
     # 3. carry from the published branch: required standalone files + the branch's

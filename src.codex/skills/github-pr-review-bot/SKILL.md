@@ -28,6 +28,35 @@ This is the installed binding of the provider-neutral review-coordination method
 - A substantive bot-authored current-head review-result may arrive on the submitted-review or REST issue-comment surface. Because that evidence carries no exact trigger identity, it qualifies for `clean` only when complete hosted state leaves exactly one unresolved exact trigger candidate on the same `(repository, pull request, headRefOid)`, with verified bot identity on that surface under the connector author identity rule, explicit and unambiguous final no-findings meaning, and a reviewed-commit binding that matches the full `headRefOid` or an unambiguous commit prefix that uniquely resolves to that same hosted head. A REST issue-comment review-result uses `IssueCommentOrder` and must be ordered after that bound exact trigger. Wording, emoji, and boilerplate may vary; clean classification must not use an exact body, signature, or phrase allowlist. Exact-body allowlisting remains exclusive to the failure classifier below.
 - A summary-only issue comment remains nonauthorizing for `clean`; so do other summary comments and `gh pr view` review/comment fields. A `Completed` summary alone is never `clean`; a summary may identify a running or completed run but is never `clean` alone. Findings from the exact post-trigger review on the current head take precedence over summaries, reactions, and clean-review signals. Any current-head automatic-run finding also takes precedence. Classify `clean` only when complete collections show no current finding comments or unresolved current connector threads, no competing run, no other unresolved exact trigger on the same current head, and either a manual exact trigger has a qualifying `+1`/review-result or an automatic `New commits` run satisfies the condition below.
 
+## Optional SDK task handoff
+
+The owning skill may delegate an already authorized correction or fresh independent
+review through an admitted software development kit (SDK) executor. Keep the
+repository identity, pull-request number, full hosted `headRefOid`, selected
+finding/thread identities and requested correction/review scope in the existing
+admitted request and artifact identity. Select fresh review context explicitly;
+do not pass the implementation author's private working conversation as an
+independent review. This is a PR-specific binding, not a GitHub prerequisite for
+unrelated SDK tasks.
+
+Before consuming the result, the existing Host authority owner re-reads the
+hosted head for this PR and compares the exact admitted revision. The SDK executor
+calls that owner at `executor_result` after retaining/receiving/scanning the result
+and before returning it for use. A generic successful callback alone does not
+prove that GitHub was checked: the PR-owning caller must perform that check.
+If the head changed or current authority cannot be established, retain the original
+runtime result and terminal as historical evidence; withhold it from application
+as stale/unusable. Do not rewrite completed execution history into a failure,
+discard the result, or automatically repeat a model call. Reconcile through the
+same owner using a newly admitted task only when appropriate and authorized.
+
+Immediately before applying a correction or changing PR state, re-read current
+hosted state again under this skill's existing rules; the earlier check is not an
+atomic GitHub transaction. SDK output cannot resolve threads, post review triggers,
+run CI, publish, merge or declare the hosted bot run clean. These actions retain
+their existing skill, GitHub and human authorization owners. Incomplete or stale
+SDK evidence does not block unrelated authorized work.
+
 ## Connector author identity
 
 Use this one author predicate for every author-dependent signal, including reactions, findings, submitted reviews, review comments or threads, clean results, and terminal failures. Success and failure must not use different notions of "the bot."

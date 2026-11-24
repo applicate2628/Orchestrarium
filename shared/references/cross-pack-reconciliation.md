@@ -15,7 +15,7 @@ Codex loads skills statically → contract docs must be self-contained lead guid
 
 ## Shared semantic blocks — operating-model.md
 
-| Block | Claude (`src.claude/agents/contracts/operating-model.md`) | Codex (`src.codex/skills/lead/operating-model.md`) | Notes |
+| Block | Claude (`adapters/claude/agents/contracts/operating-model.md`) | Codex (`src.codex/skills/lead/operating-model.md`) | Notes |
 |-------|----------------------------------------------------------|-----------------------------------------------------|-------|
 | Primary-task lock | §"Primary-task lock" | §"Primary-task lock" | Both project the shared AGENTS.md **Primary-task continuity and side work** owner; brief inline questions, eligible substantive side delegation and no-wait ready primary continuation preserve existing authority, resource gates, holds and recovery. |
 | Isolation rule | §"Isolation rule" | §"Isolation rule" | Claude mentions Agent tool explicitly; Codex says "designated agent invocation mechanism" |
@@ -35,7 +35,7 @@ Codex loads skills statically → contract docs must be self-contained lead guid
 
 ## Shared semantic blocks — subagent-contracts.md
 
-| Block | Claude (`src.claude/agents/contracts/subagent-contracts.md`) | Codex (`src.codex/skills/lead/subagent-contracts.md`) | Notes |
+| Block | Claude (`adapters/claude/agents/contracts/subagent-contracts.md`) | Codex (`src.codex/skills/lead/subagent-contracts.md`) | Notes |
 |-------|-------------------------------------------------------------|-------------------------------------------------------|-------|
 | Handoff template | §"Handoff template" | §"Shared handoff template" | Identical structure and admission-to-assignment input receiving, ready-solution route receiving, result-restriction receiving, and result-to-dispatch correlation; shared field meanings are owned by the canonical shared blueprint; Codex has extra placeholder lines |
 | Artifact gate | §"Artifact gate" | §"Artifact gate — no delegation without brief" | Identical rules; Codex adds "if the repository uses one" qualifier |
@@ -50,7 +50,7 @@ Codex loads skills statically → contract docs must be self-contained lead guid
 
 ## Shared semantic blocks — external dispatch
 
-| Block | Claude (`src.claude/agents/contracts/external-dispatch.md`) | Codex (`src.codex/skills/lead/external-dispatch.md`) | Notes |
+| Block | Claude (`adapters/claude/agents/contracts/external-dispatch.md`) | Codex (`src.codex/skills/lead/external-dispatch.md`) | Notes |
 |-------|-------------------------------------------------------------|-------------------------------------------------------|-------|
 | Config file location | `.claude/.agents-mode.yaml` | `.agents/.agents-mode.yaml` | `agents-mode` is the only supported operator overlay surface on these lines. |
 | Extended config schema | `consultantMode`, `delegationMode`, `parallelMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, `externalOpinionCounts`, production-provider workdir keys, shared `externalModelMode`, and any line-specific local fields | `consultantMode`, `delegationMode`, `parallelMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, `externalOpinionCounts`, production-provider workdir keys, shared `externalModelMode`, and optional `externalClaudeProfile` | `consultantMode` controls consultant; `reserve` is a symbolic supplemental advisory/review candidate inside `externalPriorityProfiles`, not a scalar provider key; `reserveResolver` binds it to `claude-sonnet`, `claude-wrapper`, `wrapper:<command>`, or `disabled`; `delegationMode`, `parallelMode`, and `mcpMode` are operator-level routing, fan-out, and tooling preferences; `externalProvider` allows explicit example providers but production `auto` uses only `codex | claude`; `externalPriorityProfile` selects the named production provider-order map; `externalPriorityProfiles` stores per-profile lane orderings without example-only providers and may include `reserve` only on advisory/review lanes; `externalOpinionCounts` raises specific lanes above the default single-opinion behavior; production-provider workdir keys stay separate and default `neutral`; shared `externalModelMode` distinguishes provider runtime-default execution from pinned production-provider policy; and `externalClaudeProfile` matters only on Codex when the resolved provider is primary Claude CLI. |
@@ -87,7 +87,7 @@ Shipped 2026-07-10 for the production packs (`src.claude`, `src.codex`).
 | Layer | Path | Notes |
 |-------|------|-------|
 | Trunk | `shared/references/design-panel-methodology.md` (+ `ru/` mirror) | Provider-neutral; not installed; owns the stable `DP1`-`DP8` invariant IDs verbatim |
-| Claude binding | `src.claude/agents/contracts/design-panel.md` + `src.claude/commands/agents-design-panel.md` | Self-contained installed contract + thin command; mirrors the `review-loop.md` / `agents-review-loop.md` split |
+| Claude binding | `adapters/claude/agents/contracts/design-panel.md` + `adapters/claude/commands/agents-design-panel.md` | Self-contained installed contract + thin command; mirrors the `review-loop.md` / `agents-review-loop.md` split |
 | Codex binding | `src.codex/skills/design-panel/SKILL.md` + `src.codex/skills/design-panel/agents/openai.yaml` | Self-contained skill; registered in `UTILITY_SKILLS`; stays under the unchanged Codex metadata cap |
 | Operating-model selection block | See the "Design-panel and review-loop selection" row above | Selection/pointer only in both packs; does not duplicate `DP1`-`DP8` |
 
@@ -99,17 +99,17 @@ These exist in Codex because it must be self-contained. Claude distributes this 
 
 | Codex section | Anchor (codex file) | Claude equivalent location |
 |---------------|---------------------|---------------------------|
-| Role map | subagent-contracts §"Role map" | Distributed across `src.claude/agents/*.md` |
-| Per-role contracts (PM through Consultant) | subagent-contracts §"Product Manager" … §"Consultant" (consecutive role sections) | Each in its own `src.claude/agents/<role>.md` |
+| Role map | subagent-contracts §"Role map" | Distributed across `adapters/claude/agents/*.md` |
+| Per-role contracts (PM through Consultant) | subagent-contracts §"Product Manager" … §"Consultant" (consecutive role sections) | Each in its own `adapters/claude/agents/<role>.md` |
 | Canonical routing patterns (27 patterns) | operating-model §"Canonical routing patterns" | Team templates JSON + decision tree in CLAUDE.md |
 | Stage gates (all roles) | operating-model §"Stage gates" | Distributed across role `.md` files |
-| Lead quick checklist | operating-model §"Lead quick checklist" | `src.claude/skills/lead/SKILL.md` (`agents/lead.md` is fail-closed only) |
+| Lead quick checklist | operating-model §"Lead quick checklist" | canonical `src.codex/skills/lead/SKILL.md` (`agents/lead.md` is fail-closed only) |
 | Review strategy selection + decision table | operating-model §"Review strategy selection" | Compact version in operating-model + reviewer roles |
 | Builder and blocker separation | operating-model §"Builder and blocker separation" | Implicit in role index + template routing |
 | Delivery loops | operating-model §"Delivery loops" | Implicit in template chain definitions |
 | Change classification | operating-model §"Change classification" | In AGENTS.shared.md engineering hygiene |
 | Fact-first workflow | operating-model §"Fact-first workflow" | In AGENTS.shared.md delegation principles |
-| Re-intake and integration ownership | operating-model §"Re-intake and integration ownership" | In AGENTS.shared.md + `src.claude/skills/lead/SKILL.md` |
+| Re-intake and integration ownership | operating-model §"Re-intake and integration ownership" | In AGENTS.shared.md + canonical `src.codex/skills/lead/SKILL.md` |
 | Change-isolation guidance | operating-model §"Change-isolation guidance" | In AGENTS.shared.md engineering hygiene |
 | Governance artifacts list | operating-model §"Governance artifacts to keep near the code" | In artifact persistence section |
 

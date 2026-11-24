@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import stat
@@ -215,6 +216,26 @@ def assert_no_overlay(path: Path, label: str) -> None:
         raise InstallerRegressionError(f"{label}: installer created a preferences file: {path}")
 
 
+def validate_shared_preference_resolution(root: Path, case: InstallerCase, home: Path) -> None:
+    result = subprocess.run(
+        [sys.executable, str(root / "scripts/resolve-agents-mode.py"),
+         "--provider", case.name, "--project-root", str(home),
+         "--home", str(home), "--repo-root", str(root), "--json"],
+        cwd=root, text=True, capture_output=True,
+    )
+    if result.returncode != 0:
+        raise InstallerRegressionError(
+            f"{case.name} shared preference resolution failed:\n{result.stdout}\n{result.stderr}"
+        )
+    resolved = json.loads(result.stdout)
+    expected = {"rank": "shared-global", "path": str(home / ".agents-mode.yaml")}
+    if (resolved["values"].get("reserveResolver") != "disabled"
+            or resolved["sources"].get("reserveResolver") != expected
+            or resolved["values"].get("mcpMode") != "force"
+            or resolved["sources"].get("mcpMode") != expected):
+        raise InstallerRegressionError(f"{case.name} lost the shared preference value or provenance")
+
+
 def run_regression(root: Path) -> None:
     validate_production_provider_partition()
     scratch = root / ".scratch" / "agents-mode-installer-regression" / uuid.uuid4().hex
@@ -253,13 +274,14 @@ def run_regression(root: Path) -> None:
             pack_legacy.write_bytes(pack_bytes)
             shared = home / ".agents-mode.yaml"
             shared_before = b"# shared preference\r\nexternalClaudeApiMode: disabled  # intentional\r\nmcpMode: force\r\n"
-            shared_after = b"# shared preference\r\nreserveResolver: disabled  # intentional\r\nmcpMode: force\r\n"
             shared.write_bytes(shared_before)
             run_global_installer(root, case, home)
             assert_overlay_bytes(pack_legacy, pack_bytes, f"{case.name} global legacy")
             if os.path.lexists(pack_global):
                 raise InstallerRegressionError(f"{case.name} moved its existing legacy preferences")
-            assert_overlay_bytes(shared, shared_after, f"{case.name} shared global")
+            assert_overlay_bytes(shared, shared_before, f"{case.name} shared global")
+            validate_shared_preference_resolution(root, case, home)
+            assert_overlay_bytes(shared, shared_before, f"{case.name} shared global after resolution")
             if case.codex_line:
                 validate_codex_native_role_install(home, root)
 

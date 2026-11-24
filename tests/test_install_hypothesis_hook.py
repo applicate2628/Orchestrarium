@@ -14,6 +14,7 @@ Covers the cases listed in the architecture review of commit 79aa5eb:
 
 from __future__ import annotations
 
+import ast
 import json
 import hashlib
 import importlib.util
@@ -25,6 +26,7 @@ import tempfile
 import unittest
 from pathlib import Path, PureWindowsPath
 from unittest.mock import patch
+from types import SimpleNamespace
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK_INSTALLER = REPO_ROOT / "scripts" / "install-hypothesis-hook.py"
@@ -54,6 +56,11 @@ def run_installer(
     script_path: str = str(PY_SCRIPT_PATH),
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
+    if host_os == "windows" and os.name != "nt":
+        raise unittest.SkipTest(
+            "Windows CLI interpreter admission requires native Windows; "
+            "portable target serialization is tested separately"
+        )
     cmd = [
         sys.executable,
         str(HOOK_INSTALLER),
@@ -78,7 +85,36 @@ def load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _fixture_codex_command(executable: str, script: Path, host_os: str = "windows") -> str:
+    # Ownership tests consume real writer output; shell encoding has independent
+    # native-oracle and literal legacy-byte tests in test_windows_hook_unicode.
+    tokens = ((PureWindowsPath(executable).as_posix(), PureWindowsPath(script).as_posix())
+              if host_os == "windows" else (executable, str(script)))
+    target = HOOK_MODULE.HookTarget(tokens[0], (tokens[1],))
+    return HOOK_MODULE.build_codex_entry(target, host_os)["hooks"][0]["command"]
+
+
 class TestInstallHypothesisHook(unittest.TestCase):
+
+    def test_legacy_witness_keeps_path_and_descriptor_clocks_separate(self) -> None:
+        """Windows lstat ctime and fstat ctime need not denote the same clock."""
+        from scripts import production_installer as producer
+        value = self.tmpdir.stat()
+        fields = {name: getattr(value, name) for name in dir(value) if name.startswith("st_")}
+        fields.setdefault("st_birthtime_ns", fields["st_ctime_ns"])
+        fields.setdefault("st_file_attributes", 0)
+        before = SimpleNamespace(**fields)
+        opened_fields = dict(fields, st_ctime_ns=fields["st_ctime_ns"] + 50_000_000)
+        opened = SimpleNamespace(**opened_fields)
+        matches = producer._legacy_hook_metadata_matches
+        self.assertTrue(matches(before, opened, opened, before, windows=True))
+        self.assertFalse(matches(before, opened, opened, before, windows=False))
+        for key in ("st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns",
+                    "st_ctime_ns", "st_birthtime_ns", "st_file_attributes"):
+            changed = SimpleNamespace(**dict(opened_fields, **{key: opened_fields[key] + 1}))
+            self.assertFalse(matches(before, opened, changed, before, windows=True), key)
+            changed_path = SimpleNamespace(**dict(fields, **{key: fields[key] + 1}))
+            self.assertFalse(matches(before, opened, opened, changed_path, windows=True), key)
 
     def test_windows_case_equivalent_target_updates_without_duplicate(self) -> None:
         marker = "check-bugfix-discipline"
@@ -302,6 +338,15 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.tmpdir = Path(tempfile.mkdtemp(prefix="orch-hook-test-"))
         self.target = self.tmpdir / "settings.json"
 
+    def _profile_python(self, host_os: str) -> str:
+        if host_os != "windows" or os.name == "nt":
+            return sys.executable
+        # Resolution/serialization fixture only; this file is never executed.
+        # Real Windows CLI cases run with the actual interpreter on Windows.
+        fixture = self.tmpdir / "python.exe"
+        fixture.write_bytes(b"synthetic regular executable-path fixture")
+        return str(fixture)
+
     def tearDown(self) -> None:
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
@@ -313,7 +358,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(len(pretool), 1)
         hook = pretool[0]["hooks"][0]
         # Claude POSIX = direct exec form (args array, no shell interpretation).
-        self.assertEqual(Path(hook["command"]), Path(sys.executable).resolve())
+        self.assertEqual(Path(hook["command"]), Path(sys.executable))
         self.assertEqual(hook["args"], [str(PY_SCRIPT_PATH.resolve())])
         # Matcher fires on code-mutating tool calls (script self-filters on
         # bug-context from session transcript). No `if` filter anymore — the
@@ -330,7 +375,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         data = load_json(self.target)
         hook = data["hooks"]["PreToolUse"][0]["hooks"][0]
-        self.assertEqual(Path(hook["command"]), Path(sys.executable).resolve())
+        self.assertEqual(Path(hook["command"]), Path(sys.executable))
         self.assertEqual(hook["args"], [str(PY_SCRIPT_PATH.resolve())])
         self.assertNotIn("bash", hook["command"])
         self.assertNotIn("powershell", hook["command"].casefold())
@@ -386,7 +431,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         entry = data["hooks"]["PreToolUse"][0]
         hook = entry["hooks"][0]
         self.assertEqual(entry["matcher"], "Edit|Write|NotebookEdit|apply_patch")
-        self.assertEqual(Path(hook["command"]), Path(sys.executable).resolve())
+        self.assertEqual(Path(hook["command"]), Path(sys.executable))
         self.assertEqual(hook["args"], [str(PY_SCRIPT_PATH.resolve())])
         self.assertNotIn("if", hook)
 
@@ -408,8 +453,8 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertNotIn("powershell", hook["command"].casefold())
         self.assertNotIn(".ps1", hook["command"].casefold())
 
-    def test_codex_windows_rejects_unsupported_unquoted_python_path(self) -> None:
-        quoted_dir = self.tmpdir / "O'Brien"
+    def test_codex_windows_rejects_shell_expansion_in_python_path(self) -> None:
+        quoted_dir = self.tmpdir / "unsafe$expansion"
         quoted_dir.mkdir()
         python_path = quoted_dir / "check-bugfix-discipline.py"
         python_path.write_text("", encoding="utf-8")
@@ -437,7 +482,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(len(entries), 1)
         self.assertNotIn("matcher", entries[0])
         hook = entries[0]["hooks"][0]
-        self.assertEqual(Path(hook["command"]), Path(sys.executable).resolve())
+        self.assertEqual(Path(hook["command"]), Path(sys.executable))
         self.assertEqual(hook["args"], [str(REMINDER_PY_SCRIPT_PATH.resolve())])
         self.assertIn("mcp-usage-reminder", hook["args"][0])
 
@@ -463,7 +508,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
                     self.assertNotIn("args", hook)
                     self.assertIn("mcp-usage-reminder", hook["command"])
                 else:
-                    self.assertEqual(Path(hook["command"]), Path(sys.executable).resolve())
+                    self.assertEqual(Path(hook["command"]), Path(sys.executable))
                     self.assertEqual(hook["args"], [str(REMINDER_PY_SCRIPT_PATH.resolve())])
 
     def test_install_posttooluse_hook_uses_custom_matcher_for_all_platforms(self) -> None:
@@ -488,10 +533,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
 
     def test_retired_codex_audit_removes_only_exact_handler(self) -> None:
         script = self.tmpdir / "hooks" / "check-mcp-momentum.py"
-        command = (
-            f"{PureWindowsPath(sys.executable).as_posix()} "
-            f"{PureWindowsPath(script).as_posix()}"
-        )
+        command = _fixture_codex_command(sys.executable, script)
         matcher = "Grep|Bash|PowerShell|shell_command|exec_command"
         owned = {"type": "command", "command": command, "statusMessage": "Check MCP tool use"}
         sibling = {"type": "command", "command": "echo custom-sibling", "timeout": 7}
@@ -568,7 +610,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
 
     def test_exact_handler_mode_is_independent_of_script_marker(self) -> None:
         script = self.tmpdir / "arbitrary-owner.py"
-        command = f"{PureWindowsPath(sys.executable).as_posix()} {PureWindowsPath(script).as_posix()}"
+        command = _fixture_codex_command(sys.executable, script)
         sibling = {"type": "command", "command": "echo user-sibling"}
         foreign_group = {"matcher": "ForeignTool", "hooks": [{"type": "command", "command": "echo foreign"}]}
         self.target.write_text(json.dumps({
@@ -610,8 +652,9 @@ class TestInstallHypothesisHook(unittest.TestCase):
         installer = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = installer
         spec.loader.exec_module(installer)
+        host = "windows" if os.name == "nt" else "posix"
         script = self.tmpdir / "hooks" / "check-mcp-momentum.py"
-        command = f"{PureWindowsPath(sys.executable).as_posix()} {PureWindowsPath(script).as_posix()}"
+        command = _fixture_codex_command(self._profile_python(host), script, host)
         matcher = "Grep|Bash|PowerShell|shell_command|exec_command"
         sibling = {"type": "command", "command": "echo custom-sibling"}
         self.target.write_text(json.dumps({
@@ -624,11 +667,12 @@ class TestInstallHypothesisHook(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "injected verification failure"):
             with installer._InstallTransaction([self.target], enabled=True) as transaction:
                 owner = installer._CreateOnlyMutablePath(self.tmpdir, transaction, dry_run=False)
-                hook_target = HOOK_MODULE.resolve_hook_target(str(script), "windows", "codex", require_script=False)
-                expected_entry = HOOK_MODULE.build_codex_entry(hook_target, "windows", "PreToolUse", matcher)
+                hook_target = HOOK_MODULE.resolve_hook_target(str(script), host, "codex", require_script=False,
+                                                              python_executable=self._profile_python(host))
+                expected_entry = HOOK_MODULE.build_codex_entry(hook_target, host, "PreToolUse", matcher)
                 installer._transform_hook_registration(
                     HOOK_MODULE, self.target, owner, "check-mcp-momentum", "PreToolUse",
-                    "codex", "windows", expected_entry=expected_entry,
+                    "codex", host, expected_entry=expected_entry,
                 )
                 self.assertEqual(load_json(self.target)["hooks"]["PreToolUse"][0]["hooks"], [sibling])
                 raise RuntimeError("injected verification failure")
@@ -693,7 +737,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(data["hooks"]["PreToolUse"][0]["hooks"][0]["command"], "echo user-other-hook")
         our_hook = data["hooks"]["PreToolUse"][1]["hooks"][0]
         # Direct Python exec form: marker lives in args[0], not in command.
-        self.assertEqual(Path(our_hook["command"]), Path(sys.executable).resolve())
+        self.assertEqual(Path(our_hook["command"]), Path(sys.executable))
         self.assertIn("check-bugfix-discipline", our_hook["args"][0])
         self.assertEqual(data["hooks"]["Stop"], [{"hooks": [{"type": "command", "command": "echo stop"}]}])
 
@@ -712,7 +756,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(len(stop_entries), 1)
         self.assertNotIn("matcher", stop_entries[0])
         hook = stop_entries[0]["hooks"][0]
-        self.assertEqual(Path(hook["command"]), Path(sys.executable).resolve())
+        self.assertEqual(Path(hook["command"]), Path(sys.executable))
         self.assertEqual(hook["args"], [str(STOP_PY_SCRIPT_PATH.resolve())])
         self.assertIn("check-passive-polling-stop", hook["args"][0])
 
@@ -824,7 +868,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(len(data["hooks"]["PreToolUse"]), 1)
         # After collapse, the remaining entry uses the direct Python form.
         hook = data["hooks"]["PreToolUse"][0]["hooks"][0]
-        self.assertEqual(Path(hook["command"]), Path(sys.executable).resolve())
+        self.assertEqual(Path(hook["command"]), Path(sys.executable))
         self.assertEqual(hook["args"], [str(PY_SCRIPT_PATH.resolve())])
 
     def test_duplicates_all_removed_on_uninstall(self) -> None:
@@ -980,7 +1024,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
                             str(python_target),
                             host_os,
                             platform,
-                            python_executable=sys.executable,
+                            python_executable=self._profile_python(host_os),
                         )
                         entry = (
                             HOOK_MODULE.build_claude_entry(target)
@@ -1002,6 +1046,10 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.target.write_bytes(original)
         installer = REPO_ROOT / "scripts" / "production_installer.py"
         text = installer.read_text(encoding="utf-8")
+        install_hooks = next(node for node in ast.parse(text).body
+                             if isinstance(node, ast.FunctionDef) and node.name == "_install_hooks")
+        text = ast.get_source_segment(text, install_hooks)
+        self.assertIsNotNone(text)
         self.assertLess(text.index('"--validate-only"'), text.index("for marker, script, event, matcher"))
 
         for platform in ("claude", "codex"):
@@ -1017,7 +1065,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
                                 str(candidate),
                                 host_os,
                             platform,
-                                python_executable=sys.executable,
+                                python_executable=self._profile_python(host_os),
                             )
                             for candidate in candidates
                         )
@@ -1028,7 +1076,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
             str(PY_SCRIPT_PATH),
             "windows",
             "claude",
-            python_executable=sys.executable,
+            python_executable=self._profile_python("windows"),
         )
         self.assertTrue(Path(target.executable).is_absolute())
         self.assertEqual(len(target.args), 1)
@@ -1055,39 +1103,16 @@ class TestInstallHypothesisHook(unittest.TestCase):
                 python_executable=str(self.tmpdir / "missing-python.exe"),
             )
 
-    def test_windows_unquoted_shape_and_unsupported_path_rejection(self) -> None:
+    def test_windows_target_round_trip_preserves_literal_identity(self) -> None:
         target = HOOK_MODULE.resolve_hook_target(
-            str(PY_SCRIPT_PATH),
-            "windows",
-            "codex",
-            python_executable=sys.executable,
+            str(PY_SCRIPT_PATH), "windows", "codex",
+            python_executable=self._profile_python("windows"),
         )
-        entry = HOOK_MODULE.build_codex_entry(target, "windows")
-        command = entry["hooks"][0]["command"]
-        # Pin the exact spelling the operator verified live under both cmd.exe
-        # and PowerShell: two unquoted absolute tokens with forward separators.
-        # Codex hashes entry content for trust, so this byte shape is what lets
-        # a reinstall match the stored trusted_hash instead of raising a modal.
-        expected = (
-            f"{PureWindowsPath(sys.executable).as_posix()} "
-            f"{PureWindowsPath(PY_SCRIPT_PATH).as_posix()}"
+        handler = HOOK_MODULE.build_codex_entry(target, "windows")["hooks"][0]
+        self.assertEqual(
+            HOOK_MODULE._hook_health_owner()._command_argv(handler, "codex", "windows"),
+            [target.executable, *target.args],
         )
-        self.assertEqual(command, expected)
-        self.assertNotIn("\\", command)
-        self.assertNotIn('"', command)
-        self.assertNotIn("'", command)
-
-        spaced_dir = self.tmpdir / "contains space"
-        spaced_dir.mkdir()
-        spaced_target = spaced_dir / "check-bugfix-discipline.py"
-        spaced_target.write_text("", encoding="utf-8")
-        with self.assertRaisesRegex(ValueError, "unsupported Windows"):
-            HOOK_MODULE.resolve_hook_target(
-                str(spaced_target),
-                "windows",
-                "codex",
-                python_executable=sys.executable,
-            )
 
     def test_hook_target_layers_are_separable(self) -> None:
         synthetic = HOOK_MODULE.HookTarget(

@@ -23,7 +23,7 @@ CANONICAL = ROOT / "shared/references/architecture-pattern-applicability.md"
 RUSSIAN = ROOT / "shared/references/ru/architecture-pattern-applicability.md"
 VALIDATOR_DECLARATIONS = (
     ROOT / "src.codex/skills/lead/scripts/validate-skill-pack.py",
-    ROOT / "src.claude/agents/scripts/validate-skill-pack.py",
+    ROOT / 'adapters/claude/agents/scripts/validate-skill-pack.py',
 )
 FAKE_CODEX_HOOKS_HOST = ROOT / "tests/fixtures/fake_codex_hooks_host.py"
 
@@ -139,14 +139,14 @@ CORRESPONDENCE_INVENTORY = (
 BLOCKS = {
     "LEAD-ROUTING": (
         ROOT / "src.codex/skills/lead/SKILL.md",
-        ROOT / "src.claude/skills/lead/SKILL.md",
+        ROOT / 'adapters/claude/skills/lead/SKILL.md',
     ),
     "ARCHITECT-DISPOSITION": (
         ROOT / "src.codex/skills/architect/SKILL.md",
     ),
     "ARCHITECTURE-REVIEW": (
         ROOT / "src.codex/skills/architecture-reviewer/SKILL.md",
-        ROOT / "src.claude/agents/architecture-reviewer.md",
+        ROOT / 'adapters/claude/agents/architecture-reviewer.md',
     ),
 }
 
@@ -154,9 +154,9 @@ NON_OWNING_ROLES = (
     ROOT / "src.codex/skills/backend-engineer/SKILL.md",
     ROOT / "src.codex/skills/data-engineer/SKILL.md",
     ROOT / "src.codex/skills/reliability-engineer/SKILL.md",
-    ROOT / "src.claude/agents/backend-engineer.md",
-    ROOT / "src.claude/agents/data-engineer.md",
-    ROOT / "src.claude/agents/reliability-engineer.md",
+    ROOT / 'adapters/claude/agents/backend-engineer.md',
+    ROOT / 'adapters/claude/agents/data-engineer.md',
+    ROOT / 'adapters/claude/agents/reliability-engineer.md',
 )
 
 SEMANTIC_RECORD = re.compile(
@@ -344,7 +344,7 @@ def test_candidate_evidence_and_wire_order_stay_applicability_bound() -> None:
     architect = _read(BLOCKS["ARCHITECT-DISPOSITION"][0], FAILURE_IDS[1])
     assert "actual wire shape and codec" in architect
     assert "field order only when protocol semantics require it" in architect
-    assert not (ROOT / "src.claude/skills/architect/SKILL.md").exists()
+    assert not (ROOT / 'adapters/claude/skills/architect/SKILL.md').exists()
 
 
 def test_source_projection_parity() -> None:
@@ -497,20 +497,20 @@ def test_canonical_runtime_claim_does_not_overstate_static_delivery() -> None:
 
 def test_claude_architect_source_composition_has_one_universal_body() -> None:
     universal = ROOT / "src.codex/skills/architect/SKILL.md"
-    duplicate = ROOT / "src.claude/skills/architect/SKILL.md"
-    wrapper = ROOT / "src.claude/agents/architect.md"
-    inline_policy = ROOT / "src.claude/CLAUDE.md"
-    validator = ROOT / "src.claude/agents/scripts/validate-skill-pack.py"
+    duplicate = ROOT / 'adapters/claude/skills/architect/SKILL.md'
+    wrapper = ROOT / 'adapters/claude/agents/architect.md'
+    inline_policy = ROOT / 'adapters/claude/CLAUDE.md'
+    validator = ROOT / 'adapters/claude/agents/scripts/validate-skill-pack.py'
 
     assert universal.is_file()
     assert not duplicate.exists()
-    assert "The universal Architect skill (`.agents/skills/architect/SKILL.md`, sourced from `src.codex/skills/architect/SKILL.md`) is the sole role-contract body owner" in _read(wrapper, FAILURE_IDS[0])
-    assert "Architect's sole role-contract body is the universal `.agents/skills/architect/SKILL.md` projection." in _read(inline_policy, FAILURE_IDS[0])
-    assert "('check_not_exists',\n  'src.claude/skills/architect/SKILL.md'" in _read(validator, FAILURE_IDS[0])
+    assert "The sole authored role-contract body is `src.codex/skills/architect/SKILL.md`; this Claude installation loads its ordinary copy at `.claude/skills/architect/SKILL.md`." in _read(wrapper, FAILURE_IDS[0])
+    assert "Architect's sole authored role-contract body is `src.codex/skills/architect/SKILL.md`, installed as an ordinary copy at `.claude/skills/architect/SKILL.md`." in _read(inline_policy, FAILURE_IDS[0])
+    assert "('check_not_exists',\n  'adapters/claude/skills/architect/SKILL.md'" in _read(validator, FAILURE_IDS[0])
 
 
 def test_claude_validator_maps_architect_apat_to_each_layout_owner() -> None:
-    validator = ROOT / "src.claude/agents/scripts/validate-skill-pack.py"
+    validator = ROOT / 'adapters/claude/agents/scripts/validate-skill-pack.py'
     validation = subprocess.run(
         [sys.executable, "-B", str(validator), "--root", str(ROOT)],
         cwd=ROOT,
@@ -609,7 +609,7 @@ def test_installed_parity_and_validator(
 ) -> None:
     declaration = source_roles[0].parent / "scripts/validate-skill-pack.py"
     if provider == "claude":
-        declaration = ROOT / "src.claude/agents/scripts/validate-skill-pack.py"
+        declaration = ROOT / 'adapters/claude/agents/scripts/validate-skill-pack.py'
     declaration_text = _read(declaration, FAILURE_IDS[5])
     for marker in ("APAT-G04-PROVIDER-PARITY", "APAT-G05-INSTALLED-PARITY"):
         assert marker in declaration_text, (
@@ -639,7 +639,8 @@ def test_installed_parity_and_validator(
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=120,
+        # The full install materializes independent provider copies; allow a bounded budget.
+        timeout=300,
         check=False,
     )
     assert result.returncode == 0, (
@@ -657,11 +658,10 @@ def test_installed_parity_and_validator(
     if provider == "claude":
         claude_architect = target / ".claude/skills/architect"
         universal_architect = target / ".agents/skills/architect"
-        is_directory_link = claude_architect.is_symlink() or (
-            os.name == "nt" and claude_architect.is_junction()
-        )
-        assert is_directory_link, "Claude Architect projection must remain a directory link"
-        assert claude_architect.resolve() == universal_architect.resolve()
+        for path in (target / ".claude/skills", claude_architect, claude_architect / "SKILL.md"):
+            assert not path.is_symlink()
+            assert not getattr(path.lstat(), "st_file_attributes", 0) & 0x400
+        assert not os.path.lexists(universal_architect), "Claude-only must not depend on a Codex tree"
 
     installed_validator = target / validator
     validation = subprocess.run(

@@ -1,0 +1,323 @@
+"""Common executor interface over the existing Kimi ACP/CLI owner.
+
+No SDK, second transport, provider registry, ledger writer or prose-to-JSON model
+call is introduced here. ``provider_prompt.launch`` retains admission, exact
+launch, private-home/capture lifecycle, safety scanning and durable receiving.
+Its existing Windows-only restriction is unchanged. The caller must supply an
+already prepared launch whose provenance supplied the common request identities.
+"""
+from __future__ import annotations
+
+import asyncio
+import copy
+import inspect
+import hashlib
+from dataclasses import dataclass, replace
+from pathlib import Path
+import threading
+from typing import Callable
+
+import provider_prompt as owner
+
+from ._async import drain_owned
+from .contracts import CancelReceipt, ExecutionRequest, ExecutionResult, Observation, json_text
+
+
+class KimiAdapterError(ValueError):
+    """Closed, non-secret adapter failure category."""
+
+
+@dataclass(frozen=True)
+class KimiReceivedEvidence:
+    """Historical canonical evidence, not a reconstructed live process result."""
+    request: ExecutionRequest
+    ledger_json: str
+    terminal_json: str | None
+
+
+class KimiAcpAdapter:
+    """One operation; existing Kimi receiving runs once inside the launch owner.
+
+    ``assert_current`` must bind the request to current scope, account, budget and
+    permissions, and return None or raise. Kimi's ACP does not expose account
+    readback, so this adapter does not fabricate it. The caller supplies the real
+    existing owner check, not an assertion copied from the request.
+
+    ``record`` retains only bounded observations derived from the already-scanned
+    native terminal. It is not a second receiving or ledger callback. A returned
+    native result must not be submitted to the structured SDK receiving path.
+    Both callbacks must be synchronous and return None. Deferred evidence
+    callbacks are refused rather than scheduled or treated as persistence.
+    """
+
+    def __init__(
+        self, *, prevalidated: owner.PolicyBoundLaunch,
+        assert_current: Callable[[ExecutionRequest, str], None],
+        record: Callable[[Observation], None],
+    ) -> None:
+        if type(prevalidated) is not owner.PolicyBoundLaunch:
+            raise KimiAdapterError("existing_kimi_launch_required")
+        if not callable(assert_current) or not callable(record):
+            raise KimiAdapterError("explicit_owner_callbacks_required")
+        # These owners are synchronous and execute in the launch worker thread.
+        # Reject async call shapes before any provider effect, rather than
+        # silently treating an unawaited callback as persisted evidence.
+        for callback in (assert_current, record):
+            if any(inspect.iscoroutinefunction(value) or inspect.isasyncgenfunction(value)
+                   for value in (callback, getattr(callback, "__call__", None))):
+                raise KimiAdapterError("synchronous_owner_callbacks_required")
+        self._prepared = copy.deepcopy(prevalidated)
+        self._assert_current, self._record = assert_current, record
+        self._lock = threading.RLock()
+        self._cancelled = threading.Event()
+        self._request: ExecutionRequest | None = None
+        self._operation: owner.KimiOperationBindingV1 | None = None
+        self._finished = False
+        self.execution_result: ExecutionResult | None = None
+
+    def _binding(self, request: ExecutionRequest) -> None:
+        prepared = self._prepared
+        provenance = prepared.provenance
+        if not isinstance(request, ExecutionRequest) or request.provider != "kimi" or provenance is None:
+            raise KimiAdapterError("unsupported_provider_or_binding")
+        expected = (
+            provenance.work_item, provenance.external_dispatch_id,
+            provenance.external_evidence_run_id, provenance.artifact_identity,
+            provenance.assigned_internal_role, provenance.model, provenance.effort,
+        )
+        actual = (
+            request.work_item_id, request.external_dispatch_id,
+            request.external_evidence_run_id, request.artifact_id,
+            request.role, request.model, request.effort,
+        )
+        cwd = prepared.control.kimi_capabilities.cwd or str(Path.cwd().resolve())
+        if (
+            actual != expected or provenance.provider != "kimi"
+            or provenance.actual_execution_path != "direct-external-cli"
+            or request.model != "kimi-code/k3" or request.effort not in {"high", "max"}
+            or request.cwd != cwd or provenance.effort_mapping_loss != request.effort_mapping_loss
+            or prepared.control.result_max_bytes > request.max_output_bytes
+        ):
+            raise KimiAdapterError("kimi_request_binding_mismatch")
+
+    def reconcile_received(self, request: ExecutionRequest, *, output_context: owner.ProviderOutputContext) -> KimiReceivedEvidence:
+        """Read the existing received result without launching, settling or replaying."""
+        self._binding(request)
+        if type(output_context) is not owner.ProviderOutputContext:
+            raise KimiAdapterError("receiving_output_context_required")
+        output_context.__post_init__()
+
+        def current(effect):
+            self._binding(request)
+            try:
+                result = self._assert_current(request, effect)
+            except Exception:
+                raise KimiAdapterError("kimi_receiving_authority_denied") from None
+            if result is not None:
+                if inspect.iscoroutine(result) and inspect.getcoroutinestate(result) == inspect.CORO_CREATED:
+                    result.close()
+                raise KimiAdapterError("invalid_authority_callback")
+
+        current("kimi_receipt_read")
+        control, provenance = self._prepared.control, self._prepared.provenance
+        ledger = owner.read_back_external_terminal(control, "kimi", request.run_id, provenance)
+        if ledger is None:
+            raise KimiAdapterError("terminal_ledger_readback_failed")
+        digest, size = ledger.get("terminalReceiptSha256"), ledger.get("terminalReceiptSizeBytes")
+        terminal_json = None
+        snapshot = lifecycle = None
+        if digest is not None or size is not None:
+            if (not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest)
+                or type(size) is not int or size <= 0 or control.terminal_receipt is None):
+                raise KimiAdapterError("terminal_receipt_binding_invalid")
+            try:
+                path = owner.TerminalReceiptV1._validated_path(control.terminal_receipt)
+                lifecycle = owner._ledger_owner().load_validator().load_lifecycle_owner()
+                snapshot = lifecycle._capture_file_snapshot(path, failure_id="KIMI-RECEIPT-CHANGED", maximum_bytes=size)
+                raw = snapshot.data
+                if len(raw) != size or hashlib.sha256(raw).hexdigest() != digest:
+                    raise KimiAdapterError("terminal_receipt_changed")
+                failure = owner._provider_terminal_line_safety("kimi", output_context.needles, raw.decode("utf-8"))
+                if failure is not None:
+                    raise KimiAdapterError(failure)
+                terminal = owner.parse_provider_result(raw.decode("utf-8"))
+                if (provenance is None or any(terminal.get(key) != value for key,value in provenance.payload().items())
+                    or terminal.get("status") != ledger.get("status") or terminal.get("gate") != ledger.get("gate")):
+                    raise KimiAdapterError("terminal_binding_mismatch")
+                terminal_json = json_text(terminal)
+            except KimiAdapterError:
+                raise
+            except Exception:
+                raise KimiAdapterError("terminal_receipt_unavailable") from None
+        current("kimi_receipt_result")
+        if owner.read_back_external_terminal(control, "kimi", request.run_id, provenance) != ledger:
+            raise KimiAdapterError("terminal_ledger_changed")
+        if snapshot is not None:
+            try:
+                lifecycle._verify_captured_file(snapshot, "KIMI-RECEIPT-CHANGED")
+            except Exception:
+                raise KimiAdapterError("terminal_receipt_changed") from None
+        ledger_json = json_text(ledger)
+        # The terminal uses its validated protocol-slot scanner above; generic
+        # wrapping would misclassify genuine outcome tokens as credentials.
+        failure = owner.provider_output_safety_scan_terminal("kimi", output_context.needles,
+            stdout=ledger_json.encode("utf-8"), stderr=b"")
+        if failure is not None:
+            raise KimiAdapterError(failure)
+        return KimiReceivedEvidence(request, ledger_json, terminal_json)
+
+    async def execute(self, request: ExecutionRequest) -> ExecutionResult:
+        self._binding(request)
+        with self._lock:
+            if self._request is not None:
+                raise KimiAdapterError("operation_already_consumed")
+            self._request = request
+        task = asyncio.create_task(asyncio.to_thread(self._execute, request))
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            await self.cancel(request.run_id)
+            # The existing owner must still settle and retain its terminal.
+            return await drain_owned(task)
+
+    async def cancel(self, run_id: str) -> CancelReceipt:
+        with self._lock:
+            if self._request is None or self._request.run_id != run_id:
+                return CancelReceipt(run_id, False, False, error="unknown_run")
+            if self._finished:
+                return CancelReceipt(run_id, False, False, error="already_finished")
+            self._cancelled.set()
+            exchange = self._operation.exchange if self._operation is not None else None
+            # ACP cancel is a notification, not an acknowledgement. Only an
+            # observed cancelled prompt response can establish acknowledgement.
+            acknowledged = bool(exchange is not None and exchange.cancel_sent and exchange.stop_reason == "cancelled")
+            return CancelReceipt(run_id, True, acknowledged)
+
+    def _execute(self, request: ExecutionRequest) -> ExecutionResult:
+        def current(effect: str) -> None:
+            self._binding(request)
+            decision = self._assert_current(request, effect)
+            if decision is not None:
+                if inspect.iscoroutine(decision) and inspect.getcoroutinestate(decision) == inspect.CORO_CREATED:
+                    decision.close()
+                raise KimiAdapterError("invalid_authority_callback")
+
+        operation = owner.KimiOperationBindingV1(
+            self._prepared, request.prompt.encode("utf-8"), current, self._cancelled.is_set,
+        )
+        with self._lock:
+            self._operation = operation
+        try:
+            owner_failed = False
+            try:
+                code = owner.launch("kimi", [], operation=operation)
+            except Exception:
+                # Preserve any acquired terminal while closing the exception
+                # vocabulary. Never relay provider, account or OS diagnostics.
+                code, owner_failed = 1, True
+            result = self._result(request, operation, code)
+            result = replace(
+                result, status="incomplete", execution_error=result.execution_error or "kimi_owner_failed",
+                cleanup_error=result.cleanup_error or "kimi_settlement_unavailable",
+            ) if owner_failed else result
+            # Receiving has already happened. Withhold stale delivery without
+            # discarding acquired evidence or repeating launch admission.
+            self.execution_result = result
+            try:
+                current("kimi_result")
+            except Exception:
+                raise KimiAdapterError("kimi_result_authority_denied") from None
+            return result
+        finally:
+            with self._lock:
+                self._finished = True
+
+    def _result(self, request: ExecutionRequest, operation: owner.KimiOperationBindingV1, code: int) -> ExecutionResult:
+        exchange, process = operation.exchange, operation.process_result
+        closed = bool(exchange is not None and exchange.protocol_closed)
+        cleanup_error = exchange.cleanup_error if exchange is not None else None
+        execution_error = capture_error = None
+        native_text = None
+        observations: tuple[Observation, ...] = ()
+        provider_status = None
+        if exchange is not None:
+            provider_status = {"end_turn": "completed", "cancelled": "interrupted", "refusal": "failed"}.get(exchange.stop_reason)
+        try:
+            if operation.terminal_bytes is None:
+                raise KimiAdapterError("terminal_result_unavailable")
+            terminal = owner.parse_provider_result(operation.terminal_bytes.decode("utf-8", errors="strict"))
+            provenance = self._prepared.provenance
+            if provenance is None or any(terminal.get(k) != v for k, v in provenance.payload().items()):
+                raise KimiAdapterError("terminal_binding_mismatch")
+            value = terminal.get("resultText")
+            if isinstance(value, str) and value.strip():
+                if len(value.encode("utf-8")) > request.max_output_bytes:
+                    raise KimiAdapterError("native_result_limit_exceeded")
+                native_text = value
+            if terminal.get("cleanupStatus") != "complete":
+                cleanup_error = cleanup_error or "kimi_owner_cleanup_incomplete"
+            if terminal.get("status") not in {"completed", "revise"}:
+                execution_error = "kimi_native_result_blocked"
+            payload = {
+                "model": exchange.observed_model if exchange is not None else None,
+                "effort": exchange.observed_effort if exchange is not None else None,
+                "stopReason": exchange.stop_reason if exchange is not None and exchange.stop_reason in {
+                    "end_turn", "cancelled", "refusal", "max_tokens", "max_turn_requests",
+                } else None,
+                "protocolClosed": closed,
+                "selected": terminal.get("selected"), "observed": terminal.get("observed"),
+                "nativeGate": terminal.get("gate"),
+                "ownerOutcome": terminal.get("primaryOutcome"),
+                "ownerStatus": terminal.get("status"),
+                "childNonzeroCategory": terminal.get("childNonzeroCategory"),
+                "cancelled": terminal.get("cancelled"), "timedOut": terminal.get("timedOut"),
+            }
+            encoded = json_text(payload)
+            if len(encoded.encode("utf-8")) > request.max_output_bytes:
+                raise KimiAdapterError("observation_limit_exceeded")
+            observation = Observation(0, "kimi.acp.terminal", encoded)
+            observations = (observation,)
+            try:
+                recorded = self._record(observation)
+            except Exception:
+                raise KimiAdapterError("evidence_sink_failed") from None
+            if recorded is not None:
+                # A synchronous wrapper can still return a coroutine. Do not
+                # schedule it or claim persistence; discard its unstarted frame.
+                if inspect.iscoroutine(recorded) and inspect.getcoroutinestate(recorded) == inspect.CORO_CREATED:
+                    recorded.close()
+                raise KimiAdapterError("invalid_evidence_callback")
+            if self._prepared.control.ledger and owner.read_back_external_terminal(
+                self._prepared.control, "kimi", request.run_id, provenance,
+            ) is None:
+                raise KimiAdapterError("terminal_ledger_readback_failed")
+        except KimiAdapterError as exc:
+            capture_error = str(exc)
+        except Exception:
+            capture_error = "invalid_native_terminal"
+        if process is None or not (
+            process.resources_closed and process.tree.tree_empty and process.tree.direct_reaped
+            and not process.cleanup_issues
+        ):
+            cleanup_error = cleanup_error or "kimi_process_settlement_unavailable"
+        if code != 0:
+            execution_error = execution_error or "kimi_owner_execution_failed"
+        if provider_status is None:
+            execution_error = execution_error or "kimi_terminal_not_completed"
+        elif provider_status == "failed":
+            execution_error = execution_error or "kimi_provider_refused"
+        interrupted = self._cancelled.is_set() or provider_status == "interrupted"
+        status = "interrupted" if interrupted else "failed" if execution_error else "incomplete"
+        if provider_status == "completed" and native_text is not None and closed and not (
+            execution_error or capture_error or cleanup_error or interrupted
+        ):
+            status = "completed"
+        # The existing owner scans optional session identity with its captured
+        # credential/path policy. No turn ID or account readback is invented.
+        return ExecutionResult(
+            request, status, provider_status=provider_status,
+            actual_execution_path="direct-external-cli", native_result_text=native_text,
+            native_thread_id=operation.native_session_id,
+            observations=observations, execution_error=execution_error,
+            capture_error=capture_error, cleanup_error=cleanup_error, protocol_closed=closed,
+        )

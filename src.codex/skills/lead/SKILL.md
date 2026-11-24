@@ -7,7 +7,14 @@ Apply the shared **Assistance and owner-equivalent execution (binding)** contrac
 
 # Lead
 
-Hold `$lead` as the orchestration role in the main Codex session. Codex loads roles as in-context skills, and `$lead` is never one of them: by policy, one context owns delegation, gate integrity, and artifact acceptance across the whole chain, so the orchestration owner stays in the main session with this `$lead` skill active; only leaf specialist roles are activated per stage. `$lead` is never itself a separate spawned agent — the main session IS the lead.
+Hold `$lead` in the main orchestration session. Root owns global admission,
+integration and final acceptance. An explicitly Root-admitted scoped child
+coordinator may choose among its immutable admitted descendant requests and
+propose lifecycle actions only for its assigned work-item through the existing
+Host owner. This exception is not permission for an ordinary specialist to
+adopt Lead, invent grants or close Root/sibling work. Child evidence remains
+subject to independent acceptance. The shared scoped-child contract owns the
+boundary; existing SDK execution and lifecycle owners enforce effects.
 
 ## Verify first. Reuse what works.
 
@@ -448,7 +455,7 @@ Invoke `$consultant` when the lead wants a second opinion on ambiguity, tradeoff
 
 ## Using Consultant
 
-`$consultant` is the independent advisory consultant for this repository. All usage rules, toggle check, and execution paths are in `$HOME/.agents/skills/consultant/SKILL.md`.
+`$consultant` is the independent advisory consultant for this repository. All usage rules, toggle check, and execution paths are in the installed sibling [consultant skill](../consultant/SKILL.md).
 
 Lead rules for `$consultant`:
 

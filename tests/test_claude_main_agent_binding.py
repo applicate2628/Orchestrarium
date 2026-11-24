@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -45,6 +46,7 @@ def test_claude_settings_validation_rejects_non_scalar_agent(
 def test_synthetic_claude_install_and_reinstall_preserve_settings(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
     agent: str | None,
 ) -> None:
     home = tmp_path / "home"
@@ -54,7 +56,10 @@ def test_synthetic_claude_install_and_reinstall_preserve_settings(
     claude_path = settings_path.parent / "CLAUDE.md"
     user_preamble = "# User preamble\n\nKeep this operator-owned text.\n\n"
     claude_path.write_text(
-        user_preamble,
+        user_preamble + "@AGENTS.md\n"
+        "<!-- BEGIN ORCHESTRARIUM CLAUDE MANAGED -->\n"
+        "# Claude Code Pack\n\nold managed bytes\n"
+        "<!-- END ORCHESTRARIUM CLAUDE MANAGED -->\n",
         encoding="utf-8",
     )
     settings = {
@@ -82,20 +87,55 @@ def test_synthetic_claude_install_and_reinstall_preserve_settings(
     assert claude_path.read_bytes() == before_document
     assert not (project / ".claude" / "agents" / "lead.md").exists()
 
+    capsys.readouterr()
     assert INSTALLER.install("claude", arguments) == 0
+    first_output = capsys.readouterr().out
     assert settings_path.read_bytes() == before_settings
     assert settings_path.stat().st_ino == before_identity
     assert (project / ".claude" / "agents" / "lead.md").is_file()
     assert (project / ".claude" / "skills" / "lead" / "SKILL.md").is_file()
     installed_claude = claude_path.read_text(encoding="utf-8")
-    assert installed_claude.endswith(user_preamble)
-    assert (ROOT / "src.claude" / "CLAUDE.md").read_text(
-        encoding="utf-8"
-    ).removeprefix("@AGENTS.md\n") in installed_claude
+    assert installed_claude.startswith(user_preamble)
+    payload = (ROOT / 'adapters/claude' / "CLAUDE.md").read_text(encoding="utf-8")
+    assert payload.startswith("@AGENTS.md\n")
+    assert installed_claude[len(user_preamble):] == (
+        "@AGENTS.md\n<!-- BEGIN ORCHESTRARIUM CLAUDE MANAGED -->\n"
+        + payload[len("@AGENTS.md\n"):]
+        + "<!-- END ORCHESTRARIUM CLAUDE MANAGED -->\n"
+    )
     assert installed_claude.splitlines().count("@AGENTS.md") == 1
-    assert (ROOT / "shared" / "AGENTS.shared.md").read_text(
-        encoding="utf-8"
-    ) in (settings_path.parent / "AGENTS.md").read_text(encoding="utf-8")
+    assert (settings_path.parent / "AGENTS.md").read_text(encoding="utf-8") == (
+        "<!-- BEGIN ORCHESTRARIUM SHARED MANAGED -->\n"
+        + (ROOT / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8")
+        + "<!-- END ORCHESTRARIUM SHARED MANAGED -->\n"
+    )
+    composed = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "validate-claude-md.py"),
+            "--claude-md",
+            str(claude_path),
+            "--agents-md",
+            str(settings_path.parent / "AGENTS.md"),
+            # The source delta still has its independent 8192-byte cap. This
+            # installed fixture additionally preserves user-owned preamble and
+            # the exact ownership framing, neither part of that source delta.
+            "--size-cap",
+            str(8192 + len(user_preamble.encode("utf-8")) + len(
+                "<!-- BEGIN ORCHESTRARIUM CLAUDE MANAGED -->\n"
+                "<!-- END ORCHESTRARIUM CLAUDE MANAGED -->\n"
+            )),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    assert composed.returncode == 0, composed.stdout + composed.stderr
+    assert "WARN: Claude main agent preserved" not in first_output
+
     assert INSTALLER.install("claude", arguments) == 0
     assert settings_path.read_bytes() == before_settings
     assert settings_path.stat().st_ino == before_identity
@@ -148,7 +188,7 @@ def test_failed_claude_install_rolls_back_settings_and_lead_definition(
 
 
 def test_dual_safe_lead_definition_and_current_state_documentation() -> None:
-    lead_definition = (ROOT / "src.claude" / "agents" / "lead.md").read_text(
+    lead_definition = (ROOT / 'adapters/claude' / "agents" / "lead.md").read_text(
         encoding="utf-8"
     )
     frontmatter, body = lead_definition.split("---", 2)[1:]
@@ -162,17 +202,17 @@ def test_dual_safe_lead_definition_and_current_state_documentation() -> None:
     expected_current_state = {
         "README.md": "main-agent activation",
         "INSTALL.md": "settings.json",
-        "src.claude/README.md": "initialPrompt",
-        "src.claude/CLAUDE.md": "initialPrompt",
+        "adapters/claude/README.md": "initialPrompt",
+        "adapters/claude/CLAUDE.md": "initialPrompt",
         "docs/provider-runtime-layouts.md": "initialPrompt",
     }
     for relative, marker in expected_current_state.items():
         assert marker in (ROOT / relative).read_text(encoding="utf-8"), relative
 
-    claude_entrypoint = (ROOT / "src.claude" / "CLAUDE.md").read_text(
+    claude_entrypoint = (ROOT / 'adapters/claude' / "CLAUDE.md").read_text(
         encoding="utf-8"
     )
-    help_command = (ROOT / "src.claude" / "commands" / "agents-help.md").read_text(
+    help_command = (ROOT / 'adapters/claude' / "commands" / "agents-help.md").read_text(
         encoding="utf-8"
     )
     assert "lead` is a host-selected main agent and inline `/lead` role" in claude_entrypoint
@@ -186,7 +226,7 @@ def test_claude_main_agent_slice_preserves_mcp_and_typed_routing_contracts() -> 
     claude_specs = dict(
         (marker, (event, matcher))
         for marker, _path, event, matcher in INSTALLER._hook_specs(
-            "claude", ROOT / "src.claude" / "agents"
+            "claude", ROOT / 'adapters/claude' / "agents"
         )
     )
     assert claude_specs["check-mcp-momentum"] == (
@@ -194,3 +234,10 @@ def test_claude_main_agent_slice_preserves_mcp_and_typed_routing_contracts() -> 
         "Grep|Bash|PowerShell|shell_command|exec_command",
     )
     assert claude_specs["check-typed-routing"] == ("PreToolUse", "Agent")
+
+
+def test_ambiguous_unmarked_claude_legacy_body_remains_rejected() -> None:
+    unknown = "@AGENTS.md\n\n# Claude Code Pack\n\nold managed bytes\n"
+    source = (ROOT / 'adapters/claude/CLAUDE.md').read_text(encoding="utf-8")
+    with pytest.raises(ValueError, match="E_CLAUDE_DOC_LEGACY_AMBIGUOUS"):
+        INSTALLER._render_claude_document(unknown, source[len("@AGENTS.md\n"):], claude=True)

@@ -38,7 +38,7 @@ CANON_ADAPTER = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-w
 
 ADAPTERS = (
     CANON_ADAPTER,
-    REPO_ROOT / "src.claude" / "agents" / "scripts" / "check-work-items-archival-stop.py",
+    REPO_ROOT / 'adapters/claude' / "agents" / "scripts" / "check-work-items-archival-stop.py",
     REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-work-items-archival-stop.py",
 )
 
@@ -873,8 +873,16 @@ class TestG16T18HookCommonCurrentTurnOwnership(unittest.TestCase):
         self.assertEqual(owner_text.count("def scan_current_turn_boundary"), 1)
         self.assertIn("def read_transcript_history", owner_text)
 
+        # Publication is bound to the actual native Git callback. It no longer
+        # reads conversation history or derives publication consent from it.
+        publication = REPO_ROOT / "scripts/universal-hooks/scripts/check-git-push-gate.py"
+        publication_text = publication.read_text(encoding="utf-8")
+        for retired_dependency in (
+            "read_transcript_tail", "TRANSCRIPT_TAIL_LINES", "scan_current_turn_boundary",
+        ):
+            self.assertNotIn(retired_dependency, publication_text, retired_dependency)
+
         consumers = (
-            REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-git-push-gate.py",
             REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-bugfix-discipline.py",
             REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-passive-polling-stop.py",
             REPO_ROOT / "scripts" / "universal-hooks" / "hooks" / "check-repository-orientation.py",

@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATHS = (
     ROOT / "scripts" / "universal-hooks" / "scripts" / "mcp_continuity_policy.py",
     ROOT / "src.codex" / "skills" / "lead" / "scripts" / "mcp_continuity_policy.py",
-    ROOT / "src.claude" / "agents" / "scripts" / "mcp_continuity_policy.py",
+    ROOT / 'adapters/claude' / "agents" / "scripts" / "mcp_continuity_policy.py",
 )
 REFERENCE_CONTRACTS = {
     ROOT / "shared" / "references" / "mcp-continuity.md": (

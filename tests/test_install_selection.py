@@ -1,0 +1,247 @@
+"""The common console front door selects; existing installers own effects."""
+import importlib.util
+from pathlib import Path
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+
+@pytest.fixture
+def installer(monkeypatch):
+    spec = importlib.util.spec_from_file_location('root_selection_installer', ROOT / 'install.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    calls = []
+    monkeypatch.setattr(module, '_run_production', lambda name, args: calls.append((name, list(args))) or 0)
+    monkeypatch.setattr(module.sys.stdin, 'isatty', lambda: True)
+    return module, calls
+
+
+def answer(monkeypatch, *answers):
+    values = iter(answers)
+    monkeypatch.setattr('builtins.input', lambda prompt: next(values))
+
+
+def test_explicit_clients_forward_existing_installer_arguments(installer):
+    module, calls = installer
+    assert module.main(['--clients', 'claude', 'codex', '--target', '/tmp/two words', '--dry-run']) == 0
+    assert calls == [('codex', ['--target', '/tmp/two words', '--dry-run']),
+                     ('claude', ['--target', '/tmp/two words', '--dry-run'])]
+
+
+def test_duplicate_clients_do_not_duplicate_operations(installer):
+    module, calls = installer
+    assert module.main(['--clients', 'codex', 'codex', '--global']) == 0
+    assert calls == [('codex', ['--global'])]
+
+
+def test_shared_hook_runtime_selects_codex_without_interactive_selection(installer):
+    module, calls = installer
+    assert module.main(['--global', '--shared-hook-runtime', '--dry-run']) == 0
+    assert calls == [('codex', ['--global', '--shared-hook-runtime', '--dry-run'])]
+
+
+def test_shared_hook_runtime_rejects_other_client_selection_before_effects(installer):
+    module, calls = installer
+    with pytest.raises(SystemExit):
+        module.main(['--clients', 'codex', 'claude', '--global', '--shared-hook-runtime'])
+    assert calls == []
+
+
+def test_noninteractive_without_selection_has_no_effect(installer, monkeypatch):
+    module, calls = installer
+    monkeypatch.setattr(module.sys.stdin, 'isatty', lambda: False)
+    assert module.main(['--global']) == 2
+    assert not calls
+
+
+@pytest.mark.parametrize('choice', ['q', '', '0', '999', '1,garbage'])
+def test_cancel_or_invalid_selection_never_expands_scope(installer, monkeypatch, choice):
+    module, calls = installer
+    answer(monkeypatch, choice)
+    assert module.main(['--global']) in (0, 2)
+    assert not calls
+
+
+def test_menu_previews_then_applies_exact_selected_clients(installer, monkeypatch):
+    module, calls = installer
+    answer(monkeypatch, '2,1', 'y')
+    assert module.main(['--global']) == 0
+    assert calls == [('codex', ['--global', '--dry-run']), ('claude', ['--global', '--dry-run']),
+                     ('codex', ['--global']), ('claude', ['--global'])]
+
+
+def test_cancel_after_preview_never_applies(installer, monkeypatch):
+    module, calls = installer
+    answer(monkeypatch, '1', 'n')
+    assert module.main(['--global']) == 0
+    assert calls == [('codex', ['--global', '--dry-run'])]
+
+
+def test_preview_failure_blocks_apply(installer, monkeypatch):
+    module, calls = installer
+    answer(monkeypatch, '1')
+    monkeypatch.setattr(module, '_run_production', lambda name, args: calls.append((name, args)) or 7)
+    assert module.main(['--global']) == 7
+    assert calls == [('codex', ['--global', '--dry-run'])]
+
+
+def test_list_clients_never_invokes_installer(installer):
+    module, calls = installer
+    assert module.main(['--list-clients']) == 0
+    assert not calls
+
+
+def test_uninstall_menu_requires_confirmation_then_sets_apply(installer, monkeypatch):
+    module, calls = installer
+    answer(monkeypatch, "2", "y")
+    assert module.main(["--uninstall", "--global"]) == 0
+    assert calls == [("claude", ["--uninstall", "--global", "--dry-run"]),
+                     ("claude", ["--uninstall", "--global", "--apply"])]
+
+
+@pytest.mark.parametrize("no_bytecode", (False, True))
+def test_every_client_uses_one_command_entrypoint(monkeypatch, no_bytecode):
+    from types import SimpleNamespace
+    spec = importlib.util.spec_from_file_location("common_client_entry_test", ROOT / "install.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    executable = module.sys.executable
+    monkeypatch.setattr(module, "sys", SimpleNamespace(executable=executable, dont_write_bytecode=no_bytecode))
+    calls = []
+    monkeypatch.setattr(module.subprocess, "run", lambda argv, **kw: calls.append(argv) or SimpleNamespace(returncode=0))
+    for name, _ in module.CLIENTS:
+        assert module._run_production(name, ["--dry-run"]) == 0
+    prefix = [executable, "-B"] if no_bytecode else [executable]
+    assert calls == [prefix + [str(ROOT / "scripts/install-client.py"), "--client", name, "--dry-run"]
+                     for name, _ in module.CLIENTS]
+
+
+def test_primary_client_and_unknown_adapter_fail_closed(installer):
+    module, calls = installer
+    assert [name for name, client in module.CLIENT_CATALOG.items() if client["primary"]] == ["codex"]
+    with pytest.raises(SystemExit):
+        module.main(["--clients", "unknown-host", "--global"])
+    assert calls == []
+
+
+def test_partial_uninstall_reports_preserved_state_and_unattempted_clients(installer, monkeypatch, capsys):
+    module, calls = installer
+    monkeypatch.setattr(module, '_run_production', lambda name, args: calls.append((name,args)) or 2)
+    assert module.main(['--clients','codex','claude','--global','--uninstall','--apply']) == 2
+    output=capsys.readouterr().out
+    assert 'STOPPED (2)' in output and 'installer report' in output.lower()
+    assert 'claude: NOT ATTEMPTED' in output
+    assert len(calls)==1
+
+
+def test_successful_preview_is_not_reported_as_applied(installer, capsys):
+    module, calls=installer
+    assert module.main(['--clients','codex','--global','--dry-run'])==0
+    assert 'PREVIEW' in capsys.readouterr().out
+
+
+def test_conflicting_lifecycle_operations_are_rejected_before_install():
+    from _module_loading_support import load_module
+    backend=load_module(ROOT/'scripts/production_installer.py','exclusive_lifecycle_ops')
+    assert backend.install('codex', ['--uninstall','--materialize-legacy-skills','--apply']) == 2
+
+
+def test_legacy_dryrun_alias_never_prompts_for_apply(installer,monkeypatch,capsys):
+    module,calls=installer
+    answer(monkeypatch,'1')
+    assert module.main(['--global','-DryRun'])==0
+    assert calls==[('codex',['--global','-DryRun'])]
+    assert 'PREVIEW COMPLETE' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("provider", ["codex", "claude"])
+def test_project_preview_uses_callers_repository_not_installer_source(tmp_path, provider):
+    """Changing the child cwd to the distribution root must not redirect installs."""
+    import os
+    import shutil
+    import subprocess
+    import sys
+
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("Git required to qualify repository-root discovery")
+    project = tmp_path / "user project"
+    project.mkdir()
+    nested = project / "nested"
+    nested.mkdir()
+    home = tmp_path / "isolated home"
+    home.mkdir()
+    env = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
+    for key in ("CODEX_HOME", "CLAUDE_CONFIG_DIR", "GIT_DIR", "GIT_WORK_TREE"):
+        env.pop(key, None)
+    subprocess.run([git, "init", "-q", str(project)], check=True, env=env)
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "install.py"), "--clients", provider,
+         "--dry-run", "--no-hypothesis-hook"],
+        cwd=nested, env=env, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    target_lines = [line for line in result.stdout.splitlines() if line.startswith("Target: ")]
+    assert target_lines == ["Target: " + str(project.resolve() / ("." + provider))]
+    assert not (project / ("." + provider)).exists()
+    assert not (project / ".agents").exists()
+
+
+@pytest.mark.parametrize("flag", ["--dry-run", "-DryRun"])
+@pytest.mark.parametrize("statuses,expected", [((7, 0), 7), ((7, 9), 7), ((0, 9), 9), ((0, 0), 0)])
+def test_dry_run_collects_each_client_result(installer, monkeypatch, capsys, flag, statuses, expected):
+    module, calls = installer
+    outcomes = dict(zip(("codex", "claude"), statuses))
+    def run(name, args):
+        calls.append((name, list(args)))
+        return outcomes[name]
+    monkeypatch.setattr(module, "_run_production", run)
+    forwarded = ["--global", flag, "--no-hypothesis-hook"]
+    assert module.main(["--clients", "codex", "claude", *forwarded]) == expected
+    assert calls == [("codex", forwarded), ("claude", forwarded)]
+    output = capsys.readouterr().out
+    assert "NOT ATTEMPTED" not in output
+    for name, status in outcomes.items():
+        label = "PREVIEW COMPLETE" if status == 0 else "STOPPED"
+        assert f"{name}: {label} ({status})" in output
+
+
+def test_common_preview_argument_failure_is_reported_for_all_clients(installer, monkeypatch):
+    module, calls = installer
+    monkeypatch.setattr(module, "_run_production", lambda name, args: calls.append((name, list(args))) or 2)
+    args = ["--global", "--dry-run", "--unknown-common-option"]
+    assert module.main(["--clients", "codex", "claude", *args]) == 2
+    assert calls == [("codex", args), ("claude", args)]
+
+
+def test_menu_failed_batch_preview_never_prompts_or_applies(installer, monkeypatch):
+    module, calls = installer
+    answer(monkeypatch, "1,2")
+    monkeypatch.setattr(module, "_run_production", lambda name, args: calls.append((name, list(args))) or (7 if name == "codex" else 0))
+    assert module.main(["--global"]) == 7
+    assert calls == [("codex", ["--global", "--dry-run"]), ("claude", ["--global", "--dry-run"])]
+
+
+def test_implicit_lifecycle_preview_keeps_existing_stop_order(installer, monkeypatch):
+    module, calls = installer
+    monkeypatch.setattr(module, "_run_production", lambda name, args: calls.append((name, list(args))) or 2)
+    assert module.main(["--clients", "codex", "claude", "--uninstall"]) == 2
+    assert calls == [("codex", ["--uninstall"])]
+
+
+def test_new_client_preserves_existing_menu_order_and_is_selectable(installer, monkeypatch):
+    module, calls = installer
+    assert [name for name, _ in module.CLIENTS] == ["codex", "claude", "antigravity"]
+    answer(monkeypatch, "3")
+    assert module.main(["--dry-run"]) == 0
+    assert calls == [("antigravity", ["--dry-run"])]
+
+
+def test_client_detection_uses_declared_native_command(installer, monkeypatch):
+    module, calls = installer
+    checked = []
+    monkeypatch.setattr(module.shutil, "which", lambda command: checked.append(command))
+    assert module.main(["--list-clients"]) == 0
+    assert checked == ["codex", "claude", "agy"]
+    assert not calls

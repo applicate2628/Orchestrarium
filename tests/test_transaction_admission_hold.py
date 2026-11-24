@@ -71,6 +71,15 @@ class TransactionAdmissionHoldTests(unittest.TestCase):
             with self.load("unknown", "direct_operation")(Unobserved()):
                 self.fail("Unknown scope yielded")
 
+    def test_supported_backend_admission_gate_accepts_nt_and_posix(self):
+        # Invoke only the pure gate, not transaction or filesystem effects.
+        module = ast.fix_missing_locations(ast.Module(body=[self.helper], type_ignores=[]))
+        for platform in ("nt", "posix"):
+            with self.subTest(platform=platform):
+                scope = {"os": SimpleNamespace(name=platform)}
+                exec(compile(module, str(SOURCE), "exec"), scope)
+                self.assertIsNone(scope["_require_transaction_disposal_backend"]())
+
     def test_direct_gate_precedes_fast_path(self):
         self.assertEqual(ast.unparse(self.methods["direct_operation"].body[0]),
                          "_require_transaction_disposal_backend()")
