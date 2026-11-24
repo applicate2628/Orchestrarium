@@ -2192,11 +2192,34 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
                     self.assertEqual(observed(line, binary), observed(WithoutPrefilter(line), binary))
 
     def test_selected_history_budget_preserves_object_and_time_bounds(self) -> None:
-        module = _load_canonical_scanner("_scanner_selected_history_budget")
+        with mock.patch.dict(os.environ):
+            os.environ.pop("ORCHE_PUBLICATION_SCAN_SECONDS", None)
+            module = _load_canonical_scanner("_scanner_selected_history_budget")
         self.assertEqual(module._MAX_BLOBS, 50_000)
-        self.assertEqual(module._MAX_BLOB_PATHS, 50_000)
+        self.assertEqual(module._MAX_PATH_BYTES, 4_096)
         self.assertEqual(module._MAX_BLOB_BYTES, 64 * 1024 * 1024)
-        self.assertEqual(module._SCAN_DEADLINE_SECONDS, 900.0)
+        self.assertEqual(module._SCAN_DEADLINE_SECONDS, 240.0)
+        for seconds in ("240", "900", "3600"):
+            with self.subTest(seconds=seconds), mock.patch.dict(
+                os.environ, {"ORCHE_PUBLICATION_SCAN_SECONDS": seconds},
+            ):
+                self.assertEqual(module._publication_scan_budget_seconds(), float(seconds))
+        for seconds in ("239", "3601", "900.0"):
+            with self.subTest(seconds=seconds), mock.patch.dict(
+                os.environ, {"ORCHE_PUBLICATION_SCAN_SECONDS": seconds},
+            ):
+                with self.assertRaises(ValueError):
+                    module._publication_scan_budget_seconds()
+        # Exact path coverage is indexed on disk, independently of unique
+        # blob count; per-object bytes and the shared deadline still bound work.
+        with contextlib.closing(module.sqlite3.connect("")) as db:
+            index = module._HistoryIndex(db)
+            index.add_blob("blob", 1, b"digest", False)
+            for path in (b"first", b"second", b"third"):
+                self.assertTrue(index.add(("owner", path, "blob"), "100644"))
+            subjects, paths = index.seal()
+            self.assertEqual(index.blob_count, 1)
+            self.assertEqual((len(subjects), len(paths)), (3, 3))
 
     def test_blob_limits_are_inclusive_and_receipt_counts_only_unique_objects(self) -> None:
         module = _load_canonical_scanner("_scanner_aggregate_budget_boundary")
