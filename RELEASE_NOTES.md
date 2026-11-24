@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-24
 
+- Keep an empty selected scratch namespace current through close completion. Retain existing empty directory identities or exact owner absence in the lifecycle transaction; a late foreign entry refuses completion and is preserved. Unrelated work-item scratch namespaces remain outside that selection, and ordinary close does not acquire historical scratch rows when its physical selection is empty.
+
 - Preserve typed lifecycle refusals when historical PASS custody exceeds an explicit ledger limit. Candidate admission still uses one captured ledger image and refuses same-byte replacement of that image before publication.
 
 - Linux publication scans now serialize content readers, prior-disclosure evidence and matcher process owners. They retain deadline and complete-reaping checks, reuse readers between ordinary reads, and preserve existing Windows process batching.
