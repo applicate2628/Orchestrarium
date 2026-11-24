@@ -6012,7 +6012,10 @@ transition_resource_budget=None) -> tuple[Path, Path]:
             raise LifecycleError(failure_id, "caller project root differs from held scope")
         current.verify()
         return current.repository_root, current.work_items_root
-    repositories = _project_root_candidates(root, input_role)
+    # Only the already-restricted observation route may normalize an alias.
+    # Bound acquisition retains the original path for the shared no-link gate.
+    repositories = _project_root_candidates(
+        resolved if acquisition_purpose == "topology-observation" else root, input_role)
     if len(repositories) == 1 and not selected:
         return resolved, resolved / "work-items"
     bindings = []
