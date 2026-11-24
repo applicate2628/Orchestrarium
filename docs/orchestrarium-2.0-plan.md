@@ -5,6 +5,9 @@ main `14a4e74a` and the peeled pre-SDK tag `3d8ac64b`. SDK checkpoint `e8edb957`
 was subsequently published; selected-source qualification at `7f9ad79a` and the
 applicable main corrections retain their own evidence below and in
 [the SDK execution record](sdk-execution.md#current-main-integration-audit-2026-11-24).
+The final [pre-SDK source checkpoint](https://github.com/applicate2628/Orchestrarium/tree/baseline-pre-sdk-2026-11-24)
+was published and verified at `6835523c` (tree `55235639`) before SDK merge;
+package and installed receiving retain their own evidence.
 The October outcomes remain in the register, not as prerequisites for every
 release. This plan does not authorize provider calls, publication, installation,
 or merges.

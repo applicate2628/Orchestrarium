@@ -318,8 +318,11 @@ main acceptances include PR54, PR56-PR65 and
 [PR68](https://github.com/applicate2628/Orchestrarium/pull/68). Each existing PR
 retains its own source and receiving authority. Further publication uses the
 [target-local publication contract](target-local-publication.md) and exact
-selected-revision/destination readback. Before SDK merge, publish and verify the
-final pre-SDK tag on the selected latest stable main through that same owner.
+selected-revision/destination readback. The annotated
+[November 24 pre-SDK source checkpoint](https://github.com/applicate2628/Orchestrarium/tree/baseline-pre-sdk-2026-11-24)
+was published and verified before SDK merge: commit `6835523c`, tree
+`55235639`, tag object `7a6fa90f`. Package and installed receiving retain their
+separate evidence.
 The qualification above used existing tools and synthetic provider peers; it did
 not install dependencies, dispatch workflows, invoke a paid or live provider, or
 update the working installation. Historical live evidence below keeps its original
@@ -1869,10 +1872,11 @@ the unchanged installer source, including platform admission and recovery
 boundaries; these are not Linux model/process-custody qualification. The wider
 transport sweep originally exposed the fixture defect above; only the repaired
 focused cases are credited after that fix, not a rerun of the full sweep.
-The release order retained by that review is:
+The November 19 review retained this release order; its first step was later
+completed by the [November 24 source checkpoint](#current-main-integration-audit-2026-11-24):
 
 1. Publish and verify the final pre-SDK tag on the latest stable main on GitHub
-   **before** merging SDK. This is a separately owned task, not completed here.
+   **before** merging SDK. This had not been completed at that review.
 2. Complete the requested independent pre-merge audit of the selected SDK v1
    candidate, preserving the frozen runtime while review lanes inspect transport,
    rollback and scope. Identify the exact reviewed revision and resolve findings.
