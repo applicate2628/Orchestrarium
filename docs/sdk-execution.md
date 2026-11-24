@@ -20,6 +20,116 @@ checks and the bounded live Codex review passed on October 25; the outer Agents
 cycle passed on October 26. Their exact evidence boundaries are recorded below.
 These results do not enable a default route or qualify arbitrary general use.
 
+## Contents
+
+- [Current main integration audit, 2026-11-24](#current-main-integration-audit-2026-11-24)
+- [PR19 completion roadmap](#pr19-completion-roadmap-updated-2026-11-18)
+- [Provider installation boundary](#provider-installation-boundary)
+- [Explicit Codex review opt-in](#explicit-codex-review-opt-in-repository-local-contract)
+- [Boundaries](#boundaries)
+- [Provenance and compatibility](#provenance-and-compatibility)
+- [Capability-based compatibility](#capability-based-compatibility)
+- [Typed observations and applicable semantic checks](#typed-observations-and-applicable-semantic-checks)
+- [Caller-owned conversation history](#caller-owned-conversation-history)
+- [Per-run controls](#per-run-controls-are-not-native-role-customizations)
+- [Historical adapter-only acceptance](#historical-adapter-only-acceptance-scope-2026-10-24)
+- [Dormant Grok ACP slice](#dormant-grok-acp-slice)
+- [MiniMax Code ACP addition](#minimax-code-acp-addition)
+- [MiMoCode ACP addition](#mimocode-acp-addition)
+- [Owned ACP byte streams](#owned-acp-byte-streams)
+- [Selective MCP access](#selective-mcp-access-provider-support-versus-this-implementation)
+- [Limits beyond bounded qualification](#limits-beyond-the-bounded-native-qualification)
+- [Transport update compatibility](#transport-update-compatibility)
+- [Explicit runtime composition](#explicit-runtime-composition)
+- [Before and after: measurements](#before-and-after-what-can-be-measured)
+- [Terms and Abbreviations](#terms-and-abbreviations)
+
+## Current main integration audit, 2026-11-24
+
+The local integration combines SDK source `96634fe5` with main `14a4e74a`.
+The first reviewed merge is `0332ede6`; subsequent narrowly scoped corrections
+retain that ancestry. Resolving the 73 conflicted files established a candidate,
+not release acceptance. Remote PR19 and the working installation are unchanged
+by this audit. The existing [product plan in PR13](https://github.com/applicate2628/Orchestrarium/pull/13) owns delivery
+order; this section owns the SDK integration decisions and evidence boundary.
+
+**Table 1. Reconciled integration contracts.**
+
+| Boundary | Retained behavior | Verification and limit |
+| --- | --- | --- |
+| Installed ownership | One authored skill catalog, independent selected-client copies, exact provider and Lead receipts, explicit legacy materialization, and preservation of unselected clients and vendor files. Linked global payload storage reuses already admitted owners and logical receipt names; overlapping selected payload roots refuse. | Actual isolated install/update/reinstall/rollback cases and exact identity/content checks. This does not add linked-uninstall support or migrate a working profile. |
+| Preference migration | Project installation keeps a sparse overlay. Existing global legacy preferences are read only when the canonical filename is absent; even an empty canonical file excludes the legacy layer and its trust evidence. | Layering, canonical-path refusal and byte-preservation checks. No ambient account or trust selection is inferred. |
+| Windows storage | Current replacement and rollback access rules remain together with SDK read-only/no-recall handling. Legacy link materialization preserves source owner, group and discretionary access control list (DACL). | Native isolated object/installation tests. A changed link that prevents safe settlement reports retained recovery, not successful rollback. |
+| Publication transport | Current receiver-history and progress contracts coexist with bounded SDK Git object reads. Scanner cancellation keeps resource ownership until cleanup settles; generated runtime projections match the canonical files. | Offline protocol, interruption and projection checks. Source parity does not establish native publication or complete Rust scanner qualification. |
+
+The failure-driven corrections also retain verified unchanged member images
+through repeated installs, restore five exact historical skill witnesses, admit
+explicit hook localization into the existing transaction, and resolve hook-health
+package binding without requiring a home-directory environment. Codex retirement
+uses the canonical installed agent root when removing exact previously owned
+files. Linked hook controls retain the original admitted link chain and file
+identities through receipt publication: only the exact hook file and its inventory
+may be referenced outside the payload root, and both are rechecked before and
+after publication. Neighboring files gain no exemption. POSIX (Portable
+Operating System Interface) snapshot disposal rechecks each child after an allowed
+private-parent permission change. The latter belongs to the existing serialized
+writer contract; it is not a promise of exclusion against arbitrary concurrent
+writers. See the dated [release entries](../RELEASE_NOTES.md#2026-11-24) and the
+owning [installer](../scripts/production_installer.py).
+
+Qualification records are tied to exact source and test fixtures, and overlapping
+runs are not additive totals. With their recorded fixture corrections, unchanged
+`6d565bbe` native Windows runtime bytes supplied 32 passing detached-validation
+cases and 19 passing provider-output cases.
+The corrected Claude main-agent fixture passed its three actual install/reinstall
+variants; the full architecture-parity scenario passed in 152 seconds after its
+first-install budget was raised from 120 to 300 seconds. Both later validator
+budgets and their positive/negative checks stayed unchanged. This is measured
+test scheduling, not an installer performance improvement. Linked Claude receipt
+qualification separately passed 12 native cases. Later Codex linked-receipt
+source passed 64 focused ownership cases with 10 subtests and two actual Linux
+command-line installation cases. The same `98fb2c81` source then passed eight
+native Windows cases, including the two public installation/reinstallation and
+native-role resolution scenarios, with no skips and unchanged source hashes.
+The final retained-hook correction at `2317f8bc` passed 17 native Windows cases
+with no skips: 15 control-boundary cases and two actual command-line installs
+through file-link and directory-junction layouts. The cases cover leaf and
+intermediate-link replacement, including replacement during receipt publication.
+An earlier ten-case result at `523cd963` applies only to its incomplete predecessor.
+The final source also passed the actual install/reapply/retirement/rollback
+composition on Linux; its authority run passed 45 cases with one Windows-only skip.
+
+The publication and recovery fixture correction passed all 98 cases in its three
+owning modules. It supplies the current explicit resource budgets, observes
+recovery through its transaction owner, and injects publication drift through the
+actual owned handle. It retains bounded-read, foreign-change, quarantine and
+rollback assertions. Subsequent root checks exercised the six atomic/budget
+composition cases and the unchanged synthetic-header runtime input separately.
+
+Broad test groups have also exposed obsolete source paths, policy examples,
+incomplete handcrafted installed packages and incoherent synthetic nested receipts.
+Corrections use current canonical owners and preserve the original negative
+checks. A guard's correct refusal is not changed merely to satisfy an old fixture.
+Interrupted runs without a final result and report do not establish complete
+suite acceptance. A complete current-tree release verdict remains separate from
+these bounded results.
+
+Six isolated Stage0 verifier cases remain unqualified in the available Linux
+environment: the actual reviewed child uses Python's isolated `-I` mode and
+cannot import `pytest` from either existing interpreter. A preserved dependency
+probe failed before collecting or running a repository test and emitted no
+trusted events. The isolation contract is unchanged. Optional official Agent
+Client Protocol (ACP) dependencies retain their separate collection holds.
+
+Publication remains held at the existing authenticated native Git boundary. The
+attempted guarded update stopped at missing GitHub credentials before the native
+callback; no callback acceptance or remote ref update is claimed. Continue through
+the existing [target-local publication contract](target-local-publication.md),
+with exact destination readback. The audit used existing tools and synthetic
+provider peers; it did not install dependencies, dispatch workflows, invoke a live
+provider or update the working installation. Historical live evidence below keeps
+its original revision and route limits.
+
 ## PR19 completion roadmap, updated 2026-11-18
 
 **First-version acceptance revised by Dmitry on 2026-11-18.**
@@ -2547,6 +2657,9 @@ or measured maintenance savings. Offline fixture parity is not a live benchmark.
 - UTF-8: Unicode text encoding.
 - V2: version-two legacy CLI provider-result envelope.
 - OS: operating system.
+- POSIX: Portable Operating System Interface; the platform-specific filesystem
+  permission and process contracts used on supported Unix-like systems.
+- DACL: discretionary access control list; the Windows object's explicit access rules.
 - ACP: Agent Client Protocol, used only inside applicable provider adapters.
 - Job: Windows operating-system ownership boundary for a process tree.
 - Provenance: recorded actual execution identity/configuration, not permission.
