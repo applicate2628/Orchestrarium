@@ -8,7 +8,7 @@ import importlib.util
 import io
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import sys
 import tempfile
 import unittest
@@ -191,12 +191,13 @@ class DomainPlanTests(unittest.TestCase):
         self.assertEqual([], json.loads(self.plan([]).content)["hooks"])
 
     def test_windows_command_shape_uses_existing_classifier_and_identity(self):
+        script = PureWindowsPath(r"D:\Orche hook fixture\check-bugfix-discipline.py")
         entry = H.build_codex_entry(
-            H.HookTarget(sys.executable, (str(self.script),)), "windows", "Stop"
+            H.HookTarget(r"D:\Python\python.exe", (str(script),)), "windows", "Stop"
         )
         H.write_atomic(self.target, {"hooks": {"Stop": [entry]}})
         plan = I.plan_codex_inventory(
-            target=self.target, specs=[(self.marker, self.script, "Stop", None)],
+            target=self.target, specs=[(self.marker, script, "Stop", None)],
             inventory_path=self.inventory, host_os="windows",
         )
         payload = json.loads(plan.content)
@@ -205,9 +206,17 @@ class DomainPlanTests(unittest.TestCase):
         self.assertIsNone(identity["matcher"])
         self.assertEqual(I._source_identity(self.target, "windows"), identity["sourcePath"])
         I.write_codex_inventory(
-            target=self.target, specs=[(self.marker, self.script, "Stop", None)],
+            target=self.target, specs=[(self.marker, script, "Stop", None)],
             inventory_path=self.inventory, host_os="windows",
         )
+        self.assertEqual(plan.content, self.inventory.read_bytes())
+        foreign = PureWindowsPath(r"E:\Orche hook fixture\check-bugfix-discipline.py")
+        with self.assertRaises(I._HookHealthFailure) as failure:
+            I.plan_codex_inventory(
+                target=self.target, specs=[(self.marker, foreign, "Stop", None)],
+                inventory_path=self.inventory, host_os="windows",
+            )
+        self.assertEqual("E_HOOK_INVENTORY_TARGET_INVALID", failure.exception.stable_id)
         self.assertEqual(plan.content, self.inventory.read_bytes())
 
     def test_malformed_hook_data_refuses_without_inventory(self):

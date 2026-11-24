@@ -324,7 +324,7 @@ def test_production_installed_claude_health_uses_manifest_without_repo_root(
     )
     assert install.returncode == 0, install.stdout + install.stderr
 
-    installed_root = project / ".agents" / "skills" / "lead"
+    installed_root = project / ".claude" / "skills" / "lead"
     health_path = installed_root / "scripts" / "check-hook-health.py"
     manifest_path = installed_root / "scripts" / "universal_hooks_manifest.py"
     settings = project / ".claude" / "settings.json"

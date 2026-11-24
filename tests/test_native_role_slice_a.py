@@ -1084,7 +1084,7 @@ def test_disposal_retains_readonly_file_modified_during_chmod(tmp_path: Path, mo
 
 POST_MATERIALIZATION_WRITER_IDS = {
     "lead-receipt",
-    "claude-skill-projection",
+    "provider-receipt",
     "runtime-outside",
     "ui-continuity",
     "hook-registration",
@@ -1097,7 +1097,7 @@ POST_MATERIALIZATION_WRITER_IDS = {
 }
 POST_MATERIALIZATION_ARTIFACT_CLASSES = {
     "lead-receipt",
-    "claude-skill-projection",
+    "provider-receipt",
     "runtime-outside",
     "ui-continuity",
     "hooks",
@@ -2957,9 +2957,9 @@ def test_global_codex_linked_agents_multihop_windows_reparse_chain_is_identity_b
         "stableId": None,
         "taskClass": "mechanical-read",
         "role": "mechanical-scout",
-        "requestedProfile": "luna-high",
+        "requestedProfile": "luna-xhigh",
         "requestedModel": "gpt-6-luna",
-        "requestedEffort": "high",
+        "requestedEffort": "xhigh",
         "sandbox": "read-only",
         "fallback": "none",
         "executionContract": json.loads(
@@ -3513,7 +3513,7 @@ def test_post_materialization_writer_inventory_is_complete_and_fail_closed(
         source=ROOT / 'adapters/claude',
         target=claude_target,
         agents_root=claude_target,
-        canonical_skills_target=canonical_skills,
+        canonical_skills_target=claude_target / "skills",
         docs_target=claude_target / "CLAUDE.md",
         mode_target=claude_target / ".agents-mode.yaml",
         registration=claude_target / "settings.json",
@@ -3587,7 +3587,7 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
 
     artifact_class = {
         "lead-receipt": "lead-receipt",
-        "claude-skill-projection": "claude-skill-projection",
+        "provider-receipt": "provider-receipt",
         "runtime-outside": "runtime-outside",
         "ui-continuity": "ui-continuity",
         "hook-registration": "hooks",
@@ -3630,19 +3630,6 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
         published = True
 
     monkeypatch.setattr(installer, "_apply_canonical_skills_plan", canonical)
-
-    original_projection = installer._apply_claude_skill_projection_plan
-
-    def projections(plan, canonical_source, projection_root, owner):
-        original_projection(
-            plan, canonical_source, projection_root, owner
-        )
-        for item in plan:
-            emit("claude-skill-projection", projection_root / item.name)
-
-    monkeypatch.setattr(
-        installer, "_apply_claude_skill_projection_plan", projections
-    )
 
     original_runtime = installer._install_runtime_files
 
@@ -3775,6 +3762,15 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
         return result
 
     monkeypatch.setattr(installer, "_finalize_canonical_lead_receipt", receipt)
+
+    original_provider_receipt = installer._record_provider_install
+
+    def provider_receipt(root, provider, mode, target, *args, **kwargs):
+        result = original_provider_receipt(root, provider, mode, target, *args, **kwargs)
+        emit("provider-receipt", target / installer._PROVIDER_RECEIPT_NAME)
+        return result
+
+    monkeypatch.setattr(installer, "_record_provider_install", provider_receipt)
 
     monkeypatch.setenv("CODEX_BIN", codex_hook_host_env({}, ROOT)["CODEX_BIN"])
     for provider in ("codex", "claude"):
