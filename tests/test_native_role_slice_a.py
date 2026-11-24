@@ -2747,7 +2747,7 @@ def test_global_codex_and_claude_provider_paths_keep_role_registration_owned(
 def test_global_provider_linked_canonical_agents_root_preserves_link_and_vendor_content(
     tmp_path: Path, provider: str, kind: str
 ) -> None:
-    """A user-global canonical skills root may be a bound directory link."""
+    """Codex owns linked canonical storage; Claude preserves that unselected peer."""
 
     home = tmp_path / "home"
     home.mkdir()
@@ -2779,16 +2779,23 @@ def test_global_provider_linked_canonical_agents_root_preserves_link_and_vendor_
     contract_bytes = (ROOT / installer.UI_CONTINUITY_CONTRACT_SOURCE).read_bytes()
     canonical_leaf = backing / installer.UI_CONTINUITY_CONTRACT_TARGET
     provider_leaf = home / f".{provider}" / installer.UI_CONTINUITY_CONTRACT_TARGET
-    assert canonical_leaf.read_bytes() == contract_bytes
+    if provider == "codex":
+        assert canonical_leaf.read_bytes() == contract_bytes
+        assert (backing / "skills" / "lead" / "SKILL.md").is_file()
+    else:
+        assert _no_follow_inventory(backing) == before
+        assert (home / ".claude" / "skills" / "lead" / "SKILL.md").is_file()
     assert provider_leaf.read_bytes() == contract_bytes
-    assert (backing / "skills" / "lead" / "SKILL.md").is_file()
 
     reinstalled = _run_global_installer(provider, home)
     assert reinstalled.returncode == 0, reinstalled.stdout + reinstalled.stderr
     assert installer._CreateOnlyMutablePath._identity(logical) == link_identity
     assert os.readlink(logical) == raw_target
     assert vendor.read_bytes() == b"preserve vendor content\n"
-    assert canonical_leaf.read_bytes() == contract_bytes
+    if provider == "codex":
+        assert canonical_leaf.read_bytes() == contract_bytes
+    else:
+        assert _no_follow_inventory(backing) == before
     assert provider_leaf.read_bytes() == contract_bytes
 
 
@@ -2828,14 +2835,14 @@ def test_global_provider_linked_canonical_agents_root_rolls_back_after_fault(
     original = installer._install_ui_continuity_contract
     contract_bytes = (ROOT / installer.UI_CONTINUITY_CONTRACT_SOURCE).read_bytes()
     calls = 0
+    published = []
 
     def fail_after_canonical_skills(*args: object, **kwargs: object) -> None:
         nonlocal calls
         calls += 1
         original(*args, **kwargs)
         if calls == 2:
-            assert canonical_leaf.read_bytes() == contract_bytes
-            assert provider_leaf.read_bytes() == contract_bytes
+            published.append((canonical_leaf.read_bytes(), provider_leaf.read_bytes()))
             raise RuntimeError("injected post-canonical-skills failure")
 
     monkeypatch.setattr(
@@ -2848,6 +2855,7 @@ def test_global_provider_linked_canonical_agents_root_rolls_back_after_fault(
 
     assert result == 1
     assert calls == 2
+    assert published == [(contract_bytes if provider == "codex" else canonical_prior, contract_bytes)]
     assert installer._CreateOnlyMutablePath._identity(logical) == link_identity
     assert os.readlink(logical) == raw_target
     assert _no_follow_inventory(backing) == before
