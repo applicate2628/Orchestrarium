@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-24
 
+- Bind public close to its declared work-item before root acquisition. A repository named work-items can now close the selected task when its parent contains a different neighboring task, while duplicate selected identities and invalid subjects remain refused.
+
 - Restore documented subjectless topology observation through a repository alias when no root contract is present. Only this restricted read path normalizes the alias before shared root grammar; mutation, held contexts, selected subjects and contract-bearing roots retain their no-link checks.
 
 - Keep all selected bugs and link updates under the same admitted close operation. Failure after several bug dispositions can now restore each actual forward effect; inverse identity, one-use and currentness checks still preserve concurrent foreign edits and report incomplete cleanup when those edits prevent safe disposal.
