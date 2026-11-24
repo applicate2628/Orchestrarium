@@ -24585,6 +24585,36 @@ def _partial_recovery_exact_receipt_snapshot(
     return snapshot
 
 
+def _partial_recovery_settle_pending(
+    snapshot: CapturedFileSnapshot, *, receipt: Path | None = None,
+) -> None:
+    """Publish this captured pending image's promotion or exact retirement."""
+    failure_id = "WI-PARTIAL-MIGRATION-RECOVERY-RECEIPT-CONFLICT"
+    owner = LifecycleWriteTarget(
+        snapshot.path if receipt is None else receipt,
+        failure_id=failure_id,
+        _operation_owner=_CURRENT_LIFECYCLE_TRANSACTION.get(),
+    )
+    primary = None
+    try:
+        owner._acquire_existing_parents()
+        _verify_captured_file(snapshot, failure_id)
+        image = owner.owned_image(snapshot.path.name, maximum_bytes=max(1, snapshot.length))
+        if (image is None or image["identity"]["value"] != list(snapshot.identity)
+                or _unb64(image["data"]) != snapshot.data):
+            raise _partial_recovery_fail(failure_id, "pending recovery receipt image changed")
+        if receipt is None:
+            owner.remove_owned(snapshot.path.name, image)
+        else:
+            owner.promote_create({**image, "stagePath": str(snapshot.path)})
+    except BaseException as exc:
+        primary = exc
+        raise
+    finally:
+        owner.__exit__(type(primary) if primary is not None else None, primary,
+                       primary.__traceback__ if primary is not None else None)
+
+
 def _partial_recovery_settle_receipt(path: Path, data: bytes) -> bool:
     if _partial_recovery_exact_receipt_snapshot(path, data) is not None:
         return False
@@ -24603,11 +24633,7 @@ def _partial_recovery_settle_receipt(path: Path, data: bytes) -> bool:
             pending_snapshot.length < len(data)
             and data.startswith(pending_snapshot.data)
         ):
-            _verify_captured_file(
-                pending_snapshot,
-                "WI-PARTIAL-MIGRATION-RECOVERY-RECEIPT-CONFLICT",
-            )
-            pending.unlink()
+            _partial_recovery_settle_pending(pending_snapshot)
             _atomic_write(pending, data)
             pending_created = True
         else:
@@ -24630,7 +24656,7 @@ def _partial_recovery_settle_receipt(path: Path, data: bytes) -> bool:
     final_snapshot = None
     try:
         try:
-            os.link(pending, path)
+            _partial_recovery_settle_pending(pending_snapshot, receipt=path)
             linked_here = True
             final_snapshot = _partial_recovery_exact_receipt_snapshot(path, data)
             if final_snapshot is None or final_snapshot.identity != pending_snapshot.identity:
@@ -24662,10 +24688,13 @@ def _partial_recovery_settle_receipt(path: Path, data: bytes) -> bool:
                 "WI-PARTIAL-MIGRATION-RECOVERY-RECEIPT-CONFLICT",
                 "final recovery receipt reread identity differs",
             )
-        try:
-            pending.unlink()
-        except FileNotFoundError:
-            pass
+        if not linked_here:
+            _partial_recovery_settle_pending(pending_snapshot)
+        if os.path.lexists(pending):
+            raise _partial_recovery_fail(
+                "WI-PARTIAL-MIGRATION-RECOVERY-RECEIPT-CONFLICT",
+                "pending recovery receipt reappeared after settlement",
+            )
         return True
     except BaseException as exc:
         composer = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
@@ -24716,10 +24745,10 @@ def _partial_recovery_settle_receipt(path: Path, data: bytes) -> bool:
                     or pending.read_bytes() != data
                 ):
                     raise OSError("pending recovery receipt identity changed")
-                pending.unlink()
+                _partial_recovery_settle_pending(pending_snapshot)
             except FileNotFoundError:
                 pass
-            except OSError as cleanup_exc:
+            except (OSError, LifecycleError) as cleanup_exc:
                 if composer is not None:
                     composer.record_cleanup(
                         phase="receipt-pending",

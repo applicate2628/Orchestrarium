@@ -15503,7 +15503,7 @@ class PartialMigrationRecoveryParserTests(unittest.TestCase):
                     module._load_migration_inventory(root, inventory_path),
                     sentinel,
                 )
-            parser.assert_called_once_with(root, snapshot)
+            parser.assert_called_once_with(root, snapshot, ledger_resource_budget=None)
 
     def test_byte_parser_rejects_unknown_top_level_fields(self):
         module = load_module()
@@ -15746,8 +15746,10 @@ class PartialMigrationRecoveryBehaviorTests(unittest.TestCase):
             real_atomic_write = module._atomic_write
             attempted_writes = []
 
-            def swap_after_preflight(recovery_root, inventory):
-                plans = real_preflight(recovery_root, inventory)
+            def swap_after_preflight(recovery_root, inventory, *, ledger_resource_budget=None):
+                plans = real_preflight(
+                    recovery_root, inventory, ledger_resource_budget=ledger_resource_budget
+                )
                 month = root / "work-items" / "archive" / "2026-08"
                 moved = month.with_name("2026-08-real")
                 month.rename(moved)
@@ -16151,14 +16153,14 @@ class PartialMigrationRecoveryBehaviorTests(unittest.TestCase):
             wanted = b"authorized\n"
             winner.write_bytes(wanted)
 
-            def racing_link(_source, destination):
+            def racing_promotion(owner, _image):
                 try:
-                    os.symlink(winner, destination)
+                    os.symlink(winner, owner.path)
                 except OSError as exc:
                     self.skipTest(f"target environment cannot create a symlink: {exc}")
-                raise FileExistsError(destination)
+                raise FileExistsError(owner.path)
 
-            with patch.object(module.os, "link", side_effect=racing_link):
+            with patch.object(module.LifecycleWriteTarget, "promote_create", racing_promotion):
                 with self.assertRaises(module.LifecycleError) as caught:
                     module._partial_recovery_settle_receipt(path, wanted)
             self.assertEqual(
@@ -16206,8 +16208,10 @@ class PartialMigrationRecoveryBehaviorTests(unittest.TestCase):
             }
             real_preflight = module._partial_recovery_preflight
 
-            def replace_closure_identity(recovery_root, inventory):
-                plans = real_preflight(recovery_root, inventory)
+            def replace_closure_identity(recovery_root, inventory, *, ledger_resource_budget=None):
+                plans = real_preflight(
+                    recovery_root, inventory, ledger_resource_budget=ledger_resource_budget
+                )
                 closure = plans[0][0]["closure"]
                 replacement = closure.with_name(".closure.identity-replacement")
                 replacement.write_bytes(closure.read_bytes())
@@ -16299,6 +16303,10 @@ class PartialMigrationRecoveryCliTests(unittest.TestCase):
                     "apply_admitted": True,
                     "render_readme": True,
                     "byte_check": True,
+                    "ledger_resource_budget": None,
+                    "transition_resource_budget": None,
+                    "transition_output_ceiling": None,
+                    "transition_read_admission": None,
                 },
             )
             self.assertEqual(
