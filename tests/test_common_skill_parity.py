@@ -26,7 +26,7 @@ ACCEPTED_CANONICAL_WITH_FROZEN_MIGRATION_WITNESS = {
     },
     'repo-cleanup': {
         'src.claude': '942d2eed5941b4468b28fcb8c89d3ac03416d963c598613c0e8e3cb5553b2616',
-        'src.codex': '80d1a331232eb39aafbc1f328831212b1bb4633a0a7efe8aedaec99c04ad4234',
+        'src.codex': '6da4714557cae88de6ac967e52e7fc89ad852d8e279e441fcdef70b7432f231f',
     },
     'vak-dissertation-review': {
         'src.claude': 'e259d114a1ea2372d9152a07445aeba82c51493b9caf7b39f3b6b96678e9b261',
@@ -34,7 +34,7 @@ ACCEPTED_CANONICAL_WITH_FROZEN_MIGRATION_WITNESS = {
     },
     'vcpkg-builder': {
         'src.claude': '72208f4bec6ebf30eb49e99da12cc4e3cef6ef2572bb1583232a5fb1ebe791dc',
-        'src.codex': '25d93aa341555945c9503cf40dcae47bcd62e0f3868567b13616096748bbfa6c',
+        'src.codex': '0b250657452a93a77bcb73a3796f2d6795ba727e239bf47676639016467f0cc0',
     },
     'vcpkg-ports-updater': {
         'src.claude': '17aedafce43a1de5c0917e2a14cba131fcd5dcccca67902ad42852108d90816f',
