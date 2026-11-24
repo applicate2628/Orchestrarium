@@ -5,6 +5,10 @@ A dated entry is not a release tag, publication notice, or confirmation of a
 local installation. For the frozen pre-SDK baseline and draft follow-up, see
 [Which version?](README.md#which-version).
 
+## 2026-11-24
+
+- Linux publication scans now serialize content readers, prior-disclosure evidence and matcher process owners. They retain deadline and complete-reaping checks, reuse readers between ordinary reads, and preserve existing Windows process batching.
+
 ## 2026-11-23
 
 - Prioritize the smallest working end-to-end result. During planning and review, the Lead defers speculative safeguards and unrelated work to the existing plan unless needed for that result. Existing safety and approval requirements are unchanged; no new workflow gate is introduced. Contract tests check the QA roles' referral and still check that both owning contracts state the classification rule.
@@ -18,6 +22,10 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 - Name the selected active-only audit mode in failure summaries without attributing every failure to an active work item: global lifecycle checks can still report invalid archive structure. The full-audit summary, failure count, exit status and archive checks are unchanged.
 
 - Lead now checks that implementation changes are needed for the agreed outcome, required verification, or an existing contract. Optional additions and unrelated cleanup stay out of the patch.
+
+- Repeated cancellation of a publication scan retains its object-reader finalizer and selection cleanup until the owned child and input have settled. On systems supporting the Portable Operating System Interface (POSIX), process-owner acquisition, process creation and failed-start cleanup also retain their eventual results, so cancellation cannot abandon a newly created child or the Linux child-reaper lock during the handoff. Existing cleanup deadlines, failure results and reap certificates remain enforced.
+
+- Deliver the current publication scanner through both source packs so new and rebuilt Lead installations use the same receiver-aware path checks as the canonical scanner. Previously published content is handled consistently after installation instead of producing stale findings from an older mirror.
 
 - The model resolver now compares eligible models and reasoning efforts using benchmark quality, task time, and one relative cost unit (Sol 6.2 High = 1). The Lead selects and explains the best fit for each task; the default is a fallback. The benchmark figures are not prices, launch permissions, or runtime guarantees.
 
