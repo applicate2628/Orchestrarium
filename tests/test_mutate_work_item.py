@@ -17905,6 +17905,62 @@ def test_transaction_directory_move_preserves_exact_descendants_and_inverse(tmp_
         transaction.verify()
 
 
+def test_compensated_directory_move_keeps_owned_member_and_sibling_proofs(tmp_path: Path, monkeypatch) -> None:
+    module, root, source, destination, leaf, outside = _relocation_observation_fixture(tmp_path)
+    sibling_source, sibling = root / "sibling-source", root / "sibling"
+    sibling_source.mkdir()
+    (sibling_source / "unrelated.bin").write_bytes(b"independent owned sibling")
+    original = module._capture_file_snapshot(leaf, failure_id="TEST-PROOF")
+    separate = module._capture_file_snapshot(outside, failure_id="TEST-PROOF")
+    source_identity = module._lifecycle_file_identity(source.lstat())
+    with module.LifecycleTransaction(root) as transaction:
+        transaction.observe_retained_inputs((original, separate))
+        transaction.replace_directory(sibling_source, sibling,
+            expected_identity=module._lifecycle_file_identity(sibling_source.lstat()))
+        sibling_origin = next(value for kind, value in reversed(transaction.current_binding_evidence)
+                              if kind == "owned-effect")
+        transaction.replace_directory(source, destination, expected_identity=source_identity)
+        moved_origin = next(value for kind, value in reversed(transaction.current_binding_evidence)
+                            if kind == "owned-effect")
+        sibling_native, sibling_tree = sibling_origin.native_after, sibling_origin.tree_after
+        moved_tree = moved_origin.tree_after
+        member = destination / "nested/proof.bin"
+        assert any(isinstance(value, module.CapturedFileSnapshot) and value.path == member
+                   and value.identity == original.identity and value.data == original.data
+                   for value in moved_tree)
+        assert any(isinstance(value, module.CapturedFileSnapshot) and value.path == sibling / "unrelated.bin"
+                   for value in sibling_tree)
+        publish = transaction.publish_owned_effect
+        primary = module.LifecycleError("TEST-OWNED-TREE", "failure after actual directory publication")
+        fired = []
+        def fail_after_publication(prepared, **kwargs):
+            result = publish(prepared, **kwargs)
+            if prepared.source == destination and kwargs.get("compensation") is None and not fired:
+                fired.append(True)
+                raise primary
+            return result
+        with monkeypatch.context() as scoped:
+            scoped.setattr(transaction, "publish_owned_effect", fail_after_publication)
+            with pytest.raises(module.LifecycleError) as caught:
+                transaction.replace_directory(destination, source, expected_identity=source_identity)
+        assert caught.value is primary and fired == [True]
+        assert destination.is_dir() and not source.exists()
+        assert moved_origin.native_after.path == destination
+        assert {value.path for value in moved_origin.tree_after} == {value.path for value in moved_tree}
+        assert any(isinstance(value, module.CapturedFileSnapshot) and value.path == member
+                   and value.identity == original.identity and value.data == original.data
+                   for value in moved_origin.tree_after)
+        transaction._verify_observation_map({value.path: value for value in moved_origin.tree_after})
+        assert sibling_origin.native_after is sibling_native and sibling_origin.tree_after == sibling_tree
+        transaction._verify_observation_map({value.path: value for value in sibling_origin.tree_after})
+        assert module._lifecycle_file_identity(destination.lstat()) == source_identity
+        assert module._lifecycle_file_identity(member.lstat()) == original.identity
+        assert member.read_bytes() == original.data
+        assert transaction._retained_observations[outside] is separate
+        assert not transaction._unsettled_relocations
+        transaction.verify()
+
+
 def test_transaction_directory_native_failure_keeps_observation_map(tmp_path: Path, monkeypatch) -> None:
     module, root, source, destination, leaf, _outside = _relocation_observation_fixture(tmp_path)
     snapshot = module._capture_file_snapshot(leaf, failure_id="TEST-PROOF")
