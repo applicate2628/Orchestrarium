@@ -200,7 +200,7 @@ Every substantive result receives a separate nonauthoring check under the shared
    - For each reviewer, choose the review strategy before delegating (see Review strategy rule below).
 7. Human or CI gate
    - Output: explicit human approval, CI status, or documented external blocker.
-   - For publication, `$lead` runs the publication-safety scan and `$knowledge-archivist` is the default publication-gate approver; the approver must be a different role than the role that accepted the artifact into the pipeline.
+   - For publication, `$lead` runs the publication-safety scan and `$knowledge-archivist` is the default publication-gate approver; the approver must be a different role than the role that accepted the artifact into the pipeline. When handling a scan finding or a rebuild with prior findings, read [Reviewed publication exceptions](operating-model.md#reviewed-publication-exceptions).
 8. Optional batch-close consultant sweep
    - Role: `$consultant`
    - Output: one non-binding advisory memo that performs a final missed-change and residual-risk sweep, then ends with an explicit reusable second prompt for continuing the work.
