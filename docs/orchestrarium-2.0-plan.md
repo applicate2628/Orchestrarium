@@ -1,13 +1,15 @@
 # Orchestrarium 2.0 product plan
 
-Status: reconciled on 2026-11-23 against main `14a4e74a`, the peeled
-pre-SDK tag `3d8ac64b`, and the current pull requests below. The October outcomes
-remain in the register, not as prerequisites for every release. This plan does
-not authorize provider calls, publication, installation, or merges.
+Status: audit context updated for 2026-11-24 against main `14a4e74a`, the
+peeled pre-SDK tag `3d8ac64b`, and the reviewed pull-request sources below. The
+integrated SDK candidate remains local and under qualification. The October
+outcomes remain in the register, not as prerequisites for every release. This
+plan does not authorize provider calls, publication, installation, or merges.
 
 ## Contents
 
 - [Current delivery order and completed work](#current-delivery-order-and-completed-work)
+- [2026-11-24 audit context](#2026-11-24-audit-context)
 - [Open ticket closeout](#open-ticket-closeout)
 - [Goal and boundary](#goal-and-boundary)
 - [General mechanisms, revisable plans](#general-mechanisms-revisable-plans)
@@ -30,8 +32,9 @@ this register does not create a second implementation tracker.
    [PR56](https://github.com/applicate2628/Orchestrarium/pull/56),
    [PR57](https://github.com/applicate2628/Orchestrarium/pull/57),
    [PR58](https://github.com/applicate2628/Orchestrarium/pull/58),
-   [PR59](https://github.com/applicate2628/Orchestrarium/pull/59) and
-   [PR60](https://github.com/applicate2628/Orchestrarium/pull/60) follow-ups without
+   [PR59](https://github.com/applicate2628/Orchestrarium/pull/59),
+   [PR60](https://github.com/applicate2628/Orchestrarium/pull/60) and
+   [PR62](https://github.com/applicate2628/Orchestrarium/pull/62) follow-ups without
    duplicating them. Reconcile the dated release entries and verify the combined
    governance, source projections and selected audit modes. Correct cancellation
    at the scanner and SDK worker owners and control-state drift at uninstall
@@ -102,6 +105,45 @@ belongs to the successive SDK/Rust transitions, not a new pre-SDK rewrite.
 The merged PR31 Windows replacement-security correction is historical. Do not
 conflate tagged source, isolated installation checks and actual receiving on
 any target with SDK or model-ranking completion.
+
+### 2026-11-24 audit context
+
+The audit applied 28 relevant skills across four work lanes: integration and
+governance, SDK runtime, installer, and scanner/release review. Applicable focused
+PR54/56/57/58/59/60/62/64 changes are incorporated into the local PR19 candidate;
+their existing PRs retain standalone ownership and receiving evidence. Detailed
+integration findings stay with PR19, complete Rust scanner qualification with
+PR21, and scanner cancellation and source-mirror corrections with PR60. This
+plan records their sequence without creating another tracker or implementation PR.
+
+Focused offline source checks passed for provider projections, shared governance,
+scanner cancellation, Git object reads in both supported formats, and ledger
+absence/currentness.
+Native Windows runs supplied failure evidence used for focused corrections.
+Recorded checkpoints include the real Claude install/reinstall fixtures and
+linked-root receipt checks, Codex repeated and linked-root installations, exact
+rollback and drift refusals, detached validation and selected public-output
+checks. These are bounded results on recorded source revisions, not additive
+suite totals or proof of the working installation. Interrupted runs without a
+final result retain only their recorded partial observations.
+
+The Rust primitives passed their 16 native tests. Framing and composition parity
+was checked against both the earlier Python reader and the integrated SDK reader;
+the complete publication matcher still cannot compile offline because `pcre2`
+is absent from the existing dependency cache. Six isolated Linux verifier cases
+cannot import `pytest` under the required `-I` mode in either available Python
+interpreter; optional official ACP dependencies retain separate collection holds.
+The audit leaves those cases unqualified. Full combined-candidate acceptance,
+live provider routes, actual installed receiving and complete Rust scanner
+qualification remain with their existing owners in step 2.
+
+Publication is held because local Git and the GitHub command-line interface lack
+usable GitHub credentials. A guarded PR update stopped at authentication before
+the native callback, so it supplied no callback acceptance or published-ref
+evidence. Resume through an authenticated, admitted
+[native Git publication path](target-local-publication.md), with fresh callback
+proof and exact destination-ref readback. Existing remote-carrier restrictions
+remain in force; the observed authentication failure does not change their scope.
 
 ## Open ticket closeout
 
@@ -535,3 +577,6 @@ Later implementation needs the probes under its own outcome and current gates.
 - SDK: software development kit; [PR18](https://github.com/applicate2628/Orchestrarium/pull/18) owns historical design.
   [PR19](https://github.com/applicate2628/Orchestrarium/pull/19) owns current SDK
   implementation and qualification, not this remaining 2.0 roadmap.
+- ACP: Agent Client Protocol, used by supported provider adapters.
+- PCRE2: Perl Compatible Regular Expressions, version 2; a regular-expression
+  matching dependency of the complete native publication scanner.
