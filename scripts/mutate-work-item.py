@@ -874,6 +874,7 @@ class LifecycleTransaction:
         self._retained_observations: dict[Path, CapturedFileSnapshot | CapturedDirectorySnapshotV1] = {
             snapshot.path: snapshot for snapshot in inputs.inventories
         }
+        self._retained_absence_evidence: tuple = ()
         self._validator_reuse = None
         self._runtime_source_authority = _declared_runtime_source_authority()
         self._source_admission_failure: BaseException | None = None
@@ -967,6 +968,9 @@ class LifecycleTransaction:
             for kind, value in self._binding_evidence:
                 if kind == "integrity-failure":
                     raise value[1]
+            for row in self._retained_absence_evidence:
+                self._verify_integrity_constraint(row,
+                    lambda: _verify_project_binding_evidence((row,), "WI-CATEGORY-MIGRATION-INVENTORY"))
             self._verify_observation_map({path: value for path, value in self._retained_observations.items()
                                          if not self._is_runtime_source(path)},
                 **({"creation_owner": creation_owner} if creation_owner is not None else {}))
@@ -2027,7 +2031,8 @@ class LifecycleTransaction:
                     self._retain_source_failure(failure)
                 raise
 
-    def observe_retained_inputs(self, snapshots: Iterable[CapturedFileSnapshot | CapturedDirectorySnapshotV1]) -> None:
+    def observe_retained_inputs(self, snapshots: Iterable[CapturedFileSnapshot | CapturedDirectorySnapshotV1],
+                               *, absent_paths: Iterable[Path] = ()) -> None:
         for snapshot in snapshots:
             if (isinstance(snapshot, CapturedFileSnapshot)
                     and type(vars(snapshot).get("require_single_link")) is not bool):
@@ -2050,6 +2055,16 @@ class LifecycleTransaction:
                 self._verify_observation_map({snapshot.path: snapshot})
                 self._assert_source_admission()
             self._retained_observations[snapshot.path] = snapshot
+        for path in absent_paths:
+            path = _lifecycle_unresolved_absolute(path)
+            if not path.is_relative_to(self.repository_root):
+                raise LifecycleError("WI-CATEGORY-MIGRATION-INVENTORY", "retained absence escapes admitted repository")
+            evidence = []
+            _record_project_absence_at(path, evidence, "WI-CATEGORY-MIGRATION-INVENTORY")
+            _verify_project_binding_evidence(tuple(evidence), "WI-CATEGORY-MIGRATION-INVENTORY")
+            rows = tuple(row for row in evidence if row not in self._retained_absence_evidence)
+            self._binding_evidence += tuple(row for row in rows if row not in self._binding_evidence)
+            self._retained_absence_evidence += rows
 
     def cleanup_intersects_unsettled(self, paths: tuple[Path, ...]) -> bool:
         for path in paths:
@@ -12480,6 +12495,31 @@ def _scratch_ledger_entries(item: Path, *, ledger_resource_budget=None) -> list[
     return _scratch_entries_from_events(item, effective_events)
 
 
+def _observe_empty_scratch_namespace(owner_root: Path, owner_inspection) -> None:
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if transaction is None:
+        return
+    failure_id = "WI-SCRATCH-OWNERSHIP-INCOMPLETE"
+    if not owner_inspection.exists:
+        transaction.observe_retained_inputs((), absent_paths=(owner_root,))
+    else:
+        owner = _capture_owned_directory_snapshot(owner_root, failure_id=failure_id)
+        if _lifecycle_file_identity(owner.metadata) != owner_inspection.identity[:2]:
+            raise LifecycleError(failure_id, "empty scratch owner changed during selection")
+        snapshots = [owner]
+        for name, metadata in owner.members:
+            if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode) or bool(
+                getattr(metadata, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+            ):
+                raise LifecycleError(failure_id, "empty scratch run namespace became unsafe")
+            run = _capture_owned_directory_snapshot(owner_root / name, failure_id=failure_id)
+            if run.members or _lifecycle_file_snapshot_key(run.metadata) != _lifecycle_file_snapshot_key(metadata):
+                raise LifecycleError(failure_id, "empty scratch run namespace changed during selection")
+            snapshots.append(run)
+        transaction.observe_retained_inputs(snapshots)
+    transaction.verify()
+
+
 def _scratch_disposition_plan(
     root: Path,
     item: Path,
@@ -12498,6 +12538,7 @@ def _scratch_disposition_plan(
         raise LifecycleError("WI-SCRATCH-UNSAFE-ENTRY", str(exc)) from exc
     originals, tombstones = _scratch_namespace_entries(owner_root)
     if not originals and not tombstones and not retention_paths and (not archived or selected_entries == []):
+        _observe_empty_scratch_namespace(owner_root, owner_inspection)
         return ()
     if selected_entries is None and not ledger.exists():
         if archived and retention_paths:
@@ -14764,6 +14805,7 @@ def _close_item_directory(
                 raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "ordinary proof postimage differs")
             held.observe_retained_inputs((settlement_capture,))
             _verify_settlement(root, settlement_path, json.loads(settlement_data), ledger_resource_budget=ledger_resource_budget)
+        held.verify()
     except BaseException as exc:
         composer = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
         composer.capture_primary(exc)

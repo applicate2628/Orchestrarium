@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-24
 
+- Keep an empty selected scratch namespace current through close completion. Retain existing empty directory identities or exact owner absence in the lifecycle transaction; a late foreign entry refuses completion and is preserved. Unrelated work-item scratch namespaces remain outside that selection, and ordinary close does not acquire historical scratch rows when its physical selection is empty.
+
 - Admit independently verified historical PASS custody bytes before the final selected-ledger check, so an already missing original artifact can be restored without changing its ledger. Preserve one captured ledger image, exact replay, explicit event and byte limits, and typed failures when those limits are exceeded.
 
 - Settle partial-migration pending receipts through the existing exact native write owner. Promotion and retirement now publish their actual effects to the held transaction, preserve foreign replacements even when bytes match, and retain the original failure if cleanup also fails. Create-only publication and final directory durability checks remain required.
