@@ -169,7 +169,7 @@ def test_validator_factory_refuses_unqualified_lifecycle_origin(tmp_path, monkey
         if path.is_file()
     }
     with pytest.raises(module.LifecycleError) as refused:
-        module.LifecycleTransaction(subject)
+        module._validator_module()
     assert refused.value.failure_id == "WI-VALIDATOR-LOAD"
     assert not (subject / module.LIFECYCLE_LOCK_RELATIVE).exists()
     assert {
@@ -1847,7 +1847,7 @@ def test_retained_consumer_prepares_each_item_once(tmp_path: Path):
         write(owner / "inputs" / "ordinary-a.md", "Unmatched live input.\n")
         write(owner / "inputs" / "ordinary-b.md", "Another unmatched live input.\n")
     paths = {item / "agent-runs.jsonl", peer / "agent-runs.jsonl"}
-    captures, decodes = {}, {}
+    captures, decodes, custody_decodes = {}, {}, {}
     real_capture, real_loader = module._capture_file_snapshot, module._validator_module
 
     def counted_capture(path, **kwargs):
@@ -1858,10 +1858,12 @@ def test_retained_consumer_prepares_each_item_once(tmp_path: Path):
     def counted_loader():
         validator = real_loader()
         real_decode = validator.load_jsonl
+        custody_owner = validator._resolve_historical_pass_custody_from_inputs.__code__
         def counted_decode(path, *args, **kwargs):
             # Selected-proof prefix decoding is separate, still candidate-owned.
-            if path in paths and sys._getframe(1).f_code.co_name != "resolve_historical_pass_custody":
-                decodes[path] = decodes.get(path, 0) + 1
+            if path in paths:
+                observed = custody_decodes if sys._getframe(1).f_code is custody_owner else decodes
+                observed[path] = observed.get(path, 0) + 1
             return real_decode(path, *args, **kwargs)
         validator.load_jsonl = counted_decode
         return validator
@@ -1873,6 +1875,7 @@ def test_retained_consumer_prepares_each_item_once(tmp_path: Path):
     assert payload.read_bytes() == before and peer_payload.read_bytes() == before
     assert captures == {path: 1 for path in paths}
     assert decodes == {path: 1 for path in paths}
+    assert set(custody_decodes) == paths
 
 
 def test_retained_consumer_cached_carrier_drift_never_refreshes_approval(tmp_path: Path):
@@ -2166,8 +2169,11 @@ def test_acquired_input_role_exclusion_keeps_per_leaf_currentness(tmp_path: Path
     with patch.object(module, "_owned_work_item_input_location", side_effect=drift_after_role_selection):
         with pytest.raises(module.LifecycleError) as after_entry:
             scan(module, root, payload, owned, port)
-    assert after_entry.value.failure_id == "WI-LEGACY-COMPLETION-DRIFT"
+    assert after_entry.value.failure_id == "WI-CATEGORY-MIGRATION-INVENTORY"
+    assert isinstance(after_entry.value.__cause__, module.LifecycleError)
+    assert after_entry.value.__cause__.failure_id == "WI-LEGACY-COMPLETION-DRIFT"
     assert injected_paths == ["active/data-owner/inputs/source.dat"]
+    assert payload.read_bytes() == b"changed after role selection\n"
     with pytest.raises(module.LifecycleError) as direct_read:
         port.file_snapshot(payload)
     assert direct_read.value.failure_id == "WI-LEGACY-COMPLETION-DRIFT"
@@ -3373,7 +3379,9 @@ def test_close_bug_compensation_preserves_unowned_source_and_target_images(
     archived_bug = root / "work-items" / "bugs" / "archive" / "2026-10" / bug.name
     concurrent = b"Distinct concurrent author bytes; preserve exactly.\n"
     archived_before_failure = None
-    original_refresh, original_replace = module.refresh_readme, module.os.replace
+    original_refresh = module.refresh_readme
+    original_replace = module.os.replace
+    injected = []
     def fail_after_move(_root, **kwargs):
         nonlocal archived_before_failure
         archived_before_failure = archived_bug.read_bytes()
@@ -3382,11 +3390,12 @@ def test_close_bug_compensation_preserves_unowned_source_and_target_images(
         elif state == "drifted-target":
             archived_bug.write_bytes(concurrent)
         raise module.LifecycleError("WI-README-STALE", "S1 controlled failure after bug and parent moves")
-    def fail_bug_move(source, target):
+    def fail_bug_move(source, target, **kwargs):
         if Path(source) == bug and Path(target) == archived_bug:
+            injected.append((source, target))
             bug.write_bytes(concurrent)
             raise OSError("controlled failure before bug archive move")
-        return original_replace(source, target)
+        return original_replace(source, target, **kwargs)
     if state == "drifted-source-before-move":
         module.os.replace = fail_bug_move
     else:
@@ -3395,7 +3404,8 @@ def test_close_bug_compensation_preserves_unowned_source_and_target_images(
         with pytest.raises(module.LifecycleError) as failure:
             module.close_item(root, slug, closure(instant).encode(), instant)
     finally:
-        module.refresh_readme, module.os.replace = original_refresh, original_replace
+        module.refresh_readme = original_refresh
+        module.os.replace = original_replace
     assert failure.value.failure_id == "WI-BUG-DISPOSITIONS-ROLLBACK"
     assert failure.value.__cause__ is not None
     if state == "occupied-source":
@@ -3405,6 +3415,7 @@ def test_close_bug_compensation_preserves_unowned_source_and_target_images(
         assert not bug.exists()
         assert archived_bug.read_bytes() == concurrent
     else:
+        assert injected == [(bug, archived_bug)]
         assert bug.read_bytes() == concurrent
         assert not archived_bug.exists()
     assert active.is_dir()
@@ -4195,7 +4206,7 @@ def test_historical_pass_custody_candidate_uses_one_captured_ledger(tmp_path: Pa
         selected = item / "agent-runs.jsonl"
         ledger = module._load_agent_run_ledger()
         capture = module._capture_file_snapshot
-        resolve = validator.resolve_historical_pass_custody
+        resolve = validator._resolve_historical_pass_custody_from_inputs
         read = Path.read_bytes
         captured = []
         resolver_sources = []
@@ -4221,7 +4232,7 @@ def test_historical_pass_custody_candidate_uses_one_captured_ledger(tmp_path: Pa
         failure = None
         with patch.object(ledger, "load_validator", return_value=validator), \
                 patch.object(module, "_capture_file_snapshot", side_effect=observe_capture), \
-                patch.object(validator, "resolve_historical_pass_custody", side_effect=observe_resolver), \
+                patch.object(validator, "_resolve_historical_pass_custody_from_inputs", side_effect=observe_resolver), \
                 patch.object(Path, "read_bytes", deny_reacquisition):
             try:
                 module.retain_historical_pass_custody(
@@ -5405,11 +5416,13 @@ def test_close_rolls_back_bug_bytes_when_bug_archive_move_fails(
         ],
     )
     original_replace = module.os.replace
+    injected = []
 
-    def fail_bug_move(source, target):
+    def fail_bug_move(source, target, **kwargs):
         if Path(source) == bug:
+            injected.append((source, target))
             raise OSError("injected bug archive move failure")
-        return original_replace(source, target)
+        return original_replace(source, target, **kwargs)
 
     module.os.replace = fail_bug_move
     try:
@@ -5422,6 +5435,7 @@ def test_close_rolls_back_bug_bytes_when_bug_archive_move_fails(
     finally:
         module.os.replace = original_replace
 
+    assert injected == [(bug, root / "work-items" / "bugs" / "archive" / "2026-08" / bug.name)]
     assert bug.read_bytes() == before
     assert (root / "work-items" / "active" / slug).is_dir()
     assert not (root / "work-items" / "archive" / "2026-08" / slug).exists()
@@ -6661,55 +6675,78 @@ def test_staged_start_ledger_failure_restores_candidate(tmp_path: Path) -> None:
         original_ledger_module = module._agent_run_ledger_module
         original_atomic_write = module._atomic_write
         original_validator_module = module._validator_module
-        original_replace = module.os.replace
+        original_replace = module.LifecycleTransaction.replace_directory
         real_ledger = original_ledger_module()
+        original_build = real_ledger.build_event
+        original_serialize = real_ledger.serialize_event
+        validator_functions = []
+        injected = []
 
-        class InjectedLedger:
-            def build_event(self, args):
-                if phase == "build":
-                    raise ValueError("injected event build failure")
-                return real_ledger.build_event(args)
+        def injected_build(args):
+            if phase == "build":
+                injected.append(phase)
+                raise ValueError("injected event build failure")
+            return original_build(args)
 
-            def serialize_event(self, event):
-                if phase == "serialize":
-                    raise ValueError("injected event serialization failure")
-                return real_ledger.serialize_event(event)
+        def injected_serialize(event):
+            if phase == "serialize":
+                injected.append(phase)
+                raise ValueError("injected event serialization failure")
+            return original_serialize(event)
 
-        class RejectingValidator:
-            def validate_obligation_transfer_ownership(self, _root):
-                return []
+        def injected_validator_module():
+            validator = original_validator_module()
+            if not any(owner is validator for owner, _original in validator_functions):
+                original_validate = validator.validate_work_item
+                validator_functions.append((validator, original_validate))
 
-            def validate_work_item(self, _item, *, strict_revise=True):
-                return ["injected temporary validation failure"]
+                def injected_validate(item, *args, **kwargs):
+                    errors = original_validate(item, *args, **kwargs)
+                    if item.name.startswith(f".{slug}."):
+                        injected.append(phase)
+                        return [*errors, "injected temporary validation failure"]
+                    return errors
 
-        def injected_atomic_write(path: Path, data: bytes) -> None:
+                validator.validate_work_item = injected_validate
+            return validator
+
+        def injected_atomic_write(path: Path, data: bytes, **kwargs) -> None:
             if phase == "write" and path.name == "agent-runs.jsonl":
+                injected.append(phase)
                 raise OSError("injected ledger write failure")
-            original_atomic_write(path, data)
+            original_atomic_write(path, data, **kwargs)
 
-        def injected_replace(source, target) -> None:
-            if phase == "final-replace" and Path(source).is_dir():
+        def injected_replace(transaction, source, target, **kwargs) -> None:
+            if phase == "final-replace" and target == root / "work-items" / "active" / slug:
+                injected.append(phase)
                 raise OSError("injected final replace failure")
-            original_replace(source, target)
+            return original_replace(transaction, source, target, **kwargs)
 
-        module._agent_run_ledger_module = lambda: InjectedLedger()
+        real_ledger.build_event = injected_build
+        real_ledger.serialize_event = injected_serialize
+        module._agent_run_ledger_module = lambda: real_ledger
         module._atomic_write = injected_atomic_write
         if phase == "temporary-validation":
-            module._validator_module = lambda: RejectingValidator()
-        module.os.replace = injected_replace
+            module._validator_module = injected_validator_module
+        module.LifecycleTransaction.replace_directory = injected_replace
         try:
             try:
                 module.start_item(root, slug, status)
-            except (module.LifecycleError, OSError):
-                pass
+            except (module.LifecycleError, OSError) as exc:
+                assert "injected" in str(exc), (phase, exc)
             else:
                 raise AssertionError(f"{phase} failure did not abort staged start")
         finally:
             module._agent_run_ledger_module = original_ledger_module
             module._atomic_write = original_atomic_write
+            real_ledger.build_event = original_build
+            real_ledger.serialize_event = original_serialize
             module._validator_module = original_validator_module
-            module.os.replace = original_replace
+            for validator, original_validate in validator_functions:
+                validator.validate_work_item = original_validate
+            module.LifecycleTransaction.replace_directory = original_replace
 
+        assert injected == [phase], phase
         assert hashlib.sha256(backlog.read_bytes()).hexdigest() == candidate_sha256, phase
         active = root / "work-items" / "active"
         assert not (active / slug).exists(), phase
@@ -8141,7 +8178,7 @@ def test_real_epic_reference_remains_strict_and_resolves_when_present(
     assert "[epic](epics/real-epic.md)" in item_entry.detail
 
 
-def test_unsettled_ledger_rejects_archive_without_mutation(tmp_path: Path) -> None:
+def test_unsettled_ledger_validation_preserves_active_item(tmp_path: Path) -> None:
     module = load_module()
     root = tmp_path / "repo"
     slug = "unsettled-ledger"
@@ -8165,15 +8202,22 @@ def test_unsettled_ledger_rejects_archive_without_mutation(tmp_path: Path) -> No
     }
     write(item / "agent-runs.jsonl", json.dumps(revise) + "\n")
     readme_before = (root / "work-items" / "README.md").read_bytes()
-    instant = "2026-07-31T12:00:00Z"
-    try:
-        module.close_item(root, slug, closure(instant).encode(), instant)
-    except module.LifecycleError as exc:
-        assert exc.failure_id == "WI-LEDGER-UNSETTLED"
-    else:
-        raise AssertionError("unsettled REVISE was archived")
+    item_before = {path.relative_to(item): path.read_bytes() for path in item.rglob("*") if path.is_file()}
+    # Strict ledger receiving owns this refusal. Ordinary close separately
+    # consumes the accepted task outcome; it does not clear ledger obligations.
+    states, authority, acquired = [], [], []
+    errors = module._validator_module().validate_work_item(
+        item, strict_revise=True, obligation_state_out=states,
+        authority_state_out=authority, ledger_acquisition_complete_out=acquired,
+    )
+    assert acquired == [True] and len(states) == len(authority) == 1
+    assert [row.run_id for row in states[0].open_revise] == [revise["runId"]]
+    assert authority[0][1].revise_target_eligible
+    assert len(errors) == 1 and errors[0].startswith(f"open REVISE obligation: {revise['runId']} ")
     assert item.is_dir()
     assert not (item / "closure.md").exists()
+    assert not (root / "work-items" / "archive" / "2026-07" / slug).exists()
+    assert {path.relative_to(item): path.read_bytes() for path in item.rglob("*") if path.is_file()} == item_before
     assert (root / "work-items" / "README.md").read_bytes() == readme_before
 
 
@@ -8778,15 +8822,16 @@ def test_interrupted_category_moves_preserve_current_bytes(tmp_path: Path) -> No
     )
     status_before = (active / "status.md").read_bytes()
     readme_before = (work_root / "work-items" / "README.md").read_bytes()
-    move_api = "rename" if module.os.name == "nt" else "replace"
-    original_move = getattr(module.os, move_api)
+    original_move = module.LifecycleTransaction.replace_directory
+    interrupted = []
 
-    def fail_work_item_move(source, target):
+    def fail_work_item_move(transaction, source, target, **kwargs):
         if Path(source) == active:
+            interrupted.append(source)
             raise OSError("injected directory move interruption")
-        return original_move(source, target)
+        return original_move(transaction, source, target, **kwargs)
 
-    setattr(module.os, move_api, fail_work_item_move)
+    module.LifecycleTransaction.replace_directory = fail_work_item_move
     try:
         try:
             module.migrate_legacy(
@@ -8799,7 +8844,8 @@ def test_interrupted_category_moves_preserve_current_bytes(tmp_path: Path) -> No
         else:
             raise AssertionError("interrupted work-item move returned success")
     finally:
-        setattr(module.os, move_api, original_move)
+        module.LifecycleTransaction.replace_directory = original_move
+    assert interrupted == [active]
     assert active.is_dir()
     assert (active / "status.md").read_bytes() == status_before
     assert (work_root / "work-items" / "README.md").read_bytes() == readme_before
@@ -8825,12 +8871,15 @@ def test_interrupted_category_moves_preserve_current_bytes(tmp_path: Path) -> No
         inventory = root / "incoming.json"
         write(inventory, json.dumps({"reference": reference, "incomingLinks": []}))
 
-        def fail_flat_move(candidate, target):
-            if Path(candidate) == source:
-                raise OSError("injected flat move interruption")
-            return original_move(candidate, target)
+        interrupted.clear()
 
-        setattr(module.os, move_api, fail_flat_move)
+        def fail_flat_move(transaction, candidate, target, **kwargs):
+            if Path(candidate) == source:
+                interrupted.append(candidate)
+                raise OSError("injected flat move interruption")
+            return original_move(transaction, candidate, target, **kwargs)
+
+        module.LifecycleTransaction.replace_directory = fail_flat_move
         try:
             try:
                 module.migrate_legacy(
@@ -8843,7 +8892,8 @@ def test_interrupted_category_moves_preserve_current_bytes(tmp_path: Path) -> No
             else:
                 raise AssertionError(f"interrupted {category_name} move returned success")
         finally:
-            setattr(module.os, move_api, original_move)
+            module.LifecycleTransaction.replace_directory = original_move
+        assert interrupted == [source]
         assert source.read_bytes() == before
 
 
@@ -9909,11 +9959,13 @@ def test_v1_terminalization_preflights_all_rows_before_first_write(
     work_items = root / "work-items"
     sources = [
         work_items / "bugs" / "first.md",
-        work_items / "decisions" / "second.md",
+        work_items / "decisions" / "2026-08-01-second.md",
     ]
     for path, status in zip(sources, ("fixed", "dropped")):
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(_pre_v1_terminal_record(status, path.stem))
+        path.write_bytes(_current_decision_record(path.stem, status=status).encode()
+                        if path.parent.name == "decisions"
+                        else _pre_v1_terminal_record(status, path.stem))
     inventory = root / ".scratch" / "inventory.json"
     receipt = root / ".scratch" / "receipt.json"
     payload = _denied_terminalization_inventory(work_items, inventory)
@@ -11043,7 +11095,7 @@ def test_root_contract_has_one_shared_documentation_owner_and_pack_pointers(
         "shared/references/README.md",
         "docs/work-item-execution-tracking.md",
         "references-codex/repository-task-memory.md",
-        "references-claude/repository-task-memory.md",
+        "adapters/claude/references/repository-task-memory.md",
     ):
         assert pointer in (root / relative).read_text(encoding="utf-8")
 
@@ -12520,10 +12572,14 @@ def test_terminalize_v1_supports_every_flat_category(tmp_path: Path) -> None:
         "roadmap": ("roadmaps", "archived", "Terminal-at", "Disposition"),
         "epic": ("epics", "closed", "Closed", "Outcome"),
     }
+    paths = {}
     for category, (directory, status, _utc_field, _detail_field) in records.items():
+        slug = "2026-08-01-legacy-decision" if category == "decision" else f"legacy-{category}"
+        paths[category] = work_items / directory / f"{slug}.md"
         write(
-            work_items / directory / f"legacy-{category}.md",
-            f"status: {status}\nTask: Preserve {category}.\n",
+            paths[category],
+            _current_decision_record(slug, status=status) if category == "decision"
+            else f"status: {status}\nTask: Preserve {category}.\n",
         )
     inventory = root / ".scratch" / "inventory.json"
     receipt = root / ".scratch" / "receipt.json"
@@ -12535,6 +12591,7 @@ def test_terminalize_v1_supports_every_flat_category(tmp_path: Path) -> None:
     payload = json.loads(inventory.read_text(encoding="utf-8"))
     assert {row["category"] for row in payload["rows"]} == set(records)
     assert {row["admission"]["result"] for row in payload["rows"]} == {"denied"}
+    assert {row["admission"]["failureId"] for row in payload["rows"]} == {"WI-CATEGORY-TERMINAL-EVIDENCE-MISSING"}
 
     count, replay = module.terminalize_v1_inventory(
         root,
@@ -12546,9 +12603,7 @@ def test_terminalize_v1_supports_every_flat_category(tmp_path: Path) -> None:
 
     assert count == len(records) and replay is False
     for category, (directory, _status, utc_field, detail_field) in records.items():
-        text = (work_items / directory / f"legacy-{category}.md").read_text(
-            encoding="utf-8"
-        )
+        text = paths[category].read_text(encoding="utf-8")
         assert f"{utc_field}: 2026-08-01T00:00:00Z" in text
         assert f"{detail_field}: Pre-V1 terminal status" in text
         assert text.count("V1-Migration-Evidence:") == 1
@@ -13833,7 +13888,9 @@ def test_initial_v0_owned_stage_lifetime_and_settlement(tmp_path: Path, monkeypa
             monkeypatch.setattr(module.LifecycleWriteTarget, "promote_create", drift)
         with pytest.raises(module.LifecycleError) as refused:
             module.admit_current_decision_v0(root, **request)
-        assert refused.value.failure_id == "WI-DECISION-V0-ADMISSION-RECOVERY-CONFLICT"
+        # Held native currentness refuses the replaced manifest before the
+        # domain's later settlement ownership check can run.
+        assert refused.value.failure_id == "WI-CATEGORY-MIGRATION-INVENTORY"
         assert manifest.stat().st_ino == foreign_identity and manifest.read_bytes() == foreign_bytes
         assert (root / (request["receipt"] + ".pending")).exists()
         assert (root / request["receipt"]).exists() == (fault == "manifest-after-receipt-promotion")
@@ -17113,12 +17170,17 @@ def test_directory_effect_collection_uses_physical_observation_equivalence(tmp_p
         # Feed the collection's direct-binding representation branch only. Stop
         # before native/evidence verification; this is not effect admission.
         evidence = transaction._binding_evidence
+        transaction.verify()
         reached = []
         def stop_after_collection(values, **kwargs):
             reached.append(values)
             raise CollectionReached
         try:
             with monkeypatch.context() as scoped:
+                # The real preflight above covers the admitted observations.
+                # Isolate collection from its new preceding whole-owner check;
+                # the injected representation below is deliberately synthetic.
+                scoped.setattr(transaction, "verify", lambda **kwargs: None)
                 scoped.setattr(transaction, "_verify_observation_map", stop_after_collection)
                 transaction._binding_evidence = evidence + (("file", current),)
                 with pytest.raises(CollectionReached):
@@ -19083,7 +19145,7 @@ def test_parent_successor_uri_restart_binds_original_targets_and_preserves_duty(
     closure_target = next(row for row in payload["uriTargetBindings"]["rows"] if row["source"].endswith("/closure.md"))
     assert closure_target["beforeSha256"] is None
     assert len(payload["uriConsumers"]["rows"]) == 1
-    receipt = module._recover_transition(tmp_path, intent)
+    receipt = module.recover_transition(tmp_path, fixture["operationId"])
     archive = tmp_path / receipt["archivePath"]
     assert (archive / "agent-runs.jsonl").read_bytes() == fixture["ledgerBefore"]
     assert len(receipt["obligations"]) == 1 and not intent.exists()
@@ -19107,7 +19169,7 @@ def test_parent_successor_uri_target_drift_stops_before_recovery_effects(tmp_pat
     (path / "evidence.md").write_bytes(b"Concurrent target evidence.\n")
     before = tree_file_bytes(tmp_path)
     with pytest.raises(module.LifecycleError) as refused:
-        module._recover_transition(tmp_path, intent)
+        module.recover_transition(tmp_path, fixture["operationId"])
     assert refused.value.failure_id == ("WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE" if phase == "T1" else "WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE")
     assert tree_file_bytes(tmp_path) == before and intent.exists()
 
@@ -19134,7 +19196,7 @@ def test_parent_successor_uri_omission_cannot_downgrade_historical_profile(tmp_p
     intent.write_bytes(module._migration_receipt_bytes(payload))
     before = tree_file_bytes(tmp_path)
     with pytest.raises(module.LifecycleError):
-        module._recover_transition(tmp_path, intent)
+        module.recover_transition(tmp_path, fixture["operationId"])
     assert tree_file_bytes(tmp_path) == before
 
 
@@ -19146,9 +19208,13 @@ def test_parent_successor_uri_intent_overflow_is_pre_effect(tmp_path: Path) -> N
     module.refresh_readme(tmp_path)
     fixture["readmeSha"] = hashlib.sha256((tmp_path / "work-items" / "README.md").read_bytes()).hexdigest()
     before = tree_file_bytes(tmp_path)
+    @module._lifecycle_participant
+    def constrained(root):
+        return helpers.run_transfer(fixture)
     with pytest.raises(module.LifecycleError) as refused:
-        helpers.run_transfer(fixture)
-    assert refused.value.failure_id == "WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
+        constrained(tmp_path, transition_output_ceiling=module.resolve_transition_resource_budget())
+    assert refused.value.failure_id == "WI-LIFECYCLE-RESOURCE-INCOMPLETE"
+    assert "selected transition demand exceeds" in str(refused.value)
     assert tree_file_bytes(tmp_path) == before
     assert not module._transition_intent_path(tmp_path, fixture["operationId"]).exists()
 
@@ -19160,7 +19226,7 @@ def test_parent_successor_uri_owned_images_recover_at_distinct_boundaries(tmp_pa
     with pytest.raises(module.LifecycleError):
         helpers.run_transfer(fixture, inject=phase)
     intent = module._transition_intent_path(tmp_path, fixture["operationId"])
-    outcome = module._recover_transition(tmp_path, intent)
+    outcome = module.recover_transition(tmp_path, fixture["operationId"])
     if phase == "T1":
         assert outcome is None and fixture["item"].is_dir()
         assert fixture["consumer"].read_bytes() == fixture["consumerBefore"]
@@ -19189,7 +19255,7 @@ def test_parent_successor_recreated_uri_directory_refuses_restart(tmp_path: Path
     target.mkdir()
     before = tree_file_bytes(tmp_path)
     with pytest.raises(module.LifecycleError) as refused:
-        module._recover_transition(tmp_path, intent)
+        module.recover_transition(tmp_path, fixture["operationId"])
     assert refused.value.failure_id == "WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE"
     assert tree_file_bytes(tmp_path) == before and intent.exists()
     # A captured zero native identity is representable; parser does not replace it with unknown.
@@ -19208,7 +19274,7 @@ def test_parent_successor_public_replay_enforces_pending_t6_before_committed(tmp
     assert intent.exists()
     assert (archive / "lifecycle-transition-receipt.json").exists() == (case != "mismatched-pending-caller")
     if case == "no-intent-authoring":
-        module._recover_transition(tmp_path, intent)
+        module.recover_transition(tmp_path, fixture["operationId"])
         assert not intent.exists()
     if case in {"target-drift", "no-intent-authoring"}:
         (archive / "evidence.md").write_bytes(b"Later referenced evidence authoring.\n")
@@ -19242,8 +19308,10 @@ def test_atomic_write_target_native_parent_effect_and_release(tmp_path: Path, mo
     path.write_bytes(b"before")
     (outside / "sentinel").write_bytes(b"outside unchanged")
     original = module.LifecycleWriteTarget._file
-    def inner_swap(target, leaf, *, create=False, delete=False):
+    reached = []
+    def inner_swap(target, leaf, *, create=False, delete=False, **kwargs):
         if create:
+            reached.append(leaf)
             try:
                 parent.rename(tmp_path / "retained")
             except OSError:
@@ -19251,11 +19319,12 @@ def test_atomic_write_target_native_parent_effect_and_release(tmp_path: Path, mo
                     raise
                 raise OSError("native pinned parent denied injected rename")
             parent.symlink_to(outside, target_is_directory=True)
-        return original(target, leaf, create=create, delete=delete)
+        return original(target, leaf, create=create, delete=delete, **kwargs)
     monkeypatch.setattr(module.LifecycleWriteTarget, "_file", inner_swap)
     with pytest.raises(module.LifecycleError) as refused:
         module._atomic_write(path, b"after")
     assert refused.value.failure_id == "WI-LIFECYCLE-WRITE-BOUNDARY"
+    assert len(reached) == 1
     assert sorted(p.name for p in outside.iterdir()) == ["sentinel"]
     assert (outside / "sentinel").read_bytes() == b"outside unchanged"
     retained = parent if os.name == "nt" else tmp_path / "retained"
@@ -19912,7 +19981,9 @@ def test_owned_file_inverse_native_refusal_settles_its_actual_temporary_creator(
             module._atomic_write(outside, b"owned current body")
             create = module.LifecycleWriteTarget._new_creation
             rename = module.LifecycleWriteTarget._windows_rename
+            replace_file = module.os.replace
             sentinel = OSError("controlled inverse native promotion refusal")
+            reached = []
             def capture(owner, *args, **kwargs):
                 record = create(owner, *args, **kwargs)
                 if owner._inverse is not None:
@@ -19920,14 +19991,24 @@ def test_owned_file_inverse_native_refusal_settles_its_actual_temporary_creator(
                 return record
             def refuse(owner, handle, leaf, **kwargs):
                 if owner._inverse is not None:
+                    reached.append(owner.path)
                     raise sentinel
                 return rename(owner, handle, leaf, **kwargs)
+            def refuse_posix(source, destination, **kwargs):
+                if records and source == records[-1].locator.name and destination == outside.name:
+                    assert kwargs["src_dir_fd"] == kwargs["dst_dir_fd"] == records[-1].parent
+                    reached.append(outside)
+                    raise sentinel
+                return replace_file(source, destination, **kwargs)
             with monkeypatch.context() as scoped:
                 scoped.setattr(module.LifecycleWriteTarget, "_new_creation", capture)
                 scoped.setattr(module.LifecycleWriteTarget, "_windows_rename", refuse)
+                if os.name != "nt":
+                    scoped.setattr(module.os, "replace", refuse_posix)
                 with pytest.raises(module.LifecycleError) as failed:
                     transaction.restore_owned_file(outside, b"unaffected original proof")
                 assert failed.value.__cause__ is sentinel
+                assert reached == [outside]
             assert outside.read_bytes() == b"owned current body"
             assert records and all(record.finished and record.release_complete for record in records)
             assert all(not record.locator.exists() for record in records)
