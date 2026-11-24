@@ -144,7 +144,12 @@ def test_replacement_restore_boundary_retains_unknown_state(
     with pytest.raises((RuntimeError, installer._InstallFailure)) as caught:
         with installer._InstallTransaction([tree.parent], enabled=True) as transaction:
             owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
-            owner.replace_exact_tree(tree.relative_to(tmp_path), installer._tree_sha256(tree), source)
+            owner.replace_exact_tree(tree.relative_to(tmp_path), installer._tree_sha256(tree), source,
+                                     ignore_runtime_cache=boundary == "detach")
+            if boundary == "detach":
+                # Only an actual runtime observation enters the custody move.
+                (tree / "__pycache__").mkdir()
+                (tree / "__pycache__/runtime.pyc").write_bytes(b"runtime observation\n")
             armed = True
             raise primary
     if boundary == "inside-writer":
@@ -333,7 +338,11 @@ def test_directory_sibling_retention_preserves_foreign_slot_and_parent_snapshot(
     with pytest.raises(installer._InstallFailure) as caught:
         with installer._InstallTransaction([target.parent], enabled=True) as transaction:
             owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
-            owner.replace_exact_tree(target.relative_to(tmp_path), installer._tree_sha256(target), source)
+            owner.replace_exact_tree(target.relative_to(tmp_path), installer._tree_sha256(target), source,
+                                     ignore_runtime_cache=boundary == "quarantine")
+            if boundary == "quarantine":
+                (target / "__pycache__").mkdir()
+                (target / "__pycache__/runtime.pyc").write_bytes(b"runtime observation\n")
             effect = transaction._effects[-1]
             retained, retained_state = effect.retained, dict(effect.retained_state)
             armed = True
@@ -354,25 +363,42 @@ def test_directory_sibling_retention_preserves_foreign_slot_and_parent_snapshot(
         assert installer._InstallTransaction._observe(target) == original
 
 
-def test_readonly_created_directory_rollback_uses_same_parent_detach(tmp_path: Path) -> None:
+def test_readonly_created_directory_rollback_preserves_platform_disposal_boundary(tmp_path: Path) -> None:
     source = tmp_path / "source"
     source.mkdir()
     (source / "body").write_bytes(b"created\n")
     source.chmod(0o555)
+    source_before = installer._InstallTransaction._observe(source)
     target = tmp_path / "parent/participant"
     target.parent.mkdir()
     before = installer._InstallTransaction._observe(target.parent)
-    with pytest.raises(RuntimeError, match="^created directory rollback$"):
+    primary = RuntimeError("created directory rollback")
+    with pytest.raises((RuntimeError, installer._InstallFailure)) as caught:
         with installer._InstallTransaction([target.parent], enabled=True) as transaction:
             owner = installer._CreateOnlyMutablePath(tmp_path, transaction, dry_run=False)
             owner.create_tree(target.relative_to(tmp_path), source)
             assert transaction._effects[-1].retained.parent == target.parent
-            raise RuntimeError("created directory rollback")
-    assert installer._InstallTransaction._observe(target.parent) == before
-    source.chmod(0o755)
+            created = transaction._observe(target)
+            denied = os.name == "posix" and not os.access(target, os.W_OK)
+            raise primary
+    if denied:
+        # POSIX unlink requires a writable parent. Live created trees do not
+        # receive the private-snapshot permission exception.
+        assert isinstance(caught.value, installer._InstallFailure)
+        assert caught.value.cause is primary
+        assert any(isinstance(member.cause_exception, PermissionError)
+                   for member in caught.value.members)
+        assert caught.value.recovery_path.is_dir()
+        assert transaction._observe(target) == created
+        assert not transaction._effects[-1].settled
+        assert transaction._effects[-1].quarantine is None
+    else:
+        assert caught.value is primary
+        assert transaction._observe(target.parent) == before
+    assert transaction._observe(source) == source_before
 
 
-def test_partial_quarantine_disposal_protects_recovery_from_ancestor_restore(
+def test_partial_replacement_disposal_protects_recovery_from_ancestor_restore(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     target = tmp_path / "parent/participant"
@@ -382,6 +408,8 @@ def test_partial_quarantine_disposal_protects_recovery_from_ancestor_restore(
     source = tmp_path / "source"
     source.mkdir()
     (source / "body").write_bytes(b"new\n")
+    replacement = tmp_path / "foreign-replacement"
+    replacement.write_bytes(b"foreign during disposal\n")
     foreign = None
     foreign_state = None
     two_images = False
@@ -394,16 +422,16 @@ def test_partial_quarantine_disposal_protects_recovery_from_ancestor_restore(
         nonlocal foreign, foreign_state, two_images, hits
         effect = transaction._effects[-1] if transaction._effects else None
         result = dispose_node(path, expected)
-        if effect is not None and effect.quarantine == path.parent and foreign is None:
+        if effect is not None and effect.location == path.parent and foreign is None:
             hits += 1
             assert not path.exists() and not path.is_symlink()
-            assert effect.quarantine.parent == target.parent
-            assert effect.restored_state == original
-            assert transaction._observe(target) == original
+            assert effect.retained.parent == target.parent
+            assert effect.restored_state is None
+            assert transaction._observe(effect.retained) == transaction._relocate(original, target, effect.retained)
             two_images = True
             foreign = path
-            foreign.write_bytes(b"foreign during disposal\n")
-            foreign_state = transaction._observe(effect.quarantine)
+            os.rename(replacement, foreign)
+            foreign_state = transaction._observe(target)
             assert foreign_state[foreign].python_identity[:2] != expected.python_identity[:2]
             if os.name == "nt":
                 assert foreign_state[foreign].native_proof != expected.native_proof
@@ -418,11 +446,13 @@ def test_partial_quarantine_disposal_protects_recovery_from_ancestor_restore(
     assert hits == 1 and two_images and foreign is not None
     assert caught.value.cause is primary
     assert caught.value.members and caught.value.recovery_path.is_dir()
-    assert transaction._observe(target) == original
-    assert transaction._observe(foreign.parent) == foreign_state
+    assert transaction._observe(target) == foreign_state
     assert foreign.read_bytes() == b"foreign during disposal\n"
     effect = transaction._effects[-1]
-    assert not effect.settled and effect.quarantine_state is not None
+    assert transaction._observe(effect.retained) == transaction._relocate(original, target, effect.retained)
+    assert not effect.settled and effect.restored_state is None
+    assert effect.quarantine is None
+    assert target in caught.value.unresolved_paths
 
 
 def test_disabled_direct_writers_settle_only_their_validated_resources(
@@ -1026,6 +1056,16 @@ def test_migration_stage_settlement_preserves_a_later_occupant(
     assert transaction._observe(record.tombstone_path) == transaction._relocate(before, path, record.tombstone_path)
 
 
+def _private_disposal_snapshot(source: Path):
+    transaction = installer._InstallTransaction([], enabled=False)
+    born = {}
+    private = transaction._allocate_owned_directory(source.parent, "private-disposal-", born.__setitem__)
+    target = private / "snapshot"
+    expected = transaction._copy_snapshot(source, target, transaction._observe(source))
+    assert transaction._backup_root_state[target] == expected[target]
+    return transaction, target, expected
+
+
 @pytest.mark.parametrize("kind", ("file", "directory"))
 def test_disposal_accepts_only_legal_platform_readonly_effect(tmp_path: Path, kind: str) -> None:
     target = tmp_path / "owned"
@@ -1036,50 +1076,67 @@ def test_disposal_accepts_only_legal_platform_readonly_effect(tmp_path: Path, ki
         target.write_bytes(b"owned bytes\n")
     target.chmod(stat.S_IREAD | (stat.S_IEXEC if kind == "directory" else 0))
     transaction = installer._InstallTransaction([], enabled=False)
-    transaction._dispose_image(target, transaction._observe(target))
+    expected = transaction._observe(target)
+    source = target
+    source_before = expected
+    if os.name == "posix" and kind == "directory":
+        transaction, target, expected = _private_disposal_snapshot(source)
+    transaction._dispose_image(target, expected)
     assert not target.exists()
+    if target != source:
+        assert transaction._observe(source) == source_before
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX write permissions are independent fields")
 def test_disposal_rejects_undeclared_posix_group_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    target = tmp_path / "owned"
-    target.mkdir()
-    (target / "body").write_bytes(b"owned bytes\n")
-    target.chmod(0o555)
-    transaction = installer._InstallTransaction([], enabled=False)
-    expected = transaction._observe(target)
-    chmod = Path.chmod
-    def add_group_write(path, mode, *args, **kwargs):
-        chmod(path, mode, *args, **kwargs)
-        if path == target:
-            chmod(path, stat.S_IMODE(path.stat().st_mode) | stat.S_IWGRP)
-    monkeypatch.setattr(Path, "chmod", add_group_write)
+    source = tmp_path / "owned"
+    source.mkdir()
+    (source / "body").write_bytes(b"owned bytes\n")
+    source.chmod(0o555)
+    transaction, target, expected = _private_disposal_snapshot(source)
+    chmod = os.fchmod
+    hits = []
+    def add_group_write(descriptor, mode):
+        chmod(descriptor, mode)
+        current = os.fstat(descriptor)
+        if (current.st_dev, current.st_ino) == expected[target].python_identity[:2] and mode & stat.S_IWUSR:
+            hits.append(mode)
+            chmod(descriptor, mode | stat.S_IWGRP)
+    monkeypatch.setattr(os, "fchmod", add_group_write)
     with pytest.raises(ValueError, match="disposal permission transition"):
         transaction._dispose_image(target, expected)
     assert target.exists() and (target / "body").read_bytes() == b"owned bytes\n"
+    assert hits == [0o755]
+    assert transaction._observe(target) == expected
+    assert (source / "body").read_bytes() == b"owned bytes\n"
+    assert stat.S_IMODE(source.stat().st_mode) == 0o555
 
 
-@pytest.mark.skipif(os.name != "posix", reason="Windows readonly disposition does not call chmod")
-def test_disposal_retains_readonly_file_modified_during_chmod(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    target = tmp_path / "owned"
-    target.write_bytes(b"owned bytes\n")
-    target.chmod(stat.S_IREAD)
-    transaction = installer._InstallTransaction([], enabled=False)
-    expected = transaction._observe(target)
-    chmod = Path.chmod
+@pytest.mark.skipif(os.name != "posix", reason="Windows readonly disposition does not call parent fchmod")
+def test_disposal_retains_snapshot_file_modified_during_parent_chmod(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = tmp_path / "owned"
+    source.mkdir()
+    (source / "body").write_bytes(b"owned bytes\n")
+    source.chmod(0o555)
+    transaction, target, expected = _private_disposal_snapshot(source)
+    chmod = os.fchmod
     hits = 0
-    def modify_bytes(path, mode, *args, **kwargs):
+    def modify_bytes(descriptor, mode):
         nonlocal hits
-        chmod(path, mode, *args, **kwargs)
-        if path == target:
+        chmod(descriptor, mode)
+        current = os.fstat(descriptor)
+        if (current.st_dev, current.st_ino) == expected[target].python_identity[:2] and mode & stat.S_IWUSR:
             hits += 1
-            target.write_bytes(b"foreign bytes\n")
-    monkeypatch.setattr(Path, "chmod", modify_bytes)
+            (target / "body").write_bytes(b"foreign bytes\n")
+    monkeypatch.setattr(os, "fchmod", modify_bytes)
     with pytest.raises(ValueError, match="disposal permission content drift"):
         transaction._dispose_image(target, expected)
-    assert target.read_bytes() == b"foreign bytes\n"
+    assert (target / "body").read_bytes() == b"foreign bytes\n"
     assert hits == 1
-    assert installer._CreateOnlyMutablePath._identity(target)[:2] == expected[target].python_identity[:2]
+    assert installer._CreateOnlyMutablePath._identity(target) == expected[target].python_identity
+    assert installer._CreateOnlyMutablePath._identity(target / "body") == expected[target / "body"].python_identity
+    assert (source / "body").read_bytes() == b"owned bytes\n"
+    assert stat.S_IMODE(source.stat().st_mode) == 0o555
 
 
 POST_MATERIALIZATION_WRITER_IDS = {
