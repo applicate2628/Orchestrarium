@@ -14421,6 +14421,7 @@ def _verify_parent_archive_link_targets(plan: dict, *, archived: bool,
             raise LifecycleError(failure_id, "declared absent URI target appeared")
 
 
+@functools.partial(_lifecycle_participant, subject_parameters=('category-slug', 'work-item', 'slug'))
 def close_item(root, slug, closure_data, terminal_instant, *, inject_readme_failure=False,
                inject_bug_failure_after=None, allow_protected_uri_updates=False,
                legacy_evidence_data=None, apply=False, inject_failure_at=None, ledger_resource_budget=None,):
