@@ -67,6 +67,9 @@ It binds the supplied runtime to its notice inventory; it does not change
 provider permissions. [Historical runtime evidence](https://github.com/applicate2628/Orchestrarium/blob/082d46cd83324117abcb965842005d3c15ab99ed/scripts/distribution/runtime-evidence.md)
 records only the exact earlier inputs and checks.
 
+The [Orche distribution project](docs/npm-distribution-project.md) plans release
+acquisition through PowerShell, POSIX shells, and optional npm channels.
+
 ## SDK integration scope
 
 The source has one shared governance, SDK and installation core;

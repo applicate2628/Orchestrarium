@@ -19008,6 +19008,7 @@ def test_legacy_parent_archive_repairs_descendant_uris_and_compensates_conflict(
     monkeypatch.setattr(module, "refresh_readme", fail_refresh)
     with pytest.raises(module.LifecycleError) as conflict:
         module.migrate_legacy(root, f"work-item:{parent}", incoming_links_inventory=inventory)
+    assert injected == [root]
     assert conflict.value.failure_id == "WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE"
     assert injected == [root]
     assert consumer.read_bytes() == b"Concurrent author bytes.\n" and item.is_dir()

@@ -11,6 +11,7 @@ import stat
 import subprocess
 import sys
 import tarfile
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -471,6 +472,56 @@ OBSERVED_GLOBAL_LEAD_ABSENT_TRANSPORT_FILES = (
     "shared/provider-prompt-projections.v1.json",
 )
 
+SUPPORTED_CONSULTANT_PRIORS = (
+    pytest.param(
+        "7872d36d1019d1ac8c2e1615a9f9dbde47395815",
+        "f1a23b5ceaa93c29cf0c5f9c9eec8c5997a7b4339fcd90abd13798df77e60793",
+        id="witnessed-7872",
+    ),
+    pytest.param(
+        "3a94f258a6c0b1f0b544bd1bdc8d75a91def6ffa",
+        "63c358fcb0bc435177359927760d80f04c8133a5e14505115180bd60b600184a",
+        id="witnessed-gpt6",
+    ),
+)
+
+FACTORY_BRIDGE_REVISION = "1560b867b58d789429c5d67f38f5b38d7bccfd5a"
+
+FACTORY_BRIDGE_LEGACY_SHA256 = "fdd2c0638232462cf2257dd5ec3ba2523bea820363cfbece0b1edfa5c0a45247"
+
+FACTORY_BRIDGE_STRONG_SHA256 = "665ae82dcabafd0857153a7288e8cccaa27340e56c0874b5e884e154417f0e81"
+
+
+def _git_archive_bytes(revision: str, *paths: str) -> bytes:
+    # Older revisions lack the byte-preserving attributes in the current tree.
+    # Keep host checkout defaults out of frozen archive fixtures without
+    # rewriting payloads or changing repository/global Git configuration.
+    return subprocess.run(
+        ["git", "-c", "core.autocrlf=false", "-c", "core.eol=lf",
+         "archive", "--format=tar", revision, *paths],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    ).stdout
+
+
+def _historical_identity(installer, name: str, historical: Path, legacy: str) -> str | None:
+    """Check frozen provenance separately from the current structural admission witness."""
+    assert installer._legacy_tree_sha256(historical, ignore_runtime_cache=True) == legacy
+    strong = installer._legacy_factory_identity_v2(name, legacy)
+    if strong is not None:
+        assert installer._tree_sha256(historical, ignore_runtime_cache=True) == strong
+    return strong
+
+
+def _assert_preflight_refusal_preserves_tree(installer, skills: Path, failure: str) -> None:
+    before = installer._InstallTransaction._observe(skills)
+    with pytest.raises(ValueError, match=failure):
+        unexpected = installer._preflight_canonical_skills(ROOT / "src.codex/skills", skills, root=ROOT)
+        installer._discard_canonical_skills_plan(unexpected)
+    assert installer._InstallTransaction._observe(skills) == before
+
+
 def _load_installer():
     spec = importlib.util.spec_from_file_location(
         "global_lead_accepted_prior_installer", INSTALLER_PATH
@@ -484,12 +535,7 @@ def _load_installer():
 
 def _seed_revision_staged_lead(revision: str, destination: Path) -> Path:
     source = destination.parent / "historical-source"
-    archive = subprocess.run(
-        ["git", "archive", "--format=tar", revision],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-    ).stdout
+    archive = _git_archive_bytes(revision)
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
         package.extractall(source, filter="data")
 
@@ -574,12 +620,7 @@ def _remove_historical_members(lead: Path, relatives: tuple[str, ...]) -> None:
 
 def _extract_8521_skill(name: str, destination: Path) -> Path:
     if name == "lead":
-        archive = subprocess.run(
-            ["git", "archive", "--format=tar", "8521b638"],
-            cwd=ROOT,
-            check=True,
-            capture_output=True,
-        ).stdout
+        archive = _git_archive_bytes("8521b638")
         with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
             package.extractall(destination, filter="data")
         target = destination / "installed"
@@ -599,30 +640,14 @@ def _extract_8521_skill(name: str, destination: Path) -> Path:
         )
         assert result.returncode == 0, result.stdout + result.stderr
         return target / ".agents" / "skills" / "lead"
-    archive = subprocess.run(
-        ["git", "archive", "--format=tar", "8521b638", f"src.codex/skills/{name}"],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-    ).stdout
+    archive = _git_archive_bytes("8521b638", f"src.codex/skills/{name}")
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
         package.extractall(destination, filter="data")
     return destination / "src.codex" / "skills" / name
 
 
 def _extract_7872_skill(name: str, destination: Path) -> Path:
-    archive = subprocess.run(
-        [
-            "git",
-            "archive",
-            "--format=tar",
-            PRE_KIMI_GLOBAL_LEAD_REVISION,
-            f"src.codex/skills/{name}",
-        ],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-    ).stdout
+    archive = _git_archive_bytes(PRE_KIMI_GLOBAL_LEAD_REVISION, f"src.codex/skills/{name}")
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
         package.extractall(destination, filter="data")
     return destination / "src.codex" / "skills" / name
@@ -661,36 +686,14 @@ def _extract_additional_stock_skill(
             path.write_bytes(payload)
         return target
 
-    archive = subprocess.run(
-        [
-            "git",
-            "archive",
-            "--format=tar",
-            revision,
-            f"src.codex/skills/{name}",
-        ],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-    ).stdout
+    archive = _git_archive_bytes(revision, f"src.codex/skills/{name}")
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
         package.extractall(destination, filter="data")
     return destination / "src.codex" / "skills" / name
 
 
 def _extract_stock_consultant(destination: Path, revision: str) -> Path:
-    archive = subprocess.run(
-        [
-            "git",
-            "archive",
-            "--format=tar",
-            revision,
-            "src.codex/skills/consultant",
-        ],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-    ).stdout
+    archive = _git_archive_bytes(revision, "src.codex/skills/consultant")
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
         package.extractall(destination, filter="data")
     return destination / "src.codex" / "skills" / "consultant"
@@ -2503,3 +2506,70 @@ def test_global_codex_dry_run_reads_linked_inventory_only_for_selected_hooks(
     assert registration.readlink() == link
     assert _tree_bytes(home) == before
     assert _tree_bytes(shared) == shared_before
+
+
+@pytest.mark.parametrize(
+    ("revision", "expected_prior"), STOCK_CONSULTANT_PRIORS + SUPPORTED_CONSULTANT_PRIORS,
+)
+def test_historical_archive_ignores_checkout_newline_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, revision: str, expected_prior: str,
+) -> None:
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "2")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "true")
+    monkeypatch.setenv("GIT_CONFIG_KEY_1", "core.eol")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_1", "crlf")
+    historical = _extract_stock_consultant(tmp_path / "historical", revision)
+    assert _load_installer()._legacy_tree_sha256(historical) == expected_prior
+    for relative, payload in _tree_bytes(historical).items():
+        assert payload == _historical_blob(revision, f"src.codex/skills/consultant/{relative.as_posix()}")
+
+
+@pytest.mark.parametrize("commit", (False, True))
+def test_authenticated_factory_bridge_preserves_upgrade_noop_and_rollback(
+    tmp_path: Path, commit: bool,
+) -> None:
+    installer = _load_installer()
+    historical = _seed_revision_staged_lead(FACTORY_BRIDGE_REVISION, tmp_path / "historical/lead")
+    assert _historical_identity(
+        installer, "lead", historical, FACTORY_BRIDGE_LEGACY_SHA256) == FACTORY_BRIDGE_STRONG_SHA256
+    source = tmp_path / "source-skills"
+    shutil.copytree(ROOT / "src.codex/skills/lead", source / "lead")
+    anchor = tmp_path / "target"
+    skills = anchor / ".agents/skills"
+    shutil.copytree(historical, skills / "lead")
+    before = installer._InstallTransaction._observe(skills)
+    plan = installer._preflight_canonical_skills(source, skills, root=ROOT)
+    try:
+        selected = next(skill for skill in plan.skills if skill.name == "lead")
+        assert selected.accepted_prior == FACTORY_BRIDGE_STRONG_SHA256
+        receiving = nullcontext() if commit else pytest.raises(RuntimeError, match="factory bridge rollback")
+        with receiving, installer._InstallTransaction([skills], enabled=True) as transaction:
+            owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=False)
+            installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
+            installer._finalize_canonical_lead_receipt(plan, skills, owner)
+            assert installer._tree_sha256(skills / "lead", ignore_runtime_cache=True) == selected.source_digest
+            if commit:
+                transaction.commit()
+            else:
+                raise RuntimeError("factory bridge rollback")
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+    if commit:
+        before_noop = installer._InstallTransaction._observe(skills)
+        current = installer._preflight_canonical_skills(source, skills, root=ROOT)
+        try:
+            assert next(skill for skill in current.skills if skill.name == "lead").accepted_prior is None
+            owner = installer._CreateOnlyMutablePath(
+                anchor, installer._InstallTransaction([], enabled=False), dry_run=False)
+            installer._apply_canonical_skills_plan(current, skills, owner, root=ROOT)
+            assert installer._InstallTransaction._observe(skills) == before_noop
+        finally:
+            installer._discard_canonical_skills_plan(current)
+    else:
+        assert installer._InstallTransaction._observe(skills) == before
+    drift = tmp_path / "drift/.agents/skills"
+    shutil.copytree(historical, drift / "lead")
+    with (drift / "lead/SKILL.md").open("ab") as stream:
+        stream.write(b"x")
+    _assert_preflight_refusal_preserves_tree(installer, drift, "E_ACCEPTED_PRIOR_COLLISION: lead")

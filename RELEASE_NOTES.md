@@ -85,6 +85,14 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 - Accept a verified Lead file image changed earlier by the same installation transaction, while retaining collision refusal for unrelated or subsequently changed files.
 
+- Admit independently verified historical PASS custody bytes before the final selected-ledger check, so an already missing original artifact can be restored without changing its ledger. Preserve one captured ledger image, exact replay, explicit event and byte limits, and typed failures when those limits are exceeded.
+
+- Align legacy lifecycle regression fixtures with the current native ownership and finalization contracts. The checks retain original objects outside the action, interrupt actual hold disposal, preserve primary failure diagnostics and use the transaction's real validator owner. Physical apply checks remain on Windows; unsupported hosts verify refusal without canonical writes.
+
+- Refresh the November 24 product-plan checkpoint after guarded branch publication and scoped Rust receiving. Preserve the earlier authentication and dependency-cache failures as historical evidence, identify the pending legacy-close correction and its separate qualification, and retain installation, provider and portability gates. No runtime or release completion is claimed.
+
+- Refresh the existing product plan with the four-lane audit, focused source corrections, pending combined qualification and local Git authentication hold. Keep inherited lifecycle corrections together, with repository-transfer ordering and test-only contract repairs separate, without expanding PR64's initially absent ledger scope. Retain the same three delivery steps, independent PR owners and Rust-before-SDK release order so completed source work is not mistaken for release or installed acceptance.
+
 ## 2026-11-23
 
 - The model resolver now compares eligible models and reasoning efforts using benchmark quality, task time, and one relative cost unit (Sol 6.2 High = 1). The Lead selects and explains the best fit for each task; the default is a fallback. The benchmark figures are not prices, launch permissions, or runtime guarantees.
@@ -100,6 +108,48 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 - Send Copilot Software Development Kit (SDK) observations through the worker's bounded stream after output safety scanning. The parent can now verify the observations against the terminal result and record eligible evidence in the ledger.
 
 - Keep Root's task registry consistent during concurrent admission and worker authorization checks. A newly admitted task no longer causes the registry iteration to fail while checking an independent task's existing permission. The registry still checks the canonical admission receipt and current Host authority.
+
+- Prioritize the smallest working end-to-end result. During planning and review, the Lead defers speculative safeguards and unrelated work to the existing plan unless needed for that result. Existing safety and approval requirements are unchanged; no new workflow gate is introduced. Contract tests check the QA roles' referral and still check that both owning contracts state the classification rule.
+
+- Scope cleanup holds to the affected action and current conditions. Recheck uncertain effects and resume authorized work after correction, without bypassing active denials or blocking independent work.
+
+- Clarify when an unchanged file needs no repeat review during a release rebuild, and when an exact-commit decision needs a new review. Lead opens the installed guidance only when handling scanner findings or rebuilding a release with prior findings. Fresh pre-push scans and existing decision scope are unchanged.
+
+- Work-item checker regression tests now require the explicit refusal for closure calls without an owner-issued source context and preserve resource budgets when observing real terminal evidence. The native legacy-close Goal fixtures run on Windows, matching their producer's supported platform, while portable checker cases remain active.
+
+- Name the selected active-only audit mode in failure summaries without attributing every failure to an active work item: global lifecycle checks can still report invalid archive structure. The full-audit summary, failure count, exit status and archive checks are unchanged.
+
+- Lead now checks that implementation changes are needed for the agreed outcome, required verification, or an existing contract. Optional additions and unrelated cleanup stay out of the patch.
+
+- Repeated cancellation of a publication scan retains its object-reader finalizer and selection cleanup until the owned child and input have settled. On systems supporting the Portable Operating System Interface (POSIX), process-owner acquisition, process creation and failed-start cleanup also retain their eventual results, so cancellation cannot abandon a newly created child or the Linux child-reaper lock during the handoff. Existing cleanup deadlines, failure results and reap certificates remain enforced.
+
+- Deliver the current publication scanner through both source packs so new and rebuilt Lead installations use the same receiver-aware path checks as the canonical scanner. Previously published content is handled consistently after installation instead of producing stale findings from an older mirror.
+
+- Claude removal now rechecks all selected control files through the final ownership-record write, including files absent at preview. A control created or replaced during removal stops completion and restores the owned payload and receipt while preserving the new user content, so a newly added hook is not left pointing at a removed handler.
+
+- Clarify the Kimi provider comment in the configuration defaults to match the existing explicit read and scoped-worker routes. Tool access still depends on the validated capability file and policy; no setting, routing rule or execution permission changes.
+
+- Historical upgrade checks distinguish legacy lookup digests from structural Version 2 witnesses, verify unchanged targets when historical material lacks a witness, and exercise supported upgrade, no-op and rollback behavior using authenticated factory data. Receipt and explicit-adoption checks use their current versioned formats. Archive fixtures pin Git newline settings per command so host checkout defaults cannot change historical payload bytes.
+
+- Coupled Lead and provider-transport upgrades recognize completed content writes by the same installation transaction. The check binds the captured predecessor, original file identities, current owned state and planned contents, so Windows updates can preserve their existing files without treating their own changes as foreign drift.
+
+- Removing an unchanged retired file after a Windows tree replacement retains the transaction's complete security and identity witnesses. Cleanup and rollback no longer discard that evidence by reopening the file with a weaker observation.
+
+- Restore observation of undelegated quick fixes without a ledger when resource limits are omitted. The validator keeps initial absence distinct from disappearance during capture, so Goal progress checks accept the supported ledger-free route while required-ledger and read-failure refusals remain enforced.
+
+- Align the Orche distribution plan with the tagged standalone baseline and the selected Rust scanner release before SDK delivery. PowerShell, POSIX shell, and optional npm channels qualify the same installer payload independently. The scanner release leaves the later operation-by-operation migration separately scoped.
+
+- Consolidate the current product delivery plan into source correction/integration, ordered release qualification, and evidence-based closeout. Remove stale SDK/Rust head instructions while preserving each owner, the Rust-before-SDK release dependency, independent channel qualification and actual installed acceptance requirements.
+
+- Reconcile the 2.0 delivery order with the tagged pre-SDK baseline and separate Rust, SDK, and distribution acceptance. Retain independent product outcomes without counting them as release blockers. Index open tickets by owner and verified archive criteria.
+
+- Add independently tested Rust scanner stages for verified Git objects, normalized whole lines and shared PCRE2 lexical matching. The Windows private mapping is a candidate component; production publication ownership and the shipped scanner are unchanged.
+
+- In the draft Rust index, advance positions in runs between line separators rather than updating state per character. Preserve raw and normalized coordinates, Unicode replacement, and split CRLF behavior. This does not change the installed scanner.
+
+- Recognize intentional scanner declarations in history from the approved SDK layout while retaining the shipped runtime layout. Ordinary findings and staged files still use the existing rules.
+
+- Align the draft Rust tree walker with receiver-aware publication scanning. A previously published tree in the receiver overlap still contributes path metadata at every visited prefix, while unpublished-tree coverage credits only newly selected trees. The release plan now places qualification of the selected Rust scanner after the tagged pre-SDK baseline, with the scanner release ahead of the SDK release and distribution qualification tracked separately.
 
 ## 2026-11-22
 
@@ -138,6 +188,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 - Run shared hook upgrade tests without an installed Codex executable. The rollback test now verifies that the simulated post-write health check actually ran before it checks restoration.
 
 - Preserve operator-supplied handler fields, including timeouts, when a shared hook upgrade changes its tool matcher. Joint relocations and mixed relocation/retirement groups now preserve those fields and neighboring registration positions. Permanent removal retains its existing ownership checks.
+
+- Rebase the native Rust plan onto the accepted pre-SDK source and record the isolated reminder-hook pilot, its read-only Codex registration evidence, and the remaining trust, invocation and lifecycle checks. Planning only: Python remains the production owner; no installer or hook behavior changes.
 
 ## 2026-11-20
 
@@ -374,6 +426,15 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 - Bind Claude Consultant advice to the admitted request and retained official API/cloud runtime selection in the existing provenance and receiving owners. Advice remains nonauthorizing and incompatible evidence stays blocked; real Claude task launch and the public selector remain disabled pending their separate integration. These offline checks do not authorize model spending or establish native acceptance.
 
+- The Rust migration plan now explicitly retains GUI-independent functional operations and replaceable clients through the shared architecture contract, with headless and client-replacement acceptance scoped to each migration slice. No Rust implementation or activation is claimed.
+
+- Reconciled the SDK design reference with the approved multivendor completion roadmap in PR19. Historical evidence stays dated, already implemented coordinator work is not reopened, and SDK dependency ownership is separated from qualified distribution delivery without creating another progress tracker.
+
+- Reconciled the remaining product plan with delivered model-routing changes and
+  the approved SDK completion roadmap. Current SDK work is no longer mixed with
+  optional future 2.0 outcomes or repeated completed ranking work; distribution,
+  native Rust operations and separate installer acceptance retain their owners.
+
 ## 2026-11-17
 
 - Add typed read-only Claude Consultant advice through the existing Agent SDK lifecycle. Structured tool output and final evidence share exact task identity validation, without a fabricated review verdict. Account/tool/cleanup restrictions are unchanged; this offline adapter increment does not activate public Claude task dispatch or model spending.
@@ -430,6 +491,12 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 - Preserve the original copy failure and its existing recovery evidence when a source, fresh target, or metadata descriptor also fails to close. Successful copy ordering and timestamp restoration qualification remain unchanged.
 
 - Restored source-only ledger, state-schema, and architecture-layering checks that were declared but omitted from the Python pack validators. Preserve the byte-pinned migration baseline during Git checkout so Windows newline conversion cannot invalidate its approved digest. Ledger fixture checks run only in the full monorepo, not provider exports or installed packs; existing governance limits and installed validation remain unchanged. Reconciled all 19 architecture role slices with the current shared reference before refreshing its review stamp; both complete source pack validators pass.
+
+- Inventory the full tracked Python/hook migration surface across native and SDK snapshots, retain each canonical owner and useful oracle, and map prior incidents to differential regression and scoped cutover/recovery. Record upstream library candidates and license boundaries without claiming a completed native port.
+
+- Expand the Rust workflow design across existing domain owners, scoped recovery, resource settlement and skill maintenance. Record installer process-loss evidence gaps, batch diagnostics and partial-setup recovery separately from already implemented behavior; no new scheduler, cleanup daemon or global stop is introduced.
+
+- Extend the native Rust proposal with staged SDK-to-Rust instruction reduction: move only covered deterministic obligations into their existing owners, retain semantic guidance and unsupported-host instructions, and retire procedural duplicates after verification. Planning only; no runtime activation or live rule removal.
 
 ## 2026-11-16
 
@@ -527,6 +594,10 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 - Keep lifecycle fault-injection test doubles compatible with keyword arguments from their production owners. Forwarding wrappers preserve the complete call, while the controlled failure double accepts owner options without changing its injected failure; drift and rollback assertions remain unchanged.
 - Keep lifecycle tests discoverable through both test runners: pytest no longer reruns the unittest adapter, and unittest includes functions defined at the end of the module. Test assertions and production behavior are unchanged.
 - Restore fresh-install rollback through the existing identity-checked disposal owner instead of requiring a native move merely to retain newly created data. Existing-object replacement and runtime-observation custody retain their original safeguards. This removes a fresh-file recovery failure under an unsupported native move capability; directory atomic-publication refusal and POSIX disposal holds remain unchanged, so this is not complete DrvFS installation support.
+
+## 2026-11-12
+
+- Refine the independent native Rust plan into bounded work and receiving steps. Preserve the current Python owner and SDK acceptance boundary, explicitly test final process exit after output failures, and keep payload generation with the canonical policy source. This is planning only: no native build, installation, runtime activation or measured improvement is claimed.
 
 ## 2026-11-10
 
@@ -698,6 +769,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 - Frozen model-routing migration fixtures now preserve their exact historical bytes across Git checkouts, including core.autocrlf=true. The existing digest manifest is unchanged; a real checkout regression prevents newline conversion from producing false migration failures. The overview documentation test now checks its link to the detailed installation contract instead of requiring a duplicate policy paragraph. No model profile or runtime setting is changed.
 
+- Delivery planning now follows the approved Orche sequence: integrate SDK execution and a minimal bundled Python runtime first, with npm, PowerShell and POSIX channels delegating to one installer; qualify Rust replacements later. The plan includes independent client copies, ownership-safe uninstall, retained runtime lifetime and honest Windows/Linux versus macOS qualification boundaries. This documentation does not publish a package or activate a provider.
+
 ## 2026-10-30
 
 - Uninstall now removes wholly owned, unmodified skill directory trees in the same operation instead of leaving empty directories after rollback artifacts settle. It uses the existing transactional owner, preserves user files and unowned directories, and restores original files and identities if receipt publication fails.
@@ -815,6 +888,22 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 - Historical README catalogues preserve the existing input role when receiving never-admitted retirement records. They retain stored incoming/source inventory and exact archived payload/digest checks without starting an unrelated current-consumer sweep; strict retirement and integrity audits still detect later stale citations.
 
+- Refine the native delivery plan to one Rust CLI operation owner, a thin PowerShell download/verification bootstrap and npm as a compatible optional channel. Keep the current Python installer until qualified native cutover; delivery scripts must not duplicate managed-file, trust or recovery behavior. The first Rust implementation slice remains a joint decision after SDK acceptance.
+
+- Isolate the native Rust operations plan from npm distribution so it can be reviewed and delivered independently. Preserve the first shared reminder-hook slice, existing ownership, parity and cutover criteria; this plan does not activate a native runtime or change production policy.
+
+- Separate npm distribution review from native Rust operations. This branch owns the npm plan and links to the independently based Rust proposal rather than carrying its plan or requiring it to merge. npm can explicitly use the existing Python installer; no package is published and no runtime is activated.
+
+- Reconcile the SDK design matrix with the consolidated coordinator implementation and its one bounded subscription-backed live cycle. Separate completed integration from the still-missing portable live caller and unqualified recovery, streaming and arbitrary planning scenarios; this status correction starts no provider.
+
+- Point SDK ownership references to separate npm PR17 and native Rust PR21 so neither independent project is mistaken for a combined prerequisite. This is link/ownership maintenance only, with no change to SDK behavior or qualification.
+
+- Reconciled the SDK plan with PR19's exact source head, separating the Host-led review bridge from the optional Agents coordinator. Capability-based admission supersedes product-wide version pins; the remaining supported Codex-subscription Model research and current-head qualification are explicit, without new runtime activation.
+
+- Finish the npm/Rust review split by updating the remaining roadmap to reference their separate main-based PRs. No implementation or new dependency between the projects is introduced.
+
+- Corrected the remaining 2.0 roadmap's SDK ownership links to PR18 design/status and PR19 implementation, while npm distribution belongs to PR17 and native Rust operations to independent PR21. Existing lifecycle, routing, evaluation and cross-host scope is unchanged.
+
 ## 2026-10-25
 
 - PR-scoped corrective publication no longer depends on branch-protection/rules enumeration or proving rules absent. The hook retains exact open-PR/head/ref binding, scoped human consent and a fresh complete leak scan; the ordinary push remains subject to the server's configured rules and exceptions.
@@ -893,6 +982,12 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 - Product Manager keeps the existing ordinary planning skill-only route, while ordinary external dispatch now requires an explicit `external-worker` or `external-reviewer` taxonomy lane. This closes the cross-provider path that previously authorized role eligibility alone; Lead guidance still keeps extra functionality outside delivery until the user explicitly agrees to its bounded scope.
 - Reuse guidance now requires assessing ready-component replacement for task-implicated complex custom code, preferring replacement only when constraints fit and whole-lifecycle complexity, error risk, or maintenance burden falls; superseded logic and tests are retired while required contract coverage remains.
 - The shared-spine validation row now directs maintainers to follow existing producer/manifest dependencies and check affected consumers, so stale derived copies can be found before they block installation; provider-prompt parity is an example, not a fixed list or extra stage.
+
+- Consolidated the remaining Orchestrarium 2.0 product plan around native-role lifecycle, evidence-based routing and feedback, safe cross-host continuation and optional preferences. npm distribution and the hybrid Rust/SDK/ACP runtime are tracked in a separate project with explicit outcome dispositions and only genuine dependencies, avoiding duplicate design ownership or a whole-release blocker. Current governance, runtime behavior and provider admission are unchanged; this is planning, not implementation or measured improvement.
+
+- Defined npm distribution with explicit application and installer-owned retained executable/resource versions. Native Rust operation design is maintained in a separate proposal; SDK design belongs to PR18 and implementation to PR19. Preserve the earlier count-neutral manual-trust documentation and its corrected negative tests in their original owner scope. No native runtime or package publication is delivered here.
+
+- Defined an independent SDK integration project with one common Python/Agents SDK coordinator and existing Orchestrarium contract/state owners. Codex and Claude use direct official SDK adapters; ACP stdio stays inside Kimi/Grok adapters, not a universal layer. The plan starts with contract fixtures and an Agents/Codex read-only review slice, then adapter coverage and removal of replaced glue. Explicit approval/account/resume and result-to-ledger boundaries remain. Activation also requires owned descendant-process settlement, including failure, cancellation and coordinator crash, through the existing supervision owner rather than SDK close alone. This design does not install or activate runtimes.
 
 ## 2026-10-22
 

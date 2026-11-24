@@ -108,6 +108,31 @@ def test_false_event_validity_cannot_settle_revise_or_register_terminal(tmp_path
     assert any("EFFECTIVE-VIEW-BYPASS" in error for error in refused)
     assert ledger.read_bytes() == before
 
+def test_caller_event_validity_cannot_authorize_unbound_closure():
+    validator = load_validator_module()
+    revise = {
+        "schemaVersion": 2, "runId": "revise-001", "role": "qa-engineer",
+        "executionRole": "internal", "gate": "REVISE", "status": "revise",
+    }
+    closer = {
+        "schemaVersion": 2, "runId": "closer-001", "role": "qa-engineer",
+        "executionRole": "internal", "gate": "PASS", "status": "completed",
+        "closesRunIds": ["revise-001"], "eventKind": "terminal", "launchRunId": "launch-001",
+    }
+    launch = {"schemaVersion": 2, "runId": "launch-001", "eventKind": "launch"}
+    errors: list[str] = []
+    closed_relations = {"revise-001": "stale-closer"}
+    open_revise, open_launches = validator.validate_closure(
+        [launch, revise, closer], errors, event_validity=[True, True, False],
+        closed_relations_out=closed_relations,
+    )
+    # Caller flags can narrow an owned view, but raw rows have no issued context.
+    # Empty refused outputs do not certify settlement or preserve prior credit.
+    assert errors == ["WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: "
+                      "launch-bound current authority requires an issued context"]
+    assert (open_revise, open_launches) == ([], [])
+    assert closed_relations == {}
+
 
 def test_invalid_launch_does_not_enter_authority_reduction():
     validator = load_validator_module()

@@ -58,7 +58,7 @@ A usable decision binds the actual repository/worktree, scan mode, immutable blo
 
 A valid unchanged content decision can support a second fresh scan without repeating review, but only within its recorded scope. The standard history-review flow records exact commits. If a rebuild changes only a sibling file and the scan verifies that the same receiver already has the unchanged blob, that blob is outside the newly disclosed set; no exception is used for it. If the blob is still in scope, the old decision applies only to its recorded commits. Obtain a scoped decision for any unresolved finding in a new commit rather than widening the old record. Every use still needs a new complete scan and final current repository/origin/used-record verification. A changed, revoked, missing or invalid used decision gives no qualified credit; do not fall back to clean after a failed qualification. Unused unrelated policy debris does not independently veto a complete scan that needs no exception. The standalone scanner owns its final live check; in captured execution, the gate checks used authority after child settlement and before its existing one-use receiving. A prior receipt or approval paragraph cannot replace that check.
 
-Deploy the policy owner and reused linked helper coherently with the gate/scanner and their source-pack or installed dependencies. The captured code closure has ten roles, including the gate; runtime policy data is created only by authorized promotion and is not shipped or overwritten by installation. Older or mixed code cannot accept the new qualified outcome. Help and other non-consuming operations do not resolve policy or consuming dependencies. Human publication review, exact user authority and fresh callback-owned Version 3 and Version 4 receiving remain independent of content-exception approval.
+Deploy the policy owner and reused linked helper coherently with the gate/scanner and their source-pack or installed dependencies. The captured code closure has ten roles, including the gate, receiver-scope binding (`transfer_binding.py`) and matcher protocol validation (`publication_match_wire.py`); runtime policy data is created only by authorized promotion and is not shipped or overwritten by installation. Older or mixed code cannot accept the new qualified outcome. Help and other non-consuming operations do not resolve policy or consuming dependencies. Human publication review, exact user authority and fresh callback-owned Version 3 and Version 4 receiving remain independent of content-exception approval.
 
 ## Human publication consent
 
@@ -94,6 +94,14 @@ These historical engineering defaults are not a claim that every numeric value i
 Additional payload reads are at most the number of distinct blob/path pairs; nonadjacent occurrences may increase input/output and hashing work. The cumulative volume is finite under the object/count bounds but can be much larger than the old cache budget. Memory measurements must include metadata, hashing, decoding and interpreter overhead, not just retained payload.
 
 The direct scanner's deadline is cooperative: a synchronous detector is not preempted, but its late result is rejected. The gate's external child supervisor supplies the independent timeout boundary for publication. Neither route claims a hard resident-memory ceiling. Timeout, output overflow and unknown child settlement remain fail-closed. A stopped scan provides no partial approval and does not resume from an unauthenticated receipt.
+
+### Scanner source layout transitions
+
+Distinguish exact source-owner names used for text classification from the
+runtime code closure. An approved compatible layout may be recognized for
+intentional declaration lines in selected history without admitting that layout
+as current installed code. Metadata, arbitrary copies, and ordinary content
+remain evaluated. The historical selection itself is unchanged.
 
 ## Terms and Abbreviations
 

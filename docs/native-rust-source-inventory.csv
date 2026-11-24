@@ -1,0 +1,677 @@
+path,rust_blob,sdk_blob,category,planned_disposition,owner
+adapters/claude/agents/hooks/check-machine-local-path.py,,e6ee187776b6e548bea962bc4d32a7755bdb8258,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/hooks/check-machine-local-path.py
+adapters/claude/agents/hooks/check-no-trash-in-repo.py,,92ca005040fe41cbee3a18893258e9e866f1ed19,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/hooks/check-no-trash-in-repo.py
+adapters/claude/agents/hooks/check-repository-orientation.py,,fad8d0b79aeb5db3c708862fc94a7ea282591af2,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/hooks/check-repository-orientation.py
+adapters/claude/agents/hooks/check-stale-relation-residue.py,,9aafbc3c65ce8656ba795f2e8d15cdc37ad5fa7a,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/hooks/check-stale-relation-residue.py
+adapters/claude/agents/hooks/check-typed-routing.py,,a15ccb936b6b1550fa6e9edeba1bcffaa922717d,hook-candidate,inventory event/argv/failure mode then port canonical owner,hook owner
+adapters/claude/agents/hooks/dispatch_sentinels.py,,5ca15fd01272c7a40e73c905ae411ea901fb27cb,hook-candidate,inventory event/argv/failure mode then port canonical owner,hook owner
+adapters/claude/agents/scripts/agents-mode-reminder.py,,ec58138a499b8164abe6023aa85f42e1c0739d02,native-operation-candidate,port typed config policy; preserve provider-specific host behavior,configuration
+adapters/claude/agents/scripts/agents_mode_runtime.py,,99ec1c819b16a66fb51efedf34992a01ced8e08c,native-operation-candidate,port typed config policy; preserve provider-specific host behavior,configuration
+adapters/claude/agents/scripts/await-codex-dispatch.py,,446c2f22d2e5281cd89dc77adda0676149c4107c,provider-boundary,SDK or native adapter by supported capability; no implicit launch,provider adapter
+adapters/claude/agents/scripts/await-codex-dispatch.sh,,ddffb1fd08512eeb08c86b857cbbbb7df350d85b,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+adapters/claude/agents/scripts/check-bugfix-discipline.py,,fa2fc283a1d44deec6466ff588f77d800c59497c,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/check-bugfix-discipline.py
+adapters/claude/agents/scripts/check-git-push-gate-runner.py,,42b6e2ab29bb0ce76052d739333b13f2946f2058,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/check-git-push-gate-runner.py
+adapters/claude/agents/scripts/check-git-push-gate.py,,81fc19d62c3a1f3b0dc7fb5d4b5b04b14cf97018,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/check-git-push-gate.py
+adapters/claude/agents/scripts/check-mcp-momentum.py,,6eb748244d4a2b6901727bfb1f0ae40c375eb8c2,validation-tooling,retain or port existing check after consumer/semantic inventory,validation
+adapters/claude/agents/scripts/check-passive-polling-stop.py,,c73a517b0601f269f5194b132454ab0ef3415c00,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/check-passive-polling-stop.py
+adapters/claude/agents/scripts/check-publication-safety.py,,ed4c53537ec5db9e8be9a3fb467d8384e11871ed,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/check-publication-safety.py
+adapters/claude/agents/scripts/check-publication-safety.sh,,13360cf927991a746b593f8b0312749b91e9a7ee,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+adapters/claude/agents/scripts/check-scratch-valuables.py,,8f35fe5ec31f3a6c904bba6ad7647cf90bed2617,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/check-scratch-valuables.py
+adapters/claude/agents/scripts/git_push_gate_preflight.py,,e3a281906375b563e20eb2c7130e9d9ba729a98f,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/git_push_gate_preflight.py
+adapters/claude/agents/scripts/hook_common.py,,7cda0c14d94271ecb2b6926fbf551d620e9f1cdb,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/hook_common.py
+adapters/claude/agents/scripts/invoke-claude-api.py,,f396c6c492d83b60ccc5b1f372bf1d4be8f8c838,provider-boundary,SDK or native adapter by supported capability; no implicit launch,provider adapter
+adapters/claude/agents/scripts/invoke-claude-api.sh,,080da78d02877817a583aed1060044886fa0ba79,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+adapters/claude/agents/scripts/invoke-claude-prompt.py,,eaa0cbced77512971d937e0143ba5060896c60e7,provider-boundary,SDK or native adapter by supported capability; no implicit launch,provider adapter
+adapters/claude/agents/scripts/invoke-claude-prompt.sh,,45296dded0d245931f863f9a266d226b5e9a6aaf,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+adapters/claude/agents/scripts/invoke-codex-prompt.py,,89cf60853b950d60ff49a41c3a26597911e764c1,provider-boundary,SDK or native adapter by supported capability; no implicit launch,provider adapter
+adapters/claude/agents/scripts/invoke-codex-prompt.sh,,ad0c20fc140d8a098ffab5ea3badc3c5bca8da8e,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+adapters/claude/agents/scripts/mcp-usage-reminder.py,,b181f039cce6bbf37335c5c4f9245c6340bbb00a,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/mcp-usage-reminder.py
+adapters/claude/agents/scripts/mcp_continuity_policy.py,,5e89010982e6f7e45bb29cfb2330d11b6e5ab803,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/mcp_continuity_policy.py
+adapters/claude/agents/scripts/publication_review_policy.py,,849d8a0413061dcafbb5a866dc08f3ae5173aa39,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/publication_review_policy.py
+adapters/claude/agents/scripts/turn-anchor-reminder.py,,3a572a62d15bb19d222db1904fa3022c2620ff29,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/turn-anchor-reminder.py
+adapters/claude/agents/scripts/validate-skill-pack.py,,d9c2afd05a594ca4fa20d993d7b48000baa973e5,validation-tooling,retain or port existing check after consumer/semantic inventory,validation
+adapters/claude/agents/scripts/validate-skill-pack.sh,,f79a854dad7e2a316cb471b4c6f4ccd572607eb9,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+adapters/claude/agents/scripts/workitem_sentinels.py,,6665d9997fd7f443f9c598a7249952ceeb1188b5,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/workitem_sentinels.py
+baseline/orchestrarium-v1/tooling/build_inventory.py,d06ef6d646898d98ab7b434b542cf0c123cf6763,d06ef6d646898d98ab7b434b542cf0c123cf6763,historical-oracle,retain immutable evidence; no live port,baseline
+baseline/orchestrarium-v1/tooling/build_target_effect_baseline.py,2aa964ea3aac2fa64ab16e60bf79b2ee7ebb93ec,2aa964ea3aac2fa64ab16e60bf79b2ee7ebb93ec,historical-oracle,retain immutable evidence; no live port,baseline
+baseline/orchestrarium-v1/tooling/compare_capability_baseline.py,4df5117a3ab44c446d3a5b0d4345854f87efed51,4df5117a3ab44c446d3a5b0d4345854f87efed51,historical-oracle,retain immutable evidence; no live port,baseline
+baseline/orchestrarium-v1/tooling/compare_command_baseline.py,0d590e564ef80401f85234728bbc429bd9caf985,0d590e564ef80401f85234728bbc429bd9caf985,historical-oracle,retain immutable evidence; no live port,baseline
+baseline/orchestrarium-v1/tooling/compare_pytest_baseline.py,1367613738de092164e81696b9cd4de3f85346a7,1367613738de092164e81696b9cd4de3f85346a7,historical-oracle,retain immutable evidence; no live port,baseline
+baseline/orchestrarium-v1/tooling/stage0_evidence.py,c9e428da1496c7200928ccd7b952fe6ac4f52a44,c9e428da1496c7200928ccd7b952fe6ac4f52a44,historical-oracle,retain immutable evidence; no live port,baseline
+baseline/orchestrarium-v1/tooling/stage0_orchestrator.py,e6b0c9fa373934fc6b3364748f0ae98cbf71a60a,e6b0c9fa373934fc6b3364748f0ae98cbf71a60a,historical-oracle,retain immutable evidence; no live port,baseline
+baseline/orchestrarium-v1/tooling/stage0_runtime.py,2e4a6b7e9422467cf0320563b798e8e82d677722,2e4a6b7e9422467cf0320563b798e8e82d677722,historical-oracle,retain immutable evidence; no live port,baseline
+baseline/orchestrarium-v1/tooling/verify_stage0.part-00.pyfrag,40d5d117f12ef9f7bb27912ee9989cd92f65d492,40d5d117f12ef9f7bb27912ee9989cd92f65d492,historical-oracle,retain immutable evidence; no live port,baseline
+baseline/orchestrarium-v1/tooling/verify_stage0.part-01.pyfrag,24a8cb22480d03c03a7b177ea3fcba553dcd380b,24a8cb22480d03c03a7b177ea3fcba553dcd380b,historical-oracle,retain immutable evidence; no live port,baseline
+baseline/orchestrarium-v1/tooling/verify_stage0.part-02.pyfrag,ccd04766a67ccf40b31de385005cb0d6a751fbf1,ccd04766a67ccf40b31de385005cb0d6a751fbf1,historical-oracle,retain immutable evidence; no live port,baseline
+baseline/orchestrarium-v1/tooling/verify_stage0.part-03.pyfrag,f6839cc46a4109d128e141f143e6ae54beed1727,f6839cc46a4109d128e141f143e6ae54beed1727,historical-oracle,retain immutable evidence; no live port,baseline
+baseline/orchestrarium-v1/tooling/verify_stage0.part-04.pyfrag,36545db5ccce1a07cf14947e5c6b6ab098144d24,36545db5ccce1a07cf14947e5c6b6ab098144d24,historical-oracle,retain immutable evidence; no live port,baseline
+baseline/orchestrarium-v1/tooling/verify_stage0.part-05.pyfrag,bb60ef66bb8a875ed25836f7cd59c2d0209a0389,bb60ef66bb8a875ed25836f7cd59c2d0209a0389,historical-oracle,retain immutable evidence; no live port,baseline
+baseline/orchestrarium-v1/tooling/verify_stage0.part-06.pyfrag,89b295146e22619cad1b449baa07d1cfb890660d,89b295146e22619cad1b449baa07d1cfb890660d,historical-oracle,retain immutable evidence; no live port,baseline
+baseline/orchestrarium-v1/tooling/verify_stage0.py,157c030c1e780e6e675526451cd2398df24a4c2a,157c030c1e780e6e675526451cd2398df24a4c2a,historical-oracle,retain immutable evidence; no live port,baseline
+examples/sdk/coordination_live_caller.py,,b7727ded64eedb961e251723e5b2b213bb7050d6,sdk-bridge,keep vendor-supported SDK bridge until equivalent official route is qualified,SDK adapters
+install.py,e61ee66849bbad9084ea9f7d3dc856391c8a810e,c65facba807990cbffcd392a29eb96c66166b3a3,native-operation-candidate,port by installer slice; preserve managed state/recovery,installer
+install.sh,398539323643149ad42894d79ad609c4b88fe7bf,398539323643149ad42894d79ad609c4b88fe7bf,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+scripts/agent-run-ledger.py,16fb4697a1c42b4de77460c040be75427a433bb5,4b33a07fb810111612f36ef914b915ed570630ca,native-operation-candidate,port existing state owner; source-only stores remain inactive,workflow state
+scripts/agent-run-ledger.sh,cffcbbf625b18c285adac9cfac8a1f93f35fbf6e,cffcbbf625b18c285adac9cfac8a1f93f35fbf6e,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+scripts/agent_run_persistence/operation_store.py,fddcc291c591d0de6ac9f258fe1e93b4bdb45113,fddcc291c591d0de6ac9f258fe1e93b4bdb45113,native-operation-candidate,port existing state owner; source-only stores remain inactive,workflow state
+scripts/baseline/build_inventory.py,d06ef6d646898d98ab7b434b542cf0c123cf6763,d06ef6d646898d98ab7b434b542cf0c123cf6763,development-oracle,retain while useful; migration verification tooling,baseline tooling
+scripts/baseline/build_target_effect_baseline.py,2aa964ea3aac2fa64ab16e60bf79b2ee7ebb93ec,2aa964ea3aac2fa64ab16e60bf79b2ee7ebb93ec,development-oracle,retain while useful; migration verification tooling,baseline tooling
+scripts/baseline/compare_capability_baseline.py,4df5117a3ab44c446d3a5b0d4345854f87efed51,4df5117a3ab44c446d3a5b0d4345854f87efed51,development-oracle,retain while useful; migration verification tooling,baseline tooling
+scripts/baseline/compare_command_baseline.py,0d590e564ef80401f85234728bbc429bd9caf985,0d590e564ef80401f85234728bbc429bd9caf985,development-oracle,retain while useful; migration verification tooling,baseline tooling
+scripts/baseline/compare_pytest_baseline.py,1367613738de092164e81696b9cd4de3f85346a7,1367613738de092164e81696b9cd4de3f85346a7,development-oracle,retain while useful; migration verification tooling,baseline tooling
+scripts/baseline/stage0_evidence.py,c9e428da1496c7200928ccd7b952fe6ac4f52a44,c9e428da1496c7200928ccd7b952fe6ac4f52a44,development-oracle,retain while useful; migration verification tooling,baseline tooling
+scripts/baseline/stage0_orchestrator.py,e6b0c9fa373934fc6b3364748f0ae98cbf71a60a,e6b0c9fa373934fc6b3364748f0ae98cbf71a60a,development-oracle,retain while useful; migration verification tooling,baseline tooling
+scripts/baseline/stage0_runtime.py,2e4a6b7e9422467cf0320563b798e8e82d677722,2e4a6b7e9422467cf0320563b798e8e82d677722,development-oracle,retain while useful; migration verification tooling,baseline tooling
+scripts/baseline/verify_stage0.part-00.pyfrag,40d5d117f12ef9f7bb27912ee9989cd92f65d492,40d5d117f12ef9f7bb27912ee9989cd92f65d492,development-oracle,retain while useful; migration verification tooling,baseline tooling
+scripts/baseline/verify_stage0.part-01.pyfrag,24a8cb22480d03c03a7b177ea3fcba553dcd380b,24a8cb22480d03c03a7b177ea3fcba553dcd380b,development-oracle,retain while useful; migration verification tooling,baseline tooling
+scripts/baseline/verify_stage0.part-02.pyfrag,ccd04766a67ccf40b31de385005cb0d6a751fbf1,ccd04766a67ccf40b31de385005cb0d6a751fbf1,development-oracle,retain while useful; migration verification tooling,baseline tooling
+scripts/baseline/verify_stage0.part-03.pyfrag,f6839cc46a4109d128e141f143e6ae54beed1727,f6839cc46a4109d128e141f143e6ae54beed1727,development-oracle,retain while useful; migration verification tooling,baseline tooling
+scripts/baseline/verify_stage0.part-04.pyfrag,36545db5ccce1a07cf14947e5c6b6ab098144d24,36545db5ccce1a07cf14947e5c6b6ab098144d24,development-oracle,retain while useful; migration verification tooling,baseline tooling
+scripts/baseline/verify_stage0.part-05.pyfrag,bb60ef66bb8a875ed25836f7cd59c2d0209a0389,bb60ef66bb8a875ed25836f7cd59c2d0209a0389,development-oracle,retain while useful; migration verification tooling,baseline tooling
+scripts/baseline/verify_stage0.part-06.pyfrag,89b295146e22619cad1b449baa07d1cfb890660d,89b295146e22619cad1b449baa07d1cfb890660d,development-oracle,retain while useful; migration verification tooling,baseline tooling
+scripts/baseline/verify_stage0.py,157c030c1e780e6e675526451cd2398df24a4c2a,157c030c1e780e6e675526451cd2398df24a4c2a,development-oracle,retain while useful; migration verification tooling,baseline tooling
+scripts/bash_runtime.py,3bec137b4b8662ad689dd8baa7d0eb93b5da19a1,3bec137b4b8662ad689dd8baa7d0eb93b5da19a1,native-operation-candidate,preserve shell parsing semantics or qualified library replacement,command parsing
+scripts/check-agent-run-ledger-contract.py,af054acdf038a0eb8fcffd8ab6795c045ec14250,af054acdf038a0eb8fcffd8ab6795c045ec14250,native-operation-candidate,port existing state owner; source-only stores remain inactive,workflow state
+scripts/check-hook-health.py,f0b4c289c0dfcb30dac1142c6e9e2720be1c801d,8c142ed7f2409c3a33aae7e728c1b66067e4c4cb,validation-tooling,retain or port existing check after consumer/semantic inventory,validation
+scripts/check-publication-gate.py,70e7030df9e4869fb04d895409680676cac2bde3,70e7030df9e4869fb04d895409680676cac2bde3,validation-tooling,retain or port existing check after consumer/semantic inventory,validation
+scripts/check-publication-gate.sh,77406caa2ce186ed410e736b148960f93792feca,77406caa2ce186ed410e736b148960f93792feca,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+scripts/check-work-items-state.py,d3cdbfad300ed1fd1b5725aa4e44251f68a9a18d,110b344ce035eabcefb62aa506164f64e023ef7c,native-operation-candidate,port existing state owner; source-only stores remain inactive,workflow state
+scripts/check-work-items-state.sh,52ceb33271ca4a71a8d84b824d880aa072ba6165,52ceb33271ca4a71a8d84b824d880aa072ba6165,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+scripts/distribution/build.py,0343a4edb91b554339fc179cb6f524be2e5ef901,55471d16192529cefd19052042c9cde9bc6edcc9,delivery-tooling,align existing delivery owner; not second installer,distribution
+scripts/distribution/launch.py,8b85d462f8cf659f62cb5b3ff491eca83c0a8d6b,7b48ccf57bfb6cd9ca7eca01d91cd99511526dfe,delivery-tooling,align existing delivery owner; not second installer,distribution
+scripts/extract-provider-branch.py,e907eeb0d0d54c19cf852376a7df67ea15954d12,5acec1aa8ca3706aeec3cb61c582bad8596097b4,delivery-tooling,retain branch extraction unless distribution owner retires it,distribution
+scripts/install-claude.py,36d18c29f0ff5a7220c1699dd7537065bd635f4d,36d18c29f0ff5a7220c1699dd7537065bd635f4d,native-operation-candidate,port by installer slice; preserve managed state/recovery,installer
+scripts/install-claude.sh,99ee5c72a36e925b29b1371ceb4703a9e45fa75e,99ee5c72a36e925b29b1371ceb4703a9e45fa75e,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+scripts/install-client.py,,437444fcf05162f4099dd0b4a79eb498f73e241e,native-operation-candidate,port by installer slice; preserve managed state/recovery,installer
+scripts/install-codex.py,31c732bc8ce014587345819d6837db52a0661c0e,31c732bc8ce014587345819d6837db52a0661c0e,native-operation-candidate,port by installer slice; preserve managed state/recovery,installer
+scripts/install-codex.sh,ddc73a5862674bbf72c42ba5d6076481c30ec25b,ddc73a5862674bbf72c42ba5d6076481c30ec25b,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+scripts/install-hypothesis-hook.py,0d0c13df21154d060ad67a216b4ead4bd30388d9,edc80848f20755d040a0387f15fee9a8d4fcc9ca,native-operation-candidate,port registration through existing installer contract,installer
+scripts/installation/__init__.py,86fb7a9524888d8776e9c37bd103cfc417e9310d,86fb7a9524888d8776e9c37bd103cfc417e9310d,native-operation-candidate,port by installer slice; preserve managed state/recovery,installer
+scripts/installation/clients.py,06e74de85ab994ba00b092aa3c7b795509991ef4,95b7a215f9bbb048d15d78953e36c271dde4a70e,native-operation-candidate,port by installer slice; preserve managed state/recovery,installer
+scripts/installation/configuration.py,dbadf409fe722f68350ce19dc08fffbf29dce4de,dbadf409fe722f68350ce19dc08fffbf29dce4de,native-operation-candidate,port by installer slice; preserve managed state/recovery,installer
+scripts/installation/document_outcomes.py,42f7cfb19e3ddb380b0b41370b1da82ab19c23c1,42f7cfb19e3ddb380b0b41370b1da82ab19c23c1,native-operation-candidate,port by installer slice; preserve managed state/recovery,installer
+scripts/installation/instruction_selection.py,47f788e6c282a209de0a8b4606fba5c79b85c86e,47f788e6c282a209de0a8b4606fba5c79b85c86e,native-operation-candidate,port by installer slice; preserve managed state/recovery,installer
+scripts/installation/lead_selection.py,d36b965168270c26e6314f681604a528b01f6979,d36b965168270c26e6314f681604a528b01f6979,native-operation-candidate,port by installer slice; preserve managed state/recovery,installer
+scripts/installation/migration.py,,758c2acc1bd7c6ed26dae0b22c0c138aee18db1e,native-operation-candidate,port by installer slice; preserve managed state/recovery,installer
+scripts/installation/ownership.py,12f3341dc075f465e4d8daf557a5dce75cb56ecf,12f3341dc075f465e4d8daf557a5dce75cb56ecf,native-operation-candidate,port by installer slice; preserve managed state/recovery,installer
+scripts/installation/receipt_plan.py,b2e2cf929f7b09161e2f2647ec89d0f941fa9f9e,b2e2cf929f7b09161e2f2647ec89d0f941fa9f9e,native-operation-candidate,port by installer slice; preserve managed state/recovery,installer
+scripts/installation/sdk_setup.py,,ee6d82e9bbf6ffc5e1707d47ce05cdbec192a04c,native-operation-candidate,port by installer slice; preserve managed state/recovery,installer
+scripts/installation/uninstall.py,a9f152f006f38b640f2ce8bbd7cc1c7381661612,d92c732753adf48d150412b8f0325018c12a3db4,native-operation-candidate,port by installer slice; preserve managed state/recovery,installer
+scripts/installer_markdown/__init__.py,b8becdf7e1dd2221ac3aae10580916b792352922,b8becdf7e1dd2221ac3aae10580916b792352922,native-operation-candidate,qualify parser integration and byte preservation,installer parser
+scripts/installer_markdown/context.py,aca6ce45e2db1ce19a615dde8270f1a257dceeed,aca6ce45e2db1ce19a615dde8270f1a257dceeed,native-operation-candidate,qualify parser integration and byte preservation,installer parser
+scripts/installer_markdown/vendor/markdown_it/__init__.py,9fac279576ebf16e43323f8807db3e6a1e2c79b2,9fac279576ebf16e43323f8807db3e6a1e2c79b2,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/_compat.py,9d48db4f9f85e1752cf424c49ee18a6907c3f160,9d48db4f9f85e1752cf424c49ee18a6907c3f160,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/_punycode.py,312048bf79c33be8fe58f87453845b2b39614efd,312048bf79c33be8fe58f87453845b2b39614efd,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/cli/__init__.py,e69de29bb2d1d6434b8b29ae775ad8c2e48c5391,e69de29bb2d1d6434b8b29ae775ad8c2e48c5391,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/cli/parse.py,fe346b2f51b055b62966c081139f9706e3295363,fe346b2f51b055b62966c081139f9706e3295363,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/common/__init__.py,e69de29bb2d1d6434b8b29ae775ad8c2e48c5391,e69de29bb2d1d6434b8b29ae775ad8c2e48c5391,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/common/entities.py,14d08ec9546995f8eea3e9b83ea896f29ef020cb,14d08ec9546995f8eea3e9b83ea896f29ef020cb,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/common/html_blocks.py,8a3b0b7d5ab7bc174a3c96cbc8976816278a6c21,8a3b0b7d5ab7bc174a3c96cbc8976816278a6c21,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/common/html_re.py,ab822c5fc487c5a494966604a1e89b57a06e0564,ab822c5fc487c5a494966604a1e89b57a06e0564,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/common/normalize_url.py,92720b31621b0f6b4ac853179d886cb58e4e2f36,92720b31621b0f6b4ac853179d886cb58e4e2f36,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/common/utils.py,11bda644c260b714cf010ed44d2ed345de80314e,11bda644c260b714cf010ed44d2ed345de80314e,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/helpers/__init__.py,f4e2cd21b94b9ee9ecb0cac21da619233a5258b9,f4e2cd21b94b9ee9ecb0cac21da619233a5258b9,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/helpers/parse_link_destination.py,c98323c056e0103a12849671fbbac58dc76de4b4,c98323c056e0103a12849671fbbac58dc76de4b4,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/helpers/parse_link_label.py,c80da5a7ec54521281dac45b66977404f5384491,c80da5a7ec54521281dac45b66977404f5384491,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/helpers/parse_link_title.py,a38ff0d98ac7feaba80fd67f3c8f0d0454dde47f,a38ff0d98ac7feaba80fd67f3c8f0d0454dde47f,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/main.py,bf9fd18f3f33a55d5de2fb61bde806a3377d51a8,bf9fd18f3f33a55d5de2fb61bde806a3377d51a8,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/parser_block.py,50a7184cf4746fc86a4e8032efd0604bf819021c,50a7184cf4746fc86a4e8032efd0604bf819021c,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/parser_core.py,8f5b921cbd3bed2c85734b44ccd989a0fd0e6788,8f5b921cbd3bed2c85734b44ccd989a0fd0e6788,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/parser_inline.py,26ec2e636d458fc7a431ddacc8a49c4763613643,26ec2e636d458fc7a431ddacc8a49c4763613643,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/presets/__init__.py,e21c7806930223fc6a2fda250f1c3e4065ef8c8f,e21c7806930223fc6a2fda250f1c3e4065ef8c8f,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/presets/commonmark.py,ed0de0fe4dfbad9e3ab82477433805ea0b6650c6,ed0de0fe4dfbad9e3ab82477433805ea0b6650c6,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/presets/default.py,8aa858f7ff7b6e2f0f6e5a2155dab99415255d39,8aa858f7ff7b6e2f0f6e5a2155dab99415255d39,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/presets/zero.py,3f1fc18cf6c86fd3c0e19a7a573acff28fd042b4,3f1fc18cf6c86fd3c0e19a7a573acff28fd042b4,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/renderer.py,6d60589adaab5610ab0ec3c53380dcb5d0912cdd,6d60589adaab5610ab0ec3c53380dcb5d0912cdd,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/ruler.py,91ab58044cc9f93c540fc5d7e49a6c704e805d58,91ab58044cc9f93c540fc5d7e49a6c704e805d58,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_block/__init__.py,517da2312aa4c2ec89a8ba4c9f061793ef470f1d,517da2312aa4c2ec89a8ba4c9f061793ef470f1d,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_block/blockquote.py,0c9081b9cbd4b49d39d75427fd806e56c485a5fd,0c9081b9cbd4b49d39d75427fd806e56c485a5fd,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_block/code.py,af8a41c8058b1a4887252469bdc6f20f085ad7d5,af8a41c8058b1a4887252469bdc6f20f085ad7d5,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_block/fence.py,263f1b8de8dcdd0dd736eeafab2d9da34ec2c205,263f1b8de8dcdd0dd736eeafab2d9da34ec2c205,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_block/heading.py,afcf9ed458124e52b9b365a6c17440872ffa0975,afcf9ed458124e52b9b365a6c17440872ffa0975,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_block/hr.py,fca7d79d2780a5e656e689ac4843b8464b4ab5bd,fca7d79d2780a5e656e689ac4843b8464b4ab5bd,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_block/html_block.py,3d43f6ee1deb527a42f4d99da40bd052d9b02886,3d43f6ee1deb527a42f4d99da40bd052d9b02886,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_block/lheading.py,3522207abb680510decdd6c54d0be81401128ad7,3522207abb680510decdd6c54d0be81401128ad7,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_block/list.py,d8070d747035dd6b43f11c4bd88d05533b22bc5b,d8070d747035dd6b43f11c4bd88d05533b22bc5b,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_block/paragraph.py,30ba877799beb764dc0a603caa21fe6e6b641375,30ba877799beb764dc0a603caa21fe6e6b641375,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_block/reference.py,ad94d40941ee7cd43c7d3873ac64276a47c15d8b,ad94d40941ee7cd43c7d3873ac64276a47c15d8b,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_block/state_block.py,445ad265a01e3f1dededf9f72848686a2b5ee901,445ad265a01e3f1dededf9f72848686a2b5ee901,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_block/table.py,c52553d8c21265df65e23be253686ef00b3297eb,c52553d8c21265df65e23be253686ef00b3297eb,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_core/__init__.py,e7d775363c6e1d454e73a7e3fff9af3115be4339,e7d775363c6e1d454e73a7e3fff9af3115be4339,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_core/block.py,a6c3bb8d7ae18880fd638690fb5b09beb78b103c,a6c3bb8d7ae18880fd638690fb5b09beb78b103c,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_core/inline.py,c3fd0b5e25dda5d8a5a644cc9e460d0f92ae2d1d,c3fd0b5e25dda5d8a5a644cc9e460d0f92ae2d1d,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_core/linkify.py,efbc9d4c9b1cbada1c936401b3421d73fbff5b64,efbc9d4c9b1cbada1c936401b3421d73fbff5b64,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_core/normalize.py,32439243ef6ebfa424d202ed63635983d4c9ea82,32439243ef6ebfa424d202ed63635983d4c9ea82,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_core/replacements.py,bcc9980046bf76723245b1ca2543af132efe5541,bcc9980046bf76723245b1ca2543af132efe5541,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_core/smartquotes.py,f9b8b457b6c134f5736fabd3b14dc746e75ab86b,f9b8b457b6c134f5736fabd3b14dc746e75ab86b,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_core/state_core.py,a938041d992fdf7ae3f2843a2e0f9ef298c45790,a938041d992fdf7ae3f2843a2e0f9ef298c45790,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_core/text_join.py,5379f6d7a8e9ea3ee27a6462a4108a26549ae520,5379f6d7a8e9ea3ee27a6462a4108a26549ae520,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_inline/__init__.py,d82ef8fbcca54eab4bbb40e8410104eef7a27f57,d82ef8fbcca54eab4bbb40e8410104eef7a27f57,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_inline/autolink.py,6546e2502f93a1b38a49c3fd728963a156cf0243,6546e2502f93a1b38a49c3fd728963a156cf0243,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_inline/backticks.py,fc60d6b15cdfa7012a05bcf1ccbb06f44d870dfd,fc60d6b15cdfa7012a05bcf1ccbb06f44d870dfd,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_inline/balance_pairs.py,9c63b27f7186eb99c61938d27309fda7e900b88d,9c63b27f7186eb99c61938d27309fda7e900b88d,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_inline/emphasis.py,9a98f9e216c94db0217e986270aaaa72fcc99f7f,9a98f9e216c94db0217e986270aaaa72fcc99f7f,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_inline/entity.py,ec9d39650e5bc533e694d3d6699677068d22c69f,ec9d39650e5bc533e694d3d6699677068d22c69f,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_inline/escape.py,0fca6c84e035b83b21d5224be92fd4973f25b80b,0fca6c84e035b83b21d5224be92fd4973f25b80b,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_inline/fragments_join.py,f795c1364b8ac098b7a17f34cd31d7070280cf36,f795c1364b8ac098b7a17f34cd31d7070280cf36,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_inline/html_inline.py,9065e1d034da76270f7d3f1ba528132c8d57d341,9065e1d034da76270f7d3f1ba528132c8d57d341,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_inline/image.py,005105b1c7ed1a93772c62af8bd5ef54d97dfebe,005105b1c7ed1a93772c62af8bd5ef54d97dfebe,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_inline/link.py,2e92c7d83629f00283b5ed885637c8c4a851ffc7,2e92c7d83629f00283b5ed885637c8c4a851ffc7,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_inline/linkify.py,3669396e3e7d51c125678f45a862139fe3b3fd9d,3669396e3e7d51c125678f45a862139fe3b3fd9d,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_inline/newline.py,d05ee6dac712a2211ab24f90dbea64a99e4d80b0,d05ee6dac712a2211ab24f90dbea64a99e4d80b0,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_inline/state_inline.py,50dc41294d6b3df03f73bfb40d740ea4ba36c8ee,50dc41294d6b3df03f73bfb40d740ea4ba36c8ee,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_inline/strikethrough.py,ec816281d49b23d0774bf91db6600d996aaf8b06,ec816281d49b23d0774bf91db6600d996aaf8b06,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/rules_inline/text.py,18b2fcc7a8f5a40d4820df53838d29fcce833f3f,18b2fcc7a8f5a40d4820df53838d29fcce833f3f,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/token.py,d6d0b4530d283f4fb925ca4e95c75eef0818117d,d6d0b4530d283f4fb925ca4e95c75eef0818117d,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/tree.py,5369157bc3caeda3ca53c5cdaaef28a94e47c522,5369157bc3caeda3ca53c5cdaaef28a94e47c522,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/markdown_it/utils.py,2571a15861271f25e60fd5dd414af3ac5b450ad3,2571a15861271f25e60fd5dd414af3ac5b450ad3,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/mdurl/__init__.py,cdbb640e004cef0e950a656a53d92d89d82c7472,cdbb640e004cef0e950a656a53d92d89d82c7472,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/mdurl/_decode.py,9b50a2dde976a6d43491ec6f20d12e60f6f6597f,9b50a2dde976a6d43491ec6f20d12e60f6f6597f,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/mdurl/_encode.py,bc2e5b917afe9e9ecaa6f11af7a9ac82704d3914,bc2e5b917afe9e9ecaa6f11af7a9ac82704d3914,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/mdurl/_format.py,12524ca626065183ec9974f3d7d08dadd4a7d3e8,12524ca626065183ec9974f3d7d08dadd4a7d3e8,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/mdurl/_parse.py,ffeeac768dca3bff60c55c9b1f0bc0fbb4cec7b1,ffeeac768dca3bff60c55c9b1f0bc0fbb4cec7b1,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/installer_markdown/vendor/mdurl/_url.py,f866e7a179c8854e37c9bba6294f48681e5d99d7,f866e7a179c8854e37c9bba6294f48681e5d99d7,third-party-parser,evaluate upstream crate equivalence; do not hand-port vendor code,installer parser
+scripts/invoke-claude-prompt.py,f9f6610f5b0a1ee608b70ef7b707763b85e32264,eaa0cbced77512971d937e0143ba5060896c60e7,provider-boundary,SDK or native adapter by supported capability; no implicit launch,provider adapter
+scripts/invoke-codex-prompt.py,ddbb97e19a3ab97bbfe0fa41f80de2466d39a8ec,84b56505349deeb5b0a23cd25eede7cdf1c0ddb8,provider-boundary,SDK or native adapter by supported capability; no implicit launch,provider adapter
+scripts/invoke-grok-prompt.py,a4fc3fee33f870bf624a1d20421f98e2cbe76904,0fb2933d35137b839c6e66bf8551b76a1b7f9d28,provider-boundary,SDK or native adapter by supported capability; no implicit launch,provider adapter
+scripts/invoke-kimi-prompt.py,9033b09296ca14940041e308c0d7069d3bd4e0e9,2022c4a11fdb1dae4b53b639b86011d22e7320f0,provider-boundary,SDK or native adapter by supported capability; no implicit launch,provider adapter
+scripts/linked_runtime_subroots.py,20ddc3c16358d9117f0a621c329add37fa36a462,20ddc3c16358d9117f0a621c329add37fa36a462,native-operation-candidate,preserve linked-root identity and custody; no path hardcoding,runtime root identity
+scripts/maintenance/cleanup.py,7f5677fe96cacffd98d52b7ff9eb43bc2ba508a2,0dcaee8c74e7bb47b44e67dee6cdbcb04e4e1796,maintenance-tooling,retain or port existing scoped operation; no general deleter,maintenance
+scripts/maintenance/fetch-codex-source-fixtures.py,,80a86c9977b9634663c6eaae11b2d8bf0131a8f5,maintenance-tooling,retain or port existing scoped operation; no general deleter,maintenance
+scripts/model_routing/launch_policy.py,fe549d3eded014dfdc3b9ce737015fe1e2f131c5,fe549d3eded014dfdc3b9ce737015fe1e2f131c5,native-operation-candidate,port typed config policy; preserve provider-specific host behavior,configuration
+scripts/mutate-work-item.py,3040dfee819626f2ca484f2db84db4fdf7d65cda,0cb18ff0a59f31a1726cb1d349b9c5b4292c94df,native-operation-candidate,port existing state owner; source-only stores remain inactive,workflow state
+scripts/normalize-agents-mode.py,f98c5acde8dd2bb654e7eb9fe61962eaa6b1a558,f98c5acde8dd2bb654e7eb9fe61962eaa6b1a558,native-operation-candidate,port typed config policy; preserve provider-specific host behavior,configuration
+scripts/process_supervision/__init__.py,a8d20c2e7ddb158993397dabb243def0854bda30,a8d20c2e7ddb158993397dabb243def0854bda30,native-operation-candidate,port custody/settlement per platform; inactive routes remain inactive,process supervision
+scripts/process_supervision/guarded_launcher.py,92bc3504bd75114e79cb2463aa64fa4c7d64ac26,92bc3504bd75114e79cb2463aa64fa4c7d64ac26,native-operation-candidate,port custody/settlement per platform; inactive routes remain inactive,process supervision
+scripts/process_supervision/posix_process_group.py,c43e44ee73d05f9c5055e16bedd7270ba5c3f8e7,c43e44ee73d05f9c5055e16bedd7270ba5c3f8e7,native-operation-candidate,port custody/settlement per platform; inactive routes remain inactive,process supervision
+scripts/process_supervision/process_runner.py,40ab9178c2fe0ab46930165b959f1e010b11de9a,1417eb1f1f37da013ece89328511fab9bcb48121,native-operation-candidate,port custody/settlement per platform; inactive routes remain inactive,process supervision
+scripts/process_supervision/route_activation_registry.py,adcc51f3b5a52c884a7e84f91d5b664d90333e7f,adcc51f3b5a52c884a7e84f91d5b664d90333e7f,native-operation-candidate,port custody/settlement per platform; inactive routes remain inactive,process supervision
+scripts/process_supervision/sdk_worker.py,,04b1ed8ce16095a00077c775cb27c268a3e05557,sdk-bridge,keep vendor-supported SDK bridge until equivalent official route is qualified,SDK adapters
+scripts/process_supervision/windows_job.py,2988ba4cd73c6f9a88065fd715298eee260b7332,d740d3441804f42d47fa5652e332882752c91e42,native-operation-candidate,port custody/settlement per platform; inactive routes remain inactive,process supervision
+scripts/production_installer.py,d1417d898118be62d31c0bda50a124d998fb615c,dc2d7973a7a2d5337c9407341f3330ac0c251784,native-operation-candidate,port by installer slice; preserve managed state/recovery,installer
+scripts/provider_prompt.py,45995b56021b30e4c518878a62b89d2cdf8eb343,dc3592a61fd8a1b0ddc9e8519412f865f51b46a1,provider-boundary,SDK or native adapter by supported capability; no implicit launch,provider adapter
+scripts/python_installer_bootstrap.py,949dd12a97a84d9785ddb36c290e53c2ff3df29a,949dd12a97a84d9785ddb36c290e53c2ff3df29a,native-operation-candidate,port by installer slice; preserve managed state/recovery,installer
+scripts/resolve-agents-mode.py,a7b8c4369dde2050bd9cadabe2b945d944e8deb9,643ad82422c196da34b0f715304517d61501ced9,native-operation-candidate,port typed config policy; preserve provider-specific host behavior,configuration
+scripts/review_loop_state.py,f402c1defd3270353b46ee5b3ea3d95cd003aeb0,f402c1defd3270353b46ee5b3ea3d95cd003aeb0,native-operation-candidate,port existing state owner; source-only stores remain inactive,workflow state
+scripts/sdk_execution/__init__.py,,078c4f51c3a47c12da1d838f8382fc00fb7c6c15,sdk-bridge,keep vendor-supported SDK bridge until equivalent official route is qualified,SDK adapters
+scripts/sdk_execution/_async.py,,f29deaa54a605eaa48017b1c02cec6b0130dcbff,sdk-bridge,keep vendor-supported SDK bridge until equivalent official route is qualified,SDK adapters
+scripts/sdk_execution/acp_streams.py,,d3f0862ddc1757dc196c93a733e0ed16191081b9,sdk-bridge,keep vendor-supported SDK bridge until equivalent official route is qualified,SDK adapters
+scripts/sdk_execution/claude.py,,1670a7c166878ba842826599a6846b5d32755933,sdk-bridge,keep vendor-supported SDK bridge until equivalent official route is qualified,SDK adapters
+scripts/sdk_execution/codex.py,,cbb014c4102f0e89ee4e48d8aa00c539c4aade69,sdk-bridge,keep vendor-supported SDK bridge until equivalent official route is qualified,SDK adapters
+scripts/sdk_execution/codex_tools.py,,ea8e675c0a41f0d874253ca07adfc7df88abab77,sdk-bridge,keep vendor-supported SDK bridge until equivalent official route is qualified,SDK adapters
+scripts/sdk_execution/contracts.py,,c6a68d8137be06fdd6dd43e434685b1a5d5bf83e,sdk-bridge,keep vendor-supported SDK bridge until equivalent official route is qualified,SDK adapters
+scripts/sdk_execution/coordination.py,,647f41d211de5341e85cd91ea880a07d7d604a6e,sdk-bridge,keep vendor-supported SDK bridge until equivalent official route is qualified,SDK adapters
+scripts/sdk_execution/coordination_codex.py,,4cf48ca60d7f62ff87a100fab1b42bbbed999a68,sdk-bridge,keep vendor-supported SDK bridge until equivalent official route is qualified,SDK adapters
+scripts/sdk_execution/coordination_model.py,,1715d128560c23426900acea6b6e5e94ce5761f7,sdk-bridge,keep vendor-supported SDK bridge until equivalent official route is qualified,SDK adapters
+scripts/sdk_execution/coordination_receiving.py,,a5b2fb8ea1e708c61bf6a05720dfca53b2c91866,sdk-bridge,keep vendor-supported SDK bridge until equivalent official route is qualified,SDK adapters
+scripts/sdk_execution/coordinator.py,,990feaf082903bb26f0ff52c146bdb0b89834f1b,sdk-bridge,keep vendor-supported SDK bridge until equivalent official route is qualified,SDK adapters
+scripts/sdk_execution/dispatch.py,,1255349af0483713e85747fa1f3996bd4b8b8a00,sdk-bridge,keep vendor-supported SDK bridge until equivalent official route is qualified,SDK adapters
+scripts/sdk_execution/grok.py,,3d4f636c1c3e3ba75d0b2eca509a874d0c32dbf5,sdk-bridge,keep vendor-supported SDK bridge until equivalent official route is qualified,SDK adapters
+scripts/sdk_execution/kimi.py,,da1e16964b5a1b2f421c126483b8fcde4e869d7a,sdk-bridge,keep vendor-supported SDK bridge until equivalent official route is qualified,SDK adapters
+scripts/sdk_execution/mimo.py,,9c0035d5dfd7aa28040c02243440a76315bcf07c,sdk-bridge,keep vendor-supported SDK bridge until equivalent official route is qualified,SDK adapters
+scripts/sdk_execution/minimax.py,,2cd6729f49a1a8217719864d24e01428004abe47,sdk-bridge,keep vendor-supported SDK bridge until equivalent official route is qualified,SDK adapters
+scripts/sdk_execution/receiving.py,,6dd8c17ae51e87d4f39e3b28bcc4c7d5398be729,sdk-bridge,keep vendor-supported SDK bridge until equivalent official route is qualified,SDK adapters
+scripts/sdk_execution/runtime.py,,d9767d5ac580dc948d49b3fad086ef700f5bfb12,sdk-bridge,keep vendor-supported SDK bridge until equivalent official route is qualified,SDK adapters
+scripts/sdk_execution/worker.py,,034961488a447e9b08634b37dd3c10a52f7bb6a8,sdk-bridge,keep vendor-supported SDK bridge until equivalent official route is qualified,SDK adapters
+scripts/skill_pack_validator_runtime.py,05232f53b3df7f0bcaad24dc426659486c5992b9,177105f77269da401f79ca27faeeaeef15ac6cff,validation-tooling,retain or port existing check after consumer/semantic inventory,validation
+scripts/solution_attempt/reducer.py,42ae742a1a8b2c116a0ba785ab4b9352e9ceb0c2,42ae742a1a8b2c116a0ba785ab4b9352e9ceb0c2,native-operation-candidate,port existing state owner; source-only stores remain inactive,workflow state
+scripts/sync-agents-mode-docs.py,13d07a114bb9caf3f42d61aadc3e97a5136cff72,fb5f84ffed89bf5f382b85e2faa0dd7307c55ad8,validation-tooling,retain or port existing check after consumer/semantic inventory,validation
+scripts/sync-universal-hooks.py,cea0bde11ff31a6d60b63f3a31558ec5fe39d09f,cc7be960dcdde79c829053839b8f40b8ccde2b2c,validation-tooling,retain or port existing check after consumer/semantic inventory,validation
+scripts/universal-hooks/hooks/check-machine-local-path.py,e6ee187776b6e548bea962bc4d32a7755bdb8258,e6ee187776b6e548bea962bc4d32a7755bdb8258,hook-candidate,inventory event/argv/failure mode then port canonical owner,hook owner
+scripts/universal-hooks/hooks/check-no-trash-in-repo.py,92ca005040fe41cbee3a18893258e9e866f1ed19,92ca005040fe41cbee3a18893258e9e866f1ed19,hook-candidate,inventory event/argv/failure mode then port canonical owner,hook owner
+scripts/universal-hooks/hooks/check-repository-orientation.py,fad8d0b79aeb5db3c708862fc94a7ea282591af2,fad8d0b79aeb5db3c708862fc94a7ea282591af2,hook-candidate,inventory event/argv/failure mode then port canonical owner,hook owner
+scripts/universal-hooks/hooks/check-stale-relation-residue.py,9aafbc3c65ce8656ba795f2e8d15cdc37ad5fa7a,9aafbc3c65ce8656ba795f2e8d15cdc37ad5fa7a,hook-candidate,inventory event/argv/failure mode then port canonical owner,hook owner
+scripts/universal-hooks/scripts/check-bugfix-discipline.py,fa2fc283a1d44deec6466ff588f77d800c59497c,fa2fc283a1d44deec6466ff588f77d800c59497c,hook-candidate,inventory event/argv/failure mode then port canonical owner,hook owner
+scripts/universal-hooks/scripts/check-git-push-gate-runner.py,42b6e2ab29bb0ce76052d739333b13f2946f2058,42b6e2ab29bb0ce76052d739333b13f2946f2058,hook-candidate,inventory event/argv/failure mode then port canonical owner,hook owner
+scripts/universal-hooks/scripts/check-git-push-gate.py,e9997c45f6ddab6afea7a8bbbc06be9870abf665,81fc19d62c3a1f3b0dc7fb5d4b5b04b14cf97018,hook-candidate,inventory event/argv/failure mode then port canonical owner,hook owner
+scripts/universal-hooks/scripts/check-passive-polling-stop.py,c73a517b0601f269f5194b132454ab0ef3415c00,c73a517b0601f269f5194b132454ab0ef3415c00,hook-candidate,inventory event/argv/failure mode then port canonical owner,hook owner
+scripts/universal-hooks/scripts/check-publication-safety.py,11d20e574184206769e28ae82118ba951441ad21,ed4c53537ec5db9e8be9a3fb467d8384e11871ed,hook-candidate,inventory event/argv/failure mode then port canonical owner,hook owner
+scripts/universal-hooks/scripts/check-publication-safety.sh,13360cf927991a746b593f8b0312749b91e9a7ee,13360cf927991a746b593f8b0312749b91e9a7ee,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+scripts/universal-hooks/scripts/check-scratch-valuables.py,4950287f81074c66d5717c585f117afcf319211e,8f35fe5ec31f3a6c904bba6ad7647cf90bed2617,hook-candidate,inventory event/argv/failure mode then port canonical owner,hook owner
+scripts/universal-hooks/scripts/git_push_gate_preflight.py,d1a87ee36c7feecebd6615406c8ee40da4b7d609,e3a281906375b563e20eb2c7130e9d9ba729a98f,hook-candidate,inventory event/argv/failure mode then port canonical owner,hook owner
+scripts/universal-hooks/scripts/hook_common.py,7cda0c14d94271ecb2b6926fbf551d620e9f1cdb,7cda0c14d94271ecb2b6926fbf551d620e9f1cdb,hook-candidate,inventory event/argv/failure mode then port canonical owner,hook owner
+scripts/universal-hooks/scripts/mcp-usage-reminder.py,b181f039cce6bbf37335c5c4f9245c6340bbb00a,b181f039cce6bbf37335c5c4f9245c6340bbb00a,hook-candidate,inventory event/argv/failure mode then port canonical owner,hook owner
+scripts/universal-hooks/scripts/mcp-usage-reminder.sh,c44d3abdc3987de5c0f7004af7a784d50b73e80d,c44d3abdc3987de5c0f7004af7a784d50b73e80d,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+scripts/universal-hooks/scripts/mcp_continuity_policy.py,5e89010982e6f7e45bb29cfb2330d11b6e5ab803,5e89010982e6f7e45bb29cfb2330d11b6e5ab803,hook-candidate,inventory event/argv/failure mode then port canonical owner,hook owner
+scripts/universal-hooks/scripts/publication_review_policy.py,a2467447df08d28cb516bd239a938981a87151e6,849d8a0413061dcafbb5a866dc08f3ae5173aa39,hook-candidate,inventory event/argv/failure mode then port canonical owner,hook owner
+scripts/universal-hooks/scripts/turn-anchor-reminder.py,3a572a62d15bb19d222db1904fa3022c2620ff29,3a572a62d15bb19d222db1904fa3022c2620ff29,hook-candidate,inventory event/argv/failure mode then port canonical owner,hook owner
+scripts/universal-hooks/scripts/workitem_sentinels.py,6665d9997fd7f443f9c598a7249952ceeb1188b5,6665d9997fd7f443f9c598a7249952ceeb1188b5,hook-candidate,inventory event/argv/failure mode then port canonical owner,hook owner
+scripts/universal_hooks_manifest.py,4e12a02ef98a751e131190489e291be947185b70,d0fd8a883ce59cb14bf024d39e61962173d21428,validation-tooling,retain single hook/projection manifest; compile or generate native input,hook manifest
+scripts/validate-agents-mode-contract.py,47b270d0c1930e0fdd815403f6c8c0414296e6c7,eb2154d9795f7e8338b255915ae5737abdb98adf,validation-tooling,retain or port existing check after consumer/semantic inventory,validation
+scripts/validate-agents-mode-installers.py,f31be1480234f66bd12ced700fefd68fa094eaad,f31be1480234f66bd12ced700fefd68fa094eaad,validation-tooling,retain or port existing check after consumer/semantic inventory,validation
+scripts/validate-agents-spine.py,993b36ebc7b4c56f7e0c3f3dc86882a7c73f0e3f,99b5af522d7fea8bced433384315bbf411370898,validation-tooling,retain or port existing check after consumer/semantic inventory,validation
+scripts/validate-arch-layering-slices.py,4ef3c949f1606d3f216277598b3d8064f1db4413,4a13239d006d8a505da5f05b693e3a41a3196152,validation-tooling,retain or port existing check after consumer/semantic inventory,validation
+scripts/validate-claude-md.py,125a93d98ba186643564c565333d66e6c828efa7,e76a3408256b8276dee90903f5582b9bb4a545cf,validation-tooling,retain or port existing check after consumer/semantic inventory,validation
+scripts/validate-codex-skill-catalog-budget.py,ed761b983c1a97e7054d76968c1f987e0e134d11,ed761b983c1a97e7054d76968c1f987e0e134d11,validation-tooling,retain or port existing check after consumer/semantic inventory,validation
+scripts/validate-provider-prompt-projections.py,40c5b46c6d6a8f6fde9963f43166e31737428528,d9d24bde243b27066899d401ca7c0342f489836e,validation-tooling,retain or port existing check after consumer/semantic inventory,validation
+scripts/validate-review-loop-state.py,a546faf5332c0bcc4981e5474e933e1192711dd9,a546faf5332c0bcc4981e5474e933e1192711dd9,validation-tooling,retain or port existing check after consumer/semantic inventory,validation
+scripts/validate-review-loop-state.sh,3fb274d54ee6360618d6c49e48c961f44cfceb39,3fb274d54ee6360618d6c49e48c961f44cfceb39,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+scripts/validate-slice-a-detached.py,45cf4772641c49388e6fa5f6fb675d84ec9f38b9,4d32cfddd61118628108c087fd142074c206d5a4,validation-tooling,retain or port existing check after consumer/semantic inventory,validation
+scripts/validate-work-item-state.py,e3e06483a42888047cc24e500347d05bec74d398,968779d786f8b760095f160992e0e17d269b1ac2,native-operation-candidate,port existing state owner; source-only stores remain inactive,workflow state
+scripts/validate-work-item-state.sh,abb59e9eccd076b0d1022c18b54dc39b7e80c91a,abb59e9eccd076b0d1022c18b54dc39b7e80c91a,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+src.claude/agents/hooks/check-machine-local-path.py,e6ee187776b6e548bea962bc4d32a7755bdb8258,,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/hooks/check-machine-local-path.py
+src.claude/agents/hooks/check-no-trash-in-repo.py,92ca005040fe41cbee3a18893258e9e866f1ed19,,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/hooks/check-no-trash-in-repo.py
+src.claude/agents/hooks/check-repository-orientation.py,fad8d0b79aeb5db3c708862fc94a7ea282591af2,,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/hooks/check-repository-orientation.py
+src.claude/agents/hooks/check-stale-relation-residue.py,9aafbc3c65ce8656ba795f2e8d15cdc37ad5fa7a,,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/hooks/check-stale-relation-residue.py
+src.claude/agents/hooks/check-typed-routing.py,a15ccb936b6b1550fa6e9edeba1bcffaa922717d,,hook-candidate,inventory event/argv/failure mode then port canonical owner,hook owner
+src.claude/agents/hooks/dispatch_sentinels.py,5ca15fd01272c7a40e73c905ae411ea901fb27cb,,hook-candidate,inventory event/argv/failure mode then port canonical owner,hook owner
+src.claude/agents/scripts/agents-mode-reminder.py,ec58138a499b8164abe6023aa85f42e1c0739d02,,native-operation-candidate,port typed config policy; preserve provider-specific host behavior,configuration
+src.claude/agents/scripts/agents_mode_runtime.py,99ec1c819b16a66fb51efedf34992a01ced8e08c,,native-operation-candidate,port typed config policy; preserve provider-specific host behavior,configuration
+src.claude/agents/scripts/await-codex-dispatch.py,446c2f22d2e5281cd89dc77adda0676149c4107c,,provider-boundary,SDK or native adapter by supported capability; no implicit launch,provider adapter
+src.claude/agents/scripts/await-codex-dispatch.sh,ddffb1fd08512eeb08c86b857cbbbb7df350d85b,,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+src.claude/agents/scripts/check-bugfix-discipline.py,fa2fc283a1d44deec6466ff588f77d800c59497c,,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/check-bugfix-discipline.py
+src.claude/agents/scripts/check-git-push-gate-runner.py,42b6e2ab29bb0ce76052d739333b13f2946f2058,,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/check-git-push-gate-runner.py
+src.claude/agents/scripts/check-git-push-gate.py,e9997c45f6ddab6afea7a8bbbc06be9870abf665,,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/check-git-push-gate.py
+src.claude/agents/scripts/check-mcp-momentum.py,6eb748244d4a2b6901727bfb1f0ae40c375eb8c2,,validation-tooling,retain or port existing check after consumer/semantic inventory,validation
+src.claude/agents/scripts/check-passive-polling-stop.py,c73a517b0601f269f5194b132454ab0ef3415c00,,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/check-passive-polling-stop.py
+src.claude/agents/scripts/check-publication-safety.py,11d20e574184206769e28ae82118ba951441ad21,,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/check-publication-safety.py
+src.claude/agents/scripts/check-publication-safety.sh,13360cf927991a746b593f8b0312749b91e9a7ee,,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+src.claude/agents/scripts/check-scratch-valuables.py,4950287f81074c66d5717c585f117afcf319211e,,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/check-scratch-valuables.py
+src.claude/agents/scripts/git_push_gate_preflight.py,d1a87ee36c7feecebd6615406c8ee40da4b7d609,,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/git_push_gate_preflight.py
+src.claude/agents/scripts/hook_common.py,7cda0c14d94271ecb2b6926fbf551d620e9f1cdb,,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/hook_common.py
+src.claude/agents/scripts/invoke-claude-api.py,f396c6c492d83b60ccc5b1f372bf1d4be8f8c838,,provider-boundary,SDK or native adapter by supported capability; no implicit launch,provider adapter
+src.claude/agents/scripts/invoke-claude-api.sh,080da78d02877817a583aed1060044886fa0ba79,,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+src.claude/agents/scripts/invoke-claude-prompt.py,f9f6610f5b0a1ee608b70ef7b707763b85e32264,,provider-boundary,SDK or native adapter by supported capability; no implicit launch,provider adapter
+src.claude/agents/scripts/invoke-claude-prompt.sh,45296dded0d245931f863f9a266d226b5e9a6aaf,,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+src.claude/agents/scripts/invoke-codex-prompt.py,ddbb97e19a3ab97bbfe0fa41f80de2466d39a8ec,,provider-boundary,SDK or native adapter by supported capability; no implicit launch,provider adapter
+src.claude/agents/scripts/invoke-codex-prompt.sh,ad0c20fc140d8a098ffab5ea3badc3c5bca8da8e,,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+src.claude/agents/scripts/mcp-usage-reminder.py,b181f039cce6bbf37335c5c4f9245c6340bbb00a,,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/mcp-usage-reminder.py
+src.claude/agents/scripts/mcp_continuity_policy.py,5e89010982e6f7e45bb29cfb2330d11b6e5ab803,,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/mcp_continuity_policy.py
+src.claude/agents/scripts/publication_review_policy.py,a2467447df08d28cb516bd239a938981a87151e6,,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/publication_review_policy.py
+src.claude/agents/scripts/turn-anchor-reminder.py,3a572a62d15bb19d222db1904fa3022c2620ff29,,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/turn-anchor-reminder.py
+src.claude/agents/scripts/validate-skill-pack.py,58a77e2eb038e18c4bf399481c84b90075729211,,validation-tooling,retain or port existing check after consumer/semantic inventory,validation
+src.claude/agents/scripts/validate-skill-pack.sh,f79a854dad7e2a316cb471b4c6f4ccd572607eb9,,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+src.claude/agents/scripts/workitem_sentinels.py,6665d9997fd7f443f9c598a7249952ceeb1188b5,,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/workitem_sentinels.py
+src.codex/skills/lead/hooks/check-machine-local-path.py,e6ee187776b6e548bea962bc4d32a7755bdb8258,e6ee187776b6e548bea962bc4d32a7755bdb8258,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/hooks/check-machine-local-path.py
+src.codex/skills/lead/hooks/check-no-trash-in-repo.py,92ca005040fe41cbee3a18893258e9e866f1ed19,92ca005040fe41cbee3a18893258e9e866f1ed19,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/hooks/check-no-trash-in-repo.py
+src.codex/skills/lead/hooks/check-parallel-mcp-momentum.py,ccdd28a19351e83db77727046f47d1a09bbad5c0,ccdd28a19351e83db77727046f47d1a09bbad5c0,hook-candidate,inventory event/argv/failure mode then port canonical owner,hook owner
+src.codex/skills/lead/hooks/check-repository-orientation.py,fad8d0b79aeb5db3c708862fc94a7ea282591af2,fad8d0b79aeb5db3c708862fc94a7ea282591af2,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/hooks/check-repository-orientation.py
+src.codex/skills/lead/hooks/check-stale-relation-residue.py,9aafbc3c65ce8656ba795f2e8d15cdc37ad5fa7a,9aafbc3c65ce8656ba795f2e8d15cdc37ad5fa7a,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/hooks/check-stale-relation-residue.py
+src.codex/skills/lead/scripts/agents-mode-reminder.py,9273d7ef69abaf261ac901c989a1733b02a1093f,9273d7ef69abaf261ac901c989a1733b02a1093f,native-operation-candidate,port typed config policy; preserve provider-specific host behavior,configuration
+src.codex/skills/lead/scripts/agents_mode_runtime.py,7a6e54815e5c370539f70557b0bbf4f8c64f712e,7a6e54815e5c370539f70557b0bbf4f8c64f712e,native-operation-candidate,port typed config policy; preserve provider-specific host behavior,configuration
+src.codex/skills/lead/scripts/check-bugfix-discipline.py,fa2fc283a1d44deec6466ff588f77d800c59497c,fa2fc283a1d44deec6466ff588f77d800c59497c,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/check-bugfix-discipline.py
+src.codex/skills/lead/scripts/check-git-push-gate-runner.py,42b6e2ab29bb0ce76052d739333b13f2946f2058,42b6e2ab29bb0ce76052d739333b13f2946f2058,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/check-git-push-gate-runner.py
+src.codex/skills/lead/scripts/check-git-push-gate.py,e9997c45f6ddab6afea7a8bbbc06be9870abf665,81fc19d62c3a1f3b0dc7fb5d4b5b04b14cf97018,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/check-git-push-gate.py
+src.codex/skills/lead/scripts/check-passive-polling-stop.py,c73a517b0601f269f5194b132454ab0ef3415c00,c73a517b0601f269f5194b132454ab0ef3415c00,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/check-passive-polling-stop.py
+src.codex/skills/lead/scripts/check-publication-safety.py,11d20e574184206769e28ae82118ba951441ad21,ed4c53537ec5db9e8be9a3fb467d8384e11871ed,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/check-publication-safety.py
+src.codex/skills/lead/scripts/check-publication-safety.sh,13360cf927991a746b593f8b0312749b91e9a7ee,13360cf927991a746b593f8b0312749b91e9a7ee,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+src.codex/skills/lead/scripts/check-scratch-valuables.py,4950287f81074c66d5717c585f117afcf319211e,8f35fe5ec31f3a6c904bba6ad7647cf90bed2617,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/check-scratch-valuables.py
+src.codex/skills/lead/scripts/git_push_gate_preflight.py,d1a87ee36c7feecebd6615406c8ee40da4b7d609,e3a281906375b563e20eb2c7130e9d9ba729a98f,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/git_push_gate_preflight.py
+src.codex/skills/lead/scripts/hook_common.py,7cda0c14d94271ecb2b6926fbf551d620e9f1cdb,7cda0c14d94271ecb2b6926fbf551d620e9f1cdb,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/hook_common.py
+src.codex/skills/lead/scripts/mcp-usage-reminder.py,b181f039cce6bbf37335c5c4f9245c6340bbb00a,b181f039cce6bbf37335c5c4f9245c6340bbb00a,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/mcp-usage-reminder.py
+src.codex/skills/lead/scripts/mcp_continuity_policy.py,5e89010982e6f7e45bb29cfb2330d11b6e5ab803,5e89010982e6f7e45bb29cfb2330d11b6e5ab803,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/mcp_continuity_policy.py
+src.codex/skills/lead/scripts/publication_review_policy.py,a2467447df08d28cb516bd239a938981a87151e6,849d8a0413061dcafbb5a866dc08f3ae5173aa39,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/publication_review_policy.py
+src.codex/skills/lead/scripts/turn-anchor-reminder.py,3a572a62d15bb19d222db1904fa3022c2620ff29,3a572a62d15bb19d222db1904fa3022c2620ff29,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/turn-anchor-reminder.py
+src.codex/skills/lead/scripts/validate-skill-pack.py,6ac0d331b007aedd45176682c3f058905424fad0,7b067bdeec031554f3c08d1fc8eb0742033f7691,validation-tooling,retain or port existing check after consumer/semantic inventory,validation
+src.codex/skills/lead/scripts/validate-skill-pack.sh,f79a854dad7e2a316cb471b4c6f4ccd572607eb9,f79a854dad7e2a316cb471b4c6f4ccd572607eb9,launcher,retire or retarget only with its owning qualified operation,entrypoint owner
+src.codex/skills/lead/scripts/workitem_sentinels.py,6665d9997fd7f443f9c598a7249952ceeb1188b5,6665d9997fd7f443f9c598a7249952ceeb1188b5,canonical-projection,retarget with canonical hook; preserve host binding,scripts/universal-hooks/scripts/workitem_sentinels.py
+src.codex/skills/manual-repo-transfer/scripts/repo_transfer.py,039ff36ff856f5956ed1ac670171a464321b9b52,039ff36ff856f5956ed1ac670171a464321b9b52,native-operation-candidate,port inventory/verify separately from authorized restore,transfer
+tests/_filesystem_fixture_support.py,b2cb15e51a3d6f799d2011c6cec509a1434982b2,b2cb15e51a3d6f799d2011c6cec509a1434982b2,test-oracle,retain and extend old-new differential tests,tests
+tests/_module_loading_support.py,82e80c1438bf9b55fe3ade1ca8ca0929e0946716,82e80c1438bf9b55fe3ade1ca8ca0929e0946716,test-oracle,retain and extend old-new differential tests,tests
+tests/fixtures/canonical-skill-priors/2dbf91b3e96e9dbf2bf785d16bf6964faf766d46/manual-repo-transfer/scripts/repo_transfer.py,41e55e8287e2e029fe9269f7c07771e9ab05b604,41e55e8287e2e029fe9269f7c07771e9ab05b604,test-oracle,retain and extend old-new differential tests,tests
+tests/fixtures/codex_hook_fixture.py,4725d078f1aad5a163fd97759da2becf2bdf1e99,4725d078f1aad5a163fd97759da2becf2bdf1e99,test-oracle,retain and extend old-new differential tests,tests
+tests/fixtures/fake_codex_hooks_host.py,b0e725401a29c41dadd4990b3c6944eb25854113,b0e725401a29c41dadd4990b3c6944eb25854113,test-oracle,retain and extend old-new differential tests,tests
+tests/fixtures/global-lead-priors/pre-rebase/scripts/provider_prompt.py,0bfd55a5866151a7a853f631614883ff71b0ac2b,0bfd55a5866151a7a853f631614883ff71b0ac2b,test-oracle,retain and extend old-new differential tests,tests
+tests/fixtures/global-lead-priors/pre-rebase/scripts/validate-provider-prompt-projections.py,82d2562eed4eba934536d685fde1db3860612e80,82d2562eed4eba934536d685fde1db3860612e80,test-oracle,retain and extend old-new differential tests,tests
+tests/fixtures/global-lead-priors/pre-rebase/scripts/validate-skill-pack.py,7074854fa54f6866f8425e59eb23dfd0e5edde31,7074854fa54f6866f8425e59eb23dfd0e5edde31,test-oracle,retain and extend old-new differential tests,tests
+tests/fixtures/global-lead-priors/pre-rebase/scripts/validate-work-item-state.py,006a45056bcf266dca3888a55ec38c1611a69821,006a45056bcf266dca3888a55ec38c1611a69821,test-oracle,retain and extend old-new differential tests,tests
+tests/fixtures/process_supervision/benchmark_protocol.py,67b5d1a8d0f5eb5ce06dc56838a784d2af462a7c,67b5d1a8d0f5eb5ce06dc56838a784d2af462a7c,test-oracle,retain and extend old-new differential tests,tests
+tests/fixtures/process_supervision/child_helper.py,4bbca7df95d3f3e77936a8a9cfbf61c07a3c7ea9,4bbca7df95d3f3e77936a8a9cfbf61c07a3c7ea9,test-oracle,retain and extend old-new differential tests,tests
+tests/fixtures/process_supervision/supervisor_helper.py,c8e6601a4b20ea82c3d1b2da39c3f87f600be593,c8e6601a4b20ea82c3d1b2da39c3f87f600be593,test-oracle,retain and extend old-new differential tests,tests
+tests/fixtures/provider-prompt-priors/pre-e7/provider_prompt.py,1531970d125ef83237a158e603524f8af8e4616c,1531970d125ef83237a158e603524f8af8e4616c,test-oracle,retain and extend old-new differential tests,tests
+tests/fixtures/provider_prompt_projection.py,a5aeae095e83970ae0902bcfe028b453c251e898,a5aeae095e83970ae0902bcfe028b453c251e898,test-oracle,retain and extend old-new differential tests,tests
+tests/fixtures/runtime_capabilities.py,8b4d1940664fde570dfdddb198802133d775214a,9b57cc2b5677dddd322347259b960e4af2af3316,test-oracle,retain and extend old-new differential tests,tests
+tests/git_push_gate_target.py,59f94493e4aea9c43639165a6915b1e5f2d251df,59f94493e4aea9c43639165a6915b1e5f2d251df,test-oracle,retain and extend old-new differential tests,tests
+tests/installer_diagnostic_test_support.py,5bef02b4fc0ff00f522fdae834d2dd816cb8bb0b,5bef02b4fc0ff00f522fdae834d2dd816cb8bb0b,test-oracle,retain and extend old-new differential tests,tests
+tests/policy_text_contract.py,deb838aa6871d11b4304ebe2d96aa4f5a369ed44,deb838aa6871d11b4304ebe2d96aa4f5a369ed44,test-oracle,retain and extend old-new differential tests,tests
+tests/synthetic_bundle_support.py,36cf947c3031c4c891f22ac17e5246a2c5d2b071,36cf947c3031c4c891f22ac17e5246a2c5d2b071,test-oracle,retain and extend old-new differential tests,tests
+tests/test_active_codex_dispatch_watcher.py,6c184b5563da0ad9e3d32e0afa5c10ca46fc4a00,95e81646ef32dbcb44c06a588a1c950fd9d2cd18,test-oracle,retain and extend old-new differential tests,tests
+tests/test_agent_run_ledger.py,8e8252729fb4380c53c2a9e35b9d161dd32e841b,f5db5cbb5d6da627b4886ced867f4013094bebe4,test-oracle,retain and extend old-new differential tests,tests
+tests/test_agents_mode_contract.py,181cf18918880792fd112324f88db15f0339dcee,7de9cf99c8aad5b076c0ce6a578ea2e9b68efc43,test-oracle,retain and extend old-new differential tests,tests
+tests/test_agents_mode_docs_sync.py,4fb6ff31cec70e910df920a90e44474480f13d3e,4fb6ff31cec70e910df920a90e44474480f13d3e,test-oracle,retain and extend old-new differential tests,tests
+tests/test_agents_mode_installer_regression.py,1e7db1d5689847c7b02afb7c48a27160bd4d2a96,1e7db1d5689847c7b02afb7c48a27160bd4d2a96,test-oracle,retain and extend old-new differential tests,tests
+tests/test_agents_mode_runtime_quotes.py,c4270f9b7b2a1433bf369e2a6486de43d7327084,c4270f9b7b2a1433bf369e2a6486de43d7327084,test-oracle,retain and extend old-new differential tests,tests
+tests/test_agents_spine_validator.py,7c10e5ebd44d577bf8e1fa89f33310440f211600,8f5c65029f9f0845ae68a4b6136ad95723465ca6,test-oracle,retain and extend old-new differential tests,tests
+tests/test_agents_spine_validator_fail_branches.py,2df5fd7f02f3934888940238eef455e608f3ee03,2df5fd7f02f3934888940238eef455e608f3ee03,test-oracle,retain and extend old-new differential tests,tests
+tests/test_agents_status_reserved_pm_flag.py,25da5aa692f06cb63517c7e7e6840769f0547d47,44d6cad2f4f2f59e8881bbca7a9ee94959daaf3a,test-oracle,retain and extend old-new differential tests,tests
+tests/test_arch_layering_slices.py,c07d049df4cf7c7b079567bd6e0969ddc782c4f3,eae855a3bdaa1e87a66d87ba871e91260db0125f,test-oracle,retain and extend old-new differential tests,tests
+tests/test_architecture_pattern_applicability.py,fcfa0105ba42296c782988f5db583ff15ed5f5e7,19551d508828102b59bee7e20bc52be658c8449c,test-oracle,retain and extend old-new differential tests,tests
+tests/test_atomic_directory_publish_diagnostic.py,a587ae38b332963229983c25882fb19e6c459d6a,a587ae38b332963229983c25882fb19e6c459d6a,test-oracle,retain and extend old-new differential tests,tests
+tests/test_audit_hook_payload_shape.py,41ee631e11f777504a0e81186dcf789f04af4b04,d09dcf1c5040aa67009721a254864322f77a8ca7,test-oracle,retain and extend old-new differential tests,tests
+tests/test_bugfix_discipline_hook.py,d9a1ca22747dde1f1ab6f86a2e00cd84aa225e3e,c3940592b07343b15ad94d170761eff5937dcdc5,test-oracle,retain and extend old-new differential tests,tests
+tests/test_bundle_build.py,e6adb0322cdc5325004d80d6fe0d32bd8e85516d,d963b7636c0f69d4321e25f9c503f4fe35078291,test-oracle,retain and extend old-new differential tests,tests
+tests/test_bundle_evidence_record.py,784c330e23d95c819efa05fb6c9dbcacdcc4b4cf,784c330e23d95c819efa05fb6c9dbcacdcc4b4cf,test-oracle,retain and extend old-new differential tests,tests
+tests/test_bundle_runtime_copy_receiving.py,273cb9e0c47841c1856acc9d985bc57be18c832a,273cb9e0c47841c1856acc9d985bc57be18c832a,test-oracle,retain and extend old-new differential tests,tests
+tests/test_bundle_structure_receiving.py,14399564914ed33546ad917dc00af2c93a90ddf7,14399564914ed33546ad917dc00af2c93a90ddf7,test-oracle,retain and extend old-new differential tests,tests
+tests/test_bundled_launcher.py,a2b2fa7924485c61e138ecc96f8184766a84b7b4,22ed7a3d148679894f59e39e162a3c9363ff42a8,test-oracle,retain and extend old-new differential tests,tests
+tests/test_c3_active_recovery.py,592f864b2ee13d6d8c45590f8a16109bbe25e242,400ad68c6479a77e07de369b68540d8b719c9ca7,test-oracle,retain and extend old-new differential tests,tests
+tests/test_c_abi_external_adapter_boundaries.py,305e9952929ba051bdd3aa84eb7ae2da30cb0be6,0509b63518a5fbd249a861c253a6eb0358ac57c5,test-oracle,retain and extend old-new differential tests,tests
+tests/test_canonical_receipt_manifest.py,d1efc55210ff3df834c9993fa1cd08dfa72aed17,9ef08951de9e997a6918bbf0e35e1485218152ba,test-oracle,retain and extend old-new differential tests,tests
+tests/test_claude_document_preparation.py,f5a0687a8f1fee828938f1303619c4832e38c64c,f5a0687a8f1fee828938f1303619c4832e38c64c,test-oracle,retain and extend old-new differential tests,tests
+tests/test_claude_instruction_selection.py,f6909b904419b770c3f6f3864b72eee3be2bcc7c,f6909b904419b770c3f6f3864b72eee3be2bcc7c,test-oracle,retain and extend old-new differential tests,tests
+tests/test_claude_main_agent_binding.py,eea48b8e8e28539d0626c25554d333ed72e97796,53396b33eced164be352d45a55340000dbf0ef33,test-oracle,retain and extend old-new differential tests,tests
+tests/test_claude_mcp_force_hook.py,49e360c68c456b098424947feb8e2dd5165182a6,268a7058a4d001d905fb27220b6fe20c55c98a8c,test-oracle,retain and extend old-new differential tests,tests
+tests/test_claude_md_size.py,42af62534f7ff6119a6840c071c2c931e39a2d82,8dbd648547a51427f47ba36dc8f25d25ea2827eb,test-oracle,retain and extend old-new differential tests,tests
+tests/test_claude_reference_mirror.py,240e9e2d061501ab0b3cc2c49e24cfc5be11d4ce,485f09cd0ee748d963911f2bb9114899d09be242,test-oracle,retain and extend old-new differential tests,tests
+tests/test_claude_subscription_guard.py,8c6fba856eecf392d7872b748387d4cad0ff3b37,3b4c4b548d1287602b17e9d3e36a4b4e66230e8f,test-oracle,retain and extend old-new differential tests,tests
+tests/test_cleanup_engine.py,b1adbf48c9d6ec8eec2f8006587b4d3cfe24b5d0,b1adbf48c9d6ec8eec2f8006587b4d3cfe24b5d0,test-oracle,retain and extend old-new differential tests,tests
+tests/test_client_catalog_validation.py,,f2a06315556975c02727e065acbf373765e497b3,test-oracle,retain and extend old-new differential tests,tests
+tests/test_client_source_layout.py,,a4dfb214a3768668e0bdc381e96d6e59d3675065,test-oracle,retain and extend old-new differential tests,tests
+tests/test_close_diagnostic_audit.py,8784569eac7b8849f977b3d8ff18419939fd6a8d,8784569eac7b8849f977b3d8ff18419939fd6a8d,test-oracle,retain and extend old-new differential tests,tests
+tests/test_codex_bootstrap_instruction_kernel.py,9b38c6d7c9e7c40b1b1db5a664047ba7d7233c7b,9b38c6d7c9e7c40b1b1db5a664047ba7d7233c7b,test-oracle,retain and extend old-new differential tests,tests
+tests/test_codex_catalog_estimate.py,e50ec162be14477187e4407e371c73a8d612951c,e50ec162be14477187e4407e371c73a8d612951c,test-oracle,retain and extend old-new differential tests,tests
+tests/test_codex_command_resolution.py,,ed5840235436763ea02499d254ae5f926f4129a8,test-oracle,retain and extend old-new differential tests,tests
+tests/test_codex_document_preparation.py,2157543aadfc16feeaaf77b71e4e22fac0f87546,a8c9fddf6263b13db3e12c42c357cb571e55e67a,test-oracle,retain and extend old-new differential tests,tests
+tests/test_codex_document_selection.py,027755ef26d9b233c6b38a9b56d00d1c04f7867a,027755ef26d9b233c6b38a9b56d00d1c04f7867a,test-oracle,retain and extend old-new differential tests,tests
+tests/test_codex_global_policy_reuse.py,,ee172919f2426fb86909378391147bf1c2c83542,test-oracle,retain and extend old-new differential tests,tests
+tests/test_codex_hook_status_messages.py,677e4393f53bebe5be7fe7a406a9e0b2e8d6c39e,677e4393f53bebe5be7fe7a406a9e0b2e8d6c39e,test-oracle,retain and extend old-new differential tests,tests
+tests/test_codex_legacy_heading_recognition.py,103b89b2710b582e29ebfefbc9e6793ee9e71992,103b89b2710b582e29ebfefbc9e6793ee9e71992,test-oracle,retain and extend old-new differential tests,tests
+tests/test_codex_markdown_examples.py,01bd211c775d1a0749ada53941c1ed24500c7589,01bd211c775d1a0749ada53941c1ed24500c7589,test-oracle,retain and extend old-new differential tests,tests
+tests/test_codex_native_instruction_kernel.py,35fcd6d9e7f9f783e8963e9b2323281a2494ec19,35fcd6d9e7f9f783e8963e9b2323281a2494ec19,test-oracle,retain and extend old-new differential tests,tests
+tests/test_codex_newline_preservation.py,c297d169f52cc78f924e1d6a7f542ded428ca13b,c297d169f52cc78f924e1d6a7f542ded428ca13b,test-oracle,retain and extend old-new differential tests,tests
+tests/test_codex_project_budget_warning.py,08799030eacdc93d489408fb548e9585c60063ff,08799030eacdc93d489408fb548e9585c60063ff,test-oracle,retain and extend old-new differential tests,tests
+tests/test_codex_query_custody.py,dd4365d6a02b1fdb15ce41da7fd60624fdae2c41,dd4365d6a02b1fdb15ce41da7fd60624fdae2c41,test-oracle,retain and extend old-new differential tests,tests
+tests/test_codex_routing_instruction_kernel.py,5618c7940301497d0be8204865221be9083b72b7,5618c7940301497d0be8204865221be9083b72b7,test-oracle,retain and extend old-new differential tests,tests
+tests/test_codex_ru_mirror_validator.py,a932474fb1080d64086905b404b279287bba357d,a932474fb1080d64086905b404b279287bba357d,test-oracle,retain and extend old-new differential tests,tests
+tests/test_codex_selected_global_policy.py,,c0635e1e06d726129c327e34f5bae766907a7f1d,test-oracle,retain and extend old-new differential tests,tests
+tests/test_codex_skill_catalog_budget.py,9a43fa2463b97f5e5acc7663e7992eb525d61b8b,9a43fa2463b97f5e5acc7663e7992eb525d61b8b,test-oracle,retain and extend old-new differential tests,tests
+tests/test_common_skill_parity.py,2265055026fb65fcbd2d7da1cde69d0fd8d8aa1e,073159ddb795e84b78dc99c00387ebce0acc5f64,test-oracle,retain and extend old-new differential tests,tests
+tests/test_consultant_profile_ranking.py,7c2669b91e5fa4276d98b33cfaa6f7c526b02846,7c2669b91e5fa4276d98b33cfaa6f7c526b02846,test-oracle,retain and extend old-new differential tests,tests
+tests/test_copy_metadata_acquisition_close.py,1511552e5f1812fe9600560c8f98785fd05731c8,1511552e5f1812fe9600560c8f98785fd05731c8,test-oracle,retain and extend old-new differential tests,tests
+tests/test_default_profile_task_floors.py,6088bf284195bf3e436e3b5fa4a5e0cf3026e495,6088bf284195bf3e436e3b5fa4a5e0cf3026e495,test-oracle,retain and extend old-new differential tests,tests
+tests/test_design_panel_candidate_isolation.py,f32b368f6f1744aaf0109b81ae1ba6b4ef02402a,d719a0ae394443eafe0f217f60241322b990eb1e,test-oracle,retain and extend old-new differential tests,tests
+tests/test_directory_instruction_scope.py,ef9440028de476522b67ea01e1dc6732bc48cb95,ef9440028de476522b67ea01e1dc6732bc48cb95,test-oracle,retain and extend old-new differential tests,tests
+tests/test_directory_probe_settlement.py,8e99071c7ba0f9304c77e2ca86c407462df3c209,8e99071c7ba0f9304c77e2ca86c407462df3c209,test-oracle,retain and extend old-new differential tests,tests
+tests/test_dispatch_sentinels.py,a62f57239b056e53bcc6a123ad5db408c7266331,aa13861fc24b06f577e74e8864489d19b956cff2,test-oracle,retain and extend old-new differential tests,tests
+tests/test_distribution_presdk_layout.py,4a7caff1b9cc5ac523f91a6b56595a51e1998905,4e30cffabe1a48b6f9ca75960af645da82a96896,test-oracle,retain and extend old-new differential tests,tests
+tests/test_document_outcomes.py,d19b9c4107efa0e3258f2255130444e8f92f040c,d19b9c4107efa0e3258f2255130444e8f92f040c,test-oracle,retain and extend old-new differential tests,tests
+tests/test_early_architect_routing.py,6ca26f7af6acf6c48633ce288da0809a2e0a568b,9140c424cbc4492b26e0b78c079262175be8bad4,test-oracle,retain and extend old-new differential tests,tests
+tests/test_explicit_effort_selection.py,6995b63a4b7ebcd144173ca6018067d208c93be7,6995b63a4b7ebcd144173ca6018067d208c93be7,test-oracle,retain and extend old-new differential tests,tests
+tests/test_external_prompt_governance.py,012f55d43f5eda9e47422d84a8e390ad8f134e03,410ecb8688c25c6eea46e5e3d11662e4e676755b,test-oracle,retain and extend old-new differential tests,tests
+tests/test_extract_docs_readme.py,5758aa94d9abcd97df283c0d343a7a1adeb9370e,5758aa94d9abcd97df283c0d343a7a1adeb9370e,test-oracle,retain and extend old-new differential tests,tests
+tests/test_extract_provider_branch.py,9b8fde48b82578cb70ee6fb3a0962a468016bea8,9b8fde48b82578cb70ee6fb3a0962a468016bea8,test-oracle,retain and extend old-new differential tests,tests
+tests/test_fatal_marker_pattern.py,741fd3228ddeb2ac1bf039ebcce4940a29e2e1e1,126f5869a2668ee065ef8a976ea2418a22e9ad22,test-oracle,retain and extend old-new differential tests,tests
+tests/test_fetch_codex_source_fixtures.py,,c1dd28809115b0b635056b4734ccc9de8f2852e3,test-oracle,retain and extend old-new differential tests,tests
+tests/test_finalized_lead_compatibility.py,,ccaae693a083280395937734fc8cce00b416ae23,test-oracle,retain and extend old-new differential tests,tests
+tests/test_fresh_copy_close.py,89a89d3723f20ac937dcd29b3dfd8a9397218e6b,89a89d3723f20ac937dcd29b3dfd8a9397218e6b,test-oracle,retain and extend old-new differential tests,tests
+tests/test_fresh_creator_witness.py,,2d4113be85b4480878f912f5874ceb7f0f1ddfbd,test-oracle,retain and extend old-new differential tests,tests
+tests/test_fresh_effect_inverse.py,3c70aa28ac592113a9164da191ce3ed9e1e9dae2,3c70aa28ac592113a9164da191ce3ed9e1e9dae2,test-oracle,retain and extend old-new differential tests,tests
+tests/test_fresh_provider_receipt.py,a1ef1ec72ab744238a7233c2eff6df3337b768e4,a1ef1ec72ab744238a7233c2eff6df3337b768e4,test-oracle,retain and extend old-new differential tests,tests
+tests/test_fresh_provider_wiring.py,74a46fcf798428b63bdedad3fa1339c4c9950a9b,74a46fcf798428b63bdedad3fa1339c4c9950a9b,test-oracle,retain and extend old-new differential tests,tests
+tests/test_fresh_tree_construction.py,3ef1d4c2bfef238c98c312dbe3f4f17ab961dc57,3ef1d4c2bfef238c98c312dbe3f4f17ab961dc57,test-oracle,retain and extend old-new differential tests,tests
+tests/test_git_disposition_contract.py,e195e678d191c817b780865c9655b6d9486da0c3,e195e678d191c817b780865c9655b6d9486da0c3,test-oracle,retain and extend old-new differential tests,tests
+tests/test_git_push_gate_hook.py,670560acd98105bbb3e9ba25c0589e4affcf46d5,a544bc18822647b5d67422ffcd22dbcd3fa8796d,test-oracle,retain and extend old-new differential tests,tests
+tests/test_git_push_gate_runner.py,bd4a2ad197fc27ee46dac86b541799131d747a7e,bcbf5c5988ca960de276cbdbbef53a98e81d155c,test-oracle,retain and extend old-new differential tests,tests
+tests/test_github_pr_review_bot_skill_contract.py,04e83105c07834b3a537be7dcc0fbc40a201dd80,fe300cb908a3d5d8adaf57a459a2fc97ecde1860,test-oracle,retain and extend old-new differential tests,tests
+tests/test_global_lead_accepted_prior.py,fd1c6789aab22933d296a172645d55acdeaa06b8,cf1015b17b903fd9bad817e56c5b79e998045873,test-oracle,retain and extend old-new differential tests,tests
+tests/test_global_nonlead_receipt.py,5e52b9183f64d7c5a000c257a936dfe239d4a7e7,84391fa2d4bda3498b534c2e39061795f6e5f6b7,test-oracle,retain and extend old-new differential tests,tests
+tests/test_goal_resume_hold_currency_contract.py,0ae5b01115a947e943eaf3050407f1400d6c15fc,34b7607a30602d45004c73254105e445eaebae9f,test-oracle,retain and extend old-new differential tests,tests
+tests/test_grok_transport.py,bd2bc646e51675cec20731d5e03a0aefae060e8a,c3780a23e31af5bc79a7dc1a5adffdb960cf918a,test-oracle,retain and extend old-new differential tests,tests
+tests/test_guarded_provider_launcher.py,2c7020d07fddfcc272e92078f5c9ae6501e6287a,2c7020d07fddfcc272e92078f5c9ae6501e6287a,test-oracle,retain and extend old-new differential tests,tests
+tests/test_h1_artifact_set_relocation.py,548dacf461ca9e6ac4e3796cf98f7ad374cde03d,548dacf461ca9e6ac4e3796cf98f7ad374cde03d,test-oracle,retain and extend old-new differential tests,tests
+tests/test_h1_relocation_integrity.py,768b26ae987b2c75335b75bd5029cbc5959b107e,768b26ae987b2c75335b75bd5029cbc5959b107e,test-oracle,retain and extend old-new differential tests,tests
+tests/test_handoff_continuity_contract.py,1d938fee4338f69bc40a63d3197da7827852b9a6,3942a7c85702e4a64c1646defe9f4361e61b308b,test-oracle,retain and extend old-new differential tests,tests
+tests/test_historical_disposition_archive_e2e.py,b70b02830f9160e7178ef06058c439cee2ae3cc3,b70b02830f9160e7178ef06058c439cee2ae3cc3,test-oracle,retain and extend old-new differential tests,tests
+tests/test_hook_common.py,f03d0194abb46abdc16b16fb00e949361e997ecd,f03d0194abb46abdc16b16fb00e949361e997ecd,test-oracle,retain and extend old-new differential tests,tests
+tests/test_hook_domain_plans.py,f89f48de015ffbe0ff42d7621354c728b31f20e0,f89f48de015ffbe0ff42d7621354c728b31f20e0,test-oracle,retain and extend old-new differential tests,tests
+tests/test_hook_health.py,fddd101c6ee7b636ee9590cf71b0c21f0934459b,493912c2c8c1bd58942086010aeecd16908097e1,test-oracle,retain and extend old-new differential tests,tests
+tests/test_hook_runtime_installers.py,ebc32fd60b4488af0b370b66bbe8e85ef0c167c0,861332ca645108cb258d0455a5daaf98272119ca,test-oracle,retain and extend old-new differential tests,tests
+tests/test_hook_runtime_transactions.py,2334a98dbd9dc1c29cd5eaadf90ba38be62c3e46,2334a98dbd9dc1c29cd5eaadf90ba38be62c3e46,test-oracle,retain and extend old-new differential tests,tests
+tests/test_incoming_reference_consumers.py,d6eb91559ddc727b7e62990a2735ab43a6a0a32d,d6eb91559ddc727b7e62990a2735ab43a6a0a32d,test-oracle,retain and extend old-new differential tests,tests
+tests/test_install_claude_namespace_reclaim.py,2600617ca81dc97c2bfe576d956a6c1ffa985049,2600617ca81dc97c2bfe576d956a6c1ffa985049,test-oracle,retain and extend old-new differential tests,tests
+tests/test_install_codex_compat_args.py,10eb031e932d82e4a03d20572ff1824e26321834,10eb031e932d82e4a03d20572ff1824e26321834,test-oracle,retain and extend old-new differential tests,tests
+tests/test_install_hypothesis_hook.py,77e4d82737e33a1ef6c1b89c3869651f75c1913c,951610ddce328a721695f45ce863d541e8d2fe9c,test-oracle,retain and extend old-new differential tests,tests
+tests/test_install_selection.py,,9e2a4cf09051205df557de503e183910187a8cc5,test-oracle,retain and extend old-new differential tests,tests
+tests/test_install_terminal_receiving.py,f1c1b558a81a767a68bd89bbd6a3b00034895553,cfc1cdd4f36a7111e344dc85db78fcd98375f95d,test-oracle,retain and extend old-new differential tests,tests
+tests/test_installed_role_root_identity.py,731a0377f123158c79eb3e096e65a27e5a02c6a8,731a0377f123158c79eb3e096e65a27e5a02c6a8,test-oracle,retain and extend old-new differential tests,tests
+tests/test_installer_adoption_diagnostics.py,,14af9de4bcd47f9472410e482069c9c4094631f3,test-oracle,retain and extend old-new differential tests,tests
+tests/test_installer_cleanup_primary.py,32ffd7b73f49978d43847fc8d57f6742b159f844,32ffd7b73f49978d43847fc8d57f6742b159f844,test-oracle,retain and extend old-new differential tests,tests
+tests/test_installer_powershell_matcher.py,a15b7a817dd183c606cc462572f280f8bef4c05b,a15b7a817dd183c606cc462572f280f8bef4c05b,test-oracle,retain and extend old-new differential tests,tests
+tests/test_installer_producer_integration.py,f9c0aa316fcc84d50e72771fdbf469507fbc91d2,7110e4a01a3b766196e81f2e8f55bec5b1b50d5f,test-oracle,retain and extend old-new differential tests,tests
+tests/test_installer_projection_rollback.py,9dc9f8c55fc8a7793e0005197288970103a6ccc4,048cc13e32e0d587236b4b7ac9d66f6da58e713d,test-oracle,retain and extend old-new differential tests,tests
+tests/test_installer_reminder_hooks_wiring.py,c667adabe39bf396e92f6b420daea4cbdd622b23,c667adabe39bf396e92f6b420daea4cbdd622b23,test-oracle,retain and extend old-new differential tests,tests
+tests/test_installer_repository_orientation_hook.py,2f6e147d67d652c2dfd3a5dc562aca6a3d84558f,2f6e147d67d652c2dfd3a5dc562aca6a3d84558f,test-oracle,retain and extend old-new differential tests,tests
+tests/test_installer_sessionstart_hooks.py,a25e3fe84bee9081d546dd41e5c035f31fe2e4a4,a25e3fe84bee9081d546dd41e5c035f31fe2e4a4,test-oracle,retain and extend old-new differential tests,tests
+tests/test_installer_transaction_metadata.py,7659b28537030185ee5207a9880c2729fc6a5ead,b95d75e155b7371626810ab0824cdb44518e1940,test-oracle,retain and extend old-new differential tests,tests
+tests/test_installer_tree_identity.py,d4ba4d879b99f2fb357b9ac7203d6b943ecf899e,49d5f08c5fd2560faefc7c363b01985a9ee95d6a,test-oracle,retain and extend old-new differential tests,tests
+tests/test_invalid_current_suffix_disposition.py,f97d3c5ebe9f3680e86873209aad4e006d9a90f0,f97d3c5ebe9f3680e86873209aad4e006d9a90f0,test-oracle,retain and extend old-new differential tests,tests
+tests/test_invoke_claude_api.py,44c5c371f7f2e49e031ff5474fc5cd6ef3de23c9,e26b7e61ce14c3dcc72f9362ec3d52de1fe72052,test-oracle,retain and extend old-new differential tests,tests
+tests/test_invoke_codex_prompt_help.py,8a4dfe4cb6264e78da3ee5b4f49fa3fa571caa84,8a4dfe4cb6264e78da3ee5b4f49fa3fa571caa84,test-oracle,retain and extend old-new differential tests,tests
+tests/test_kimi_grok_live_docs_contract.py,a6997fc2072ff0a61227744b223ff73829b85374,dffd4705827efc1453886cece9362dbe860e9121,test-oracle,retain and extend old-new differential tests,tests
+tests/test_kimi_transport.py,0d1a0aed8b52e5163f703985a9e1b8df4c77b62a,41d0e2c0d61bafc0dd27de847c282b9366ccc3d2,test-oracle,retain and extend old-new differential tests,tests
+tests/test_lead_invariant.py,4808676139925fd85ca09d2661e494996b25a32f,4808676139925fd85ca09d2661e494996b25a32f,test-oracle,retain and extend old-new differential tests,tests
+tests/test_ledger_default_admission.py,26f467e55530319659ee18f2aff793c4ef0c7f7d,26f467e55530319659ee18f2aff793c4ef0c7f7d,test-oracle,retain and extend old-new differential tests,tests
+tests/test_ledger_detached_admission_custody.py,49a04d459df85334ad38e9393281b92e5c906e68,49a04d459df85334ad38e9393281b92e5c906e68,test-oracle,retain and extend old-new differential tests,tests
+tests/test_ledger_h1_activation_writer.py,156a68bde0010611960f6c3e0ab84b6d16b8d19b,156a68bde0010611960f6c3e0ab84b6d16b8d19b,test-oracle,retain and extend old-new differential tests,tests
+tests/test_ledger_h1_effective_view.py,ed6a60fe2bf025d702f2c66d07e25ef81a5541c3,7357f27b9f2ee47112617aabd128cd552c094d6a,test-oracle,retain and extend old-new differential tests,tests
+tests/test_ledger_lock_acquisition.py,,575df18bc74e50953407a08f8f41106cfeb9d04b,test-oracle,retain and extend old-new differential tests,tests
+tests/test_ledger_native_qualified_publication.py,952e3f728aca848b2e0e1f02fc3ad6cbbec6a70f,952e3f728aca848b2e0e1f02fc3ad6cbbec6a70f,test-oracle,retain and extend old-new differential tests,tests
+tests/test_ledger_resource_budget.py,bb48e7b765068dcc9af069eede6c214385d19faf,b34f3aabe95379848b43d8d6254d7e43d9e91d6a,test-oracle,retain and extend old-new differential tests,tests
+tests/test_legacy_backlog_read_compatibility.py,a8bae84ed2a835700303183fb111d6408bdc6db5,a8bae84ed2a835700303183fb111d6408bdc6db5,test-oracle,retain and extend old-new differential tests,tests
+tests/test_legacy_cleanup_currentness.py,7ff76bfd6907bfdc3d4be0aedbfaa386f9969699,7ff76bfd6907bfdc3d4be0aedbfaa386f9969699,test-oracle,retain and extend old-new differential tests,tests
+tests/test_legacy_flat_history_binding.py,8150f5b6bb80db7fe8a5475c031599839ff218cd,8150f5b6bb80db7fe8a5475c031599839ff218cd,test-oracle,retain and extend old-new differential tests,tests
+tests/test_legacy_flat_terminal_close.py,8eb21d4e71ec5510143c701ee2623c0bf1fba53f,8eb21d4e71ec5510143c701ee2623c0bf1fba53f,test-oracle,retain and extend old-new differential tests,tests
+tests/test_legacy_ledger_projection_read.py,a5987dd77caa6f022abf4e8cc7f3704e6025c3f6,a5987dd77caa6f022abf4e8cc7f3704e6025c3f6,test-oracle,retain and extend old-new differential tests,tests
+tests/test_legacy_ledger_projection_writer.py,c84d52dd8598f95c44f2f0598f5606eb12ccee95,c84d52dd8598f95c44f2f0598f5606eb12ccee95,test-oracle,retain and extend old-new differential tests,tests
+tests/test_legacy_ledger_settlement.py,5f8f2e036205dec9f7856faca9cbcb32ec1753f7,5f8f2e036205dec9f7856faca9cbcb32ec1753f7,test-oracle,retain and extend old-new differential tests,tests
+tests/test_legacy_link_projection_migration_native.py,18d2743b803d6ec009af6c38baa56d3dfa475eea,18d2743b803d6ec009af6c38baa56d3dfa475eea,test-oracle,retain and extend old-new differential tests,tests
+tests/test_legacy_obligation_migration.py,1bdaf173cbe63463f67a879532f877c8cba90a35,1bdaf173cbe63463f67a879532f877c8cba90a35,test-oracle,retain and extend old-new differential tests,tests
+tests/test_legacy_scratch_evidence_migration.py,b92cd78247ef7585cba59358bab8f126c67cc53e,b92cd78247ef7585cba59358bab8f126c67cc53e,test-oracle,retain and extend old-new differential tests,tests
+tests/test_legacy_skill_bundle_compatibility.py,bec32f2857bb4d5b124be30f4ec4e0ef67388796,55aed1d2cb463e1dfb8439f19303e56d9174afe0,test-oracle,retain and extend old-new differential tests,tests
+tests/test_lifecycle_readme_summary.py,8817950be4c3c7480f5943736ad3871851a5d124,8817950be4c3c7480f5943736ad3871851a5d124,test-oracle,retain and extend old-new differential tests,tests
+tests/test_lifecycle_test_discovery.py,b4f303fe6decd1c0fd312208269ecf5812cf8b3d,b4f303fe6decd1c0fd312208269ecf5812cf8b3d,test-oracle,retain and extend old-new differential tests,tests
+tests/test_machine_local_path_hook.py,a6195ba7d5cb687b9f8a3c3a67eb654293ef87a3,becc84ea97f5fb203d630f6d44c83eaa5af27751,test-oracle,retain and extend old-new differential tests,tests
+tests/test_manual_repo_transfer.py,300476b826718c03d45ea7502704c4a3d1f5c385,300476b826718c03d45ea7502704c4a3d1f5c385,test-oracle,retain and extend old-new differential tests,tests
+tests/test_manual_repo_transfer_posix.py,67d24685e7b60959b05335cdf127ffc75ebce474,67d24685e7b60959b05335cdf127ffc75ebce474,test-oracle,retain and extend old-new differential tests,tests
+tests/test_manual_repo_transfer_security_contracts.py,214f52a0ec68d51931daf15fb64349b7df56ab06,214f52a0ec68d51931daf15fb64349b7df56ab06,test-oracle,retain and extend old-new differential tests,tests
+tests/test_markdown_bom_preservation.py,0ea9adf9ad07b3788da8b1e0005c57bb50bc71ce,0ea9adf9ad07b3788da8b1e0005c57bb50bc71ce,test-oracle,retain and extend old-new differential tests,tests
+tests/test_markdown_private_semantic_contract.py,781ab7cfef4e9d7db4e5ef04e04fde995b910ea9,781ab7cfef4e9d7db4e5ef04e04fde995b910ea9,test-oracle,retain and extend old-new differential tests,tests
+tests/test_mcp_continuity_refresh_policy.py,576e1873ba0869023e1d392ae29c52e1455a74eb,3521a543a0dd59d24b0bfd4b9c165324b0f6ac8c,test-oracle,retain and extend old-new differential tests,tests
+tests/test_mixed_current_ledger_recovery.py,328a286c925a94ed6ee5801172f49e0823a4d48c,f82bb1836baedbb3408c784026a4c5b7f7f5afa6,test-oracle,retain and extend old-new differential tests,tests
+tests/test_modified_lead_sdk_integration.py,,119b929b74106c5b38c19d129401f5ae55f9f60b,test-oracle,retain and extend old-new differential tests,tests
+tests/test_modified_lead_selection.py,77d172ff192a9ce1ddebcac4e9b15f87bc364e0b,77d172ff192a9ce1ddebcac4e9b15f87bc364e0b,test-oracle,retain and extend old-new differential tests,tests
+tests/test_moved_copy_metadata_receiving.py,0572be1c2bc7f79024d31769b2d5f5ed20ac398d,0572be1c2bc7f79024d31769b2d5f5ed20ac398d,test-oracle,retain and extend old-new differential tests,tests
+tests/test_mutable_path_admission_hold.py,a3425c9409483c58a4ad924795457f35f6b9b12a,a3425c9409483c58a4ad924795457f35f6b9b12a,test-oracle,retain and extend old-new differential tests,tests
+tests/test_mutate_work_item.py,68d03e361a6cda280869529779dfc01be87a3da1,8663ccade00e12102aa72a206fb49d82ec2548ca,test-oracle,retain and extend old-new differential tests,tests
+tests/test_native_agent_features.py,,af731cba1d2f45991dfeaea16b1bd67b29379bdd,test-oracle,retain and extend old-new differential tests,tests
+tests/test_native_git_push_gate.py,f9766a3215f20804d40fc780d9fcb3b935fcaf9b,0e9130ce689418bfa514ad1fef50166fc1e7198b,test-oracle,retain and extend old-new differential tests,tests
+tests/test_native_luna_corridor.py,be9e053a889dfc70c704bd772f80808d00e2c969,99441580d7323d8664016f0910cdefe868b999a9,test-oracle,retain and extend old-new differential tests,tests
+tests/test_native_receiver_inventory_gate.py,c547d56a404c40fa98464f4d732b2ec7ee23a3b0,c547d56a404c40fa98464f4d732b2ec7ee23a3b0,test-oracle,retain and extend old-new differential tests,tests
+tests/test_native_role_slice_a.py,9809352fed2b7dd06668601d0bfb7d5eba6d3984,dfcc9beed6172d10977c9a6b4dbb9d904742835c,test-oracle,retain and extend old-new differential tests,tests
+tests/test_no_trash_hook.py,da676d602a68ab95e103f4c710ff7e9d9acbb576,fe629b42a3b5bc60f572e74d2d85938df8ea21df,test-oracle,retain and extend old-new differential tests,tests
+tests/test_noncanonical_ledger_recovery.py,7b046815e12eaebeb3fa7328e6b30376631b93ac,7b046815e12eaebeb3fa7328e6b30376631b93ac,test-oracle,retain and extend old-new differential tests,tests
+tests/test_noncanonical_replay_staging_ownership.py,4d85abd911dca6098bf4dbea94f9b6f892b5e5a8,4d85abd911dca6098bf4dbea94f9b6f892b5e5a8,test-oracle,retain and extend old-new differential tests,tests
+tests/test_normalize_agents_mode_contract.py,2a785af492a3c755bc0b5a460a7aa8933aaba818,2a785af492a3c755bc0b5a460a7aa8933aaba818,test-oracle,retain and extend old-new differential tests,tests
+tests/test_operation_store.py,728ddd20c22d322c3f406b44f0a1acebb036e436,728ddd20c22d322c3f406b44f0a1acebb036e436,test-oracle,retain and extend old-new differential tests,tests
+tests/test_orche_baseline_inventory.py,9aec720391aa005bae7d7b5abdf91201baf9560e,9aec720391aa005bae7d7b5abdf91201baf9560e,test-oracle,retain and extend old-new differential tests,tests
+tests/test_orche_baseline_pin.py,a0a083a568211cf72e61f3b75439aa95642ea3d6,a0a083a568211cf72e61f3b75439aa95642ea3d6,test-oracle,retain and extend old-new differential tests,tests
+tests/test_orche_capability_baseline.py,7a552c4553e4fd5d780a4d656511c7253cbc7acd,7a552c4553e4fd5d780a4d656511c7253cbc7acd,test-oracle,retain and extend old-new differential tests,tests
+tests/test_orche_command_baseline.py,8d5bace0b3af71188de88f535c260d691dfb4424,8d5bace0b3af71188de88f535c260d691dfb4424,test-oracle,retain and extend old-new differential tests,tests
+tests/test_orche_pytest_baseline.py,cf4b57ebe5d13357470775e5bad125818b406257,cf4b57ebe5d13357470775e5bad125818b406257,test-oracle,retain and extend old-new differential tests,tests
+tests/test_orche_review9_regressions.py,54eeeaba33b6574dd9d599e84ad8620bb13f35d0,54eeeaba33b6574dd9d599e84ad8620bb13f35d0,test-oracle,retain and extend old-new differential tests,tests
+tests/test_orche_review_regressions.py,6d3d7fb2dbceb34ae568d67d4c58eb9defc8cc9a,6d3d7fb2dbceb34ae568d67d4c58eb9defc8cc9a,test-oracle,retain and extend old-new differential tests,tests
+tests/test_orche_target_effect_baseline.py,b93873ad92a3b505d72f91d8f9b9e4a224f85c57,b93873ad92a3b505d72f91d8f9b9e4a224f85c57,test-oracle,retain and extend old-new differential tests,tests
+tests/test_orche_verifier_isolation.py,a2c31367507a54506672a38e1f90bebbb88966c2,a2c31367507a54506672a38e1f90bebbb88966c2,test-oracle,retain and extend old-new differential tests,tests
+tests/test_orchestration_discipline_contract.py,f4c5e2bafc052252cfd45fd9b0160c03fc1915c0,f4c5e2bafc052252cfd45fd9b0160c03fc1915c0,test-oracle,retain and extend old-new differential tests,tests
+tests/test_owned_file_mode_receiving.py,39cd78347db318c3f46d209951174fd5f3ec4f84,39cd78347db318c3f46d209951174fd5f3ec4f84,test-oracle,retain and extend old-new differential tests,tests
+tests/test_parallel_mcp_powershell.py,47aa298b422b808f37683d58a5bc979b4e2bd2cb,47aa298b422b808f37683d58a5bc979b4e2bd2cb,test-oracle,retain and extend old-new differential tests,tests
+tests/test_parallel_mcp_reminder_hook.py,0d553e381c104262897837e554980963f478767f,0d553e381c104262897837e554980963f478767f,test-oracle,retain and extend old-new differential tests,tests
+tests/test_parallel_mcp_repo_root_modes.py,5032c0370cd6e017372e49b42f4b3c9f2bdce02d,5032c0370cd6e017372e49b42f4b3c9f2bdce02d,test-oracle,retain and extend old-new differential tests,tests
+tests/test_passive_polling_stop.py,051d7acd7fab80d920f4ac23bbff9d7bc3ccd9e1,2314c7817cf4b3ffef3b80bf0f48d53a0ae363b1,test-oracle,retain and extend old-new differential tests,tests
+tests/test_pinned_source_checkout.py,310bced69bb16cf340e81375de9f9d15da34f614,26d69d4d91519a0f1a0e5934948e8ac942bd80aa,test-oracle,retain and extend old-new differential tests,tests
+tests/test_placeholder_close_dispositions.py,e5f62a6248da7eda216f37875215ff8b024e1ef1,e5f62a6248da7eda216f37875215ff8b024e1ef1,test-oracle,retain and extend old-new differential tests,tests
+tests/test_plan_currency_contract.py,3bc9931f83f04aac035fc39d934faef967cf5b33,3bc9931f83f04aac035fc39d934faef967cf5b33,test-oracle,retain and extend old-new differential tests,tests
+tests/test_posix_installation_hold.py,c3a1ecf80ea37215d93881f8eedde157ef35254f,29abcea55f05959bb9f4668369f44130613e93d4,test-oracle,retain and extend old-new differential tests,tests
+tests/test_posix_installer_lifecycle.py,0ba495d9b684c9ba863ce1be7c5c0b40f2a79cfd,0ba495d9b684c9ba863ce1be7c5c0b40f2a79cfd,test-oracle,retain and extend old-new differential tests,tests
+tests/test_posix_leaf_disposal.py,af680244064d7fc5e463dbec355ecdcedb8d51e2,af680244064d7fc5e463dbec355ecdcedb8d51e2,test-oracle,retain and extend old-new differential tests,tests
+tests/test_posix_process_group.py,60e35bbc3e7215d76c207b7882336c66a3cae610,25ecfd465924dad59357559a6b511c5a56986c71,test-oracle,retain and extend old-new differential tests,tests
+tests/test_posix_projection_inverse.py,c76336a1b0168faeb13bb9800cf5110eb87556dc,c76336a1b0168faeb13bb9800cf5110eb87556dc,test-oracle,retain and extend old-new differential tests,tests
+tests/test_posix_provider_receiving.py,74c4ff5a3b86a6b3dd8d630ba066d15a78d7feaf,74c4ff5a3b86a6b3dd8d630ba066d15a78d7feaf,test-oracle,retain and extend old-new differential tests,tests
+tests/test_posix_tree_disposal.py,d2a9e6532d789d329b7f1c9ef26237ab29846567,d2a9e6532d789d329b7f1c9ef26237ab29846567,test-oracle,retain and extend old-new differential tests,tests
+tests/test_post_materialization_source_census.py,1b4c9d3ba6d9fc97f538a9d1782d8dbd743c6521,1b4c9d3ba6d9fc97f538a9d1782d8dbd743c6521,test-oracle,retain and extend old-new differential tests,tests
+tests/test_pr10_followup_regressions.py,73a7daad284455a2fc0d18080e39bebb15dc0dbc,73a7daad284455a2fc0d18080e39bebb15dc0dbc,test-oracle,retain and extend old-new differential tests,tests
+tests/test_pr10_identity_bound_publish.py,1d984525d311f6f00272c6db8b29b13c1006caf2,1d984525d311f6f00272c6db8b29b13c1006caf2,test-oracle,retain and extend old-new differential tests,tests
+tests/test_pr10_integrity_regressions.py,6ce51d17355943007184439978e0bd2d21a7436b,6ce51d17355943007184439978e0bd2d21a7436b,test-oracle,retain and extend old-new differential tests,tests
+tests/test_presdk_linked_document.py,cdd0e326c15c05b665906c0a4a4ec46572f5a4bf,cdd0e326c15c05b665906c0a4a4ec46572f5a4bf,test-oracle,retain and extend old-new differential tests,tests
+tests/test_presdk_uninstall.py,11bcce7a05b04b3aa30f9b3dcb46a05899877c82,11bcce7a05b04b3aa30f9b3dcb46a05899877c82,test-oracle,retain and extend old-new differential tests,tests
+tests/test_presdk_windows_document_link.py,412af41c8691c086f461edda3c61e0236de353e4,412af41c8691c086f461edda3c61e0236de353e4,test-oracle,retain and extend old-new differential tests,tests
+tests/test_prior815_skill_witnesses.py,,2af99dd5c2f0e060d8b1f25215b8f8229a154bfe,test-oracle,retain and extend old-new differential tests,tests
+tests/test_process_runner_cli.py,556d3608147aee2cbb6d77ca0939398ab3695340,556d3608147aee2cbb6d77ca0939398ab3695340,test-oracle,retain and extend old-new differential tests,tests
+tests/test_process_runner_core.py,e280318250adf887f50b924f16067fc4d5ca0239,e280318250adf887f50b924f16067fc4d5ca0239,test-oracle,retain and extend old-new differential tests,tests
+tests/test_process_runner_executable_launch_binding.py,0bf268c7c8940c705bd3b838c668bcf2ca4a5632,0bf268c7c8940c705bd3b838c668bcf2ca4a5632,test-oracle,retain and extend old-new differential tests,tests
+tests/test_process_runner_performance.py,348bf8d216f08273630ce9e54a9a4b916714ac40,24a23218c87fbd2f14a4673a93a4c3fcfcc63e72,test-oracle,retain and extend old-new differential tests,tests
+tests/test_process_runner_r2_contract.py,4669bc1c4b132d457c18fbaa4e2a7c6bcb122967,4669bc1c4b132d457c18fbaa4e2a7c6bcb122967,test-oracle,retain and extend old-new differential tests,tests
+tests/test_process_runner_r3_delta.py,5476b089051858584dc86854c8baab892270ddb4,5476b089051858584dc86854c8baab892270ddb4,test-oracle,retain and extend old-new differential tests,tests
+tests/test_process_runner_r4_delta.py,a1c255d9857958f82a360319835ca0eadd842da7,a1c255d9857958f82a360319835ca0eadd842da7,test-oracle,retain and extend old-new differential tests,tests
+tests/test_process_runner_r5_delta.py,1a4ab383616badd4f5ab7df79bb2ac4510d7caef,1a4ab383616badd4f5ab7df79bb2ac4510d7caef,test-oracle,retain and extend old-new differential tests,tests
+tests/test_process_runner_windows_argv_admission.py,e2fa3176f08f84c554ff863d027ff3608182b77d,e2fa3176f08f84c554ff863d027ff3608182b77d,test-oracle,retain and extend old-new differential tests,tests
+tests/test_process_runner_windows_runtime.py,dcc62e3429f42c85a34992ddd17a247a1a296535,dcc62e3429f42c85a34992ddd17a247a1a296535,test-oracle,retain and extend old-new differential tests,tests
+tests/test_production_installer_python310.py,a38930a9feb54d7e1ff8be762f10891fbd15d2a6,a38930a9feb54d7e1ff8be762f10891fbd15d2a6,test-oracle,retain and extend old-new differential tests,tests
+tests/test_production_installer_receiving_errors.py,2844936a76e6d437dc840b5862cc74bede571b2f,2844936a76e6d437dc840b5862cc74bede571b2f,test-oracle,retain and extend old-new differential tests,tests
+tests/test_projection_set_diagnostic.py,932c3bcc6ae1c91033e1606063dd1256c60d66f1,932c3bcc6ae1c91033e1606063dd1256c60d66f1,test-oracle,retain and extend old-new differential tests,tests
+tests/test_prompt_wrapper_oracle.py,e8f756a67998a6f3d0c42b3eff4c4cb15eabba7e,626a4de9ab0e08f95a727e3ad8192e92da6e47d0,test-oracle,retain and extend old-new differential tests,tests
+tests/test_provider_global_roundtrip.py,,94a9f6520892c33561c3e0aeb7d6c7a56b9fed42,test-oracle,retain and extend old-new differential tests,tests
+tests/test_provider_hook_roundtrip.py,,ec181303fca00a01d08068bc07a9a8ed133ce9cc,test-oracle,retain and extend old-new differential tests,tests
+tests/test_provider_install_isolation.py,,cd333339d2ffcd003f520872f99bda3310f05634,test-oracle,retain and extend old-new differential tests,tests
+tests/test_provider_install_ownership.py,,fb15fbc8c66fd6f7788302d8135ffbe073155637,test-oracle,retain and extend old-new differential tests,tests
+tests/test_provider_legacy_dependency_guard.py,,77531ff517f83c1b4457dc3bfbef8fa6ac294018,test-oracle,retain and extend old-new differential tests,tests
+tests/test_provider_legacy_materialization.py,,57117de5a602cf7b6c19ac5434208229d16c3062,test-oracle,retain and extend old-new differential tests,tests
+tests/test_provider_legacy_roundtrip.py,,dcbe88d2b46ffe93f3d4b798b8edbf6d25013c32,test-oracle,retain and extend old-new differential tests,tests
+tests/test_provider_owned_ledger_binding.py,,cd1b34220250514967679dec981f6c3b57fe92ef,test-oracle,retain and extend old-new differential tests,tests
+tests/test_provider_ownership_commit_scope.py,,702a62986d4f6aa0ed9c4c50f4317aa0c6dee95d,test-oracle,retain and extend old-new differential tests,tests
+tests/test_provider_projection_materialization.py,,69b72dc9d809c273050d3449a7898a6d3cfdd270,test-oracle,retain and extend old-new differential tests,tests
+tests/test_provider_prompt_projections.py,7bfc2ed8087bbe3ed3485d0833a1bdaeeb3feb55,6d3e1c33e465cf36325370d7196bfa54de9d2f2e,test-oracle,retain and extend old-new differential tests,tests
+tests/test_provider_prompt_relocation.py,c5d2da088be1c63045a5e4b4a1b4f46dc20710bd,abfa3efa6755254e3633c167fad3891dbaa2953b,test-oracle,retain and extend old-new differential tests,tests
+tests/test_provider_receipt_plan.py,4158138be7dd98d6fe75416db32745e9c3aa8d12,4158138be7dd98d6fe75416db32745e9c3aa8d12,test-oracle,retain and extend old-new differential tests,tests
+tests/test_provider_uninstall_configuration.py,,7fbbf690f350c0f75554e5ed66e9c5411dc1f623,test-oracle,retain and extend old-new differential tests,tests
+tests/test_provider_uninstall_hooks.py,,c50db40c34b978bb4efbc817020024816a39c553,test-oracle,retain and extend old-new differential tests,tests
+tests/test_provider_uninstall_retarget.py,,44d6bd88b1f1d025238aabee57dc005584a80851,test-oracle,retain and extend old-new differential tests,tests
+tests/test_provider_uninstall_roundtrip.py,,9ae546361a144e8b385b82b98eab7c4da2629e94,test-oracle,retain and extend old-new differential tests,tests
+tests/test_provider_uninstall_safety.py,,068a430c8e0118248ec4093b389eebc04ea2adef,test-oracle,retain and extend old-new differential tests,tests
+tests/test_publication_clean_lines.py,b33f9979ab2d38a3bf79692c10bf6f1efbdae99f,b33f9979ab2d38a3bf79692c10bf6f1efbdae99f,test-oracle,retain and extend old-new differential tests,tests
+tests/test_publication_gate.py,1163572cd7527a3296e8559af9ecd623f905b0d5,1163572cd7527a3296e8559af9ecd623f905b0d5,test-oracle,retain and extend old-new differential tests,tests
+tests/test_publication_native_effects.py,54759b8564e9d10bbdb477f6442e46e9bd1a1134,55f1a72eb103c43ef3bcfcd7276b26fecb89c9b7,test-oracle,retain and extend old-new differential tests,tests
+tests/test_publication_native_timeout.py,effcf2146af013690b211b3a7b116cdb76204e1f,fd83e7a3a696f5e80437f8a12f3a9440d66bb83a,test-oracle,retain and extend old-new differential tests,tests
+tests/test_publication_prior_disclosure.py,3409afe83d265d23162cda92ab566cd1cf2b34c7,3409afe83d265d23162cda92ab566cd1cf2b34c7,test-oracle,retain and extend old-new differential tests,tests
+tests/test_publication_refusal_diagnostics.py,8d02d74f952a73a13b0ea2695cf33196de9cacfb,8d02d74f952a73a13b0ea2695cf33196de9cacfb,test-oracle,retain and extend old-new differential tests,tests
+tests/test_publication_retained_payload.py,ed9a5a970edd292173de938dbd7d01fef57d8a55,ed9a5a970edd292173de938dbd7d01fef57d8a55,test-oracle,retain and extend old-new differential tests,tests
+tests/test_publication_review_policy.py,7d67774db54839f57fe2d54bea25347fb3b33f09,7d67774db54839f57fe2d54bea25347fb3b33f09,test-oracle,retain and extend old-new differential tests,tests
+tests/test_publication_safety_gitlink.py,edc86c9bdae9c3593cb2fc55838a90ee5b577e31,edc86c9bdae9c3593cb2fc55838a90ee5b577e31,test-oracle,retain and extend old-new differential tests,tests
+tests/test_publication_safety_scanner.py,0abe0081c50387141b6e1c0c8b1b47de502b7386,373e37f8f26e324d80408bc649bed5a391460e92,test-oracle,retain and extend old-new differential tests,tests
+tests/test_pytest_output_routing.py,ee39f40f49994c4151b104ebe81a848601c89c6c,ee39f40f49994c4151b104ebe81a848601c89c6c,test-oracle,retain and extend old-new differential tests,tests
+tests/test_python_hook_entrypoints_smoke.py,25cd97dabdbdf39c76f1aca6390fc9a847411001,eb856ab196e92cb3b3efb202f5c56c9427bec1cb,test-oracle,retain and extend old-new differential tests,tests
+tests/test_python_production_entrypoints.py,d5466382fd57c0ba9d5de25f8f8ee764e9c69b17,22abd002f09fc769c8b9ef43735f04954d46f875,test-oracle,retain and extend old-new differential tests,tests
+tests/test_python_validator_runtime.py,c193108c98375dd0ff3f4ff3554b4dd5281d07d7,d822a88789fc44fd269ef57c5bd01180e1a1a425,test-oracle,retain and extend old-new differential tests,tests
+tests/test_qa_contract_economy.py,aba9408c940f14477dc0668b5076194d52a2914f,aba9408c940f14477dc0668b5076194d52a2914f,test-oracle,retain and extend old-new differential tests,tests
+tests/test_ready_solution_receiving_contract.py,db3108f043d6176c95c55d9722d0b0a1c77fafce,db3108f043d6176c95c55d9722d0b0a1c77fafce,test-oracle,retain and extend old-new differential tests,tests
+tests/test_receipted_claude_instruction_wiring.py,b8d8e19a0d1ac231be25edfa0f69d4dae6d92477,b8d8e19a0d1ac231be25edfa0f69d4dae6d92477,test-oracle,retain and extend old-new differential tests,tests
+tests/test_receipted_instruction_selection.py,3c2d2d3fc253f87d38ebd88b8204a58e17fa8081,3c2d2d3fc253f87d38ebd88b8204a58e17fa8081,test-oracle,retain and extend old-new differential tests,tests
+tests/test_registry_governance_reconciliation_contract.py,e494f2a0ea4f71d50d782dac1b06602db891a8fc,cb6dedc76ff5bcae1a6e4034bdd7d90fce1dab8a,test-oracle,retain and extend old-new differential tests,tests
+tests/test_remaining_role_prerequisites.py,f17c279d6c113e7b0d755a8e045fc96e67e63243,f17c279d6c113e7b0d755a8e045fc96e67e63243,test-oracle,retain and extend old-new differential tests,tests
+tests/test_removed_gemini_qwen_provider_contract.py,0b4b9c376a4516e42b26237cb1751b2e97618e4f,0b4b9c376a4516e42b26237cb1751b2e97618e4f,test-oracle,retain and extend old-new differential tests,tests
+tests/test_repo_cleanup_skill_contract.py,f63e4565de3fb47d2b394a84a7ba9c5e5ad29cf7,edd2b593a50d6fb2ae2169af782437b59a608b67,test-oracle,retain and extend old-new differential tests,tests
+tests/test_repository_local_boundaries.py,62aad234fa924745c752d41405762b7314e56619,62aad234fa924745c752d41405762b7314e56619,test-oracle,retain and extend old-new differential tests,tests
+tests/test_repository_orientation_hook.py,981edaa3dce32dc97de835082707602707a4e33e,3d2bb0059d033849a8cf33b84aea3486191eb877,test-oracle,retain and extend old-new differential tests,tests
+tests/test_reserved_receipt_alias.py,d906d0ba8c04ef508a753e1c5747bd60662bcfdf,d906d0ba8c04ef508a753e1c5747bd60662bcfdf,test-oracle,retain and extend old-new differential tests,tests
+tests/test_resolve_agents_mode.py,184c94545a84a780416c39406ebf6efb325bdd06,184c94545a84a780416c39406ebf6efb325bdd06,test-oracle,retain and extend old-new differential tests,tests
+tests/test_resolver_install_contract.py,c5485e59e569a59c38681fe72a8242a0aa9654cb,d211a2d26d97d93ad2d40d65a2b30aab52573069,test-oracle,retain and extend old-new differential tests,tests
+tests/test_retained_scratch_file_lifecycle.py,c56600c722f25bcb38a172790340f84f804ed88e,c56600c722f25bcb38a172790340f84f804ed88e,test-oracle,retain and extend old-new differential tests,tests
+tests/test_retained_scratch_release.py,af3d5a8f1e18a9684efb854effcce5edcb921707,af3d5a8f1e18a9684efb854effcce5edcb921707,test-oracle,retain and extend old-new differential tests,tests
+tests/test_review_entrypoint_economy.py,cdf5b95f8967d58e56a726269c90e2b23b444bcc,cdf5b95f8967d58e56a726269c90e2b23b444bcc,test-oracle,retain and extend old-new differential tests,tests
+tests/test_review_loop_enum_diagnostics.py,3bea9f9309939fae76ce556309defe1b89e66a56,3bea9f9309939fae76ce556309defe1b89e66a56,test-oracle,retain and extend old-new differential tests,tests
+tests/test_review_loop_state_v2.py,0da2eabef740724e4aa681c61db3efc4046030d8,86d31f942eddea22b9cc6b00c21f66092c528b42,test-oracle,retain and extend old-new differential tests,tests
+tests/test_review_subject_settlement.py,c7ef6934a409efddd97d6515ff8f40c68770734d,c7ef6934a409efddd97d6515ff8f40c68770734d,test-oracle,retain and extend old-new differential tests,tests
+tests/test_review_verdict_closure.py,fb050ba358c23d6ec9c650cb0b675a83d638043e,fb050ba358c23d6ec9c650cb0b675a83d638043e,test-oracle,retain and extend old-new differential tests,tests
+tests/test_revise_cap_contracts.py,b37d794cce1ac7d822e02f71b9b3f11618670134,b37d794cce1ac7d822e02f71b9b3f11618670134,test-oracle,retain and extend old-new differential tests,tests
+tests/test_role_policy_default_profile_floors.py,bb8faa923134c8f223004d07014f360535cfeea7,e19dfc082c14a9f369e4c6b55ccde44bfca17e2b,test-oracle,retain and extend old-new differential tests,tests
+tests/test_route_activation_registry.py,9f5c491352039c799e2c65d5b6230c986ffa0002,9f5c491352039c799e2c65d5b6230c986ffa0002,test-oracle,retain and extend old-new differential tests,tests
+tests/test_runtime_capabilities.py,7ced22accec6e9367beb9d24bbb99796538cd391,7ced22accec6e9367beb9d24bbb99796538cd391,test-oracle,retain and extend old-new differential tests,tests
+tests/test_scalar_parent_retention.py,a095d171b762310eb06d38487644ffca5e374524,a095d171b762310eb06d38487644ffca5e374524,test-oracle,retain and extend old-new differential tests,tests
+tests/test_scalar_restore_close.py,a257d30641e2975dd0485acdaa93af9b29a2cf75,a257d30641e2975dd0485acdaa93af9b29a2cf75,test-oracle,retain and extend old-new differential tests,tests
+tests/test_scientific_conformance_contract.py,7954b6d386aa114e560f6b202f77bd8cdd18c27f,8a33a29e166356c69116da21afe2b0a1f9fe239e,test-oracle,retain and extend old-new differential tests,tests
+tests/test_scratch_durable_custody.py,,3c68d35d5742da8f13c3327ebff3758e54beb547,test-oracle,retain and extend old-new differential tests,tests
+tests/test_scratch_evidence_lifecycle.py,2601291244c8ba2eec4944944b3f7cfd71250560,b09f09a072fbc05d6c589a3a4f4a531e3b9faabf,test-oracle,retain and extend old-new differential tests,tests
+tests/test_scratch_valuables_hook.py,a6d5b7a6a7fe945a5f3e5a4c7b474fabde880ed2,072afd11c965db413d392f74405215bba4ccf12b,test-oracle,retain and extend old-new differential tests,tests
+tests/test_scratch_valuables_hook_common_unimportable.py,b0b84cd5ca96e85b613e592724ada462118b28ff,7356eb52f07ddd307995c10da79cc1cbb0465e33,test-oracle,retain and extend old-new differential tests,tests
+tests/test_scratch_watchdog_repository_root.py,3ca0a1d6d6aed71973ac25de60fc508b406d16a4,34be3099f05750994a308598c8fb636bb1c823c3,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_acp_streams.py,,a66a6f9ef4246366df8bf8bc6e2feca534919dfb,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_artifact_namespace.py,,5cfa483d6d9d3fc4fe00dacbfb860d6081d9eb70,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_claude.py,,cfd74db195093557a166586967c9be98bb577198,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_codex.py,,393b8aded4a160e8aa53790410eab1be59dd5a1f,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_codex_tools.py,,5a65bacb3896174faa3a73509b96bcde7630b157,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_context_selection.py,,6a66671d51cc9673fe44d3f91772f80fe6ed8143,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_coordination.py,,5c6e5b56cfe0ee4b42a328601c21c44edbdbec03,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_coordination_owner.py,,bf3aedb2eeb26e53c16fa161414ecf53316a3e6e,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_coordination_runner.py,,183b5ad0fc926dcaaaf72b9256c8d329f6800ccd,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_coordinator.py,,09830c843e48f189f142104fd27206d17ad0035c,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_dispatch.py,,93003158b41113f4942a77e1961569a8b9b58029,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_grok.py,,9f229f696ab52642ebc00863ca7c0e20e11d1d7e,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_grok_process.py,,9195b75804a23deecb8736ec07a2d35781502239,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_hook_package_binding.py,,cee5412dc070d128a5e656c62f6dbc687031ee33,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_installed_dispatch.py,,8f694486cafef88fce3fcc63604d6d1553ff78b8,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_kimi.py,,ffd94786371b1f4572216cd393518d8cb2bdbf21,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_kimi_callbacks.py,,fdb93bc13c16bcef26b1535d409a6e1716041ac5,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_launch_entrypoint.py,,5c26f9989656f4dc822ddc7d7ec0c6aa7be6f9b6,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_ledger.py,,d4f741b35d4cc5088a5ef41d85cb78354f8b2314,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_live_caller_example.py,,263851ae1803e1b3f30ef45d9680249bc7641f02,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_migration_route.py,,f9a67059f5afb8f065db3b45f519b6ebf7bf2676,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_mimo.py,,82029304d827089bab2a40d16911e90cd5728cb0,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_mimo_official_acp.py,,8e6d6ab6ebe2c515298ca972901c1fa1182eecaf,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_minimax.py,,88cbb672c993fce8d63594e482cffbca657f08f0,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_observation_snapshot.py,,0ed6a689a6ccf1524908b11a6cb2f8e85dd8d5bf,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_process_owner.py,,88322e56d1ad56cf9409522fb7e51c5977d291e7,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_provider_identity_contract.py,,8a2ded6527d547591882943a149828df3102f55e,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_provider_result.py,,d3ba527e09f88ecf525339d45ab086f48e5312ee,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_receipt_close.py,,4bc437c6980f6d068d5bbaca6a2ea1976cbe9e87,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_receiving.py,,aa08e780fa843987ee2b313f5f54fc530138598c,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_receiving_preworker.py,,632732431d60430c457b92d44bb13c77c72f9149,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_recovery_lifecycle.py,,2254f6b986c3b612a506274d1403521373879511,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_resume_snapshot.py,,3da08e0a6b470df77a305f1f05b7d4d52a5edcbb,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_runtime.py,,a7765febc0aaa2a64be0470264b14777ecc1acba,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_selected_prior_receiving.py,,3cebc631098cfd51523dc8334ee1360428cb69d3,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_selected_receipt_composition.py,,c1dff9765faaee79cd17a32c1e87ab361a421831,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_selected_receipt_finalization.py,,0728c87e07eb546d6cb80341d7fd7d19748561ff,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_setup.py,,39afca72ceb10c7c3f73c09dc85b3b126c7bef56,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_tracing_isolation.py,,f67b18e8942e4bc2b53cdc343176f8456846de8b,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sdk_transport_source_manifest.py,,d531ad0bec0fefb62b248ead744c132ab86bb5aa,test-oracle,retain and extend old-new differential tests,tests
+tests/test_selected_block_receipt_plan.py,a4cdf8a8245261361b21443287a57ca0b62954c7,a4cdf8a8245261361b21443287a57ca0b62954c7,test-oracle,retain and extend old-new differential tests,tests
+tests/test_selected_claude_instruction_wiring.py,dc0a37eb7e668cb82153663ab9a5f6321898d373,e281bec41b0e5355aa42d4c1390241b3156e3c18,test-oracle,retain and extend old-new differential tests,tests
+tests/test_selected_claude_linked_physical.py,8ec0d4d47f4fde7bc80499e8fd8bef41876500a9,8ec0d4d47f4fde7bc80499e8fd8bef41876500a9,test-oracle,retain and extend old-new differential tests,tests
+tests/test_selected_codex_document_wiring.py,fbca73b8d3898cf6eb077b0df43fadd9d27bc1fb,25d90c5ed2230efed5d6fe4829d0624f406d905a,test-oracle,retain and extend old-new differential tests,tests
+tests/test_selected_document_receipt_plan.py,441e329f87144daa4acf870cbe3f7b41d7148a46,441e329f87144daa4acf870cbe3f7b41d7148a46,test-oracle,retain and extend old-new differential tests,tests
+tests/test_selected_document_rendering.py,9f922ef882596aed2242579d65a5eb9909bc0916,9f922ef882596aed2242579d65a5eb9909bc0916,test-oracle,retain and extend old-new differential tests,tests
+tests/test_selected_file_receipt_plan.py,84020f4d3557619901897b6724ceebb6468cc4f2,84020f4d3557619901897b6724ceebb6468cc4f2,test-oracle,retain and extend old-new differential tests,tests
+tests/test_session_persistence_contract.py,83fbac46490e3e1b93f91ac2e6553a8237719cae,f850eb9043799f700270eae9aa8c631b9432cc7b,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sessionstart_reminder_python_hooks.py,a9312dde896d8098ff9599805f47721dc58d8dc2,101525dcea5f897bd86ebaf2e7f6d06ece9249a5,test-oracle,retain and extend old-new differential tests,tests
+tests/test_slice_a_design_currency.py,9ddf4675b9e2b649dbb608fbcde3626e6ccb7e4b,9ddf4675b9e2b649dbb608fbcde3626e6ccb7e4b,test-oracle,retain and extend old-new differential tests,tests
+tests/test_slice_a_detached_validation.py,24e97b85f87065aca655b14ee301fb15d491120b,24e97b85f87065aca655b14ee301fb15d491120b,test-oracle,retain and extend old-new differential tests,tests
+tests/test_slice_b_external_dispatch.py,ebe99a636561e47f46cac3197a3234e510b30e2d,ebe99a636561e47f46cac3197a3234e510b30e2d,test-oracle,retain and extend old-new differential tests,tests
+tests/test_slice_b_fix_controls.py,be87c38726c111ef50e2711f46f3504d1414bc5f,be87c38726c111ef50e2711f46f3504d1414bc5f,test-oracle,retain and extend old-new differential tests,tests
+tests/test_snapshot_capture_diagnostics.py,149bad458b837dbaaf5e7670a34df39a89886081,149bad458b837dbaaf5e7670a34df39a89886081,test-oracle,retain and extend old-new differential tests,tests
+tests/test_sol_6_1_routing_migration.py,c095f25e698135b57205c4381842fca767930e7f,56e62ab469689e4c459a3ae385171cbc7c297010,test-oracle,retain and extend old-new differential tests,tests
+tests/test_solution_attempt_integration.py,34577ae1369f94639ceb6223314d8dd1e31e23ce,34577ae1369f94639ceb6223314d8dd1e31e23ce,test-oracle,retain and extend old-new differential tests,tests
+tests/test_solution_attempt_reducer.py,6f01ab07104482d51188c797a9a4ab9ffd33602c,6f01ab07104482d51188c797a9a4ab9ffd33602c,test-oracle,retain and extend old-new differential tests,tests
+tests/test_stale_relation_residue_hook.py,784528aa87b8d1d1ed68fe3ed35d66c38acaf33d,c4e7dbc27dd12f1dd6448762a28a9b3eb8224b0a,test-oracle,retain and extend old-new differential tests,tests
+tests/test_transaction_admission_hold.py,8cf7b727d01a2eb18e429fc0f00cf832c7cbffda,1fae3e9ada299396447cbdae938044f4b42c4872,test-oracle,retain and extend old-new differential tests,tests
+tests/test_transaction_disposal_hold.py,7cda5f63e83ab4d05db6c207623be84be5bfb31e,7cda5f63e83ab4d05db6c207623be84be5bfb31e,test-oracle,retain and extend old-new differential tests,tests
+tests/test_transaction_snapshot_lifecycle.py,886279609b28c6417fb2209dc36dbf9e498b7607,886279609b28c6417fb2209dc36dbf9e498b7607,test-oracle,retain and extend old-new differential tests,tests
+tests/test_transfer_receipt_integrity.py,45ae741974fa47b8b8ce013490b1c096a5f2787a,45ae741974fa47b8b8ce013490b1c096a5f2787a,test-oracle,retain and extend old-new differential tests,tests
+tests/test_transition_intent_resources.py,c34ae59e37fd563d2a05fde4efc573dd37dbfde0,c34ae59e37fd563d2a05fde4efc573dd37dbfde0,test-oracle,retain and extend old-new differential tests,tests
+tests/test_typed_routing_hook.py,1c9ac430ab7855e4130c5d4928c25a0b25924558,4af3861c1da747205ec8d62a4dedc2c31e15a924,test-oracle,retain and extend old-new differential tests,tests
+tests/test_ui_transition_continuity_contract.py,60d6a39bd075173824d6f8f99b45e29960cee8ce,dfb99c869ebd5d18eda4c8a2b0601584147eac8a,test-oracle,retain and extend old-new differential tests,tests
+tests/test_universal_audit_hooks_hook_common_unimportable.py,f2f685611dceb01e1a11604619c1bb378c7c9777,2748fcf3ba97dd8e54f9814ac54bb38e74e1e779,test-oracle,retain and extend old-new differential tests,tests
+tests/test_universal_hook_surfaces.py,6232770257c505957249b106cbc701b3638a0950,a59500ee5573223a4b3c8ae9e19e9e3b5ed3160e,test-oracle,retain and extend old-new differential tests,tests
+tests/test_universal_reminder_hooks.py,b09f1fd33d2710688e59468f68a192fad0b0816e,b09f1fd33d2710688e59468f68a192fad0b0816e,test-oracle,retain and extend old-new differential tests,tests
+tests/test_vcpkg_ports_updater_skill_contract.py,0456ddc960aef182acd644252e19db76fa65d82d,9e1ecc63fc4b895b3d9d188c75b27d702245d4ab,test-oracle,retain and extend old-new differential tests,tests
+tests/test_windows_hook_unicode.py,,2863b6d7978ca0920a474c2b6ae87e519f33b779,test-oracle,retain and extend old-new differential tests,tests
+tests/test_windows_job_owner.py,2172336fa203ca1fc7ba167f96deda3b19f6bd7b,2172336fa203ca1fc7ba167f96deda3b19f6bd7b,test-oracle,retain and extend old-new differential tests,tests
+tests/test_windows_private_dacl.py,c5c092513931c9e1c8ab0eb29a9d56bbb3c15749,c5c092513931c9e1c8ab0eb29a9d56bbb3c15749,test-oracle,retain and extend old-new differential tests,tests
+tests/test_windows_projection_junction.py,2849fe772348a08c80fb0d847c1d1fc9ae6814d4,2849fe772348a08c80fb0d847c1d1fc9ae6814d4,test-oracle,retain and extend old-new differential tests,tests
+tests/test_work_item_state_validator.py,1b13c891bb507a311e83394587fdc1da1e1f6fba,2aa1557a88834148084434f28381c648c91e567c,test-oracle,retain and extend old-new differential tests,tests
+tests/test_work_items_archival_hook.py,37103c976d98e9e42b60e71eefb39a5360e6efc6,8a0fb3f8d99a9e23edefe4c9271f700b89e62d31,test-oracle,retain and extend old-new differential tests,tests
+tests/test_work_items_lifecycle_install_parity.py,3ae6497c73dee9b6be5d1829739eb580dff5455a,d79fc82791254f56355b03164f5c57045a612322,test-oracle,retain and extend old-new differential tests,tests
+tests/test_work_items_state_checker.py,de37fca4a2e90f5587e379cd12988c1252a4e437,15cf8bb4ce9c0498c4abf01e9e06f7ceef4b8fb5,test-oracle,retain and extend old-new differential tests,tests
+tests/test_workcycle_owner_contract.py,fae8f96379391ff69906e6d449adcb6e8d128baa,f8dbe100ffdff9b2a044dd8df5167729510d1e06,test-oracle,retain and extend old-new differential tests,tests
+tests/test_workflow_economy_contract.py,62e811d36b150e9aee8b374777ebea1de02b4904,62e811d36b150e9aee8b374777ebea1de02b4904,test-oracle,retain and extend old-new differential tests,tests
+tests/test_workitem_sentinels.py,a95c8d6de0b8ead95e876cc0491e32703d23c528,cc4f8c2bcfe49a84cc8a2df2c561cdef12050d8c,test-oracle,retain and extend old-new differential tests,tests
+tests/test_wrapper_model_effort_guard.py,97e115821810b4b8cd88643588db096c9e965715,5384deace7b54606f9567588e4fbb95a44680245,test-oracle,retain and extend old-new differential tests,tests
