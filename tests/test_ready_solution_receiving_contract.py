@@ -7,7 +7,7 @@ from policy_text_contract import selected_unit
 ROOT = Path(__file__).resolve().parent.parent
 OWNERS = (
     ("src.codex/skills/lead/subagent-contracts.md", "Shared handoff template"),
-    ("src.claude/agents/contracts/subagent-contracts.md", "Handoff template"),
+    ("adapters/claude/agents/contracts/subagent-contracts.md", "Handoff template"),
     ("shared/references/subagent-operating-model.md", "4. Standard task template for any subagent"),
 )
 MARKER = "Reuse-assessment carry-forward."

@@ -6,7 +6,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 REVIEW_ENTRYPOINTS = (
     "src.codex/skills/review-changes/SKILL.md",
-    "src.claude/commands/agents-review.md",
+    "adapters/claude/commands/agents-review.md",
 )
 
 
@@ -58,13 +58,17 @@ class TestReviewEntrypointEconomy(unittest.TestCase):
                 self.assertIn("admit an Analyst to collect those facts before the downstream QA or review verdict", text)
 
     def test_review_entrypoints_preserve_the_existing_anti_layering_trigger(self) -> None:
-        marker = (
-            "When the existing multi-fix anti-layering trigger applies, its Architecture Reviewer lane "
-            "and distinct-engine audit remain mandatory"
+        required = (
+            "Inside an already-triggered Architecture Reviewer gate",
+            "apply its mandatory multi-fix anti-layering audit and distinct-engine requirement",
+            "the batch trigger creates no additional reviewer, lane, artifact, engine, or review loop",
+            "A `PILED` verdict maps to `REVISE` and blocks push",
         )
         for relative in REVIEW_ENTRYPOINTS:
             with self.subTest(relative=relative):
-                self.assertIn(marker, self._read(relative))
+                text = self._read(relative)
+                for marker in required:
+                    self.assertIn(marker, text)
 
     def test_authorized_thread_resolution_is_delegated_to_the_hosted_state_owner(
         self,

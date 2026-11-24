@@ -78,7 +78,7 @@ AUDIT_HIT_CASES = (
     ),
     (
         "check-no-trash-in-repo.py",
-        {"tool_input": {"command": "git worktree add ../wt"}},
+        {"tool_name": "Bash", "tool_input": {"command": "git worktree add ../wt"}},
     ),
     (
         "check-stale-relation-residue.py",
