@@ -2747,7 +2747,7 @@ def test_e7_claude_transport_replacement_rolls_back_trees_trio_and_manifest(
     target.mkdir()
     args = ["--target", str(target), "--force", "--allow-unsafe-target", "--no-hypothesis-hook"]
     assert installer.install("claude", args) == 0
-    canonical = target / ".agents" / "skills"
+    canonical = target / ".claude" / "skills"
     transport = target / ".claude" / "agents" / "scripts"
     manifest = transport.parent / "shared" / "provider-prompt-projections.v1.json"
 
@@ -2778,6 +2778,31 @@ def test_e7_claude_transport_replacement_rolls_back_trees_trio_and_manifest(
     assert _sha(legacy_provider) == installer.E7_LEGACY_PROVIDER_PROMPT_SHA256
     (transport / "provider_prompt.py").write_bytes(legacy_provider)
 
+    # Seed one coherent predecessor within the fresh install's existing ownership.
+    # Legacy tree entries retain the pinned factory qualification above instead of
+    # claiming that the current per-member receipts describe these older bytes.
+    nonlead_receipt = canonical / installer._NONLEAD_RECEIPT_NAME
+    nonlead_record = json.loads(nonlead_receipt.read_bytes())
+    for name in retained_names:
+        assert name in nonlead_record["skills"]
+        nonlead_record["skills"][name] = installer.E7_CANONICAL_SKILL_TREE_SHA256[name]
+    nonlead_receipt.write_bytes(installer._nonlead_receipt_bytes(
+        nonlead_record["skills"], schema=nonlead_record["schema"]))
+    codec = installer._provider_ownership_module(ROOT)
+    provider_receipt = target / ".claude" / installer._PROVIDER_RECEIPT_NAME
+    record = codec.decode_record(provider_receipt.read_bytes(), "claude", "project")
+    seeded = [nonlead_receipt, manifest, *(transport / name for name in TRANSPORT_FILES)]
+    seeded.extend(path for name in retained_names for path in (canonical / name).rglob("*")
+                  if path.is_file())
+    for path in seeded:
+        relative = path.relative_to(target).as_posix()
+        assert relative in record["files"], "synthetic prior cannot add ownership"
+        if path.is_file():
+            record["files"][relative] = _sha(path.read_bytes())
+        else:
+            del record["files"][relative]
+    provider_receipt.write_bytes(codec.serialize_record(record, "claude", "project"))
+
     def witness(path: Path):
         if not path.exists():
             return None
@@ -2791,6 +2816,7 @@ def test_e7_claude_transport_replacement_rolls_back_trees_trio_and_manifest(
             {path.relative_to(canonical): witness(path) for path in canonical.rglob("*")},
             {name: witness(transport / name) for name in TRANSPORT_FILES},
             witness(manifest),
+            witness(provider_receipt),
         )
 
     before = snapshot_effects()
@@ -3083,6 +3109,7 @@ def test_linked_claude_subroot_rollback_restores_resolved_agent_bytes(
     marker = backing / "agents" / "consultant.md"
     original = marker.read_bytes()
     marker.write_bytes(b"custom linked agent before transaction\n")
+    marker_identity = installer._CreateOnlyMutablePath._identity(marker)
     links = {name: os.readlink(logical / name) for name in ("agents", "commands")}
     sync_tree = installer._sync_tree
     injected = []
@@ -3090,13 +3117,18 @@ def test_linked_claude_subroot_rollback_restores_resolved_agent_bytes(
     def fail_after_commands(source: Path, target: Path, dry_run: bool, **kwargs) -> None:
         sync_tree(source, target, dry_run, **kwargs)
         if source.name == "commands":
+            assert marker.read_bytes() == original
             injected.append(source.name)
             raise RuntimeError("injected linked-subroot failure")
 
     monkeypatch.setattr(installer, "_sync_tree", fail_after_commands)
-    assert installer.install("claude", ["--global", "--no-hypothesis-hook"]) == 1
+    assert installer.install("claude", [
+        "--global", "--no-hypothesis-hook", "--replace-claude-instruction",
+        "agents/consultant.md=" + _sha(marker.read_bytes()),
+    ]) == 1
     assert injected == ["commands"]
     assert marker.read_bytes() == b"custom linked agent before transaction\n"
+    assert installer._CreateOnlyMutablePath._identity(marker) == marker_identity
     assert original != marker.read_bytes()
     assert {name: os.readlink(logical / name) for name in links} == links
 
