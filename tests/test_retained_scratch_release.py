@@ -780,7 +780,9 @@ def test_reconcile_prior_disposal_public_cli_preserves_history_and_replays(tmp_p
     replay = reconciliation_cli(root, item, request_file)
     assert replay.returncode == 0, replay.stdout + replay.stderr
     assert path.read_bytes() == receipt_bytes
-    assert mutator._scratch_disposition_plan(root, item, archived=False)[0].disposition == "completed-disposal"
+    entry = event["scratchEvidence"][0]
+    assert mutator._release_receipt(root, item, event["runId"], entry["entryId"], entry) == receipt
+    assert mutator._scratch_disposition_plan(root, item, archived=False) == ()
     instant = "2026-08-09T01:00:00Z"
     closure_file = tmp_path / "closure-input.md"
     closure_file.write_bytes(helpers.closure(instant))
@@ -791,6 +793,7 @@ def test_reconcile_prior_disposal_public_cli_preserves_history_and_replays(tmp_p
         closed = subprocess.run(argv, cwd=ROOT, env=environment, capture_output=True, text=True, timeout=30)
         assert closed.returncode == 0, closed.stdout + closed.stderr
     archived = root / "work-items/archive/2026-08" / item.name
+    assert json.loads((archived / mutator.BUG_DISPOSITIONS_RECEIPT).read_bytes())["scratchSelection"] == []
     assert (archived / "agent-runs.jsonl").read_bytes() == before[item.relative_to(root) / "agent-runs.jsonl"]
     assert mutator._release_receipt_path(archived, receipt["runId"], receipt["entryId"]).read_bytes() == receipt_bytes
     assert not scratch.exists()
@@ -869,8 +872,9 @@ def test_reconciliation_receipt_and_proof_drift_never_replace_prior_bytes(tmp_pa
     before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
     refused = reconciliation_cli(root, item, request_file)
     assert refused.returncode == 1, refused.stdout + refused.stderr
+    entry = event["scratchEvidence"][0]
     with pytest.raises(mutator.LifecycleError):
-        mutator._scratch_disposition_plan(root, item, archived=False)
+        mutator._release_receipt(root, item, event["runId"], entry["entryId"], entry)
     assert {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()} == before
     assert not scratch.exists()
 
@@ -918,7 +922,7 @@ def test_reconciliation_batch_failure_rolls_back_only_new_metadata(tmp_path: Pat
 
 
 @pytest.mark.parametrize("change", ["reappearance", "proof-drift"])
-def test_completed_disposal_rechecks_before_and_after_archive_without_deletion(tmp_path: Path, monkeypatch, change: str):
+def test_empty_scratch_namespace_and_current_item_drift_refuse_without_deletion(tmp_path: Path, monkeypatch, change: str):
     helpers, mutator, root, item, scratch, _event, _request, request_file = prior_disposal_fixture(tmp_path)
     assert reconciliation_cli(root, item, request_file).returncode == 0
     instant = "2026-08-09T01:00:00Z"
@@ -937,11 +941,16 @@ def test_completed_disposal_rechecks_before_and_after_archive_without_deletion(t
             (archived / "implementation.md").write_bytes(b"late changed canonical observations")
             return result
         monkeypatch.setattr(mutator, "refresh_readme", refresh_then_drift)
-    with pytest.raises(mutator.LifecycleError, match="completed-disposal|reviewed evidence"):
-        mutator.close_item(root, item.name, helpers.closure(instant), instant)
+    observer = mutator.LifecycleDiagnosticObserver()
+    with pytest.raises(mutator.LifecycleError) as caught:
+        mutator.close_item(root, item.name, helpers.closure(instant), instant, diagnostic_observer=observer)
+    assert observer.snapshot.primaryFailureId == "WI-CATEGORY-MIGRATION-INVENTORY"
     if change == "reappearance":
+        assert caught.value.failure_id == "WI-CATEGORY-MIGRATION-INVENTORY"
         assert scratch.read_bytes() == b"late unrelated payload" and item.is_dir()
     else:
+        assert caught.value.failure_id == "WI-BUG-DISPOSITIONS-ROLLBACK"
+        assert observer.snapshot.rollback == "incomplete"
         assert (root / "work-items/archive/2026-08" / item.name / "implementation.md").read_bytes() == b"late changed canonical observations"
         assert not scratch.exists()
 
@@ -953,17 +962,35 @@ def test_reconciliation_preserves_unselected_missing_retention_and_open_launch(t
     request_file.write_text(json.dumps(request), encoding="utf-8")
     applied = reconciliation_cli(root, item, request_file)
     assert applied.returncode == 0, applied.stdout + applied.stderr
-    with pytest.raises(mutator.LifecycleError, match="retained scratch evidence is missing"):
-        mutator._scratch_disposition_plan(root, item, archived=False)
+    unselected = event["scratchEvidence"][1]
+    assert mutator._release_receipt_path(item, event["runId"], event["scratchEvidence"][0]["entryId"]).is_file()
+    assert not mutator._release_receipt_path(item, event["runId"], unselected["entryId"]).exists()
     ledger = item / "agent-runs.jsonl"
     original_rows = ledger.read_bytes()
     launch = json.loads(original_rows.splitlines()[0]); launch["runId"] = "unrelated-open-launch"
     ledger.write_bytes(original_rows + json.dumps(launch).encode() + b"\n")
     assert reconciliation_cli(root, item, request_file).returncode == 0
-    assert ledger.read_bytes().startswith(original_rows)
-    with pytest.raises(mutator.LifecycleError, match="WI-LEDGER-UNSETTLED|launch"):
-        mutator.close_item(root, item.name, helpers.closure("2026-08-09T01:00:00Z"), "2026-08-09T01:00:00Z")
-    assert item.is_dir() and not scratch.exists()
+    preserved_rows = ledger.read_bytes()
+    assert preserved_rows.startswith(original_rows)
+    states, acquired = [], []
+    errors = mutator._validator_module().validate_work_item(item, strict_revise=True,
+        obligation_state_out=states, ledger_acquisition_complete_out=acquired)
+    assert acquired == [True] and len(states) == 1
+    assert [row.run_id for row in states[0].open_launches] == [launch["runId"]]
+    assert any(error.startswith(f"unsettled launch: {launch['runId']} ") for error in errors)
+    assert item.is_dir() and ledger.read_bytes() == preserved_rows
+    # Physical close preserves this history; it does not certify missing raw
+    # custody or discharge the unrelated launch reported by strict receiving.
+    instant = "2026-08-09T01:00:00Z"
+    archived = mutator.close_item(root, item.name, helpers.closure(instant), instant)
+    assert (archived / "agent-runs.jsonl").read_bytes() == preserved_rows and not scratch.exists()
+    before_release = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    with pytest.raises(mutator.LifecycleError) as caught:
+        mutator.release_retained_scratch(root, archived.name, terminal_run_id=event["runId"],
+            expected_event_sha256=request["subjects"][0]["eventSha256"], entry_id=unselected["entryId"],
+            artifact="implementation.md", rationale="Select only the still-unproved retained subject.", apply=True)
+    assert caught.value.failure_id == "WI-SCRATCH-RETAINED-EVIDENCE-MISSING"
+    assert {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()} == before_release
 
 
 def test_release_empty_retained_directory_preserves_archive_and_replays(tmp_path: Path) -> None:

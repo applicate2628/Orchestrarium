@@ -125,6 +125,16 @@ def test_retained_file_invalid_states_fail_before_archive(
     )
     if case == "missing":
         retained.unlink()
+        # A live declared sibling selects this row's retention obligations.
+        # An entirely empty physical namespace does not select old ledger rows.
+        events = ledger_events(item)
+        sibling = retained.with_name("remaining.json")
+        sibling.write_bytes(retained_bytes)
+        events[-1]["scratchEvidence"].append({
+            **events[-1]["scratchEvidence"][0], "entryId": sibling.name,
+            "path": sibling.relative_to(root).as_posix(),
+        })
+        write_ledger(item, events)
     elif case == "undeclared-sibling":
         (retained.parent / "undeclared.json").write_bytes(b"{}\n")
     elif case == "file-tombstone":
