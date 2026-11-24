@@ -17,6 +17,8 @@ To change only the shared registrations and their generated inventory, add
 complete owned registration and does not install or update skills, roles,
 documents, settings, or trust.
 
+See the [Orche distribution project](docs/npm-distribution-project.md) for
+planned PowerShell, POSIX shell, and optional npm acquisition of this installer.
 
 ## Supported filesystem backends
 
