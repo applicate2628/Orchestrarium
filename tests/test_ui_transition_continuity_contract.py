@@ -418,7 +418,7 @@ def _run_scoped_install(
         f"UI-CONTINUITY-CONTRACT-DRIFT: {provider} {scope} install failed\n"
         f"{result.stdout}\n{result.stderr}"
     )
-    canonical_root = anchor / ".agents"
+    canonical_root = anchor / (".agents" if provider == "codex" else ".claude")
     provider_root = (
         canonical_root
         if provider == "codex" and scope == "project"

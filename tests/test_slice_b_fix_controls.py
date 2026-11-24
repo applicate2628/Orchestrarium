@@ -64,19 +64,6 @@ def _terminal_outcome() -> object:
     )
 
 
-def _external_terminal_row(provenance: object) -> dict[str, object]:
-    return {
-        "schemaVersion": 2,
-        "runId": provenance.external_evidence_run_id,
-        "eventKind": "terminal",
-        "launchRunId": provenance.external_dispatch_id,
-        "terminalClass": "external-nonauthorizing",
-        "authorizing": False,
-        "closesRunIds": [],
-        **provenance.terminal_projection(),
-    }
-
-
 @pytest.mark.parametrize("field", tuple(OWNER.ExecutionProvenance.__dataclass_fields__))
 def test_execution_provenance_drift_is_rejected_before_envelope_or_ledger_sink(
     field: str, monkeypatch: pytest.MonkeyPatch
@@ -137,41 +124,21 @@ def test_execution_provenance_drift_is_rejected_before_envelope_or_ledger_sink(
     assert ledger_calls == []
 
 
-def test_execution_provenance_has_identical_envelope_and_ledger_projection(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _persist_external_terminal_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from tests.test_agent_run_ledger import prepare_valid_work_item
 
     ledger = prepare_valid_work_item(tmp_path)
     (ledger / "mutable-artifact").write_text("Fixture review result.\n", encoding="utf-8")
     provenance = replace(_execution_provenance(), work_item=ledger.name)
-    encoded = OWNER.build_provider_result_line(
-        "kimi",
-        "kimi-code/k3",
-        "unsupported",
-        "fixture",
-        _terminal_outcome(),
-        cancelled=False,
-        timed_out=False,
-        provenance=provenance,
-        expected_provenance=provenance,
-        role_provenance=OWNER.ExternalRoleProvenance(
-            "qa-engineer", "external-reviewer"
-        ),
-    )
-    envelope = OWNER.parse_provider_result(encoded)
-    assert {key: envelope[key] for key in provenance.payload()} == provenance.payload()
-
-    ledger_args: list[list[str]] = []
     control = OWNER.Control(ledger=str(ledger), ledger_artifact="mutable-artifact")
     role = OWNER.ExternalRoleProvenance("qa-engineer", "external-reviewer")
+    ledger_args: list[list[str]] = []
 
     def persist_terminal(_runner: object, args: list[str]) -> bool:
         ledger_args.append(args)
         return OWNER._ledger_owner().main(args) == 0
 
-    # Use the actual paired writer and work-item validator. A fabricated
-    # terminal-only JSON file cannot establish current canonical readback.
+    # Canonical readback requires the actual work item and paired launch/terminal.
     launch_args = [
         "--work-item", str(ledger), "append",
         "--run-id", provenance.external_dispatch_id,
@@ -184,23 +151,33 @@ def test_execution_provenance_has_identical_envelope_and_ledger_projection(
     assert OWNER._ledger_owner().main(launch_args) == 0
     monkeypatch.setattr(OWNER, "run_ledger", persist_terminal)
     assert OWNER.record_terminal(
-        control,
-        "kimi",
-        "kimi-code/k3",
-        "unsupported",
-        "mutable-topic",
-        provenance.external_dispatch_id,
-        _terminal_outcome(),
-        cancelled=False,
-        timed_out=False,
-        result_delivered=True,
-        runner=object(),
-        role_provenance=OWNER.ExternalRoleProvenance(
-            "qa-engineer", "external-reviewer"
-        ),
-        provenance=provenance,
-        expected_provenance=provenance,
+        control, "kimi", "kimi-code/k3", "unsupported", "mutable-topic",
+        provenance.external_dispatch_id, _terminal_outcome(),
+        cancelled=False, timed_out=False, result_delivered=True,
+        runner=object(), role_provenance=role,
+        provenance=provenance, expected_provenance=provenance,
     )
+    rows = [json.loads(line) for line in
+            (ledger / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 2 and rows[0]["eventKind"] == "launch"
+    assert OWNER.read_back_external_terminal(
+        control, provenance.provider, provenance.external_dispatch_id, provenance
+    ) == rows[1]
+    return control, provenance, rows, ledger_args
+
+
+def test_execution_provenance_has_identical_envelope_and_ledger_projection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    control, provenance, rows, ledger_args = _persist_external_terminal_fixture(tmp_path, monkeypatch)
+    encoded = OWNER.build_provider_result_line(
+        "kimi", "kimi-code/k3", "unsupported", "fixture", _terminal_outcome(),
+        cancelled=False, timed_out=False, provenance=provenance,
+        expected_provenance=provenance,
+        role_provenance=OWNER.ExternalRoleProvenance("qa-engineer", "external-reviewer"),
+    )
+    envelope = OWNER.parse_provider_result(encoded)
+    assert {key: envelope[key] for key in provenance.payload()} == provenance.payload()
     args = ledger_args[0]
     values = {
         args[index]: args[index + 1]
@@ -213,216 +190,114 @@ def test_execution_provenance_has_identical_envelope_and_ledger_projection(
     assert values["--external-dispatch-id"] == provenance.external_dispatch_id
     assert values["--external-evidence-run-id"] == provenance.external_evidence_run_id
     assert values["--effort-mapping-loss"] == provenance.effort_mapping_loss
-    rows = [json.loads(line) for line in
-            (ledger / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert len(rows) == 2
     persisted = rows[1]
-    assert rows[0]["eventKind"] == "launch"
     assert OWNER.read_back_external_terminal(
         control, "kimi", provenance.external_dispatch_id, provenance
     ) == persisted
-    assert {
-        key: persisted[key] for key in provenance.terminal_projection()
-    } == provenance.terminal_projection()
+    assert {key: persisted[key] for key in provenance.terminal_projection()} == provenance.terminal_projection()
 
 
 @pytest.mark.parametrize("field", tuple(_execution_provenance().terminal_projection()))
 def test_external_terminal_readback_rejects_each_post_append_provenance_mutation(
-    field: str, tmp_path: Path
+    field: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    provenance = _execution_provenance()
-    ledger = tmp_path / "item-frozen"
-    ledger.mkdir()
-    ledger_path = ledger / "agent-runs.jsonl"
-    terminal = _external_terminal_row(provenance)
-    ledger_path.write_text(json.dumps(terminal) + "\n", encoding="utf-8")
-
-    control = OWNER.Control(ledger=ledger)
+    control, provenance, rows, _args = _persist_external_terminal_fixture(tmp_path, monkeypatch)
+    ledger_path = Path(control.ledger) / "agent-runs.jsonl"
+    terminal = rows[1]
     assert OWNER.read_back_external_terminal(
         control, provenance.provider, provenance.external_dispatch_id, provenance
     ) == terminal
 
-    terminal[field] = f"mutated-{field}"
-    ledger_path.write_text(json.dumps(terminal) + "\n", encoding="utf-8")
+    terminal[field] = ["--model", "mutated-model"] if field == "launchFlags" else f"mutated-{field}"
+    ledger_path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
     assert OWNER.read_back_external_terminal(
         control, provenance.provider, provenance.external_dispatch_id, provenance
     ) is None
 
 
-class _ReadlineOnlyStream:
-    """Virtual text stream that rejects whole-file and iterator consumption."""
-
-    def __init__(self, content: str) -> None:
-        self._content = content
-        self._offset = 0
-        self.readline_sizes: list[int] = []
-
-    @property
-    def eof(self) -> bool:
-        return self._offset == len(self._content)
-
-    def __enter__(self) -> _ReadlineOnlyStream:
-        return self
-
-    def __exit__(self, *_args: object) -> bool:
-        return False
-
-    def read(self, *_args: object) -> str:
-        pytest.fail("whole-file read reached")
-
-    def read_text(self, *_args: object) -> str:
-        pytest.fail("Path.read_text reached")
-
-    def readlines(self, *_args: object) -> list[str]:
-        pytest.fail("whole-file readlines reached")
-
-    def __iter__(self) -> object:
-        pytest.fail("stream iteration reached")
-
-    def readline(self, size: int = -1) -> str:
-        assert size > 0, "readline must have a bound"
-        self.readline_sizes.append(size)
-        if self._offset == len(self._content):
-            return ""
-        stop = min(self._offset + size, len(self._content))
-        newline = self._content.find("\n", self._offset, stop)
-        if newline >= 0:
-            stop = newline + 1
-        value = self._content[self._offset:stop]
-        self._offset = stop
-        return value
-
-
-class _ReadlineOnlyLedgerPath:
-    def __init__(self, stream: _ReadlineOnlyStream) -> None:
-        self._stream = stream
-
-    def __truediv__(self, child: str) -> _ReadlineOnlyLedgerPath:
-        assert child == "agent-runs.jsonl"
-        return self
-
-    def open(self, *_args: object, **_kwargs: object) -> _ReadlineOnlyStream:
-        return self._stream
-
-
-def _readback_from_virtual_stream(
-    content: str,
-    provenance: object,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    max_line_chars: int,
-    max_events: int,
-) -> tuple[dict[str, object] | None, _ReadlineOnlyStream]:
-    stream = _ReadlineOnlyStream(content)
-    monkeypatch.setattr(OWNER, "Path", lambda _value: _ReadlineOnlyLedgerPath(stream))
-    monkeypatch.setattr(
-        OWNER,
-        "_agent_run_jsonl_limits",
-        lambda: (max_line_chars, max_events),
-    )
-    result = OWNER.read_back_external_terminal(
-        OWNER.Control(ledger="virtual-ledger"),
-        provenance.provider,
-        provenance.external_dispatch_id,
-        provenance,
-    )
-    return result, stream
-
-
-def test_external_terminal_readback_streams_one_target_to_eof(
-    monkeypatch: pytest.MonkeyPatch,
+def test_external_terminal_readback_accepts_valid_paired_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    provenance = _execution_provenance()
-    terminal = _external_terminal_row(provenance)
-    other = {"eventKind": "launch", "launchRunId": "other"}
-    limit = len(json.dumps(terminal)) + 16
-    result, stream = _readback_from_virtual_stream(
-        "\n".join((json.dumps(other), json.dumps(terminal), json.dumps(other))) + "\n",
-        provenance,
-        monkeypatch,
-        max_line_chars=limit,
-        max_events=8,
-    )
-    assert result == terminal
-    assert stream.eof
-    assert stream.readline_sizes and set(stream.readline_sizes) == {limit + 2}
+    control, provenance, rows, _args = _persist_external_terminal_fixture(tmp_path, monkeypatch)
+    raw = (Path(control.ledger) / "agent-runs.jsonl").read_bytes()
+    bounded = replace(control, ledger_max_events=len(rows), ledger_max_bytes=len(raw))
+    assert OWNER.read_back_external_terminal(
+        bounded, provenance.provider, provenance.external_dispatch_id, provenance
+    ) == rows[1]
 
 
 def test_external_terminal_readback_limits_match_canonical_schema() -> None:
     schema = json.loads(
-        (ROOT / "shared" / "schemas" / "agent-runs.schema.json").read_text(
-            encoding="utf-8"
-        )
+        (ROOT / "shared" / "schemas" / "agent-runs.schema.json").read_text(encoding="utf-8")
     )["x-orchestrarium-jsonl"]
-    assert OWNER._agent_run_jsonl_limits() == (
-        schema["maxLineChars"],
-        schema["maxEvents"],
-    )
+    validator = OWNER._ledger_owner().load_validator()
+    budget = validator.resolve_ledger_resource_budget()
+    assert validator.MAX_LEDGER_LINE_CHARS == schema["maxLineChars"]
+    assert budget.max_events == schema["maxEvents"]
+    assert budget.max_ledger_bytes == schema["maxLedgerBytes"]
 
 
 @pytest.mark.parametrize(
-    ("rows", "trailing_newline"),
-    (
-        (lambda terminal, _limit: (json.dumps(terminal), json.dumps(terminal)), True),
-        (lambda terminal, _limit: ("{malformed", json.dumps(terminal)), True),
-        (lambda terminal, _limit: (json.dumps(terminal), "{malformed"), True),
-        (lambda terminal, limit: ("x" * (limit + 1), json.dumps(terminal)), True),
-        (lambda terminal, _limit: (json.dumps(terminal), '{"truncated":'), False),
-    ),
-    ids=("duplicate", "malformed-before", "malformed-after", "overlong", "truncated-json"),
+    "corruption", ("duplicate", "malformed-before", "malformed-after", "overlong", "truncated-json")
 )
-def test_external_terminal_readback_stream_rejects_invalid_ledger_to_eof(
-    rows: object, trailing_newline: bool, monkeypatch: pytest.MonkeyPatch
+def test_external_terminal_readback_rejects_invalid_complete_capture(
+    corruption: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    provenance = _execution_provenance()
-    terminal = _external_terminal_row(provenance)
-    limit = len(json.dumps(terminal)) + 16
-    content = "\n".join(rows(terminal, limit)) + ("\n" if trailing_newline else "")
-    result, stream = _readback_from_virtual_stream(
-        content,
-        provenance,
-        monkeypatch,
-        max_line_chars=limit,
-        max_events=8,
-    )
-    assert result is None
-    assert stream.eof
+    control, provenance, rows, _args = _persist_external_terminal_fixture(tmp_path, monkeypatch)
+    ledger_path = Path(control.ledger) / "agent-runs.jsonl"
+    raw = ledger_path.read_bytes()
+    limit = OWNER._ledger_owner().load_validator().MAX_LEDGER_LINE_CHARS
+    if corruption == "duplicate":
+        changed = raw + (json.dumps(rows[1]) + "\n").encode()
+    elif corruption == "malformed-before":
+        changed = b"{malformed\n" + raw
+    elif corruption == "malformed-after":
+        changed = raw + b"{malformed\n"
+    elif corruption == "overlong":
+        changed = b"x" * (limit + 1) + b"\n" + raw
+    else:
+        changed = raw + b'{"truncated":'
+    ledger_path.write_bytes(changed)
+    assert OWNER.read_back_external_terminal(
+        control, provenance.provider, provenance.external_dispatch_id, provenance
+    ) is None
 
 
-def test_external_terminal_readback_stream_rejects_event_overflow_to_eof(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("resource", ("events", "bytes"))
+def test_external_terminal_readback_refuses_insufficient_capture_budget(
+    resource: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    provenance = _execution_provenance()
-    terminal = _external_terminal_row(provenance)
-    other = {"eventKind": "launch", "launchRunId": "other"}
-    limit = len(json.dumps(terminal)) + 16
-    result, stream = _readback_from_virtual_stream(
-        "\n".join((json.dumps(other), json.dumps(other), json.dumps(terminal))) + "\n",
-        provenance,
-        monkeypatch,
-        max_line_chars=limit,
-        max_events=2,
+    control, provenance, rows, _args = _persist_external_terminal_fixture(tmp_path, monkeypatch)
+    raw = (Path(control.ledger) / "agent-runs.jsonl").read_bytes()
+    control = replace(
+        control, ledger_max_events=len(rows) - (resource == "events"),
+        ledger_max_bytes=len(raw) - (resource == "bytes"),
     )
-    assert result is None
-    assert stream.eof
+    assert OWNER.read_back_external_terminal(
+        control, provenance.provider, provenance.external_dispatch_id, provenance
+    ) is None
 
 
 def test_external_terminal_readback_counts_malformed_records_toward_limit(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    provenance = _execution_provenance()
-    terminal = _external_terminal_row(provenance)
-    limit = len(json.dumps(terminal)) + 16
-    result, stream = _readback_from_virtual_stream(
-        "{bad-1\n{bad-2\n{bad-3\n" + json.dumps(terminal) + "\n",
-        provenance,
-        monkeypatch,
-        max_line_chars=limit,
-        max_events=2,
-    )
-    assert result is None
-    assert not stream.eof
-    assert len(stream.readline_sizes) == 3
+    control, provenance, _rows, _args = _persist_external_terminal_fixture(tmp_path, monkeypatch)
+    ledger_path = Path(control.ledger) / "agent-runs.jsonl"
+    raw = b"{bad-1\n{bad-2\n{bad-3\n" + ledger_path.read_bytes()
+    ledger_path.write_bytes(raw)
+    validator = OWNER._ledger_owner().load_validator()
+    budget = validator.resolve_ledger_resource_budget(2, len(raw))
+    errors, complete = [], []
+    assert validator.load_jsonl(
+        ledger_path, errors, source_bytes=raw, ledger_resource_budget=budget,
+        ledger_acquisition_complete_out=complete,
+    ) == []
+    assert complete == [False]
+    assert any("WI-LEDGER-RESOURCE-INCOMPLETE" in error for error in errors)
+    assert OWNER.read_back_external_terminal(
+        replace(control, ledger_max_events=2, ledger_max_bytes=len(raw)),
+        provenance.provider, provenance.external_dispatch_id, provenance,
+    ) is None
 
 
 def test_unavailable_providers_ship_no_unreachable_executor_surface() -> None:
@@ -850,9 +725,9 @@ def test_installed_kimi_grok_contract_splits_admitted_and_unavailable_routes() -
     """Installed contracts admit Kimi read-only while keeping Grok unavailable."""
     live_consumers = (
         "shared/AGENTS.shared.md",
-        "src.claude/agents/contracts/external-dispatch.md",
-        "src.claude/agents/contracts/operating-model.md",
-        "src.claude/agents/contracts/subagent-contracts.md",
+        "adapters/claude/agents/contracts/external-dispatch.md",
+        "adapters/claude/agents/contracts/operating-model.md",
+        "adapters/claude/agents/contracts/subagent-contracts.md",
         "src.codex/skills/lead/external-dispatch.md",
         "src.codex/skills/lead/operating-model.md",
     )
