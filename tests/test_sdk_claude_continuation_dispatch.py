@@ -65,8 +65,7 @@ def execute_offline(operation,monkeypatch,peer):
             peer.options=options
             return ClientBinding(peer,SDK_VERSION)
         with monkeypatch.context() as patch:
-            for row in kwargs["environment"]:
-                patch.setenv(row.name,row.value)
+            patch.setattr(claude.os,"environ",{row.name:row.value for row in kwargs["environment"]})
             patch.setattr(claude,"_official_client_binding",client_binding)
             result=asyncio.run(claude.create_claude_adapter(request,Sink(),selected).execute(request))
             assert result.status=="completed",result.execution_error

@@ -135,7 +135,7 @@ def test_public_linked_instruction_batch_receives_both_roots(tmp_path, monkeypat
         physical = tmp_path / ("physical-" + kind)
         (target / kind).rename(physical)
         _link(target / kind, physical)
-        source = next(iter(sorted((ROOT / "src.claude" / kind).glob("*.md"))))
+        source = next(iter(sorted((ROOT / "adapters" / "claude" / kind).glob("*.md"))))
         path = physical / source.name
         expected = path.read_bytes()
         path.write_bytes(b"explicitly selected synthetic authored instruction\n")

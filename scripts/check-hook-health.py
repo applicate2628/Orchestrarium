@@ -1706,7 +1706,6 @@ def _default_checks(repo_root: Path) -> list[tuple[Path, str, Path]]:
 def _installed_root_for_target(target: Path, platform: str) -> Path | None:
     """Resolve only the documented logical settings-to-package relationship."""
     selected = Path(os.path.abspath(target.expanduser()))
-    home = Path(os.path.abspath(Path.home()))
     if platform == "codex":
         directory, filename = ".codex", "hooks.json"
         relative = Path(".agents/skills/lead")
@@ -1715,8 +1714,6 @@ def _installed_root_for_target(target: Path, platform: str) -> Path | None:
         relative = Path(".claude/agents")
     else:
         return None
-    if os.path.normcase(str(selected)) == os.path.normcase(str(home / directory / filename)):
-        return home / relative
     if os.path.normcase(selected.name) == os.path.normcase(filename) and os.path.normcase(selected.parent.name) == os.path.normcase(directory):
         return selected.parent.parent / relative
     return None

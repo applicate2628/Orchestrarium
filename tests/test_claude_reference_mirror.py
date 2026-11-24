@@ -112,7 +112,7 @@ def test_matching_nonempty_status_inventory_is_accepted(tmp_path: Path) -> None:
     for name, source in (("en.md", EN_REFERENCE), ("ru.md", RU_REFERENCE)):
         path = tmp_path / name
         # Outside the pinned payload: exercise inventory equality independently.
-        path.write_text(source.read_text(encoding="utf-8") + "\nTEST-STATUS-SAMPLE\n", encoding="utf-8")
+        path.write_bytes(source.read_bytes() + b"\nTEST-STATUS-SAMPLE\n")
         copies.append(path)
     ok, messages = validator.validate_reference_mirror(*copies)
     assert ok, messages

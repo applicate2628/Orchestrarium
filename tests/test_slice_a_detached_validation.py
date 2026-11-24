@@ -47,6 +47,7 @@ def _repo(tmp_path: Path) -> tuple[Path, Path, str]:
     _git(repo, "init", "-q")
     _git(repo, "config", "user.email", "slice-a@example.invalid")
     _git(repo, "config", "user.name", "Slice A Test")
+    _git(repo, "config", "core.autocrlf", "false")
     (repo / "tracked.txt").write_text("head\n", encoding="utf-8")
     (repo / "excluded.txt").write_text("head-excluded\n", encoding="utf-8")
     (repo / "probe.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -347,6 +348,7 @@ def _failed_add_validation(module, repo, baseline, digest, run_dir):
     )
 
 
+@requires_windows_process_runner
 def test_worktree_add_nonzero_path_only_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -366,6 +368,7 @@ def test_worktree_add_nonzero_path_only_cleanup(
             _cleanup_partial_fixture(repo, targets[0])
 
 
+@requires_windows_process_runner
 def test_worktree_add_nonzero_registration_only_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -391,6 +394,7 @@ def test_worktree_add_nonzero_registration_only_cleanup(
             _cleanup_partial_fixture(repo, targets[0])
 
 
+@requires_windows_process_runner
 def test_worktree_add_nonzero_both_side_effects_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -410,6 +414,7 @@ def test_worktree_add_nonzero_both_side_effects_cleanup(
             _cleanup_partial_fixture(repo, targets[0])
 
 
+@requires_windows_process_runner
 def test_worktree_add_interruption_partial_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -431,6 +436,7 @@ def test_worktree_add_interruption_partial_cleanup(
             _cleanup_partial_fixture(repo, targets[0])
 
 
+@requires_windows_process_runner
 def test_partial_acquisition_cleanup_failure_manifest_is_durable_before_interrupt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -503,6 +509,7 @@ def test_deep_evidence_directory_uses_a_bounded_workspace_worktree_path(
     assert not worktree.exists()
 
 
+@requires_windows_process_runner
 def test_child_failure_has_attempt_receipt_but_no_terminal_manifest(
     tmp_path: Path,
 ) -> None:
@@ -529,6 +536,7 @@ def test_child_failure_has_attempt_receipt_but_no_terminal_manifest(
     assert receipt["exitCode"] == 7
 
 
+@requires_windows_process_runner
 def test_real_child_timeout_is_reaped(tmp_path: Path) -> None:
     """A deadline produces bounded, settled version-2 evidence."""
 
@@ -550,6 +558,7 @@ def test_real_child_timeout_is_reaped(tmp_path: Path) -> None:
     assert not list(attempts.glob("*.stderr.log"))
 
 
+@requires_windows_process_runner
 def test_exact_argv_reaches_real_child(tmp_path: Path) -> None:
     """Empty, quoted, slash-heavy, spaced, and Unicode argv remain exact."""
 
@@ -584,6 +593,7 @@ def test_exact_argv_reaches_real_child(tmp_path: Path) -> None:
     assert json.loads(observed.read_text(encoding="utf-8")) == list(expected)
 
 
+@requires_windows_process_runner
 def test_infinite_output_is_bounded_and_settled(tmp_path: Path) -> None:
     """Capture overflow stops the whole run without an unbounded target spool."""
 
@@ -605,6 +615,7 @@ def test_infinite_output_is_bounded_and_settled(tmp_path: Path) -> None:
     assert sum(path.stat().st_size for path in attempts.iterdir()) < 128 * 1024
 
 
+@requires_windows_process_runner
 def test_fast_oversized_git_status_cannot_be_consumed_as_complete(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -679,6 +690,7 @@ def test_fast_oversized_git_status_cannot_be_consumed_as_complete(
     assert observed[0].stdout.truncated is True
 
 
+@requires_windows_process_runner
 def test_timeout_settles_parent_and_descendant(tmp_path: Path) -> None:
     """A timed-out parent cannot leave its sleeping descendant alive."""
 
@@ -704,6 +716,7 @@ def test_timeout_settles_parent_and_descendant(tmp_path: Path) -> None:
     assert not _process_running(pid)
 
 
+@requires_windows_process_runner
 def test_direct_exit_with_retained_pipe_settles_descendant(tmp_path: Path) -> None:
     """A descendant retaining both capture pipes cannot outlive the receipt."""
 
@@ -729,6 +742,7 @@ def test_direct_exit_with_retained_pipe_settles_descendant(tmp_path: Path) -> No
     assert not _process_running(pid)
 
 
+@requires_windows_process_runner
 def test_timed_out_receipt_with_clean_cleanup_has_no_terminal_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -745,8 +759,10 @@ def test_timed_out_receipt_with_clean_cleanup_has_no_terminal_manifest(
         exitCode=-1,
         timedOut=True,
     )
+    exercised = []
 
     def timed_out_receipt(_runner, _command, _worktree, attempts, ordinal, **_kwargs):
+        exercised.append(ordinal)
         module._atomic_json(
             attempts / f"{ordinal:02d}-fixture-command.receipt.json",
             module._receipt_payload(receipt),
@@ -758,11 +774,13 @@ def test_timed_out_receipt_with_clean_cleanup_has_no_terminal_manifest(
         module, repo, run_dir, baseline, digest, _command(module, "pass")
     )
     assert manifest is None
+    assert exercised == [1]
     assert not (run_dir / module.TERMINAL_MANIFEST_NAME).exists()
     assert not list(repo.parent.glob(".orchestrarium-slice-a-worktree-*"))
 
 
 @pytest.mark.parametrize("mode", ("missing", "spool-open"))
+@requires_windows_process_runner
 def test_missing_or_unclosed_receipt_fails_without_terminal_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
 ) -> None:
@@ -778,7 +796,9 @@ def test_missing_or_unclosed_receipt_fails_without_terminal_manifest(
             module,
             resourcesClosed=False,
         )
+    exercised = []
     def incomplete_receipt(_runner, _command, _worktree, attempts, ordinal, **_kwargs):
+        exercised.append(ordinal)
         if result is not None:
             module._atomic_json(
                 attempts / f"{ordinal:02d}-fixture-command.receipt.json",
@@ -791,6 +811,7 @@ def test_missing_or_unclosed_receipt_fails_without_terminal_manifest(
         module, repo, run_dir, baseline, digest, _command(module, "pass")
     )
     assert manifest is None
+    assert exercised == [1]
     assert not (run_dir / module.TERMINAL_MANIFEST_NAME).exists()
 
 
@@ -829,6 +850,7 @@ def test_legacy_v1_receipt_is_readable_but_nonauthorizing(tmp_path: Path) -> Non
     assert summary["authorizing"] is False
 
 
+@requires_windows_process_runner
 def test_receipt_drift_denies_terminal_pass(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -838,6 +860,7 @@ def test_receipt_drift_denies_terminal_pass(
     repo, baseline, digest = _repo(tmp_path)
     run_dir = repo / ".scratch" / "runs" / "receipt-drift"
     real_run = module._run_child
+    exercised = []
 
     def drift_receipt(*args, **kwargs):
         receipt = real_run(*args, **kwargs)
@@ -845,6 +868,7 @@ def test_receipt_drift_denies_terminal_pass(
         payload = json.loads(receipt_path.read_text(encoding="utf-8"))
         payload["stdoutSha256"] = "f" * 64
         receipt_path.write_text(json.dumps(payload), encoding="utf-8")
+        exercised.append(receipt_path)
         return receipt
 
     monkeypatch.setattr(module, "_run_child", drift_receipt)
@@ -852,6 +876,7 @@ def test_receipt_drift_denies_terminal_pass(
         module, repo, run_dir, baseline, digest, _command(module, "pass")
     )
     assert manifest is None
+    assert len(exercised) == 1
     assert not (run_dir / module.TERMINAL_MANIFEST_NAME).exists()
     error = json.loads(
         (run_dir / "attempts" / "supervisor-error.json").read_text(encoding="utf-8")
@@ -859,6 +884,7 @@ def test_receipt_drift_denies_terminal_pass(
     assert error["stableId"] == "E_SLICE_A_VALIDATION_INCOMPLETE"
 
 
+@requires_windows_process_runner
 def test_shell_census_omission_fails_before_child_and_without_manifest(
     tmp_path: Path
 ) -> None:
@@ -880,6 +906,8 @@ def test_shell_census_omission_fails_before_child_and_without_manifest(
     )
     assert manifest is None
     assert not (run_dir / module.TERMINAL_MANIFEST_NAME).exists()
+    error = json.loads((run_dir / "attempts/supervisor-error.json").read_text(encoding="utf-8"))
+    assert "tracked shell census is missing or incomplete" in error["cause"]
 
 
 @requires_windows_process_runner
@@ -918,6 +946,7 @@ def test_explicit_untracked_exclusion_is_absent_from_detached_worktree(
     ]
 
 
+@requires_windows_process_runner
 def test_cleanup_failure_publishes_one_nonpass_with_recovery_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -963,6 +992,7 @@ def test_cleanup_failure_publishes_one_nonpass_with_recovery_path(
 
 
 @pytest.mark.parametrize("boundary", ("child", "publication"))
+@requires_windows_process_runner
 def test_interruption_before_publication_leaves_no_terminal_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str
 ) -> None:

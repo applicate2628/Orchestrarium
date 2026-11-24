@@ -131,7 +131,7 @@ class SelectedClaudeInstructionWiringTests(unittest.TestCase):
         expected = {
             "_SelectedSource": ["path", "node", "raw"],
             "_SelectedReplacement": ["owner", "sources", "path", "before_node", "before",
-                                     "after", "digest", "parents"],
+                                     "after", "digest", "parents", "global_policy"],
             "_SelectedProviderUpdates": ["provider", "owner", "scope", "receipt",
                 "receipt_node", "receipt_before", "receipt_parents",
                 "receipt_parent_preimage", "items", "outcomes", "payload", "received"],

@@ -33,6 +33,22 @@ def _load_checker():
 CHECKER = _load_checker()
 
 
+@pytest.mark.parametrize(
+    ("platform", "control", "package"),
+    (("codex", ".codex/hooks.json", ".agents/skills/lead"),
+     ("claude", ".claude/settings.json", ".claude/agents")),
+)
+def test_explicit_package_binding_does_not_require_home(tmp_path, monkeypatch, platform, control, package):
+    # Provider trust subprocesses deliberately omit user-profile environment.
+    for key in ("HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"):
+        monkeypatch.delenv(key, raising=False)
+    def unavailable_home():
+        raise RuntimeError("Could not determine home directory.")
+    monkeypatch.setattr(CHECKER.Path, "home", unavailable_home)
+    assert CHECKER._installed_root_for_target(tmp_path / control, platform) == tmp_path / package
+    assert CHECKER._installed_root_for_target(tmp_path / "foreign" / Path(control).name, platform) is None
+
+
 def _source_dirs(platform: str) -> tuple[Path, ...]:
     if platform == "claude":
         return (
