@@ -72,6 +72,7 @@ def test_failure_after_link_publication_restores_link_and_sidecar(tmp_path, monk
     anchor, source, link, receipt, payload = fixture(tmp_path)
     inventory = link.parent / PI.CODEX_HOOK_INVENTORY
     inventory.write_bytes(b"old local inventory")
+    inventory_identity = inventory.lstat().st_ino
     original = link.readlink()
     real = PI._CreateOnlyMutablePath.retain_path
     def fail_after(owner, *args, **kwargs):
@@ -83,6 +84,35 @@ def test_failure_after_link_publication_restores_link_and_sidecar(tmp_path, monk
     assert link.is_symlink() and link.readlink() == original
     assert source.read_bytes() == payload
     assert inventory.read_bytes() == b"old local inventory"
+    assert inventory.lstat().st_ino == inventory_identity
+
+
+def test_inventory_same_byte_replacement_after_admission_is_not_adopted(tmp_path, monkeypatch):
+    anchor, source, link, receipt, payload = fixture(tmp_path)
+    inventory = link.parent / PI.CODEX_HOOK_INVENTORY
+    inventory.write_bytes(b"old local inventory")
+    original = link.readlink()
+    inventory_identity = inventory.lstat().st_ino
+    retained = inventory.with_name(inventory.name + ".user-prior")
+    replacement_identity = None
+    real = PI._apply_hook_file_localization
+
+    def replace_after_admission(plan, transaction, owner):
+        nonlocal replacement_identity
+        inventory.rename(retained)
+        inventory.write_bytes(b"old local inventory")
+        replacement_identity = inventory.lstat().st_ino
+        return real(plan, transaction, owner)
+
+    monkeypatch.setattr(PI, "_apply_hook_file_localization", replace_after_admission)
+    with pytest.raises((ValueError, PI._InstallFailure)):
+        PI._localize_hook_file(ROOT, "codex", anchor, "global", apply=True)
+    assert link.is_symlink() and link.readlink() == original
+    assert source.read_bytes() == payload
+    assert inventory.read_bytes() == b"old local inventory"
+    assert inventory.lstat().st_ino == replacement_identity != inventory_identity
+    assert retained.read_bytes() == b"old local inventory"
+    assert retained.lstat().st_ino == inventory_identity
 
 
 def test_shared_source_drift_refused_before_placement(tmp_path, monkeypatch):
@@ -206,10 +236,27 @@ def test_public_normal_install_localization_phase(tmp_path, monkeypatch):
     # Explicit synthetic historical receipt input; actual installer and digest unchanged.
     record["files"][script.relative_to(project).as_posix()] = hashlib.sha256(script.read_bytes()).hexdigest()
     receipt.write_bytes(codec.serialize_record(record, "codex", "project"))
+    inventory = registration.parent / PI.CODEX_HOOK_INVENTORY
+    inventory.write_bytes(b"stale local inventory")
+    registration_identity = registration.lstat().st_ino
+    inventory_identity = inventory.lstat().st_ino
+    receipt_before = receipt.read_bytes()
+    assert PI.install("codex", [*args, "--localize-hook-file", "--dry-run"]) == 0
+    assert registration.is_symlink() and registration.lstat().st_ino == registration_identity
+    assert source.read_bytes() == payload
+    assert inventory.read_bytes() == b"stale local inventory"
+    assert inventory.lstat().st_ino == inventory_identity
+    assert receipt.read_bytes() == receipt_before
+    assert not PI.os.path.lexists(registration.with_name(registration.name + ".orche-localization-link"))
+    assert not PI.os.path.lexists(inventory.with_name(inventory.name + ".orche-localization-prior"))
     assert PI.install("codex", [*args, "--localize-hook-file"]) == 0
     assert not registration.is_symlink() and registration.read_bytes() == payload
     assert source.read_bytes() == payload
     assert registration.with_name(registration.name + ".orche-localization-link").is_symlink()
+    assert not inventory.exists()
+    assert inventory.with_name(inventory.name + ".orche-localization-prior").read_bytes() == b"stale local inventory"
+    updated_record = codec.decode_record(receipt.read_bytes(), "codex", "project")
+    assert updated_record["configs"][client["registration"]] == record["configs"][client["registration"]]
 
 
 @pytest.mark.parametrize("member", ["source", "receipt"])

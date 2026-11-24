@@ -15454,8 +15454,11 @@ def install(provider: str, argv: list[str] | None = None) -> int:
         elif fresh_receipt is not None:
             transaction_paths.append(fresh_receipt)
         if hook_localization is not None:
-            transaction_paths.extend([hook_localization.backup, hook_localization.inventory_backup,
+            transaction_paths.extend([hook_localization.registration, hook_localization.inventory,
+                                      hook_localization.backup, hook_localization.inventory_backup,
                                       *(path for path, _digest in hook_localization.dependencies)])
+            if hook_localization.registration not in byte_pointer_objects:
+                byte_pointer_objects += (hook_localization.registration,)
             readonly_transport_paths += (hook_localization.source,)
         transaction = _InstallTransaction(
             transaction_paths,
