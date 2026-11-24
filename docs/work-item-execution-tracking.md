@@ -1124,14 +1124,24 @@ Failed publication rolls back only newly owned metadata. Exact identical
 repetition reads back existing receipts; changed inputs or conflicting mode/stage
 do not overwrite them.
 
-One retained-scratch reader interprets this completed-disposal state for active
-close and archived replay, rechecking proof and absence before close writes and
-after archive placement. It performs no payload rename, unlink, restoration or
-inventory. Unknown or unselected missing retains and ordinary open obligations
-still block close. This mode certifies neither exact raw recovery nor future
-custody, parent closure or publication authority. Root runs its normal receiving
-and closure checks after Source acceptance; installed command availability still
-requires rollout verification.
+Explicit reconciliation and reads of its selected completed-disposal receipt
+recheck the exact proof and absence. They perform no payload rename, unlink,
+restoration or inventory. Missing retained data without a receipt still refuses
+an explicitly selected release or a close whose live resource namespace selects
+that retention obligation.
+
+Ordinary physical close consumes the accepted task outcome separately from
+strict ledger receiving. An empty selected scratch namespace binds an empty
+`scratchSelection` in the disposition receipt; close does not automatically scan
+historical disposal receipts or discharge unrelated open ledger obligations.
+The observed namespace or its absence must remain current through the lifecycle
+transaction. Archived replay uses the proof-bound selection, including an empty
+one. Explicit reconciliation and strict ledger validation remain available to
+check their respective selected evidence and outstanding obligations. This mode
+certifies neither exact raw recovery nor future custody, parent closure or
+publication authority. Root runs its normal receiving and closure checks after
+Source acceptance; installed command availability still requires rollout
+verification.
 
 ## Retained preimages and incoming-link selection
 
