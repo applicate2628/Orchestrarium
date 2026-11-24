@@ -1744,7 +1744,14 @@ def git_metadata(repository: BoundRepository, paths: list[str] | None = None) ->
             if len(output) + len(result.stdout) > MAX_JSON_BYTES:
                 raise ContractError("git output exceeds JSON limit")
             output.extend(result.stdout)
-        metadata[name] = bytes(output)
+        payload = bytes(output)
+        if name == METADATA_NAMES[0]:
+            # --no-renames makes each NUL field one complete status record.
+            # Keep Git's tracked/untracked groups global and the terminator last.
+            records = payload.split(b"\0")
+            records.sort(key=lambda record: (not record, record.startswith(b"?? "), record[3:]))
+            payload = b"\0".join(records)
+        metadata[name] = payload
     return metadata
 
 
