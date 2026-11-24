@@ -276,6 +276,7 @@ class LegacyFlatTerminalTests(unittest.TestCase):
             "--legacy-evidence-file", str(request)]
         return request.read_bytes(), arguments
 
+    @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
     def test_pending_progress_accepts_both_directory_parent_wire_forms_and_refuses_drift(self):
         evidence, _arguments = self.legacy_request()
         with self.assertRaisesRegex(m.LifecycleError, "interruption after promotion"):
@@ -325,14 +326,24 @@ class LegacyFlatTerminalTests(unittest.TestCase):
     def test_public_legacy_close_requires_the_additive_evidence_and_apply_surface(self):
         _evidence, arguments = self.legacy_request()
         before = self.canonical_images()
+        source_identity = m._lifecycle_file_identity(self.source.lstat())
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(m.main(arguments), 0)
         self.assertEqual(before, self.canonical_images())
         diagnostic = io.StringIO()
         with contextlib.redirect_stdout(diagnostic), contextlib.redirect_stderr(diagnostic):
             result = m.main([*arguments, "--apply"])
-        self.assertEqual(result, 0, diagnostic.getvalue())
         archive = self.root / "work-items/archive/2026-10" / self.slug
+        if m.os.name != "nt":
+            self.assertEqual(result, 1, diagnostic.getvalue())
+            self.assertIn("WI-LEGACY-COMPLETION-NATIVE-UNSUPPORTED", diagnostic.getvalue())
+            self.assertEqual(before, self.canonical_images())
+            self.assertEqual(m._lifecycle_file_identity(self.source.lstat()), source_identity)
+            self.assertFalse(archive.exists())
+            self.assertFalse(m._transition_intent_path(self.root, "flat-terminal-001").exists())
+            self.assertEqual(m.work_item_dependency_state(self.root, self.slug), "open")
+            return
+        self.assertEqual(result, 0, diagnostic.getvalue())
         self.assertFalse(self.source.exists())
         self.assertEqual((archive / "legacy-source" / self.source.name).read_bytes(), before[self.source.relative_to(self.root).as_posix()])
         self.assertEqual(m.resolve_category(self.root, f"work-item:{self.slug}"), archive)
@@ -383,8 +394,10 @@ class LegacyFlatTerminalTests(unittest.TestCase):
                 "referenceRows": sorted({tuple(sorted(row)) for row in action["links"]["inventory"]["references"]}),
                 "consumerRows": sorted({tuple(sorted(row)) for row in action["links"]["consumers"]})}
 
+    @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
     def test_public_opaque_markdown_dryrun_apply_replay_and_receiving(self):
         self.exercise_incoming_byte_images()
+    @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
     def test_selected_active_status_afterimage_is_used_by_public_close(self):
         from test_mutate_work_item import seed_active
 
@@ -507,6 +520,7 @@ print('FRESH_SELECTED_READERS_OK')
 
 
 
+    @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
     def test_public_cli_fresh_process_readers_and_historical_replay(self):
         evidence, arguments = self.legacy_request()
         # Genuine new public helper frame, no inherited native objects.
@@ -555,6 +569,7 @@ print('FRESH_PUBLIC_READERS_OK')
         with self.assertRaises(m.LifecycleError):
             m.resolve_legacy_path(self.root, (archive / "closure.md").relative_to(self.root).as_posix())
 
+    @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
     def test_board_before_action_receipt_is_pending_and_matching_reentry_recovers(self):
         evidence, _arguments = self.legacy_request()
         with self.assertRaisesRegex(m.LifecycleError, "interruption after derived board"):
@@ -630,6 +645,7 @@ print('FRESH_PUBLIC_READERS_OK')
         self.assertEqual(m.work_item_dependency_state(self.root, self.slug), "done")
         m.check_readme(self.root)
 
+    @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
     def test_b1_saved_null_hold_resumes_only_finalization(self):
         self._assert_finalization_recovery("saved-null")
 
@@ -664,6 +680,7 @@ print('FRESH_PUBLIC_READERS_OK')
             return acquire(target)
         m.LifecycleWriteTarget._acquire_existing_parents = retained
         parent = self.root / "observation-parent"; parent.mkdir()
+        parent_identity = m._lifecycle_file_identity(parent.lstat())
         leaf = parent / "absent.bin"
         moved = self.root / "fixture-held-parent"
         def parent_drift(target, *args, **kwargs):
@@ -681,14 +698,27 @@ print('FRESH_PUBLIC_READERS_OK')
             self.assertEqual(before_unsafe, tuple((str(p.relative_to(self.root)), m._lifecycle_file_identity(p.lstat()))
                                                   for p in self.root.rglob("*")))
             m.LifecycleWriteTarget.owned_image = parent_drift
-            with self.assertRaisesRegex(m.LifecycleError, "existing-parent acquisition failed") as denied_parent:
+            expected = ("existing-parent acquisition failed" if m.os.name == "nt"
+                        else "admitted directory identity changed")
+            with self.assertRaisesRegex(m.LifecycleError, expected) as denied_parent:
                 m._legacy_local_image(leaf, maximum_bytes=0)
-            # The observed NT sharing contract prevents replacement while this
-            # parent is held. Preserve that guard, expose its cause, never mint a
-            # replacement or relax native access merely to force a drift fixture.
-            self.assertIsInstance(denied_parent.exception.__cause__, PermissionError)
-            self.assertTrue(parent.exists())
-            self.assertFalse(moved.exists())
+            if m.os.name == "nt":
+                # Native sharing prevents moving the held parent. Keep this
+                # refusal rather than relaxing access to manufacture drift.
+                self.assertIsInstance(denied_parent.exception.__cause__, PermissionError)
+                self.assertEqual(m._lifecycle_file_identity(parent.lstat()), parent_identity)
+                self.assertFalse(moved.exists())
+            else:
+                # POSIX permits the fixture's rename; observation must detect
+                # the replacement and preserve it without creating the leaf.
+                self.assertEqual(denied_parent.exception.failure_id, "WI-LIFECYCLE-WRITE-BOUNDARY")
+                self.assertEqual(m._lifecycle_file_identity(moved.lstat()), parent_identity)
+                foreign_identity = m._lifecycle_file_identity(parent.lstat())
+                self.assertNotEqual(foreign_identity, parent_identity)
+                preserved = self.root / "fixture-foreign-parent"
+                parent.rename(preserved)
+                moved.rename(parent)
+                self.assertEqual(m._lifecycle_file_identity(preserved.lstat()), foreign_identity)
             self.assertFalse(leaf.exists())
             m.LifecycleWriteTarget.owned_image = owned
             current = parent / "present.bin"; current.write_bytes(b"present before native read\n")
@@ -719,8 +749,13 @@ print('FRESH_PUBLIC_READERS_OK')
                     raise OSError("fixture release failure after real native close")
                 return result
             m.LifecycleWriteTarget._close = release_failure
-            with self.assertRaisesRegex(m.LifecycleError, "handle release.*existing-parent acquisition failed.*release failure"):
+            with self.assertRaisesRegex(m.LifecycleError, "existing-parent acquisition failed") as failed_acquisition:
                 m._legacy_local_image(self.root / "another-missing-parent/leaf.bin", maximum_bytes=0)
+            self.assertEqual(failed_acquisition.exception.failure_id, "WI-LEGACY-COMPLETION-NATIVE")
+            self.assertIsInstance(failed_acquisition.exception.__cause__, FileNotFoundError)
+            self.assertEqual(failed_acquisition.exception.__notes__, [
+                "WI-LIFECYCLE-WRITE-BOUNDARY secondary write-target-release: OSError"])
+            self.assertEqual(released, [True])
         finally:
             m.LifecycleWriteTarget._acquire_existing_parents = acquire
             m.LifecycleWriteTarget.owned_image = owned
@@ -729,12 +764,15 @@ print('FRESH_PUBLIC_READERS_OK')
         self.assertTrue(owners)
         self.assertTrue(all(not target._open and not target._directories for target in owners))
 
+    @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
     def test_b1_removed_hold_before_save_resumes_only_finalization(self):
         self._assert_finalization_recovery("remove-before-save")
 
+    @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
     def test_b1_last_cleanup_resumes_without_expired_parent_identity(self):
         self._assert_finalization_recovery("last-cleanup")
 
+    @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
     def test_b1_caught_late_failure_keeps_primary_and_never_claims_completed_rollback(self):
         rollbacks = []
         composer_type = m.LifecycleOutcomeComposer
@@ -753,6 +791,7 @@ print('FRESH_PUBLIC_READERS_OK')
         self.assertFalse(self.source.exists())
         self.assertEqual(m.work_item_dependency_state(self.root, self.slug), "done")
 
+    @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
     def test_b1_remaining_native_objects_and_incomplete_proof_never_falsely_settle(self):
         evidence, intent_path = self._finalization_cut("saved-null")
         archive = self.root / "work-items/archive/2026-10" / self.slug
@@ -840,6 +879,7 @@ print('FRESH_PUBLIC_READERS_OK')
         self.assertEqual(m.work_item_dependency_state(self.root, self.slug), "done")
         m.check_readme(self.root)
 
+    @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
     def test_creator_rollback_and_foreign_replacement_preserve_then_real_recovery(self):
         evidence, _arguments = self.legacy_request()
         before = self.canonical_images()
@@ -886,6 +926,7 @@ print('FRESH_PUBLIC_READERS_OK')
         self.assertEqual(m.work_item_dependency_state(self.root, self.slug), "done")
         m.check_readme(self.root)
 
+    @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
     def test_shared_relocation_observation_excludes_both_actual_custodians(self):
         from unittest.mock import patch
         evidence, _arguments = self.legacy_request()
@@ -915,6 +956,7 @@ print('FRESH_PUBLIC_READERS_OK')
         self.assertEqual(len(probes), 1)
         self.assertEqual(m.work_item_dependency_state(self.root, self.slug), "done")
 
+    @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
     def test_reconciled_placement_precedes_fallible_domain_receiving(self):
         from unittest.mock import patch
         evidence, _arguments = self.legacy_request()
@@ -961,6 +1003,7 @@ print('FRESH_PUBLIC_READERS_OK')
         self.assertEqual(self.canonical_images(), before)
         self.assertFalse(m._transition_intent_path(self.root, "flat-terminal-001").exists())
 
+    @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
     def test_shared_relocation_progress_failures_use_real_outer_compensation(self):
         from unittest.mock import patch
         evidence, _arguments = self.legacy_request()
@@ -1016,6 +1059,7 @@ print('FRESH_PUBLIC_READERS_OK')
         self.assertEqual(self.canonical_images(), before)
         self.assertFalse(m._transition_intent_path(self.root, "flat-terminal-001").exists())
 
+    @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
     def test_shared_relocation_actual_publication_prefixes_keep_joint_receiving(self):
         from unittest.mock import patch
         evidence, _arguments = self.legacy_request()
@@ -1065,6 +1109,7 @@ print('FRESH_PUBLIC_READERS_OK')
                     self.assertEqual(self.canonical_images(), before)
                     self.assertFalse(m._transition_intent_path(self.root, "flat-terminal-001").exists())
 
+    @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
     def test_shared_relocation_real_save_fsync_retain_and_unavailable_recovery(self):
         from unittest.mock import patch
         evidence, _arguments = self.legacy_request()
@@ -1190,6 +1235,7 @@ print('FRESH_PUBLIC_READERS_OK')
             for owner, handle, _identity in retained:
                 close(owner, handle)
 
+    @unittest.skipUnless(m.os.name == "nt", "creator-bound flat close requires Windows")
     def test_real_bug_incoming_documents_and_distinct_same_basename_targets(self):
         spec = importlib.util.spec_from_file_location("flat_terminal_bug_producer", ROOT / "tests/test_mutate_work_item.py")
         producer = importlib.util.module_from_spec(spec); sys.modules[spec.name] = producer; spec.loader.exec_module(producer)
