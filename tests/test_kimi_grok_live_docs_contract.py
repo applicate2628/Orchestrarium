@@ -29,7 +29,6 @@ EXPECTED_HIT_FILES = frozenset({
     "adapters/claude/agents/external-worker.md",
     "adapters/claude/commands/agents-external-brigade.md",
     "adapters/claude/commands/agents-help.md",
-    "adapters/claude/commands/agents-init-project.md",
     "adapters/claude/commands/agents-second-opinion.md",
     "adapters/claude/references/ru/subagent-operating-model.md",
     "adapters/claude/references/subagent-operating-model.md",
@@ -239,6 +238,10 @@ def test_kimi_grok_live_inventory_and_nonexecution_language() -> None:
             continue
         if KIMI_ADMISSION_TRIGGER.search(text):
             for boundary, pattern in KIMI_ADMISSION_TERMS.items():
+                if boundary == "read-only/read-tools boundary" and relative_path == "shared/agents-mode.defaults.yaml":
+                    assert "policy-admitted read work or mapped external-worker engineering" in text
+                    assert "a validated capability file bounds tools" in text
+                    continue
                 if boundary == "explicit" and relative_path == "shared/AGENTS.shared.md":
                     assert "Lead may choose Kimi for bounded independent read-only" in text
                     assert "Kimi: not `auto`/gate/counter" in text

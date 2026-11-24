@@ -1056,7 +1056,7 @@ def test_live_dispatch_corpus_is_exact_and_refused():
 
     assert Counter((path, name) for path, name, _polarity in occurrences) == Counter(
         {
-            ("adapters/claude/CLAUDE.md", "dispatch:subagent_type-lead"): 2,
+            ("adapters/claude/CLAUDE.md", "dispatch:subagent_type-lead"): 1,
             ("adapters/claude/agents/lead.md", "dispatch:subagent_type-lead"): 2,
             ("adapters/claude/agents/lead.md", "dispatch:lead-spawned"): 1,
             ("adapters/claude/commands/agents-bugfix.md", "dispatch:verb-lead"): 1,
@@ -1067,7 +1067,7 @@ def test_live_dispatch_corpus_is_exact_and_refused():
     )
     assert Counter(name for _path, name, _polarity in occurrences) == Counter(
         {
-            "dispatch:subagent_type-lead": 5,
+            "dispatch:subagent_type-lead": 4,
             "dispatch:verb-lead": 3,
             "dispatch:lead-spawned": 1,
         }

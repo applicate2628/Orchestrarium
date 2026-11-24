@@ -395,13 +395,20 @@ class InvalidCurrentSuffixDispositionTests(unittest.TestCase):
         launch_event = {
             "runId": "relation-launch",
             "eventKind": "launch",
-            "launchFlags": ["--model", "one"],
+            "status": "running",
+            "provider": "codex",
+            "model": "one",
+            "effort": "high",
+            "launchFlags": ["--model", "one", "-c", "model_reasoning_effort=high"],
         }
         terminal_event = {
+            **launch_event,
             "runId": "relation-terminal",
             "eventKind": "terminal",
+            "status": "completed",
             "launchRunId": "relation-launch",
-            "launchFlags": ["--model", "two"],
+            "model": "two",
+            "launchFlags": ["--model", "two", "-c", "model_reasoning_effort=high"],
         }
         launch_authority = module.LedgerAuthorityV1(True, False, False, False, False)
         terminal_authority = module._NO_LEDGER_AUTHORITY
@@ -417,12 +424,23 @@ class InvalidCurrentSuffixDispositionTests(unittest.TestCase):
             module.LedgerEventValidityV1(True, launch_authority),
             module.LedgerEventValidityV1(True, terminal_authority),
         )
-        current_errors: list[str] = []
+        bypass_errors: list[str] = []
         module.validate_closure(
-            current_rows, current_errors, validity=current_validity
+            current_rows, bypass_errors, validity=current_validity
         )
+        self.assertTrue(any("WI-LEDGER-CUSTODY-STALE-TARGET" in error for error in bypass_errors), bypass_errors)
+        # The current qualification owner emits relation diagnostics. Caller
+        # supplied masks cannot replace its issued context at the public helper.
+        current_errors: list[str] = []
+        masks = module._derive_authority_masks(
+            current_rows, [True, True], Path("reader-a"),
+            _definition="current", _diagnostics=current_errors,
+        )
+        self.assertTrue(masks[0].launch_eligible)
+        self.assertFalse(masks[1].terminal_eligible)
         self.assertTrue(
-            any("launchFlags must equal" in error for error in current_errors)
+            any("WI-LEDGER-LAUNCH-BINDING" in error and "launchFlags" in error
+                for error in current_errors), current_errors,
         )
 
         sealed_rows = rows("sealed-prefix")
@@ -439,13 +457,13 @@ class InvalidCurrentSuffixDispositionTests(unittest.TestCase):
         for label, target_event, target_validity, expected in (
             (
                 "nonlaunch",
-                {"runId": "relation-launch", "eventKind": "standalone"},
+                {**launch_event, "eventKind": "standalone"},
                 True,
                 "references a non-launch event",
             ),
             (
                 "invalid-launch",
-                {"runId": "relation-launch", "eventKind": "launch"},
+                dict(launch_event),
                 False,
                 "references an invalid launch event",
             ),
@@ -475,18 +493,12 @@ class InvalidCurrentSuffixDispositionTests(unittest.TestCase):
                         module._NO_LEDGER_AUTHORITY,
                     ),
                 )
-                validity = (
-                    module.LedgerEventValidityV1(
-                        target_validity, module._NO_LEDGER_AUTHORITY
-                    ),
-                    module.LedgerEventValidityV1(
-                        True, module._NO_LEDGER_AUTHORITY
-                    ),
-                )
                 relation_errors: list[str] = []
-                module.validate_closure(
-                    current_rows, relation_errors, validity=validity
+                masks = module._derive_authority_masks(
+                    current_rows, [target_validity, True], Path("reader-a"),
+                    _definition="current", _diagnostics=relation_errors,
                 )
+                self.assertFalse(masks[1].terminal_eligible)
                 self.assertTrue(
                     any(expected in error for error in relation_errors),
                     relation_errors,

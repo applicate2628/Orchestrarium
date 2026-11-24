@@ -21,7 +21,6 @@ WRAPPER_PATH = ROOT / "scripts" / "invoke-kimi-prompt.py"
 INSTALLER_PATH = ROOT / "scripts" / "production_installer.py"
 CODEX_UI_PROMPT_PATHS = (
     ROOT / "src.codex/skills/consultant/agents/openai.yaml",
-    ROOT / "src.codex/skills/init-project/agents/openai.yaml",
     ROOT / "src.codex/skills/second-opinion/agents/openai.yaml",
 )
 EXPECTED_KIMI_TERMINAL_INSTRUCTION = (
@@ -65,6 +64,10 @@ def test_codex_ui_prompts_describe_fixed_no_enrollment_kimi_launch() -> None:
         assert "omitted Kimi capability file keeps tools/MCP/subagents empty with permission reject" in prompt
         assert "validated capability file" in prompt
         assert "ordinary launch does not consult enrollment" in prompt.lower()
+
+    # Project initialization configures local preferences without launching providers.
+    init_prompt = (ROOT / "src.codex/skills/init-project/agents/openai.yaml").read_text(encoding="utf-8")
+    assert "Do not launch external providers." in init_prompt
 
 
 def test_installer_kimi_enrollment_actions_are_explicit_and_mutually_exclusive() -> None:
