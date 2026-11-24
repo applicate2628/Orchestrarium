@@ -540,6 +540,10 @@ Empty input or `q` cancels; there is no default. The menu previews before asking
 selection without `--dry-run` to apply. Selected clients are processed separately;
 a failure does not undo an earlier client's successful installation.
 
+`--dry-run` does not create move-capability probes inside installed targets.
+It may prepare and dispose private staging under the process temporary directory;
+required native move capabilities are checked before a real apply.
+
 Every `--target` install requires the explicit `--allow-unsafe-target` acknowledgement; without it, the installer exits before mutation. The flag admits the named custom project target but does not disable path, reparse-point, collision, transaction, or rollback checks.
 
 The installer's `Target:` line names only the provider root (`.codex/` or `.claude/`), not every mutation root. Here `<home>` means the validated global home selected from `HOME` on POSIX or `USERPROFILE` on Windows:

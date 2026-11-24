@@ -2297,11 +2297,12 @@ def test_unreceipted_lead_adoption_dry_run_is_read_only(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("changed", ["source", "lead", "receipt"])
-def test_lead_receipt_preflight_drift(tmp_path: Path, changed: str) -> None:
+@pytest.mark.parametrize("dry_run", (False, True))
+def test_lead_receipt_preflight_drift(tmp_path: Path, changed: str, dry_run: bool) -> None:
     installer, source, anchor, skills, receipt = _receipt_fixture(tmp_path)
     _apply_receipted(installer, source, anchor, skills)
     (source / "lead" / "SKILL.md").write_bytes(b"next version")
-    plan = installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True)
+    plan = installer._preflight_canonical_skills(source, skills, root=ROOT, global_install=True, dry_run=dry_run)
     try:
         if changed == "source":
             (source / "lead" / "SKILL.md").write_bytes(b"later version")
@@ -2313,7 +2314,7 @@ def test_lead_receipt_preflight_drift(tmp_path: Path, changed: str) -> None:
             ))
         before = _tree_bytes(skills)
         owner = installer._CreateOnlyMutablePath(
-            anchor, installer._InstallTransaction([], enabled=False), dry_run=False
+            anchor, installer._InstallTransaction([], enabled=False), dry_run=dry_run
         )
         with pytest.raises(ValueError, match="preflight drift|E_CANONICAL_LEAD_RECEIPT_DRIFT"):
             installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
@@ -2573,3 +2574,84 @@ def test_authenticated_factory_bridge_preserves_upgrade_noop_and_rollback(
     with (drift / "lead/SKILL.md").open("ab") as stream:
         stream.write(b"x")
     _assert_preflight_refusal_preserves_tree(installer, drift, "E_ACCEPTED_PRIOR_COLLISION: lead")
+
+
+def _forbid_installed_directory_creation(monkeypatch, target: Path) -> list[Path]:
+    """Catch transient target writes, which a final tree comparison cannot see."""
+    mkdir = os.mkdir
+    attempts: list[Path] = []
+
+    def checked_mkdir(path, mode=0o777, *, dir_fd=None):
+        candidate = Path(os.path.abspath(os.fsdecode(path)))
+        if candidate == target or target in candidate.parents:
+            attempts.append(candidate)
+            raise AssertionError(f"preview attempted directory creation: {candidate}")
+        return mkdir(path, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "mkdir", checked_mkdir)
+    return attempts
+
+
+@pytest.mark.parametrize("provider", ("codex", "claude"))
+def test_receipted_lead_public_preview_never_creates_target_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], provider: str,
+) -> None:
+    installer, source, anchor, skills, receipt = _receipt_fixture(tmp_path)
+    with (source / "lead" / "SKILL.md").open("ab") as stream:
+        stream.write(b"\nprevious receipted source\n")
+    _apply_receipted(installer, source, anchor, skills)
+    assert json.loads(receipt.read_bytes())["schema"] == installer._LEAD_RECEIPT_SCHEMA
+    before = _tree_bytes(anchor)
+    monkeypatch.setenv("USERPROFILE", str(anchor))
+    monkeypatch.setenv("HOME", str(anchor))
+    attempts = _forbid_installed_directory_creation(monkeypatch, skills)
+
+    status = installer.install(provider, ["--global", "--dry-run", "--no-hypothesis-hook"])
+
+    output = capsys.readouterr()
+    assert not attempts, f"dry-run entered the installed target: {attempts}"
+    assert status == 0, output.out + output.err
+    assert "RESULT: DRY-RUN complete" in output.out
+    assert _tree_bytes(anchor) == before
+
+
+def test_receipted_lead_direct_preview_never_creates_target_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    installer, source, anchor, skills, _receipt = _receipt_fixture(tmp_path)
+    _apply_receipted(installer, source, anchor, skills)
+    (source / "lead" / "SKILL.md").write_bytes(b"next version")
+    before = _tree_bytes(anchor)
+    attempts = _forbid_installed_directory_creation(monkeypatch, skills)
+    owner = installer._CreateOnlyMutablePath(
+        anchor, installer._InstallTransaction([], enabled=False), dry_run=True
+    )
+
+    installer._install_canonical_skills(source, skills, owner, root=ROOT)
+
+    assert not attempts
+    assert _tree_bytes(anchor) == before
+
+
+def test_receipted_lead_preview_plan_cannot_authorize_real_apply(tmp_path: Path) -> None:
+    installer, source, anchor, skills, _receipt = _receipt_fixture(tmp_path)
+    _apply_receipted(installer, source, anchor, skills)
+    (source / "lead" / "SKILL.md").write_bytes(b"next version")
+    plan = installer._preflight_canonical_skills(
+        source, skills, root=ROOT, global_install=True, dry_run=True,
+    )
+    try:
+        assert any(skill.accepted_prior is not None for skill in plan.skills)
+        assert not plan.directory_move_parents
+        before = installer._InstallTransaction._observe(skills)
+        transaction = installer._InstallTransaction([], enabled=False)
+        owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=False)
+
+        with pytest.raises(ValueError, match="missing directory move capability observation"):
+            installer._apply_canonical_skills_plan(plan, skills, owner, root=ROOT)
+
+        assert transaction._effects == []
+        assert installer._InstallTransaction._observe(skills) == before
+    finally:
+        installer._discard_canonical_skills_plan(plan)
