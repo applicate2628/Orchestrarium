@@ -23,6 +23,9 @@ These results do not enable a default route or qualify arbitrary general use.
 ## Contents
 
 - [Current main integration audit, 2026-11-24](#current-main-integration-audit-2026-11-24)
+  - [Reconciled integration contracts](#reconciled-integration-contracts)
+  - [Corrections and bounded verification](#corrections-and-bounded-verification)
+  - [Remaining qualification and publication](#remaining-qualification-and-publication)
 - [PR19 completion roadmap](#pr19-completion-roadmap-updated-2026-11-18)
 - [Provider installation boundary](#provider-installation-boundary)
 - [Explicit Codex review opt-in](#explicit-codex-review-opt-in-repository-local-contract)
@@ -53,6 +56,8 @@ not release acceptance. Remote PR19 and the working installation are unchanged
 by this audit. The existing [product plan in PR13](https://github.com/applicate2628/Orchestrarium/pull/13) owns delivery
 order; this section owns the SDK integration decisions and evidence boundary.
 
+### Reconciled integration contracts
+
 **Table 1. Reconciled integration contracts.**
 
 | Boundary | Retained behavior | Verification and limit |
@@ -61,6 +66,8 @@ order; this section owns the SDK integration decisions and evidence boundary.
 | Preference migration | Project installation keeps a sparse overlay. Existing global legacy preferences are read only when the canonical filename is absent; even an empty canonical file excludes the legacy layer and its trust evidence. | Layering, canonical-path refusal and byte-preservation checks. No ambient account or trust selection is inferred. |
 | Windows storage | Current replacement and rollback access rules remain together with SDK read-only/no-recall handling. Legacy link materialization preserves source owner, group and discretionary access control list (DACL). | Native isolated object/installation tests. A changed link that prevents safe settlement reports retained recovery, not successful rollback. |
 | Publication transport | Current receiver-history and progress contracts coexist with bounded SDK Git object reads. Scanner cancellation keeps resource ownership until cleanup settles; generated runtime projections match the canonical files. | Offline protocol, interruption and projection checks. Source parity does not establish native publication or complete Rust scanner qualification. |
+
+### Corrections and bounded verification
 
 The failure-driven corrections also retain verified unchanged member images
 through repeated installs, restore five exact historical skill witnesses, admit
@@ -106,13 +113,161 @@ actual owned handle. It retains bounded-read, foreign-change, quarantine and
 rollback assertions. Subsequent root checks exercised the six atomic/budget
 composition cases and the unchanged synthetic-header runtime input separately.
 
+The audit also reproduced a transfer-budget defect on unchanged main `14a4e74a`:
+staged successor startup admitted source and receipt bytes before entering its
+selected ledger scope, whose initialization then reset that derived budget.
+`start_item` now enters the existing scope before source admission. The two
+original failures passed after this one-line correction; eight further main
+checks preserved the exact caller ceiling, one-byte-under refusal, source/receipt
+currentness and independent operation scopes. The same correction is carried into
+SDK and a focused lifecycle follow-up from main; the two original cases also
+passed on native Windows with unchanged source hashes. PR64 retains its separate
+initially absent ledger scope.
+
+Two further lifecycle defects are shared with main. Closing several selected bugs
+changed the transaction actor for each row, so rollback of an earlier row failed
+its actual-forward-origin check. The caller now binds the existing complete close
+plan once; individual byte, endpoint, inverse-use and currentness checks are
+unchanged. The original failure reproduced on main and six focused checks passed
+after correction. The SDK lane separately passed nine cases, including a late
+failure with a concurrent foreign consumer: original bugs are restored, the
+foreign image survives, and unsafe directory cleanup remains explicitly incomplete.
+Subjectless topology observation also incorrectly sent its original alias through
+the bound-acquisition no-link gate. Only the already restricted observation route
+now uses its resolved root. Both original main failures and three adjacent
+contract/context guards passed after correction; mutation through an alias remains
+refused. These changes remain separate commits within the lifecycle follow-up.
+
+Public close now declares its selected work-item before root acquisition. This
+corrects the ambiguous case where the repository itself is named `work-items`
+and its parent contains a different neighboring task; duplicate selected
+identities and invalid subjects remain refused. Three focused main checks passed.
+Legacy-parent archive compensation now uses the existing operation-bound inverses
+for its actual forward effects. A changed external URI (Uniform Resource
+Identifier) consumer no longer prevents restoration of an independently owned
+parent, while a changed member inside that parent still blocks an overlapping
+restore. Seven focused main checks passed, including the preserved foreign-image
+and inverse-authority boundaries.
+
+Partial-migration pending receipts now use the existing native write owner for
+both create-only promotion and retirement. Those effects are published to the
+held transaction; same-byte foreign replacements survive, late reappearance
+refuses, and cleanup preserves the primary failure. The owning SDK selection
+passed 43 cases with seven subtests; the same correction on main passed 17 cases
+after its original selection failed 16 of 17. Root checks separately passed 14
+current SDK cases. These are overlapping, source-bound selections, not a combined
+test total. The focused regression owner is
+[`test_partial_recovery_receipt_retirement.py`](../tests/test_partial_recovery_receipt_retirement.py).
+
+Main also lacked SDK's candidate-aware admission for historical PASS custody:
+the final selected-ledger check ran before it could see independently verified
+replacement evidence for an already missing original. The focused main port
+forwards those candidate bytes through the existing admission owner and retains
+one captured ledger image. Auditing that port exposed an inherited SDK regression:
+an explicit event limit could escape as an unhandled `ValueError`. Both variants
+now preserve the established typed lifecycle failure and the original ceiling.
+The main selection passed 13 cases; the three new explicit-limit and same-byte
+replacement cases passed on SDK. No ledger is rewritten to manufacture authority.
+
+Ordinary close also lost currentness after selecting an empty physical scratch
+namespace: a foreign subject created later could escape all empty disposition
+checks. The transaction now retains exact owner absence and parent identities,
+or existing empty owner/run directory snapshots, through its existing verification
+owner. Three boundary cases reproduced the defect on the main-based candidate;
+the final 12-case matrix passed on both applicable source trees. It covers early,
+last-settlement and transaction-exit appearances, missing parents, and unrelated
+work-item siblings. Foreign bytes and identities survive. A late failure before
+body completion restores independently owned item/README effects; any unsafe
+creator cleanup remains explicitly incomplete. A failure detected only at
+transaction exit refuses success while preserving the already completed archive
+and foreign subject. The ordinary empty-selection route still does not acquire
+historical scratch rows; dedicated reconcile/release and strict validation keep
+their separate authority. See the focused
+[`test_empty_scratch_namespace_currentness.py`](../tests/test_empty_scratch_namespace_currentness.py)
+regressions.
+
+Repository transfer exposed another shared defect: concatenating bounded Git
+status batches changed native tracked/untracked pathname order. The correction
+sorts the complete NUL-separated records using the existing no-renames contract,
+without altering diff bytes, command limits or the aggregate output ceiling.
+The original main failure reproduced; four focused main checks passed after the
+correction, including Unicode names and an independent native Git result. Its
+separate transfer follow-up does not expand the lifecycle changes.
+
+The SDK import path also restores main's check immediately before execution of
+the paired ledger module. Two regressions change the selected link during import
+preparation: both executed the originally captured module before the correction,
+and both now refuse before any marker is written. This proves pre-execution
+currentness; it is not evidence of execution of a substituted foreign module.
+Current provider projections validate all 33 declared source members.
+
+The Linux history scanner had a separate process-ownership deadlock. Its content
+reader held the non-reentrant child-reaping owner while a prior-disclosure proof
+tried to acquire the same owner. The correction serializes those process owners
+and the corresponding retained-payload matcher scheduling on Linux, checks
+complete settlement before a successor starts, and lazily reuses the content
+reader between ordinary reads.
+Windows process batching is unchanged. The original unmodified edited-blob case
+now finishes on both SDK and the focused PR60 candidate; PR60's run completed in
+0.76 seconds with its adopted children drained. The SDK compatibility selection
+passed ten cases with 27 subtests, and PR60's passed seven with 12 subtests.
+Cancellation, spawn-failure and incomplete-settlement paths remain fail-closed.
+Matcher scheduling was exercised with a synthetic peer, not a compiled Linux
+Rust matcher.
+Frequent reader/matcher switches can still add process launches; a full compiled
+Rust matcher and large-history performance qualification remain separate.
+
+The native legacy creator-recovery fixture now interrupts actual finalization
+boundaries and preserves both original and foreign file identities. Its final
+single Windows case passed in 161 seconds on the recorded `7534a2c6` runtime with
+the exact reviewed test overlays. It reached public recovery after the fixture
+actor restored its own original image; source and test hashes were unchanged.
+An earlier zero-test harness failure was only cross-version abstract syntax tree
+(AST) formatting, and an earlier test failure retained its own evidence. This
+one passing case does not qualify the 14 cases left unexecuted by the earlier
+bounded native class run or later lifecycle source changes.
+
+The final focused Windows lifecycle selection used commit `cf36685d`, tree
+`21c81f1f`, and the runtime SHA-256
+`9a74c309a0f860bdae7abc93b728840883aa7900521d8555143f6d205394bcb4`.
+All 33 cases in Table 2 passed with no failures or skips. Every group retained
+the ten frozen source/test hashes and a clean Git status, matched the exact
+selected test identities in both XML and event records, and recorded its direct
+pytest child exiting. The wrapper completed in 177.51 seconds; this is elapsed
+execution time, not an installer performance measurement. The harness preserved
+three exact unittest temporary owners through child exit, and the two alias cases
+used the existing private-thread symbolic-link privilege context. No assertion,
+runtime/test file or process-wide privilege was changed by that harness.
+
+**Table 2. Final focused Windows lifecycle selection.**
+
+| Group | Cases passed | Selected boundaries |
+| --- | ---: | --- |
+| Core lifecycle | 9 | Multi-bug rollback, native aliases, selected close subjects and explicit event-limit refusal. |
+| Legacy parent | 4 | Public recovery and independently owned inverses with external or overlapping foreign changes. |
+| Pending receipt | 16 | Exact retirement/promotion, same-byte foreign replacement, durability, primary failure, public retry and replay. |
+| Empty scratch namespace | 4 | Late appearance before writes, after settlement and at transaction exit, plus an unrelated-owner positive. |
+
 Broad test groups have also exposed obsolete source paths, policy examples,
 incomplete handcrafted installed packages and incoherent synthetic nested receipts.
 Corrections use current canonical owners and preserve the original negative
 checks. A guard's correct refusal is not changed merely to satisfy an old fixture.
+The applicable shared lifecycle fixture port passed all 44 expanded cases on the
+main-based candidate, with unchanged source and test hashes. Separate receipt and
+capability fixture corrections passed 21 cases on each applicable owner tree;
+SDK's new receipt finalizer remains SDK-specific, while shared target ordering
+and canonical host selection stay in a small test-only main follow-up.
+The original 627-case lifecycle selection now has completed-attempt evidence for
+every selected identity, and the last 37 non-publication and eight publication
+modules completed. Completion includes recorded failures and skips. The coverage
+inventory uses exact node identities across revisions and never adds overlapping
+run totals. All 495 originally selected modules have execution or collection
+evidence; a module with an observed case is not assumed completely qualified.
 Interrupted runs without a final result and report do not establish complete
 suite acceptance. A complete current-tree release verdict remains separate from
 these bounded results.
+
+### Remaining qualification and publication
 
 Six isolated Stage0 verifier cases remain unqualified in the available Linux
 environment: the actual reviewed child uses Python's isolated `-I` mode and
@@ -120,6 +275,11 @@ cannot import `pytest` from either existing interpreter. A preserved dependency
 probe failed before collecting or running a repository test and emitted no
 trusted events. The isolation contract is unchanged. Optional official Agent
 Client Protocol (ACP) dependencies retain their separate collection holds.
+Two POSIX socket-boundary cases additionally stop at socket creation: both
+existing interpreters receive `EPERM` (operation not permitted) from the
+environment before an AF_UNIX local socket can be bound. The downstream
+special-file negative paths in those cases remain unqualified; the tests and
+production checks are not weakened to hide that restriction.
 
 Publication remains held at the existing authenticated native Git boundary. The
 attempted guarded update stopped at missing GitHub credentials before the native
