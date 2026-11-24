@@ -2380,10 +2380,11 @@ def _lifecycle_participant(function, *, input_role: str = "caller-root", subject
     signature = inspect.signature(function)
     if subject_parameters is not None:
         if (not isinstance(subject_parameters, tuple) or not subject_parameters
-            or subject_parameters[0] not in ("category-slug", "category-reference", "transition")
-            or len(subject_parameters) != (3 if subject_parameters[0] == "category-slug" else 2)
+            or subject_parameters[0] not in ("category-slug", "category-reference", "transition", "legacy-close")
+            or len(subject_parameters) != (3 if subject_parameters[0] in ("category-slug", "legacy-close") else 2)
             or subject_parameters[-1] not in signature.parameters
-            or (subject_parameters[0] == "category-slug" and subject_parameters[1] not in CATEGORIES)):
+            or (subject_parameters[0] == "category-slug" and subject_parameters[1] not in CATEGORIES)
+            or (subject_parameters[0] == "legacy-close" and subject_parameters[1] not in signature.parameters)):
             raise TypeError("invalid lifecycle subject declaration")
     def prepare_subject(root, args, kwargs):
         if "_prepared_category" in kwargs:
@@ -2393,6 +2394,15 @@ def _lifecycle_participant(function, *, input_role: str = "caller-root", subject
         arguments = signature.bind(root, *args, **kwargs)
         arguments.apply_defaults()
         value = arguments.arguments[subject_parameters[-1]]
+        if subject_parameters[0] == "legacy-close":
+            slug = arguments.arguments[subject_parameters[1]]
+            _validate_slug(slug)
+            reference = ("work-item", slug)
+            if value is None:
+                return {"selected_reference": reference}, {}
+            request = _legacy_evidence_input(value)
+            return {"selected_transition": request["operationId"],
+                "selected_transition_fallback": reference}, {}
         if subject_parameters[0] == "category-slug":
             _validate_slug(value)
             return {"selected_reference": (subject_parameters[1], value)}, {}
@@ -2847,6 +2857,16 @@ def _project_root_candidates(root, input_role):
     return (resolved, resolved.parent) if resolved.parent / "work-items" == resolved else (resolved,)
 
 
+def _validate_transition_reference_fallback(operation_id, reference):
+    if reference is None:
+        return
+    if (operation_id is None or not isinstance(reference, tuple) or len(reference) != 2
+            or reference[0] != "work-item"):
+        raise LifecycleError("WI-LIFECYCLE-LOCK-IDENTITY", "transition fallback requires one declared work-item")
+    _validate_transition_operation_id(operation_id)
+    _validate_slug(reference[1])
+
+
 def select_transition_resource_inputs(root, *, input_role="caller-root", selection=None,
         read_admission=None, acquisition_ceiling=None, output_ceiling=None, acquired_input=None):
     """Select finite read demand from native metadata, before any pending JSON read.
@@ -2867,10 +2887,13 @@ def select_transition_resource_inputs(root, *, input_role="caller-root", selecti
         if read_admission is not None and read_admission != current.transition_resource_inputs.read_admission:
             raise LifecycleError("WI-LIFECYCLE-RESOURCE-DRIFT", "nested operation changed transition admission")
         return current.transition_resource_inputs
-    if selection is not None and (not isinstance(selection, dict) or
-            set(selection) - {"selected_locator", "selected_reference", "selected_transition"} or
-            sum(value is not None for value in selection.values()) > 1):
-        raise LifecycleError("WI-LIFECYCLE-LOCK-IDENTITY", "invalid transition resource selection")
+    if selection is not None:
+        if (not isinstance(selection, dict) or
+                set(selection) - {"selected_locator", "selected_reference", "selected_transition", "selected_transition_fallback"} or
+                sum(selection.get(key) is not None for key in ("selected_locator", "selected_reference", "selected_transition")) > 1):
+            raise LifecycleError("WI-LIFECYCLE-LOCK-IDENTITY", "invalid transition resource selection")
+        _validate_transition_reference_fallback(selection.get("selected_transition"),
+            selection.get("selected_transition_fallback"))
     if read_admission == "explicit" and acquisition_ceiling is None:
         raise LifecycleError("WI-LIFECYCLE-RESOURCE-INCOMPLETE", "explicit transition admission requires all three numeric controls")
     ceiling = _transition_resource_budget(acquisition_ceiling) if acquisition_ceiling is not None else None
@@ -5969,6 +5992,7 @@ def _resolve_project_root_identity(
     failure_id: str = "WI-LIFECYCLE-LOCK-IDENTITY",
     selected_locator: tuple[str, str] | None = None,
     selected_reference: tuple[str, str] | None = None, selected_transition: str | None = None,
+    selected_transition_fallback: tuple[str, str] | None = None,
     binding_evidence_out: list | None = None,
     acquisition_purpose: str = "bound-acquisition",
     acquired_input=None, ledger_resource_budget=None,
@@ -5980,6 +6004,7 @@ transition_resource_budget=None) -> tuple[Path, Path]:
         raise LifecycleError(failure_id, "unknown project root input role")
     if sum(value is not None for value in (selected_locator, selected_reference, selected_transition)) > 1:
         raise LifecycleError(failure_id, "multiple selected project subjects")
+    _validate_transition_reference_fallback(selected_transition, selected_transition_fallback)
     if selected_reference is not None:
         if not isinstance(selected_reference, tuple) or len(selected_reference) != 2 or selected_reference[0] not in CATEGORIES:
             raise LifecycleError("WI-REFERENCE-INVALID", "invalid selected logical subject")
@@ -6042,12 +6067,26 @@ transition_resource_budget=None) -> tuple[Path, Path]:
         evidence.extend(observed)
         if matched:
             bindings.append(repository)
-    if selected and not bindings:
+    if selected_transition_fallback is not None and not bindings:
+        # A pending operation owns reentry before ordinary terminal acquisition.
+        # Only its absence across every candidate admits the declared subject.
         for repository in repositories:
-            subjects, observed = _read_project_namespace_identity_at(repository / "work-items", failure_id=failure_id, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
+            matched, observed = _read_selected_reference_at(repository / "work-items",
+                selected_transition_fallback, failure_id, ledger_resource_budget=ledger_resource_budget,
+                transition_resource_budget=transition_resource_budget)
             evidence.extend(observed)
-            if subjects or len(repositories) == 1:
+            if matched:
                 bindings.append(repository)
+    if selected and not bindings:
+        if selected_transition_fallback is not None:
+            if len(repositories) == 1:
+                bindings.append(repositories[0])
+        else:
+            for repository in repositories:
+                subjects, observed = _read_project_namespace_identity_at(repository / "work-items", failure_id=failure_id, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget)
+                evidence.extend(observed)
+                if subjects or len(repositories) == 1:
+                    bindings.append(repository)
     _verify_project_binding_evidence(tuple(evidence), failure_id)
     if len(bindings) != 1:
         outcome = "ambiguous" if bindings else "unbound"
@@ -14447,7 +14486,7 @@ def _verify_parent_archive_link_targets(plan: dict, *, archived: bool,
             raise LifecycleError(failure_id, "declared absent URI target appeared")
 
 
-@functools.partial(_lifecycle_participant, subject_parameters=('category-slug', 'work-item', 'slug'))
+@functools.partial(_lifecycle_participant, subject_parameters=('legacy-close', 'slug', 'legacy_evidence_data'))
 def close_item(root, slug, closure_data, terminal_instant, *, inject_readme_failure=False,
                inject_bug_failure_after=None, allow_protected_uri_updates=False,
                legacy_evidence_data=None, apply=False, inject_failure_at=None, ledger_resource_budget=None,):
