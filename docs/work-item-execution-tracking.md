@@ -198,6 +198,10 @@ This compatibility is limited to validation of an already archived work item's i
 
 This grants only the closure-target eligibility bit for that explicit relationship. It does not convert V1 to V2, make unrelated historical V1 `REVISE` events open obligations, validate an invalid V2 closer, or alter active-item validation. The common C1–C5 closure checks still decide order, unique discharge, reviewer/role/artifact/lane authority, and protected waivers; their existing errors remain visible. The reader writes no archive bytes and adds no command, manifest, or sidecar. A clean archived-reader result does not establish that other current-item obligations in the periodic checker are closed.
 
+## Preview an older active status
+
+Run `python -B scripts/mutate-work-item.py update --root . --slug <slug> --preview-legacy --transition-read-admission selected-native` for a selected older active record. The JSON reports the original content digest, usable fields, and unresolved fields. It does not write files, infer a verdict, create ledger history, or archive a task. A lead can request targeted evidence from the relevant owner; missing evidence remains unknown.
+
 ## Check All Active Work Items
 
 Run the periodic checker at handoff boundaries, before publication review, or when resuming after interruption.

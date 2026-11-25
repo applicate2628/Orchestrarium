@@ -5,6 +5,10 @@ A dated entry is not a release tag, publication notice, or confirmation of a
 local installation. For the frozen pre-SDK baseline and draft follow-up, see
 [Which version?](README.md#which-version).
 
+## 2026-11-25
+
+- Preview recovery of old active task records without editing them. The report identifies unambiguous fields, damaged or conflicting values, and missing evidence so one broken record does not delay reconciliation of others.
+
 ## 2026-11-24
 
 - Preserve SDK ledger absence handling through its explicit observation owner and final binding check. Direct reads of missing ledgers keep the `WI-LEDGER-RESOURCE-DRIFT` diagnostic, while ledger-free observation and disappearance during capture retain their distinct outcomes.

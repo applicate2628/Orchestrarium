@@ -11874,6 +11874,70 @@ def start_item(root: Path, slug: str, status_data: bytes, *, inject_readme_failu
     return target
 
 
+def _legacy_active_status_preview(data: bytes) -> dict:
+    """Report facts from an immutable legacy preimage; never decide disposition."""
+    keys = ("status", "started", "updated", "task", "current step", "last result",
+            "next action", "scope boundary", "owner", "integration owner", "evidence gate")
+    candidates: dict[str, set[str]] = {key: set() for key in keys}
+    damaged = set()
+    warnings: list[str] = []
+    text = data.decode("utf-8-sig", errors="surrogateescape")
+    try:
+        for _line_number, line in _authoritative_markdown_lines(text):
+            match = FIELD_RE.fullmatch(line)
+            if not match:
+                continue
+            key, value = (part.strip() for part in match.groups())
+            key = key.casefold()
+            if key in ("state", "lifecycle"):
+                key = "status"
+            if key not in candidates or not value:
+                continue
+            if any(0xDC80 <= ord(character) <= 0xDCFF or ord(character) < 32
+                   for character in value):
+                damaged.add(key)
+                continue
+            candidates[key].add(value.casefold() if key == "status" else value)
+    except LifecycleError as exc:
+        if exc.failure_id != "WI-CATEGORY-MARKDOWN-INVALID":
+            raise
+        warnings.append("unterminated-markdown-fence")
+
+    fields = {}
+    unresolved = {}
+    for key, values in candidates.items():
+        if key in damaged:
+            unresolved[key] = "damaged"
+        elif len(values) > 1:
+            unresolved[key] = "conflict"
+        elif not values:
+            unresolved[key] = "missing"
+        else:
+            value = next(iter(values))
+            if key == "status" and value not in {"active", "blocked"}:
+                unresolved[key] = "unsupported"
+            elif key in {"started", "updated"}:
+                try:
+                    _strict_utc(value)
+                except LifecycleError:
+                    unresolved[key] = "invalid-date"
+                else:
+                    fields[key] = value
+            else:
+                fields[key] = value
+    return {"sourceSha256": _sha256_bytes(data), "fields": fields,
+            "unresolved": unresolved, "warnings": warnings}
+
+
+def preview_legacy_active_status(root: Path, slug: str, *, ledger_resource_budget=None) -> dict:
+    target = resolve_category(root, f"work-item:{slug}", ledger_resource_budget=ledger_resource_budget)
+    if target.parent.name != "active" or not target.is_dir():
+        raise LifecycleError("WI-INVALID-TARGET", "status recovery requires an active work-item")
+    snapshot = _capture_file_snapshot(target / "status.md", failure_id="WI-CATEGORY-STATUS-INVALID",
+                                      maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP)
+    return _legacy_active_status_preview(snapshot.data)
+
+
 @functools.partial(_lifecycle_participant, subject_parameters=('category-slug', 'work-item', 'slug'))
 def update_status(root: Path, slug: str, status_data: bytes, *, inject_readme_failure: bool = False, ledger_resource_budget=None) -> Path:
     _validate_active_status_bytes(status_data)
@@ -31578,8 +31642,12 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--slug", required=True)
         if name == "candidate":
             command.add_argument("--file", required=True)
-        elif name in {"start", "update"}:
+        elif name == "start":
             command.add_argument("--status-file", required=True)
+        elif name == "update":
+            status_input = command.add_mutually_exclusive_group(required=True)
+            status_input.add_argument("--status-file")
+            status_input.add_argument("--preview-legacy", action="store_true")
         elif name == "close":
             command.add_argument("--closure-file", required=True)
             command.add_argument("--terminal-instant", required=True)
@@ -31928,6 +31996,12 @@ def main(argv: list[str]) -> int:
             , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             print(result)
         elif args.command == "update":
+            if args.preview_legacy:
+                if args.inject_readme_failure:
+                    raise LifecycleError("WI-INVALID-TARGET", "a recovery preview does not write")
+                print(json.dumps(preview_legacy_active_status(
+                    root, args.slug, ledger_resource_budget=ledger_resource_budget), sort_keys=True))
+                return 0
             result = update_status(
                 root,
                 args.slug,
