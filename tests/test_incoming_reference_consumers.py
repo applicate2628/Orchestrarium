@@ -942,3 +942,34 @@ def test_unicode_plain_evidence_is_classified_and_kept_byte_exact(module, tmp_pa
     assert image.edit([]) == raw
     replacement = "bug:successor"
     assert image.edit(image.literal_edits(REFERENCE, replacement)) == bom + text.replace(REFERENCE, replacement).encode(codec)
+
+
+def test_canonical_input_ownership_does_not_hide_neighbor_navigation(module, tmp_path):
+    from gzip import compress
+    from io import BytesIO
+    import tarfile
+
+    archive = BytesIO()
+    with tarfile.open(fileobj=archive, mode="w") as out:
+        raw_member = b"build artifact"
+        header = tarfile.TarInfo("result.bin")
+        header.size = len(raw_member)
+        out.addfile(header, BytesIO(raw_member))
+    binary = compress(archive.getvalue(), mtime=0)
+    source, opaque = seed(tmp_path, "active/other/inputs/result.tar.gz", binary)
+    document = opaque.parent.parent / "design.md"
+    doc_bytes = b"[proof](../../bugs/owned-record.md)\n"
+    document.write_bytes(doc_bytes)
+    expected = {"result": "unmapped", "references": [{
+        "consumer": "active/other/design.md", "kind": "physical",
+        "value": "../../bugs/owned-record.md",
+    }]}
+    got = module._incoming_link_result(tmp_path, {source}, REFERENCE, strict_consumer_reads=True)
+    assert got == expected
+    assert opaque.read_bytes() == binary and document.read_bytes() == doc_bytes
+    ambiguous = opaque.parent.parent / "artifacts" / opaque.name
+    ambiguous.parent.mkdir()
+    opaque.rename(ambiguous)
+    with pytest.raises(module.LifecycleError, match="cannot classify live incoming-link consumer"):
+        module._incoming_link_result(tmp_path, {source}, REFERENCE, strict_consumer_reads=True)
+    assert ambiguous.read_bytes() == binary and document.read_bytes() == doc_bytes
