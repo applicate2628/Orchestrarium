@@ -1737,7 +1737,7 @@ def retained_preimage_profiles(event: Mapping[str, object], item: Path, errors: 
             provenance = profile.get("provenance")
             purpose = profile.get("purpose")
             namespace = ("inputs" if purpose == "historical-only" else
-                         "artifacts" if purpose == "legacy-opaque-artifact" else None)
+                         "artifacts" if purpose in ("legacy-opaque-artifact", "legacy-package-tree") else None)
             safe_ref = (namespace is not None and isinstance(ref, str) and _safe_repo_relative(ref)
                         and not Path(ref).is_absolute() and not Path(ref).drive
                         and len(PurePosixPath(ref).parts) >= 2 and PurePosixPath(ref).parts[0] == namespace)
@@ -1790,8 +1790,69 @@ def _legacy_archive_representation(data: bytes) -> bool:
         return False
 
 
-def capture_retained_preimage_payload(item: Path, entry: Mapping[str, object], profile: Mapping[str, object]):
-    """Use the existing ordinary/no-follow capture, bounded by declared bytes."""
+@dataclass(frozen=True)
+class _RetainedPackageTreeCapture:
+    path: Path
+    length: int
+    digest: str
+    entries: int
+    members: tuple[tuple[str, str], ...]
+
+    def verify(self) -> None:
+        owner = load_lifecycle_owner()
+        if owner._lifecycle_path_has_reparse(self.path):
+            raise ValueError("WI-RETAINED-PREIMAGE: retained package tree is redirected")
+        limits = owner.PayloadDigestLimits(len(self.members), self.entries, self.length)
+        if owner._payload_digest(
+            self.path, limits=limits, expected_members=dict(self.members),
+            expected_byte_count=self.length,
+        )[1] != self.digest or owner._lifecycle_path_has_reparse(self.path):
+            raise ValueError("WI-RETAINED-PREIMAGE: reviewed tree digest or path differs")
+
+
+def _capture_retained_package_tree(item, entry, profile, report_data=None):
+    if isinstance(item, _CapturedHistoryPath):
+        raise ValueError("WI-RETAINED-PREIMAGE: selected history lacks a recursive tree capture")
+    owner = load_lifecycle_owner()
+    provenance = profile["provenance"]
+    if report_data is None:
+        report = item / provenance["snapshot"]
+        if not report.exists() and not report.is_symlink():
+            report = item / provenance["ref"]
+        report_data = owner._capture_file_snapshot(report, failure_id="WI-RETAINED-PREIMAGE").data
+    if hashlib.sha256(report_data).hexdigest() != provenance["sha256"]:
+        raise ValueError("WI-RETAINED-PREIMAGE: producer inventory provenance differs")
+    inventory = decode_json_object(report_data, source="reviewed package inventory", maximum_bytes=len(report_data))
+    files = inventory.get("files")
+    count = inventory.get("entryCount")
+    if (inventory.get("bundle") != entry["ref"] or inventory.get("links") != {}
+        or not isinstance(files, dict) or not files or type(count) is not int or count < len(files)
+        or any(not isinstance(name, str) or not _safe_repo_relative(name) or name in {"", "."}
+               or not isinstance(digest, str) or SHA256_RE.fullmatch(digest) is None
+               for name, digest in files.items())):
+        raise ValueError("WI-RETAINED-PREIMAGE: reviewed producer inventory contract differs")
+    selected = item / entry["ref"]
+    result = _RetainedPackageTreeCapture(selected, profile["byteCount"], profile["sha256"],
+                                         count, tuple(sorted(files.items())))
+    result.verify()
+    return result
+
+
+def verify_retained_payload(snapshot, *, acquired_input=None):
+    if isinstance(snapshot, _RetainedPackageTreeCapture):
+        if acquired_input is not None:
+            raise ValueError("WI-RETAINED-PREIMAGE: selected history lacks a recursive tree capture")
+        snapshot.verify()
+    else:
+        load_lifecycle_owner()._verify_captured_file(
+            snapshot, "WI-RETAINED-PREIMAGE", acquired_input=acquired_input
+        )
+
+
+def capture_retained_preimage_payload(item: Path, entry: Mapping[str, object], profile: Mapping[str, object], *, report_data=None):
+    """Use existing no-follow readers bounded by the reviewed representation."""
+    if profile["purpose"] == "legacy-package-tree":
+        return _capture_retained_package_tree(item, entry, profile, report_data)
     owner = load_lifecycle_owner()
     selected = item / entry["ref"]
     snapshot = owner._capture_file_snapshot(selected.path if isinstance(selected, _CapturedHistoryPath) else selected,
@@ -2756,7 +2817,7 @@ class _CurrentPredicateV1:
             elif self.kind == "custody":
                 good = _ordinary_custody_snapshot(self.item, self.locator, self.digest)
             elif self.kind == "retained":
-                owner._verify_captured_file(self.snapshot, "WI-RETAINED-PREIMAGE",
+                verify_retained_payload(self.snapshot,
                     acquired_input=self.item if isinstance(self.item, _CapturedHistoryPath) else None)
                 good = True
             else:
@@ -5185,8 +5246,10 @@ def _validate_event_fields(
                 if isinstance(expected_path, _CapturedHistoryPath):
                     expected_path = (expected_path.owner_input.current_snapshot(expected_path.path).path
                                      if expected_path._settled_origin() is not None else expected_path.path)
+                digest = (snapshot.digest if isinstance(snapshot, _RetainedPackageTreeCapture)
+                          else hashlib.sha256(snapshot.data).hexdigest())
                 if (snapshot.path != expected_path or snapshot.length != profile["byteCount"]
-                    or hashlib.sha256(snapshot.data).hexdigest() != profile["sha256"]):
+                    or digest != profile["sha256"]):
                     raise ValueError("WI-RETAINED-PREIMAGE: captured payload binding differs")
                 key = ("retained", expected_path, profile["byteCount"], profile["sha256"])
                 if isinstance(item, _CapturedHistoryPath):

@@ -14562,9 +14562,11 @@ def _plan_parent_archive_links(
     """Capture one parent relocation's authorized consumer and target images."""
     work_items = _work_items_root(root, ledger_resource_budget=ledger_resource_budget)
     target_after_images = target_after_images or {}
+    retained_trees = {}
     incoming = _incoming_link_result(
         root, {source}, f"work-item:{source.name}",
-        mutable_consumers_only=True, strict_consumer_reads=True, ledger_resource_budget=ledger_resource_budget
+        mutable_consumers_only=True, strict_consumer_reads=True,
+        retained_trees=retained_trees, ledger_resource_budget=ledger_resource_budget
     )
     images = {plan.source: plan for plan in bug_plans}
     links = _physical_archive_link_plans(
@@ -14629,11 +14631,17 @@ def _plan_parent_archive_links(
             "consumerCaptures": consumer_captures, "ownerEvidence": tuple(owner_evidence),
             "targetImages": target_images,
             "targetDirectoryIdentities": target_directory_identities,
+            "retainedTrees": tuple(value[0] for value in retained_trees.values()),
             "maintenance": link_maintenance}
 
 
 def _verify_parent_archive_link_targets(plan: dict, *, archived: bool,
                                         failure_id: str) -> None:
+    for tree in plan.get("retainedTrees", ()):
+        try:
+            tree.verify()
+        except (OSError, ValueError, LifecycleError) as exc:
+            raise LifecycleError(failure_id, "reviewed sibling package tree changed") from exc
     for original, (final, captured, data) in plan["targetImages"].items():
         path = final if archived else original
         if not archived and captured is not None:
@@ -21149,6 +21157,7 @@ def _payload_limited_tree_entries(path: Path, limits: PayloadDigestLimits) -> li
 def _payload_digest(
     path: Path, *, limits: PayloadDigestLimits | None = None,
     expected_members: Mapping[str, str] | None = None,
+    expected_byte_count: int | None = None,
 ) -> tuple[str, str]:
     """Optionally verify the exact producer file inventory in the same byte stream."""
     if expected_members is not None and (limits is None or not path.is_dir()):
@@ -21250,6 +21259,8 @@ def _payload_digest(
             )
     if remaining:
         raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "producer inventory has a missing file")
+    if expected_byte_count is not None and (limits is None or expected_byte_count != total_bytes):
+        raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "producer inventory byte count differs")
     return MIGRATION_DIGEST_ALGORITHMS["directory"], digest.hexdigest()
 
 
@@ -21498,8 +21509,9 @@ class _IncomingConsumerImage:
 
 class _RetainedConsumerScanPreparation:
     """Invocation-owned validator and captured/decoded inputs, never admission."""
-    def __init__(self, acquired_input=None, *, ledger_resource_budget=None) -> None:
+    def __init__(self, acquired_input=None, *, retained_trees=None, ledger_resource_budget=None) -> None:
         self.ledger_resource_budget = ledger_resource_budget
+        self.retained_trees = retained_trees
         self._validator: object | None = None
         self.acquired_input = acquired_input
         self._items: dict[Path, tuple[CapturedFileSnapshot, list[dict], list[dict[str, object]], tuple[str, ...]] | None | Exception] = {}
@@ -21604,7 +21616,12 @@ def _retained_preimage_consumer(
         return False
     item = work_items.joinpath(*parts[:item_parts])
     relative = consumer.relative_to(item).as_posix()
-    preparation = _RetainedConsumerScanPreparation( ledger_resource_budget=ledger_resource_budget) if scan_preparation is None else scan_preparation
+    preparation = _RetainedConsumerScanPreparation(ledger_resource_budget=ledger_resource_budget) if scan_preparation is None else scan_preparation
+    trees = preparation.retained_trees
+    if trees is not None:
+        for tree, (_, members) in trees.items():
+            if consumer.is_relative_to(tree) and consumer.relative_to(tree).as_posix() in members:
+                return True
     validator = preparation.validator()
     acquired_input = preparation.acquired_input
     selected_item = item if acquired_input is None else _call_acquired_input(acquired_input, "validator_path", item, validator)
@@ -21619,7 +21636,12 @@ def _retained_preimage_consumer(
             if profile_errors:
                 continue
             for entry, profile in profiles:
-                if relative not in {entry["ref"], profile["provenance"]["snapshot"]}:
+                tree = profile["purpose"] == "legacy-package-tree"
+                if tree:
+                    if (trees is None or acquired_input is not None
+                        or not relative.startswith(entry["ref"] + "/")):
+                        continue
+                elif relative not in {entry["ref"], profile["provenance"]["snapshot"]}:
                     continue
                 run_id = event.get("runId")
                 if not isinstance(run_id, str) or sum(isinstance(row.get("runId"), str)
@@ -21630,7 +21652,9 @@ def _retained_preimage_consumer(
                                                      maximum_bytes=validator.MAX_LEDGER_LINE_BYTES, acquired_input=acquired_input)
                 provenance = _capture_file_snapshot(item / profile["provenance"]["snapshot"],
                                                      failure_id="WI-CATEGORY-MIGRATION-INVENTORY", acquired_input=acquired_input)
-                payload = validator.capture_retained_preimage_payload(selected_item, entry, profile)
+                payload = validator.capture_retained_preimage_payload(
+                    selected_item, entry, profile, report_data=provenance.data
+                )
                 # Resolve exactly the captured association/snapshot; unrelated
                 # declarations and legacy rows cannot become a new veto.
                 custody, custody_errors = validator.resolve_historical_pass_custody(
@@ -21645,7 +21669,7 @@ def _retained_preimage_consumer(
                 if not validator._validate_event(event, selected_item, set(), record_errors,
                     historical_pass_snapshot=locator, retained_payloads={entry["ref"]: payload}) or record_errors:
                     continue
-                captures = (carrier, association, provenance, payload)
+                captures = (carrier, association, provenance) if tree else (carrier, association, provenance, payload)
                 for snapshot in captures:
                     _verify_captured_file(snapshot, "WI-CATEGORY-MIGRATION-INVENTORY", acquired_input=acquired_input)
                 transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
@@ -21654,6 +21678,11 @@ def _retained_preimage_consumer(
                         tuple(_call_acquired_input(acquired_input, "current_capture", snapshot)
                               if _settled_history_input(acquired_input) is not None else acquired_input.files[snapshot.path].current
                               for snapshot in captures))
+                if tree:
+                    members = frozenset(name for name, _ in payload.members)
+                    if consumer.relative_to(payload.path).as_posix() not in members:
+                        continue
+                    trees[payload.path] = (payload, members)
                 return True
     except (OSError, ValueError, LifecycleError, validator.load_lifecycle_owner().LifecycleError):
         # Failed admission is not an exemption. The caller retains its existing
@@ -21777,7 +21806,7 @@ def _incoming_link_result(
     mutable_consumers_only: bool = False,
     scan_markdown_links: bool = True,
     strict_consumer_reads: bool = False,
-    acquired_input=None, ledger_resource_budget=None,
+    acquired_input=None, retained_trees=None, ledger_resource_budget=None,
 ) -> dict:
     work_items = _work_items_root(root, acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget)
     physical: list[dict[str, str]] = []
@@ -21808,7 +21837,9 @@ def _incoming_link_result(
             for owned in owned_resolved
         )
 
-    preparation = _RetainedConsumerScanPreparation(acquired_input, ledger_resource_budget=ledger_resource_budget)
+    preparation = _RetainedConsumerScanPreparation(
+        acquired_input, retained_trees=retained_trees, ledger_resource_budget=ledger_resource_budget
+    )
     work_items_resolved = _input_resolve(work_items, acquired_input)
 
     for consumer in sorted(path for path in _input_descendants(work_items, acquired_input) if _input_is_file(path, acquired_input)):

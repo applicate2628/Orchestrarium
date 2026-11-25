@@ -1923,7 +1923,7 @@ def _append_retained_preimage(item: Path, validator: Any, event: dict[str, Any],
         for entry, profile in profiles:
             if profile["provenance"]["sha256"] != digest:
                 raise ValueError("WI-RETAINED-PREIMAGE: accepted report digest differs")
-            captures.append(validator.capture_retained_preimage_payload(item, entry, profile))
+            captures.append(validator.capture_retained_preimage_payload(item, entry, profile, report_data=report.data))
         captures.append(report)
         line = serialize_event(event).encode("utf-8")
         candidate = _append_candidate_bytes(previous.encode("utf-8"), event)
@@ -1936,7 +1936,7 @@ def _append_retained_preimage(item: Path, validator: Any, event: dict[str, Any],
 
     def publish() -> None:
         for capture in captures:
-            owner._verify_captured_file(capture, "WI-RETAINED-PREIMAGE")
+            validator.verify_retained_payload(capture)
         for directory in (item / "review-artifact-custody", item / "review-artifact-custody" / "historical-pass"):
             if not directory.exists():
                 directory.mkdir()
