@@ -7,6 +7,8 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-25
 
+- Keep explicitly reviewed legacy package files and expanded package trees intact during ordinary work-item close. Reuse the existing evidence ledger to verify exact package contents without treating them as live links; changed or unreviewed material and real neighboring links retain ordinary checks.
+
 - Read explicitly marked Unicode diagnostic text during work-item link checks. Keep its original byte order and marker; malformed content and strict metadata remain subject to the existing refusals.
 
 - Preview recovery of old active task records without editing them. The report identifies unambiguous fields, damaged or conflicting values, and missing evidence so one broken record does not delay reconciliation of others. Apply recovery with an explicitly reviewed staged status and its preview digest; keep original bytes and existing history. New tracking, when explicitly admitted, starts now rather than recreating past results.
