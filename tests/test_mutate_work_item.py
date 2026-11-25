@@ -3890,6 +3890,30 @@ def test_retained_payload_digest_optional_limits_keep_legacy_golden_bytes(
             raise AssertionError(f"{label} payload limit was accepted")
 
 
+@pytest.mark.parametrize("scenario", ("exact", "changed", "added", "removed"))
+def test_retained_payload_digest_verifies_producer_member_inventory(tmp_path: Path, scenario: str) -> None:
+    module = load_module()
+    tree = tmp_path / "build"
+    tree.mkdir()
+    candidate = tree / "asset.bin"
+    original = b"original"
+    candidate.write_bytes(original)
+    proof = {candidate.name: hashlib.sha256(original).hexdigest()}
+    expected = module._payload_digest(tree)
+    limits = module.PayloadDigestLimits(max_files=3, max_entries=4, max_bytes=128)
+    if scenario == "changed":
+        candidate.write_bytes(b"replaced")
+    elif scenario == "added":
+        (tree / "extra.md").write_bytes(b"live instructions")
+    elif scenario == "removed":
+        candidate.unlink()
+    if scenario == "exact":
+        assert module._payload_digest(tree, limits=limits, expected_members=proof) == expected
+    else:
+        with pytest.raises(module.LifecycleError, match="producer inventory"):
+            module._payload_digest(tree, limits=limits, expected_members=proof)
+
+
 def test_retained_payload_digest_limit_stops_scandir_before_preloading(tmp_path: Path) -> None:
     module = load_module()
     payload = tmp_path / "payload"

@@ -21079,7 +21079,7 @@ def _pointer_names_retained_root(
     return False
 
 
-def _payload_stream_regular_file(path: Path, expected: os.stat_result, digest, classifier) -> None:
+def _payload_stream_regular_file(path: Path, expected: os.stat_result, digest, classifier, *, member=None) -> None:
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(path, flags)
@@ -21094,6 +21094,8 @@ def _payload_stream_regular_file(path: Path, expected: os.stat_result, digest, c
             if not block:
                 break
             digest.update(block)
+            if member is not None:
+                member.update(block)
         final = os.fstat(descriptor)
         if not classifier._same_open_identity(final, opened):
             raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "payload file identity changed while reading")
@@ -21144,7 +21146,14 @@ def _payload_limited_tree_entries(path: Path, limits: PayloadDigestLimits) -> li
     return entries
 
 
-def _payload_digest(path: Path, *, limits: PayloadDigestLimits | None = None) -> tuple[str, str]:
+def _payload_digest(
+    path: Path, *, limits: PayloadDigestLimits | None = None,
+    expected_members: Mapping[str, str] | None = None,
+) -> tuple[str, str]:
+    """Optionally verify the exact producer file inventory in the same byte stream."""
+    if expected_members is not None and (limits is None or not path.is_dir()):
+        raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "producer inventory requires an owned directory capture")
+    remaining = None if expected_members is None else dict(expected_members)
     if path.is_symlink():
         raise LifecycleError(
             "WI-CATEGORY-MIGRATION-PAYLOAD",
@@ -21191,7 +21200,8 @@ def _payload_digest(path: Path, *, limits: PayloadDigestLimits | None = None) ->
                 "WI-CATEGORY-MIGRATION-PAYLOAD",
                 f"symbolic-link tree entry is not admitted: {entry}",
             )
-        relative = entry.relative_to(path).as_posix().encode("utf-8")
+        name = entry.relative_to(path).as_posix()
+        relative = name.encode("utf-8")
         if entry.is_dir():
             if limits is not None and _lifecycle_path_has_reparse(entry):
                 raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "payload tree entry is not ordinary")
@@ -21221,7 +21231,16 @@ def _payload_digest(path: Path, *, limits: PayloadDigestLimits | None = None) ->
             digest.update(size.to_bytes(8, "big"))
             if data is None:
                 assert limits is not None and classifier is not None
-                _payload_stream_regular_file(entry, expected, digest, classifier)
+                if remaining is None:
+                    _payload_stream_regular_file(entry, expected, digest, classifier)
+                else:
+                    member_expected = remaining.pop(name, None)
+                    if member_expected is None:
+                        raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "producer inventory has an unexpected file")
+                    member = hashlib.sha256()
+                    _payload_stream_regular_file(entry, expected, digest, classifier, member=member)
+                    if member.hexdigest() != member_expected:
+                        raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "producer inventory member content differs")
             else:
                 digest.update(data)
         else:
@@ -21229,6 +21248,8 @@ def _payload_digest(path: Path, *, limits: PayloadDigestLimits | None = None) ->
                 "WI-CATEGORY-MIGRATION-PAYLOAD",
                 f"unsupported tree entry: {entry}",
             )
+    if remaining:
+        raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "producer inventory has a missing file")
     return MIGRATION_DIGEST_ALGORITHMS["directory"], digest.hexdigest()
 
 
