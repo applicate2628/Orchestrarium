@@ -332,6 +332,41 @@ class TestNativePublicationEffects(unittest.TestCase):
         self.assertEqual(self.git("--git-dir", str(import_root), "for-each-ref"), b"")
 
 
+    def test_disk_backed_native_proofs_preserve_receipts_past_legacy_collection_caps(self):
+        """Both scanner stages keep complete evidence even above legacy caps."""
+        for number in range(4):
+            folder = self.root / f"folder-{number}"
+            folder.mkdir()
+            (folder / "sample.txt").write_bytes(f"ordinary public line {number}\n".encode())
+        self.git("add", ".")
+        self.git("commit", "-qm", "Add synthetic nested fixture")
+        tip = self.git("rev-parse", "HEAD").strip().decode()
+        payload = self.payload([(b"refs/heads/main", tip, b"refs/heads/main", self.commit)])
+        before = self.git("ls-remote", "--heads", "origin")
+        mod = self.module
+
+        def scan():
+            with self.in_root(), mock.patch.object(mod, "__injected_native_push__", payload, create=True):
+                ranged = mod._scan_range(
+                    "origin", "refs/heads/main", lambda _line: (),
+                    source_revision=tip, receipt_coverage=True,
+                )
+                native = mod._scan_native_push(payload, lambda _line: (), receipt_coverage=True)
+            return ranged, native
+
+        normal = scan()
+        self.assertEqual(tuple(result.kind for result in normal), ("clean", "clean"))
+        with (mock.patch.object(mod, "_MAX_OBJECTS", 3),
+              mock.patch.object(mod, "_MAX_BLOBS", 1),
+              mock.patch.object(mod, "_MAX_TREE_FRONTIER", 1)):
+            compact = scan()
+            legacy = self.scan(payload)
+        self.assertEqual(tuple(result.kind for result in compact), ("clean", "clean"))
+        self.assertEqual(tuple(map(mod._format_outcome, compact)), tuple(map(mod._format_outcome, normal)))
+        self.assertEqual(legacy.refusal, mod._refusal("PS-MSG-LIMIT", "count"))
+        self.assertEqual(self.git("ls-remote", "--heads", "origin"), before)
+
+
     def test_small_publication_does_not_rescan_large_receiver_history(self):
         self.import_large_history()
         base = self.git("rev-parse", "refs/heads/local-first").strip().decode("ascii")

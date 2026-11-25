@@ -5,12 +5,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
-from collections import Counter, OrderedDict
+from collections import Counter, OrderedDict, deque
 from copy import deepcopy
 from enum import Enum
 from functools import lru_cache
 import hashlib
-from itertools import chain, zip_longest
+from itertools import chain, islice, tee, zip_longest
 import importlib.util
 import json
 import math
@@ -461,8 +461,8 @@ class RangeSelection:
     destination: str
     source: str
     tip: str
-    expected_oids: tuple[str, ...]
-    object_oids: tuple[str, ...] = ()
+    expected_oids: tuple[str, ...] | _SealedRangeCommits
+    object_oids: tuple[str, ...] | _IndexedObjectSelection = ()
     object_format: GitObjectFormat = _SHA1_OBJECT_FORMAT
     destination_oid: str | None = None
     expected_parents: tuple[tuple[str, tuple[str, ...]], ...] = ()
@@ -684,7 +684,7 @@ class CoverageRecorder:
 
     def __init__(
         self,
-        expected_oids: Iterable[str] | _IndexedObjectSelection,
+        expected_oids: Iterable[str] | _IndexedObjectSelection | _SealedRangeCommits,
         observer: Callable[[CoverageEvent, str], None] | None = None,
         fault_port: "CoverageFaultPort | None" = None,
         *,
@@ -695,6 +695,10 @@ class CoverageRecorder:
         if isinstance(expected_oids, _IndexedObjectSelection):
             if history_index is None or receipt_coverage != "objects":
                 raise ValueError("indexed object selection requires compact native coverage")
+            self.expected_oids = expected_oids
+        elif isinstance(expected_oids, _SealedRangeCommits):
+            if history_index is None or receipt_coverage != "commits":
+                raise ValueError("indexed commit selection requires compact coverage")
             self.expected_oids = expected_oids
         else:
             self.expected_oids = tuple(expected_oids)
@@ -880,6 +884,11 @@ class _SealedRows:
 
     def __len__(self) -> int:
         return self.count
+
+
+@dataclass(frozen=True)
+class _SealedRangeCommits(_SealedRows):
+    order: str
 
 
 @dataclass(frozen=True)
@@ -4163,8 +4172,8 @@ async def _native_push_selection(
     object_progress = _VerifiedWorkPhase("objects", budget=deadline)
     objects = await _read_git_oid_lines_bounded(
         _range_git_argv("rev-list", "--objects", "--no-object-names", "--stdin"),
-        count_cap=None if exclusions else _MAX_OBJECTS,
-        byte_cap=None if exclusions else request.object_format.list_byte_cap(_MAX_OBJECTS),
+        count_cap=None if compact_graph or exclusions else _MAX_OBJECTS,
+        byte_cap=None if compact_graph or exclusions else request.object_format.list_byte_cap(_MAX_OBJECTS),
         deadline=loop_deadline, object_format=request.object_format, input_bytes=revisions,
         store_row=object_progress.observed(index.add_selected_object),
     )
@@ -4174,7 +4183,7 @@ async def _native_push_selection(
     receiver = await _subtract_receiver_object_intersection(index, exclusions, request.object_format, deadline)
     if isinstance(receiver, Refusal):
         return receiver
-    if not index.object_selection_within_limit():
+    if not compact_graph and not index.object_selection_within_limit():
         return _refusal("PS-MSG-LIMIT", "count")
     if not index.selected_commits_covered():
         return _refusal("PS-MSG-COVERAGE", "commit-object-set")
@@ -4230,8 +4239,8 @@ async def _native_commit_range_selection(
             return graph
         selected_objects = await _read_git_oid_lines_bounded(
             _range_git_argv("rev-list", "--objects", "--no-object-names", "--stdin"),
-            count_cap=None if prior_roots else _MAX_OBJECTS,
-            byte_cap=None if prior_roots else object_format.list_byte_cap(_MAX_OBJECTS),
+            count_cap=None if compact_graph or prior_roots else _MAX_OBJECTS,
+            byte_cap=None if compact_graph or prior_roots else object_format.list_byte_cap(_MAX_OBJECTS),
             deadline=loop_deadline, object_format=object_format, input_bytes=revisions,
             store_row=lambda oid: index.add_selected_object(oid, stream=stream),
         )
@@ -4242,14 +4251,16 @@ async def _native_commit_range_selection(
     receiver = await _subtract_receiver_object_intersection(index, prior_roots, object_format, deadline)
     if isinstance(receiver, Refusal):
         return receiver
-    if not index.object_selection_within_limit():
+    if not compact_graph and not index.object_selection_within_limit():
         return _refusal("PS-MSG-LIMIT", "count")
     if not index.selected_commits_covered():
         return _refusal("PS-MSG-COVERAGE", "commit-object-set")
     parents = () if compact_graph else tuple(index.selected_commits())
-    commits = tuple(index.selected_commit_ids()) if compact_graph else tuple(oid for oid, _ in parents)
+    commits = index.bind_range_commit_selection() if compact_graph else tuple(oid for oid, _ in parents)
+    objects = (index.bind_object_selection(sorted_ids=True) if compact_graph
+               else tuple(index.selected_objects(sorted_ids=True)))
     return RangeSelection(primary.remote, primary.destination, primary.source,
-        primary.source, commits, tuple(index.selected_objects(sorted_ids=True)),
+        primary.source, commits, objects,
         object_format, expected_parents=parents, indexed_parent_graph=compact_graph,
         prior_receiver_roots=prior_roots)
 
@@ -4346,9 +4357,16 @@ class _AsyncGitObjectReader:
         argv: tuple[str, ...] | None = None,
         request_timeout: float | None = None,
         settle_timeout: float = OBJECT_REAP_ATTEMPT_SECONDS,
+        buffered: bool = False,
     ) -> None:
+        if buffered and argv is not None:
+            raise ValueError("buffered object acquisition requires the built-in command")
         self._command_mode = argv is None
-        self._argv = _range_git_argv("cat-file", "--batch-command") if argv is None else argv
+        self.buffered = buffered
+        flags = ("--batch-command", "--buffer") if buffered else ("--batch-command",)
+        self._argv = _range_git_argv("cat-file", *flags) if argv is None else argv
+        self._planned_acquisition = None
+        self._pending_contents = deque()
         self._request_timeout = request_timeout
         self._settle_timeout = settle_timeout
         self._process: asyncio.subprocess.Process | None = None
@@ -4430,6 +4448,29 @@ class _AsyncGitObjectReader:
             raise asyncio.TimeoutError
         return await asyncio.wait_for(awaitable, timeout=remaining)
 
+    def plan_acquisition(self, targets) -> None:
+        if not self.buffered or self._planned_acquisition is not None or self._pending_contents:
+            raise ValueError("buffered acquisition state")
+        self._planned_acquisition = iter(targets)
+
+    async def _write_contents(self, oid, expected_type, process, deadline) -> bool:
+        if not self.buffered:
+            prefix = b"contents " if self._command_mode else b""
+            process.stdin.write(prefix + oid.encode("ascii") + b"\n")
+            await self._within(process.stdin.drain(), deadline)
+            return True
+        if not self._pending_contents:
+            # A queue size is a transport choice, not a scan-size limit.
+            batch = tuple(islice(self._planned_acquisition, 64)) if self._planned_acquisition is not None else ()
+            if not batch:
+                self._planned_acquisition = None
+                batch = ((oid, expected_type),)
+            self._pending_contents.extend(batch)
+            wire = b"".join(b"contents " + key.encode("ascii") + b"\n" for key, _ in batch)
+            process.stdin.write(wire + b"flush\n")
+            await self._within(process.stdin.drain(), deadline)
+        return self._pending_contents.popleft() == (oid, expected_type)
+
     async def read(
         self,
         oid: str,
@@ -4448,8 +4489,9 @@ class _AsyncGitObjectReader:
             return _refusal("PS-MSG-READ", "reader-state")
         try:
             deadline = self._request_deadline(scan_deadline)
-            process.stdin.write((b"contents " if self._command_mode else b"") + oid.encode("ascii") + b"\n")
-            await self._within(process.stdin.drain(), deadline)
+            if not await self._write_contents(oid, expected_type, process, deadline):
+                self._poisoned = True
+                return _refusal("PS-MSG-COVERAGE", "object-set")
             header = await self._within(process.stdout.readline(), deadline)
             if not header.endswith(b"\n"):
                 self._poisoned = True
@@ -5217,15 +5259,23 @@ class _HistoryIndex:
             return ()
         return _SealedRows(count, _commit_set_digest(self.selected_commit_ids()))
 
+    def bind_range_commit_selection(self) -> _SealedRangeCommits | tuple[()]:
+        selected = self.bind_commit_selection()
+        if not selected:
+            return ()
+        return _SealedRangeCommits(
+            len(selected), selected.digest, _ordered_receipt_selection_digest(self.selected_commit_ids()),
+        )
+
     def selected_objects(self, *, sorted_ids=False):
         order = "oid" if sorted_ids else "sequence"
         return (oid for (oid,) in self.db.execute(f"SELECT oid FROM selected_object ORDER BY {order}"))
 
-    def bind_object_selection(self) -> _IndexedObjectSelection | tuple[()]:
+    def bind_object_selection(self, *, sorted_ids=False) -> _IndexedObjectSelection | tuple[()]:
         count, = self.db.execute("SELECT COUNT(*) FROM selected_object").fetchone()
         if not count:
             return ()
-        return _IndexedObjectSelection(count, _ordered_receipt_selection_digest(self.selected_objects()))
+        return _IndexedObjectSelection(count, _ordered_receipt_selection_digest(self.selected_objects(sorted_ids=sorted_ids)))
 
     def acquisition_targets(self, *, lexical: bool = False) -> Iterable[tuple[str, bool]]:
         order = "o.oid" if lexical else "o.sequence"
@@ -5299,7 +5349,7 @@ class _HistoryIndex:
         ))
 
     def seal_receipt_coverage(
-        self, expected: tuple[str, ...] | _IndexedObjectSelection, *, commits: bool = False,
+        self, expected: tuple[str, ...] | _IndexedObjectSelection | _SealedRangeCommits, *, commits: bool = False,
     ) -> _ReceiptCoverage | Refusal:
         def invalid():
             return _refusal("PS-MSG-COVERAGE", "multiplicity")
@@ -5310,6 +5360,10 @@ class _HistoryIndex:
 
         if isinstance(expected, _IndexedObjectSelection):
             if commits or self.bind_object_selection() != expected:
+                return invalid()
+            ordered_digest = expected.order
+        elif isinstance(expected, _SealedRangeCommits):
+            if not commits or self.bind_range_commit_selection() != expected:
                 return invalid()
             ordered_digest = expected.order
         else:
@@ -5326,7 +5380,7 @@ class _HistoryIndex:
                 return invalid()
         return _ReceiptCoverage(
             len(expected),
-            _commit_set_digest(expected) if commits else _digest_frames(
+            (expected.digest if isinstance(expected, _SealedRangeCommits) else _commit_set_digest(expected)) if commits else _digest_frames(
                 b"object-set", (oid.lower().encode("ascii") for oid in selected("oid")),
             ),
             _coverage_digest(self.coverage_events(CoverageEvent.SCANNED)),
@@ -5461,6 +5515,13 @@ class _HistoryProcesses:
         if self._serial:
             await self._close_matcher()
             await self._pause_reader()
+
+    @property
+    def buffered_acquisition(self) -> bool:
+        return not self._serial and isinstance(self._reader, _AsyncGitObjectReader) and self._reader.buffered
+
+    def plan_acquisition(self, targets) -> None:
+        self._reader.plan_acquisition(targets)
 
     async def read(self, oid, expected_type, *, scan_deadline=None):
         if self._serial:
@@ -5732,13 +5793,49 @@ async def _acquire_indexed_history(
 
     targets = index.acquisition_targets(lexical=lexical_acquisition)
     indexed_objects = isinstance(selection.object_oids, _IndexedObjectSelection)
-    if indexed_objects and (lexical_acquisition or not native):
+    if indexed_objects and lexical_acquisition == native:
+        return _refusal("PS-MSG-COVERAGE", "object-set")
+    if lexical_acquisition and indexed_objects and index.bind_object_selection(sorted_ids=True) != selection.object_oids:
         return _refusal("PS-MSG-COVERAGE", "object-set")
     ordered_targets = ((target[0], target) for target in targets) if indexed_objects else (
         zip_longest(selection.object_oids, targets)
     )
+    if indexed_objects and isinstance(reader, _HistoryProcesses) and reader.buffered_acquisition:
+        ordered_targets, read_ahead = tee(ordered_targets)
+        reader.plan_acquisition(
+            (oid, "commit" if target[1] else None) for oid, target in read_ahead
+        )
     observe_work = native or isinstance(scan_deadline, _ScanInactivity)
     acquisition_progress = _VerifiedWorkPhase("acquired", enabled=observe_work, budget=scan_deadline)
+    grouped_metadata = (native and sys.platform == "win32" and indexed_objects and matcher is not None
+                        and review_capture is None and review_evaluation is None
+                        and len(selection.object_oids) >= 4096)
+    commit_metadata = []
+    commit_chars = 0
+
+    async def verify_commit_metadata():
+        nonlocal commit_chars
+        if not commit_metadata:
+            return
+        rows = ((oid, kind, n, start, line)
+                for oid, subject_rows in commit_metadata
+                for kind, text in subject_rows
+                for n, start, line in _selected_text_lines(text, oid, kind))
+        for batch in _matcher_batches(rows):
+            captures = await matcher.match(
+                [(line, False) for _, _, _, _, line in batch],
+                _deadline_snapshot(scan_deadline, asyncio.get_running_loop().time),
+            )
+            for (oid, kind, n, start, line), raw in zip(batch, captures, strict=True):
+                _append_findings(findings, _text_findings(
+                    ((n, start, line, raw),), oid, find_machine_paths,
+                    kind, max(0, _MAX_FINDINGS - len(findings)),
+                ))
+        for oid, _ in commit_metadata:
+            coverage_recorder.record(CoverageEvent.SCANNED, oid)
+        commit_metadata.clear()
+        commit_chars = 0
+
     for ordinal, (oid, target) in enumerate(ordered_targets):
         if _time_left(scan_deadline, asyncio.get_running_loop().time) <= 0:
             return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
@@ -5776,29 +5873,35 @@ async def _acquire_indexed_history(
                 if line_refusal is not None:
                     return line_refusal
                 header_text = header.decode("utf-8", "replace")
-                _append_findings(findings, _content_hits(
-                    header_text, oid, find_machine_paths,
-                    subject_kind="commit-header", max_findings=max(0, _MAX_FINDINGS - len(findings)),
-                ))
+                if not grouped_metadata:
+                    _append_findings(findings, _content_hits(
+                        header_text, oid, find_machine_paths,
+                        subject_kind="commit-header", max_findings=max(0, _MAX_FINDINGS - len(findings)),
+                    ))
             if review_capture is not None:
                 review_capture.metadata(record.message.text, "commit-message", find_machine_paths)
                 if native:
                     review_capture.metadata(header_text, "commit-header", find_machine_paths)
-            _append_findings(findings, _content_hits(
-                record.message.text,
-                oid,
-                find_machine_paths,
-                subject_kind="commit-message",
-                max_findings=max(0, _MAX_FINDINGS - len(findings)),
-            ))
-            coverage_recorder.record(CoverageEvent.SCANNED, oid)
-            # Content is scanned synchronously; only topology survives this object.
+            if grouped_metadata:
+                subjects = (("commit-header", header_text), ("commit-message", record.message.text))
+                commit_metadata.append((oid, subjects))
+                commit_chars += sum(len(text) for _, text in subjects)
+                if len(commit_metadata) >= 1024 or commit_chars >= 2 * 1024 * 1024:
+                    await verify_commit_metadata()
+            else:
+                _append_findings(findings, _content_hits(
+                    record.message.text, oid, find_machine_paths, subject_kind="commit-message",
+                    max_findings=max(0, _MAX_FINDINGS - len(findings)),
+                ))
+                coverage_recorder.record(CoverageEvent.SCANNED, oid)
+            # Keep topology independently of the bounded lexical metadata group.
             if not index.record_commit_root(oid, record.root_tree, record.parents):
                 return _refusal("PS-MSG-COVERAGE", "commit-set")
             del record
             if native:
                 del header, header_text
         elif native and result.object_type == "tag":
+            await verify_commit_metadata()
             target = _decode_tag_target(result.raw, selection.object_format)
             if isinstance(target, Refusal):
                 return target
@@ -5829,8 +5932,8 @@ async def _acquire_indexed_history(
                                           f"blob {len(result.raw)}\0".encode("ascii") + result.raw).hexdigest() != oid:
                 return _refusal("PS-MSG-COVERAGE", "object-content-identity")
             # Only the raw receipt path retains the full list of blob IDs.
-            # The compact native receipt seals the exact SQLite-backed set.
-            if not coverage_recorder.compact_native_receipt and index.blob_count >= _MAX_BLOBS:
+            # Compact receipts seal the exact SQLite-backed set instead.
+            if not indexed_objects and index.blob_count >= _MAX_BLOBS:
                 return _refusal("PS-MSG-LIMIT", "blob-count")
             # The line bound is a property of the verified bytes, not their paths.
             # Every path reuses only data whose identity is checked again.
@@ -5847,9 +5950,10 @@ async def _acquire_indexed_history(
             return _refusal("PS-MSG-FRAME", "object-type")
         result = None  # Release the previous blob before the next reader allocation.
         acquisition_progress.step()
+    await verify_commit_metadata()
     acquisition_progress.finish()
 
-    expected_objects = index.selected_objects() if indexed_objects else selection.object_oids
+    expected_objects = index.selected_objects(sorted_ids=lexical_acquisition) if indexed_objects else selection.object_oids
     if any(a != b for a, b in zip_longest(index.acquired_oids(), expected_objects)):
         return _refusal("PS-MSG-COVERAGE", "object-set")
     commit_problem = index.commit_coverage_problem(
@@ -5913,7 +6017,7 @@ async def _acquire_indexed_history(
             elif kind == "blob":
                 direct_blobs.append((root, b"", selected))
     traversal_progress = _VerifiedWorkPhase("traversed", enabled=observe_work, budget=scan_deadline)
-    compact_frontier = coverage_recorder.compact_native_receipt
+    compact_frontier = indexed_objects
     stack = _PendingTrees(index.db) if compact_frontier else []
     for commit_oid, root_tree in chain(commit_roots, direct_trees):
         guard = _tree_traversal_guard(
@@ -6124,6 +6228,15 @@ async def _acquire_indexed_history(
                 or len(canonical_tags) != len(tag_targets)):
             return _refusal("PS-MSG-COVERAGE", "history-index")
         object_digest, blob_digest = canonical_objects.digest, canonical_blobs.digest
+    elif indexed_objects:
+        if native or tag_targets:
+            return _refusal("PS-MSG-COVERAGE", "object-set")
+        canonical_objects = _seal_sorted_oids(b"object-set", index.selected_objects(sorted_ids=True))
+        canonical_blobs = _seal_sorted_oids(b"blob-set", index.recorded_blob_ids())
+        if len(canonical_objects) != len(selection.object_oids) or len(canonical_blobs) != index.blob_count:
+            return _refusal("PS-MSG-COVERAGE", "history-index")
+        canonical_tags = ()
+        object_digest, blob_digest = canonical_objects.digest, canonical_blobs.digest
     else:
         if isinstance(tag_targets, _IndexedTagTargets):
             return _refusal("PS-MSG-COVERAGE", "tag-set")
@@ -6133,7 +6246,13 @@ async def _acquire_indexed_history(
         object_digest = _oid_set_digest(b"object-set", canonical_objects)
         blob_digest = _oid_set_digest(b"blob-set", canonical_blobs)
     commit_ids = selection.expected_oids
-    if isinstance(commit_ids, _SealedRows):
+    if isinstance(commit_ids, _SealedRangeCommits):
+        if (native or not isinstance(coverage, _ReceiptCoverage)
+                or (coverage.expected_count, coverage.selection_set, coverage.selection_order)
+                != (len(commit_ids), commit_ids.digest, commit_ids.order)):
+            return _refusal("PS-MSG-COVERAGE", "commit-set")
+        commit_digest = commit_ids.digest
+    elif isinstance(commit_ids, _SealedRows):
         if (not native or not isinstance(coverage, _ReceiptCoverage)
                 or not selection.indexed_parent_graph
                 or index.bind_commit_selection() != commit_ids):
@@ -6292,6 +6411,9 @@ async def _scan_selected_history_async(
     )
 
     if selection.object_oids:
+        if (sys.platform == "win32" and reader_factory is _AsyncGitObjectReader
+                and receipt_coverage and isinstance(selection.object_oids, _IndexedObjectSelection)):
+            reader_factory = lambda: _AsyncGitObjectReader(buffered=True)
         reader = reader_factory()
         try:
             start_refusal = await reader.start()
@@ -6949,9 +7071,9 @@ def _format_outcome(outcome: ScanOutcome) -> tuple[str, str, int]:
             exact = (
                 coverage.expected_count > 0
                 and coverage.expected_count == len(history.commit_ids) == len(selection.expected_oids)
-                and coverage.selection_order == _ordered_receipt_selection_digest(selection.expected_oids)
+                and coverage.selection_order == (selection.expected_oids.order if isinstance(selection.expected_oids, _SealedRangeCommits) else _ordered_receipt_selection_digest(selection.expected_oids))
                 and history.commit_ids == selection.expected_oids
-                and coverage.selection_set == history.commit_set == _commit_set_digest(history.commit_ids)
+                and coverage.selection_set == history.commit_set == (history.commit_ids.digest if isinstance(history.commit_ids, _SealedRangeCommits) else _commit_set_digest(history.commit_ids))
             )
             if not exact:
                 return "", "publication-safety: refusing id=PS-MSG-COVERAGE reason=receipt-binding phase=coverage", 2

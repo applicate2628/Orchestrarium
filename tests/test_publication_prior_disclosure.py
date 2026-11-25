@@ -181,6 +181,7 @@ class TestPriorDisclosure(native.TestNativePublicationEffects):
         peer = self.root.parent / "synthetic-matcher.py"
         peer.write_text(
             "import json, re, sys\n"
+            "sys.stdout.reconfigure(newline=chr(10))\n"
             "rules = [(row['binary'], re.compile(row['regex'])) "
             "for row in json.loads(sys.stdin.buffer.readline())]\n"
             "sys.stdout.write('orche-match-spans-v1\\n'); sys.stdout.flush()\n"
