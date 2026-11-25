@@ -2719,6 +2719,21 @@ def test_ordinary_close_updates_standalone_incoming_evidence_links(tmp_path: Pat
                  "stewardship.md": b"Receiving responsibilities verified.\n"}
     for name, data in documents.items():
         (active / name).write_bytes(data)
+    from gzip import compress
+    from io import BytesIO
+    import tarfile
+
+    sibling = "2026-10-08-fixture-asset-owner"
+    seed_active(module, root, sibling)
+    attachment = root / "work-items" / "active" / sibling / "inputs" / "package.tar.gz"
+    attachment.parent.mkdir()
+    archive_bytes = BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+        header = tarfile.TarInfo("package.bin")
+        header.size = len(b"known build artifact")
+        archive.addfile(header, BytesIO(b"known build artifact"))
+    before_attachment = compress(archive_bytes.getvalue(), mtime=0)
+    attachment.write_bytes(before_attachment)
     bug = seed_context_bug(root, "standalone", "2026-10-08-unselected-open")
     hrefs = [f"../active/{slug}/evidence.md#check", f"../active/{slug}/stewardship.md"]
     before = bug.read_bytes() + (f"\n[Evidence]({hrefs[0]})\n[Stewardship]({hrefs[1]})\n").encode()
@@ -2741,6 +2756,7 @@ def test_ordinary_close_updates_standalone_incoming_evidence_links(tmp_path: Pat
         expected = expected.replace(href.encode(), relocated.encode())
         assert (bug.parent / relocated.split("#", 1)[0]).is_file()
     assert bug.read_bytes() == expected
+    assert attachment.read_bytes() == before_attachment
     for name, data in documents.items():
         assert (archived / name).read_bytes() == data
     module.check_readme(root)
