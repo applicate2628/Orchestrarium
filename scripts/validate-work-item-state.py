@@ -1735,13 +1735,20 @@ def retained_preimage_profiles(event: Mapping[str, object], item: Path, errors: 
             profile = decode_json_object(entry["result"].encode("utf-8"), source="retained-preimage result", maximum_bytes=MAX_LEDGER_LINE_BYTES)
             ref = entry.get("ref")
             provenance = profile.get("provenance")
-            safe_ref = (isinstance(ref, str) and _safe_repo_relative(ref)
+            purpose = profile.get("purpose")
+            namespace = ("inputs" if purpose == "historical-only" else
+                         "artifacts" if purpose == "legacy-opaque-artifact" else None)
+            safe_ref = (namespace is not None and isinstance(ref, str) and _safe_repo_relative(ref)
                         and not Path(ref).is_absolute() and not Path(ref).drive
-                        and len(PurePosixPath(ref).parts) >= 2 and PurePosixPath(ref).parts[0] == "inputs")
+                        and len(PurePosixPath(ref).parts) >= 2 and PurePosixPath(ref).parts[0] == namespace)
+            if safe_ref and purpose == "legacy-opaque-artifact":
+                safe_ref = PurePosixPath(ref).suffix.casefold() not in {
+                    ".md", ".json", ".jsonl", ".log", ".txt", ".out", ".err",
+                }
             if (set(entry) != {"kind", "ref", "result"} or entry.get("kind") != "artifact"
                 or set(profile) != {"schemaVersion", "kind", "workItem", "purpose", "byteCount", "sha256", "provenance"}
                 or type(profile.get("schemaVersion")) is not int or profile["schemaVersion"] != 1
-                or profile.get("workItem") != item.name or profile.get("purpose") != "historical-only"
+                or profile.get("workItem") != item.name
                 or type(profile.get("byteCount")) is not int or profile["byteCount"] < 0
                 or not isinstance(profile.get("sha256"), str) or SHA256_RE.fullmatch(profile["sha256"]) is None
                 or not safe_ref or not isinstance(provenance, dict) or set(provenance) != {"ref", "sha256", "snapshot"}
@@ -1763,6 +1770,26 @@ def retained_preimage_profiles(event: Mapping[str, object], item: Path, errors: 
     return profiles
 
 
+def _legacy_archive_representation(data: bytes) -> bool:
+    """Identify a reviewed archive; this never extracts or authenticates members."""
+    import gzip
+    import io
+    import tarfile
+    import zipfile
+    import zlib
+
+    if data.startswith(b"PK\x03\x04"):
+        return zipfile.is_zipfile(io.BytesIO(data))
+    if not data.startswith(b"\x1f\x8b"):
+        return False
+    try:
+        with gzip.GzipFile(fileobj=io.BytesIO(data)) as stream:
+            tarfile.TarInfo.frombuf(stream.read(tarfile.BLOCKSIZE), "utf-8", "surrogateescape")
+            return True
+    except (EOFError, OSError, tarfile.HeaderError, zlib.error):
+        return False
+
+
 def capture_retained_preimage_payload(item: Path, entry: Mapping[str, object], profile: Mapping[str, object]):
     """Use the existing ordinary/no-follow capture, bounded by declared bytes."""
     owner = load_lifecycle_owner()
@@ -1772,6 +1799,8 @@ def capture_retained_preimage_payload(item: Path, entry: Mapping[str, object], p
         **({"acquired_input": selected} if isinstance(selected, _CapturedHistoryPath) else {}))
     if snapshot.length != profile["byteCount"] or hashlib.sha256(snapshot.data).hexdigest() != profile["sha256"]:
         raise ValueError("WI-RETAINED-PREIMAGE: payload byte count/hash differs")
+    if profile["purpose"] == "legacy-opaque-artifact" and not _legacy_archive_representation(snapshot.data):
+        raise ValueError("WI-RETAINED-PREIMAGE: legacy artifact is not an opaque archive")
     return snapshot
 
 

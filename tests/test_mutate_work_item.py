@@ -1716,6 +1716,65 @@ def test_retained_preimage_public_utf8_archive_does_not_rewrite_history(tmp_path
     retained_preimage_archive_oracle(tmp_path, text_payload=True)
 
 
+@pytest.mark.parametrize("case", ["tar", "zip", "live-text", "live-name", "wrong-owner", "changed"])
+def test_retained_legacy_archive_custody_preserves_live_neighbor(tmp_path: Path, case: str):
+    from gzip import compress
+    from io import BytesIO
+    import tarfile
+
+    _module, root, bug, status, item, _payload, _before, report, profile = (
+        retained_preimage_fixture(tmp_path)
+    )
+    payload = item / "artifacts" / ("package.md" if case == "live-name" else "package.tar.gz")
+    payload.parent.mkdir()
+    archive_bytes = BytesIO()
+    body = b"historical package contents"
+    with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+        header = tarfile.TarInfo("payload.bin")
+        header.size = len(body)
+        archive.addfile(header, BytesIO(body))
+    content = compress(archive_bytes.getvalue(), mtime=0)
+    if case == "zip":
+        from zipfile import ZipFile
+        archive_bytes = BytesIO()
+        with ZipFile(archive_bytes, "w") as archive:
+            archive.writestr("payload.bin", body)
+        content = archive_bytes.getvalue()
+    elif case == "live-text":
+        content = b"[Live navigation](../../bugs/example.md)\n"
+    payload.write_bytes(content)
+    profile["ref"] = payload.relative_to(item).as_posix()
+    descriptor = json.loads(profile["result"])
+    descriptor.update(purpose="legacy-opaque-artifact", sha256=hashlib.sha256(content).hexdigest(),
+                      byteCount=len(content))
+    profile["result"] = json.dumps(descriptor)
+    appended = retained_preimage_append(
+        item, profile, role="platform-engineer" if case == "wrong-owner" else "knowledge-archivist"
+    )
+    if case in ("live-text", "live-name", "wrong-owner"):
+        assert appended.returncode != 0, appended.stdout + appended.stderr
+        assert b"WI-RETAINED-PREIMAGE" in appended.stdout + appended.stderr
+        assert not (item / "agent-runs.jsonl").exists()
+        return
+    assert appended.returncode == 0, appended.stdout + appended.stderr
+    if case == "changed":
+        payload.write_bytes(content + b"changed")
+    result = retained_preimage_cli(item, SCRIPT, "archive-fixed-bug", "--root", str(root),
+                                  "--slug", bug.stem, "--terminal-instant", "2026-10-05T00:00:00Z",
+                                  "--resolution", "Synthetic verified fix.",
+                                  "--evidence", "Synthetic legacy archive custody.", "--apply")
+    if case == "changed":
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert bug.is_file()
+        assert payload.read_bytes() == content + b"changed"
+        return
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert payload.read_bytes() == content
+    assert f"../../bugs/archive/2026-10/{bug.stem}.md#proof".encode() in status.read_bytes()
+    snapshot = item / descriptor["provenance"]["snapshot"]
+    assert snapshot.read_bytes() == report.read_bytes()
+
+
 def test_retained_preimage_wire_refuses_nonsteward_live_path_and_bad_binding(tmp_path: Path):
     for case in ("issuer", "live", "count-type", "hash", "duplicate"):
         _module, _root, _bug, _status, item, payload, before, _report, profile = retained_preimage_fixture(tmp_path / case)
