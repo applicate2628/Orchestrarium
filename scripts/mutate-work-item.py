@@ -21403,13 +21403,27 @@ class _IncomingConsumerImage:
     """Authoritative bytes and their reversible private navigation coordinates."""
 
     def __init__(self, raw: bytes, suffix: str = ".md") -> None:
+        import codecs
+
         self.raw = raw
+        self._bom = b""
+        self._encoding = "utf-8"
+        self._errors = "surrogateescape"
+        if suffix.lower() in {".log", ".txt", ".out", ".err"}:
+            # Only the auxiliary plain-text role admits these representations.
+            # Detect wider signatures first and keep the exact byte order.
+            for bom, encoding in ((codecs.BOM_UTF32_LE, "utf-32-le"), (codecs.BOM_UTF32_BE, "utf-32-be"),
+                                  (codecs.BOM_UTF16_LE, "utf-16-le"), (codecs.BOM_UTF16_BE, "utf-16-be")):
+                if raw.startswith(bom):
+                    self._bom = bom
+                    self._encoding = encoding
+                    self._errors = "strict"
+                    break
         try:
-            self.view = raw.decode("utf-8")
+            self.view = raw[len(self._bom):].decode(self._encoding)
         except UnicodeDecodeError:
             if suffix.lower() != ".md":
                 raise
-            import codecs
             for signature, identity in ((codecs.BOM_UTF32_LE, "utf32-le"), (codecs.BOM_UTF32_BE, "utf32-be"),
                                         (codecs.BOM_UTF16_LE, "utf16-le"), (codecs.BOM_UTF16_BE, "utf16-be")):
                 if raw.startswith(signature):
@@ -21424,9 +21438,8 @@ class _IncomingConsumerImage:
         if self._bytes(self.view) != raw:
             raise LifecycleError("WI-INCOMING-LINK-REPRESENTATION", "incoming image is not reversible")
 
-    @staticmethod
-    def _bytes(view: str) -> bytes:
-        return view.encode("utf-8", errors="surrogateescape")
+    def _bytes(self, view: str) -> bytes:
+        return self._bom + view.encode(self._encoding, errors=self._errors)
 
     @staticmethod
     def semantic(value: str, *, purpose: str) -> str:

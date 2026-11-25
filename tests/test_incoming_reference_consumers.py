@@ -926,3 +926,19 @@ def test_public_fixed_bug_failure_keeps_inventory_id_cause_and_bytes(module, tmp
     assert "Traceback" not in output.out + output.err
     assert not any(0xD800 <= ord(c) <= 0xDFFF for c in output.out + output.err)
     assert tree_file_bytes(root / "work-items") == before
+
+
+@pytest.mark.parametrize("suffix", (".log", ".txt", ".out", ".err"))
+@pytest.mark.parametrize("codec,bom", (("utf-16-le", b"\xff\xfe"), ("utf-16-be", b"\xfe\xff"),
+                                       ("utf-32-le", b"\xff\xfe\0\0"), ("utf-32-be", b"\0\0\xfe\xff")))
+def test_unicode_plain_evidence_is_classified_and_kept_byte_exact(module, tmp_path, suffix, codec, bom):
+    text = "PowerShell trace\r\n" + REFERENCE + "\r\n"
+    raw = bom + text.encode(codec)
+    source, consumer = seed(tmp_path, "active/other/evidence" + suffix, raw)
+    result = module._incoming_link_result(tmp_path, {source}, REFERENCE, strict_consumer_reads=True)
+    assert result["result"] == "logical-only"
+    assert consumer.read_bytes() == raw
+    image = module._IncomingConsumerImage(raw, suffix)
+    assert image.edit([]) == raw
+    replacement = "bug:successor"
+    assert image.edit(image.literal_edits(REFERENCE, replacement)) == bom + text.replace(REFERENCE, replacement).encode(codec)
