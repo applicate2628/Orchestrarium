@@ -7,7 +7,7 @@ local installation. For the frozen pre-SDK baseline and draft follow-up, see
 
 ## 2026-11-25
 
-- Preview recovery of old active task records without editing them. The report identifies unambiguous fields, damaged or conflicting values, and missing evidence so one broken record does not delay reconciliation of others.
+- Preview recovery of old active task records without editing them. The report identifies unambiguous fields, damaged or conflicting values, and missing evidence so one broken record does not delay reconciliation of others. Apply recovery with an explicitly reviewed staged status and its preview digest; keep original bytes and existing history. New tracking, when explicitly admitted, starts now rather than recreating past results.
 
 ## 2026-11-24
 

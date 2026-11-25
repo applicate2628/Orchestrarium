@@ -2668,6 +2668,7 @@ class ReadmeEntry:
     detail: str = ""
     source_paths: list[Path] = field(default_factory=list)
     classification: str | None = None
+    status_metadata_unreadable: bool = False
 
 
 @dataclass(frozen=True)
@@ -10079,7 +10080,19 @@ def _status_entry(root: Path, item: Path, *, diagnostic_status: bool = False, pr
     )
     if data is None:
         raise LifecycleError("WI-CATEGORY-STATUS-MISSING", f"missing status.md: {item}")
-    fields = _parse_fields(data.decode("utf-8"))
+    try:
+        fields = _parse_fields(data.decode("utf-8"))
+    except (UnicodeError, LifecycleError) as exc:
+        if not diagnostic_status or (isinstance(exc, LifecycleError)
+                                     and exc.failure_id != "WI-CATEGORY-MARKDOWN-INVALID"):
+            raise
+        # The board is a projection, not lifecycle authority. Preserve the
+        # exact failed input in its diagnostics without interpreting its fields.
+        entry = ReadmeEntry("Blockers", f"work-item:{item.name}", item.name,
+                            status_path, False, "", [status_path], status_metadata_unreadable=True)
+        issue = exc.failure_id if isinstance(exc, LifecycleError) else "WI-CATEGORY-STATUS-INVALID"
+        entry.classification = f"{issue}: unreadable status; source sha256:{_sha256_bytes(data)}"
+        return entry
     status = fields.get("status", "")
     section = "Blockers" if status == "blocked" or fields.get("blocker") else "Current focus"
     label = fields.get("task") or item.name
@@ -10517,6 +10530,8 @@ def _input_digest(entries: Iterable[ReadmeEntry], work_items: Path, *, prepared_
 def _canonical_timestamp(entries: Iterable[ReadmeEntry], *, prepared_terminal=None) -> str:
     instants: list[str] = []
     for entry in entries:
+        if entry.status_metadata_unreadable:
+            continue
         if entry.classification == LEGACY_COMPLETION_KIND:
             path = entry.link.parent / LEGACY_COMPLETION_METADATA
             raw = prepared_terminal.images[path] if prepared_terminal is not None and path in prepared_terminal.images else _capture_file_snapshot(
@@ -11019,10 +11034,10 @@ def _agent_run_ledger_module():
         ) from exc
 
 
-def _staged_admission_ledger_bytes(slug: str, status_data: bytes) -> bytes:
+def _staged_admission_ledger_bytes(slug: str, status_data: bytes, *, recovery_at: str | None = None) -> bytes:
     """Build the settled Lead admission event from the already-validated status."""
 
-    started_at = _parse_fields(status_data.decode("utf-8"))["started"]
+    started_at = recovery_at or _parse_fields(status_data.decode("utf-8"))["started"]
     ledger = _agent_run_ledger_module()
     args = argparse.Namespace(
         work_item=Path(slug),
@@ -11035,7 +11050,8 @@ def _staged_admission_ledger_bytes(slug: str, status_data: bytes) -> bytes:
         model=None,
         status="completed",
         gate="none",
-        scope=["candidate -> active lifecycle admission"],
+        scope=["legacy status recovery: current tracking admission only; prior history not supplied"
+               if recovery_at else "candidate -> active lifecycle admission"],
         prompt_file=None,
         artifact=None,
         evidence=None,
@@ -11938,12 +11954,85 @@ def preview_legacy_active_status(root: Path, slug: str, *, ledger_resource_budge
     return _legacy_active_status_preview(snapshot.data)
 
 
+def _recover_legacy_status(root: Path, target: Path, status_data: bytes, source_digest: str,
+                           *, inject_readme_failure: bool, admit_current_tracking_at: str | None,
+                           ledger_resource_budget=None) -> Path:
+    failure = "WI-CATEGORY-STATUS-INVALID"
+    if not re.fullmatch(r"[0-9a-f]{64}", source_digest):
+        raise LifecycleError(failure, "recovery requires the exact preview SHA-256")
+    if _parse_fields(status_data.decode("utf-8")).get("template") != "staged":
+        raise LifecycleError(failure, "historical work must not be reclassified as a quick fix")
+
+    status = target / "status.md"
+    original = target / f"status.legacy-{source_digest}.md"
+    ledger = target / "agent-runs.jsonl"
+    selected = _capture_file_snapshot(status, failure_id=failure,
+                                      maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP)
+    prior = (_capture_file_snapshot(original, failure_id=failure,
+                                    maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP)
+             if os.path.lexists(original) else None)
+    replay = prior is not None and selected.data == status_data
+    if prior is not None and _sha256_bytes(prior.data) != source_digest:
+        raise LifecycleError(failure, "the retained legacy source no longer matches")
+    if not replay and _sha256_bytes(selected.data) != source_digest:
+        raise LifecycleError(failure, "the selected status changed since its recovery preview")
+    if not replay:
+        try:
+            _validate_active_status_bytes(selected.data)
+        except LifecycleError:
+            pass
+        else:
+            raise LifecycleError(failure, "a current valid status must use ordinary update")
+    admission = None
+    if admit_current_tracking_at is not None:
+        _strict_utc(admit_current_tracking_at)
+        admission = _staged_admission_ledger_bytes(
+            target.name, status_data, recovery_at=admit_current_tracking_at)
+    history = (_capture_file_snapshot(ledger, failure_id="WI-LEDGER-RESOURCE-DRIFT",
+                                      maximum_bytes=None, ledger_resource_budget=ledger_resource_budget)
+               if os.path.lexists(ledger) else None)
+    if history is None and (admission is None or replay):
+        raise LifecycleError("WI-LEDGER-UNSETTLED",
+                             "missing ledger requires explicit admission of current tracking; no historical rows were created")
+    if history is not None and admission is not None and (prior is None or history.data != admission):
+        raise LifecycleError("WI-LEDGER-UNSETTLED", "existing history cannot be replaced by current admission")
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    transaction.observe_retained_inputs(tuple(row for row in (selected, history, prior) if row is not None))
+    if history is None:
+        ledger_resource_budget = transaction.admit_ledger_creation(
+            ledger, tuple(admission.splitlines(keepends=True)), participant_snapshots=(selected,))
+    _preflight_readme_markers(root, ledger_resource_budget=ledger_resource_budget)
+    transaction.verify()
+    if not replay:
+        if prior is None:
+            _atomic_write(original, selected.data)
+        if history is None:
+            _atomic_write(ledger, admission)
+        _atomic_write(status, status_data)
+    if inject_readme_failure:
+        raise _postcommit_readme_stale("update")
+    try:
+        refresh_readme(root, ledger_resource_budget=ledger_resource_budget)
+    except LifecycleError as exc:
+        raise _postcommit_readme_stale("update") from exc
+    return status
+
+
 @functools.partial(_lifecycle_participant, subject_parameters=('category-slug', 'work-item', 'slug'))
-def update_status(root: Path, slug: str, status_data: bytes, *, inject_readme_failure: bool = False, ledger_resource_budget=None) -> Path:
+def update_status(root: Path, slug: str, status_data: bytes, *, inject_readme_failure: bool = False,
+                  recover_from_sha256: str | None = None, admit_current_tracking_at: str | None = None,
+                  ledger_resource_budget=None) -> Path:
     _validate_active_status_bytes(status_data)
     target = resolve_category(root, f"work-item:{slug}", ledger_resource_budget=ledger_resource_budget)
     if target.parent.name != "active" or not target.is_dir():
         raise LifecycleError("WI-INVALID-TARGET", "status update requires an active work-item")
+    if recover_from_sha256 is not None:
+        return _recover_legacy_status(root, target, status_data, recover_from_sha256,
+                                      inject_readme_failure=inject_readme_failure,
+                                      admit_current_tracking_at=admit_current_tracking_at,
+                                      ledger_resource_budget=ledger_resource_budget)
+    if admit_current_tracking_at is not None:
+        raise LifecycleError("WI-CATEGORY-STATUS-INVALID", "current admission requires a legacy recovery hash")
     _status_entry(root, target, ledger_resource_budget=ledger_resource_budget)
     _preflight_readme(root, ledger_resource_budget=ledger_resource_budget)
     status = target / "status.md"
@@ -31648,6 +31737,8 @@ def build_parser() -> argparse.ArgumentParser:
             status_input = command.add_mutually_exclusive_group(required=True)
             status_input.add_argument("--status-file")
             status_input.add_argument("--preview-legacy", action="store_true")
+            command.add_argument("--recover-from-sha256")
+            command.add_argument("--admit-current-tracking-at")
         elif name == "close":
             command.add_argument("--closure-file", required=True)
             command.add_argument("--terminal-instant", required=True)
@@ -31997,7 +32088,7 @@ def main(argv: list[str]) -> int:
             print(result)
         elif args.command == "update":
             if args.preview_legacy:
-                if args.inject_readme_failure:
+                if args.inject_readme_failure or args.recover_from_sha256 or args.admit_current_tracking_at:
                     raise LifecycleError("WI-INVALID-TARGET", "a recovery preview does not write")
                 print(json.dumps(preview_legacy_active_status(
                     root, args.slug, ledger_resource_budget=ledger_resource_budget), sort_keys=True))
@@ -32006,6 +32097,8 @@ def main(argv: list[str]) -> int:
                 root,
                 args.slug,
                 _read_arg_file(args.status_file),
+                recover_from_sha256=args.recover_from_sha256,
+                admit_current_tracking_at=args.admit_current_tracking_at,
                 inject_readme_failure=bool(args.inject_readme_failure), ledger_resource_budget=ledger_resource_budget
             , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             print(result)

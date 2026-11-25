@@ -202,6 +202,8 @@ This grants only the closure-target eligibility bit for that explicit relationsh
 
 Run `python -B scripts/mutate-work-item.py update --root . --slug <slug> --preview-legacy --transition-read-admission selected-native` for a selected older active record. The JSON reports the original content digest, usable fields, and unresolved fields. It does not write files, infer a verdict, create ledger history, or archive a task. A lead can request targeted evidence from the relevant owner; missing evidence remains unknown.
 
+To apply, use the same update command with `--status-file <reviewed-staged-status.md> --recover-from-sha256 <preview-digest>` instead of `--preview-legacy`. Retain the original status bytes beside the current status and never replace an existing ledger. If no ledger exists, the owner may explicitly add `--admit-current-tracking-at <strict-UTC>`; this records one new admission, not a backdated run, result, or verdict. The same inputs resume an interrupted index refresh without rewriting status or duplicating the admission. A recovered active item remains active until separately accepted and closed. The board reports unreadable active status as a diagnostic bound to its original bytes; strict selected-item checks still refuse malformed state.
+
 ## Check All Active Work Items
 
 Run the periodic checker at handoff boundaries, before publication review, or when resuming after interruption.
