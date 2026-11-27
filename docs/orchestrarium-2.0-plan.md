@@ -650,6 +650,17 @@ diff-surface inspection and preservation of existing release-note bytes/line end
 These checks do not prove runtime behavior, installed compatibility or benchmarks.
 Later implementation needs the probes under its own outcome and current gates.
 
+## Workflow qualification matrix
+
+The versioned fixture in `tests/fixtures/workflow-qualification-matrix-20261127.json`
+defines 256 runs: 96 offline and 160 on local Qwen 14B without thinking.
+The portable probe can submit 14 workflow requests in paired cases. Start
+with the 8-request pilot (two diagnosis and two work-item inventory pairs);
+score only complete matched pairs, then qualify the remaining cases. A
+fixture, synthetic reply or source hook replay is not installed behavior.
+Do not publish benchmark results or change defaults before real acceptance.
+This workflow evaluation does not block the scanner, Rust hooks or SDK release.
+
 ## Terms and Abbreviations
 
 - Exact profile: an admitted model and its model-local effort setting.

@@ -1,6 +1,6 @@
 ---
 name: repo-cleanup
-description: "Audit repository cleanup or transfer readiness and route authorized work to existing owners."
+description: "Read-only repository cleanup and transfer: classify stale files, artifacts, and worktrees; route authorized cleanup."
 ---
 
 # Repository Cleanup

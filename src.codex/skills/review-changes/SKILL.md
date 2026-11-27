@@ -1,6 +1,6 @@
 ---
 name: review-changes
-description: "Diff/PR/commit-range impact review beyond changed lines."
+description: "Review a diff, PR, or commit range: trace unchanged callers, input and output contracts, and regression tests."
 ---
 
 # Review Changes

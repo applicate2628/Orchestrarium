@@ -1,0 +1,29 @@
+{
+  "mesh-importer": {
+    "query": "generalize fixture-specific geometry remove hardcoding algorithm correctness tests",
+    "skill": "generalize-from-instance",
+    "task": "A mesh importer assigns a wall by checking if the filename is demo-left.mesh. The format already has an explicit boundary_type=wall field. The one fixture passes. What should change and how would you prove it?",
+    "criteria": [
+      "Use the exact boundary_type field as the source of truth in the importer.",
+      "Propose a wall fixture with a different filename and no extra filename exception."
+    ]
+  },
+  "measurement-review": {
+    "query": "diff impact review commit regression changed lines",
+    "skill": "review-changes",
+    "task": "Review this change: the serializer now writes null for missing measurements, and its tests pass. An unchanged report view still coerces its measurement input to a number. What should you check before accepting the change?",
+    "criteria": [
+      "Trace the null output into the unchanged report view.",
+      "Require a consumer-level null test before acceptance."
+    ]
+  },
+  "bugfix-first-read": {
+    "mode": "first-read",
+    "skill": "bug-hunting",
+    "skill_summary": "diagnose bugs with evidence and verify the scoped fix",
+    "task": "Please investigate a bug in this synthetic deployment scenario. After retrying a deployment, the same job shows two identical completion receipts. Both receipts look genuine but there is no independent execution count in the user-facing report, so we cannot yet tell whether a second execution happened or one execution produced two receipts. What would you do first? Keep it brief, read-only, and do not patch anything or run deployments. You may consult the normal project guidance; use local read-only file inspection only, not network, MCP or subagents.",
+    "criteria": [
+      "The first tool request opens the exact available bug-hunting file. An alternate source or log read is not evidence of acquisition. The case does not grade diagnosis quality."
+    ]
+  }
+}

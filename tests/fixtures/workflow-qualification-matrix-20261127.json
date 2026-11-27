@@ -1,0 +1,2731 @@
+{
+  "version": 1,
+  "status": "inventory-and-scenarios-prepared; executable-inputs-and-native-acceptance-pending",
+  "source_sha256": {
+    "shared/role-routing-policy.v1.json": "3fff09850ccb82216b54b16665ff856993bcabe3a603456f5cb93e62ea423960",
+    "src.codex/agents/orchestrarium-role-manifest.json": "e4de68a707bae409aa7d636c42c2619fc1643bf2863a2ccd6b0275a0551f7f77",
+    "shared/external-role-taxonomy.v1.json": "469ad1b8bf93b56f0323456413961ca7e01dd9a1890a66d766e564bc03d489b8",
+    "scripts/universal_hooks_manifest.py": "0cc6c05aebd58c88d1b44ebb53f044a51bf44602dc972bed75a9e1dfa4582d63"
+  },
+  "inventory": {
+    "roles": 40,
+    "codex_skills": 54,
+    "claude_skills": 18,
+    "unique_hooks": 14,
+    "hook_bindings": {
+      "claude": 13,
+      "codex": 12
+    },
+    "claude_agent_files": 35,
+    "standalone_skill_only": 19,
+    "combined_role_skill": 1
+  },
+  "logical_runs": {
+    "offline": 96,
+    "qwen14b-non-thinking": 160
+  },
+  "model_and_scope": "Local Qwen 14B non-thinking only; no external, paid, provider-native, or destructive action.",
+  "matrix": [
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "accessibility-reviewer",
+      "scenario": "Review a toolbar where Tab skips Save and the focus outline is invisible. Return defects, not an implementation.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "skill-only",
+      "claude_agent_source_sha256": "b00b32503f9c68ca37b0f0a84bc604f66f12f30a8649bbc421b02ae8dc11dbf3",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:accessibility-reviewer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:accessibility-reviewer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "accessibility-reviewer",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "skill-only",
+      "run_ids": {
+        "handoff": "offline:role-handoff:accessibility-reviewer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "algorithm-scientist",
+      "scenario": "Compare two sparse nearest-neighbor methods by complexity and establish the invariant needed for an exact result.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "native",
+      "claude_agent_source_sha256": "5d50e38d69d1fc3a8d9158ff04770e9d71c288cd4dc45cb19a851836c8fc70f9",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:algorithm-scientist:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:algorithm-scientist:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "algorithm-scientist",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "native",
+      "run_ids": {
+        "handoff": "offline:role-handoff:algorithm-scientist:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "analyst",
+      "scenario": "Reconcile three dated migration records and distinguish confirmed completion from conflicting evidence.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "native",
+      "claude_agent_source_sha256": "3764055f9abc80c61e89aab7269131a2a56b16e07f9e6177470aca505404dbff",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:analyst:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:analyst:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "analyst",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "native",
+      "run_ids": {
+        "handoff": "offline:role-handoff:analyst:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "architect",
+      "scenario": "Design the ownership and interfaces for moving local job history from one writer to two cooperating components.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "native",
+      "claude_agent_source_sha256": "106150d0063a4a285d5c6db3258b8e00953ae554acfd7c68e028ebf43e834cee",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:architect:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:architect:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "architect",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "native",
+      "run_ids": {
+        "handoff": "offline:role-handoff:architect:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "architecture-reviewer",
+      "scenario": "Critique a proposed persistence boundary that makes both the UI and background worker owners of commit.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "native",
+      "claude_agent_source_sha256": "80c9556f4ed31b9e66e3ef0e9813261e40006261e9c11031b361cd8c7e35d456",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:architecture-reviewer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:architecture-reviewer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "architecture-reviewer",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "native",
+      "run_ids": {
+        "handoff": "offline:role-handoff:architecture-reviewer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "backend-engineer",
+      "scenario": "Implement an idempotent local API for reporting the completion of a background calculation.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "native",
+      "claude_agent_source_sha256": "200db7319fb486819644652d268412b706893f057a8927bca27c91286819db4e",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:backend-engineer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:backend-engineer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "backend-engineer",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "native",
+      "run_ids": {
+        "handoff": "offline:role-handoff:backend-engineer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "computational-scientist",
+      "scenario": "Choose a convergence protocol and identify numerical error sources in a BEM capacitance calculation.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "native",
+      "claude_agent_source_sha256": "e3dcae57fe6edf862c1c5621f5e22451f6dc9288a6d4044db369368797f85ed6",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:computational-scientist:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:computational-scientist:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "computational-scientist",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "native",
+      "run_ids": {
+        "handoff": "offline:role-handoff:computational-scientist:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "consultant",
+      "scenario": "Give a time-bounded independent second opinion on a specific choice of cache invalidation policy.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "skill-only",
+      "claude_agent_source_sha256": "d1b4277b27571fa21396b45e9c863e5b19f234846bcd4a410279db35e1f0feb8",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:consultant:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:consultant:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "consultant",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "skill-only",
+      "run_ids": {
+        "handoff": "offline:role-handoff:consultant:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "data-engineer",
+      "scenario": "Implement the already approved replayable importer for versioned CSV measurement exports with missing values.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "skill-only",
+      "claude_agent_source_sha256": "306945a7c83a014259bfb85a9aa40054477af0999b73e34d635e4b339e29bf25",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:data-engineer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:data-engineer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "data-engineer",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "skill-only",
+      "run_ids": {
+        "handoff": "offline:role-handoff:data-engineer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "default",
+      "scenario": "Recover a stalled already authorized task that has no fitting specialist. State what to resume without expanding scope.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "native",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:default:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:default:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "default",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "native",
+      "run_ids": {
+        "handoff": "offline:role-handoff:default:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "explorer",
+      "scenario": "Map the repository entrypoints and ownership of report export without changing files.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "native",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:explorer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:explorer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "explorer",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "native",
+      "run_ids": {
+        "handoff": "offline:role-handoff:explorer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "external-reviewer",
+      "scenario": "Assess a supplied independent reviewer report against an approved read-only evidence packet and return review findings; do not contact a service.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "external-taxonomy-only",
+      "claude_agent_source_sha256": "99d71a7f671d67e2089f81f6ab0970aa3e591af53c921e76f17d00c3c8d47d9b",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:external-reviewer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:external-reviewer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "external-reviewer",
+      "scenario": "Verify the registered wrapper/agent identity, preserve scope, and assert that a taxonomy-only role is not treated as direct provider authorization.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "external-taxonomy-only",
+      "run_ids": {
+        "handoff": "offline:role-handoff:external-reviewer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "external-worker",
+      "scenario": "Plan the handoff of one authorized bounded export adapter implementation to a separately managed worker; do not contact a service.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "external-taxonomy-only",
+      "claude_agent_source_sha256": "dd5c8277d6c7e590f4ff4d18a9bbc105aee8d104bc475bdbc2b13f736d349e7b",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:external-worker:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:external-worker:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "external-worker",
+      "scenario": "Verify the registered wrapper/agent identity, preserve scope, and assert that a taxonomy-only role is not treated as direct provider authorization.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "external-taxonomy-only",
+      "run_ids": {
+        "handoff": "offline:role-handoff:external-worker:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "frontend-engineer",
+      "scenario": "Implement loading, error and retry states for a web report viewer without changing the backend endpoint.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "skill-only",
+      "claude_agent_source_sha256": "e680e7d54d2cd39aef0f12ce700c463ee990f2d6b5a64251dc4ca022a4545646",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:frontend-engineer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:frontend-engineer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "frontend-engineer",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "skill-only",
+      "run_ids": {
+        "handoff": "offline:role-handoff:frontend-engineer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "geometry-engineer",
+      "scenario": "Preserve CAD boundary tags while deduplicating mesh edges under a defined tolerance.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "skill-only",
+      "claude_agent_source_sha256": "72735f24d8a6ab6cdebf8a19339a883f181cd42033e074c66ebb68a538007d49",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:geometry-engineer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:geometry-engineer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "geometry-engineer",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "skill-only",
+      "run_ids": {
+        "handoff": "offline:role-handoff:geometry-engineer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "graphics-engineer",
+      "scenario": "Diagnose an offscreen renderer's incorrect alpha blend from a supplied frame and render state.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "skill-only",
+      "claude_agent_source_sha256": "d1294c5cdf2ad904dbd394dc2a7d0d31b75d97fce832351ada052d731679c95b",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:graphics-engineer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:graphics-engineer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "graphics-engineer",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "skill-only",
+      "run_ids": {
+        "handoff": "offline:role-handoff:graphics-engineer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "knowledge-archivist",
+      "scenario": "Consolidate verified decisions from superseded notes without discarding unique evidence.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "native",
+      "claude_agent_source_sha256": "36df593b53479b099711e17d490831857f4b7576268d9667b42fba40d0efbdec",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:knowledge-archivist:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:knowledge-archivist:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "knowledge-archivist",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "native",
+      "run_ids": {
+        "handoff": "offline:role-handoff:knowledge-archivist:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "lead",
+      "scenario": "Coordinate an import, review and acceptance sequence, name owners, and retain the top-level decision.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "external-taxonomy-only",
+      "claude_agent_source_sha256": "7895971ff01bb48c4ebb453b44c8e877840135df07946f24766c498bd28d6f28",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:lead:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:lead:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "lead",
+      "scenario": "Retain top-level decision ownership; no launch or conversion into a generic worker.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "external-taxonomy-only",
+      "run_ids": {
+        "handoff": "offline:role-handoff:lead:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "mechanical-scout",
+      "scenario": "Read the package manifest and return its exact declared version and dependency list without edits.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "native",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:mechanical-scout:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:mechanical-scout:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "mechanical-scout",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "native",
+      "run_ids": {
+        "handoff": "offline:role-handoff:mechanical-scout:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "mechanical-worker",
+      "scenario": "Apply an approved literal rename in exactly two identified files with no design discretion.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "native",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:mechanical-worker:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:mechanical-worker:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "mechanical-worker",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "native",
+      "run_ids": {
+        "handoff": "offline:role-handoff:mechanical-worker:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "model-view-engineer",
+      "scenario": "Preserve stable selection while an item model emits row insertion and removal notifications.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "skill-only",
+      "claude_agent_source_sha256": "e4a5024feb4851b116184be2295938b85cd681a7f6e03854dfe043d756b09f7e",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:model-view-engineer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:model-view-engineer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "model-view-engineer",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "skill-only",
+      "run_ids": {
+        "handoff": "offline:role-handoff:model-view-engineer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "performance-engineer",
+      "scenario": "Profile a slow parser, then propose the smallest measured allocation improvement.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "skill-only",
+      "claude_agent_source_sha256": "5a3ba1b1cc60162bd81441f5a20f24b3eccf9a964df097f482a40061b2c1f145",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:performance-engineer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:performance-engineer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "performance-engineer",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "skill-only",
+      "run_ids": {
+        "handoff": "offline:role-handoff:performance-engineer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "performance-reviewer",
+      "scenario": "Review supplied benchmark results for comparability and assess an asserted performance gain without editing.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "skill-only",
+      "claude_agent_source_sha256": "ba99ca6b5bf3536bff6a75de8681c8280dee640a7a58db945b446deb363e9022",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:performance-reviewer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:performance-reviewer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "performance-reviewer",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "skill-only",
+      "run_ids": {
+        "handoff": "offline:role-handoff:performance-reviewer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "planner",
+      "scenario": "Order six known tasks by dependency and state the acceptance condition for each handoff.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "native",
+      "claude_agent_source_sha256": "8be3dae0e1275110612b14ea551c091d39b3622aacf8d866fcecb98d9e57463d",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:planner:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:planner:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "planner",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "native",
+      "run_ids": {
+        "handoff": "offline:role-handoff:planner:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "platform-engineer",
+      "scenario": "Make the installer behave consistently on Windows and Linux while retaining platform lifecycle contracts.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "native",
+      "claude_agent_source_sha256": "839bed596007773d7a12d8c8cb1565be23a9e42865c7b0df059b5a2fcf48704a",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:platform-engineer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:platform-engineer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "platform-engineer",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "native",
+      "run_ids": {
+        "handoff": "offline:role-handoff:platform-engineer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "product-analyst",
+      "scenario": "Infer where users abandon an import flow from supplied funnel events and describe uncertainty.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "skill-only",
+      "claude_agent_source_sha256": "a1be04ca268d9d72a3274dd8dac5e94131b4216968752493733892d426abc4b9",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:product-analyst:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:product-analyst:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "product-analyst",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "skill-only",
+      "run_ids": {
+        "handoff": "offline:role-handoff:product-analyst:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "product-manager",
+      "scenario": "Decide what belongs in the next release from competing user goals and propose non-goals.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "skill-only",
+      "claude_agent_source_sha256": "3554d09d5ec3581fb08f8d4ae0af5c60a26624032103212964deaf7886d85399",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:product-manager:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:product-manager:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "product-manager",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "skill-only",
+      "run_ids": {
+        "handoff": "offline:role-handoff:product-manager:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "qa-engineer",
+      "scenario": "Design and run a test plan for a versioned import change, including controls and regression evidence.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "native",
+      "claude_agent_source_sha256": "56378425fb87e8f622a793296f9b21bb9f7811a87ab1ed61515469c0d36cc7e5",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:qa-engineer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:qa-engineer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "qa-engineer",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "native",
+      "run_ids": {
+        "handoff": "offline:role-handoff:qa-engineer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "qt-ui-engineer",
+      "scenario": "Correct keyboard handling and widget lifetime for a native Qt dialog.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "skill-only",
+      "claude_agent_source_sha256": "106e2cd1b05113f88023d3b4626cadc8905030a46389ad51200f5a5d69131a47",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:qt-ui-engineer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:qt-ui-engineer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "qt-ui-engineer",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "skill-only",
+      "run_ids": {
+        "handoff": "offline:role-handoff:qt-ui-engineer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "reliability-engineer",
+      "scenario": "Design a restart and acknowledgement contract for a local queue; address how to avoid losing already acknowledged jobs. Do not execute recovery.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "skill-only",
+      "claude_agent_source_sha256": "4289250578eee736359b946863fd913b8a4d72809ab34b0765d586d4af6488fd",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:reliability-engineer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:reliability-engineer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "reliability-engineer",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "skill-only",
+      "run_ids": {
+        "handoff": "offline:role-handoff:reliability-engineer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "scientific-software-engineer",
+      "scenario": "Turn the supplied numerical method into a tested scientific software module while preserving its stated tolerances.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "native",
+      "claude_agent_source_sha256": "12d08cd4967e9f21d2195ac4e16091d93df4ece529a7e16066d3cba12bfd5b6c",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:scientific-software-engineer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:scientific-software-engineer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "scientific-software-engineer",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "native",
+      "run_ids": {
+        "handoff": "offline:role-handoff:scientific-software-engineer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "security-engineer",
+      "scenario": "Review generated authorization code and propose least-privilege corrective changes; no exploitation.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "native",
+      "claude_agent_source_sha256": "19d4950aaa4857a3cf101508b8fce7503624d3537f24cd138d92a5246a0d9657",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:security-engineer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:security-engineer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "security-engineer",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "native",
+      "run_ids": {
+        "handoff": "offline:role-handoff:security-engineer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "security-reviewer",
+      "scenario": "Independently review whether a proposed read-only access control change preserves the declared authorization boundary.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "native",
+      "claude_agent_source_sha256": "ad1cb34cc19dc89944f4d519f506ef8a9cf0d1ed4130e6e20ec1b7cdc5e0616a",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:security-reviewer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:security-reviewer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "security-reviewer",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "native",
+      "run_ids": {
+        "handoff": "offline:role-handoff:security-reviewer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "toolchain-engineer",
+      "scenario": "Diagnose mismatched compiler and linker flags across Windows build presets.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "skill-only",
+      "claude_agent_source_sha256": "111ac1ed55a4e8d0440e16350dac5d17904e976b2a02d6b034d293d2d6434bbf",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:toolchain-engineer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:toolchain-engineer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "toolchain-engineer",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "skill-only",
+      "run_ids": {
+        "handoff": "offline:role-handoff:toolchain-engineer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "ui-test-engineer",
+      "scenario": "Build a repeatable native UI regression test for opening a dialog, tab traversal and closing it.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "skill-only",
+      "claude_agent_source_sha256": "7b5c61cef9963eb913a2e05636509d4aa63e4e9971c4792159415449232e0b6a",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:ui-test-engineer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:ui-test-engineer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "ui-test-engineer",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "skill-only",
+      "run_ids": {
+        "handoff": "offline:role-handoff:ui-test-engineer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "ux-designer",
+      "scenario": "Design the flow for resolving ambiguous measurement units before import.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "skill-only",
+      "claude_agent_source_sha256": "20b92aea1dc5aae3a287cced5cf33a2bc3d244a7f1505fa38fabb5c1464d9180",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:ux-designer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:ux-designer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "ux-designer",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "skill-only",
+      "run_ids": {
+        "handoff": "offline:role-handoff:ux-designer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "ux-reviewer",
+      "scenario": "Review an existing import flow for discoverability and recovery without redesigning it.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "skill-only",
+      "claude_agent_source_sha256": "d3e9fbc7fb69f2bca24d17bc476a8ba32a07debf278a3680ab4b6ee6ed7bc669",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:ux-reviewer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:ux-reviewer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "ux-reviewer",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "skill-only",
+      "run_ids": {
+        "handoff": "offline:role-handoff:ux-reviewer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "visualization-engineer",
+      "scenario": "Choose and implement an uncertainty display for many measurement series with comparable axes.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "skill-only",
+      "claude_agent_source_sha256": "81469245e2b706b2582b4aed72fe9a8ee5663af3fd02b60fe7703f0a2c438c3f",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:visualization-engineer:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:visualization-engineer:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "visualization-engineer",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "skill-only",
+      "run_ids": {
+        "handoff": "offline:role-handoff:visualization-engineer:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "worker",
+      "scenario": "Implement a bounded user-approved change whose method requires ordinary engineering judgment, without a specialist.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "form": "native",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:worker:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:worker:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "worker",
+      "scenario": "Verify the expected carrier, scope and worker assignment without launching a model. For lead, prove retained top-level ownership.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "native",
+      "run_ids": {
+        "handoff": "offline:role-handoff:worker:handoff"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "standalone-skill",
+      "id": "analyzing-video-bugs",
+      "scenario": "A supplied video shows the panel jump on frame transition; identify observable motion from the supplied frame sequence.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "variants": [
+        {
+          "pack": "codex",
+          "sha256": "c8b2eb666a08bb9dbd104012ad37eaf653279331f94bc8e89757288470289db6"
+        },
+        {
+          "pack": "claude",
+          "sha256": "80e66f5079831f9e520b932faaed9a85d8ac39d1b7fce2b0cb2d1a241911db1b"
+        }
+      ],
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:standalone-skill:analyzing-video-bugs:baseline",
+        "workflow": "qwen14b-non-thinking:standalone-skill:analyzing-video-bugs:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "standalone-skill",
+      "id": "bug-hunting",
+      "scenario": "Two completion receipts may represent one or two executions; decide using independent evidence before suggesting a fix.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "variants": [
+        {
+          "pack": "codex",
+          "sha256": "a29723df6caa9fd9fc1d7c01a74f38007d95de70b4d84b24b796d4e985f5a3ac"
+        },
+        {
+          "pack": "claude",
+          "sha256": "5aa05064e746009adcbbd83d23d7af8d011ad626d420dda3f2e649a167c0333e"
+        }
+      ],
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:standalone-skill:bug-hunting:baseline",
+        "workflow": "qwen14b-non-thinking:standalone-skill:bug-hunting:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "standalone-skill",
+      "id": "design-panel",
+      "scenario": "Compare viable designs against competing constraints and report tradeoffs without deciding by model vote.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "variants": [
+        {
+          "pack": "codex",
+          "sha256": "f5847afcc0109b59d3b145964d4bd9f12474fddadca249769a9615772a8618d6"
+        }
+      ],
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:standalone-skill:design-panel:baseline",
+        "workflow": "qwen14b-non-thinking:standalone-skill:design-panel:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "standalone-skill",
+      "id": "explain-simply",
+      "scenario": "Explain a cache invalidation decision to a user without assuming they know the terminology.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "variants": [
+        {
+          "pack": "codex",
+          "sha256": "cd6877e5a7db1f9a281c30251cc1f9b12bc0b49180d7cadf4b823a9ee64d7383"
+        },
+        {
+          "pack": "claude",
+          "sha256": "cd6877e5a7db1f9a281c30251cc1f9b12bc0b49180d7cadf4b823a9ee64d7383"
+        }
+      ],
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:standalone-skill:explain-simply:baseline",
+        "workflow": "qwen14b-non-thinking:standalone-skill:explain-simply:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "standalone-skill",
+      "id": "external-brigade",
+      "scenario": "Describe a simulated coordination handoff for several independently supplied work packets without launching or contacting anything.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "variants": [
+        {
+          "pack": "codex",
+          "sha256": "a8867568331b4133ef41fd0230bb98c578c90d3cf03843d6d312719b98fa7503"
+        }
+      ],
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:standalone-skill:external-brigade:baseline",
+        "workflow": "qwen14b-non-thinking:standalone-skill:external-brigade:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "standalone-skill",
+      "id": "generalize-from-instance",
+      "scenario": "Replace filename-dependent wall selection with the format invariant; specify positive and negative cases.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "variants": [
+        {
+          "pack": "codex",
+          "sha256": "1a90a629b3fa53dbe500407a9ef0f664214ac996289d2694ce72c097add5483f"
+        },
+        {
+          "pack": "claude",
+          "sha256": "1a90a629b3fa53dbe500407a9ef0f664214ac996289d2694ce72c097add5483f"
+        }
+      ],
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:standalone-skill:generalize-from-instance:baseline",
+        "workflow": "qwen14b-non-thinking:standalone-skill:generalize-from-instance:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "standalone-skill",
+      "id": "github-pr-review-bot",
+      "scenario": "Review a supplied mock pull-request diff and produce file-specific findings without connecting to GitHub or posting.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "variants": [
+        {
+          "pack": "codex",
+          "sha256": "9867cab3437e7b34572bb4c7f789d60180858122e66691047cae86a602ea87ea"
+        },
+        {
+          "pack": "claude",
+          "sha256": "2e621ae3ea6d2193cdd6e860f5a47f3d32a063ec522c7be3c3937f5ed4b47bb6"
+        }
+      ],
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:standalone-skill:github-pr-review-bot:baseline",
+        "workflow": "qwen14b-non-thinking:standalone-skill:github-pr-review-bot:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "standalone-skill",
+      "id": "implementation-to-theory",
+      "scenario": "Recover the mathematical method stated by a supplied numerical kernel and separate inference from known intent.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "variants": [
+        {
+          "pack": "codex",
+          "sha256": "eeadb535e12e4102a43291cb7544f9d1396a6fcfa4c9bf5079e41334299b58ae"
+        },
+        {
+          "pack": "claude",
+          "sha256": "eeadb535e12e4102a43291cb7544f9d1396a6fcfa4c9bf5079e41334299b58ae"
+        }
+      ],
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:standalone-skill:implementation-to-theory:baseline",
+        "workflow": "qwen14b-non-thinking:standalone-skill:implementation-to-theory:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "standalone-skill",
+      "id": "init-project",
+      "scenario": "Plan initial setup for a blank project using the supplied repository conventions without installing.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "variants": [
+        {
+          "pack": "codex",
+          "sha256": "3fd7f21dbbd9f274d0f9dced5edd5e4b3d0f9fe78816deddfca0f3fb4624578c"
+        }
+      ],
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:standalone-skill:init-project:baseline",
+        "workflow": "qwen14b-non-thinking:standalone-skill:init-project:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "standalone-skill",
+      "id": "manual-repo-transfer",
+      "scenario": "Plan a portable manual transfer of a non-networked repository snapshot with identity checks and no publish.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "variants": [
+        {
+          "pack": "codex",
+          "sha256": "6a8b5d401ad6a022cd35f734b8f14deaafab3a2f4074e581131f2914afa487d0"
+        },
+        {
+          "pack": "claude",
+          "sha256": "6a8b5d401ad6a022cd35f734b8f14deaafab3a2f4074e581131f2914afa487d0"
+        }
+      ],
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:standalone-skill:manual-repo-transfer:baseline",
+        "workflow": "qwen14b-non-thinking:standalone-skill:manual-repo-transfer:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "standalone-skill",
+      "id": "mathtype-book-page",
+      "scenario": "Transcribe mathematical notation from a supplied page and preserve distinctions between subscript and exponent.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "variants": [
+        {
+          "pack": "codex",
+          "sha256": "978dae14ed5bf766eda939a90cc60c6ebeb336407f7cac900db7c746301d28e3"
+        },
+        {
+          "pack": "claude",
+          "sha256": "0cd8a946c8e7039020315b70a2fde56bed63e8a6f1a5bd4c15d951fd41a7999c"
+        }
+      ],
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:standalone-skill:mathtype-book-page:baseline",
+        "workflow": "qwen14b-non-thinking:standalone-skill:mathtype-book-page:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "standalone-skill",
+      "id": "post-spawn-cleanup",
+      "scenario": "Given a process-and-owner manifest, identify finished owned resources eligible for cleanup without terminating anything.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "variants": [
+        {
+          "pack": "codex",
+          "sha256": "912ef7d3dd6952a9cf85d69bae7a4ba7804f409e20e0b7d646c940dd382324d3"
+        },
+        {
+          "pack": "claude",
+          "sha256": "912ef7d3dd6952a9cf85d69bae7a4ba7804f409e20e0b7d646c940dd382324d3"
+        }
+      ],
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:standalone-skill:post-spawn-cleanup:baseline",
+        "workflow": "qwen14b-non-thinking:standalone-skill:post-spawn-cleanup:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "standalone-skill",
+      "id": "repo-cleanup",
+      "scenario": "Inspect a supplied repository inventory and distinguish disposable files from unique results or unowned entries.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "variants": [
+        {
+          "pack": "codex",
+          "sha256": "76852c170162ce6b3051b4bcaf14dc629382036b5a5d3ecf54634fed4aa2ddfb"
+        },
+        {
+          "pack": "claude",
+          "sha256": "06fe776be7a9c75ec5491fdf8a54e16c65e2586ab0f04ec972d3501cae55c060"
+        }
+      ],
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:standalone-skill:repo-cleanup:baseline",
+        "workflow": "qwen14b-non-thinking:standalone-skill:repo-cleanup:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "standalone-skill",
+      "id": "review-changes",
+      "scenario": "Inspect a serializer change and its unchanged consumer; require the exact regression assertion.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "variants": [
+        {
+          "pack": "codex",
+          "sha256": "5d24d352a0d94e50835508e45840a0df3ccbd850f0e591510b158f78d6a95558"
+        }
+      ],
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:standalone-skill:review-changes:baseline",
+        "workflow": "qwen14b-non-thinking:standalone-skill:review-changes:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "standalone-skill",
+      "id": "review-loop",
+      "scenario": "Route the second review pass only to changed or unresolved findings; decide when the loop is complete.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "variants": [
+        {
+          "pack": "codex",
+          "sha256": "3f2127239fbbc5cc86189600ad3982e9e9e598e2e2ed3975f84eb9208316ee43"
+        }
+      ],
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:standalone-skill:review-loop:baseline",
+        "workflow": "qwen14b-non-thinking:standalone-skill:review-loop:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "standalone-skill",
+      "id": "second-opinion",
+      "scenario": "Compare a proposed technical decision against an independent alternative without running an external model.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "variants": [
+        {
+          "pack": "codex",
+          "sha256": "f384c649c8742de6c856e5258d896be41bd0eab509f5580c864d5ad83ad7927a"
+        }
+      ],
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:standalone-skill:second-opinion:baseline",
+        "workflow": "qwen14b-non-thinking:standalone-skill:second-opinion:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "standalone-skill",
+      "id": "vak-dissertation-review",
+      "scenario": "Assess a supplied dissertation excerpt against a supplied reviewer rubric; do not contact a reviewer.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "variants": [
+        {
+          "pack": "codex",
+          "sha256": "a75f4a03f2f91b1a034a1be1fdc96b4c9535f449abdaa3320a8aea08f888bf50"
+        },
+        {
+          "pack": "claude",
+          "sha256": "312690af9b0d486ce6315d8ecbbef88cc17a7be27c378d72247901406e73349d"
+        }
+      ],
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:standalone-skill:vak-dissertation-review:baseline",
+        "workflow": "qwen14b-non-thinking:standalone-skill:vak-dissertation-review:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "standalone-skill",
+      "id": "vcpkg-builder",
+      "scenario": "Choose a repeatable local library build for a declared triplet without installation.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "variants": [
+        {
+          "pack": "codex",
+          "sha256": "fb5d1e9e169425e13669634e06b72c0f8f4d500fbaae94aa76ab218b3ef8b9e5"
+        },
+        {
+          "pack": "claude",
+          "sha256": "94fcd8800bb43918ac7d66bee1efe9e08127cc72edaa200e4d30561e84883247"
+        }
+      ],
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:standalone-skill:vcpkg-builder:baseline",
+        "workflow": "qwen14b-non-thinking:standalone-skill:vcpkg-builder:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "standalone-skill",
+      "id": "vcpkg-ports-updater",
+      "scenario": "Assess an update to an existing port from supplied upstream metadata and identify the exact version and patch checks.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "variants": [
+        {
+          "pack": "codex",
+          "sha256": "4fea1ecbadf216854a5b720f6b6a192aa5919a6ee9bdc1c165f1d6d5c8950649"
+        },
+        {
+          "pack": "claude",
+          "sha256": "117b66a7edce120b3ed9746698bbc93759180c9c901466b39f95c1965ddca57c"
+        }
+      ],
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:standalone-skill:vcpkg-ports-updater:baseline",
+        "workflow": "qwen14b-non-thinking:standalone-skill:vcpkg-ports-updater:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "role-choice",
+      "id": "windows-gui-manual-testing",
+      "scenario": "Plan a manual Windows UI verification with initial state, concrete interactions and success evidence.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "variants": [
+        {
+          "pack": "codex",
+          "sha256": "be8883c5c5503754b8fb6584bdc5b1007941ece1c99321600a962afcd3364bc3"
+        },
+        {
+          "pack": "claude",
+          "sha256": "a74a81230074e26708992872bae561ccd85c5a42f52a6a3e92b8061898d28f09"
+        }
+      ],
+      "form": "claude-agent-with-skill",
+      "combined_skill_delivery": true,
+      "claude_agent_source_sha256": "dd60bae56075f8b312663e1193eb93d35178297a81a18a1d35126d84475911fc",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:role-choice:windows-gui-manual-testing:baseline",
+        "workflow": "qwen14b-non-thinking:role-choice:windows-gui-manual-testing:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "claude:agents-mode-reminder",
+      "scenario": {
+        "positive": "Explicit delegation mode",
+        "ordinary": "Ordinary or inherited mode"
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "SessionStart",
+      "matcher": null,
+      "run_ids": {
+        "positive": "offline:hook-binding:claude:agents-mode-reminder:positive",
+        "ordinary": "offline:hook-binding:claude:agents-mode-reminder:ordinary"
+      },
+      "source_fixture_selectors": "test_python_hook_entrypoints_smoke.py::agents_mode",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "hook-cue",
+      "id": "claude:agents-mode-reminder",
+      "scenario": "Explicit delegation mode",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "compare": "exact observed cue versus no cue; hold other inputs fixed",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:hook-cue:claude:agents-mode-reminder:baseline",
+        "workflow": "qwen14b-non-thinking:hook-cue:claude:agents-mode-reminder:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "claude:check-bugfix-discipline",
+      "scenario": {
+        "positive": "Edit in a declared defect investigation without diagnostic evidence",
+        "ordinary": "Benign edit using similar wording"
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "PreToolUse",
+      "matcher": "Edit|Write|NotebookEdit|apply_patch",
+      "run_ids": {
+        "positive": "offline:hook-binding:claude:check-bugfix-discipline:positive",
+        "ordinary": "offline:hook-binding:claude:check-bugfix-discipline:ordinary"
+      },
+      "expected_positive": "assert host-visible enforcement decision from the fixture; exit code alone is not evidence",
+      "source_fixture_selectors": "test_bugfix_discipline_hook.py::genuine_bug_report_fires; tool_result_trigger_words_do_not_fire",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "hook-cue",
+      "id": "claude:check-bugfix-discipline",
+      "scenario": "Edit in a declared defect investigation without diagnostic evidence",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "compare": "Isolated prompt-only replay of captured explanatory text versus no text; enforcement is not part of the experiment and remains unchanged.",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:hook-cue:claude:check-bugfix-discipline:baseline",
+        "workflow": "qwen14b-non-thinking:hook-cue:claude:check-bugfix-discipline:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "claude:check-git-push-gate",
+      "scenario": {
+        "positive": "Fixture with a new outgoing finding; local receiver remains unchanged",
+        "ordinary": "Clean small outgoing change over published history"
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "PreToolUse",
+      "matcher": "Bash|PowerShell",
+      "run_ids": {
+        "positive": "offline:hook-binding:claude:check-git-push-gate:positive",
+        "ordinary": "offline:hook-binding:claude:check-git-push-gate:ordinary"
+      },
+      "source_fixture_selectors": "test_git_push_gate_runner.py::runner_and_direct_policy_are_semantically_equivalent; runner_is_mirrored",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "claude:check-machine-local-path",
+      "scenario": {
+        "positive": "Introduce a machine-local path in an edit",
+        "ordinary": "Portable path in the same edit surface"
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "PreToolUse",
+      "matcher": "Edit|Write|NotebookEdit|apply_patch",
+      "run_ids": {
+        "positive": "offline:hook-binding:claude:check-machine-local-path:positive",
+        "ordinary": "offline:hook-binding:claude:check-machine-local-path:ordinary"
+      },
+      "source_fixture_selectors": "test_python_hook_entrypoints_smoke.py::warn_only_hooks_emit_stdout_advisory; test_machine_local_path_hook.py::clean_content_not_flagged",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "claude:check-mcp-momentum",
+      "scenario": {
+        "positive": "Relevant available tool for current task",
+        "ordinary": "Tool unavailable or irrelevant"
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "PreToolUse",
+      "matcher": "Grep|Bash|PowerShell|shell_command|exec_command",
+      "run_ids": {
+        "positive": "offline:hook-binding:claude:check-mcp-momentum:positive",
+        "ordinary": "offline:hook-binding:claude:check-mcp-momentum:ordinary"
+      },
+      "source_fixture_selectors": "test_claude_mcp_force_hook.py::force_root_reminds; force_preserves_classifier_exemptions",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "hook-cue",
+      "id": "claude:check-mcp-momentum",
+      "scenario": "Relevant available tool for current task",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "compare": "exact observed cue versus no cue; hold other inputs fixed",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:hook-cue:claude:check-mcp-momentum:baseline",
+        "workflow": "qwen14b-non-thinking:hook-cue:claude:check-mcp-momentum:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "claude:check-no-trash-in-repo",
+      "scenario": {
+        "positive": "An unmarked git worktree add exercises the local output warning using a fixture.",
+        "ordinary": "Read-only git status produces no warning."
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "PreToolUse",
+      "matcher": "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell",
+      "run_ids": {
+        "positive": "offline:hook-binding:claude:check-no-trash-in-repo:positive",
+        "ordinary": "offline:hook-binding:claude:check-no-trash-in-repo:ordinary"
+      },
+      "source_fixture_selectors": "test_python_hook_entrypoints_smoke.py::warn_only_hooks_emit_stdout_advisory; test_no_trash_hook.py::git_status_no_warn",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "claude:check-passive-polling-stop",
+      "scenario": {
+        "positive": "Repeated passive status polling",
+        "ordinary": "One check while independent work is progressing"
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "Stop",
+      "matcher": null,
+      "run_ids": {
+        "positive": "offline:hook-binding:claude:check-passive-polling-stop:positive",
+        "ordinary": "offline:hook-binding:claude:check-passive-polling-stop:ordinary"
+      },
+      "expected_positive": "assert host-visible enforcement decision from the fixture; exit code alone is not evidence",
+      "source_fixture_selectors": "test_passive_polling_stop.py::strong_phrase_without_relevant_probe_blocks_stop; standalone_answer_pause_and_nonpassive_pending_allow_stop",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "claude:check-repository-orientation",
+      "scenario": {
+        "positive": "First operation on a genuinely new repository scope",
+        "ordinary": "Already oriented scope"
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "PreToolUse",
+      "matcher": "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell|shell_command|exec_command",
+      "run_ids": {
+        "positive": "offline:hook-binding:claude:check-repository-orientation:positive",
+        "ordinary": "offline:hook-binding:claude:check-repository-orientation:ordinary"
+      },
+      "source_fixture_selectors": "test_repository_orientation_hook.py::edit_before_record_warns; valid_in_scope_record_is_silent_for_claude_and_codex_shapes",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "hook-cue",
+      "id": "claude:check-repository-orientation",
+      "scenario": "First operation on a genuinely new repository scope",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "compare": "exact observed cue versus no cue; hold other inputs fixed",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:hook-cue:claude:check-repository-orientation:baseline",
+        "workflow": "qwen14b-non-thinking:hook-cue:claude:check-repository-orientation:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "claude:check-scratch-valuables",
+      "scenario": {
+        "positive": "Unique evidence not preserved outside scratch",
+        "ordinary": "Only disposable input or no scratch work"
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "SessionStart",
+      "matcher": null,
+      "run_ids": {
+        "positive": "offline:hook-binding:claude:check-scratch-valuables:positive",
+        "ordinary": "offline:hook-binding:claude:check-scratch-valuables:ordinary"
+      },
+      "source_fixture_selectors": "test_python_hook_entrypoints_smoke.py::scratch_watchdog_emits_context_for_unique_file; scratch_watchdog_is_silent_without_candidates",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "hook-cue",
+      "id": "claude:check-scratch-valuables",
+      "scenario": "Unique evidence not preserved outside scratch",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "compare": "exact observed cue versus no cue; hold other inputs fixed",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:hook-cue:claude:check-scratch-valuables:baseline",
+        "workflow": "qwen14b-non-thinking:hook-cue:claude:check-scratch-valuables:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "claude:check-stale-relation-residue",
+      "scenario": {
+        "positive": "New edit retains a superseded reference",
+        "ordinary": "Active reference retained"
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "PreToolUse",
+      "matcher": "Edit|Write|NotebookEdit|apply_patch",
+      "run_ids": {
+        "positive": "offline:hook-binding:claude:check-stale-relation-residue:positive",
+        "ordinary": "offline:hook-binding:claude:check-stale-relation-residue:ordinary"
+      },
+      "source_fixture_selectors": "test_python_hook_entrypoints_smoke.py::warn_only_hooks_emit_stdout_advisory; test_stale_relation_residue_hook.py::clean_content_not_flagged",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "claude:check-typed-routing",
+      "scenario": {
+        "positive": "A catch-all dispatch with a specialist signal emits an advisory.",
+        "ordinary": "The same fixture with an appropriate typed role does not emit that advisory."
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "PreToolUse",
+      "matcher": "Agent",
+      "run_ids": {
+        "positive": "offline:hook-binding:claude:check-typed-routing:positive",
+        "ordinary": "offline:hook-binding:claude:check-typed-routing:ordinary"
+      },
+      "source_fixture_selectors": "test_typed_routing_hook.py::python_entrypoint_exits_zero; typed_role_is_silent",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "claude:mcp-usage-reminder",
+      "scenario": {
+        "positive": "Registered SessionStart emits the reminder, including non-actionable or absent stdin.",
+        "ordinary": "A nonregistered event must not dispatch the reminder; do not expect a registered ordinary SessionStart to be quiet."
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "SessionStart",
+      "matcher": null,
+      "run_ids": {
+        "positive": "offline:hook-binding:claude:mcp-usage-reminder:positive",
+        "ordinary": "offline:hook-binding:claude:mcp-usage-reminder:ordinary"
+      },
+      "source_fixture_selectors": "test_python_hook_entrypoints_smoke.py::mcp_reminders_emit_policy_owned_context; test_sessionstart_reminder_python_hooks.py",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "hook-cue",
+      "id": "claude:mcp-usage-reminder",
+      "scenario": "Startup or resume with a task-relevant tool to discover",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "compare": "exact observed cue versus no cue; hold other inputs fixed",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:hook-cue:claude:mcp-usage-reminder:baseline",
+        "workflow": "qwen14b-non-thinking:hook-cue:claude:mcp-usage-reminder:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "claude:turn-anchor-reminder",
+      "scenario": {
+        "positive": "Registered UserPromptSubmit emits valid turn anchor context.",
+        "ordinary": "An event not registered for this hook does not dispatch it; ordinary UserPromptSubmit is not expected to be quiet."
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "UserPromptSubmit",
+      "matcher": null,
+      "run_ids": {
+        "positive": "offline:hook-binding:claude:turn-anchor-reminder:positive",
+        "ordinary": "offline:hook-binding:claude:turn-anchor-reminder:ordinary"
+      },
+      "source_fixture_selectors": "test_universal_reminder_hooks.py::turn_anchor_uses_policy; python_emits_wellformed",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "hook-cue",
+      "id": "claude:turn-anchor-reminder",
+      "scenario": "Resume with pending authorized work and stale prior parking command",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "compare": "exact observed cue versus no cue; hold other inputs fixed",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:hook-cue:claude:turn-anchor-reminder:baseline",
+        "workflow": "qwen14b-non-thinking:hook-cue:claude:turn-anchor-reminder:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "codex:agents-mode-reminder",
+      "scenario": {
+        "positive": "Explicit delegation mode",
+        "ordinary": "Ordinary or inherited mode"
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "SessionStart",
+      "matcher": null,
+      "run_ids": {
+        "positive": "offline:hook-binding:codex:agents-mode-reminder:positive",
+        "ordinary": "offline:hook-binding:codex:agents-mode-reminder:ordinary"
+      },
+      "source_fixture_selectors": "test_python_hook_entrypoints_smoke.py::agents_mode",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "hook-cue",
+      "id": "codex:agents-mode-reminder",
+      "scenario": "Explicit delegation mode",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "compare": "exact observed cue versus no cue; hold other inputs fixed",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:hook-cue:codex:agents-mode-reminder:baseline",
+        "workflow": "qwen14b-non-thinking:hook-cue:codex:agents-mode-reminder:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "codex:check-bugfix-discipline",
+      "scenario": {
+        "positive": "Edit in a declared defect investigation without diagnostic evidence",
+        "ordinary": "Benign edit using similar wording"
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "PreToolUse",
+      "matcher": "Edit|Write|NotebookEdit|apply_patch",
+      "run_ids": {
+        "positive": "offline:hook-binding:codex:check-bugfix-discipline:positive",
+        "ordinary": "offline:hook-binding:codex:check-bugfix-discipline:ordinary"
+      },
+      "expected_positive": "assert host-visible enforcement decision from the fixture; exit code alone is not evidence",
+      "source_fixture_selectors": "test_bugfix_discipline_hook.py::genuine_bug_report_fires; tool_result_trigger_words_do_not_fire",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "hook-cue",
+      "id": "codex:check-bugfix-discipline",
+      "scenario": "Edit in a declared defect investigation without diagnostic evidence",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "compare": "Isolated prompt-only replay of captured explanatory text versus no text; enforcement is not part of the experiment and remains unchanged.",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:hook-cue:codex:check-bugfix-discipline:baseline",
+        "workflow": "qwen14b-non-thinking:hook-cue:codex:check-bugfix-discipline:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "codex:check-git-push-gate",
+      "scenario": {
+        "positive": "Fixture with a new outgoing finding; local receiver remains unchanged",
+        "ordinary": "Clean small outgoing change over published history"
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "PreToolUse",
+      "matcher": "Bash|PowerShell",
+      "run_ids": {
+        "positive": "offline:hook-binding:codex:check-git-push-gate:positive",
+        "ordinary": "offline:hook-binding:codex:check-git-push-gate:ordinary"
+      },
+      "source_fixture_selectors": "test_git_push_gate_runner.py::runner_and_direct_policy_are_semantically_equivalent; runner_is_mirrored",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "codex:check-machine-local-path",
+      "scenario": {
+        "positive": "Introduce a machine-local path in an edit",
+        "ordinary": "Portable path in the same edit surface"
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "PreToolUse",
+      "matcher": "Edit|Write|NotebookEdit|apply_patch",
+      "run_ids": {
+        "positive": "offline:hook-binding:codex:check-machine-local-path:positive",
+        "ordinary": "offline:hook-binding:codex:check-machine-local-path:ordinary"
+      },
+      "source_fixture_selectors": "test_python_hook_entrypoints_smoke.py::warn_only_hooks_emit_stdout_advisory; test_machine_local_path_hook.py::clean_content_not_flagged",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "codex:check-no-trash-in-repo",
+      "scenario": {
+        "positive": "An unmarked git worktree add exercises the local output warning using a fixture.",
+        "ordinary": "Read-only git status produces no warning."
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "PreToolUse",
+      "matcher": "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell",
+      "run_ids": {
+        "positive": "offline:hook-binding:codex:check-no-trash-in-repo:positive",
+        "ordinary": "offline:hook-binding:codex:check-no-trash-in-repo:ordinary"
+      },
+      "source_fixture_selectors": "test_python_hook_entrypoints_smoke.py::warn_only_hooks_emit_stdout_advisory; test_no_trash_hook.py::git_status_no_warn",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "codex:check-parallel-mcp-momentum",
+      "scenario": {
+        "positive": "An eligible root work start produces the cue.",
+        "ordinary": "Read, wait, bookkeeping, or a non-root worker remains quiet."
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "PreToolUse",
+      "matcher": "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell|shell_command|exec_command",
+      "run_ids": {
+        "positive": "offline:hook-binding:codex:check-parallel-mcp-momentum:positive",
+        "ordinary": "offline:hook-binding:codex:check-parallel-mcp-momentum:ordinary"
+      },
+      "source_fixture_selectors": "test_parallel_mcp_reminder_hook.py::root_active_modes_emit; read_wait_stop_and_bookkeeping",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "hook-cue",
+      "id": "codex:check-parallel-mcp-momentum",
+      "scenario": "Independent jobs and usable tools",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "compare": "exact observed cue versus no cue; hold other inputs fixed",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:hook-cue:codex:check-parallel-mcp-momentum:baseline",
+        "workflow": "qwen14b-non-thinking:hook-cue:codex:check-parallel-mcp-momentum:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "codex:check-passive-polling-stop",
+      "scenario": {
+        "positive": "Repeated passive status polling",
+        "ordinary": "One check while independent work is progressing"
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "Stop",
+      "matcher": null,
+      "run_ids": {
+        "positive": "offline:hook-binding:codex:check-passive-polling-stop:positive",
+        "ordinary": "offline:hook-binding:codex:check-passive-polling-stop:ordinary"
+      },
+      "expected_positive": "assert host-visible enforcement decision from the fixture; exit code alone is not evidence",
+      "source_fixture_selectors": "test_passive_polling_stop.py::strong_phrase_without_relevant_probe_blocks_stop; standalone_answer_pause_and_nonpassive_pending_allow_stop",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "codex:check-repository-orientation",
+      "scenario": {
+        "positive": "First operation on a genuinely new repository scope",
+        "ordinary": "Already oriented scope"
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "PreToolUse",
+      "matcher": "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell|shell_command|exec_command",
+      "run_ids": {
+        "positive": "offline:hook-binding:codex:check-repository-orientation:positive",
+        "ordinary": "offline:hook-binding:codex:check-repository-orientation:ordinary"
+      },
+      "source_fixture_selectors": "test_repository_orientation_hook.py::edit_before_record_warns; valid_in_scope_record_is_silent_for_claude_and_codex_shapes",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "hook-cue",
+      "id": "codex:check-repository-orientation",
+      "scenario": "First operation on a genuinely new repository scope",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "compare": "exact observed cue versus no cue; hold other inputs fixed",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:hook-cue:codex:check-repository-orientation:baseline",
+        "workflow": "qwen14b-non-thinking:hook-cue:codex:check-repository-orientation:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "codex:check-scratch-valuables",
+      "scenario": {
+        "positive": "Unique evidence not preserved outside scratch",
+        "ordinary": "Only disposable input or no scratch work"
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "SessionStart",
+      "matcher": null,
+      "run_ids": {
+        "positive": "offline:hook-binding:codex:check-scratch-valuables:positive",
+        "ordinary": "offline:hook-binding:codex:check-scratch-valuables:ordinary"
+      },
+      "source_fixture_selectors": "test_python_hook_entrypoints_smoke.py::scratch_watchdog_emits_context_for_unique_file; scratch_watchdog_is_silent_without_candidates",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "hook-cue",
+      "id": "codex:check-scratch-valuables",
+      "scenario": "Unique evidence not preserved outside scratch",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "compare": "exact observed cue versus no cue; hold other inputs fixed",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:hook-cue:codex:check-scratch-valuables:baseline",
+        "workflow": "qwen14b-non-thinking:hook-cue:codex:check-scratch-valuables:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "codex:check-stale-relation-residue",
+      "scenario": {
+        "positive": "New edit retains a superseded reference",
+        "ordinary": "Active reference retained"
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "PreToolUse",
+      "matcher": "Edit|Write|NotebookEdit|apply_patch",
+      "run_ids": {
+        "positive": "offline:hook-binding:codex:check-stale-relation-residue:positive",
+        "ordinary": "offline:hook-binding:codex:check-stale-relation-residue:ordinary"
+      },
+      "source_fixture_selectors": "test_python_hook_entrypoints_smoke.py::warn_only_hooks_emit_stdout_advisory; test_stale_relation_residue_hook.py::clean_content_not_flagged",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "codex:mcp-usage-reminder",
+      "scenario": {
+        "positive": "Registered SessionStart emits the reminder, including non-actionable or absent stdin.",
+        "ordinary": "A nonregistered event must not dispatch the reminder; do not expect a registered ordinary SessionStart to be quiet."
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "SessionStart",
+      "matcher": null,
+      "run_ids": {
+        "positive": "offline:hook-binding:codex:mcp-usage-reminder:positive",
+        "ordinary": "offline:hook-binding:codex:mcp-usage-reminder:ordinary"
+      },
+      "source_fixture_selectors": "test_python_hook_entrypoints_smoke.py::mcp_reminders_emit_policy_owned_context; test_sessionstart_reminder_python_hooks.py",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "hook-cue",
+      "id": "codex:mcp-usage-reminder",
+      "scenario": "Startup or resume with a task-relevant tool to discover",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "compare": "exact observed cue versus no cue; hold other inputs fixed",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:hook-cue:codex:mcp-usage-reminder:baseline",
+        "workflow": "qwen14b-non-thinking:hook-cue:codex:mcp-usage-reminder:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-binding",
+      "id": "codex:turn-anchor-reminder",
+      "scenario": {
+        "positive": "Registered UserPromptSubmit emits valid turn anchor context.",
+        "ordinary": "An event not registered for this hook does not dispatch it; ordinary UserPromptSubmit is not expected to be quiet."
+      },
+      "arms": [
+        "positive",
+        "ordinary"
+      ],
+      "event": "UserPromptSubmit",
+      "matcher": null,
+      "run_ids": {
+        "positive": "offline:hook-binding:codex:turn-anchor-reminder:positive",
+        "ordinary": "offline:hook-binding:codex:turn-anchor-reminder:ordinary"
+      },
+      "source_fixture_selectors": "test_universal_reminder_hooks.py::turn_anchor_uses_policy; python_emits_wellformed",
+      "scope": "Source fixtures and adapter parity are preflight evidence, not installed host dispatch receipts."
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "hook-cue",
+      "id": "codex:turn-anchor-reminder",
+      "scenario": "Resume with pending authorized work and stale prior parking command",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "compare": "exact observed cue versus no cue; hold other inputs fixed",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:hook-cue:codex:turn-anchor-reminder:baseline",
+        "workflow": "qwen14b-non-thinking:hook-cue:codex:turn-anchor-reminder:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "hook-history",
+      "id": "published-history",
+      "scenario": "Use a temporary local receiver; already published material alone does not stop an ordinary push check.",
+      "source_fixture_selectors": "test_publication_prior_disclosure.py::TestPriorDisclosure::test_qualified_receiver_object_difference_excludes_shared_older_blobs",
+      "arms": [
+        "published-control"
+      ],
+      "run_ids": {
+        "published-control": "offline:hook-history:published-history:published-control"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "catalog-control",
+      "id": "missing",
+      "scenario": "Assert exact receiver-visible inventory and delivery status; no silent substitution.",
+      "arms": [
+        "control"
+      ],
+      "run_ids": {
+        "control": "offline:catalog-control:missing:control"
+      },
+      "source_fixture_selectors": "test_native_skill_choices.py::test_missing_receiver_skill_does_not_fall_back_by_name",
+      "scope": "Explicit receiver inventory fixture; not discovery or body delivery in the installed host."
+    },
+    {
+      "lane": "offline",
+      "kind": "catalog-control",
+      "id": "disabled",
+      "scenario": "Assert exact receiver-visible inventory and delivery status; no silent substitution.",
+      "arms": [
+        "control"
+      ],
+      "run_ids": {
+        "control": "offline:catalog-control:disabled:control"
+      },
+      "source_fixture_selectors": "test_native_skill_choices.py::test_disabled_exact_receiver_entry_never_selects_same_name",
+      "scope": "Explicit receiver inventory fixture; not discovery or body delivery in the installed host."
+    },
+    {
+      "lane": "offline",
+      "kind": "catalog-control",
+      "id": "same-name-different-source",
+      "scenario": "Assert exact receiver-visible inventory and delivery status; no silent substitution.",
+      "arms": [
+        "control"
+      ],
+      "run_ids": {
+        "control": "offline:catalog-control:same-name-different-source:control"
+      },
+      "source_fixture_selectors": "test_native_skill_choices.py::test_external_can_rank_first_and_duplicates_are_distinct",
+      "scope": "Explicit receiver inventory fixture; not discovery or body delivery in the installed host."
+    },
+    {
+      "lane": "offline",
+      "kind": "catalog-control",
+      "id": "explicit-override",
+      "scenario": "Assert exact receiver-visible inventory and delivery status; no silent substitution.",
+      "arms": [
+        "control"
+      ],
+      "run_ids": {
+        "control": "offline:catalog-control:explicit-override:control"
+      },
+      "source_fixture_selectors": "test_native_skill_choices.py::test_selection_changes_only_that_invocation",
+      "scope": "Explicit receiver inventory fixture; not discovery or body delivery in the installed host."
+    },
+    {
+      "lane": "offline",
+      "kind": "catalog-control",
+      "id": "ordinary-no-body",
+      "scenario": "Assert exact receiver-visible inventory and delivery status; no silent substitution.",
+      "arms": [
+        "control"
+      ],
+      "run_ids": {
+        "control": "offline:catalog-control:ordinary-no-body:control"
+      },
+      "source_fixture_selectors": "test_native_skill_choices.py::test_selection_changes_only_that_invocation",
+      "scope": "Explicit receiver inventory fixture; not discovery or body delivery in the installed host."
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "workflow",
+      "id": "bugfix-one-start",
+      "input": {
+        "task": "The daily dashboard lists two completion receipts for a batch. Determine whether the evidence shows a duplicate execution, and name one check that could narrow the cause. Do not run a command or claim that a check was performed.",
+        "scope": "Batch T-320, closed window 10:00:00?10:05:00 UTC",
+        "independent_start_export": {
+          "coverage": "Complete for every worker assigned to this batch in this window.",
+          "start_ids": [
+            "worker-17"
+          ]
+        },
+        "completion_receipts": [
+          {
+            "receipt_id": "receipt-801",
+            "worker_start_id": "worker-17"
+          },
+          {
+            "receipt_id": "receipt-802",
+            "worker_start_id": "worker-17"
+          }
+        ]
+      },
+      "scenario": "Use the same task and artifacts in both arms.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "criteria": "Conclude one execution: both receipts refer to worker-17 in the complete independent start export. Identify duplicate receipt evidence without asserting an unseen cause; propose one bounded next check.",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:workflow:bugfix-one-start:baseline",
+        "workflow": "qwen14b-non-thinking:workflow:bugfix-one-start:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "workflow",
+      "id": "bugfix-two-starts",
+      "input": {
+        "task": "The daily dashboard lists two completion receipts for a batch. Determine whether the evidence shows a duplicate execution, and name one check that could narrow the cause. Do not run a command or claim that a check was performed.",
+        "scope": "Batch T-320, closed window 10:00:00?10:05:00 UTC",
+        "independent_start_export": {
+          "coverage": "Complete for every worker assigned to this batch in this window.",
+          "start_ids": [
+            "worker-17",
+            "worker-42"
+          ]
+        },
+        "completion_receipts": [
+          {
+            "receipt_id": "receipt-801",
+            "worker_start_id": "worker-17"
+          },
+          {
+            "receipt_id": "receipt-802",
+            "worker_start_id": "worker-42"
+          }
+        ]
+      },
+      "scenario": "Use the same task and artifacts in both arms.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "criteria": "Conclude two executions: the receipts refer to separate worker-17 and worker-42 starts in the complete independent export. Do not infer the cause; propose one bounded next check.",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:workflow:bugfix-two-starts:baseline",
+        "workflow": "qwen14b-non-thinking:workflow:bugfix-two-starts:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "workflow",
+      "id": "census-known",
+      "input": {
+        "task": "Decide whether the work-item board is complete and whether its root is free of unowned entries. Distinguish what you verified from what remains unknown. Do not change files or assign ownership.",
+        "scope": "Synthetic work-items root; read-only assessment",
+        "state_audit": {
+          "exit_code": 0,
+          "stdout": "PASS active-item\nSTILL OPEN - these active work-items are NOT closed (a check result is state, not completion):\n  - active-item -- Next action: Continue.\nRESULT: PASS - valid state only, NOT completion: 1 active work-item(s) STILL OPEN (see 'STILL OPEN' list above; a done-claim must reconcile each one's Next action)\n",
+          "stderr": ""
+        }
+      },
+      "workflow_evidence": {
+        "inventory_scope": "All immediate children of the selected work-items root",
+        "declared_category_directories": [
+          "active"
+        ],
+        "children": [
+          {
+            "name": "active",
+            "kind": "directory"
+          }
+        ]
+      },
+      "source_fixture_selectors": "test_work_items_state_checker.py::test_state_pass_is_not_a_physical_work_item_root_census",
+      "scenario": "Use the same task and artifacts in both arms.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "criteria": "Both arms preserve the active item and reject a completion claim. Without census data leave root cleanliness unknown; with it, identify no unknown entry and do not invent one.",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:workflow:census-known:baseline",
+        "workflow": "qwen14b-non-thinking:workflow:census-known:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "workflow",
+      "id": "census-unknown",
+      "input": {
+        "task": "Decide whether the work-item board is complete and whether its root is free of unowned entries. Distinguish what you verified from what remains unknown. Do not change files or assign ownership.",
+        "scope": "Synthetic work-items root; read-only assessment",
+        "state_audit": {
+          "exit_code": 0,
+          "stdout": "PASS active-item\nSTILL OPEN - these active work-items are NOT closed (a check result is state, not completion):\n  - active-item -- Next action: Continue.\nRESULT: PASS - valid state only, NOT completion: 1 active work-item(s) STILL OPEN (see 'STILL OPEN' list above; a done-claim must reconcile each one's Next action)\n",
+          "stderr": ""
+        }
+      },
+      "workflow_evidence": {
+        "inventory_scope": "All immediate children of the selected work-items root",
+        "declared_category_directories": [
+          "active"
+        ],
+        "children": [
+          {
+            "name": "active",
+            "kind": "directory"
+          },
+          {
+            "name": "operator-note.txt",
+            "kind": "file"
+          }
+        ]
+      },
+      "source_fixture_selectors": "test_work_items_state_checker.py::test_state_pass_is_not_a_physical_work_item_root_census",
+      "scenario": "Use the same task and artifacts in both arms.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "criteria": "Both arms preserve the active item and reject a completion claim. Without census data leave root cleanliness unknown; with it, identify operator-note.txt as unresolved and preserve it.",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:workflow:census-unknown:baseline",
+        "workflow": "qwen14b-non-thinking:workflow:census-unknown:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "workflow",
+      "id": "installed-assignment",
+        "input": {
+          "task": "Review an API change that moves access decisions across two service boundaries. Pick one visible skill for the receiving role. Return only JSON with skill_id, or null.",
+          "query": "architecture API review",
+          "group": "architecture",
+          "receiving_ids": [
+            "pack:review",
+            "plugin:review"
+          ]
+        },
+        "assignment_catalog": [
+          {
+            "id": "pack:review",
+            "name": "review",
+            "description": "General review of diffs",
+            "source": "pack",
+            "group": "architecture",
+            "available": true
+          },
+          {
+            "id": "plugin:review",
+            "name": "review",
+            "description": "Architecture review of API boundaries",
+            "source": "plugin",
+            "group": "architecture",
+            "available": true
+          },
+          {
+            "id": "off:review",
+            "name": "review",
+            "description": "API architecture review",
+            "source": "plugin",
+            "group": "architecture",
+            "available": false
+          }
+        ],
+      "scenario": "Use the same task and artifacts in both arms.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "criteria": "Select between an installed and bundled skill with overlapping names and deliver only the exact receiver-visible assignment.",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:workflow:installed-assignment:baseline",
+        "workflow": "qwen14b-non-thinking:workflow:installed-assignment:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "workflow",
+      "id": "ordinary",
+        "input": {
+          "task": "Add a CSV export button to the design checklist. Give exactly two acceptance checks.",
+          "requirements": [
+            "Export the filtered rows only.",
+            "Quote fields containing commas."
+          ]
+        },
+        "ordinary_hook_replay": {
+          "entry": "Error: build failed; fix the broken regression traceback",
+          "tool_name": "Edit"
+        },
+      "scenario": "Use the same task and artifacts in both arms.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "criteria": "Both agree the checklist covers filtered rows and CSV quoting for commas. The workflow preflight must deliver no task skill or bugfix cue for a feature task with a noisy tool result.",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:workflow:ordinary:baseline",
+        "workflow": "qwen14b-non-thinking:workflow:ordinary:workflow"
+      }
+    },
+    {
+      "lane": "qwen14b-non-thinking",
+      "kind": "workflow",
+      "id": "resume",
+        "input": {
+          "task": "Choose the next action for the admitted diagnostics task: continue, park, or ask. Identify the decisive record and one next step. Do not change the Goal or run a command.",
+          "event_log": [
+            {
+              "id": "u-101",
+              "sequence": 101,
+              "source": "user",
+              "action": "park",
+              "goal_id": "g-7",
+              "scope": "diagnose packet-count discrepancy"
+            },
+            {
+              "id": "g-108",
+              "sequence": 108,
+              "source": "native_goal_log",
+              "action": "parking_completed",
+              "completes": "u-101",
+              "goal_id": "g-7"
+            },
+            {
+              "id": "u-115",
+              "sequence": 115,
+              "source": "user",
+              "action": "resume",
+              "goal_id": "g-7",
+              "scope": "diagnose packet-count discrepancy"
+            }
+          ],
+          "recovery_summary": {
+            "displayed_sequence": 120,
+            "copied_from_event_id": "u-101",
+            "text": "Park the current goal."
+          },
+          "native_goal": {
+            "id": "g-7",
+            "state": "ACTIVE"
+          },
+          "pending_authorized_step": "Compare packet counts in the two existing local logs."
+        },
+        "goal_rule": true,
+      "scenario": "Use the same task and artifacts in both arms.",
+      "arms": [
+        "baseline",
+        "workflow"
+      ],
+      "criteria": "Continue the admitted read-only comparison. Cite u-115 as the later user resume for the same Goal and scope; the recovery summary only copies fulfilled u-101. Do not pause or ask again.",
+      "run_ids": {
+        "baseline": "qwen14b-non-thinking:workflow:resume:baseline",
+        "workflow": "qwen14b-non-thinking:workflow:resume:workflow"
+      }
+    },
+    {
+      "lane": "offline",
+      "kind": "role-handoff",
+      "id": "windows-gui-manual-testing",
+      "scenario": "Resolve the registered Claude agent and preserve the approved read-only UI verification scope. Inspect the exact linked skill as part of the combined case; do not start Claude.",
+      "arms": [
+        "handoff"
+      ],
+      "form": "claude-agent-with-skill",
+      "run_ids": {
+        "handoff": "offline:role-handoff:windows-gui-manual-testing:handoff"
+      }
+    }
+  ],
+  "layout_note": "Counts are planned logical scenarios. One local server can serve many Qwen requests; several offline scenarios can share a runner command. Claude model sessions are not included."
+}
