@@ -2529,6 +2529,112 @@ def resolve(provider: str, project_root: Path, home: Path, repo_root: Path) -> d
     }
 
 
+
+# Task actions trigger contextual inputs, not new launch authority.
+_DIAGNOSE_DEFECT = {
+    "id": "diagnose-defect",
+    "description": "Find the cause of an observed defect",
+    "skill": "bug-hunting",
+}
+
+
+def _apply_native_task_action(decision: dict[str, Any], action: str | None, skills_root: Path) -> None:
+    if (decision.get("status"), decision.get("role"), decision.get("taskClass"), action) != (
+        "resolved", "analyst", "exploration", _DIAGNOSE_DEFECT["id"]
+    ):
+        return
+
+    skill_name = _DIAGNOSE_DEFECT["skill"]
+    skill_folder = skills_root / skill_name
+    try:
+        if not (_ordinary_directory(skills_root) and _ordinary_directory(skill_folder)):
+            raise ValueError("missing selected skill directory")
+        data, snapshot = _native_snapshot(skill_folder / "SKILL.md")
+        body = data.decode("utf-8")
+        if not body.strip():
+            raise ValueError("empty selected skill")
+    except (OSError, ValueError):
+        decision["taskContext"] = {"status": "unavailable", "skill": skill_name}
+        return
+
+    decision["invocation"]["promptPreamble"] += f"\n\n# Task skill: {skill_name}\n\n" + body
+    decision["taskContext"] = {"status": "attached", "skill": skill_name, "sha256": snapshot[2]}
+
+
+def _skill_catalog(raw: Any) -> dict[str, dict[str, str]] | None:
+    """Normalize host-supplied metadata only; do not open or trust skill bodies."""
+    if not isinstance(raw, list):
+        return None
+    entries: dict[str, dict[str, str]] = {}
+    seen: set[str] = set()
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        keys = ("id", "name", "source", "description")
+        if not all(isinstance(row.get(key), str) and row[key].strip() for key in keys):
+            continue
+        identity = row["id"]
+        if identity in seen:
+            entries.pop(identity, None)
+            continue
+        seen.add(identity)
+        if row.get("available") is not True:
+            continue
+        entries[identity] = {key: row[key] for key in keys}
+        if isinstance(row.get("group"), str):
+            entries[identity]["group"] = row["group"]
+    return entries
+
+
+def _skill_words(value: str) -> set[str]:
+    return set(re.findall(r"[^\W_]+", value.casefold()))
+
+
+def _search_skill_catalog(raw: Any, query: str, group: str | None) -> dict[str, Any]:
+    entries = _skill_catalog(raw)
+    if entries is None:
+        return {"status": "unavailable", "skills": []}
+    terms = _skill_words(query)
+    ranked = []
+    for entry in entries.values():
+        if group is not None and entry.get("group", "").casefold() != group.casefold():
+            continue
+        score = (
+            2 * len(terms & _skill_words(entry["name"]))
+            + len(terms & _skill_words(entry["description"]))
+            + len(terms & _skill_words(entry.get("group", "")))
+        )
+        if score or (not terms and group):
+            ranked.append((-score, entry["name"].casefold(), entry["id"], entry))
+    ranked.sort()
+    return {
+        "status": "available",
+        "skills": [
+            {**entry, "description": " ".join(entry["description"].split())[:180]}
+            for _, _, _, entry in ranked[:5]
+        ],
+    }
+
+
+def _apply_worker_skill(decision: dict[str, Any], identity: str, raw: Any) -> None:
+    if decision.get("status") != "resolved":
+        return
+    entry = (_skill_catalog(raw) or {}).get(identity)
+    if entry is None:
+        decision["taskSkillStatus"] = "unavailable"
+        return
+    decision["invocation"]["taskSkill"] = {
+        key: entry[key] for key in ("id", "source", "name")
+    }
+
+
+def _read_skill_catalog_stdin() -> Any:
+    try:
+        return json.load(sys.stdin)
+    except (ValueError, OSError):
+        return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--provider", required=True)
@@ -2539,6 +2645,10 @@ def main() -> int:
     parser.add_argument("--resolve-external-dispatch", action="store_true")
     parser.add_argument("--ordinary-native-action", choices=("describe", "resolve"))
     parser.add_argument("--task-class")
+    parser.add_argument("--task-action", help="Selected contextual action for ordinary native resolve")
+    parser.add_argument("--skill-query", help="Search active host skill metadata supplied as JSON on stdin")
+    parser.add_argument("--skill-group", help="Optional exact topic filter for skill search")
+    parser.add_argument("--worker-skill-id", help="Selected skill ID from the receiver catalog on stdin")
     parser.add_argument("--role")
     parser.add_argument("--feature-state", choices=("enabled", "disabled"))
     parser.add_argument("--host-controls", choices=("explicit", "unavailable"))
@@ -2556,6 +2666,8 @@ def main() -> int:
     parser.add_argument("--astra-task-authorization-json", type=json.loads)
     parser.add_argument("--json", action="store_true", help="emit JSON output")
     args = parser.parse_args()
+    if args.task_action is not None and args.ordinary_native_action != "resolve":
+        parser.error("--task-action requires ordinary native resolve")
 
     if args.provider in REMOVED_EXTERNAL_PROVIDERS:
         parser.error(
@@ -2567,6 +2679,18 @@ def main() -> int:
             f"unsupported provider '{args.provider}'; expected one of "
             + ", ".join(PROVIDER_CHOICES)
         )
+
+    searching_skills = args.skill_query is not None or args.skill_group is not None
+    if searching_skills:
+        if args.provider != "codex" or not args.json or any((args.ordinary_native_action,
+                args.resolve_role_dispatch, args.resolve_external_dispatch, args.worker_skill_id is not None)):
+            parser.error("skill search requires provider codex, --json, and no dispatch")
+        json.dump(_search_skill_catalog(_read_skill_catalog_stdin(), args.skill_query or "", args.skill_group),
+                  sys.stdout, sort_keys=True, separators=(",", ":"))
+        sys.stdout.write("\n")
+        return 0
+    if args.worker_skill_id is not None and (args.ordinary_native_action != "resolve" or args.task_action is not None):
+        parser.error("--worker-skill-id requires ordinary native resolve without --task-action")
 
     resolver_path = Path(os.path.abspath(__file__))
     repo_root = Path(args.repo_root).resolve()
@@ -2606,7 +2730,9 @@ def main() -> int:
             host_observation["reportedEfforts"] = args.reported_effort
         if args.reported_agent_type is not None:
             host_observation["reportedAgentTypes"] = args.reported_agent_type
+        skills_root: Path | None = None
         if source_root is not None:
+            skills_root = source_root / "src.codex" / "skills"
             description = describe_ordinary_native_role_options(
                 args.role,
                 args.task_class,
@@ -2623,6 +2749,7 @@ def main() -> int:
                     args.task_class, args.role, "E_ORDINARY_NATIVE_SELECTION_INVALID"
                 )
             else:
+                skills_root = installed_root.parent
                 description = _describe_ordinary_native_role_options_in_layout(
                     args.role,
                     args.task_class,
@@ -2654,6 +2781,14 @@ def main() -> int:
                 user_approved_launch=args.user_approved_launch,
                 astra_task_authorization=args.astra_task_authorization_json,
             )
+            if skills_root is not None:
+                _apply_native_task_action(decision, args.task_action, skills_root)
+            if args.worker_skill_id is not None and decision.get("status") == "resolved":
+                _apply_worker_skill(decision, args.worker_skill_id, _read_skill_catalog_stdin())
+        elif (decision.get("status"), decision.get("role"), decision.get("taskClass")) == (
+            "available", "analyst", "exploration"
+        ):
+            decision["taskActions"] = [dict(_DIAGNOSE_DEFECT)]
         json.dump(decision, sys.stdout, sort_keys=True, separators=(",", ":"))
         sys.stdout.write("\n")
         return 0

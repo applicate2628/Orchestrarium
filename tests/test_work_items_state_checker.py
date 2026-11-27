@@ -1148,6 +1148,53 @@ def test_checker_validates_all_active_items(tmp_path: Path):
     assert "ledger has no events" not in result.stdout
 
 
+def test_state_pass_is_not_a_physical_work_item_root_census(tmp_path: Path):
+    item = write_valid_item(tmp_path, "active-item")
+    board = tmp_path / "work-items"
+    before_item = {path.name: path.read_bytes() for path in item.iterdir() if path.is_file()}
+
+    known = run_checker(tmp_path)
+    assert known.returncode == 0, known.stdout + known.stderr
+    assert "NOT completion" in known.stdout
+    known_children = {path.name for path in board.iterdir()}
+    matrix = json.loads(
+        (Path(__file__).with_name("fixtures") / "workflow-qualification-matrix-20261127.json")
+        .read_text(encoding="utf-8")
+    )
+    cases = {row["id"]: row for row in matrix["matrix"] if row["kind"] == "workflow"}
+
+    def check_capture(case_id, result):
+        case = cases[case_id]
+        assert case["input"]["state_audit"] == dict(
+            exit_code=result.returncode, stdout=result.stdout, stderr=result.stderr,
+        )
+        children = sorted(board.iterdir(), key=lambda path: path.name)
+        assert case["workflow_evidence"]["children"] == [
+            dict(name=path.name, kind="directory" if path.is_dir() else "file") for path in children
+        ]
+
+    check_capture("census-known", known)
+
+
+    unknown_file = board / "operator-note.txt"
+    unknown_file.write_bytes(b"synthetic retained evidence")
+    with_file = run_checker(tmp_path)
+    assert (with_file.returncode, with_file.stdout, with_file.stderr) == (
+        known.returncode, known.stdout, known.stderr,
+    )
+    assert {path.name for path in board.iterdir()} - known_children == {unknown_file.name}
+    check_capture("census-unknown", with_file)
+
+    unknown_directory = board / "unrecognized-directory"
+    unknown_directory.mkdir()
+    with_directory = run_checker(tmp_path)
+    assert with_directory.returncode == 1
+    assert "WI-CATEGORY-UNKNOWN-ROOT" in with_directory.stdout + with_directory.stderr
+    assert unknown_file.read_bytes() == b"synthetic retained evidence"
+    assert unknown_directory.is_dir()
+    assert {path.name: path.read_bytes() for path in item.iterdir() if path.is_file()} == before_item
+
+
 def test_checker_rejects_unapplied_active_bug_disposition_manifest(
     tmp_path: Path,
 ) -> None:
