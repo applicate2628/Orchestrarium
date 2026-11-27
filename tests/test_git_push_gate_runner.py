@@ -76,6 +76,36 @@ def test_shared_hook_input_applicability_preserves_publication_failure_contract(
         assert result.reason_id == "PFP-DENY-INTERNAL" and result.continuation == "RENDER_DENY"
 
 
+@pytest.mark.parametrize("shell,command,dry", (
+    ("powershell", "git -C C:/ExampleRepository push --dry-run origin main", True),
+    ("bash", "git -C /work/repo push --dry-run origin main", True),
+    ("powershell", "git push --dry-run origin main", True),
+    ("powershell", "git push origin main", False),
+    ("powershell", "git push --dry-run --no-dry-run origin main", False),
+    ("powershell", "git push --dry-run origin main; git push origin main", False),
+    ("powershell", "git push --dry-run --no-verify origin main", False),
+    ("powershell", "git -C ../repo push --dry-run origin main", False),
+    ("powershell", "git push --dry-run https://example.invalid/foreign main", False),
+    (None, "git push --dry-run origin main", False),
+))
+def test_remote_publication_accepts_only_literal_no_send_preview(shell, command, dry) -> None:
+    for target in TARGETS:
+        owner = _load(target.preflight_path, f"remote_dry_{target.label}")
+        with mock.patch.object(owner, "_repository_workdir",
+                               side_effect=AssertionError("controller-local repository lookup")):
+            result = owner.build_preflight({
+                "tool_name": "mcp__codex_apps__remote_desktop_commander_start_process",
+                "tool_input": {"shell": shell, "command": command},
+            })
+        assert owner.validate_preflight_result(result) is result
+        if dry:
+            assert (result.outcome, result.reason_id, result.continuation) == (
+                "ALLOW_FINAL", "PFP-ALLOW-DRY-RUN", "NONE")
+            assert result.failure_id is None
+        else:
+            assert result.failure_id == "PGG-REMOTE-EXECUTION-UNBOUND"
+
+
 def test_shared_hook_input_unavailable_command_is_denied_by_the_public_runner() -> None:
     for target in TARGETS:
         for envelope, denied in (

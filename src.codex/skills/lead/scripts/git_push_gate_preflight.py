@@ -2721,6 +2721,27 @@ def _has_solitary_direct_dry_credit(parsed: ShellParseResult) -> bool:
     )
 
 
+def _has_remote_no_send_preview(parsed: ShellParseResult) -> bool:
+    """Admit only a literal named-remote preview, never a send or scan receipt."""
+    literal = literal_direct_command(parsed)
+    if literal is None or not _has_solitary_direct_dry_credit(parsed):
+        return False
+    tokens = literal.tokens
+    if tuple(parsed.raw_command.split()) != tokens or tokens[0] != "git":
+        return False
+    args = tokens[1:]
+    if len(args) == 6 and args[0] == "-C":
+        root = args[1]
+        if not re.fullmatch(r"(?:[A-Za-z]:)?/[A-Za-z0-9_. /-]+", root):
+            return False
+        args = args[2:]
+    if len(args) != 4 or args[:2] != ("push", "--dry-run"):
+        return False
+    remote, ref = args[2:]
+    return (re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", remote) is not None
+            and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", ref) is not None)
+
+
 def _has_malformed_minus_c_push_candidate(parsed: ShellParseResult) -> bool:
     if len(parsed.commands) != 1:
         return False
@@ -2926,9 +2947,13 @@ def _build_preflight(envelope: dict) -> PreflightResult:
         pushes = find_git_push_records(parsed)
         minus_c_candidate = _has_malformed_minus_c_push_candidate(parsed)
         if remote and (pushes or minus_c_candidate or parsed.effective_publications.records):
-            # No admitted transport binds this evaluator to the selected device.
-            # Refuse observed publication, including dry-run, before host-local
-            # workdir/identity checks could accidentally stand in for that proof.
+            if resolution.exact and _has_remote_no_send_preview(parsed):
+                return _result(
+                    "ALLOW_FINAL", "PFP-ALLOW-DRY-RUN", "NONE",
+                    command=command, dialect=resolution.dialect, parsed=parsed,
+                )
+            # Do not mistake controller-local workdir or Git identity for the
+            # target's authoritative preflight on a send-capable request.
             raise PrRouteDenied("PGG-REMOTE-EXECUTION-UNBOUND")
         if (
             not pushes
