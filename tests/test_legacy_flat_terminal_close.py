@@ -24,9 +24,29 @@ def digest(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
+def temporary_fixture_directory(prefix):
+    scratch = ROOT / ".scratch"
+    scratch.mkdir(exist_ok=True)
+    return tempfile.TemporaryDirectory(prefix=prefix, dir=scratch)
+
+
+class TestFixtureDirectory(unittest.TestCase):
+    def test_clean_checkout_provisions_fixture_parent(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as directory:
+            isolated = Path(directory)
+            self.assertFalse((isolated / ".scratch").exists())
+            with patch.dict(globals(), {"ROOT": isolated}):
+                with temporary_fixture_directory("flat-test-") as child:
+                    self.assertEqual(Path(child).parent, isolated / ".scratch")
+                    self.assertTrue(Path(child).is_dir())
+                self.assertEqual(list((isolated / ".scratch").iterdir()), [])
+
+
 class TestLifecycleValidatorReuse(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory(prefix="validator-reuse-test-", dir=ROOT / ".scratch")
+        temporary = temporary_fixture_directory("validator-reuse-test-")
         self.addCleanup(temporary.cleanup)
         self.base = Path(temporary.name)
         self.scripts = self.base / "source/scripts"; self.scripts.mkdir(parents=True)
@@ -157,7 +177,7 @@ class TestLifecycleValidatorReuse(unittest.TestCase):
 
 class LegacyFlatTerminalTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="flat-terminal-test-", dir=ROOT / ".scratch")
+        self.temp = temporary_fixture_directory("flat-terminal-test-")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.slug = "original-flat-task"
