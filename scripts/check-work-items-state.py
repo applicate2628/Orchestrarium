@@ -235,16 +235,12 @@ def blocked_by_notes(
     lifecycle: Any,
     is_valid_slug: Any,
     *, root_input_role: str = "caller-root", original_root: Path | None = None, binding_evidence: tuple = (), ledger_resource_budget=None,
-    transition_resource_budget=None,
+    transition_resource_budget=None, status_reader=None,
 ) -> list[str]:
     """Informational: open Depends-on blockers + dangling targets for an active
     item. A blocked item is EXPECTED state, NOT a failure (so this never flips the
     exit code) — it mirrors the /agents-status governance derivation in a script."""
-    status = item / "status.md"
-    try:
-        text = status.read_text(encoding="utf-8", errors="replace") if status.is_file() else ""
-    except OSError:
-        return []
+    text = _read_status_text(item, status_reader)
     match = DEPENDS_ON_RE.search(text)
     if not match:
         return []
@@ -296,12 +292,20 @@ def blocked_by_notes(
     return notes
 
 
-def _read_status_text(item: Path) -> str:
-    status = item / "status.md"
-    try:
-        return status.read_text(encoding="utf-8", errors="replace") if status.is_file() else ""
-    except OSError:
-        return ""
+def _status_reader(lifecycle):
+    def read(item: Path) -> tuple[str, str | None]:
+        try:
+            text = lifecycle.capture_board_status(item).data.decode("utf-8", errors="replace")
+            return text.replace("\r\n", "\n").replace("\r", "\n"), None
+        except lifecycle.LifecycleError as exc:
+            marker = "(no status.md)" if exc.failure_id == "WI-CATEGORY-STATUS-MISSING" else "(status.md unreadable)"
+            return "", marker
+
+    return read
+
+
+def _read_status_text(item: Path, status_reader=None) -> str:
+    return (status_reader or _status_reader(load_lifecycle_owner()))(item)[0]
 
 
 def epic_link_notes(
@@ -309,6 +313,7 @@ def epic_link_notes(
     active_dir: Path,
     resolve_epic_locations: Any,
     is_valid_slug: Any,
+    *, status_reader=None,
 ) -> list[str]:
     """Validate a child's Epic link through the sentinel-owned resolver.
 
@@ -316,7 +321,7 @@ def epic_link_notes(
     never selects one ambiguous copy. These diagnostics are document validity
     failures in ``command_check`` rather than adoption-only hints.
     """
-    text = _read_status_text(item)
+    text = _read_status_text(item, status_reader)
     match = EPIC_RE.search(text)
     if not match:
         return []
@@ -347,7 +352,7 @@ def epic_link_notes(
     return []
 
 
-def epic_adoption_notes(items: list[Path], active_dir: Path) -> list[str]:
+def epic_adoption_notes(items: list[Path], active_dir: Path, *, status_reader=None) -> list[str]:
     """Informational: nudge multi-item initiatives toward an epic or rationale."""
     if len(items) < 2:
         return []
@@ -356,7 +361,7 @@ def epic_adoption_notes(items: list[Path], active_dir: Path) -> list[str]:
         return []
     saw_epic_or_rationale = False
     for item in items:
-        text = _read_status_text(item)
+        text = _read_status_text(item, status_reader)
         if EPIC_RE.search(text) or NO_EPIC_RE.search(text):
             saw_epic_or_rationale = True
             break
@@ -374,7 +379,7 @@ def iter_work_items(active_dir: Path) -> list[Path]:
     return sorted(path for path in active_dir.iterdir() if path.is_dir())
 
 
-def next_action_line(item: Path, validator=None) -> str:
+def next_action_line(item: Path, validator=None, *, status_reader=None) -> str:
     """First non-empty content line under the '## Next action' section of status.md,
     for the still-open enumeration. Returns a loud marker (never silence) on a missing
     file/section — open work must stay visible. The heading match is EXACT so
@@ -382,13 +387,9 @@ def next_action_line(item: Path, validator=None) -> str:
     the section is skipped rather than mistaken for the action; long content is
     ellipsis-truncated. Output-encoding safety (non-ASCII content on a non-UTF-8 console)
     is owned at the stream level in main(), not here."""
-    status = item / "status.md"
-    if not status.is_file():
-        return "(no status.md)"
-    try:
-        text = status.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return "(status.md unreadable)"
+    text, marker = (status_reader or _status_reader(load_lifecycle_owner()))(item)
+    if marker is not None:
+        return marker
     staged_fields = validator.staged_status_fields(text) if validator is not None else None
     if staged_fields is not None:
         content = staged_fields.get("next action", "").strip()
@@ -447,7 +448,8 @@ def command_check(args: argparse.Namespace, *, ledger_resource_budget=None, tran
             for error in transfer_errors:
                 print(f"  - {error}")
 
-    global_notes = epic_adoption_notes(items, active_dir)
+    status_reader = _status_reader(lifecycle)
+    global_notes = epic_adoption_notes(items, active_dir, status_reader=status_reader)
     sentinel_dependency = load_required_sentinels()
     if not sentinel_dependency.available:
         failed += 1
@@ -465,11 +467,11 @@ def command_check(args: argparse.Namespace, *, ledger_resource_budget=None, tran
         errors.extend(stale_running_errors(item, now, stale_after, validator, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget))
         resolver = sentinel_dependency.resolve_epic_locations
         if callable(resolver):
-            errors.extend(epic_link_notes(item, active_dir, resolver, is_valid_slug))
+            errors.extend(epic_link_notes(item, active_dir, resolver, is_valid_slug, status_reader=status_reader))
         notes = item_aging_notes(item, today, args.max_age_days)
         if base_root is not None:
             notes.extend(blocked_by_notes(item, base_root, lifecycle, is_valid_slug,
-                root_input_role="repository-root", original_root=args.root, binding_evidence=base_evidence, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget))
+                root_input_role="repository-root", original_root=args.root, binding_evidence=base_evidence, ledger_resource_budget=ledger_resource_budget, transition_resource_budget=transition_resource_budget, status_reader=status_reader))
         label = item.name
         if errors:
             failed += 1
@@ -503,6 +505,7 @@ def command_check(args: argparse.Namespace, *, ledger_resource_budget=None, tran
         else:
             try:
                 sentinel_ctx = build_context(str(root))
+                sentinel_ctx["read_active_status"] = lambda item: _read_status_text(item, status_reader)
                 for finding in evaluate_all(sentinel_ctx):
                     first_line = finding.message.splitlines()[0] if finding.message else ""
                     print(f"info: sentinel {finding.id} ({finding.severity}): {first_line}")
@@ -553,7 +556,7 @@ def command_check(args: argparse.Namespace, *, ledger_resource_budget=None, tran
     if items:
         print("STILL OPEN - these active work-items are NOT closed (a check result is state, not completion):")
         for item in items:
-            print(f"  - {item.name} -- Next action: {next_action_line(item, validator)}")
+            print(f"  - {item.name} -- Next action: {next_action_line(item, validator, status_reader=status_reader)}")
 
     if failed:
         scope = "in active-only audit" if args.active_only else "across active+archived work-items"

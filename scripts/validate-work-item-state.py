@@ -12127,10 +12127,30 @@ def validate_status(
         fail(errors, "WI-LEDGER-CUSTODY-STALE-TARGET: status requires its local issued context or plain event values")
         return
     status_path = item / "status.md"
-    if not status_path.exists():
-        fail(errors, f"missing status.md: {status_path}")
+    owner = load_lifecycle_owner()
+    evaluation = _context_evaluation(context) if isinstance(context, LedgerValidationContextV1) else None
+    selected = next((predicate for predicate in evaluation.inputs.selection_inputs
+                     if predicate.kind == "bytes" and predicate.path == status_path), None) if evaluation is not None else None
+    try:
+        if selected is not None:
+            if not selected.accepted:
+                fail(errors, "WI-LEDGER-CUSTODY-STALE-TARGET: selected status changed")
+                return
+            raw = selected.expected_bytes
+        elif isinstance(status_path, _CapturedHistoryPath):
+            raw = status_path.read_bytes()
+        else:
+            raw = owner.capture_board_status(item).data
+        text = raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    except owner.LifecycleError as exc:
+        if exc.failure_id == "WI-CATEGORY-STATUS-MISSING":
+            fail(errors, f"missing status.md: {status_path}")
+        else:
+            fail(errors, f"WI-LEDGER-CUSTODY-STALE-TARGET: transfer/status input is unreadable: {exc}")
         return
-    text = status_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        fail(errors, f"WI-LEDGER-CUSTODY-STALE-TARGET: transfer/status input is unreadable: {exc}")
+        return
     if is_quick_fix_status_candidate(text):
         validate_quick_fix_status(text, errors)
         return
@@ -12928,10 +12948,21 @@ def validate_work_item(
     status_path = item / "status.md"
     inputs = _CurrentEvidenceV1()
     status_bytes = None
+    owner = load_lifecycle_owner()
     try:
-        status_bytes = inputs.read_selection(status_path) if status_path.exists() else None
+        if isinstance(status_path, _CapturedHistoryPath):
+            status_bytes = inputs.read_selection(status_path) if status_path.exists() else None
+        else:
+            try:
+                status = owner.capture_board_status(item)
+            except owner.LifecycleError as exc:
+                if exc.failure_id != "WI-CATEGORY-STATUS-MISSING":
+                    raise
+            else:
+                status_bytes = status.data
+                inputs.bind_selection(status_path, status_bytes, snapshot=status)
         status_text = status_bytes.decode("utf-8", errors="strict") if status_bytes is not None else ""
-    except (OSError, UnicodeError, ValueError) as exc:
+    except (OSError, UnicodeError, ValueError, owner.LifecycleError) as exc:
         fail(errors, f"WI-LEDGER-CUSTODY-STALE-TARGET: transfer/status input is unreadable: {exc}")
         if ledger_acquisition_complete_out is not None:
             ledger_acquisition_complete_out.append(False)

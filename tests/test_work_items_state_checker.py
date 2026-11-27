@@ -2523,17 +2523,91 @@ class TestActiveStatusAuditFailure(unittest.TestCase):
             status = write_valid_item(root, "a-missing") / "status.md"
             write_valid_item(root, "z-neighbor")
             checker = load_checker_module()
-            read_text = Path.read_text
+            lifecycle = checker.load_lifecycle_owner()
+            capture = lifecycle._capture_file_snapshot
             removed = []
 
             def read(path, *args, **kwargs):
                 if path == status and not removed:
                     path.unlink()
                     removed.append(path)
-                return read_text(path, *args, **kwargs)
+                return capture(path, *args, **kwargs)
 
             output = StringIO()
-            with patch.object(Path, "read_text", read), redirect_stdout(output):
+            with (patch.object(checker, "load_lifecycle_owner", return_value=lifecycle),
+                  patch.object(lifecycle, "_capture_file_snapshot", read), redirect_stdout(output)):
                 result = checker.main(["--root", str(root), "--active-only"])
             self.assertEqual(removed, [status])
             self.assert_missing_is_reported(result, output.getvalue())
+
+    def test_category_read_refuses_status_over_existing_metadata_limit(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            status = write_valid_item(root, "a-missing") / "status.md"
+            status.write_text("Task: Benign status metadata test.\n", encoding="utf-8")
+            lifecycle = load_checker_module().load_lifecycle_owner()
+            with (patch.object(lifecycle, "LEDGER_LOCATION_PROOF_BYTE_CAP", 8),
+                  patch.object(lifecycle, "_parse_fields", side_effect=AssertionError("must not parse refused input")),
+                  self.assertRaises(lifecycle.LifecycleError) as failed):
+                lifecycle.audit_categories(root)
+            self.assertEqual(failed.exception.failure_id, "WI-CATEGORY-STATUS-INVALID")
+            self.assertIn("bounded owned regular file", str(failed.exception.__cause__))
+
+    def test_board_rejects_over_bound_status_without_parsing_and_visits_neighbor(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            status = write_valid_item(root, "a-over-budget") / "status.md"
+            neighbor = write_valid_item(root, "z-neighbor") / "status.md"
+            cap = 4096
+            self.assertLess(neighbor.stat().st_size, cap)
+            marker = "Benign over-budget metadata"
+            status.write_text(marker + "\n" + "ordinary metadata\n" * 240, encoding="utf-8")
+            self.assertGreater(status.stat().st_size, cap)
+            checker = load_checker_module()
+            lifecycle = checker.load_lifecycle_owner()
+            validator = checker.load_validator()
+
+            def without_marker(parse):
+                def guarded(text, *args, **kwargs):
+                    self.assertNotIn(marker, text)
+                    return parse(text, *args, **kwargs)
+                return guarded
+
+            output = StringIO()
+            with (patch.object(checker, "load_lifecycle_owner", return_value=lifecycle),
+                  patch.object(checker, "load_validator", return_value=validator),
+                  patch.object(validator, "load_lifecycle_owner", return_value=lifecycle),
+                  patch.object(lifecycle, "LEDGER_LOCATION_PROOF_BYTE_CAP", cap),
+                  patch.object(lifecycle, "_parse_fields", without_marker(lifecycle._parse_fields)),
+                  patch.object(validator, "staged_status_fields", without_marker(validator.staged_status_fields)),
+                  patch.object(validator, "is_quick_fix_status", without_marker(validator.is_quick_fix_status)),
+                  redirect_stdout(output)):
+                result = checker.main(["--root", str(root), "--active-only"])
+
+            report = output.getvalue()
+            self.assertEqual(result, 1, report)
+            self.assertIn("WI-CATEGORY-STATUS-INVALID", report)
+            self.assertIn("FAIL a-over-budget", report)
+            self.assertIn("a-over-budget -- Next action: (status.md unreadable)", report)
+            self.assertIn("PASS z-neighbor", report)
+            self.assertIn("RESULT: FAIL", report)
+
+    def test_validator_uses_one_owned_status_acquisition(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            item = write_valid_item(root, "a-current")
+            checker = load_checker_module()
+            validator = checker.load_validator()
+            lifecycle = validator.load_lifecycle_owner()
+            with (patch.object(validator, "load_lifecycle_owner", return_value=lifecycle),
+                  patch.object(lifecycle, "capture_board_status", wraps=lifecycle.capture_board_status) as capture):
+                self.assertEqual(validator.validate_work_item(item), [])
+            capture.assert_called_once_with(item)

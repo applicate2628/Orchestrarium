@@ -6358,6 +6358,8 @@ def _authoritative_field_occurrences(
 ) -> tuple[tuple[int, str, str, str], ...]:
     occurrences: list[tuple[int, str, str, str]] = []
     for line_number, line in _authoritative_markdown_lines(text):
+        if ":" not in line:
+            continue
         match = FIELD_RE.fullmatch(line)
         if match:
             occurrences.append(
@@ -15331,11 +15333,12 @@ def audit_categories(root: Path, *, ledger_resource_budget=None) -> tuple[str, .
                     f"work-item:{item.name} has an unapplied bug disposition manifest",
                 )
             status_path = item / "status.md"
+            status = capture_board_status(item)
             try:
-                status_text = status_path.read_text(encoding="utf-8")
-            except FileNotFoundError as exc:
-                raise LifecycleError("WI-CATEGORY-STATUS-MISSING", f"missing status.md: {item}") from exc
-            fields = _parse_fields(status_text)
+                text = status.data.decode("utf-8")
+            except UnicodeError as exc:
+                raise LifecycleError("WI-CATEGORY-STATUS-INVALID", f"status.md is not UTF-8: {item}") from exc
+            fields = _parse_fields(text)
             failure = _current_readme_status_error(fields, "active", status_path)
             if failure is not None:
                 raise failure
@@ -22518,6 +22521,19 @@ def ledger_resource_budget_for_current_operation(value=None):
     # Explicit remaining-participant sub-allowances remain the arithmetic
     # owner's inputs. The lifecycle wrapper checks operation-level replacement.
     return current.ledger_resource_budget if value is None else value
+
+
+def capture_board_status(item: Path) -> CapturedFileSnapshot:
+    """Acquire live board status under the existing metadata byte bound."""
+    try:
+        return _capture_file_snapshot(
+            item / "status.md", failure_id="WI-CATEGORY-STATUS-INVALID",
+            maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
+        )
+    except LifecycleError as exc:
+        if isinstance(exc.__cause__, FileNotFoundError):
+            raise LifecycleError("WI-CATEGORY-STATUS-MISSING", f"missing status.md: {item}") from exc
+        raise
 
 
 def _capture_file_snapshot(

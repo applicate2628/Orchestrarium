@@ -162,3 +162,28 @@ class LegacyActiveStatusPreviewTest(unittest.TestCase):
             before = ledger.read_bytes()
             self.assertEqual(self.run_owner(root, *authorized).returncode, 0)
             self.assertEqual(ledger.read_bytes(), before)
+
+
+
+def test_lifecycle_metadata_skips_non_fields_without_changing_fences(monkeypatch):
+    import importlib.util
+    import sys
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "mutate-work-item.py"
+    spec = importlib.util.spec_from_file_location("orche_status_field_guard_test", path)
+    assert spec and spec.loader
+    owner = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, owner)
+    spec.loader.exec_module(owner)
+    original = owner.FIELD_RE
+    inspected = []
+
+    class FieldMatcher:
+        def fullmatch(self, line):
+            inspected.append(line)
+            return original.fullmatch(line)
+
+    monkeypatch.setattr(owner, "FIELD_RE", FieldMatcher())
+    text = "Introductory prose\n   \n- **Owner**: Lead\n```\nStatus: draft\n```\nStatus: active\n"
+    assert owner._parse_fields(text) == {"owner": "Lead", "status": "active"}
+    assert inspected == ["- **Owner**: Lead", "Status: active"]
