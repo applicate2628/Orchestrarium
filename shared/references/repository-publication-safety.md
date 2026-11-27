@@ -25,6 +25,11 @@ The rules below apply to every tracked file in the repository, including docs, r
 
 The shell-observation publication guard abstains when its analysis is incomplete and it observes no publication or bypass candidate. Uncertainty alone does not deny ordinary work. An observed publication or bypass candidate remains subject to the technical publication checks; Root separately owns human authorization. Abstention certifies neither the command's exact effects, safety or dry-run status nor permission to publish.
 
+Remote process diagnostics may run one literal `git push --dry-run` to a
+named remote, with an explicit known shell and no other operation. This
+does not update a ref, qualify publication, or replace a fresh pre-push
+scan. A send-capable request still needs target-local admission.
+
 The parser admits one supported direct push from its actual tool envelope. A literal absolute Git application **A** and `-C` repository **R** may select a root independently of execution directory **E**. Valid E may differ from R; absent E is allowed only when the existing literal A/R proof is sufficient. Invalid-present metadata refuses. No process cwd or guessed repository fills missing input. The pre-tool gate qualifies the command and native Git callback; Git supplies its actual updates to that callback, which performs the fresh scans and rechecks the technical target. The approved source may differ from HEAD; the scan and command must still refer to that exact source.
 
 Root confirms the genuine human review and consent for the selected publication before submitting it. Consent may remain valid across neutral steering and applies only to the reviewed scope. The hook does not inspect chat history, special markers, consent indices or GitHub pull-request APIs to authenticate that decision. Pre-tool qualification does not prove scan completion; a successful callback proves technical qualification only, never human consent or Git completion.

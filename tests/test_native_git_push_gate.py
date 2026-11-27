@@ -257,6 +257,48 @@ def native_repository():
         yield root
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows target-local acceptance")
+def test_target_local_entry_sends_clean_and_preserves_receiver_on_finding(native_repository, monkeypatch):
+    root = native_repository
+    receiver = root / "test-receiver.git"
+    home = root / "synthetic-user"
+    home.mkdir()
+    monkeypatch.setenv("USERPROFILE", str(home))
+    dst = "refs/heads/main"
+
+    def git(*args, repo=root):
+        return subprocess.check_output(["git", "-C", str(repo), *args], text=True, timeout=20).strip()
+
+    git("init", "-q", "--bare", str(receiver))
+    git("config", "protocol.allow", "never")
+    git("config", "protocol.file.allow", "always")
+    git("remote", "add", "origin", str(receiver))
+
+    def launch(oid):
+        return subprocess.run([
+            sys.executable, "-B", str(CANONICAL_HOOK), "--target-local-push",
+            str(root), "origin", oid, dst,
+        ], cwd=root, capture_output=True, text=True, timeout=150)
+
+    clean_oid = git("rev-parse", "HEAD")
+    clean = launch(clean_oid)
+    assert clean.returncode == 0, clean.stderr
+    assert git("rev-parse", dst, repo=receiver) == clean_oid
+
+    marker = "fresh=" + chr(69) + chr(58) + "/dev/synthetic-new/"
+    (root / "synthetic.txt").write_text(marker + "\n", encoding="utf-8")
+    git("add", "--", "synthetic.txt")
+    git("-c", "user.name=Synthetic", "-c", "user.email=synthetic@example.invalid",
+        "commit", "-qm", "Add a synthetic machine path")
+    dirty_oid = git("rev-parse", "HEAD")
+    assert dirty_oid != clean_oid
+    refused = launch(dirty_oid)
+    assert refused.returncode != 0
+    assert marker not in refused.stdout + refused.stderr
+    assert "PGG-SCAN-FINDING" in refused.stderr, refused.stderr
+    assert git("rev-parse", dst, repo=receiver) == clean_oid
+
+
 def native_preflight(owner, root, *, trailing=(), push_options=(), native=True, refspecs=None):
     options = owner.native_git_config_arguments() if native else ()
     oid = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True, timeout=20).strip()
