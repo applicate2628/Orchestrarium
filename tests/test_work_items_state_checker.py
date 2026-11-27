@@ -2494,3 +2494,46 @@ def test_checker_aliases_validate_base_transfer_receipt(tmp_path: Path) -> None:
             assert "FAIL obligation transfer ownership" in checked.stdout
     finally:
         receipt_path.write_bytes(original)
+
+
+class TestActiveStatusAuditFailure(unittest.TestCase):
+    def assert_missing_is_reported(self, result, output):
+        self.assertEqual(result, 1, output)
+        self.assertIn("WI-CATEGORY-STATUS-MISSING", output)
+        self.assertIn("a-missing", output)
+        self.assertIn("PASS z-neighbor", output)
+        self.assertIn("RESULT: FAIL", output)
+
+    def test_status_absent_at_start(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "work-items/active/a-missing").mkdir(parents=True)
+            write_valid_item(root, "z-neighbor")
+            result = run_checker(root)
+            self.assertNotIn("Traceback", result.stderr)
+            self.assert_missing_is_reported(result.returncode, result.stdout)
+
+    def test_status_disappears_on_category_read(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            status = write_valid_item(root, "a-missing") / "status.md"
+            write_valid_item(root, "z-neighbor")
+            checker = load_checker_module()
+            read_text = Path.read_text
+            removed = []
+
+            def read(path, *args, **kwargs):
+                if path == status and not removed:
+                    path.unlink()
+                    removed.append(path)
+                return read_text(path, *args, **kwargs)
+
+            output = StringIO()
+            with patch.object(Path, "read_text", read), redirect_stdout(output):
+                result = checker.main(["--root", str(root), "--active-only"])
+            self.assertEqual(removed, [status])
+            self.assert_missing_is_reported(result, output.getvalue())

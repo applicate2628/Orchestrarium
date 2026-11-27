@@ -15330,8 +15330,13 @@ def audit_categories(root: Path, *, ledger_resource_budget=None) -> tuple[str, .
                     "WI-BUG-DISPOSITIONS-PENDING",
                     f"work-item:{item.name} has an unapplied bug disposition manifest",
                 )
-            fields = _parse_fields((item / "status.md").read_text(encoding="utf-8"))
-            failure = _current_readme_status_error(fields, "active", item / "status.md")
+            status_path = item / "status.md"
+            try:
+                status_text = status_path.read_text(encoding="utf-8")
+            except FileNotFoundError as exc:
+                raise LifecycleError("WI-CATEGORY-STATUS-MISSING", f"missing status.md: {item}") from exc
+            fields = _parse_fields(status_text)
+            failure = _current_readme_status_error(fields, "active", status_path)
             if failure is not None:
                 raise failure
     for item in _archived_work_item_candidates(work_items / "archive", ledger_resource_budget=ledger_resource_budget):
