@@ -6,6 +6,7 @@ import ipaddress
 import json
 import math
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -173,11 +174,13 @@ def evaluate(case, model):
 
 
 def first_read_pair(case, model):
-    """Measure the exact initial read, not diagnosis quality."""
+    """Record the first request and resulting harness open, not model uptake."""
     skill = case["skill"]
-    path = pack_catalog()[1][f"pack:{skill}"]
+    if not isinstance(skill, str) or re.fullmatch(r"[a-z0-9][a-z0-9_-]*", skill) is None:
+        raise ValueError("invalid first-read fixture skill name")
+    path = ROOT / "src.codex" / "skills" / skill / "SKILL.md"
     alias = f".agents/skills/{skill}/SKILL.md"
-    data = path.read_bytes()
+    confirmed_digest = None
     shared = {"role": "system", "content": (
         "You have a local read-only file tool. To invoke it, return exactly one line "
         "beginning READ_FILE followed by the path, and nothing else. The harness "
@@ -187,15 +190,25 @@ def first_read_pair(case, model):
     arms = {}
     for arm, addition in (("baseline", ""), ("workflow", f"\n\nApproved inputs: Read {alias} before diagnosing.")):
         status, answer = model([shared, user(case["task"] + addition)])
-        row = dict(response=status, answer=answer, read="not-evaluated")
+        row = dict(response=status, answer=answer, read="not-evaluated",
+                   content_delivered_to_model=False)
         if status == "complete":
             lines = answer.strip().splitlines()
             parts = lines[0].split(maxsplit=1) if len(lines) == 1 else []
             requested = parts[1].strip().strip("\"'").strip(chr(96)).replace("\\", "/") if len(parts) == 2 else ""
             if parts[:1] == ["READ_FILE"] and requested.removeprefix("./") == alias:
-                if path.read_bytes() != data:
-                    raise RuntimeError("skill changed during first-read comparison")
-                row.update(read="confirmed", skill_sha256=hashlib.sha256(data).hexdigest())
+                row["requested_path"] = alias
+                try:
+                    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                except OSError:
+                    row["read_evidence"] = "harness-open-failed"
+                else:
+                    if confirmed_digest is not None and confirmed_digest != digest:
+                        row["read_evidence"] = "fixture-changed"
+                    else:
+                        confirmed_digest = digest
+                        row.update(read="confirmed", read_evidence="harness-open-after-request",
+                                   skill_sha256=digest)
             else:
                 row["read"] = "not-requested"
         arms[arm] = row

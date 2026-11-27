@@ -281,5 +281,54 @@ class SkillWorkflowProbeTests(unittest.TestCase):
         self.assertEqual(probe.first_read_pair(case, lambda _: ("complete", f"READ_FILE {alias}"))["contrast"],
                          "both-read")
 
+
+    def test_first_read_evidence_requires_terminal_exact_request_and_successful_open(self):
+        case = probe.load_cases()["bugfix-first-read"]
+        alias = ".agents/skills/bug-hunting/SKILL.md"
+        skill = probe.ROOT / "src.codex" / "skills" / "bug-hunting" / "SKILL.md"
+        expected = probe.hashlib.sha256(skill.read_bytes()).hexdigest()
+        events = []
+        real_read = Path.read_bytes
+
+        def read(path):
+            events.append(("read", path))
+            return real_read(path)
+
+        def compare(replies):
+            events.clear()
+            replies = iter(replies)
+
+            def model(messages):
+                events.append(("model", messages))
+                return next(replies)
+
+            with patch.object(Path, "read_bytes", read):
+                return probe.first_read_pair(case, model)
+
+        request = f"READ_FILE {alias}"
+        result = compare([("complete", f"I opened {alias}."), ("complete", request)])
+        self.assertEqual([event[0] for event in events], ["model", "model", "read"])
+        self.assertEqual(events[-1], ("read", skill))
+        self.assertEqual(result["arms"]["baseline"]["read"], "not-requested")
+        self.assertNotIn("skill_sha256", result["arms"]["baseline"])
+        self.assertEqual(result["arms"]["workflow"]["requested_path"], alias)
+        self.assertEqual(result["arms"]["workflow"]["read_evidence"], "harness-open-after-request")
+        self.assertEqual(result["arms"]["workflow"]["skill_sha256"], expected)
+        self.assertFalse(result["arms"]["workflow"]["content_delivered_to_model"])
+
+        result = compare([("complete", request + "\nI opened it."), ("incomplete:no-done", request)])
+        self.assertEqual(result["contrast"], "incomplete")
+        self.assertEqual([event[0] for event in events], ["model", "model"])
+        self.assertTrue(all("skill_sha256" not in arm for arm in result["arms"].values()))
+
+        with patch.object(Path, "read_bytes", side_effect=PermissionError) as denied:
+            result = probe.first_read_pair(case, lambda _: ("complete", request))
+        self.assertEqual(denied.call_count, 2)
+        self.assertEqual(result["contrast"], "incomplete")
+        for arm in result["arms"].values():
+            self.assertEqual(arm["read_evidence"], "harness-open-failed")
+            self.assertNotIn("skill_sha256", arm)
+
+
 if __name__ == "__main__":
     unittest.main()
