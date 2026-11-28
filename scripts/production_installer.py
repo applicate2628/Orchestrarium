@@ -1245,11 +1245,9 @@ class _WindowsBoundNode:
         return self
 
     @classmethod
-    @contextmanager
-    def create(cls, path: Path, *, directory: bool, mode: int = 0o777,
-               parent_reference: "_WindowsBoundNode | None" = None,
-               security_image: _WindowsSecurityImage | None = None):
-        ctypes, wintypes, kernel, *_rest = cls._api()
+    def _creation_api(cls):
+        """Bind creation types without acquiring or creating a filesystem object."""
+        ctypes, wintypes, *_rest = cls._api()
         if cls._creation_bindings is None:
             class UnicodeString(ctypes.Structure):
                 _fields_ = [("length", wintypes.WORD), ("maximum_length", wintypes.WORD),
@@ -1271,7 +1269,15 @@ class _WindowsBoundNode:
                                  wintypes.ULONG, wintypes.LPVOID, wintypes.ULONG)
             function.restype = ctypes.c_long
             cls._creation_bindings = (nt, function, UnicodeString, ObjectAttributes, IoStatus)
-        _nt, function, UnicodeString, ObjectAttributes, IoStatus = cls._creation_bindings
+        return cls._creation_bindings
+
+    @classmethod
+    @contextmanager
+    def create(cls, path: Path, *, directory: bool, mode: int = 0o777,
+               parent_reference: "_WindowsBoundNode | None" = None,
+               security_image: _WindowsSecurityImage | None = None):
+        ctypes, wintypes, kernel, *_rest = cls._api()
+        _nt, function, UnicodeString, ObjectAttributes, IoStatus = cls._creation_api()
         name = path.name
         if not name or name in {".", ".."} or "/" in name or "\\" in name:
             raise ValueError("E_MUTABLE_PATH_ESCAPE: invalid native creation leaf")
@@ -1592,9 +1598,7 @@ class _WindowsBoundNode:
         """Let the OS name the target; encode the documented reparse metadata layout."""
         import struct
         ctypes, wintypes, kernel, *_rest = cls._api()
-        if cls._creation_bindings is None:
-            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: native creator ABI not acquired")
-        nt, _function, UnicodeString, *_rest = cls._creation_bindings
+        nt, _function, UnicodeString, *_rest = cls._creation_api()
         if cls._target_bindings is None:
             canonical = kernel.GetFinalPathNameByHandleW
             canonical.argtypes = (wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD)
