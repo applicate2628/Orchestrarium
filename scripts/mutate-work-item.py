@@ -2668,6 +2668,7 @@ class ReadmeEntry:
     detail: str = ""
     source_paths: list[Path] = field(default_factory=list)
     classification: str | None = None
+    status_metadata_unreadable: bool = False
 
 
 @dataclass(frozen=True)
@@ -6357,6 +6358,8 @@ def _authoritative_field_occurrences(
 ) -> tuple[tuple[int, str, str, str], ...]:
     occurrences: list[tuple[int, str, str, str]] = []
     for line_number, line in _authoritative_markdown_lines(text):
+        if ":" not in line:
+            continue
         match = FIELD_RE.fullmatch(line)
         if match:
             occurrences.append(
@@ -10079,7 +10082,19 @@ def _status_entry(root: Path, item: Path, *, diagnostic_status: bool = False, pr
     )
     if data is None:
         raise LifecycleError("WI-CATEGORY-STATUS-MISSING", f"missing status.md: {item}")
-    fields = _parse_fields(data.decode("utf-8"))
+    try:
+        fields = _parse_fields(data.decode("utf-8"))
+    except (UnicodeError, LifecycleError) as exc:
+        if not diagnostic_status or (isinstance(exc, LifecycleError)
+                                     and exc.failure_id != "WI-CATEGORY-MARKDOWN-INVALID"):
+            raise
+        # The board is a projection, not lifecycle authority. Preserve the
+        # exact failed input in its diagnostics without interpreting its fields.
+        entry = ReadmeEntry("Blockers", f"work-item:{item.name}", item.name,
+                            status_path, False, "", [status_path], status_metadata_unreadable=True)
+        issue = exc.failure_id if isinstance(exc, LifecycleError) else "WI-CATEGORY-STATUS-INVALID"
+        entry.classification = f"{issue}: unreadable status; source sha256:{_sha256_bytes(data)}"
+        return entry
     status = fields.get("status", "")
     section = "Blockers" if status == "blocked" or fields.get("blocker") else "Current focus"
     label = fields.get("task") or item.name
@@ -10517,6 +10532,8 @@ def _input_digest(entries: Iterable[ReadmeEntry], work_items: Path, *, prepared_
 def _canonical_timestamp(entries: Iterable[ReadmeEntry], *, prepared_terminal=None) -> str:
     instants: list[str] = []
     for entry in entries:
+        if entry.status_metadata_unreadable:
+            continue
         if entry.classification == LEGACY_COMPLETION_KIND:
             path = entry.link.parent / LEGACY_COMPLETION_METADATA
             raw = prepared_terminal.images[path] if prepared_terminal is not None and path in prepared_terminal.images else _capture_file_snapshot(
@@ -11019,10 +11036,10 @@ def _agent_run_ledger_module():
         ) from exc
 
 
-def _staged_admission_ledger_bytes(slug: str, status_data: bytes) -> bytes:
+def _staged_admission_ledger_bytes(slug: str, status_data: bytes, *, recovery_at: str | None = None) -> bytes:
     """Build the settled Lead admission event from the already-validated status."""
 
-    started_at = _parse_fields(status_data.decode("utf-8"))["started"]
+    started_at = recovery_at or _parse_fields(status_data.decode("utf-8"))["started"]
     ledger = _agent_run_ledger_module()
     args = argparse.Namespace(
         work_item=Path(slug),
@@ -11035,7 +11052,8 @@ def _staged_admission_ledger_bytes(slug: str, status_data: bytes) -> bytes:
         model=None,
         status="completed",
         gate="none",
-        scope=["candidate -> active lifecycle admission"],
+        scope=["legacy status recovery: current tracking admission only; prior history not supplied"
+               if recovery_at else "candidate -> active lifecycle admission"],
         prompt_file=None,
         artifact=None,
         evidence=None,
@@ -11874,12 +11892,149 @@ def start_item(root: Path, slug: str, status_data: bytes, *, inject_readme_failu
     return target
 
 
+def _legacy_active_status_preview(data: bytes) -> dict:
+    """Report facts from an immutable legacy preimage; never decide disposition."""
+    keys = ("status", "started", "updated", "task", "current step", "last result",
+            "next action", "scope boundary", "owner", "integration owner", "evidence gate")
+    candidates: dict[str, set[str]] = {key: set() for key in keys}
+    damaged = set()
+    warnings: list[str] = []
+    text = data.decode("utf-8-sig", errors="surrogateescape")
+    try:
+        for _line_number, line in _authoritative_markdown_lines(text):
+            match = FIELD_RE.fullmatch(line)
+            if not match:
+                continue
+            key, value = (part.strip() for part in match.groups())
+            key = key.casefold()
+            if key in ("state", "lifecycle"):
+                key = "status"
+            if key not in candidates or not value:
+                continue
+            if any(0xDC80 <= ord(character) <= 0xDCFF or ord(character) < 32
+                   for character in value):
+                damaged.add(key)
+                continue
+            candidates[key].add(value.casefold() if key == "status" else value)
+    except LifecycleError as exc:
+        if exc.failure_id != "WI-CATEGORY-MARKDOWN-INVALID":
+            raise
+        warnings.append("unterminated-markdown-fence")
+
+    fields = {}
+    unresolved = {}
+    for key, values in candidates.items():
+        if key in damaged:
+            unresolved[key] = "damaged"
+        elif len(values) > 1:
+            unresolved[key] = "conflict"
+        elif not values:
+            unresolved[key] = "missing"
+        else:
+            value = next(iter(values))
+            if key == "status" and value not in {"active", "blocked"}:
+                unresolved[key] = "unsupported"
+            elif key in {"started", "updated"}:
+                try:
+                    _strict_utc(value)
+                except LifecycleError:
+                    unresolved[key] = "invalid-date"
+                else:
+                    fields[key] = value
+            else:
+                fields[key] = value
+    return {"sourceSha256": _sha256_bytes(data), "fields": fields,
+            "unresolved": unresolved, "warnings": warnings}
+
+
+def preview_legacy_active_status(root: Path, slug: str, *, ledger_resource_budget=None) -> dict:
+    target = resolve_category(root, f"work-item:{slug}", ledger_resource_budget=ledger_resource_budget)
+    if target.parent.name != "active" or not target.is_dir():
+        raise LifecycleError("WI-INVALID-TARGET", "status recovery requires an active work-item")
+    snapshot = _capture_file_snapshot(target / "status.md", failure_id="WI-CATEGORY-STATUS-INVALID",
+                                      maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP)
+    return _legacy_active_status_preview(snapshot.data)
+
+
+def _recover_legacy_status(root: Path, target: Path, status_data: bytes, source_digest: str,
+                           *, inject_readme_failure: bool, admit_current_tracking_at: str | None,
+                           ledger_resource_budget=None) -> Path:
+    failure = "WI-CATEGORY-STATUS-INVALID"
+    if not re.fullmatch(r"[0-9a-f]{64}", source_digest):
+        raise LifecycleError(failure, "recovery requires the exact preview SHA-256")
+    if _parse_fields(status_data.decode("utf-8")).get("template") != "staged":
+        raise LifecycleError(failure, "historical work must not be reclassified as a quick fix")
+
+    status = target / "status.md"
+    original = target / f"status.legacy-{source_digest}.md"
+    ledger = target / "agent-runs.jsonl"
+    selected = _capture_file_snapshot(status, failure_id=failure,
+                                      maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP)
+    prior = (_capture_file_snapshot(original, failure_id=failure,
+                                    maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP)
+             if os.path.lexists(original) else None)
+    replay = prior is not None and selected.data == status_data
+    if prior is not None and _sha256_bytes(prior.data) != source_digest:
+        raise LifecycleError(failure, "the retained legacy source no longer matches")
+    if not replay and _sha256_bytes(selected.data) != source_digest:
+        raise LifecycleError(failure, "the selected status changed since its recovery preview")
+    if not replay:
+        try:
+            _validate_active_status_bytes(selected.data)
+        except LifecycleError:
+            pass
+        else:
+            raise LifecycleError(failure, "a current valid status must use ordinary update")
+    admission = None
+    if admit_current_tracking_at is not None:
+        _strict_utc(admit_current_tracking_at)
+        admission = _staged_admission_ledger_bytes(
+            target.name, status_data, recovery_at=admit_current_tracking_at)
+    history = (_capture_file_snapshot(ledger, failure_id="WI-LEDGER-RESOURCE-DRIFT",
+                                      maximum_bytes=None, ledger_resource_budget=ledger_resource_budget)
+               if os.path.lexists(ledger) else None)
+    if history is None and (admission is None or replay):
+        raise LifecycleError("WI-LEDGER-UNSETTLED",
+                             "missing ledger requires explicit admission of current tracking; no historical rows were created")
+    if history is not None and admission is not None and (prior is None or history.data != admission):
+        raise LifecycleError("WI-LEDGER-UNSETTLED", "existing history cannot be replaced by current admission")
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    transaction.observe_retained_inputs(tuple(row for row in (selected, history, prior) if row is not None))
+    if history is None:
+        ledger_resource_budget = transaction.admit_ledger_creation(
+            ledger, tuple(admission.splitlines(keepends=True)), participant_snapshots=(selected,))
+    _preflight_readme_markers(root, ledger_resource_budget=ledger_resource_budget)
+    transaction.verify()
+    if not replay:
+        if prior is None:
+            _atomic_write(original, selected.data)
+        if history is None:
+            _atomic_write(ledger, admission)
+        _atomic_write(status, status_data)
+    if inject_readme_failure:
+        raise _postcommit_readme_stale("update")
+    try:
+        refresh_readme(root, ledger_resource_budget=ledger_resource_budget)
+    except LifecycleError as exc:
+        raise _postcommit_readme_stale("update") from exc
+    return status
+
+
 @functools.partial(_lifecycle_participant, subject_parameters=('category-slug', 'work-item', 'slug'))
-def update_status(root: Path, slug: str, status_data: bytes, *, inject_readme_failure: bool = False, ledger_resource_budget=None) -> Path:
+def update_status(root: Path, slug: str, status_data: bytes, *, inject_readme_failure: bool = False,
+                  recover_from_sha256: str | None = None, admit_current_tracking_at: str | None = None,
+                  ledger_resource_budget=None) -> Path:
     _validate_active_status_bytes(status_data)
     target = resolve_category(root, f"work-item:{slug}", ledger_resource_budget=ledger_resource_budget)
     if target.parent.name != "active" or not target.is_dir():
         raise LifecycleError("WI-INVALID-TARGET", "status update requires an active work-item")
+    if recover_from_sha256 is not None:
+        return _recover_legacy_status(root, target, status_data, recover_from_sha256,
+                                      inject_readme_failure=inject_readme_failure,
+                                      admit_current_tracking_at=admit_current_tracking_at,
+                                      ledger_resource_budget=ledger_resource_budget)
+    if admit_current_tracking_at is not None:
+        raise LifecycleError("WI-CATEGORY-STATUS-INVALID", "current admission requires a legacy recovery hash")
     _status_entry(root, target, ledger_resource_budget=ledger_resource_budget)
     _preflight_readme(root, ledger_resource_budget=ledger_resource_budget)
     status = target / "status.md"
@@ -14409,9 +14564,11 @@ def _plan_parent_archive_links(
     """Capture one parent relocation's authorized consumer and target images."""
     work_items = _work_items_root(root, ledger_resource_budget=ledger_resource_budget)
     target_after_images = target_after_images or {}
+    retained_trees = {}
     incoming = _incoming_link_result(
         root, {source}, f"work-item:{source.name}",
-        mutable_consumers_only=True, strict_consumer_reads=True, ledger_resource_budget=ledger_resource_budget
+        mutable_consumers_only=True, strict_consumer_reads=True,
+        retained_trees=retained_trees, ledger_resource_budget=ledger_resource_budget
     )
     images = {plan.source: plan for plan in bug_plans}
     links = _physical_archive_link_plans(
@@ -14476,11 +14633,17 @@ def _plan_parent_archive_links(
             "consumerCaptures": consumer_captures, "ownerEvidence": tuple(owner_evidence),
             "targetImages": target_images,
             "targetDirectoryIdentities": target_directory_identities,
+            "retainedTrees": tuple(value[0] for value in retained_trees.values()),
             "maintenance": link_maintenance}
 
 
 def _verify_parent_archive_link_targets(plan: dict, *, archived: bool,
                                         failure_id: str) -> None:
+    for tree in plan.get("retainedTrees", ()):
+        try:
+            tree.verify()
+        except (OSError, ValueError, LifecycleError) as exc:
+            raise LifecycleError(failure_id, "reviewed sibling package tree changed") from exc
     for original, (final, captured, data) in plan["targetImages"].items():
         path = final if archived else original
         if not archived and captured is not None:
@@ -15169,8 +15332,14 @@ def audit_categories(root: Path, *, ledger_resource_budget=None) -> tuple[str, .
                     "WI-BUG-DISPOSITIONS-PENDING",
                     f"work-item:{item.name} has an unapplied bug disposition manifest",
                 )
-            fields = _parse_fields((item / "status.md").read_text(encoding="utf-8"))
-            failure = _current_readme_status_error(fields, "active", item / "status.md")
+            status_path = item / "status.md"
+            status = capture_board_status(item)
+            try:
+                text = status.data.decode("utf-8")
+            except UnicodeError as exc:
+                raise LifecycleError("WI-CATEGORY-STATUS-INVALID", f"status.md is not UTF-8: {item}") from exc
+            fields = _parse_fields(text)
+            failure = _current_readme_status_error(fields, "active", status_path)
             if failure is not None:
                 raise failure
     for item in _archived_work_item_candidates(work_items / "archive", ledger_resource_budget=ledger_resource_budget):
@@ -20926,7 +21095,7 @@ def _pointer_names_retained_root(
     return False
 
 
-def _payload_stream_regular_file(path: Path, expected: os.stat_result, digest, classifier) -> None:
+def _payload_stream_regular_file(path: Path, expected: os.stat_result, digest, classifier, *, member=None) -> None:
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(path, flags)
@@ -20941,6 +21110,8 @@ def _payload_stream_regular_file(path: Path, expected: os.stat_result, digest, c
             if not block:
                 break
             digest.update(block)
+            if member is not None:
+                member.update(block)
         final = os.fstat(descriptor)
         if not classifier._same_open_identity(final, opened):
             raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "payload file identity changed while reading")
@@ -20991,7 +21162,15 @@ def _payload_limited_tree_entries(path: Path, limits: PayloadDigestLimits) -> li
     return entries
 
 
-def _payload_digest(path: Path, *, limits: PayloadDigestLimits | None = None) -> tuple[str, str]:
+def _payload_digest(
+    path: Path, *, limits: PayloadDigestLimits | None = None,
+    expected_members: Mapping[str, str] | None = None,
+    expected_byte_count: int | None = None,
+) -> tuple[str, str]:
+    """Optionally verify the exact producer file inventory in the same byte stream."""
+    if expected_members is not None and (limits is None or not path.is_dir()):
+        raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "producer inventory requires an owned directory capture")
+    remaining = None if expected_members is None else dict(expected_members)
     if path.is_symlink():
         raise LifecycleError(
             "WI-CATEGORY-MIGRATION-PAYLOAD",
@@ -21038,7 +21217,8 @@ def _payload_digest(path: Path, *, limits: PayloadDigestLimits | None = None) ->
                 "WI-CATEGORY-MIGRATION-PAYLOAD",
                 f"symbolic-link tree entry is not admitted: {entry}",
             )
-        relative = entry.relative_to(path).as_posix().encode("utf-8")
+        name = entry.relative_to(path).as_posix()
+        relative = name.encode("utf-8")
         if entry.is_dir():
             if limits is not None and _lifecycle_path_has_reparse(entry):
                 raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "payload tree entry is not ordinary")
@@ -21068,7 +21248,16 @@ def _payload_digest(path: Path, *, limits: PayloadDigestLimits | None = None) ->
             digest.update(size.to_bytes(8, "big"))
             if data is None:
                 assert limits is not None and classifier is not None
-                _payload_stream_regular_file(entry, expected, digest, classifier)
+                if remaining is None:
+                    _payload_stream_regular_file(entry, expected, digest, classifier)
+                else:
+                    member_expected = remaining.pop(name, None)
+                    if member_expected is None:
+                        raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "producer inventory has an unexpected file")
+                    member = hashlib.sha256()
+                    _payload_stream_regular_file(entry, expected, digest, classifier, member=member)
+                    if member.hexdigest() != member_expected:
+                        raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "producer inventory member content differs")
             else:
                 digest.update(data)
         else:
@@ -21076,6 +21265,10 @@ def _payload_digest(path: Path, *, limits: PayloadDigestLimits | None = None) ->
                 "WI-CATEGORY-MIGRATION-PAYLOAD",
                 f"unsupported tree entry: {entry}",
             )
+    if remaining:
+        raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "producer inventory has a missing file")
+    if expected_byte_count is not None and (limits is None or expected_byte_count != total_bytes):
+        raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "producer inventory byte count differs")
     return MIGRATION_DIGEST_ALGORITHMS["directory"], digest.hexdigest()
 
 
@@ -21250,13 +21443,27 @@ class _IncomingConsumerImage:
     """Authoritative bytes and their reversible private navigation coordinates."""
 
     def __init__(self, raw: bytes, suffix: str = ".md") -> None:
+        import codecs
+
         self.raw = raw
+        self._bom = b""
+        self._encoding = "utf-8"
+        self._errors = "surrogateescape"
+        if suffix.lower() in {".log", ".txt", ".out", ".err"}:
+            # Only the auxiliary plain-text role admits these representations.
+            # Detect wider signatures first and keep the exact byte order.
+            for bom, encoding in ((codecs.BOM_UTF32_LE, "utf-32-le"), (codecs.BOM_UTF32_BE, "utf-32-be"),
+                                  (codecs.BOM_UTF16_LE, "utf-16-le"), (codecs.BOM_UTF16_BE, "utf-16-be")):
+                if raw.startswith(bom):
+                    self._bom = bom
+                    self._encoding = encoding
+                    self._errors = "strict"
+                    break
         try:
-            self.view = raw.decode("utf-8")
+            self.view = raw[len(self._bom):].decode(self._encoding)
         except UnicodeDecodeError:
             if suffix.lower() != ".md":
                 raise
-            import codecs
             for signature, identity in ((codecs.BOM_UTF32_LE, "utf32-le"), (codecs.BOM_UTF32_BE, "utf32-be"),
                                         (codecs.BOM_UTF16_LE, "utf16-le"), (codecs.BOM_UTF16_BE, "utf16-be")):
                 if raw.startswith(signature):
@@ -21271,9 +21478,8 @@ class _IncomingConsumerImage:
         if self._bytes(self.view) != raw:
             raise LifecycleError("WI-INCOMING-LINK-REPRESENTATION", "incoming image is not reversible")
 
-    @staticmethod
-    def _bytes(view: str) -> bytes:
-        return view.encode("utf-8", errors="surrogateescape")
+    def _bytes(self, view: str) -> bytes:
+        return self._bom + view.encode(self._encoding, errors=self._errors)
 
     @staticmethod
     def semantic(value: str, *, purpose: str) -> str:
@@ -21311,8 +21517,9 @@ class _IncomingConsumerImage:
 
 class _RetainedConsumerScanPreparation:
     """Invocation-owned validator and captured/decoded inputs, never admission."""
-    def __init__(self, acquired_input=None, *, ledger_resource_budget=None) -> None:
+    def __init__(self, acquired_input=None, *, retained_trees=None, ledger_resource_budget=None) -> None:
         self.ledger_resource_budget = ledger_resource_budget
+        self.retained_trees = retained_trees
         self._validator: object | None = None
         self.acquired_input = acquired_input
         self._items: dict[Path, tuple[CapturedFileSnapshot, list[dict], list[dict[str, object]], tuple[str, ...]] | None | Exception] = {}
@@ -21417,7 +21624,12 @@ def _retained_preimage_consumer(
         return False
     item = work_items.joinpath(*parts[:item_parts])
     relative = consumer.relative_to(item).as_posix()
-    preparation = _RetainedConsumerScanPreparation( ledger_resource_budget=ledger_resource_budget) if scan_preparation is None else scan_preparation
+    preparation = _RetainedConsumerScanPreparation(ledger_resource_budget=ledger_resource_budget) if scan_preparation is None else scan_preparation
+    trees = preparation.retained_trees
+    if trees is not None:
+        for tree, (_, members) in trees.items():
+            if consumer.is_relative_to(tree) and consumer.relative_to(tree).as_posix() in members:
+                return True
     validator = preparation.validator()
     acquired_input = preparation.acquired_input
     selected_item = item if acquired_input is None else _call_acquired_input(acquired_input, "validator_path", item, validator)
@@ -21432,7 +21644,12 @@ def _retained_preimage_consumer(
             if profile_errors:
                 continue
             for entry, profile in profiles:
-                if relative not in {entry["ref"], profile["provenance"]["snapshot"]}:
+                tree = profile["purpose"] == "legacy-package-tree"
+                if tree:
+                    if (trees is None or acquired_input is not None
+                        or not relative.startswith(entry["ref"] + "/")):
+                        continue
+                elif relative not in {entry["ref"], profile["provenance"]["snapshot"]}:
                     continue
                 run_id = event.get("runId")
                 if not isinstance(run_id, str) or sum(isinstance(row.get("runId"), str)
@@ -21443,7 +21660,9 @@ def _retained_preimage_consumer(
                                                      maximum_bytes=validator.MAX_LEDGER_LINE_BYTES, acquired_input=acquired_input)
                 provenance = _capture_file_snapshot(item / profile["provenance"]["snapshot"],
                                                      failure_id="WI-CATEGORY-MIGRATION-INVENTORY", acquired_input=acquired_input)
-                payload = validator.capture_retained_preimage_payload(selected_item, entry, profile)
+                payload = validator.capture_retained_preimage_payload(
+                    selected_item, entry, profile, report_data=provenance.data
+                )
                 # Resolve exactly the captured association/snapshot; unrelated
                 # declarations and legacy rows cannot become a new veto.
                 custody, custody_errors = validator.resolve_historical_pass_custody(
@@ -21458,7 +21677,7 @@ def _retained_preimage_consumer(
                 if not validator._validate_event(event, selected_item, set(), record_errors,
                     historical_pass_snapshot=locator, retained_payloads={entry["ref"]: payload}) or record_errors:
                     continue
-                captures = (carrier, association, provenance, payload)
+                captures = (carrier, association, provenance) if tree else (carrier, association, provenance, payload)
                 for snapshot in captures:
                     _verify_captured_file(snapshot, "WI-CATEGORY-MIGRATION-INVENTORY", acquired_input=acquired_input)
                 transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
@@ -21467,6 +21686,11 @@ def _retained_preimage_consumer(
                         tuple(_call_acquired_input(acquired_input, "current_capture", snapshot)
                               if _settled_history_input(acquired_input) is not None else acquired_input.files[snapshot.path].current
                               for snapshot in captures))
+                if tree:
+                    members = frozenset(name for name, _ in payload.members)
+                    if consumer.relative_to(payload.path).as_posix() not in members:
+                        continue
+                    trees[payload.path] = (payload, members)
                 return True
     except (OSError, ValueError, LifecycleError, validator.load_lifecycle_owner().LifecycleError):
         # Failed admission is not an exemption. The caller retains its existing
@@ -21590,7 +21814,7 @@ def _incoming_link_result(
     mutable_consumers_only: bool = False,
     scan_markdown_links: bool = True,
     strict_consumer_reads: bool = False,
-    acquired_input=None, ledger_resource_budget=None,
+    acquired_input=None, retained_trees=None, ledger_resource_budget=None,
 ) -> dict:
     work_items = _work_items_root(root, acquired_input=acquired_input, ledger_resource_budget=ledger_resource_budget)
     physical: list[dict[str, str]] = []
@@ -21621,7 +21845,9 @@ def _incoming_link_result(
             for owned in owned_resolved
         )
 
-    preparation = _RetainedConsumerScanPreparation(acquired_input, ledger_resource_budget=ledger_resource_budget)
+    preparation = _RetainedConsumerScanPreparation(
+        acquired_input, retained_trees=retained_trees, ledger_resource_budget=ledger_resource_budget
+    )
     work_items_resolved = _input_resolve(work_items, acquired_input)
 
     for consumer in sorted(path for path in _input_descendants(work_items, acquired_input) if _input_is_file(path, acquired_input)):
@@ -22295,6 +22521,19 @@ def ledger_resource_budget_for_current_operation(value=None):
     # Explicit remaining-participant sub-allowances remain the arithmetic
     # owner's inputs. The lifecycle wrapper checks operation-level replacement.
     return current.ledger_resource_budget if value is None else value
+
+
+def capture_board_status(item: Path) -> CapturedFileSnapshot:
+    """Acquire live board status under the existing metadata byte bound."""
+    try:
+        return _capture_file_snapshot(
+            item / "status.md", failure_id="WI-CATEGORY-STATUS-INVALID",
+            maximum_bytes=LEDGER_LOCATION_PROOF_BYTE_CAP,
+        )
+    except LifecycleError as exc:
+        if isinstance(exc.__cause__, FileNotFoundError):
+            raise LifecycleError("WI-CATEGORY-STATUS-MISSING", f"missing status.md: {item}") from exc
+        raise
 
 
 def _capture_file_snapshot(
@@ -31578,8 +31817,14 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--slug", required=True)
         if name == "candidate":
             command.add_argument("--file", required=True)
-        elif name in {"start", "update"}:
+        elif name == "start":
             command.add_argument("--status-file", required=True)
+        elif name == "update":
+            status_input = command.add_mutually_exclusive_group(required=True)
+            status_input.add_argument("--status-file")
+            status_input.add_argument("--preview-legacy", action="store_true")
+            command.add_argument("--recover-from-sha256")
+            command.add_argument("--admit-current-tracking-at")
         elif name == "close":
             command.add_argument("--closure-file", required=True)
             command.add_argument("--terminal-instant", required=True)
@@ -31928,10 +32173,18 @@ def main(argv: list[str]) -> int:
             , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             print(result)
         elif args.command == "update":
+            if args.preview_legacy:
+                if args.inject_readme_failure or args.recover_from_sha256 or args.admit_current_tracking_at:
+                    raise LifecycleError("WI-INVALID-TARGET", "a recovery preview does not write")
+                print(json.dumps(preview_legacy_active_status(
+                    root, args.slug, ledger_resource_budget=ledger_resource_budget), sort_keys=True))
+                return 0
             result = update_status(
                 root,
                 args.slug,
                 _read_arg_file(args.status_file),
+                recover_from_sha256=args.recover_from_sha256,
+                admit_current_tracking_at=args.admit_current_tracking_at,
                 inject_readme_failure=bool(args.inject_readme_failure), ledger_resource_budget=ledger_resource_budget
             , transition_resource_budget=transition_resource_budget, transition_output_ceiling=transition_output_ceiling, transition_read_admission=transition_read_admission)
             print(result)

@@ -1735,13 +1735,20 @@ def retained_preimage_profiles(event: Mapping[str, object], item: Path, errors: 
             profile = decode_json_object(entry["result"].encode("utf-8"), source="retained-preimage result", maximum_bytes=MAX_LEDGER_LINE_BYTES)
             ref = entry.get("ref")
             provenance = profile.get("provenance")
-            safe_ref = (isinstance(ref, str) and _safe_repo_relative(ref)
+            purpose = profile.get("purpose")
+            namespace = ("inputs" if purpose == "historical-only" else
+                         "artifacts" if purpose in ("legacy-opaque-artifact", "legacy-package-tree") else None)
+            safe_ref = (namespace is not None and isinstance(ref, str) and _safe_repo_relative(ref)
                         and not Path(ref).is_absolute() and not Path(ref).drive
-                        and len(PurePosixPath(ref).parts) >= 2 and PurePosixPath(ref).parts[0] == "inputs")
+                        and len(PurePosixPath(ref).parts) >= 2 and PurePosixPath(ref).parts[0] == namespace)
+            if safe_ref and purpose == "legacy-opaque-artifact":
+                safe_ref = PurePosixPath(ref).suffix.casefold() not in {
+                    ".md", ".json", ".jsonl", ".log", ".txt", ".out", ".err",
+                }
             if (set(entry) != {"kind", "ref", "result"} or entry.get("kind") != "artifact"
                 or set(profile) != {"schemaVersion", "kind", "workItem", "purpose", "byteCount", "sha256", "provenance"}
                 or type(profile.get("schemaVersion")) is not int or profile["schemaVersion"] != 1
-                or profile.get("workItem") != item.name or profile.get("purpose") != "historical-only"
+                or profile.get("workItem") != item.name
                 or type(profile.get("byteCount")) is not int or profile["byteCount"] < 0
                 or not isinstance(profile.get("sha256"), str) or SHA256_RE.fullmatch(profile["sha256"]) is None
                 or not safe_ref or not isinstance(provenance, dict) or set(provenance) != {"ref", "sha256", "snapshot"}
@@ -1763,8 +1770,89 @@ def retained_preimage_profiles(event: Mapping[str, object], item: Path, errors: 
     return profiles
 
 
-def capture_retained_preimage_payload(item: Path, entry: Mapping[str, object], profile: Mapping[str, object]):
-    """Use the existing ordinary/no-follow capture, bounded by declared bytes."""
+def _legacy_archive_representation(data: bytes) -> bool:
+    """Identify a reviewed archive; this never extracts or authenticates members."""
+    import gzip
+    import io
+    import tarfile
+    import zipfile
+    import zlib
+
+    if data.startswith(b"PK\x03\x04"):
+        return zipfile.is_zipfile(io.BytesIO(data))
+    if not data.startswith(b"\x1f\x8b"):
+        return False
+    try:
+        with gzip.GzipFile(fileobj=io.BytesIO(data)) as stream:
+            tarfile.TarInfo.frombuf(stream.read(tarfile.BLOCKSIZE), "utf-8", "surrogateescape")
+            return True
+    except (EOFError, OSError, tarfile.HeaderError, zlib.error):
+        return False
+
+
+@dataclass(frozen=True)
+class _RetainedPackageTreeCapture:
+    path: Path
+    length: int
+    digest: str
+    entries: int
+    members: tuple[tuple[str, str], ...]
+
+    def verify(self) -> None:
+        owner = load_lifecycle_owner()
+        if owner._lifecycle_path_has_reparse(self.path):
+            raise ValueError("WI-RETAINED-PREIMAGE: retained package tree is redirected")
+        limits = owner.PayloadDigestLimits(len(self.members), self.entries, self.length)
+        if owner._payload_digest(
+            self.path, limits=limits, expected_members=dict(self.members),
+            expected_byte_count=self.length,
+        )[1] != self.digest or owner._lifecycle_path_has_reparse(self.path):
+            raise ValueError("WI-RETAINED-PREIMAGE: reviewed tree digest or path differs")
+
+
+def _capture_retained_package_tree(item, entry, profile, report_data=None):
+    if isinstance(item, _CapturedHistoryPath):
+        raise ValueError("WI-RETAINED-PREIMAGE: selected history lacks a recursive tree capture")
+    owner = load_lifecycle_owner()
+    provenance = profile["provenance"]
+    if report_data is None:
+        report = item / provenance["snapshot"]
+        if not report.exists() and not report.is_symlink():
+            report = item / provenance["ref"]
+        report_data = owner._capture_file_snapshot(report, failure_id="WI-RETAINED-PREIMAGE").data
+    if hashlib.sha256(report_data).hexdigest() != provenance["sha256"]:
+        raise ValueError("WI-RETAINED-PREIMAGE: producer inventory provenance differs")
+    inventory = decode_json_object(report_data, source="reviewed package inventory", maximum_bytes=len(report_data))
+    files = inventory.get("files")
+    count = inventory.get("entryCount")
+    if (inventory.get("bundle") != entry["ref"] or inventory.get("links") != {}
+        or not isinstance(files, dict) or not files or type(count) is not int or count < len(files)
+        or any(not isinstance(name, str) or not _safe_repo_relative(name) or name in {"", "."}
+               or not isinstance(digest, str) or SHA256_RE.fullmatch(digest) is None
+               for name, digest in files.items())):
+        raise ValueError("WI-RETAINED-PREIMAGE: reviewed producer inventory contract differs")
+    selected = item / entry["ref"]
+    result = _RetainedPackageTreeCapture(selected, profile["byteCount"], profile["sha256"],
+                                         count, tuple(sorted(files.items())))
+    result.verify()
+    return result
+
+
+def verify_retained_payload(snapshot, *, acquired_input=None):
+    if isinstance(snapshot, _RetainedPackageTreeCapture):
+        if acquired_input is not None:
+            raise ValueError("WI-RETAINED-PREIMAGE: selected history lacks a recursive tree capture")
+        snapshot.verify()
+    else:
+        load_lifecycle_owner()._verify_captured_file(
+            snapshot, "WI-RETAINED-PREIMAGE", acquired_input=acquired_input
+        )
+
+
+def capture_retained_preimage_payload(item: Path, entry: Mapping[str, object], profile: Mapping[str, object], *, report_data=None):
+    """Use existing no-follow readers bounded by the reviewed representation."""
+    if profile["purpose"] == "legacy-package-tree":
+        return _capture_retained_package_tree(item, entry, profile, report_data)
     owner = load_lifecycle_owner()
     selected = item / entry["ref"]
     snapshot = owner._capture_file_snapshot(selected.path if isinstance(selected, _CapturedHistoryPath) else selected,
@@ -1772,6 +1860,8 @@ def capture_retained_preimage_payload(item: Path, entry: Mapping[str, object], p
         **({"acquired_input": selected} if isinstance(selected, _CapturedHistoryPath) else {}))
     if snapshot.length != profile["byteCount"] or hashlib.sha256(snapshot.data).hexdigest() != profile["sha256"]:
         raise ValueError("WI-RETAINED-PREIMAGE: payload byte count/hash differs")
+    if profile["purpose"] == "legacy-opaque-artifact" and not _legacy_archive_representation(snapshot.data):
+        raise ValueError("WI-RETAINED-PREIMAGE: legacy artifact is not an opaque archive")
     return snapshot
 
 
@@ -2727,7 +2817,7 @@ class _CurrentPredicateV1:
             elif self.kind == "custody":
                 good = _ordinary_custody_snapshot(self.item, self.locator, self.digest)
             elif self.kind == "retained":
-                owner._verify_captured_file(self.snapshot, "WI-RETAINED-PREIMAGE",
+                verify_retained_payload(self.snapshot,
                     acquired_input=self.item if isinstance(self.item, _CapturedHistoryPath) else None)
                 good = True
             else:
@@ -5156,8 +5246,10 @@ def _validate_event_fields(
                 if isinstance(expected_path, _CapturedHistoryPath):
                     expected_path = (expected_path.owner_input.current_snapshot(expected_path.path).path
                                      if expected_path._settled_origin() is not None else expected_path.path)
+                digest = (snapshot.digest if isinstance(snapshot, _RetainedPackageTreeCapture)
+                          else hashlib.sha256(snapshot.data).hexdigest())
                 if (snapshot.path != expected_path or snapshot.length != profile["byteCount"]
-                    or hashlib.sha256(snapshot.data).hexdigest() != profile["sha256"]):
+                    or digest != profile["sha256"]):
                     raise ValueError("WI-RETAINED-PREIMAGE: captured payload binding differs")
                 key = ("retained", expected_path, profile["byteCount"], profile["sha256"])
                 if isinstance(item, _CapturedHistoryPath):
@@ -12035,10 +12127,30 @@ def validate_status(
         fail(errors, "WI-LEDGER-CUSTODY-STALE-TARGET: status requires its local issued context or plain event values")
         return
     status_path = item / "status.md"
-    if not status_path.exists():
-        fail(errors, f"missing status.md: {status_path}")
+    owner = load_lifecycle_owner()
+    evaluation = _context_evaluation(context) if isinstance(context, LedgerValidationContextV1) else None
+    selected = next((predicate for predicate in evaluation.inputs.selection_inputs
+                     if predicate.kind == "bytes" and predicate.path == status_path), None) if evaluation is not None else None
+    try:
+        if selected is not None:
+            if not selected.accepted:
+                fail(errors, "WI-LEDGER-CUSTODY-STALE-TARGET: selected status changed")
+                return
+            raw = selected.expected_bytes
+        elif isinstance(status_path, _CapturedHistoryPath):
+            raw = status_path.read_bytes()
+        else:
+            raw = owner.capture_board_status(item).data
+        text = raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    except owner.LifecycleError as exc:
+        if exc.failure_id == "WI-CATEGORY-STATUS-MISSING":
+            fail(errors, f"missing status.md: {status_path}")
+        else:
+            fail(errors, f"WI-LEDGER-CUSTODY-STALE-TARGET: transfer/status input is unreadable: {exc}")
         return
-    text = status_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        fail(errors, f"WI-LEDGER-CUSTODY-STALE-TARGET: transfer/status input is unreadable: {exc}")
+        return
     if is_quick_fix_status_candidate(text):
         validate_quick_fix_status(text, errors)
         return
@@ -12836,10 +12948,21 @@ def validate_work_item(
     status_path = item / "status.md"
     inputs = _CurrentEvidenceV1()
     status_bytes = None
+    owner = load_lifecycle_owner()
     try:
-        status_bytes = inputs.read_selection(status_path) if status_path.exists() else None
+        if isinstance(status_path, _CapturedHistoryPath):
+            status_bytes = inputs.read_selection(status_path) if status_path.exists() else None
+        else:
+            try:
+                status = owner.capture_board_status(item)
+            except owner.LifecycleError as exc:
+                if exc.failure_id != "WI-CATEGORY-STATUS-MISSING":
+                    raise
+            else:
+                status_bytes = status.data
+                inputs.bind_selection(status_path, status_bytes, snapshot=status)
         status_text = status_bytes.decode("utf-8", errors="strict") if status_bytes is not None else ""
-    except (OSError, UnicodeError, ValueError) as exc:
+    except (OSError, UnicodeError, ValueError, owner.LifecycleError) as exc:
         fail(errors, f"WI-LEDGER-CUSTODY-STALE-TARGET: transfer/status input is unreadable: {exc}")
         if ledger_acquisition_complete_out is not None:
             ledger_acquisition_complete_out.append(False)

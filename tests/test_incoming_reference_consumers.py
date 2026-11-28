@@ -926,3 +926,50 @@ def test_public_fixed_bug_failure_keeps_inventory_id_cause_and_bytes(module, tmp
     assert "Traceback" not in output.out + output.err
     assert not any(0xD800 <= ord(c) <= 0xDFFF for c in output.out + output.err)
     assert tree_file_bytes(root / "work-items") == before
+
+
+@pytest.mark.parametrize("suffix", (".log", ".txt", ".out", ".err"))
+@pytest.mark.parametrize("codec,bom", (("utf-16-le", b"\xff\xfe"), ("utf-16-be", b"\xfe\xff"),
+                                       ("utf-32-le", b"\xff\xfe\0\0"), ("utf-32-be", b"\0\0\xfe\xff")))
+def test_unicode_plain_evidence_is_classified_and_kept_byte_exact(module, tmp_path, suffix, codec, bom):
+    text = "PowerShell trace\r\n" + REFERENCE + "\r\n"
+    raw = bom + text.encode(codec)
+    source, consumer = seed(tmp_path, "active/other/evidence" + suffix, raw)
+    result = module._incoming_link_result(tmp_path, {source}, REFERENCE, strict_consumer_reads=True)
+    assert result["result"] == "logical-only"
+    assert consumer.read_bytes() == raw
+    image = module._IncomingConsumerImage(raw, suffix)
+    assert image.edit([]) == raw
+    replacement = "bug:successor"
+    assert image.edit(image.literal_edits(REFERENCE, replacement)) == bom + text.replace(REFERENCE, replacement).encode(codec)
+
+
+def test_canonical_input_ownership_does_not_hide_neighbor_navigation(module, tmp_path):
+    from gzip import compress
+    from io import BytesIO
+    import tarfile
+
+    archive = BytesIO()
+    with tarfile.open(fileobj=archive, mode="w") as out:
+        raw_member = b"build artifact"
+        header = tarfile.TarInfo("result.bin")
+        header.size = len(raw_member)
+        out.addfile(header, BytesIO(raw_member))
+    binary = compress(archive.getvalue(), mtime=0)
+    source, opaque = seed(tmp_path, "active/other/inputs/result.tar.gz", binary)
+    document = opaque.parent.parent / "design.md"
+    doc_bytes = b"[proof](../../bugs/owned-record.md)\n"
+    document.write_bytes(doc_bytes)
+    expected = {"result": "unmapped", "references": [{
+        "consumer": "active/other/design.md", "kind": "physical",
+        "value": "../../bugs/owned-record.md",
+    }]}
+    got = module._incoming_link_result(tmp_path, {source}, REFERENCE, strict_consumer_reads=True)
+    assert got == expected
+    assert opaque.read_bytes() == binary and document.read_bytes() == doc_bytes
+    ambiguous = opaque.parent.parent / "artifacts" / opaque.name
+    ambiguous.parent.mkdir()
+    opaque.rename(ambiguous)
+    with pytest.raises(module.LifecycleError, match="cannot classify live incoming-link consumer"):
+        module._incoming_link_result(tmp_path, {source}, REFERENCE, strict_consumer_reads=True)
+    assert ambiguous.read_bytes() == binary and document.read_bytes() == doc_bytes

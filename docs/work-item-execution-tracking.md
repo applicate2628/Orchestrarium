@@ -198,6 +198,12 @@ This compatibility is limited to validation of an already archived work item's i
 
 This grants only the closure-target eligibility bit for that explicit relationship. It does not convert V1 to V2, make unrelated historical V1 `REVISE` events open obligations, validate an invalid V2 closer, or alter active-item validation. The common C1–C5 closure checks still decide order, unique discharge, reviewer/role/artifact/lane authority, and protected waivers; their existing errors remain visible. The reader writes no archive bytes and adds no command, manifest, or sidecar. A clean archived-reader result does not establish that other current-item obligations in the periodic checker are closed.
 
+## Preview an older active status
+
+Run `python -B scripts/mutate-work-item.py update --root . --slug <slug> --preview-legacy --transition-read-admission selected-native` for a selected older active record. The JSON reports the original content digest, usable fields, and unresolved fields. It does not write files, infer a verdict, create ledger history, or archive a task. A lead can request targeted evidence from the relevant owner; missing evidence remains unknown.
+
+To apply, use the same update command with `--status-file <reviewed-staged-status.md> --recover-from-sha256 <preview-digest>` instead of `--preview-legacy`. Retain the original status bytes beside the current status and never replace an existing ledger. If no ledger exists, the owner may explicitly add `--admit-current-tracking-at <strict-UTC>`; this records one new admission, not a backdated run, result, or verdict. The same inputs resume an interrupted index refresh without rewriting status or duplicating the admission. A recovered active item remains active until separately accepted and closed. The board reports unreadable active status as a diagnostic bound to its original bytes; strict selected-item checks still refuse malformed state.
+
 ## Check All Active Work Items
 
 Run the periodic checker at handoff boundaries, before publication review, or when resuming after interruption.
@@ -1158,6 +1164,18 @@ Use the existing `agent-run-ledger.py append --evidence-json` surface. Keep the 
 ```
 
 The public writer captures the unchanged payload and accepted report, validates the ordinary whole append candidate, and publishes the report through the existing digest store and exact historical-PASS association. Failed append reclaims only its unchanged owned residue. The incoming-link owner resolves only the matching declaration's selected association and per-record schema/unique decoded identity; unrelated malformed legacy rows or unrelated associations do not become additional vetoes. Admission is ineffective without the exact validated association. The stewardship report remains usable through its immutable snapshot after its original path is overwritten or removed.
+
+For an existing package at a legacy item-relative leaf under artifacts/, the same custody contract accepts purpose legacy-opaque-artifact. An actual new stewardship review must bind the exact package size and SHA-256 and its provenance report; never backdate a run or infer admission from a release log. ZIP and gzip-compressed tar representations are recognized without extracting or validating members. The package stays at its original path. Unreviewed siblings, text mislabeled as an archive, and changed files retain ordinary navigation checks.
+
+For an expanded legacy package, use purpose legacy-package-tree with a reviewed
+JSON report. Its bundle is the exact item-relative directory; files maps every
+ordinary member path to its SHA-256; links is empty; entryCount bounds member and
+directory enumeration. The descriptor binds the tree digest and exact total
+file byte count. Ordinary close rechecks proven sibling trees before mutation
+and on archive readback. Internal package bytes are left uninterpreted; actual
+outside documents can still link to them. Review only the selected package,
+not its surrounding qualification or test workspace. Existing report and
+ledger custody bind the authority; the member list alone is not an exemption.
 
 Only the exact declared payload or exact derived `provenance.snapshot` is excluded because of historical admission. Ordinary data under its actual work-item `inputs/` role is independently left uninterpreted after the existing input carrier verifies that the leaf has not changed. A failed read of the retained ledger is not proof that no claim exists. Both paths preserve bytes and purpose; neither asserts that historical links are absent, grants goal completion, closes a review obligation, or waives a gate. Actual current consumers retain the existing native-content recognition, strict UTF-8 and reference checks. Unknown unreadable current input still refuses strict inventory.
 

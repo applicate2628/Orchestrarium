@@ -1716,6 +1716,139 @@ def test_retained_preimage_public_utf8_archive_does_not_rewrite_history(tmp_path
     retained_preimage_archive_oracle(tmp_path, text_payload=True)
 
 
+@pytest.mark.parametrize("case", ["tar", "zip", "live-text", "live-name", "wrong-owner", "changed"])
+def test_retained_legacy_archive_custody_preserves_live_neighbor(tmp_path: Path, case: str):
+    from gzip import compress
+    from io import BytesIO
+    import tarfile
+
+    _module, root, bug, status, item, _payload, _before, report, profile = (
+        retained_preimage_fixture(tmp_path)
+    )
+    payload = item / "artifacts" / ("package.md" if case == "live-name" else "package.tar.gz")
+    payload.parent.mkdir()
+    archive_bytes = BytesIO()
+    body = b"historical package contents"
+    with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+        header = tarfile.TarInfo("payload.bin")
+        header.size = len(body)
+        archive.addfile(header, BytesIO(body))
+    content = compress(archive_bytes.getvalue(), mtime=0)
+    if case == "zip":
+        from zipfile import ZipFile
+        archive_bytes = BytesIO()
+        with ZipFile(archive_bytes, "w") as archive:
+            archive.writestr("payload.bin", body)
+        content = archive_bytes.getvalue()
+    elif case == "live-text":
+        content = b"[Live navigation](../../bugs/example.md)\n"
+    payload.write_bytes(content)
+    profile["ref"] = payload.relative_to(item).as_posix()
+    descriptor = json.loads(profile["result"])
+    descriptor.update(purpose="legacy-opaque-artifact", sha256=hashlib.sha256(content).hexdigest(),
+                      byteCount=len(content))
+    profile["result"] = json.dumps(descriptor)
+    appended = retained_preimage_append(
+        item, profile, role="platform-engineer" if case == "wrong-owner" else "knowledge-archivist"
+    )
+    if case in ("live-text", "live-name", "wrong-owner"):
+        assert appended.returncode != 0, appended.stdout + appended.stderr
+        assert b"WI-RETAINED-PREIMAGE" in appended.stdout + appended.stderr
+        assert not (item / "agent-runs.jsonl").exists()
+        return
+    assert appended.returncode == 0, appended.stdout + appended.stderr
+    if case == "changed":
+        payload.write_bytes(content + b"changed")
+    result = retained_preimage_cli(item, SCRIPT, "archive-fixed-bug", "--root", str(root),
+                                  "--slug", bug.stem, "--terminal-instant", "2026-10-05T00:00:00Z",
+                                  "--resolution", "Synthetic verified fix.",
+                                  "--evidence", "Synthetic legacy archive custody.", "--apply")
+    if case == "changed":
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert bug.is_file()
+        assert payload.read_bytes() == content + b"changed"
+        return
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert payload.read_bytes() == content
+    assert f"../../bugs/archive/2026-10/{bug.stem}.md#proof".encode() in status.read_bytes()
+    snapshot = item / descriptor["provenance"]["snapshot"]
+    assert snapshot.read_bytes() == report.read_bytes()
+
+
+@pytest.mark.parametrize("drift", ["none", "before-close", "after-move", "owner-close"])
+def test_retained_legacy_package_tree_archives_with_live_neighbor(tmp_path: Path, monkeypatch, drift: str):
+    module, root, _bug, _status, item, _old_payload, _before, report, profile = (
+        retained_preimage_fixture(tmp_path)
+    )
+    # An expanded build can contain arbitrary binary and document-shaped
+    # payload. A current sibling document remains a navigation consumer.
+    package = item / "artifacts" / "expanded-build"
+    package.mkdir(parents=True)
+    asset = package / "opaque.bin"
+    asset.write_bytes(bytes((255,)) + b"binary")
+    authored = package / "README.md"
+    authored.write_bytes(b"Documentation supplied inside the build.\n")
+    profile["ref"] = package.relative_to(item).as_posix()
+    proof_data = {k.name: hashlib.sha256(k.read_bytes()).hexdigest() for k in (asset, authored)}
+    report.write_text(json.dumps({"bundle": profile["ref"], "files": proof_data, "links": {},
+                                  "entryCount": len(proof_data)}),
+                      encoding="utf-8")
+    report_hash = hashlib.sha256(report.read_bytes()).hexdigest()
+    descriptor = json.loads(profile["result"])
+    descriptor.update(purpose="legacy-package-tree", sha256=module._payload_digest(package)[1],
+                      byteCount=sum(k.stat().st_size for k in (asset, authored)),
+                      provenance={"ref": report.name, "sha256": report_hash,
+                                  "snapshot": f"review-artifact-custody/{report_hash}"})
+    profile["result"] = json.dumps(descriptor)
+    appended = retained_preimage_append(item, profile)
+    assert appended.returncode == 0, appended.stdout + appended.stderr
+    target = item.name if drift == "owner-close" else "package-close-target"
+    instant = "2026-10-05T00:00:00Z"
+    if target != item.name:
+        seed_active(module, root, target)
+    active = root / "work-items" / "active" / target
+    (active / "proof.md").write_bytes(b"Reviewed closing item.")
+    consumer = seed_context_bug(root, "standalone", "package-neighbor-bug")
+    old_href = f"../active/{target}/proof.md".encode()
+    before = consumer.read_bytes() + b"\n[Proof](" + old_href + b")\n"
+    consumer.write_bytes(before)
+    write_empty_bug_dispositions(root, target, instant)
+    module.refresh_readme(root)
+    closure_file = root / "request.md"
+    closure_file.write_text(closure(instant), encoding="utf-8")
+    if drift == "after-move":
+        verify = module._verify_parent_archive_link_targets
+
+        def mutate_after_move(plan, *, archived, failure_id):
+            if archived:
+                asset.write_bytes(asset.read_bytes() + b"changed")
+            verify(plan, archived=archived, failure_id=failure_id)
+
+        monkeypatch.setattr(module, "_verify_parent_archive_link_targets", mutate_after_move)
+        with pytest.raises(module.LifecycleError, match="reviewed sibling package tree changed"):
+            module.close_item(root, target, closure_file.read_bytes(), instant)
+        assert active.is_dir() and consumer.read_bytes() == before
+        assert asset.read_bytes().endswith(b"changed")
+        return
+    if drift == "before-close":
+        asset.write_bytes(asset.read_bytes() + b"changed")
+    result = retained_preimage_cli(item, SCRIPT, "close", "--root", str(root), "--slug", target,
+                                  "--closure-file", str(closure_file), "--terminal-instant", instant,
+                                  "--transition-read-admission", "selected-native")
+    if drift == "before-close":
+        assert result.returncode != 0 and active.is_dir()
+        assert consumer.read_bytes() == before
+        return
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not active.exists()
+    archived = root / "work-items" / "archive" / "2026-10" / target
+    assert (archived / module.BUG_DISPOSITIONS_RECEIPT).is_file()
+    assert consumer.read_bytes() == before.replace(old_href, f"../archive/2026-10/{target}/proof.md".encode())
+    settled_package = (archived / package.relative_to(item)) if target == item.name else package
+    for member, digest in proof_data.items():
+        assert hashlib.sha256((settled_package / member).read_bytes()).hexdigest() == digest
+
+
 def test_retained_preimage_wire_refuses_nonsteward_live_path_and_bad_binding(tmp_path: Path):
     for case in ("issuer", "live", "count-type", "hash", "duplicate"):
         _module, _root, _bug, _status, item, payload, before, _report, profile = retained_preimage_fixture(tmp_path / case)
@@ -2719,6 +2852,21 @@ def test_ordinary_close_updates_standalone_incoming_evidence_links(tmp_path: Pat
                  "stewardship.md": b"Receiving responsibilities verified.\n"}
     for name, data in documents.items():
         (active / name).write_bytes(data)
+    from gzip import compress
+    from io import BytesIO
+    import tarfile
+
+    sibling = "2026-10-08-fixture-asset-owner"
+    seed_active(module, root, sibling)
+    attachment = root / "work-items" / "active" / sibling / "inputs" / "package.tar.gz"
+    attachment.parent.mkdir()
+    archive_bytes = BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+        header = tarfile.TarInfo("package.bin")
+        header.size = len(b"known build artifact")
+        archive.addfile(header, BytesIO(b"known build artifact"))
+    before_attachment = compress(archive_bytes.getvalue(), mtime=0)
+    attachment.write_bytes(before_attachment)
     bug = seed_context_bug(root, "standalone", "2026-10-08-unselected-open")
     hrefs = [f"../active/{slug}/evidence.md#check", f"../active/{slug}/stewardship.md"]
     before = bug.read_bytes() + (f"\n[Evidence]({hrefs[0]})\n[Stewardship]({hrefs[1]})\n").encode()
@@ -2741,6 +2889,7 @@ def test_ordinary_close_updates_standalone_incoming_evidence_links(tmp_path: Pat
         expected = expected.replace(href.encode(), relocated.encode())
         assert (bug.parent / relocated.split("#", 1)[0]).is_file()
     assert bug.read_bytes() == expected
+    assert attachment.read_bytes() == before_attachment
     for name, data in documents.items():
         assert (archived / name).read_bytes() == data
     module.check_readme(root)
@@ -3813,6 +3962,30 @@ def test_retained_payload_digest_optional_limits_keep_legacy_golden_bytes(
             assert exc.failure_id == "WI-CATEGORY-MIGRATION-PAYLOAD", label
         else:
             raise AssertionError(f"{label} payload limit was accepted")
+
+
+@pytest.mark.parametrize("scenario", ("exact", "changed", "added", "removed"))
+def test_retained_payload_digest_verifies_producer_member_inventory(tmp_path: Path, scenario: str) -> None:
+    module = load_module()
+    tree = tmp_path / "build"
+    tree.mkdir()
+    candidate = tree / "asset.bin"
+    original = b"original"
+    candidate.write_bytes(original)
+    proof = {candidate.name: hashlib.sha256(original).hexdigest()}
+    expected = module._payload_digest(tree)
+    limits = module.PayloadDigestLimits(max_files=3, max_entries=4, max_bytes=128)
+    if scenario == "changed":
+        candidate.write_bytes(b"replaced")
+    elif scenario == "added":
+        (tree / "extra.md").write_bytes(b"live instructions")
+    elif scenario == "removed":
+        candidate.unlink()
+    if scenario == "exact":
+        assert module._payload_digest(tree, limits=limits, expected_members=proof) == expected
+    else:
+        with pytest.raises(module.LifecycleError, match="producer inventory"):
+            module._payload_digest(tree, limits=limits, expected_members=proof)
 
 
 def test_retained_payload_digest_limit_stops_scandir_before_preloading(tmp_path: Path) -> None:

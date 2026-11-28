@@ -392,7 +392,7 @@ def _detect_orphans(active_dir: Path) -> list[tuple[str, str]]:
         if has_closure:
             orphans.append((item.name, "closure.md is present in an active item; verify accepted outcome, terminal evidence, obligations and the admitted lifecycle transition"))
             continue
-        text = _read_status(item)
+        text = ctx.get("read_active_status", _read_status)(item)
         if text and DONE_STATE_LINE_REGEX.search(text):
             orphans.append((item.name, "status text claims completion while the item is physically active; reconcile the actual outcome and transition with the lifecycle owner"))
     return orphans
