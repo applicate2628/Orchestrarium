@@ -3180,6 +3180,8 @@ def test_global_claude_declared_linked_subroots_are_bound_and_dry_run_is_read_on
     # A linked skills root is a separate, explicitly refused migration input.
     shutil.move(str(logical / "skills"), str(backing / "skills"))
     os.symlink(backing / "skills", logical / "skills", target_is_directory=True)
+    skills_link = os.readlink(logical / "skills")
+    assert os.path.samefile(logical / "skills", backing / "skills")
     failures = []
     render = installer._installer_failure_text
     def capture_failure(error):
@@ -3188,7 +3190,8 @@ def test_global_claude_declared_linked_subroots_are_bound_and_dry_run_is_read_on
     monkeypatch.setattr(installer, "_installer_failure_text", capture_failure)
     assert installer.install("claude", ["--global", "--dry-run", "--no-hypothesis-hook"]) == 1
     assert any(message.startswith("E_PROVIDER_SKILLS_MIGRATION_REQUIRED:") for message in failures)
-    assert os.readlink(logical / "skills") == str(backing / "skills")
+    assert os.readlink(logical / "skills") == skills_link
+    assert os.path.samefile(logical / "skills", backing / "skills")
     assert _tree_bytes(backing / "skills") == ordinary_skills
     assert {name: _tree_bytes(backing / name) for name in before} == before
 
