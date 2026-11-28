@@ -29,6 +29,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Protocol, Sequence
 
@@ -717,6 +718,15 @@ class TreeObservationV1:
     job_handle_closed: bool
 
 
+class TreeSettlementCauseV1(str, Enum):
+    """First Windows-owned tree-settlement decision, not a cleanup finding."""
+
+    READER_DRAIN_DEADLINE = "reader-drain-deadline"
+    JOB_CLOSURE_INCOMPLETE = "job-closure-incomplete"
+    JOB_REQUIRED_TERMINATION = "job-required-termination"
+    FINAL_SETTLEMENT_AMBIGUOUS = "final-settlement-ambiguous"
+
+
 @dataclass(frozen=True)
 class ProcessResultV1:
     schema_version: int
@@ -744,6 +754,9 @@ class ProcessResultV1:
     cleanup_uncertain: bool = False
     request_sha256: str | None = None
     policy_id: str | None = None
+    tree_settlement_first_cause: TreeSettlementCauseV1 | None = field(
+        default=None, kw_only=True
+    )
 
 
 @dataclass(frozen=True)
@@ -3059,6 +3072,7 @@ def _result_from_parts(
     poisoned: bool,
     cleanup_issues: Sequence[str],
     capture_limit_is_failure: bool = True,
+    tree_settlement_first_cause: TreeSettlementCauseV1 | None = None,
 ) -> ProcessResultV1:
     streams = capture.snapshot()
     if failure_id is None and capture_limit_is_failure and (
@@ -3110,6 +3124,7 @@ def _result_from_parts(
         poisoned,
         tuple(cleanup_issues),
         policy_id=request.capture_policy.policy_id,
+        tree_settlement_first_cause=tree_settlement_first_cause,
     )
 
 
@@ -3181,9 +3196,18 @@ class _WindowsBackendV1:
         job_process: Any | None = None
         helper: Any | None = None
 
+        tree_settlement_first_cause: TreeSettlementCauseV1 | None = None
+
+        def record_tree_failure(cause: TreeSettlementCauseV1) -> None:
+            nonlocal failure_id, stage, tree_settlement_first_cause
+            if failure_id is None:
+                failure_id, stage = "PSV1-TREE-SETTLEMENT", "tree-settlement"
+                if tree_settlement_first_cause is None:
+                    tree_settlement_first_cause = cause
+
         def record_job_closure(closure: Any) -> None:
             nonlocal direct_reaped, exit_code, settlement, job_handle_closed
-            nonlocal primary_thread_closed, failure_id, stage
+            nonlocal primary_thread_closed
             direct_reaped = closure.direct_reaped
             if exit_code is None:
                 exit_code = closure.direct_exit_code
@@ -3192,9 +3216,10 @@ class _WindowsBackendV1:
             primary_thread_closed = closure.handles_closed
             if closure.issues:
                 issues.extend(closure.issues)
-            if not closure.complete or (closure.job_terminated and failure_id is None):
-                if failure_id is None:
-                    failure_id, stage = "PSV1-TREE-SETTLEMENT", "tree-settlement"
+            if not closure.complete:
+                record_tree_failure(TreeSettlementCauseV1.JOB_CLOSURE_INCOMPLETE)
+            elif closure.job_terminated:
+                record_tree_failure(TreeSettlementCauseV1.JOB_REQUIRED_TERMINATION)
 
         def register_handle(name: str, handle: int) -> None:
             handles[name] = handle
@@ -3458,8 +3483,7 @@ class _WindowsBackendV1:
                     if settle_deadline is None:
                         settle_deadline = phase_deadline(now)
                     elif now >= settle_deadline:
-                        if failure_id is None:
-                            failure_id, stage = "PSV1-TREE-SETTLEMENT", "tree-settlement"
+                        record_tree_failure(TreeSettlementCauseV1.READER_DRAIN_DEADLINE)
                         if not terminate_job():
                             last_close_after_terminate_failure()
                             break
@@ -3531,8 +3555,8 @@ class _WindowsBackendV1:
             finalization = lifecycle.finalize_once(phase_deadline())
         issues.extend(finalization.cleanup_issues)
         resources_closed = not any(handles.values()) and not issues
-        if settlement == "AMBIGUOUS" and direct_reaped and ownership_confirmed and not failure_id:
-            failure_id, stage = "PSV1-TREE-SETTLEMENT", "tree-settlement"
+        if settlement == "AMBIGUOUS" and direct_reaped and ownership_confirmed:
+            record_tree_failure(TreeSettlementCauseV1.FINAL_SETTLEMENT_AMBIGUOUS)
         final_streams = capture.snapshot()
         continued_stdout_capture_limit = (
             dialogue is not None
@@ -3551,6 +3575,7 @@ class _WindowsBackendV1:
             job_handle_closed=job_handle_closed, resources_closed=resources_closed,
             poisoned=self.coordinator.poisoned, cleanup_issues=issues,
             capture_limit_is_failure=not continued_stdout_capture_limit,
+            tree_settlement_first_cause=tree_settlement_first_cause,
         )
 
 
@@ -4985,6 +5010,7 @@ __all__ = [
     "MemoryCaptureSinkV1",
     "ProcessRequestV1",
     "ProcessResultV1",
+    "TreeSettlementCauseV1",
     "ProcessRunnerV1",
     "ProcessSupervisionError",
     "RepositoryTransferCapturePolicyV1",

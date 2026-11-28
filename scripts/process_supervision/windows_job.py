@@ -574,11 +574,7 @@ class WindowsJobOwnerV1:
             in_job = wintypes.BOOL()
             if not k.IsProcessInJob(h["process"], h["job"], ctypes.byref(in_job)) or not in_job.value:
                 raise WindowsJobError("WJOB-MEMBERSHIP", "tree-verification")
-            if before_resume is not None:
-                before_resume()
-            if k.ResumeThread(h["thread"]) != 1:
-                raise WindowsJobError("WJOB-RESUME", "process-resume")
-            process._close_handle("thread")
+            # The launcher owns pipe preparation until the target can execute.
             for name, flags in (("stdin", os.O_WRONLY), ("stdout", os.O_RDONLY), ("stderr", os.O_RDONLY)):
                 handle = h[f"{name}_parent"]
                 if handle is None:
@@ -588,6 +584,11 @@ class WindowsJobOwnerV1:
                     h[f"{name}_parent"] = None
                 except OSError as exc:
                     raise WindowsJobError("WJOB-FD-TRANSFER", "handle-preparation") from exc
+            if before_resume is not None:
+                before_resume()
+            if k.ResumeThread(h["thread"]) != 1:
+                raise WindowsJobError("WJOB-RESUME", "process-resume")
+            process._close_handle("thread")
             if process._issues:
                 raise WindowsJobError(process._issues[0], "handle-preparation")
             return process

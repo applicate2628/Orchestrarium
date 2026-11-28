@@ -228,6 +228,48 @@ def test_windows_environment_block_limit_is_checked_before_launch() -> None:
     assert captured.value.terminal_stage == "request-validation"
 
 
+def test_windows_pipe_preparation_finishes_before_target_resume(tmp_path, monkeypatch):
+    """A failed native pipe transfer settles an unresumed child."""
+    import msvcrt
+
+    runner = _load_runner()
+    api = runner._WindowsKernelV1()
+    created = resumed = failed_transfer = 0
+    create_process = api.k32.CreateProcessW
+    resume_thread = api.k32.ResumeThread
+    convert_handle = msvcrt.open_osfhandle
+
+    def create(*args):
+        nonlocal created
+        result = create_process(*args)
+        created += int(bool(result))
+        return result
+
+    def resume(*args):
+        nonlocal resumed
+        resumed += 1
+        return resume_thread(*args)
+
+    def convert(*args):
+        nonlocal failed_transfer
+        if created and not failed_transfer:
+            failed_transfer += 1
+            raise OSError("injected pipe conversion failure")
+        return convert_handle(*args)
+
+    monkeypatch.setattr(api.k32, "CreateProcessW", create)
+    monkeypatch.setattr(api.k32, "ResumeThread", resume)
+    monkeypatch.setattr(msvcrt, "open_osfhandle", convert)
+    marker = tmp_path / "target-started"
+    result = runner.ProcessRunnerV1(windows_api=api).run(
+        _request(runner, (sys.executable, str(CHILD), "marker", "--marker", str(marker)))
+    )
+    assert (created, failed_transfer, resumed) == (1, 1, 0)
+    assert not marker.exists()
+    assert result.failure_id == "PSV1-ATTRIBUTE-LIST"
+    assert result.resources_closed and result.tree.tree_empty and result.tree.direct_reaped
+
+
 def test_stdout_fd_transfer_failure_closes_taken_descriptor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -298,6 +340,8 @@ def test_resume_thread_one_runs_target(tmp_path: Path) -> None:
         _request(runner, (sys.executable, str(CHILD), "marker", "--marker", str(marker)))
     )
     assert result.outcome == "success"
+    assert result.tree_settlement_first_cause is None
+    assert "treeSettlementFirstCause" not in runner.safe_serialize_result(result)
     assert marker.exists()
 
 
@@ -336,9 +380,27 @@ def test_grandchild_retained_pipe_is_terminated_and_settled(tmp_path: Path) -> N
     started = time.monotonic()
     result = runner.ProcessRunnerV1().run(request)
     assert result.failure_id == "PSV1-TREE-SETTLEMENT"
+    assert result.tree_settlement_first_cause is runner.TreeSettlementCauseV1.READER_DRAIN_DEADLINE
+    assert "treeSettlementFirstCause" not in runner.safe_serialize_result(result)
     assert result.tree.tree_empty is True
     assert result.resources_closed is True
     assert time.monotonic() - started < 8.0
+    # A private caller can project the enum into its terminal record without
+    # treating final cleanup as the first cause or changing the V1 receipt.
+    from dataclasses import asdict
+    from json import dumps, loads
+
+    private_native = asdict(result)
+    first_cause = private_native.pop("tree_settlement_first_cause")
+    terminal = loads(dumps({"native_exit": private_native["target_exit_code"],
+                            "failure_id": private_native["failure_id"],
+                            "tree_settlement_first_cause": first_cause.value,
+                            "resources_closed": private_native["resources_closed"]}))
+    assert terminal == {"native_exit": 0, "failure_id": "PSV1-TREE-SETTLEMENT",
+                        "tree_settlement_first_cause": "reader-drain-deadline",
+                        "resources_closed": True}
+    assert "tree_settlement_first_cause" not in private_native
+
 
 
 def test_concurrent_runs_keep_jobs_capture_and_outcomes_isolated() -> None:
@@ -546,6 +608,7 @@ def test_terminate_failure_is_recorded_without_erasing_primary_failure() -> None
         _request(runner, (sys.executable, str(CHILD), "infinite-writer"), limit=64 * 1024)
     )
     assert result.failure_id == "PSV1-JOB-TERMINATE"
+    assert result.tree_settlement_first_cause is None
     assert result.tree.settlement_state == "AMBIGUOUS"
     assert result.tree.tree_empty is False
     assert result.tree.job_handle_closed is True
@@ -688,6 +751,7 @@ def test_query_failure_denies_tree_empty_success() -> None:
         _request(runner, (sys.executable, str(CHILD), "identity"))
     )
     assert result.failure_id == "PSV1-TREE-SETTLEMENT"
+    assert result.tree_settlement_first_cause is runner.TreeSettlementCauseV1.JOB_CLOSURE_INCOMPLETE
     assert result.tree.tree_empty is False
 
 
