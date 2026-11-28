@@ -2045,6 +2045,22 @@ def test_active_failure_summary_reports_only_selected_scope(tmp_path: Path) -> N
 
 
 
+def test_triage_summary_reports_skipped_archive_obligation_scan(tmp_path: Path) -> None:
+    empty = tmp_path / "empty"
+    (empty / "work-items" / "active").mkdir(parents=True)
+    valid = tmp_path / "valid"
+    write_valid_item(valid)
+    invalid = tmp_path / "invalid"
+    (write_valid_item(invalid) / "agent-runs.jsonl").unlink()
+
+    for root, expected_exit in ((empty, 0), (valid, 0), (invalid, 1)):
+        result = run_checker(root, "--no-strict-revise")
+        assert result.returncode == expected_exit, result.stdout + result.stderr
+        assert "archive obligation scan skipped" in result.stdout
+        assert "archive scan clean" not in result.stdout
+        assert "across active+archived work-items" not in result.stdout
+
+
 def test_active_only_summary_preserves_global_archive_lifecycle_failures(tmp_path: Path) -> None:
     (tmp_path / "work-items" / "active").mkdir(parents=True)
     unbound = tmp_path / "work-items" / "archive" / "2026-07" / "unbound-fixture"

@@ -515,7 +515,8 @@ def command_check(args: argparse.Namespace, *, ledger_resource_budget=None, tran
                     f"{type(exc).__name__}: {exc}"
                 )
 
-    if not args.no_strict_revise and not args.active_only:
+    scan_archive_obligations = not (args.no_strict_revise or args.active_only)
+    if scan_archive_obligations:
         try:
             acquire = getattr(lifecycle, "archive_entity_inventory", None)
             if not callable(acquire):
@@ -559,12 +560,17 @@ def command_check(args: argparse.Namespace, *, ledger_resource_budget=None, tran
             print(f"  - {item.name} -- Next action: {next_action_line(item, validator, status_reader=status_reader)}")
 
     if failed:
-        scope = "in active-only audit" if args.active_only else "across active+archived work-items"
+        if args.active_only:
+            scope = "in active-only audit"
+        elif scan_archive_obligations:
+            scope = "across active+archived work-items"
+        else:
+            scope = "with archive obligation scan skipped"
         print(f"RESULT: FAIL ({failed} failures {scope})")
         return 1
 
     if not items:
-        if args.active_only:
+        if not scan_archive_obligations:
             print(
                 f"RESULT: PASS (no active work-items: {active_dir}; "
                 "archive obligation scan skipped)"
@@ -574,6 +580,8 @@ def command_check(args: argparse.Namespace, *, ledger_resource_budget=None, tran
         return 0
     if args.active_only:
         print("info: publication scope active-only; archive obligation scan skipped")
+    elif not scan_archive_obligations:
+        print("info: archive obligation scan skipped (--no-strict-revise)")
     print(
         f"RESULT: PASS - valid state only, NOT completion: {len(items)} active work-item(s) "
         f"STILL OPEN (see 'STILL OPEN' list above; a done-claim must reconcile each one's Next action)"
